@@ -1,0 +1,83 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+import tomllib
+
+from app.config import config as cfg
+from app.config.defaults import (
+    get_openai_compatible_ui_values,
+    normalize_openai_compatible_model_name,
+)
+
+
+class ConfigBootstrapDefaultsTests(unittest.TestCase):
+    def test_load_config_bootstraps_webui_llm_defaults(self):
+        original_root_dir = cfg.root_dir
+        original_config_file = cfg.config_file
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            example_file = tmp_path / "config.example.toml"
+            example_file.write_text(
+                """
+[app]
+vision_llm_provider = "openai"
+vision_openai_model_name = "gemini/gemini-2.0-flash-lite"
+vision_openai_api_key = ""
+vision_openai_base_url = ""
+text_llm_provider = "openai"
+text_openai_model_name = "deepseek/deepseek-chat"
+text_openai_api_key = ""
+text_openai_base_url = ""
+hide_config = true
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            config_path = tmp_path / "config.toml"
+            try:
+                cfg.root_dir = str(tmp_path)
+                cfg.config_file = str(config_path)
+
+                config_data = cfg.load_config()
+                saved_config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+            finally:
+                cfg.root_dir = original_root_dir
+                cfg.config_file = original_config_file
+
+        self.assertEqual("openai", config_data["app"]["vision_llm_provider"])
+        self.assertEqual("Qwen/Qwen3.5-122B-A10B", config_data["app"]["vision_openai_model_name"])
+        self.assertEqual("https://api.siliconflow.cn/v1", config_data["app"]["vision_openai_base_url"])
+        self.assertEqual("openai", config_data["app"]["text_llm_provider"])
+        self.assertEqual("Pro/zai-org/GLM-5", config_data["app"]["text_openai_model_name"])
+        self.assertEqual("https://api.siliconflow.cn/v1", config_data["app"]["text_openai_base_url"])
+        self.assertEqual("Qwen/Qwen3.5-122B-A10B", saved_config["app"]["vision_openai_model_name"])
+        self.assertEqual("Pro/zai-org/GLM-5", saved_config["app"]["text_openai_model_name"])
+        self.assertTrue(saved_config["app"]["hide_config"])
+
+
+class OpenAICompatibleModelDefaultsTests(unittest.TestCase):
+    def test_ui_keeps_full_model_name_and_openai_provider(self):
+        provider, model_name = get_openai_compatible_ui_values(
+            "Qwen/Qwen3.5-122B-A10B",
+            "fallback-model",
+        )
+
+        self.assertEqual("openai", provider)
+        self.assertEqual("Qwen/Qwen3.5-122B-A10B", model_name)
+
+    def test_normalize_only_strips_openai_prefix(self):
+        self.assertEqual(
+            "Qwen/Qwen3.5-122B-A10B",
+            normalize_openai_compatible_model_name("openai/Qwen/Qwen3.5-122B-A10B"),
+        )
+        self.assertEqual(
+            "Qwen/Qwen3.5-122B-A10B",
+            normalize_openai_compatible_model_name("Qwen/Qwen3.5-122B-A10B"),
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
