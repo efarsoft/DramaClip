@@ -1,0 +1,172 @@
+"""
+使用统一LLM服务，分析字幕文件，返回剧情梗概和爆点
+"""
+import traceback
+import json
+from loguru import logger
+
+from app.services.subtitle_text import has_timecodes, normalize_subtitle_text, read_subtitle_text
+# 导入新的提示词管理系统
+from app.services.prompts import PromptManager
+# 导入统一LLM服务
+from app.services.llm.unified_service import UnifiedLLMService
+# 导入安全的异步执行函数
+from app.services.llm.migration_adapter import _run_async_safely
+
+
+def analyze_subtitle(
+    model_name: str,
+    api_key: str = None,
+    base_url: str = None,
+    custom_clips: int = 5,
+    provider: str = None,
+    srt_path: str = None,
+    subtitle_content: str = None
+) -> dict:
+    """分析字幕内容，返回完整的分析结果
+
+    Args:
+        model_name (str): 大模型名称
+        api_key (str, optional): 大模型API密钥. Defaults to None.
+        base_url (str, optional): 大模型API基础URL. Defaults to None.
+        custom_clips (int): 需要提取的片段数量. Defaults to 5.
+        provider (str, optional): LLM服务提供商. Defaults to None.
+        srt_path (str, optional): SRT字幕文件路径（与subtitle_content二选一）
+        subtitle_content (str, optional): SRT字幕文本内容（与srt_path二选一）
+
+    Returns:
+        dict: 包含剧情梗概和结构化的时间段分析的字典
+    """
+    try:
+        # 读取并规范化字幕文本（不依赖结构化 SRT 解析，提升兼容性）
+        if subtitle_content and str(subtitle_content).strip():
+            normalized_subtitle_text = normalize_subtitle_text(subtitle_content)
+            source_label = "字幕内容（直接传入）"
+        elif srt_path:
+            decoded = read_subtitle_text(srt_path)
+            normalized_subtitle_text = decoded.text
+            source_label = f"字幕文件: {srt_path} (encoding: {decoded.encoding})"
+        else:
+            raise ValueError("必须提供 srt_path 或 subtitle_content 参数")
+
+        # 基础校验：必须有内容且包含可用于定位的时间码
+        if not normalized_subtitle_text or len(normalized_subtitle_text.strip()) < 10:
+            error_msg = (
+                f"字幕来源 [{source_label}] 内容为空或过短。\n"
+                f"请检查：\n"
+                f"1. 文件格式是否为标准 SRT\n"
+                f"2. 文件编码是否为 UTF-8、UTF-16、GBK 或 GB2312\n"
+                f"3. 文件内容是否为空"
+            )
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        if not has_timecodes(normalized_subtitle_text):
+            error_msg = (
+                f"字幕来源 [{source_label}] 未检测到有效时间码，无法进行时间段定位。\n"
+                f"请确保字幕包含类似以下格式的时间轴：\n"
+                f"00:00:01,000 --> 00:00:02,000\n"
+                f"（若毫秒分隔符为'.'，系统会自动规范化为','）"
+            )
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        logger.info(f"成功加载字幕来源 [{source_label}]，字符数: {len(normalized_subtitle_text)}")
+        subtitle_content = normalized_subtitle_text
+
+        # 如果没有指定provider，根据model_name推断
+        if not provider:
+            if "deepseek" in model_name.lower():
+                provider = "deepseek"
+            elif "gpt" in model_name.lower():
+                provider = "openai"
+            elif "gemini" in model_name.lower():
+                provider = "gemini"
+            else:
+                provider = "openai"  # 默认使用openai
+
+        logger.info(f"使用LLM服务分析字幕，提供商: {provider}, 模型: {model_name}")
+
+        # 使用新的提示词管理系统
+        subtitle_analysis_prompt = PromptManager.get_prompt(
+            category="short_drama_editing",
+            name="subtitle_analysis",
+            parameters={
+                "subtitle_content": subtitle_content,
+                "custom_clips": custom_clips
+            }
+        )
+
+        # 使用统一LLM服务生成文本
+        logger.info("开始分析字幕内容...")
+        response = _run_async_safely(
+            UnifiedLLMService.generate_text,
+            prompt=subtitle_analysis_prompt,
+            provider=provider,
+            model=model_name,
+            api_key=api_key,
+            base_url=base_url,
+            temperature=0.1,  # 使用较低的温度以获得更稳定的结果
+            max_tokens=4000
+        )
+
+        # 解析JSON响应
+        from webui.tools.generate_short_summary import parse_and_fix_json
+        summary_data = parse_and_fix_json(response)
+
+        if not summary_data:
+            raise Exception("无法解析LLM返回的JSON数据")
+
+        logger.info(f"字幕分析完成，找到 {len(summary_data.get('plot_titles', []))} 个关键情节")
+        logger.debug(json.dumps(summary_data, indent=4, ensure_ascii=False))
+
+        # 构建爆点标题列表
+        plot_titles_text = ""
+        logger.info(f"找到 {len(summary_data.get('plot_titles', []))} 个片段")
+        for i, point in enumerate(summary_data['plot_titles'], 1):
+            plot_titles_text += f"{i}. {point}\n"
+
+        # 使用新的提示词管理系统
+        plot_extraction_prompt = PromptManager.get_prompt(
+            category="short_drama_editing",
+            name="plot_extraction",
+            parameters={
+                "subtitle_content": subtitle_content,
+                "plot_summary": summary_data['summary'],
+                "plot_titles": plot_titles_text
+            }
+        )
+
+        # 使用统一LLM服务进行爆点时间段分析
+        logger.info("开始分析爆点时间段...")
+        response = _run_async_safely(
+            UnifiedLLMService.generate_text,
+            prompt=plot_extraction_prompt,
+            provider=provider,
+            model=model_name,
+            api_key=api_key,
+            base_url=base_url,
+            temperature=0.1,
+            max_tokens=4000
+        )
+
+        # 解析JSON响应
+        plot_data = parse_and_fix_json(response)
+
+        if not plot_data:
+            raise Exception("无法解析爆点分析的JSON数据")
+
+        logger.info(f"爆点分析完成，找到 {len(plot_data.get('plot_points', []))} 个时间段")
+
+        # 合并结果
+        result = {
+            "summary": summary_data.get("summary", ""),
+            "plot_titles": summary_data.get("plot_titles", []),
+            "plot_points": plot_data.get("plot_points", [])
+        }
+
+        return result
+
+    except Exception as e:
+        logger.error(f"分析字幕时发生错误: {str(e)}")
+        raise Exception(f"分析字幕时发生错误：{str(e)}\n{traceback.format_exc()}")

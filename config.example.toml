@@ -1,0 +1,154 @@
+[app]
+    project_version="0.7.6"
+
+    # LLM API 超时配置（秒）
+    llm_vision_timeout = 120  # 视觉模型基础超时时间
+    llm_text_timeout = 180    # 文本模型基础超时时间（解说文案生成等复杂任务需要更长时间）
+    llm_max_retries = 3       # API 重试次数
+
+    ##########################################
+    # 🚀 LLM 配置 - 使用 OpenAI 兼容统一接口
+    ##########################################
+    # 统一使用 OpenAI 兼容协议（/v1/chat/completions）
+    # 支持接入 OpenAI、DeepSeek、Gemini 兼容网关、Qwen 网关、SiliconFlow、OpenRouter 等。
+
+    # ===== 视觉模型配置 =====
+    vision_llm_provider = "openai"
+
+    # 模型格式：provider/model_name
+    # 常用视觉模型示例：
+    #   - Gemini: gemini/gemini-2.0-flash-lite (推荐，速度快成本低)
+    #   - Gemini: gemini/gemini-1.5-pro (高精度)
+    #   - OpenAI: gpt-4o, gpt-4o-mini
+    #   - Qwen: qwen/qwen2.5-vl-32b-instruct
+    #   - SiliconFlow: siliconflow/Qwen/Qwen2.5-VL-32B-Instruct
+    vision_openai_model_name = "Qwen/Qwen3.5-122B-A10B"
+    vision_openai_api_key = ""  # 填入对应 provider 的 API key
+    vision_openai_base_url = "https://api.siliconflow.cn/v1"  # 可选：自定义 API base URL（官方 OpenAI 可留空）
+
+    # ===== 文本模型配置 =====
+    text_llm_provider = "openai"
+
+    # 常用文本模型示例：
+    #   - DeepSeek: deepseek/deepseek-chat (推荐，性价比高)
+    #   - DeepSeek: deepseek/deepseek-reasoner (推理能力强)
+    #   - Gemini: gemini/gemini-2.0-flash (速度快)
+    #   - OpenAI: gpt-4o, gpt-4o-mini, gpt-4-turbo
+    #   - Qwen: qwen/qwen-plus, qwen/qwen-turbo
+    #   - SiliconFlow: siliconflow/deepseek-ai/DeepSeek-R1
+    #   - Moonshot: moonshot/moonshot-v1-8k
+    text_openai_model_name = "Pro/zai-org/GLM-5"
+    text_openai_api_key = ""  # 填入对应 provider 的 API key
+    text_openai_base_url = "https://api.siliconflow.cn/v1"  # 可选：自定义 API base URL（官方 OpenAI 可留空）
+
+    # ===== API Keys 参考 =====
+    # 主流 LLM Providers API Key 获取地址：
+    #
+    # OpenAI:       https://platform.openai.com/api-keys
+    # Gemini:       https://makersuite.google.com/app/apikey
+    # DeepSeek:     https://platform.deepseek.com/api_keys
+    # Qwen (阿里):  https://bailian.console.aliyun.com/?tab=model#/api-key
+    # SiliconFlow:  https://cloud.siliconflow.cn/account/ak (手机号注册)
+    # Moonshot:     https://platform.moonshot.cn/console/api-keys
+    # Anthropic:    https://console.anthropic.com/settings/keys
+    # Cohere:       https://dashboard.cohere.com/api-keys
+    # Together AI:  https://api.together.xyz/settings/api-keys
+
+    ##########################################
+    # 🔧 高级配置（可选）
+    ##########################################
+
+    # WebUI 界面是否显示配置项
+    hide_config = true
+
+    # 官方 OpenAI 默认端点（可选）：
+    # text_openai_base_url = "https://api.openai.com/v1"
+
+##########################################
+# TTS (文本转语音) 配置
+##########################################
+
+[azure]
+    # Azure TTS 配置
+    # 获取密钥：https://portal.azure.com
+    speech_key = ""
+    speech_region = ""
+
+[tencent]
+    # 腾讯云 TTS 配置
+    # 访问 https://console.cloud.tencent.com/cam/capi 获取密钥
+    secret_id = ""
+    secret_key = ""
+    region = "ap-beijing"  # 地域配置
+
+[soulvoice]
+    # SoulVoice TTS API 配置
+    api_key = ""
+    voice_uri = "speech:mcg3fdnx:clzkyf4vy00e5qr6hywum4u84:bzznlkuhcjzpbosexitr"
+    api_url = "https://tts.scsmtech.cn/tts"
+    model = "FunAudioLLM/CosyVoice2-0.5B"
+
+[tts_qwen]
+    # 通义千问 Qwen3 TTS 配置
+    # 访问 https://bailian.console.aliyun.com/?tab=model#/api-key 获取你的 API 密钥
+    api_key = ""
+    model_name = "qwen3-tts-flash"
+    
+[indextts2]
+    # IndexTTS2 语音克隆配置
+    # 这是一个开源的零样本语音克隆项目，需要自行部署
+    # 项目地址：https://github.com/index-tts/index-tts
+    # 默认 API 地址（本地部署）
+    api_url = "http://127.0.0.1:8081/tts"
+    
+    # 默认参考音频路径（可选）
+    # reference_audio = "/path/to/reference_audio.wav"
+    
+    # 推理模式：普通推理 / 快速推理
+    infer_mode = "普通推理"
+    
+    # 高级参数
+    temperature = 1.0
+    top_p = 0.8
+    top_k = 30
+    do_sample = true
+    num_beams = 3
+    repetition_penalty = 10.0
+
+[ui]
+    # TTS引擎选择 (edge_tts, azure_speech, soulvoice, tencent_tts, tts_qwen)
+    tts_engine = "edge_tts"
+
+    # Edge TTS 配置
+    edge_voice_name = "zh-CN-XiaoyiNeural-Female"
+    edge_volume = 80
+    edge_rate = 1.0
+    edge_pitch = 0
+
+    # Azure Speech Services 配置
+    azure_voice_name = "zh-CN-XiaoyiNeural-Female"
+    azure_volume = 80
+    azure_rate = 1.0
+    azure_pitch = 0
+
+##########################################
+# 代理和网络配置
+##########################################
+
+[proxy]
+    # HTTP/HTTPS 代理配置（如需要）
+    # clash 默认地址：http://127.0.0.1:7890
+    http = ""
+    https = ""
+    enabled = false
+
+##########################################
+# 视频处理配置
+##########################################
+
+[frames]
+    # 提取关键帧的间隔时间（秒）
+    frame_interval_input = 3
+
+    # 大模型单次处理的关键帧数量
+    vision_batch_size = 10
