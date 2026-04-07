@@ -38,6 +38,16 @@
     secret_key = ""
     region = "ap-beijing"
 
+[cosyvoice]
+    # CosyVoice TTS (DashScope API) - AI解说模式使用
+    # 支持 v3-flash/v3-plus/v2/v1，仅 v3 系列支持情感 Instruct
+    api_key = ""
+    model = "cosyvoice-v3-flash"
+    voice = "longanyang"
+    # 情感指令 (仅 v3 + 支持 Instruct 的音色可用，留空则无情感控制)
+    # 示例: "用激动的语气说", "带有悲伤的情感", "用温柔亲切的语气"
+    instruction = ""
+
 [ui]
     # TTS引擎选择 (edge_tts, azure_speech, tencent_tts)
     tts_engine = "edge_tts"

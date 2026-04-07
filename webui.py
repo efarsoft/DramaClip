@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import sys
+import threading
 from loguru import logger
 from app.config import config
 from webui.components import basic_settings, video_settings, audio_settings, subtitle_settings, script_settings, \
@@ -24,11 +25,174 @@ st.set_page_config(
     },
 )
 
-# 设置页面样式
-hide_streamlit_style = """
-<style>#root > div:nth-child(1) > div > div > div > div > section > div {padding-top: 2rem; padding-bottom: 10px; padding-left: 20px; padding-right: 20px;}</style>
+# ============================================================
+# DramaClip UI Theme - Custom CSS
+# ============================================================
+custom_css = """
+<style>
+/* ---- Global Layout ---- */
+.block-container {
+    padding-top: 2rem;
+    padding-bottom: 1rem;
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+    max-width: 1400px;
+}
+
+/* ---- Title ---- */
+h1 {
+    font-weight: 800 !important;
+    letter-spacing: -0.02em;
+}
+
+/* ---- Cards / Containers with border ---- */
+.streamlit-expanderHeader,
+div[data-testid="stContainer"] {
+    border-radius: 12px !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+/* ---- Tabs ---- */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 8px;
+    background: transparent;
+}
+.stTabs [data-baseweb="tab"] {
+    border-radius: 8px;
+    padding: 8px 16px;
+    background-color: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+.stTabs [data-baseweb="tab"]:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.85);
+}
+.stTabs [aria-selected="true"] {
+    background-color: #FF4D6D !important;
+    color: white !important;
+    font-weight: 600;
+}
+
+/* ---- Buttons ---- */
+.stButton > button {
+    border-radius: 10px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    border: none;
+}
+.stButton > button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(255, 77, 109, 0.3);
+}
+.stButton > button:active {
+    transform: translateY(0);
+}
+/* Primary button glow */
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #FF4D6D, #FF758F);
+    border: none;
+}
+
+/* ---- Selectbox / Input ---- */
+div[data-testid="stSelectbox"] > div > div,
+.stSelectbox label {
+    font-size: 14px;
+}
+
+/* ---- Slider ---- */
+.stSlider > div > div > div > div {
+    background: linear-gradient(90deg, #FF4D6D, #FF758F);
+}
+
+/* ---- Radio buttons (mode selector) ---- */
+div[data-testid="stRadio"] label {
+    font-size: 15px;
+    font-weight: 500;
+}
+
+/* ---- Segmented Control ---- */
+div[data-testid="stSegmentedControl"] {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    padding: 4px;
+}
+div[data-testid="stSegmentedControl"] button {
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+/* ---- Progress bar ---- */
+.stProgress > div > div > div {
+    background: linear-gradient(90deg, #FF4D6D, #FF758F, #FFB3C1);
+    border-radius: 10px;
+}
+
+/* ---- Metric (highlight scores) ---- */
+[data-testid="stMetricValue"] {
+    font-size: 28px !important;
+    font-weight: 700 !important;
+}
+[data-testid="stMetricLabel"] {
+    font-size: 13px !important;
+    opacity: 0.7;
+}
+
+/* ---- Info / Success / Warning / Error boxes ---- */
+.stAlert {
+    border-radius: 10px;
+    border-left: 4px solid;
+}
+
+/* ---- Sidebar (hidden by default, reserve for future) ---- */
+section[data-testid="stSidebar"] {
+    display: none;
+}
+
+/* ---- Scrollbar (Webkit) ---- */
+::-webkit-scrollbar {
+    width: 6px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+/* ---- File uploader ---- */
+[data-testid="stFileUploader"] section {
+    border: 2px dashed rgba(255, 77, 109, 0.3);
+    border-radius: 12px;
+    padding: 1.5rem;
+    background: rgba(255, 77, 109, 0.03);
+    transition: all 0.2s ease;
+}
+[data-testid="stFileUploader"] section:hover {
+    border-color: rgba(255, 77, 109, 0.6);
+    background: rgba(255, 77, 109, 0.06);
+}
+
+/* ---- Divider ---- */
+hr {
+    border: none;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+    margin: 0.5rem 0;
+}
+
+/* ---- Hide Streamlit default hamburger / footer ---- */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+</style>
 """
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+st.markdown(custom_css, unsafe_allow_html=True)
 
 
 def init_log():

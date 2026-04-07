@@ -26,6 +26,7 @@ def get_tts_engine_options():
         "azure_speech": "Azure Speech Services",
         "tencent_tts": "腾讯云 TTS",
         "qwen3_tts": "通义千问 Qwen3 TTS",
+        "cosyvoice": "CosyVoice 情感语音",
         "indextts2": "IndexTTS2 语音克隆"
     }
 
@@ -53,8 +54,14 @@ def get_tts_engine_descriptions():
         },
         "qwen3_tts": {
             "title": "通义千问 Qwen3 TTS",
-            "features": "阿里云通义千问语音合成，音质优秀，支持多种音色",
-            "use_case": "需要高质量中文语音合成的用户",
+            "features": "阿里云通义千问语音合成，音质优秀，支持情感指令控制（instruct模型）",
+            "use_case": "需要高质量中文语音合成+情感控制的用户",
+            "registration": "https://dashscope.aliyuncs.com/"
+        },
+        "cosyvoice": {
+            "title": "CosyVoice 情感语音",
+            "features": "阿里CosyVoice大模型，支持自然语言情感指令（如'用激动的语气'），V3音色100+种，短剧解说推荐",
+            "use_case": "短剧解说、有声书、情感化配音",
             "registration": "https://dashscope.aliyuncs.com/"
         },
         "indextts2": {
@@ -145,6 +152,8 @@ def render_tts_settings(tr):
         render_tencent_tts_settings(tr)
     elif selected_engine == "qwen3_tts":
         render_qwen3_tts_settings(tr)
+    elif selected_engine == "cosyvoice":
+        render_cosyvoice_tts_settings(tr)
     elif selected_engine == "indextts2":
         render_indextts2_tts_settings(tr)
 
@@ -493,7 +502,7 @@ def render_tencent_tts_settings(tr):
 
 
 def render_qwen3_tts_settings(tr):
-    """渲染 Qwen3 TTS 设置"""
+    """渲染 Qwen3 TTS 设置（含情感控制）"""
     api_key = st.text_input(
         "API Key",
         value=config.tts_qwen.get("api_key", ""),
@@ -501,10 +510,17 @@ def render_qwen3_tts_settings(tr):
         help="通义千问 DashScope API Key"
     )
 
+    # 情感控制开关
+    enable_instruct = st.toggle(
+        "启用情感控制",
+        value=config.tts_qwen.get("enable_instruct", False),
+        help="启用后将使用 qwen3-tts-instruct-flash 模型，支持自然语言情感指令"
+    )
+
     model_name = st.text_input(
         "模型名称",
-        value=config.tts_qwen.get("model_name", "qwen3-tts-flash"),
-        help="Qwen TTS 模型名，例如 qwen3-tts-flash"
+        value=config.tts_qwen.get("model_name", "qwen3-tts-instruct-flash" if enable_instruct else "qwen3-tts-flash"),
+        help="启用情感时推荐 qwen3-tts-instruct-flash，否则用 qwen3-tts-flash"
     )
 
     # Qwen3 TTS 音色选项 - 中文名: 英文参数
@@ -563,12 +579,240 @@ def render_qwen3_tts_settings(tr):
         help="调节语音速度 (0.5-2.0)"
     )
 
+    # 情感指令输入（仅启用情感控制时显示）
+    if enable_instruct:
+        st.divider()
+        st.markdown("**🎭 情感控制**")
+
+        # 预设情感模板
+        emotion_presets = {
+            "不设置": "",
+            "激动兴奋": "语调欢快，充满热情和能量",
+            "温柔亲切": "语速轻柔，声音温暖，带有亲切感",
+            "紧张悬疑": "语速稍快，语气紧张，带有悬念感",
+            "低沉悲伤": "语速缓慢，声音低沉，带有忧伤感",
+            "严肃认真": "语速平稳，语气庄重严肃",
+            "活泼可爱": "语调活泼跳跃，充满童趣",
+        }
+
+        preset_name = st.selectbox(
+            "情感预设",
+            options=list(emotion_presets.keys()),
+            index=0,
+            help="选择预设情感模板，或自定义输入"
+        )
+
+        instructions = st.text_area(
+            "情感指令",
+            value=emotion_presets.get(preset_name, config.tts_qwen.get("instructions", "")),
+            height=60,
+            placeholder="例如：语调欢快，充满热情和能量",
+            help="自然语言描述你想要的语音风格（仅 instruct 模型支持）"
+        )
+
+        with st.expander("💡 情感指令示例", expanded=False):
+            st.write("- **激动**: \"语调欢快，充满热情和能量\"")
+            st.write("- **温柔**: \"语速轻柔，声音温暖，带有亲切感\"")
+            st.write("- **悬疑**: \"语速稍快，语气紧张，带有悬念感\"")
+            st.write("- **悲伤**: \"语速缓慢，声音低沉，带有忧伤感\"")
+            st.write("- **解说**: \"语速适中，吐字清晰，像专业的影视解说\"")
+    else:
+        instructions = ""
+
     # 保存配置
     config.tts_qwen["api_key"] = api_key
     config.tts_qwen["model_name"] = model_name
+    config.tts_qwen["enable_instruct"] = enable_instruct
+    config.tts_qwen["instructions"] = instructions
     config.ui["qwen_voice_type"] = voice_type
     config.ui["qwen3_rate"] = voice_rate
-    config.ui["voice_name"] = voice_type #兼容性
+    config.ui["voice_name"] = voice_type
+
+
+def render_cosyvoice_tts_settings(tr):
+    """渲染 CosyVoice TTS 设置（含情感指令控制）"""
+    api_key = st.text_input(
+        "API Key",
+        value=config.cosyvoice.get("api_key", ""),
+        type="password",
+        help="DashScope API Key (与Qwen3 TTS可共用同一Key)"
+    )
+
+    # 模型选择
+    model_options = {
+        "CosyVoice V3 Flash (推荐)": "cosyvoice-v3-flash",
+        "CosyVoice V3 Plus": "cosyvoice-v3-plus",
+        "CosyVoice V2": "cosyvoice-v2",
+        "CosyVoice V1": "cosyvoice-v1",
+    }
+
+    saved_model = config.cosyvoice.get("model", "cosyvoice-v3-flash")
+    saved_model_display = "CosyVoice V3 Flash (推荐)"
+    for display, value in model_options.items():
+        if value == saved_model:
+            saved_model_display = display
+            break
+
+    selected_model_display = st.selectbox(
+        "模型选择",
+        options=list(model_options.keys()),
+        index=list(model_options.keys()).index(saved_model_display) if saved_model_display in model_options else 0,
+        help="V3 系列支持情感 Instruct（需搭配支持 Instruct 的音色）"
+    )
+    selected_model = model_options[selected_model_display]
+
+    # 音色选择 - 按场景分类
+    # V3 系列音色（含情感支持标记）
+    voice_categories = {
+        "🎬 短视频配音": {
+            "龙机器 (男)": ("longjiqi_v3", False),
+            "龙猴哥 (男)": ("longhouge_v3", False),
+            "龙黛玉 (女)": ("longdaiyu_v3", False),
+        },
+        "📖 有声书": {
+            "龙妙 (女)": ("longmiao_v3", False),
+            "龙三叔 (男)": ("longsanshu_v3", False),
+            "龙婉君 (女)": ("longwanjun_v3", False),
+        },
+        "💬 社交陪伴": {
+            "龙安洋 (男) ★情感": ("longanyang", True),
+            "龙安欢 (女) ★情感": ("longanhuan", True),
+            "龙寒 (男)": ("longhan_v3", False),
+            "龙颜 (女)": ("longyan_v3", False),
+        },
+        "📞 客服": {
+            "龙应询 (男)": ("longyingxun_v3", False),
+            "龙应静 (女)": ("longyingjing_v3", False),
+            "龙应聆 (女)": ("longyingling_v3", False),
+        },
+        "📻 新闻播报": {
+            "龙书 (男)": ("longshu_v3", False),
+            "龙硕 (男)": ("longshuo_v3", False),
+        },
+        "👶 童声": {
+            "龙呼呼 ★情感": ("longhuhu_v3", True),
+        },
+    }
+
+    # V2 音色补充
+    voice_categories_v2 = {
+        "🎬 短视频配音 (V2)": {
+            "龙机心 (男)": ("longjixin", False),
+            "龙高僧 (男)": ("longgaoseng", False),
+        },
+        "📖 有声书 (V2)": {
+            "龙白芷 (女)": ("longbaizhi", False),
+            "龙逸尘 (男)": ("longyichen", False),
+        },
+    }
+
+    # 根据选择的模型决定音色范围
+    use_v2_voices = "v2" in selected_model or "v1" in selected_model
+
+    saved_voice = config.cosyvoice.get("voice", "longanyang")
+
+    # 构建音色选项
+    all_voice_options = {}
+    for cat_name, voices in voice_categories.items():
+        for disp_name, (voice_id, support_emotion) in voices.items():
+            all_voice_options[f"{cat_name} > {disp_name}"] = voice_id
+
+    if use_v2_voices:
+        for cat_name, voices in voice_categories_v2.items():
+            for disp_name, (voice_id, support_emotion) in voices.items():
+                all_voice_options[f"{cat_name} > {disp_name}"] = voice_id
+
+    display_voice_list = list(all_voice_options.keys())
+    saved_voice_display = display_voice_list[0]
+    for disp, vid in all_voice_options.items():
+        if vid == saved_voice:
+            saved_voice_display = disp
+            break
+
+    selected_voice_display = st.selectbox(
+        "音色选择",
+        options=display_voice_list,
+        index=display_voice_list.index(saved_voice_display) if saved_voice_display in display_voice_list else 0,
+        help="带 ★情感 标记的音色支持情感 Instruct（仅 V3 模型）"
+    )
+    selected_voice = all_voice_options.get(selected_voice_display, "longanyang")
+
+    # 语速调节
+    voice_rate = st.slider(
+        "语速调节",
+        min_value=0.5,
+        max_value=2.0,
+        value=1.0,
+        step=0.1,
+        help="调节语音速度 (0.5-2.0)"
+    )
+
+    # 情感指令（仅 V3 + 支持 Instruct 的音色）
+    st.divider()
+    st.markdown("**🎭 情感指令控制**")
+
+    # 检查是否支持情感
+    is_v3 = "v3" in selected_model
+    support_instruct = is_v3 and any(
+        vid == selected_voice and emo for _, voices in voice_categories.items()
+        for _, (vid, emo) in voices.items()
+    )
+
+    if not is_v3:
+        st.warning("⚠️ 当前选择的模型不支持情感控制，请切换到 V3 模型")
+    elif not support_instruct:
+        st.warning("⚠️ 当前选择的音色不支持情感 Instruct，请选择带 ★情感 标记的音色")
+
+    emotion_presets_cosy = {
+        "不设置": "",
+        "激动兴奋": "用激动的语气说，充满热情和能量",
+        "温柔亲切": "用温柔亲切的语气说，语速轻柔",
+        "紧张悬疑": "用紧张的语气说，语速稍快，带有悬念感",
+        "低沉悲伤": "用悲伤的语气说，语速缓慢，声音低沉",
+        "严肃解说": "用专业的语气解说，吐字清晰，语速适中",
+        "活泼可爱": "用活泼可爱的语气说，语调跳跃",
+        "愤怒暴躁": "用愤怒的语气说，声音洪亮，语速急促",
+    }
+
+    preset_name = st.selectbox(
+        "情感预设",
+        options=list(emotion_presets_cosy.keys()),
+        index=0,
+        help="选择预设情感模板，或自定义输入",
+        disabled=not (is_v3 and support_instruct)
+    )
+
+    instruction = st.text_area(
+        "情感指令",
+        value=emotion_presets_cosy.get(preset_name, config.cosyvoice.get("instruction", "")),
+        height=60,
+        placeholder="例如：用激动的语气说，充满热情和能量",
+        help="自然语言描述你想要的情感和语调（CosyVoice V3 Instruct）",
+        disabled=not (is_v3 and support_instruct)
+    )
+
+    with st.expander("💡 CosyVoice 使用说明", expanded=False):
+        st.markdown("""
+        **情感控制说明：**
+        - 仅 **V3 模型** + **带 ★情感 标记的音色** 支持情感 Instruct
+        - 情感指令支持自然语言描述，如"用激动的语气说"
+        - 音色选择建议：短剧解说推荐「龙机器」或「龙黛玉」
+
+        **模型对比：**
+        | 模型 | 情感支持 | 音色数 | 速度 |
+        |------|---------|--------|------|
+        | V3 Flash | ★ | 60+ | 快 |
+        | V3 Plus | ★ | 2 | 中 |
+        | V2 | ✗ | 100+ | 中 |
+        """)
+
+    # 保存配置
+    config.cosyvoice["api_key"] = api_key
+    config.cosyvoice["model"] = selected_model
+    config.cosyvoice["voice"] = selected_voice
+    config.cosyvoice["instruction"] = instruction if (is_v3 and support_instruct) else ""
+    config.ui["cosyvoice_rate"] = voice_rate
+    config.ui["voice_name"] = f"cosyvoice:{selected_voice}"
 
 
 def render_indextts2_tts_settings(tr):
@@ -706,7 +950,7 @@ def render_indextts2_tts_settings(tr):
 def render_voice_preview_new(tr, selected_engine):
     """渲染新的语音试听功能"""
     if st.button("🎵 试听语音合成", use_container_width=True):
-        play_content = "感谢关注 NarratoAI，有任何问题或建议，可以关注微信公众号，求助或讨论"
+        play_content = "感谢关注 DramaClip，短剧高光自动剪辑，让精彩不再错过"
 
         # 根据选择的引擎获取对应的语音配置
         voice_name = ""
@@ -740,6 +984,11 @@ def render_voice_preview_new(tr, selected_engine):
             voice_name = f"qwen3:{vt}"
             voice_rate = config.ui.get("qwen3_rate", 1.0)
             voice_pitch = 1.0  # Qwen3 TTS 不支持音调调节
+        elif selected_engine == "cosyvoice":
+            cv = config.cosyvoice.get("voice", "longanyang")
+            voice_name = f"cosyvoice:{cv}"
+            voice_rate = config.ui.get("cosyvoice_rate", 1.0)
+            voice_pitch = 1.0  # CosyVoice 不支持音调调节
         elif selected_engine == "indextts2":
             reference_audio = config.indextts2.get("reference_audio", "")
             if reference_audio:
@@ -853,7 +1102,7 @@ def render_voice_parameters(tr, voice_name):
 def render_voice_preview(tr, voice_name):
     """渲染语音试听功能"""
     if st.button(tr("Play Voice")):
-        play_content = "感谢关注 NarratoAI，有任何问题或建议，可以关注微信公众号，求助或讨论"
+        play_content = "感谢关注 DramaClip，短剧高光自动剪辑，让精彩不再错过"
         if not play_content:
             play_content = st.session_state.get('video_script', '')
         if not play_content:

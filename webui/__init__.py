@@ -1,5 +1,5 @@
 """
-NarratoAI WebUI Package
+DramaClip WebUI Package
 """
 from webui.config.settings import config
 from webui.components import (
