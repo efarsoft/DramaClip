@@ -1,4 +1,8 @@
-# 核心依赖
+# ============================================
+# DramaClip 短剧自动高光剪辑系统 - 依赖列表
+# ============================================
+
+# ----- 核心依赖 -----
 requests>=2.32.0
 moviepy==2.1.1
 edge-tts==7.2.7
@@ -9,29 +13,27 @@ tomli>=2.2.1
 tomli-w>=1.0.0
 pydub==0.25.1
 pysrt==1.1.2
-
-# AI 服务依赖
-openai>=1.77.0
-google-generativeai>=0.8.5  # 原生 Gemini 场景依赖
-azure-cognitiveservices-speech>=1.37.0
-tencentcloud-sdk-python>=3.0.1200
-dashscope>=1.24.6
-
-# 图像处理依赖
 Pillow>=10.3.0
-
-# 进度条和重试机制
 tqdm>=4.66.6
 tenacity>=9.0.0
 
-# 可选依赖（根据功能需要）
-# 如果需要本地语音识别，取消注释下面的行
-# faster-whisper>=1.0.1
+# ----- AI 服务依赖 -----
+openai>=1.77.0
+google-generativeai>=0.8.5
+azure-cognitiveservices-speech>=1.37.0
+tencentcloud-sdk-python>=3.0.1200
 
-# 如果需要 OpenCV 图像处理，取消注释下面的行
-# opencv-python>=4.11.0.86
+# ----- 高光分析核心依赖 -----
+# 镜头分割
+scenedetect>=0.7
+# 音频分析（音频爆点检测）
+librosa>=0.10.0
+soundfile>=0.12.0
+# 图像处理（人脸检测、画面特征）
+opencv-python>=4.11.0.86
+# 中文NLP（台词情绪分析）
+jieba>=0.42.1
 
-# 如果需要 CUDA 支持，取消注释下面的行
-# torch>=2.0.0
-# torchvision>=0.15.0
-# torchaudio>=2.0.0
+# ----- 可选依赖（按需取消注释）-----
+# faster-whisper>=1.0.1      # 本地语音识别
+# torch>=2.0.0                # CUDA加速支持

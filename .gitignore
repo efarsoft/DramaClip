@@ -46,3 +46,15 @@ AGENTS.md
 CLAUDE.md
 tests/*
 /SourceProjects
+
+# 临时脚本和测试产物
+check_*.py
+find_*.py
+iter_check.py
+run_e2e.py
+test_e2e*.py
+test_e2e*.txt
+test_output_e2e/
+
+# WorkBuddy 团队/记忆临时文件
+.workbuddy/teams/

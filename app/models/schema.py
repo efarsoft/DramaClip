@@ -1,45 +1,19 @@
-import warnings
-from enum import Enum
-from typing import Any, List, Optional, Union
+"""
+DramaClip - 数据模型定义
+基于 NarratoAI schema 扩展，增加短剧高光剪辑专用模型
+"""
 
-import pydantic
+from enum import Enum
+from typing import Optional, List, Any
 from pydantic import BaseModel, Field
 
-# 忽略 Pydantic 的特定警告
-warnings.filterwarnings(
-    "ignore",
-    category=UserWarning,
-    message="Field name.*shadows an attribute in parent.*",
-)
 
-
-class AudioVolumeDefaults:
-    """音量配置默认值常量类 - 确保全局一致性"""
-
-    # 语音音量默认值
-    VOICE_VOLUME = 1.0
-    TTS_VOLUME = 1.0
-
-    # 原声音量默认值 - 提高原声音量以平衡TTS
-    ORIGINAL_VOLUME = 1.2
-
-    # 背景音乐音量默认值
-    BGM_VOLUME = 0.3
-
-    # 音量范围
-    MIN_VOLUME = 0.0
-    MAX_VOLUME = 2.0  # 允许原声音量超过1.0以平衡TTS
-
-    # 智能音量调整
-    ENABLE_SMART_VOLUME = True  # 是否启用智能音量分析和调整
-
-
-class VideoConcatMode(str, Enum):
-    random = "random"
-    sequential = "sequential"
-
+# ============================================
+# 原有模型（从 NarratoAI 保留）
+# ============================================
 
 class VideoAspect(str, Enum):
+    """视频宽高比"""
     landscape = "16:9"
     landscape_2 = "4:3"
     portrait = "9:16"
@@ -47,175 +21,216 @@ class VideoAspect(str, Enum):
     square = "1:1"
 
     def to_resolution(self):
-        if self == VideoAspect.landscape.value:
-            return 1920, 1080
-        elif self == VideoAspect.portrait.value:
-            return 1080, 1920
-        elif self == VideoAspect.square.value:
-            return 1080, 1080
-        return 1080, 1920
+        resolutions = {
+            "16:9": (1920, 1080),
+            "4:3": (1440, 1080),
+            "9:16": (1080, 1920),
+            "3:4": (1080, 1440),
+            "1:1": (1080, 1080),
+        }
+        return resolutions.get(self.value, (1080, 1920))
 
 
-class _Config:
-    arbitrary_types_allowed = True
-
-
-@pydantic.dataclasses.dataclass(config=_Config)
-class MaterialInfo:
-    provider: str = "pexels"
-    url: str = ""
-    duration: int = 0
-
-
-# VoiceNames = [
-#     # zh-CN
-#     "female-zh-CN-XiaoxiaoNeural",
-#     "female-zh-CN-XiaoyiNeural",
-#     "female-zh-CN-liaoning-XiaobeiNeural",
-#     "female-zh-CN-shaanxi-XiaoniNeural",
-#
-#     "male-zh-CN-YunjianNeural",
-#     "male-zh-CN-YunxiNeural",
-#     "male-zh-CN-YunxiaNeural",
-#     "male-zh-CN-YunyangNeural",
-#
-#     # "female-zh-HK-HiuGaaiNeural",
-#     # "female-zh-HK-HiuMaanNeural",
-#     # "male-zh-HK-WanLungNeural",
-#     #
-#     # "female-zh-TW-HsiaoChenNeural",
-#     # "female-zh-TW-HsiaoYuNeural",
-#     # "male-zh-TW-YunJheNeural",
-#
-#     # en-US
-#     "female-en-US-AnaNeural",
-#     "female-en-US-AriaNeural",
-#     "female-en-US-AvaNeural",
-#     "female-en-US-EmmaNeural",
-#     "female-en-US-JennyNeural",
-#     "female-en-US-MichelleNeural",
-#
-#     "male-en-US-AndrewNeural",
-#     "male-en-US-BrianNeural",
-#     "male-en-US-ChristopherNeural",
-#     "male-en-US-EricNeural",
-#     "male-en-US-GuyNeural",
-#     "male-en-US-RogerNeural",
-#     "male-en-US-SteffanNeural",
-# ]
-
-
-class VideoParams(BaseModel):
-    """
-    {
-      "video_subject": "",
-      "video_aspect": "横屏 16:9（西瓜视频）",
-      "voice_name": "女生-晓晓",
-      "bgm_name": "random",
-      "font_name": "STHeitiMedium 黑体-中",
-      "text_color": "#FFFFFF",
-      "font_size": 60,
-      "stroke_color": "#000000",
-      "stroke_width": 1.5
-    }
-    """
-
-    video_subject: str
-    video_script: str = ""  # 用于生成视频的脚本
-    video_terms: Optional[Union[str, list]] = None  # 用于生成视频的关键词
-    video_aspect: Optional[VideoAspect] = VideoAspect.portrait.value
-    video_concat_mode: Optional[VideoConcatMode] = VideoConcatMode.random.value
-    video_clip_duration: Optional[int] = 5
-    video_count: Optional[int] = 1
-
-    video_source: Optional[str] = "pexels"
-    video_materials: Optional[List[MaterialInfo]] = None  # 用于生成视频的素材
-
-    video_language: Optional[str] = ""  # auto detect
-
-    voice_name: Optional[str] = ""
-    voice_volume: Optional[float] = AudioVolumeDefaults.VOICE_VOLUME
-    voice_rate: Optional[float] = 1.0
-    bgm_type: Optional[str] = "random"
-    bgm_file: Optional[str] = ""
-    bgm_volume: Optional[float] = AudioVolumeDefaults.BGM_VOLUME
-
-    subtitle_enabled: Optional[bool] = True
-    subtitle_position: Optional[str] = "bottom"  # top, bottom, center
-    custom_position: float = 70.0
-    font_name: Optional[str] = "STHeitiMedium.ttc"
-    text_fore_color: Optional[str] = "#FFFFFF"
-    text_background_color: Optional[str] = "transparent"
-
-    font_size: int = 60
-    stroke_color: Optional[str] = "#000000"
-    stroke_width: float = 1.5
-    n_threads: Optional[int] = 2
-    paragraph_number: Optional[int] = 1
-
-
-
-
-
-class VideoClipParams(BaseModel):
-    """
-    DramaClip 短剧高光剪辑数据模型
-    支持单视频（向后兼容）和多视频（多集短剧）两种模式
-    """
-    video_clip_json: Optional[list] = Field(default=[], description="LLM 生成的视频剪辑脚本内容")
-    video_clip_json_path: Optional[str] = Field(default="", description="LLM 生成的视频剪辑脚本路径")
-
-    # 单视频路径（向后兼容）
-    video_origin_path: Optional[str] = Field(default="", description="原视频路径（单视频模式）")
-    # 多视频路径列表（多集短剧模式）
-    video_origin_paths: Optional[List[str]] = Field(
-        default_factory=list,
-        description="原视频路径列表（多集模式），按剧集顺序排列"
-    )
-    video_aspect: Optional[VideoAspect] = Field(default=VideoAspect.portrait.value, description="视频比例")
-    video_language: Optional[str] = Field(default="zh-CN", description="视频语言")
-
-    # 多集高光剪辑专用字段
-    target_duration: int = Field(default=30, description="目标输出时长（秒），用于高光筛选")
-    vision_llm_provider: str = Field(default="gemini", description="视觉分析 LLM 提供商")
-    video_plot: str = Field(default="", description="视频主题/剧情简介，用于 LLM 生成高光脚本时参考")
-
-    # video_clip_duration: Optional[int] = 5      # 视频片段时长
-    # video_count: Optional[int] = 1      # 视频片段数量
-    # video_source: Optional[str] = "local"
-    # video_concat_mode: Optional[VideoConcatMode] = VideoConcatMode.random.value
-
-    voice_name: Optional[str] = Field(default="zh-CN-YunjianNeural", description="语音名称")
-    voice_volume: Optional[float] = Field(default=AudioVolumeDefaults.VOICE_VOLUME, description="解说语音音量")
-    voice_rate: Optional[float] = Field(default=1.0, description="语速")
-    voice_pitch: Optional[float] = Field(default=1.0, description="语调")
-    tts_engine: Optional[str] = Field(default="", description="TTS 引擎")
-    bgm_name: Optional[str] = Field(default="random", description="背景音乐名称")
-    bgm_type: Optional[str] = Field(default="random", description="背景音乐类型")
-    bgm_file: Optional[str] = Field(default="", description="背景音乐文件")
-
-    subtitle_enabled: bool = True
-    font_name: str = "SimHei"  # 默认使用黑体
-    font_size: int = 36
-    text_fore_color: str = "white"              # 文本前景色
-    text_back_color: Optional[str] = None       # 文本背景色
-    stroke_color: str = "black"                 # 描边颜色
-    stroke_width: float = 1.5                   # 描边宽度
-    subtitle_position: str = "bottom"   # top, bottom, center, custom
-    custom_position: float = 70.0       # 自定义位置
-
-    n_threads: Optional[int] = Field(default=16, description="线程数")    # 线程数，有助于提升视频处理速度
-
-    tts_volume: Optional[float] = Field(default=AudioVolumeDefaults.TTS_VOLUME, description="解说语音音量（后处理）")
-    original_volume: Optional[float] = Field(default=AudioVolumeDefaults.ORIGINAL_VOLUME, description="视频原声音量")
-    bgm_volume: Optional[float] = Field(default=AudioVolumeDefaults.BGM_VOLUME, description="背景音乐音量")
-
-
-
+class VideoConcatMode(str, Enum):
+    """视频拼接模式"""
+    random = "random"
+    sequential = "sequential"
 
 
 class SubtitlePosition(str, Enum):
-    TOP = "top"
-    CENTER = "center"
-    BOTTOM = "bottom"
+    """字幕位置"""
+    bottom = "bottom"
+    top = "top"
+    center = "center"
 
+
+# 音量范围与默认值常量 (UI 组件使用)
+class AudioVolumeDefaults:
+    """音频默认音量配置（常量 + 默认值）"""
+    MIN_VOLUME: float = 0.0
+    MAX_VOLUME: float = 2.0
+    VOICE_VOLUME: float = 1.0
+    BGM_VOLUME: float = 0.3
+    ORIGINAL_VOLUME: float = 0.0
+    ENABLE_SMART_VOLUME: bool = True
+
+
+class AudioVolumeConfig(BaseModel):
+    """音频音量运行时配置（实例字段）"""
+
+
+class MaterialInfo(BaseModel):
+    """视频素材信息"""
+    provider: str = ""
+    url: str = ""
+    duration: int = 0
+    video_file_path: str = ""
+
+
+class VideoClipParams(BaseModel):
+    """视频剪辑参数 — 完整字段定义（UI + task.py 双向对齐）"""
+    # 脚本相关
+    video_origin_path: str = Field(default="", description="原视频路径(兼容旧接口)")
+    video_origin_paths: List[str] = Field(default_factory=list, description="原视频路径列表(多集短剧)")
+    video_clip_json_path: str = Field(default="", description="脚本JSON路径")
+    video_plot: str = Field(default="", description="剧情描述")
+    voice_name: str = Field(default="zh-CN-XiaoyiNeural-Female", description="TTS音色")
+    
+    # 视频参数
+    video_aspect: VideoAspect = Field(default=VideoAspect.portrait, description="视频宽高比")
+    video_quality: str = Field(default="1080p", description="视频画质")
+    video_concat_mode: VideoConcatMode = Field(default=VideoConcatMode.sequential, description="拼接模式")
+    clip_mode: str = Field(default="direct_cut", description="剪辑模式(direct_cut/ai_narration)")
+    
+    # 音频参数
+    bgm_volume: float = Field(default=0.3, description="BGM音量")
+    voice_volume: float = Field(default=1.0, description="人声音量")
+    original_audio_volume: float = Field(default=0.2, description="原声音量(作为背景)")
+    original_volume: float = Field(default=0.0, description="原声音量(UI slider用)")
+    tts_engine: str = Field(default="edge_tts", description="TTS引擎")
+    voice_rate: float = Field(default=1.0, description="TTS语速")
+    voice_pitch: float = Field(default=1.0, description="TTS音调")
+    tts_volume: float = Field(default=1.0, description="TTS音量")
+    bgm_type: str = Field(default="random", description="BGM类型(random/custom/none)")
+    bgm_file: str = Field(default="", description="BGM自定义文件路径")
+    
+    # 字幕参数
+    subtitle_enabled: bool = Field(default=True, description="是否启用字幕")
+    subtitle_font_size: int = Field(default=40, description="字幕大小")
+    subtitle_color: str = Field(default="#FFFFFF", description="字幕颜色")
+    subtitle_position: SubtitlePosition = Field(default=SubtitlePosition.bottom, description="字幕位置")
+    font_name: str = Field(default="SimHei", description="字体名称")
+    font_size: int = Field(default=60, description="字体大小(字幕渲染)")
+    text_fore_color: str = Field(default="#FFFFFF", description="文字颜色(字幕)")
+    custom_position: Optional[float] = Field(default=None, description="自定义字幕位置(百分比)")
+    
+    # 脚本与模式参数
+    script_type: str = Field(default="short", description="脚本类型(short/summary/auto)")
+    target_duration: int = Field(default=30, description="目标时长(秒)")
+    output_duration: int = Field(default=30, description="输出时长(秒)")
+    video_language: str = Field(default="", description="视频语言")
+    video_name: str = Field(default="", description="视频名称")
+    n_threads: int = Field(default=2, description="线程数")
+
+
+# ============================================
+# DramaClip 新增模型
+# ============================================
+
+class ClipMode(str, Enum):
+    """
+    DramaClip 剪辑模式
+    
+    - direct_cut: 原片直剪模式 — 保留原声，快速提取高光
+    - ai_narration: AI解说模式 — 生成旁白，替换原声
+    """
+    DIRECT_CUT = "direct_cut"
+    AI_NARRATION = "ai_narration"
+
+
+class SceneSegment(BaseModel):
+    """
+    镜头片段（场景分割后的基本单元）
+    
+    每个镜头片段代表视频中一个连续的场景片段，
+    经过 PySceneDetect 分割后生成。
+    """
+    # 基本信息
+    segment_id: str = Field(description="片段唯一ID")
+    episode_index: int = Field(description="所属剧集序号(从1开始)")
+    start_time: float = Field(description="起始时间(秒)")
+    end_time: float = Field(description="结束时间(秒)")
+    duration: float = Field(description="片段时长(秒)")
+    
+    # 文件路径
+    video_path: Optional[str] = Field(default=None, description="片段视频文件路径")
+    audio_path: Optional[str] = Field(default=None, description="提取的音频文件路径")
+    
+    # ASR转写结果
+    subtitle_text: Optional[str] = Field(default=None, description="该片段的台词/字幕文本")
+    subtitle_srt_path: Optional[str] = Field(default=None, description="SRT字幕文件路径")
+    
+    # 画面分析结果
+    has_face: bool = Field(default=False, description="是否包含人脸")
+    is_closeup: bool = Field(default=False, description="是否为特写镜头")
+    face_center_x: Optional[float] = Field(default=None, description="人脸中心X坐标(归一化0-1)")
+    face_center_y: Optional[float] = Field(default=None, description="人脸中心Y坐标(归一化0-1)")
+    has_action: bool = Field(default=False, description="是否有肢体动作/冲突")
+    emotion_tags: List[str] = Field(default_factory=list, description="检测到的情绪标签(anger/surprise/sadness等)")
+    
+    # 音频分析结果
+    audio_peak_db: Optional[float] = Field(default=None, description="音量峰值(dB)")
+    audio_rms: Optional[float] = Field(default=None, description="音频RMS均值")
+    audio_energy: Optional[float] = Field(default=None, description="音频能量")
+    has_sudden_change: bool = Field(default=False, description="是否存在音频突变")
+    speech_rate: Optional[float] = Field(default=None, description="语速(字/秒)")
+    
+    # 打分结果
+    audio_score: Optional[float] = Field(default=None, description="音频爆点得分(0-1)")
+    emotion_score: Optional[float] = Field(default=None, description="台词情绪得分(0-1)")
+    visual_score: Optional[float] = Field(default=None, description="画面特征得分(0-1)")
+    rhythm_score: Optional[float] = Field(default=None, description="镜头节奏得分(0-1)")
+    total_score: Optional[float] = Field(default=None, description="综合得分(0-1)")
+    
+    # 排序与筛选
+    rank: Optional[int] = Field(default=None, description="排名")
+    selected: bool = Field(default=False, description="是否被选中为高光片段")
+
+
+class HighlightScoreWeights(BaseModel):
+    """
+    高光打分权重配置
+    
+    默认公式: score = 0.4*audio + 0.3*emotion + 0.2*visual + 0.1*rhythm
+    """
+    audio_weight: float = Field(default=0.4, ge=0, le=1, description="音频爆点权重")
+    emotion_weight: float = Field(default=0.3, ge=0, le=1, description="台词情绪权重")
+    visual_weight: float = Field(default=0.2, ge=0, le=1, description="画面特征权重")
+    rhythm_weight: float = Field(default=0.1, ge=0, le=1, description="镜头节奏权重")
+    
+    def validate_weights(self) -> bool:
+        """验证权重之和是否为1.0"""
+        total = self.audio_weight + self.emotion_weight + self.visual_weight + self.rhythm_weight
+        return abs(total - 1.0) < 0.01
+
+
+class HighlightConfig(BaseModel):
+    """高光识别配置"""
+    weights: HighlightScoreWeights = Field(default_factory=HighlightScoreWeights)
+    top_ratio: float = Field(default=0.3, ge=0.1, le=0.8, description="Top N比例")
+    min_segment_duration: float = Field(default=2.0, ge=1.0, le=10.0, description="最小片段时长(秒)")
+    max_segments_per_episode: int = Field(default=5, ge=1, le=20, description="每集最多片段数")
+    min_episodes_covered: int = Field(default=1, ge=1, description="最少覆盖集数")
+
+
+class DramaClipOutputConfig(BaseModel):
+    """输出配置"""
+    duration_seconds: int = Field(default=30, description="目标输出时长(秒)")
+    resolution: str = Field(default="1080P", description="分辨率")
+    aspect_ratio: str = Field(default="9:16", description="宽高比")
+    fps: int = Field(default=25, description="帧率")
+    format: str = Field(default="mp4", description="输出格式")
+
+
+class NarrationScript(BaseModel):
+    """AI解说文案"""
+    title: str = Field(default="", description="解说标题")
+    segments: List[dict] = Field(default_factory=list, description="分段解说内容")
+    full_text: str = Field(default="", description="完整文案文本")
+    style: str = Field(default="normal", description="文案风格(normal/satire/concise)")
+    
+    class NarrationSegment(BaseModel):
+        timestamp: float = Field(description="对应时间点")
+        text: str = Field(description="解说文本")
+        emphasis: bool = Field(default=False, description="是否为重点强调")
+
+
+class EpisodeInput(BaseModel):
+    """单集输入信息"""
+    episode_index: int = Field(description="剧集序号")
+    file_path: str = Field(description="文件路径")
+    file_name: str = Field(description="文件名")
+    file_size_mb: float = Field(description="文件大小(MB)")
+    duration_seconds: float = Field(description="视频时长(秒)")
+    resolution: str = Field(description="分辨率")
+    thumbnail_path: Optional[str] = Field(default=None, description="缩略图路径")

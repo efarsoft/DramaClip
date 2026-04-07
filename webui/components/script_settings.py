@@ -10,7 +10,12 @@ from app.config import config
 from app.models.schema import VideoClipParams
 from app.services.subtitle_text import decode_subtitle_bytes
 from app.utils import utils, check_script
-from webui.tools.generate_script_docu import generate_script_docu
+# generate_script_docu 已移除（DramaClip 不需要画面解说模式）
+# 原函数保留为空实现以兼容调用
+def generate_script_docu(params):
+    """画面解说脚本生成（已弃用，保留接口兼容）"""
+    st.warning("画面解说模式暂不可用，请选择其他模式")
+    logger.warning("generate_script_docu called but module removed")
 from webui.tools.generate_script_short import generate_script_short
 from webui.tools.generate_short_summary import generate_script_short_sunmmary
 
@@ -460,7 +465,12 @@ def render_video_file(tr, params):
                 )
             with col_del:
                 if st.button("🗑", key=f"del_ep_{i}", help="移除此集"):
-                    st.session_state['episode_paths'].pop(i)
+                    # 用路径匹配删除（避免遍历中 pop(i) 索引偏移问题）
+                    target_path = ep['path']
+                    st.session_state['episode_paths'] = [
+                        e for e in st.session_state['episode_paths']
+                        if e['path'] != target_path
+                    ]
                     st.rerun()
 
         # 全量清理
@@ -534,12 +544,12 @@ def render_video_details(tr):
     with input_cols[2]:
         target_dur = st.selectbox(
             tr("Target Duration (s)"),
-            options=[15, 30, 45, 60],
+            options=[15, 30, 45, 60, 90, 120, 180, 240, 300],
             index=1,  # 默认 30s
-            help=tr("目标输出时长，用于高光筛选（多集模式下高光将均匀分配到各集）"),
+            help=tr("目标输出时长：15s~5min（多集模式下高光将均匀分配到各集）"),
             key="target_duration"
         )
-        st.session_state['target_duration'] = target_dur
+        # selectbox 已通过 key 自动写入 session_state，无需重复赋值
 
     st.session_state['video_theme'] = video_theme
     st.session_state['custom_prompt'] = custom_prompt

@@ -82,6 +82,11 @@ def save_config():
         _cfg["ui"] = ui
         _cfg["tts_qwen"] = tts_qwen
         _cfg["indextts2"] = indextts2
+        _cfg["frames"] = frames
+        # DramaClip 配置段
+        _cfg["highlight"] = highlight
+        _cfg["output"] = output
+        _cfg["scene_detect"] = scene_detect
         f.write(toml.dumps(_cfg))
 
 
@@ -96,6 +101,11 @@ ui = _cfg.get("ui", {})
 frames = _cfg.get("frames", {})
 tts_qwen = _cfg.get("tts_qwen", {})
 indextts2 = _cfg.get("indextts2", {})
+
+# DramaClip: 新增配置段
+highlight = _cfg.get("highlight", {})
+output = _cfg.get("output", {})
+scene_detect = _cfg.get("scene_detect", {})
 
 hostname = socket.gethostname()
 

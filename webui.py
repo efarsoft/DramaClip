@@ -4,8 +4,7 @@ import sys
 from loguru import logger
 from app.config import config
 from webui.components import basic_settings, video_settings, audio_settings, subtitle_settings, script_settings, \
-    system_settings
-# from webui.utils import cache, file_utils
+    system_settings, mode_selector, highlight_preview
 from app.utils import utils
 from app.utils import ffmpeg_utils
 from app.models.schema import VideoClipParams, VideoAspect
@@ -18,10 +17,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="auto",
     menu_items={
-        "Report a bug": "https://github.com/linyqh/NarratoAI/issues",
-        'About': f"# 🎬 DramaClip :blue[短剧自动高光剪辑系统] \n "
-                 f"#### Version: v{config.project_version} \n "
-                 f"单系统双模式：原片直剪（保留原声）| AI解说（生成旁白）"
+        "Report a bug": "https://github.com/user/DramaClip/issues",
+        'About': f"# :blue[DramaClip] 🎬 \n #### Version: v{config.project_version} \n "
+                 f"短剧自动高光剪辑系统\n "
+                 f"单系统双模式：原片直剪 | AI解说"
     },
 )
 
@@ -36,25 +35,21 @@ def init_log():
     """初始化日志配置"""
     from loguru import logger
     logger.remove()
-    _lvl = "INFO"  # 改为 INFO 级别，过滤掉 DEBUG 日志
+    _lvl = "INFO"
 
     def format_record(record):
-        # 简化日志格式化处理，不尝试按特定字符串过滤torch相关内容
         file_path = record["file"].path
         relative_path = os.path.relpath(file_path, config.root_dir)
         record["file"].path = f"./{relative_path}"
         record['message'] = record['message'].replace(config.root_dir, ".")
 
-        _format = '<green>{time:%Y-%m-%d %H:%M:%S}</> | ' + \
-                  '<level>{level}</> | ' + \
-                  '"{file.path}:{line}":<blue> {function}</> ' + \
-                  '- <level>{message}</>' + "\n"
+        _format = '<green>{time:%Y-%m-%d %H:%M:%S}</> | ' \
+                  '<level>{level}</level> | ' \
+                  '"{file.path}:{line}":<blue> {function}</blue> ' \
+                  '- <level>{message}</level>' + "\n"
         return _format
 
-    # 添加日志过滤器
     def log_filter(record):
-        """过滤不必要的日志消息"""
-        # 过滤掉启动时的噪音日志（即使在 DEBUG 模式下也可以选择过滤）
         ignore_patterns = [
             "Examining the path of torch.classes raised",
             "torch.cuda.is_available()",
@@ -70,16 +65,12 @@ def init_log():
         filter=log_filter
     )
 
-    # 应用启动后，可以再添加更复杂的过滤器
     def setup_advanced_filters():
-        """在应用完全启动后设置高级过滤器"""
         try:
             for handler_id in logger._core.handlers:
                 logger.remove(handler_id)
 
-            # 重新添加带有高级过滤的处理器
             def advanced_filter(record):
-                """更复杂的过滤器，在应用启动后安全使用"""
                 ignore_messages = [
                     "Examining the path of torch.classes raised",
                     "torch.cuda.is_available()",
@@ -95,7 +86,6 @@ def init_log():
                 filter=advanced_filter
             )
         except Exception as e:
-            # 如果过滤器设置失败，确保日志仍然可用
             logger.add(
                 sys.stdout,
                 level=_lvl,
@@ -104,7 +94,6 @@ def init_log():
             )
             logger.error(f"设置高级日志过滤器失败: {e}")
 
-    # 将高级过滤器设置放到启动主逻辑后
     import threading
     threading.Timer(5.0, setup_advanced_filters).start()
 
@@ -117,28 +106,48 @@ def init_global_state():
         st.session_state['video_plot'] = ''
     if 'ui_language' not in st.session_state:
         st.session_state['ui_language'] = config.ui.get("language", utils.get_system_locale())
-    # 多集短剧支持
-    if 'episode_paths' not in st.session_state:
-        st.session_state['episode_paths'] = []     # [{'path', 'name', 'duration'}, ...]
-    if 'video_origin_paths' not in st.session_state:
-        st.session_state['video_origin_paths'] = []
-    # 移除subclip_videos初始化 - 现在使用统一裁剪策略
+    # DramaClip 新增状态
+    if 'clip_mode' not in st.session_state:
+        st.session_state['clip_mode'] = 'direct_cut'  # 默认原片直剪模式
+    if 'uploaded_episodes' not in st.session_state:
+        st.session_state['uploaded_episodes'] = []
+    if 'highlight_segments' not in st.session_state:
+        st.session_state['highlight_segments'] = []
 
+
+# i18n 翻译缓存（避免每次调用都重新读文件）
+_tr_cache: dict = {}
+_tr_cache_lock = threading.Lock()
 
 def tr(key):
-    """翻译函数"""
+    """翻译函数（带LRU缓存，避免重复读取文件）"""
+    global _tr_cache
+    lang = st.session_state.get('ui_language', 'zh_CN')
+    cache_key = f"{lang}:{key}"
+    
+    # 加锁读取缓存，防止迭代时修改字典
+    if cache_key in _tr_cache:
+        return _tr_cache[cache_key]
+    
     i18n_dir = os.path.join(os.path.dirname(__file__), "webui", "i18n")
     locales = utils.load_locales(i18n_dir)
-    loc = locales.get(st.session_state['ui_language'], {})
-    return loc.get("Translation", {}).get(key, key)
+    loc = locales.get(lang, {})
+    result = loc.get("Translation", {}).get(key, key)
+    
+    # 加锁写入缓存
+    with _tr_cache_lock:
+        _tr_cache[cache_key] = result
+        # 防止缓存无限增长（原子操作）
+        if len(_tr_cache) > 500:
+            _tr_cache = {k: v for k, v in list(_tr_cache.items())[-300:]}
+    return result
 
 
 def render_generate_button():
-    """渲染生成按钮和处理逻辑 - 支持单视频和多集短剧"""
+    """渲染生成按钮和处理逻辑"""
     if st.button(tr("Generate Video"), use_container_width=True, type="primary"):
         from app.services import task as tm
         from app.services import state as sm
-        from app.services.multi_episode_processor import start_multi_episode
         from app.models import const
         import threading
         import time
@@ -146,181 +155,100 @@ def render_generate_button():
 
         config.save_config()
 
-        # 获取 episode 列表
-        episode_paths: list = st.session_state.get('video_origin_paths', [])
+        clip_mode = st.session_state.get('clip_mode', 'direct_cut')
 
-        if not episode_paths:
-            st.error(tr("请先添加短剧集（支持单集或多集）"))
-            return
+        # AI解说模式需要脚本文件
+        if clip_mode == 'ai_narration':
+            if not st.session_state.get('video_clip_json_path'):
+                st.error(tr("脚本文件不能为空"))
+                return
 
-        # 多集模式：自动走多集流程
-        if len(episode_paths) >= 2:
-            _run_multi_episode(episode_paths, sm, const)
-            return
+        # 两种模式都需要视频（支持单集和多集）
+        video_paths = st.session_state.get('video_origin_paths', [])
+        single_path = st.session_state.get('video_origin_path', '')
 
-        # 单集模式：向后兼容原有逻辑
-        _run_single_episode(sm, const, tm, script_settings, video_settings, audio_settings, subtitle_settings)
+        # 直剪模式只需要有视频即可
+        if clip_mode == 'direct_cut':
+            if not video_paths and not single_path:
+                st.error(tr("视频文件不能为空"))
+                return
+        else:
+            # AI解说模式保持原有校验
+            if not single_path:
+                st.error(tr("视频文件不能为空"))
+                return
 
+        script_params = script_settings.get_script_params()
+        video_params = video_settings.get_video_params()
+        audio_params = audio_settings.get_audio_params()
+        subtitle_params = subtitle_settings.get_subtitle_params()
 
-def _run_single_episode(sm, const, tm, script_settings, video_settings, audio_settings, subtitle_settings):
-    """单集处理流程（向后兼容）"""
-    if not st.session_state.get('video_clip_json_path'):
-        st.error(tr("脚本文件不能为空"))
-        return
-    if not st.session_state.get('video_origin_path'):
-        st.error(tr("视频文件不能为空"))
-        return
+        all_params = {
+            **script_params,
+            **video_params,
+            **audio_params,
+            **subtitle_params,
+            # DramaClip: 传递剪辑模式
+            'clip_mode': st.session_state.get('clip_mode', 'direct_cut'),
+            # DramaClip: 传递多集视频路径列表
+            'video_origin_paths': st.session_state.get('video_origin_paths', []),
+        }
 
-    script_params = script_settings.get_script_params()
-    video_params = video_settings.get_video_params()
-    audio_params = audio_settings.get_audio_params()
-    subtitle_params = subtitle_settings.get_subtitle_params()
+        params = VideoClipParams(**all_params)
+        task_id = str(uuid.uuid4())
 
-    all_params = {
-        **script_params,
-        **video_params,
-        **audio_params,
-        **subtitle_params
-    }
-    params = VideoClipParams(**all_params)
+        progress_bar = st.progress(0)
+        status_text = st.empty()
 
-    task_id = str(uuid.uuid4())
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+        def run_task():
+            try:
+                tm.start_subclip_unified(
+                    task_id=task_id,
+                    params=params
+                )
+            except Exception as e:
+                logger.error(f"任务执行失败: {e}")
+                sm.state.update_task(task_id, state=const.TASK_STATE_FAILED, message=str(e))
 
-    def run_task():
-        try:
-            tm.start_subclip_unified(task_id=task_id, params=params)
-        except Exception as e:
-            logger.error(f"单集任务执行失败: {e}")
-            sm.state.update_task(task_id, state=const.TASK_STATE_FAILED, message=str(e))
+        thread = threading.Thread(target=run_task)
+        thread.start()
 
-    thread = threading.Thread(target=run_task)
-    thread.start()
+        elapsed = 0.0
+        max_wait = 7200  # 最长等待2小时（短剧剪辑通常不会超过这个时间）
+        while True:
+            task = sm.state.get_task(task_id)
+            if task:
+                progress = task.get("progress", 0)
+                state = task.get("state")
 
-    _poll_task_status(task_id, sm, const, progress_bar, status_text)
+                progress_bar.progress(progress / 100)
+                status_text.text(f"Processing... {progress}%")
 
+                if state == const.TASK_STATE_COMPLETE:
+                    status_text.text(tr("视频生成完成"))
+                    progress_bar.progress(1.0)
 
-def _run_multi_episode(episode_paths: list, sm, const):
-    """多集短剧处理流程"""
-    import uuid as uuid_mod
+                    video_files = task.get("videos", [])
+                    try:
+                        if video_files:
+                            player_cols = st.columns(len(video_files) * 2 + 1)
+                            for i, url in enumerate(video_files):
+                                player_cols[i * 2 + 1].video(url)
+                    except Exception as e:
+                        logger.error(f"播放视频失败: {e}")
 
-    episode_count = len(episode_paths)
-    episode_names = [os.path.basename(p) for p in episode_paths]
-    logger.info(f"[UI] 启动多集处理: {episode_count} 集 — {episode_names}")
+                    st.success(tr("视频生成完成"))
+                    break
 
-    # 获取所有参数
-    script_params = script_settings.get_script_params()
-    video_params = video_settings.get_video_params()
-    audio_params = audio_settings.get_audio_params()
-    subtitle_params = subtitle_settings.get_subtitle_params()
+                elif state == const.TASK_STATE_FAILED:
+                    st.error(f"任务失败: {task.get('message', 'Unknown error')}")
+                    break
 
-    all_params = {
-        **script_params,
-        **video_params,
-        **audio_params,
-        **subtitle_params
-    }
-    params = VideoClipParams(**all_params)
-
-    task_id = str(uuid_mod.uuid4())
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
-    # 进度回调（由后端 task.py 的 sm.state 驱动）
-    def progress_callback(progress: float, message: str):
-        """Streamlit-safe 进度更新（通过 session_state 传递）"""
-        st.session_state[f'_task_progress_{task_id}'] = (progress, message)
-
-    def run_task():
-        try:
-            from app.services.multi_episode_processor import start_multi_episode
-            start_multi_episode(
-                task_id=task_id,
-                params=params,
-                episode_paths=episode_paths,
-                progress_callback=progress_callback,
-            )
-        except Exception as e:
-            logger.error(f"[多集] 任务执行失败: {e}")
-            sm.state.update_task(task_id, state=const.TASK_STATE_FAILED, message=str(e))
-
-    # 启动后台线程
-    thread = threading.Thread(target=run_task)
-    thread.start()
-
-    # 轮询任务状态（合并后端 state + 前端回调进度）
-    prev_pct = 0
-    while True:
-        task = sm.state.get_task(task_id)
-        if task:
-            state = task.get("state")
-
-            # 尝试从回调进度更新（更细粒度）
-            cb_data = st.session_state.get(f'_task_progress_{task_id}')
-            if cb_data:
-                cb_pct, cb_msg = cb_data
-                progress_bar.progress(cb_pct / 100)
-                status_text.text(cb_msg)
-                prev_pct = cb_pct
-            else:
-                # fallback 到后端粗粒度进度
-                backend_pct = task.get("progress", prev_pct)
-                if backend_pct != prev_pct:
-                    progress_bar.progress(backend_pct / 100)
-                    status_text.text(f"处理中... {backend_pct:.0f}%")
-                    prev_pct = backend_pct
-
-            if state == const.TASK_STATE_COMPLETE:
-                status_text.text("✅ 多集高光剪辑完成！")
-                progress_bar.progress(1.0)
-
-                video_files = task.get("videos", [])
-                if video_files:
-                    st.success(f"🎬 处理完成！共 {episode_count} 集短剧高光，已生成成片")
-                    for vf in video_files:
-                        st.video(vf)
-                else:
-                    st.success("处理完成！")
+            time.sleep(0.5)
+            elapsed += 0.5
+            if elapsed > max_wait:
+                st.warning("⚠️ 任务执行超时，请检查日志获取详情")
                 break
-
-            elif state == const.TASK_STATE_FAILED:
-                err = task.get('message', 'Unknown error')
-                st.error(f"❌ 处理失败: {err}")
-                break
-
-        time.sleep(0.5)
-
-
-def _poll_task_status(task_id, sm, const, progress_bar, status_text):
-    """轮询单集任务状态"""
-    import time
-    while True:
-        task = sm.state.get_task(task_id)
-        if task:
-            progress = task.get("progress", 0)
-            state = task.get("state")
-
-            progress_bar.progress(progress / 100)
-            status_text.text(f"处理中... {progress:.0f}%")
-
-            if state == const.TASK_STATE_COMPLETE:
-                status_text.text(tr("视频生成完成"))
-                progress_bar.progress(1.0)
-                video_files = task.get("videos", [])
-                if video_files:
-                    player_cols = st.columns(len(video_files) * 2 + 1)
-                    for i, url in enumerate(video_files):
-                        player_cols[i * 2 + 1].video(url)
-                st.success(tr("视频生成完成"))
-                break
-
-            elif state == const.TASK_STATE_FAILED:
-                st.error(f"任务失败: {task.get('message', 'Unknown error')}")
-                break
-
-        time.sleep(0.5)
-
 
 
 def main():
@@ -328,44 +256,42 @@ def main():
     init_log()
     init_global_state()
 
-    # ===== 显式注册 LLM 提供商（最佳实践）=====
-    # 在应用启动时立即注册，确保所有 LLM 功能可用
+    # 注册 LLM 提供商
     if 'llm_providers_registered' not in st.session_state:
         try:
             from app.services.llm.providers import register_all_providers
             register_all_providers()
             st.session_state['llm_providers_registered'] = True
-            logger.info("✅ LLM 提供商注册成功")
+            logger.info("LLM 提供商注册成功")
         except Exception as e:
-            logger.error(f"❌ LLM 提供商注册失败: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
+            logger.error(f"LLM 初始化失败: {str(e)}")
             st.error(f"⚠️ LLM 初始化失败: {str(e)}\n\n请检查配置文件和依赖是否正确安装。")
-            # 不抛出异常，允许应用继续运行（但 LLM 功能不可用）
 
-    # 检测FFmpeg硬件加速，但只打印一次日志（使用 session_state 持久化）
+    # FFmpeg硬件加速检测
     if 'hwaccel_logged' not in st.session_state:
         st.session_state['hwaccel_logged'] = False
     
     hwaccel_info = ffmpeg_utils.detect_hardware_acceleration()
     if not st.session_state['hwaccel_logged']:
         if hwaccel_info["available"]:
-            logger.info(f"FFmpeg硬件加速检测结果: 可用 | 类型: {hwaccel_info['type']} | 编码器: {hwaccel_info['encoder']} | 独立显卡: {hwaccel_info['is_dedicated_gpu']}")
+            logger.info(f"FFmpeg硬件加速: 可用 | 类型: {hwaccel_info['type']} | 编码器: {hwaccel_info['encoder']}")
         else:
-            logger.warning(f"FFmpeg硬件加速不可用: {hwaccel_info['message']}, 将使用CPU软件编码")
+            logger.warning(f"FFmpeg硬件加速不可用: {hwaccel_info['message']}, 使用CPU软件编码")
         st.session_state['hwaccel_logged'] = True
 
-    # 仅初始化基本资源，避免过早地加载依赖PyTorch的资源
-    # 检查是否能分解utils.init_resources()为基本资源和高级资源(如依赖PyTorch的资源)
+    # 初始化资源
     try:
         utils.init_resources()
     except Exception as e:
-        logger.warning(f"资源初始化时出现警告: {e}")
+        logger.warning(f"资源初始化警告: {e}")
 
-    st.title(f"🎬 DramaClip :blue[短剧高光剪辑系统]")
-    st.write(tr("Get Help"))
+    # ===== DramaClip 主界面 =====
+    st.title(f":blue[DramaClip] 🎬")
+    st.caption(tr("短剧自动高光剪辑系统 — 单系统双模式"))
 
-    # 首先渲染不依赖PyTorch的UI部分
+    # 模式选择面板（DramaClip 核心新增）
+    mode_selector.render_mode_selector(tr)
+
     # 渲染基础设置面板
     basic_settings.render_basic_settings(tr)
 
@@ -379,12 +305,14 @@ def main():
         video_settings.render_video_panel(tr)
         subtitle_settings.render_subtitle_panel(tr)
 
-    # 放到最后渲染可能使用PyTorch的部分
-    # 渲染系统设置面板
+    # 高光预览面板（DramaClip 核心新增）
+    highlight_preview.render_highlight_panel(tr)
+
+    # 系统设置
     with panel[2]:
         system_settings.render_system_panel(tr)
 
-    # 放到最后渲染生成按钮和处理逻辑
+    # 生成按钮
     render_generate_button()
 
 

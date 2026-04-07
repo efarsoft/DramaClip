@@ -19,6 +19,42 @@ from pydub import AudioSegment
 import numpy as np
 
 
+def _parse_loudnorm_json(stderr_text: str) -> Optional[Dict[str, Any]]:
+    """
+    从 FFmpeg loudnorm 滤镜的 stderr 输出中解析 JSON 数据
+    
+    Args:
+        stderr_text: FFmpeg 子进程的 stderr 输出文本
+        
+    Returns:
+        解析后的字典，失败返回 None
+    """
+    if not stderr_text:
+        return None
+    
+    lines = stderr_text.split('\n')
+    json_start = False
+    json_lines = []
+    
+    for line in lines:
+        if line.strip() == '{':
+            json_start = True
+        if json_start:
+            json_lines.append(line)
+        if line.strip() == '}':
+            break
+    
+    if not json_lines:
+        return None
+    
+    try:
+        import json
+        return json.loads('\n'.join(json_lines))
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.debug(f"解析loudnorm JSON失败: {e}")
+        return None
+
+
 class AudioNormalizer:
     """音频响度分析和标准化工具"""
     
@@ -57,27 +93,12 @@ class AudioNormalizer:
             )
             
             # 从stderr中提取JSON信息
-            stderr_lines = result.stderr.split('\n')
-            json_start = False
-            json_lines = []
+            loudness_data = _parse_loudnorm_json(result.stderr)
             
-            for line in stderr_lines:
-                if line.strip() == '{':
-                    json_start = True
-                if json_start:
-                    json_lines.append(line)
-                if line.strip() == '}':
-                    break
-                    
-            if json_lines:
-                import json
-                try:
-                    loudness_data = json.loads('\n'.join(json_lines))
-                    input_i = float(loudness_data.get('input_i', 0))
-                    logger.info(f"音频 {os.path.basename(audio_path)} 的LUFS: {input_i}")
-                    return input_i
-                except (json.JSONDecodeError, ValueError) as e:
-                    logger.warning(f"解析LUFS数据失败: {e}")
+            if loudness_data:
+                input_i = float(loudness_data.get('input_i', 0))
+                logger.info(f"音频 {os.path.basename(audio_path)} 的LUFS: {input_i}")
+                return input_i
                     
         except Exception as e:
             logger.error(f"分析音频LUFS失败: {e}")
@@ -151,20 +172,10 @@ class AudioNormalizer:
                 check=False
             )
             
-            # 解析分析结果
-            stderr_lines = analyze_result.stderr.split('\n')
-            json_start = False
-            json_lines = []
+            # 解析分析结果（复用公共方法）
+            loudness_data = _parse_loudnorm_json(analyze_result.stderr)
             
-            for line in stderr_lines:
-                if line.strip() == '{':
-                    json_start = True
-                if json_start:
-                    json_lines.append(line)
-                if line.strip() == '}':
-                    break
-            
-            if not json_lines:
+            if not loudness_data:
                 logger.warning("无法获取音频分析数据，使用简单标准化")
                 return self._simple_normalize(input_path, output_path)
             
@@ -191,8 +202,12 @@ class AudioNormalizer:
                 normalize_cmd, 
                 capture_output=True, 
                 text=True, 
-                check=True
+                check=False
             )
+            
+            if result.returncode != 0:
+                logger.warning(f"FFmpeg标准化返回非零: {result.stderr[:200]}")
+                return self._simple_normalize(input_path, output_path)
             
             logger.info(f"音频标准化完成: {output_path}")
             return True
