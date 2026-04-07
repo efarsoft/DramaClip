@@ -33,13 +33,16 @@ class VisualScorer:
     5. 镜头类型 (10%) — 特殊角度、转场效果
     """
     
+    # Downscale width for face detection (speed vs accuracy trade-off)
+    FACE_DETECT_WIDTH = 640
+
     def __init__(self, 
-                 sample_fps: float = 1.0,
+                 sample_fps: float = 0.5,
                  face_confidence: float = 0.5):
         """
         Args:
-            sample_fps: 采样帧率（每秒采样多少帧）
-            face_confidence: 人脸检测置信度阈值
+            sample_fps: Sampling rate in frames per second (default 0.5 = 1 frame per 2s)
+            face_confidence: Face detection confidence threshold
         """
         self.sample_fps = sample_fps
         self.face_confidence = face_confidence
@@ -102,21 +105,25 @@ class VisualScorer:
                 video_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 
-                # 计算采样间隔
+                # Calculate sampling interval and seek frames directly
                 interval = max(1, int(video_fps / self.sample_fps))
                 
-                # 采集数据
+                # Collect sampled frames using seek (avoid decoding every frame)
                 frames_data = []
                 frame_idx = 0
                 
                 while True:
+                    target_frame = frame_idx * interval
+                    if target_frame >= total_frames:
+                        break
+                    
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
                     ret, frame = cap.read()
                     if not ret:
                         break
                     
-                    if frame_idx % interval == 0:
-                        frame_info = self._analyze_frame(frame)
-                        frames_data.append(frame_info)
+                    frame_info = self._analyze_frame(frame)
+                    frames_data.append(frame_info)
                     
                     frame_idx += 1
                 
@@ -136,11 +143,11 @@ class VisualScorer:
             return 0.0, {"error": str(e)}
     
     def _analyze_frame(self, frame: np.ndarray) -> dict:
-        """分析单帧图像"""
+        """Analyze a single frame image"""
         import cv2
         
         info = {}
-        height, width = frame.shape[:2]
+        orig_h, orig_w = frame.shape[:2]
         
         # ===== 1. 人脸检测 =====#
         faces = []
@@ -149,29 +156,40 @@ class VisualScorer:
         
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
+        # Downscale for face detection (Haar cascade works fine at lower res)
+        orig_h, orig_w = frame.shape[:2]
+        scale = self.FACE_DETECT_WIDTH / max(1, orig_w)
+        if scale < 1.0:
+            small_gray = cv2.resize(gray, (self.FACE_DETECT_WIDTH, int(orig_h * scale)))
+        else:
+            small_gray = gray
+        
         if self._face_cascade is not None:
             detected_faces = self._face_cascade.detectMultiScale(
-                gray,
-                scaleFactor=1.1,
+                small_gray,
+                scaleFactor=1.3,
                 minNeighbors=5,
-                minSize=(30, 30)
+                minSize=(20, 20)  # Smaller minSize since we already downscaled
             )
             
             for (x, y, w, h) in detected_faces:
+                # Map coordinates back to original resolution
+                if scale < 1.0:
+                    x, y, w, h = int(x / scale), int(y / scale), int(w / scale), int(h / scale)
                 faces.append({
                     "x": int(x), "y": int(y),
                     "w": int(w), "h": int(h),
-                    "center_x": (x + w/2) / width,
-                    "center_y": (y + h/2) / height,
-                    "size_ratio": (w * h) / (width * height),
+                    "center_x": (x + w/2) / orig_w,
+                    "center_y": (y + h/2) / orig_h,
+                    "size_ratio": (w * h) / (orig_w * orig_h),
                 })
             
             if faces:
-                # 取最大的人脸中心
+                # Pick the largest face center
                 largest_face = max(faces, key=lambda f: f["size_ratio"])
                 face_center = (largest_face["center_x"], largest_face["center_y"])
                 
-                # 判断是否特写：人脸占画面比例超过阈值
+                # Closeup: face occupies > threshold of frame area
                 is_closeup = largest_face["size_ratio"] > CLOSEUP_RATIO_THRESHOLD
         
         info["faces"] = faces

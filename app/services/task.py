@@ -38,15 +38,92 @@ def start_subclip_unified(task_id: str, params: VideoClipParams):
     logger.info(f"DramaClip task started | mode={clip_mode} | task={task_id}")
 
     if clip_mode == 'ai_narration':
-        # AI解说模式必须提供脚本文件
-        if not getattr(params, 'video_clip_json_path', None):
-            raise ValueError("AI解说模式需要指定脚本文件路径 (video_clip_json_path)")
-        return _run_narration_pipeline(task_id, params)
+        # If script JSON is provided, use legacy flow; otherwise use new NarrationPipeline
+        if getattr(params, 'video_clip_json_path', None):
+            return _run_narration_pipeline(task_id, params)
+        else:
+            return _run_ai_narration_pipeline(task_id, params)
     elif clip_mode == 'direct_cut':
         return _run_direct_cut_pipeline(task_id, params)
     else:
         logger.error(f"Unknown clip mode: {clip_mode}")
         raise ValueError(f"Unknown clip mode: {clip_mode}")
+
+
+def _run_ai_narration_pipeline(task_id: str, params: VideoClipParams):
+    """
+    AI解说流水线（新版 - 支持多集）
+
+    复用 DirectCutPipeline 的预处理+高光打分筛选排序，
+    在此基础上增加：剧情解析 → 文案生成 → TTS合成 → 音画合成
+
+    不需要手动脚本 JSON，自动从多集视频中提取高光并生成解说。
+    """
+    from app.services.narration.pipeline import NarrationPipeline
+
+    logger.info(f"\n\n## [AI-Narration] Task start: {task_id}")
+    sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=0)
+
+    try:
+        # Get video paths (multi-episode or single fallback)
+        video_paths = getattr(params, 'video_origin_paths', None) or []
+        if not video_paths:
+            single_path = getattr(params, 'video_origin_path', None) or ''
+            if single_path and path.exists(single_path):
+                video_paths = [single_path]
+            else:
+                raise ValueError("未提供视频文件，请先上传视频")
+
+        missing = [p for p in video_paths if not path.exists(p)]
+        if missing:
+            raise ValueError(f"以下视频文件不存在:\n" + "\n".join(missing))
+
+        # Read config
+        output_cfg = config.output or {}
+        target_duration = getattr(params, 'output_duration', output_cfg.get('default_duration', 30))
+
+        logger.info(f"[AI-Narration] Input: {len(video_paths)} episode(s), target={target_duration}s")
+
+        def on_progress(progress_01: float, message: str):
+            pct = int(progress_01 * 100)
+            sm.state.update_task(task_id, progress=pct)
+
+        # Narration style from params or config
+        narration_style = getattr(params, 'narration_style', 'normal')
+
+        # Run the new NarrationPipeline
+        pipeline = NarrationPipeline()
+        output_dir = utils.task_dir(task_id)
+
+        result = pipeline.run(
+            video_paths=video_paths,
+            output_duration=target_duration,
+            narration_style=narration_style,
+            output_dir=output_dir,
+            progress_callback=on_progress,
+        )
+
+        output_path = result.get('output_path', '')
+
+        logger.info(f"[AI-Narration] Pipeline complete | output={output_path}")
+        logger.info(f"[AI-Narration] Script: {result.get('script_title', 'N/A')}")
+
+        final_video_paths = [output_path] if output_path else []
+
+        kwargs = {
+            "videos": final_video_paths,
+            "combined_videos": final_video_paths[:],
+            "mode": "ai_narration",
+            "narration_title": result.get('script_title', ''),
+            "plot_summary": result.get('plot_summary', ''),
+        }
+        sm.state.update_task(task_id, state=const.TASK_STATE_COMPLETE, progress=100, **kwargs)
+        return kwargs
+
+    except Exception as e:
+        logger.exception(f"[AI-Narration] Task {task_id} failed: {e}")
+        sm.state.update_task(task_id, state=const.TASK_STATE_FAILED, message=str(e))
+        raise
 
 
 def _run_direct_cut_pipeline(task_id: str, params: VideoClipParams):
@@ -129,7 +206,8 @@ def _run_direct_cut_pipeline(task_id: str, params: VideoClipParams):
             "videos": final_video_paths,
             "combined_videos": combined_video_paths,
             "highlight_count": result.get('segments_count', 0),
-            "mode": "direct_cut"
+            "mode": "direct_cut",
+            "highlight_segments": result.get('highlight_segments', []),
         }
         sm.state.update_task(task_id, state=const.TASK_STATE_COMPLETE, progress=100, **kwargs)
         return kwargs

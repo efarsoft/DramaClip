@@ -157,11 +157,14 @@ def render_generate_button():
 
         clip_mode = st.session_state.get('clip_mode', 'direct_cut')
 
-        # AI解说模式需要脚本文件
+        # AI解说模式：脚本文件可选（无脚本走自动NarrationPipeline）
         if clip_mode == 'ai_narration':
-            if not st.session_state.get('video_clip_json_path'):
-                st.error(tr("脚本文件不能为空"))
-                return
+            has_script = st.session_state.get('video_clip_json_path')
+            if not has_script:
+                # Auto narration mode: need video files
+                if not video_paths and not single_path:
+                    st.error(tr("AI解说模式（自动）需要上传视频文件"))
+                    return
 
         # 两种模式都需要视频（支持单集和多集）
         video_paths = st.session_state.get('video_origin_paths', [])
@@ -227,6 +230,11 @@ def render_generate_button():
                 if state == const.TASK_STATE_COMPLETE:
                     status_text.text(tr("视频生成完成"))
                     progress_bar.progress(1.0)
+
+                    # Feed highlight segments to preview panel
+                    seg_list = task.get("highlight_segments", [])
+                    if seg_list:
+                        st.session_state['highlight_segments'] = seg_list
 
                     video_files = task.get("videos", [])
                     try:
