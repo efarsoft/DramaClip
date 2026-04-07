@@ -193,7 +193,7 @@ class EmotionScorer:
         """情绪词密度评分"""
         if not jieba:
             # jieba 不可用时降级为关键词匹配
-            return self._score_keyword_hits(text)
+            return self._score_keywords(text)
         
         try:
             words = list(jieba.cut(text))

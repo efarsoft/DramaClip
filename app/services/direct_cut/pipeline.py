@@ -162,6 +162,17 @@ class DirectCutPipeline:
             progress(1.0, f"完成! 成片已生成: {os.path.basename(output_info['output_path'])}")
             
             # 返回结果
+            # Serialize segments for UI preview panel
+            highlight_segments = []
+            for seg in sorted_segments:
+                highlight_segments.append({
+                    "episode": seg.episode_index,
+                    "score": round(seg.total_score or 0, 3),
+                    "start_time": round(seg.start_time, 1),
+                    "duration": round(seg.duration, 1),
+                    "reason": self._build_reason(seg),
+                })
+
             result = {
                 "task_id": task_id,
                 "mode": "direct_cut",
@@ -175,6 +186,7 @@ class DirectCutPipeline:
                     sum(s.total_score or 0 for s in sorted_segments) / max(1, len(sorted_segments)), 3
                 ),
                 "sorting_quality": quality,
+                "highlight_segments": highlight_segments,
             }
             
             logger.info(f"[{task_id}] 原片直剪完成: {result}")
@@ -194,6 +206,27 @@ class DirectCutPipeline:
             duration=info.duration,
             video_path=info.video_path,
         )
+    
+    @staticmethod
+    def _build_reason(seg: SceneSegment) -> str:
+        """Build a human-readable reason string for a highlight segment"""
+        reasons = []
+        if seg.is_closeup:
+            reasons.append("特写")
+        if seg.has_face:
+            reasons.append("有人物")
+        if seg.has_action:
+            reasons.append("动作")
+        if seg.audio_score and seg.audio_score > 0.6:
+            reasons.append("音频爆点")
+        if seg.emotion_score and seg.emotion_score > 0.6:
+            reasons.append("情绪")
+        if seg.visual_score and seg.visual_score > 0.6:
+            reasons.append("画面佳")
+        if seg.subtitle_text:
+            preview = seg.subtitle_text[:20].replace("\n", " ")
+            reasons.append(f"\"{preview}\"")
+        return ", ".join(reasons) if reasons else "高光片段"
     
     def _extract_media(self, 
                         segments: List[SceneSegment],
