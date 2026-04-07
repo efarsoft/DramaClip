@@ -1148,6 +1148,10 @@ def tts(
         logger.info("分发到 IndexTTS2")
         return indextts2_tts(text, voice_name, voice_file, speed=voice_rate)
 
+    if tts_engine == "cosyvoice":
+        logger.info("分发到 CosyVoice TTS")
+        return cosyvoice_tts(text, voice_name, voice_file, speed=voice_rate)
+
     # Fallback for unknown engine - default to azure v1
     logger.warning(f"未知的 TTS 引擎: '{tts_engine}', 将默认使用 Edge TTS (Azure V1)。")
     return azure_tts_v1(text, voice_name, voice_rate, voice_pitch, voice_file)
@@ -1699,94 +1703,108 @@ def parse_qwen3_voice(voice_name: str) -> str:
 
 def qwen3_tts(text: str, voice_name: str, voice_file: str, speed: float = 1.0) -> Union[SubMaker, None]:
     """
-    使用通义千问 Qwen3 TTS 生成语音（仅使用 DashScope SDK）
+    Synthesize speech using Qwen3 TTS (DashScope SDK).
+    Supports emotion control via 'instructions' parameter (instruct model only).
     """
-    # 读取配置
+    # Read config
     tts_qwen_cfg = getattr(config, "tts_qwen", {}) or {}
     api_key = tts_qwen_cfg.get("api_key", "")
     model_name = tts_qwen_cfg.get("model_name", "qwen3-tts-flash")
+    instructions = tts_qwen_cfg.get("instructions", "").strip()
+    enable_instruct = tts_qwen_cfg.get("enable_instruct", False)
     if not api_key:
-        logger.error("Qwen3 TTS API key 未配置")
+        logger.error("Qwen3 TTS API key not configured")
         return None
 
-    # 准备参数
+    # Prepare parameters
     voice_type = parse_qwen3_voice(voice_name)
     safe_speed = float(max(0.5, min(2.0, speed)))
     text = text.strip()
 
-
-
-    # SDK 调用
+    # SDK import
     try:
         import dashscope
     except ImportError:
-        logger.error("未安装 dashscope SDK，请执行: pip install dashscope")
+        logger.error("dashscope SDK not installed, run: pip install dashscope")
         return None
     except Exception as e:
-        logger.error(f"DashScope SDK 初始化失败: {e}")
+        logger.error(f"DashScope SDK init failed: {e}")
         return None
 
-    # Qwen3 TTS 直接使用英文参数，不需要映射
     mapped_voice = voice_type or "Cherry"
+
+    # Use instruct model when emotion instructions are provided
+    if enable_instruct and instructions:
+        # Auto-switch to instruct model if not already
+        if "instruct" not in model_name:
+            model_name = "qwen3-tts-instruct-flash"
+            logger.info(f"Auto-switching to instruct model: {model_name}")
+    else:
+        # Use the configured model directly
+        model_name = model_name or "qwen3-tts-flash"
 
     for i in range(3):
         try:
-            # 打印详细的请求参数日志
-            logger.info(f"=== Qwen3 TTS 请求参数 (第 {i+1} 次调用) ===")
+            logger.info(f"Qwen3 TTS request (attempt {i+1}), model={model_name}, voice={mapped_voice}")
 
-            # 官方推荐：使用 MultiModalConversation.call
-            result = dashscope.MultiModalConversation.call(
-                # 仅支持 qwen-tts 系列模型
-                model=(model_name or "qwen3-tts-flash"),
-                # 同时显式传入 api_key，并兼容示例中从环境变量读取
-                api_key=api_key,
-                text=text,
-                voice=mapped_voice
-            )
-            logger.info(f"Qwen3 TTS API 响应: {result}")
-        
+            # Build call parameters
+            call_kwargs = {
+                "model": model_name,
+                "api_key": api_key,
+                "text": text,
+                "voice": mapped_voice,
+            }
+
+            # Add emotion instructions if available
+            if enable_instruct and instructions:
+                # Incorporate speed into instructions
+                effective_inst = instructions
+                if abs(safe_speed - 1.0) > 0.05:
+                    speed_desc = "语速稍快" if safe_speed > 1.0 else "语速稍慢"
+                    effective_inst = f"{effective_inst}，{speed_desc}"
+                call_kwargs["instructions"] = effective_inst
+                call_kwargs["optimize_instructions"] = True
+                logger.info(f"Qwen3 TTS emotion instruction: {effective_inst}")
+
+            result = dashscope.MultiModalConversation.call(**call_kwargs)
+            logger.info(f"Qwen3 TTS API response: {result}")
 
             audio_bytes: bytes | None = None
 
-            # 解析返回结果，提取音频URL并下载
-            try:# 假设 result 是你收到的字符串
+            try:
                 audio_url = None
-                
+
                 if result.output and result.output.audio:
                     audio_url = result.output.audio.url
-                # 从响应中提取音频URL
-    
+
                 if audio_url:
-                    # 直接下载音频文件
                     response = requests.get(audio_url, timeout=30)
                     response.raise_for_status()
                     audio_bytes = response.content
                 else:
-                    logger.warning("API响应中未找到音频URL")
-                    
+                    logger.warning("No audio URL found in API response")
+
             except Exception as e:
-                logger.error(f"解析API响应失败: {str(e)}")
+                logger.error(f"Failed to parse API response: {e}")
 
             if not audio_bytes:
-                logger.warning("DashScope SDK 返回空音频数据，重试")
+                logger.warning("DashScope SDK returned empty audio, retrying")
                 if i < 2:
                     time.sleep(1)
                 continue
 
-            # 写入文件
             with open(voice_file, "wb") as f:
                 f.write(audio_bytes)
 
-            # 估算字幕
             sub = new_sub_maker()
             est_ms = max(800, int(len(text) * 180))
             add_subtitle_event(sub, 0, est_ms, text)
-            
-            logger.info(f"Qwen3 TTS 生成成功（DashScope SDK），文件大小: {len(audio_bytes)} 字节")
+
+            logger.info(f"Qwen3 TTS success (DashScope SDK), file size: {len(audio_bytes)} bytes")
             return sub
 
         except Exception as e:
-            logger.error(f"DashScope SDK 合成失败: {e}")
+            logger.error(f"DashScope SDK synthesis failed: {e}")
             if i < 2:
                 time.sleep(1)
 
@@ -2128,4 +2146,121 @@ def indextts2_tts(text: str, voice_name: str, voice_file: str, speed: float = 1.
                     pass
 
     logger.error("IndexTTS2 TTS 生成失败，已达到最大重试次数")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# CosyVoice TTS (DashScope API) - supports emotion instruction (v3 Instruct)
+# ---------------------------------------------------------------------------
+
+def parse_cosyvoice_voice(voice_name: str) -> str | None:
+    """Extract CosyVoice voice parameter from voice_name prefix.
+
+    Expected format: 'cosyvoice:longanyang' -> 'longanyang'
+    Raw voice names are returned as-is.
+    """
+    if not voice_name:
+        return None
+    if voice_name.startswith("cosyvoice:"):
+        return voice_name[len("cosyvoice:"):].strip()
+    return voice_name.strip()
+
+
+def cosyvoice_tts(text: str, voice_name: str, voice_file: str, speed: float = 1.0) -> Union[SubMaker, None]:
+    """Synthesize speech using CosyVoice (DashScope API).
+
+    Supports emotion control via 'instruction' parameter (v3 Instruct voices only).
+
+    Args:
+        text: Text to synthesize.
+        voice_name: Voice name, format 'cosyvoice:longanyang' or raw name.
+        voice_file: Output audio file path.
+        speed: Speech speed (CosyVoice API doesn't natively support speed,
+               but we can include it in instruction).
+
+    Returns:
+        SubMaker with estimated timestamps on success, None on failure.
+    """
+    # Read config
+    cosyvoice_cfg = getattr(config, "cosyvoice", {}) or {}
+    api_key = cosyvoice_cfg.get("api_key", "")
+    model_name = cosyvoice_cfg.get("model", "cosyvoice-v3-flash")
+    instruction = cosyvoice_cfg.get("instruction", "").strip()
+
+    if not api_key:
+        logger.error("CosyVoice API key is not configured")
+        return None
+
+    # Parse voice parameter
+    voice_param = parse_cosyvoice_voice(voice_name) or "longanyang"
+    text = text.strip()
+    safe_speed = float(max(0.5, min(2.0, speed)))
+
+    try:
+        import dashscope
+    except ImportError:
+        logger.error("dashscope SDK not installed, run: pip install dashscope")
+        return None
+
+    # Set API key
+    dashscope.api_key = api_key
+
+    for i in range(3):
+        try:
+            logger.info(f"CosyVoice TTS request (attempt {i+1}), model={model_name}, voice={voice_param}")
+
+            # Use dashscope.audio.tts_v2.SpeechSynthesizer for CosyVoice
+            try:
+                from dashscope.audio.tts_v2 import SpeechSynthesizer
+            except ImportError:
+                logger.error("dashscope.audio.tts_v2 not available, please upgrade dashscope: pip install dashscope --upgrade")
+                return None
+
+            # Build instruction with speed if needed
+            effective_instruction = instruction
+            if abs(safe_speed - 1.0) > 0.05:
+                speed_desc = "语速稍快" if safe_speed > 1.0 else "语速稍慢"
+                if effective_instruction:
+                    effective_instruction = f"{effective_instruction}，{speed_desc}"
+                else:
+                    effective_instruction = speed_desc
+
+            # Create synthesizer
+            kwargs = {
+                "model": model_name,
+                "voice": voice_param,
+            }
+            if effective_instruction:
+                kwargs["instruction"] = effective_instruction
+
+            synthesizer = SpeechSynthesizer(**kwargs)
+
+            # Call synthesis (non-streaming)
+            audio = synthesizer.call(text)
+
+            if not audio:
+                logger.warning("CosyVoice returned empty audio, retrying")
+                if i < 2:
+                    time.sleep(1)
+                continue
+
+            # Write audio to file
+            with open(voice_file, "wb") as f:
+                f.write(audio)
+
+            # Estimate subtitles (CosyVoice doesn't return precise timestamps)
+            sub = new_sub_maker()
+            est_ms = max(800, int(len(text) * 180))
+            add_subtitle_event(sub, 0, est_ms, text)
+
+            audio_size = len(audio) if audio else 0
+            logger.info(f"CosyVoice TTS success, file size: {audio_size} bytes")
+            return sub
+
+        except Exception as e:
+            logger.error(f"CosyVoice TTS synthesis failed: {e}")
+            if i < 2:
+                time.sleep(1)
+
+    logger.error("CosyVoice TTS failed after 3 attempts")
     return None

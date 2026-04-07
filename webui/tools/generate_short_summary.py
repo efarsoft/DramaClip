@@ -2,7 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 '''
-@Project: NarratoAI
+@Project: DramaClip
 @File   : 短剧解说脚本生成
 @Author : 小林同学
 @Date   : 2025/5/10 下午10:26 
