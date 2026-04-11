@@ -114,8 +114,11 @@ class HighlightSelector:
                           all_results: List[ScoringResult],
                           min_episodes_covered: int = 1,
                           max_per_episode: int = 5) -> List[ScoringResult]:
-        """剧集均衡：确保每集至少有 min_episodes_covered 个片段"""
+        """剧集均衡：两阶段确保每集覆盖率
         
+        Phase 1: 保证每集至少有1个片段
+        Phase 2: 补充不足 min_episodes_covered 的剧集
+        """
         episode_groups: dict[int, List[ScoringResult]] = defaultdict(list)
         for r in top_results:
             ep = r.segment.episode_index
@@ -123,12 +126,12 @@ class HighlightSelector:
                 episode_groups[ep].append(r)
         
         selected = list(top_results)
-        
+        already_selected_ids = {r.segment.segment_id for r in selected}
         all_episodes = set(r.segment.episode_index for r in all_results)
+        
+        # ===== Phase 1: 保证每集至少1个片段 =====#
         covered_episodes = set(episode_groups.keys())
         missing_episodes = all_episodes - covered_episodes
-        
-        already_selected_ids = {r.segment.segment_id for r in selected}
         
         for ep in sorted(missing_episodes):
             candidates = [
@@ -140,25 +143,29 @@ class HighlightSelector:
                 best = max(candidates, key=lambda r: r.total_score)
                 selected.append(best)
                 already_selected_ids.add(best.segment.segment_id)
-                logger.info(f"剧集均衡: 为 E{ep} 补充了片段 {best.segment.segment_id}")
+                logger.info(f"剧集均衡 Phase1: 为 E{ep} 补充了片段 {best.segment.segment_id}")
         
-        # 二次检查最小数量
+        # ===== Phase 2: 补充到 min_episodes_covered =====#
         episode_counts = defaultdict(int)
         for r in selected:
             episode_counts[r.segment.episode_index] += 1
         
-        for ep, count in episode_counts.items():
-            if count < min_episodes_covered and ep in all_episodes:
+        for ep in all_episodes:
+            count = episode_counts.get(ep, 0)
+            if count < min_episodes_covered:
                 needed = min_episodes_covered - count
                 extras = [
                     r for r in all_results
                     if r.segment.episode_index == ep
                     and r.segment.segment_id not in already_selected_ids
-                ][:needed]
-                for extra in extras:
+                ]
+                # 按分数排序取前 N 个
+                extras_sorted = sorted(extras, key=lambda r: r.total_score, reverse=True)[:needed]
+                for extra in extras_sorted:
                     selected.append(extra)
                     already_selected_ids.add(extra.segment.segment_id)
                     episode_counts[ep] += 1
+                    logger.info(f"剧集均衡 Phase2: 为 E{ep} 补充到 {episode_counts[ep]} 个片段")
         
         return selected
     
@@ -180,7 +187,7 @@ class HighlightSelector:
                 break
             selected.append(r)
             current_duration += seg.duration
-            if current_duration >= target_duration * 0.90:
+            if current_duration >= target_duration * 0.95:
                 break
         
         return selected

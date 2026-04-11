@@ -37,7 +37,7 @@ class HighlightScorer:
     
     def __init__(self, config: Optional[HighlightConfig] = None):
         self.config = config or HighlightConfig()
-        self.weights = config.weights if config else HighlightScoreWeights()
+        self.weights = self.config.weights
         
         # 延迟导入子评分器（避免启动时加载重依赖）
         from .audio_scorer import AudioScorer
@@ -199,11 +199,21 @@ class HighlightScorer:
             return 0.30
         return 0.15
     
-    def _default_rhythm_score(self, duration: float) -> float:
-        """节奏评分降级方案"""
-        r, _ = self.rhythm_scorer.score(
-            duration=duration,
-            start_time=0,
-            episode_duration=max(duration * 3, 10)
-        )
-        return r
+    def _default_rhythm_score(self, duration: float, _depth: int = 0) -> float:
+        """节奏评分降级方案（含递归防护）"""
+        if _depth > 1:
+            # 防止递归：直接用时长计算基础分
+            if 2 <= duration <= 6:
+                return 0.7
+            elif 1 <= duration <= 10:
+                return 0.4
+            return 0.2
+        try:
+            r, _ = self.rhythm_scorer.score(
+                duration=duration,
+                start_time=0,
+                episode_duration=max(duration * 3, 10)
+            )
+            return r
+        except Exception:
+            return self._default_rhythm_score(duration, _depth + 1)

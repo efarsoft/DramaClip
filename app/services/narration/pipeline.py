@@ -512,6 +512,11 @@ class NarrationPipeline:
     → 剧情解析 → 文案生成 → TTS合成 → 音画合成 → 输出
     """
     
+    def __init__(self):
+        """初始化，预创建 DirectCutPipeline 避免重复初始化"""
+        from app.services.direct_cut.pipeline import DirectCutPipeline
+        self._direct_cut_pipeline = DirectCutPipeline()
+    
     def run(self,
             video_paths: List[str],
             output_duration: int = 30,
@@ -524,7 +529,6 @@ class NarrationPipeline:
         复用 DirectCutPipeline 的预处理+打分+筛选排序部分，
         在此基础上增加：剧情解析 → 文案生成 → TTS → 音画合成
         """
-        from app.services.direct_cut.pipeline import DirectCutPipeline
         from app.services.highlight.scene_detect import detect_all_episodes
         
         task_id = str(uuid.uuid4())[:8]
@@ -539,7 +543,7 @@ class NarrationPipeline:
         
         try:
             # ===== Phase 1-5: 复用直剪流水线的预处理到排序部分 =====#
-            pipeline = DirectCutPipeline()
+            pipeline = self._direct_cut_pipeline
             
             progress(0.05, "正在执行预处理和高光分析...")
             scene_infos = detect_all_episodes(video_paths, config={
@@ -637,14 +641,16 @@ class NarrationPipeline:
             
             cropped_path = os.path.join(crop_dir, f"ncrop_{seg.segment_id}.mp4")
             try:
+                # 优先使用 clip_path（裁剪片段），否则用原始 video_path
+                input_video = getattr(seg, 'clip_path', None) or seg.video_path
                 ffmpeg_utils.crop_to_portrait_face_centered(
-                    seg.video_path, cropped_path, 1080, 1920
+                    input_video, cropped_path, 1080, 1920
                 )
                 if os.path.exists(cropped_path):
                     cropped_paths.append(cropped_path)
             except Exception as e:
                 logger.warning(f"裁剪失败 ({seg.segment_id}): {e}, 使用原片段")
-                cropped_paths.append(seg.video_path)
+                cropped_paths.append(getattr(seg, 'clip_path', None) or seg.video_path)
         
         # 2. 合并视频片段
         concat_file = os.path.join(output_dir, f"concat_n_{task_id}.txt")
@@ -680,9 +686,10 @@ class NarrationPipeline:
             )
         except Exception as e:
             logger.warning(f"高级合成失败，尝试简单混合: {e}")
-            # fallback: FFmpeg简单混合
-            self._mix_video_audio_fallback(merged_video, narration_audio, output_path,
-                                           original_audio_volume=0.15)
+            # fallback: 使用 ffmpeg_utils 中的 mix_audio_video
+            from app.utils import ffmpeg_utils
+            ffmpeg_utils.mix_audio_video(merged_video, narration_audio, output_path,
+                                          original_audio_volume=0.15)
         
         # 4. 生成封面（使用公共工具函数）
         cover = generate_video_cover(sorted_segments, output_dir, task_id)
@@ -691,14 +698,28 @@ class NarrationPipeline:
 
     @staticmethod
     def _generate_narration_srt(script, output_dir, task_id, time_formatter) -> str:
-        """从解说文案生成SRT字幕"""
+        """从解说文案生成SRT字幕
+        
+        字幕时长根据文本长度动态计算（约2.5字/秒），
+        而非固定5秒，确保字幕与语音同步。
+        """
+        CHARS_PER_SECOND = 2.5  # 中文语速参考值
+        MIN_SUB_DURATION = 2.0  # 最短字幕时长
+        MAX_SUB_DURATION = 10.0  # 最长字幕时长
+        
         srt_path = os.path.join(output_dir, f"narration_subs_{task_id}.srt")
         with open(srt_path, 'w', encoding='utf-8') as f:
             for i, seg in enumerate(script.segments):
                 ts = getattr(seg, 'timestamp', i * 5) if hasattr(seg, 'timestamp') else seg.get('timestamp', i * 5)
-                start_hms = time_formatter(float(ts))
-                end_hms = time_formatter(float(ts) + 5)
                 text = getattr(seg, 'text', '') if hasattr(seg, 'text') else seg.get('text', '')
+                
+                # 动态计算字幕时长：文本长度 / 语速
+                char_count = len(text.replace(' ', '').replace('\n', ''))
+                estimated_duration = max(MIN_SUB_DURATION, 
+                                        min(MAX_SUB_DURATION, char_count / CHARS_PER_SECOND))
+                
+                start_hms = time_formatter(float(ts))
+                end_hms = time_formatter(float(ts) + estimated_duration)
                 f.write(f"{i + 1}\n{start_hms} --> {end_hms}\n{text}\n\n")
         return srt_path
 

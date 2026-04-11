@@ -780,9 +780,9 @@ def _get_linux_gpu_info() -> str:
         str: 显卡信息字符串
     """
     try:
-        # 尝试使用lspci命令
+        # 尝试使用lspci命令（shell=True 时用字符串形式，使管道符生效）
         gpu_info = subprocess.run(
-            ['lspci', '-v', '-nn', '|', 'grep', '-i', 'vga\\|display'],
+            "lspci -v -nn | grep -i 'vga\\|display'",
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=True, check=False
         )
         if gpu_info.stdout:
@@ -790,7 +790,7 @@ def _get_linux_gpu_info() -> str:
 
         # 如果lspci命令失败，尝试使用glxinfo
         gpu_info = subprocess.run(
-            ['glxinfo', '|', 'grep', '-i', 'vendor\\|renderer'],
+            "glxinfo | grep -i 'vendor\\|renderer'",
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=True, check=False
         )
         if gpu_info.stdout:
@@ -1240,7 +1240,7 @@ def crop_to_portrait_face_centered(input_path: str, output_path: str,
         logger.warning(f"crop_to_portrait_face_centered: max retry ({MAX_RETRY}) reached, using fallback")
         return crop_to_portrait_centered(input_path, output_path, target_width, target_height)
 
-    # Step 1: Detect face position using OpenCV
+    # Step 1: Detect face position using OpenCV, also get video dimensions
     try:
         import cv2
         cap = cv2.VideoCapture(input_path)
@@ -1248,9 +1248,13 @@ def crop_to_portrait_face_centered(input_path: str, output_path: str,
             logger.error("Cannot open video for face detection")
             return crop_to_portrait_centered(input_path, output_path, target_width, target_height)
 
+        # Get video dimensions first
+        vw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        vh = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
         # Sample a few frames to find a face
         face_cx = None
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         sample_positions = [total_frames // 4, total_frames // 2, total_frames * 3 // 4]
 
         face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
@@ -1278,13 +1282,7 @@ def crop_to_portrait_face_centered(input_path: str, output_path: str,
             logger.info("No face detected, fallback to center crop")
             return crop_to_portrait_centered(input_path, output_path, target_width, target_height)
 
-        # Step 2: Get video dimensions and calculate crop area
-        cap = cv2.VideoCapture(input_path)
-        vw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        vh = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        cap.release()
-
-        # Calculate crop width/height maintaining aspect ratio
+        # Step 2: Calculate crop area using already-obtained dimensions
         scale = min(target_width / vw, target_height / vh)
         crop_w = int(target_width / scale)
         crop_h = int(target_height / scale)
@@ -1389,26 +1387,54 @@ def crop_to_portrait_centered(input_path: str, output_path: str,
         return False
 
 
-def concat_videos(concat_list_path: str, output_path: str) -> bool:
+def concat_videos(concat_list_path: str, output_path: str,
+                   stream_copy: bool = True) -> bool:
     """Concatenate multiple video files using FFmpeg concat demuxer.
 
     Args:
         concat_list_path: Path to concat list file (format: "file '/path.mp4'" per line)
         output_path: Output video path
+        stream_copy: If True, use stream copy (fast, no re-encode). If False, re-encode.
 
     Returns:
         bool: True on success
     """
-    cmd = [
-        "ffmpeg", "-y", "-hide_banner",
-        "-f", "concat", "-safe", "0",
-        "-i", concat_list_path,
-        "-c:v", get_optimal_ffmpeg_encoder(),
-        "-preset", "fast", "-crf", "23",
-        "-c:a", "aac", "-b:a", "128k",
-        "-movflags", "+faststart",
-        output_path
-    ]
+    # Validate input
+    if not os.path.isfile(concat_list_path):
+        logger.error(f"concat list not found: {concat_list_path}")
+        return False
+    
+    # Check for empty concat list
+    try:
+        with open(concat_list_path, 'r', encoding='utf-8') as f:
+            first_line = f.readline().strip()
+            if not first_line:
+                logger.error(f"concat list is empty: {concat_list_path}")
+                return False
+    except Exception as e:
+        logger.error(f"cannot read concat list: {e}")
+        return False
+
+    if stream_copy:
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner",
+            "-f", "concat", "-safe", "0",
+            "-i", concat_list_path,
+            "-c", "copy",
+            "-movflags", "+faststart",
+            output_path
+        ]
+    else:
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner",
+            "-f", "concat", "-safe", "0",
+            "-i", concat_list_path,
+            "-c:v", get_optimal_ffmpeg_encoder(),
+            "-preset", "fast", "-crf", "23",
+            "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "+faststart",
+            output_path
+        ]
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=600)

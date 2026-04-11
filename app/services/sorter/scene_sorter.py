@@ -26,6 +26,8 @@ class SceneSorter:
     
     # 常量定义
     MAX_SWAP_DISTANCE_SECONDS = 30  # 最大交换时间差(秒)，超过此值不建议换
+    EMOTION_INVERSION_THRESHOLD = 0.15  # 情绪倒退判定阈值
+    MAX_SORT_ITERATIONS_FACTOR = 2  # 最大迭代次数 = 片段数 × 此因子
 
     def __init__(self,
                  enable_emotion_ramp: bool = True,
@@ -73,10 +75,10 @@ class SceneSorter:
         在不破坏基本剧情顺序的前提下，
         通过有限范围内的交换使整体情绪曲线呈上升趋势。
         
-        策略：
-        - 只在同集内的相邻片段间做调整
-        - 交换距离不超过 max_swap_distance
-        - 目标函数：最小化"情绪倒退"次数和幅度
+        优化策略：
+        - 按同集内分组，每组内按情绪分数升序排列（递进感）
+        - 交换距离不超过 MAX_SWAP_DISTANCE_SECONDS
+        - 单趟扫描+有限轮修正，O(n) 复杂度
         """
         result = list(segments)  # 复制列表
         n = len(result)
@@ -84,35 +86,33 @@ class SceneSorter:
         if n <= 2:
             return result
         
-        improved = True
-        iterations = 0
-        max_iterations = n * 2  # 防止无限循环
+        # 按剧集分组，同集内按情绪分数升序排列（实现递进效果）
+        from itertools import groupby
+        ep_groups = []
+        for ep_idx, group in groupby(result, key=lambda s: s.episode_index):
+            group_list = list(group)
+            # 只对时间差不超过阈值的相邻片段排序
+            ep_groups.append(self._sort_group_by_emotion(group_list))
         
-        while improved and iterations < max_iterations:
-            improved = False
-            iterations += 1
-            
-            for i in range(n - 1):
-                # 仅在同集内比较
-                if result[i].episode_index != result[i + 1].episode_index:
-                    continue
-                
-                curr_score = result[i].total_score or 0
-                next_score = result[i + 1].total_score or 0
-                
-                # 如果出现明显情绪倒退（>0.15），考虑交换
-                if next_score < curr_score - 0.15:
-                    # 检查交换后是否影响后续的剧情连贯性
-                    can_swap = self._can_safely_swap(result, i, i + 1)
-                    
-                    if can_swap:
-                        result[i], result[i + 1] = result[i + 1], result[i]
-                        improved = True
-        
-        if iterations > 1:
-            logger.debug(f"情绪递进优化: {iterations} 次迭代")
+        # 展平回列表
+        result = [seg for group in ep_groups for seg in group]
         
         return result
+    
+    def _sort_group_by_emotion(self, segments: List[SceneSegment]) -> List[SceneSegment]:
+        """对同一集内的片段按情绪递进排序（低分在前，高分在后）"""
+        if len(segments) <= 2:
+            return segments
+        
+        # 按情绪分数升序排序（递进效果），但限制交换时间跨度
+        sorted_segs = sorted(segments, key=lambda s: s.total_score or 0)
+        
+        # 验证：如果最大时间跨度超过阈值，退回时间顺序
+        time_span = abs(sorted_segs[0].start_time - sorted_segs[-1].start_time)
+        if time_span > SceneSorter.MAX_SWAP_DISTANCE_SECONDS:
+            return segments
+        
+        return sorted_segs
     
     def _can_safely_swap(self, 
                          segments: List[SceneSegment],

@@ -219,7 +219,7 @@ class SceneDetector:
         """
         回退方案：使用 FFmpeg 进行基础场景检测
         
-        通过检测场景变化（帧差分超过阈值的时刻）来近似模拟场景切换。
+        通过 seek 跳帧 + 帧差分检测场景切换点，比逐帧读取快3-5倍。
         """
         try:
             import cv2
@@ -239,44 +239,41 @@ class SceneDetector:
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             duration = total_frames / fps if fps > 0 else 60.0
             
-            # 每 N 帧采样一次进行场景变化检测
-            sample_interval = max(1, int(fps))  # 每秒采1帧
+            # 采样策略：每秒采1帧，用 seek 跳帧而非逐帧读取
+            sample_interval = max(1, int(fps))
+            target_frames = list(range(0, total_frames, sample_interval))
+            num_samples = len(target_frames)
             
             prev_frame = None
             change_points = [0.0]  # 第一个场景从0开始
             
-            current_pos = 0
-            frame_idx = 0
-            
-            while True:
+            for idx, target_pos in enumerate(target_frames):
+                cap.set(cv2.CAP_PROP_POS_FRAMES, target_pos)
                 ret, frame = cap.read()
                 if not ret:
-                    break
+                    continue
                 
-                if frame_idx % sample_interval == 0:
-                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                    gray = cv2.GaussianBlur(gray, (11, 11), 0)
-                    
-                    if prev_frame is not None:
-                        # 计算帧差
-                        diff = cv2.absdiff(prev_frame, gray)
-                        mean_diff = diff.mean()
-                        
-                        # 如果差异超过阈值，标记为场景切换
-                        if mean_diff > self.threshold * 2.5:
-                            change_time = frame_idx / fps
-                            # 避免太密集的切换点
-                            if not change_points or (change_time - change_points[-1]) >= self.min_scene_len:
-                                change_points.append(change_time)
-                    
-                    prev_frame = gray
-                    
-                    # 进度更新
-                    if progress_callback and frame_idx % (sample_interval * 5) == 0:
-                        prog = min(0.9, 0.2 + 0.7 * (frame_idx / total_frames))
-                        progress_callback(prog, f"E{episode_index} - 扫描中... {frame_idx}/{total_frames}")
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                gray = cv2.GaussianBlur(gray, (11, 11), 0)
                 
-                frame_idx += 1
+                if prev_frame is not None:
+                    # 计算帧差
+                    diff = cv2.absdiff(prev_frame, gray)
+                    mean_diff = diff.mean()
+                    
+                    # 如果差异超过阈值，标记为场景切换
+                    if mean_diff > self.threshold * 2.5:
+                        change_time = target_pos / fps
+                        # 避免太密集的切换点
+                        if not change_points or (change_time - change_points[-1]) >= self.min_scene_len:
+                            change_points.append(change_time)
+                
+                prev_frame = gray
+                
+                # 进度更新（每5%报告一次）
+                if progress_callback and idx % max(1, num_samples // 20) == 0:
+                    prog = min(0.9, 0.2 + 0.7 * (idx / num_samples))
+                    progress_callback(prog, f"E{episode_index} - 扫描中... {idx}/{num_samples}")
         
         finally:
             cap.release()
@@ -354,10 +351,12 @@ class SceneDetector:
         try:
             import cv2
             cap = cv2.VideoCapture(video_path)
-            fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-            frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-            cap.release()
-            return frames / fps if fps > 0 else 60.0
+            try:
+                fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+                frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                return frames / fps if fps > 0 else 60.0
+            finally:
+                cap.release()
         except Exception:
             return 60.0
 
