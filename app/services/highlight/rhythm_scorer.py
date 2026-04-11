@@ -181,7 +181,7 @@ class RhythmScorer:
         is_near_cut_point = (start_time % 1.0) < 0.3 or (start_time % 1.0) > 0.7
         cut_point_bonus = 0.15 if is_near_cut_point else 0.0
         
-        score = 0.8 * short_intensity + 0.2 * (1.0 - cut_point_bonus)
+        score = 0.8 * short_intensity + 0.2 * (0.85 + cut_point_bonus)
         return score
     
     def _score_boundary(self, start_time: float, 

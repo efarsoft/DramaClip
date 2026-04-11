@@ -145,6 +145,7 @@ class SceneSegment(BaseModel):
     # 文件路径
     video_path: Optional[str] = Field(default=None, description="片段视频文件路径")
     audio_path: Optional[str] = Field(default=None, description="提取的音频文件路径")
+    clip_path: Optional[str] = Field(default=None, description="裁剪后的片段视频路径(保留原始video_path)")
     
     # ASR转写结果
     subtitle_text: Optional[str] = Field(default=None, description="该片段的台词/字幕文本")

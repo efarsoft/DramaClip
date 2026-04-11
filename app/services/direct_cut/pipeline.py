@@ -266,7 +266,8 @@ class DirectCutPipeline:
                         duration=seg.duration,
                     )
                     if success and os.path.exists(clip_out):
-                        seg.video_path = clip_out  # 更新为裁剪后的片段
+                        # 保留原始 video_path，用 clip_path 存储裁剪片段
+                        seg.clip_path = clip_out
                         
             except Exception as e:
                 logger.warning(f"媒体提取失败 ({seg.segment_id}): {e}")
@@ -308,8 +309,10 @@ class DirectCutPipeline:
             
             try:
                 # 人脸居中裁剪为 1080x1920 (9:16)
+                # 优先使用 clip_path（裁剪片段），否则用原始 video_path
+                input_video = getattr(seg, 'clip_path', None) or seg.video_path
                 success = ffmpeg_utils.crop_to_portrait_face_centered(
-                    input_path=seg.video_path,
+                    input_path=input_video,
                     output_path=cropped_path,
                     target_width=1080,
                     target_height=1920,
@@ -350,9 +353,12 @@ class DirectCutPipeline:
         
         # ===== 3. 音量均衡处理 =====#
         normalized_path = os.path.join(output_dir, f"normalized_{task_id}.mp4")
-        from app.services.audio_normalizer import AudioNormalizer
-        normalizer = AudioNormalizer()
-        normalizer.normalize_audio_lufs(merged_path, normalized_path)
+        try:
+            from app.services.audio_normalizer import AudioNormalizer
+            normalizer = AudioNormalizer()
+            normalizer.normalize_audio_lufs(merged_path, normalized_path)
+        except Exception as e:
+            logger.warning(f"音量均衡处理失败（跳过）: {e}")
         
         # 如果归一化成功则使用，否则用合并版本
         final_video = normalized_path if os.path.exists(normalized_path) else merged_path

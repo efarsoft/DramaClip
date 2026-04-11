@@ -154,12 +154,16 @@ class EmotionScorer:
         - 冲突对抗类：权重最高（1.0）
         - 高潮信号词：权重高（0.8）
         - 强烈情绪词：权重中等（0.6）
+        
+        匹配策略：
+        - 多字关键词(>=2字)：直接子串匹配
+        - 单字关键词：用jieba分词后匹配词粒度，避免误匹配
         """
         text_lower = text.lower()
         
-        conflict_hits = sum(1 for kw in self.CONFLICT_KEYWORDS if kw in text)
-        climax_hits = sum(1 for kw in self.CLIMAX_KEYWORDS if kw in text)
-        emotion_hits = sum(1 for kw in self.INTENSE_EMOTION_KEYWORDS if kw in text_lower)
+        conflict_hits = self._count_keyword_hits(text, text_lower, self.CONFLICT_KEYWORDS)
+        climax_hits = self._count_keyword_hits(text, text_lower, self.CLIMAX_KEYWORDS)
+        emotion_hits = self._count_keyword_hits(text, text_lower, self.INTENSE_EMOTION_KEYWORDS)
         
         # 加权计算
         weighted_hits = (
@@ -171,6 +175,36 @@ class EmotionScorer:
         # 归一化（假设命中3个以上高权关键词即为高情绪片段）
         score = min(1.0, weighted_hits / 3.0)
         return score
+    
+    def _count_keyword_hits(self, text: str, text_lower: str, keywords: list) -> int:
+        """统计关键词命中数，对单字关键词用分词匹配避免误匹配"""
+        hits = 0
+        single_char_kws = []
+        multi_char_kws = []
+        
+        for kw in keywords:
+            if len(kw) == 1:
+                single_char_kws.append(kw)
+            else:
+                multi_char_kws.append(kw)
+        
+        # 多字关键词：子串匹配
+        for kw in multi_char_kws:
+            if kw in text:
+                hits += 1
+        
+        # 单字关键词：用jieba分词后匹配词粒度
+        if single_char_kws:
+            if jieba:
+                try:
+                    words = set(jieba.cut(text))
+                    hits += sum(1 for kw in single_char_kws if kw in words)
+                except Exception:
+                    # jieba 失败时，跳过单字关键词（比误匹配好）
+                    pass
+            # jieba 不可用时，跳过单字关键词避免大量误匹配
+        
+        return hits
     
     def _score_patterns(self, text: str) -> float:
         """句式特征评分（感叹句、反问句等）"""
@@ -212,15 +246,16 @@ class EmotionScorer:
             density = emotion_count / len(words)
             
             # 短剧场景中，5%以上的情绪词密度就算很高了
-            score = min(1.0, density * 15)
+            score = min(1.0, density * 15.0)
             return score
             
         except Exception:
             logger.debug("jieba 分词降级为关键词匹配", exc_info=True)
+            return self._score_keywords(text)
     
     def _score_intensity(self, text: str) -> float:
-        """对话强度评分（短促句+重复+省略）"""
-        """
+        """对话强度评分（短促句+重复+省略）
+        
         分析对话的激烈程度：
         - 短促句（1~4字）比例高 → 激烈对话
         - 字符重复（啊啊啊、不不不）→ 强烈情绪
@@ -262,9 +297,24 @@ class EmotionScorer:
             [(kw, "emotion") for kw in self.INTENSE_EMOTION_KEYWORDS]
         )
         
-        for kw, category in all_keywords:
+        # 对单字关键词，用jieba分词后匹配
+        single_chars = [(kw, cat) for kw, cat in all_keywords if len(kw) == 1]
+        multi_chars = [(kw, cat) for kw, cat in all_keywords if len(kw) > 1]
+        single_char_words = set()
+        
+        if single_chars and jieba:
+            try:
+                single_char_words = set(jieba.cut(text))
+            except Exception:
+                single_char_words = set()  # jieba 失败时不匹配单字
+        
+        for kw, category in multi_chars:
             if (category == "emotion" and kw in text_lower) or \
                (category != "emotion" and kw in text):
+                matched.append(f"{kw}({category})")
+        
+        for kw, category in single_chars:
+            if single_char_words and kw in single_char_words:
                 matched.append(f"{kw}({category})")
         
         return matched[:10]  # 最多返回10个

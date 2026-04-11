@@ -26,7 +26,17 @@ class AudioScorer:
     对镜头片段的音频进行分析，给出 0~1 的爆点得分。
     得分越高表示该片段越可能是高光时刻。
     """
-    
+
+    # ===== 可调参数常量 =====#
+    PEAK_RATIO_SCALE = 5.0          # 峰值比例放大系数
+    RELATIVE_CHANGE_SCALE = 2.0     # 相对变化放大系数
+    MAX_DIFF_SCALE = 5.0            # 最大差分放大系数
+    DYNAMIC_RANGE_SCALE = 2.0       # 动态范围放大系数
+    ZCR_TYPICAL_MAX = 0.15          # 典型语音过零率上限
+    ZCR_VARIATION_MAX = 0.05        # 过零率标准差上限
+    SPECTRAL_VARIATION_SCALE = 1000 # 频谱质心标准差缩放因子
+    EMOTION_DENSITY_SCALE = 15.0    # 情绪词密度放大系数
+
     def __init__(self, 
                  sr: int = 22050,
                  peak_threshold_db: float = -10.0,
@@ -141,7 +151,7 @@ class AudioScorer:
         normalized_peak = (max_peak + abs(DB_NORMALIZATION_MIN)) / abs(DB_NORMALIZATION_MAX)  # dB 归一化到 0~1
         
         # 综合峰值得分
-        score = 0.6 * min(1.0, normalized_peak) + 0.4 * min(1.0, peak_ratio * 5)
+        score = 0.6 * min(1.0, normalized_peak) + 0.4 * min(1.0, peak_ratio * self.PEAK_RATIO_SCALE)
         return float(score)
     
     def _analyze_energy_change(self, rms: np.ndarray) -> float:
@@ -164,7 +174,7 @@ class AudioScorer:
             relative_change = 0.0
         
         # 综合变化得分
-        score = 0.5 * min(1.0, relative_change * 2) + 0.5 * min(1.0, max_diff * 5)
+        score = 0.5 * min(1.0, relative_change * self.RELATIVE_CHANGE_SCALE) + 0.5 * min(1.0, max_diff * self.MAX_DIFF_SCALE)
         return float(score)
     
     def _analyze_dynamic_range(self, rms: np.ndarray) -> float:
@@ -180,7 +190,7 @@ class AudioScorer:
         
         dynamic_range = (rms_max - rms_min) / rms_max
         # 动态范围越大，戏剧性越强（但过大会被截断）
-        score = min(1.0, dynamic_range * 2)
+        score = min(1.0, dynamic_range * self.DYNAMIC_RANGE_SCALE)
         return float(score)
     
     def _analyze_zcr(self, y: np.ndarray, sr: int) -> float:
@@ -196,9 +206,9 @@ class AudioScorer:
             zcr_std = float(np.std(zcr))
             
             # 过零率高且变化大 = 激烈对话
-            # 典型语音 ZCR 范围 0.0 ~ 0.15 左右
-            density_score = min(1.0, mean_zcr / 0.15)
-            variation_score = min(1.0, zcr_std / 0.05)
+            # 典型语音 ZCR 范围 0.0 ~ ZCR_TYPICAL_MAX 左右
+            density_score = min(1.0, mean_zcr / self.ZCR_TYPICAL_MAX)
+            variation_score = min(1.0, zcr_std / self.ZCR_VARIATION_MAX)
             
             score = 0.7 * density_score + 0.3 * variation_score
             return float(score)
@@ -222,7 +232,7 @@ class AudioScorer:
             high_freq_ratio = min(1.0, mean_sc / (max_freq * 0.5))
             
             # 变化大也意味着可能有情绪波动
-            variation_score = min(1.0, sc_std / 1000)
+            variation_score = min(1.0, sc_std / self.SPECTRAL_VARIATION_SCALE)
             
             score = 0.6 * high_freq_ratio + 0.4 * variation_score
             return float(score)

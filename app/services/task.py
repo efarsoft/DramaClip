@@ -308,6 +308,8 @@ def _run_narration_pipeline(task_id: str, params: VideoClipParams):
         """
         logger.info("\n\n## 4. Merge audio and subtitles")
         total_duration = sum([script["duration"] for script in new_script_list])
+        merged_audio_path = ""
+        merged_subtitle_path = ""
         if tts_segments:
             try:
                 merged_audio_path = audio_merger.merge_audio_files(
@@ -325,14 +327,10 @@ def _run_narration_pipeline(task_id: str, params: VideoClipParams):
                     merged_subtitle_path = ""
             except Exception as e:
                 logger.error(f"Audio/subtitle merge failed: {str(e)}")
-                if 'merged_audio_path' not in locals():
-                    merged_audio_path = ""
-                if 'merged_subtitle_path' not in locals():
-                    merged_subtitle_path = ""
+                merged_audio_path = merged_audio_path or ""
+                merged_subtitle_path = merged_subtitle_path or ""
         else:
             logger.warning("No audio/subtitle to merge")
-            merged_audio_path = ""
-            merged_subtitle_path = ""
 
         """
         5. Merge videos

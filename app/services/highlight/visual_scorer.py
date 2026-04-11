@@ -301,9 +301,11 @@ class VisualScorer:
             from moviepy import VideoFileClip
             
             clip = VideoFileClip(video_path)
-            duration = clip.duration
-            w, h = clip.size
-            clip.close()
+            try:
+                duration = clip.duration
+                w, h = clip.size
+            finally:
+                clip.close()
             
             # 基于分辨率和时长的基础评分
             resolution_factor = (w * h) / (1920 * 1080)
