@@ -82,7 +82,12 @@ const ExportPanel: React.FC<Props> = ({ onComplete }) => {
                 message.error(status.message || '导出失败');
               }
             }
-          } catch { /* 忽略 */ }
+          } catch (err: any) {
+            clearInterval(pollRef.current!);
+            pollRef.current = null;
+            setExporting(false);
+            message.error(err?.message || '轮询导出状态失败');
+          }
         }, 1000);
       }
     } catch (err: any) {
@@ -93,7 +98,11 @@ const ExportPanel: React.FC<Props> = ({ onComplete }) => {
 
   const openOutputFolder = async () => {
     if (outputPath) {
-      message.info('输出路径：' + outputPath);
+      try {
+        await window.electronAPI?.system?.openPath(outputPath);
+      } catch (err) {
+        message.info('输出路径：' + outputPath);
+      }
     } else {
       message.info('输出路径：默认导出目录');
     }

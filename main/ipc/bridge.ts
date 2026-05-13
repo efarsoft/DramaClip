@@ -3,7 +3,7 @@
  * 注册所有 IPC 处理器，转发前端请求到 backend.exe
  */
 
-import { ipcMain, BrowserWindow, dialog, app } from 'electron';
+import { ipcMain, BrowserWindow, dialog, app, shell } from 'electron';
 import { IPC_CHANNELS } from './channels';
 import { BackendManager } from '../backend/manager';
 import { DialogService } from '../services/dialog';
@@ -133,6 +133,19 @@ export function setupIpcHandlers(): void {
           message: error instanceof Error ? error.message : 'Failed to get FFmpeg info',
           data: error,
         },
+      };
+    }
+  });
+
+  // ============= 打开文件路径 =============
+  ipcMain.handle(IPC_CHANNELS.SYSTEM_OPEN_PATH, async (_event, filePath: string) => {
+    try {
+      await shell.openPath(filePath);
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to open path',
       };
     }
   });

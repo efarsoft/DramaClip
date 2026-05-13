@@ -23,6 +23,7 @@ export const IPC_CHANNELS = {
   // ============= 系统 =============
   SYSTEM_GET_VERSION: 'system:getVersion',
   SYSTEM_GET_FFMPEG_INFO: 'system:getFFmpegInfo',
+  SYSTEM_OPEN_PATH: 'system:openPath',
 } as const;
 
 export type IpcChannel = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

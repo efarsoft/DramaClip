@@ -27,6 +27,7 @@ export const IPC_CHANNELS = {
   // 系统
   SYSTEM_GET_VERSION: 'system:getVersion',
   SYSTEM_GET_FFMPEG_INFO: 'system:getFFmpegInfo',
+  SYSTEM_OPEN_PATH: 'system:openPath',
 } as const;
 
 // 类型定义
@@ -103,6 +104,8 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_GET_VERSION),
     getFFmpegInfo: (): Promise<IpcResponse<{ available: boolean; version: string; hwaccel: string }>> =>
       ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_GET_FFMPEG_INFO),
+    openPath: (path: string): Promise<IpcResponse<void>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_OPEN_PATH, path),
   },
 };
 

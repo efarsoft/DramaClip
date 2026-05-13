@@ -94,7 +94,7 @@ const AnalyzePanel: React.FC<Props> = ({ onNext }) => {
             setError(status.message ?? '分析失败');
           }
         }
-      } catch { /* 网络抖动忽略 */ }
+      } catch (err: any) { clearInterval(pollRef.current!); pollRef.current = null; setAnalyzing(false); setError(err?.message || '轮询分析状态失败'); setPhase('idle'); }
     }, 1000);
   };
 
