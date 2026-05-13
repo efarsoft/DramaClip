@@ -2,7 +2,6 @@ import os
 import re
 import json
 import traceback
-import streamlit as st
 from typing import List
 from loguru import logger
 from openai import OpenAI
@@ -126,7 +125,7 @@ def handle_exception(err):
     elif isinstance(err, IncompleteIterationError):
         raise Exception("500 访问需要完整 API 响应但流式响应尚未完全迭代的内容时引发。对响应对象调用 resolve() 以使用迭代器。")
     elif isinstance(err, ConnectionError):
-        raise Exception("网络连接错误, 请检查您的网络连接(建议使用 NarratoAI 官方提供的 url)")
+        raise Exception("网络连接错误, 请检查您的网络连接")
     else:
         raise Exception(f"大模型请求失败, 下面是具体报错信息: \n\n{traceback.format_exc()}")
 

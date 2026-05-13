@@ -1,233 +1,289 @@
 """
-DramaClip - 高光片段筛选器
-
-负责从打分后的片段中筛选出最优的高光集合：
-1. Top-N 按比例筛选
-2. 剧集均衡（每集至少N个）
-3. 最小时长过滤
-4. 总时长适配
+高光选择器 - 根据打分结果筛选高光片段
 """
 
-from typing import List, Optional
-from loguru import logger
-from collections import defaultdict
+import logging
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
 
-from app.models.schema import SceneSegment, HighlightConfig
-from .scorer import ScoringResult
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class HighlightSegment:
+    """高光片段数据类"""
+
+    video_path: str
+    start_time: float  # 开始时间（秒）
+    end_time: float  # 结束时间（秒）
+    score: float  # 总分
+    audio_score: float  # 音频分数
+    emotion_score: float  # 情绪分数
+    visual_score: float  # 画面分数
+    rhythm_score: float  # 节奏分数
+    subtitle_text: Optional[str] = None  # 字幕文本
+    reason: Optional[str] = None  # 入选理由
+
+    @property
+    def duration(self) -> float:
+        """片段时长（秒）"""
+        return self.end_time - self.start_time
+
+    def to_dict(self) -> Dict:
+        """转换为字典"""
+        return {
+            "video_path": self.video_path,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "duration": self.duration,
+            "score": self.score,
+            "audio_score": self.audio_score,
+            "emotion_score": self.emotion_score,
+            "visual_score": self.visual_score,
+            "rhythm_score": self.rhythm_score,
+            "subtitle_text": self.subtitle_text,
+            "reason": self.reason,
+        }
 
 
 class HighlightSelector:
-    """
-    高光筛选器
-    
-    策略：
-    1. 过滤掉过短/过长的碎片片段
-    2. 按得分全局排序，选取 Top ratio%
-    3. 剧集均衡：保证每集至少有 min_episodes_covered 个片段
-    4. 适配目标输出时长（可选）
-    """
-    
-    def __init__(self, config: Optional[HighlightConfig] = None):
-        self.config = config or HighlightConfig()
-    
-    def select(self,
-                scored_results: List[ScoringResult],
-                target_duration: Optional[float] = None,
-                progress_callback=None) -> List[SceneSegment]:
+    """高光片段选择器"""
+
+    def __init__(
+        self,
+        top_ratio: float = 0.3,
+        min_segment_duration: float = 2.0,
+        max_segments_per_episode: int = 5,
+        min_episodes_covered: int = 1,
+    ):
         """
-        从打分结果中筛选高光片段
-        
+        初始化选择器
+
         Args:
-            scored_results: 已打分的片段结果列表
-            target_duration: 目标总时长(秒)，None则不限制
-            progress_callback: 进度回调 function(progress_01, message)
-            
-        Returns:
-            List[SceneSegment]: 筛选出的高光片段列表（按剧集+时间排序）
+            top_ratio: 选取Top N比例 (0.3 = Top 30%)
+            min_segment_duration: 最小片段时长（秒）
+            max_segments_per_episode: 每集最多保留片段数
+            min_episodes_covered: 最少覆盖集数
         """
-        if not scored_results:
-            logger.warning("没有可筛选的片段")
-            return []
-        
-        cfg = self.config
-        
-        # ===== Step 1: 基础过滤（最小时长） =====#
-        if progress_callback:
-            progress_callback(0.1, "正在过滤碎片片段...")
-        
-        filtered = self._filter_by_duration(scored_results, cfg.min_segment_duration)
-        
-        if not filtered:
-            logger.warning("过滤后没有剩余片段")
-            return []
-        
-        # ===== Step 2: 全局 Top-N 筛选 =====#
-        if progress_callback:
-            progress_callback(0.3, "正在进行全局评分排序...")
-        
-        sorted_results = sorted(filtered, key=lambda r: r.total_score, reverse=True)
-        top_n = max(1, int(len(sorted_results) * cfg.top_ratio))
-        top_results = sorted_results[:top_n]
-        
-        # ===== Step 3: 剧集均衡 =====#
-        if progress_callback:
-            progress_callback(0.6, "正在执行剧集均衡...")
-        
-        balanced = self._balance_episodes(
-            top_results,
-            all_results=sorted_results,
-            min_episodes_covered=cfg.min_episodes_covered,
-            max_per_episode=cfg.max_segments_per_episode
-        )
-        
-        # ===== Step 4: 目标时长适配 =====#
-        if progress_callback:
-            progress_callback(0.8, "正在适配输出时长...")
-        
-        if target_duration:
-            balanced = self._fit_target_duration(balanced, target_duration)
-        
-        # ===== Step 5: 排序 + 标记 =====#
-        if progress_callback:
-            progress_callback(0.95, "正在整理最终结果...")
-        
-        final_segments = self._finalize_selection(balanced)
-        
-        if progress_callback:
-            total_dur = sum(s.duration for s in final_segments)
-            progress_callback(1.0, f"完成! 筛选出 {len(final_segments)} 个片段, 总时长 {total_dur:.1f}s")
-        
-        return final_segments
-    
-    def _filter_by_duration(self, 
-                             results: List[ScoringResult], 
-                             min_duration: float) -> List[ScoringResult]:
-        """过滤过短片段"""
-        filtered = [r for r in results if r.segment.duration >= min_duration]
-        removed_count = len(results) - len(filtered)
-        if removed_count > 0:
-            logger.info(f"时长过滤: 移除 {removed_count} 个过短片段 (<{min_duration}s)")
-        return filtered
-    
-    def _balance_episodes(self,
-                          top_results: List[ScoringResult],
-                          all_results: List[ScoringResult],
-                          min_episodes_covered: int = 1,
-                          max_per_episode: int = 5) -> List[ScoringResult]:
-        """剧集均衡：两阶段确保每集覆盖率
-        
-        Phase 1: 保证每集至少有1个片段
-        Phase 2: 补充不足 min_episodes_covered 的剧集
-        """
-        episode_groups: dict[int, List[ScoringResult]] = defaultdict(list)
-        for r in top_results:
-            ep = r.segment.episode_index
-            if len(episode_groups[ep]) < max_per_episode:
-                episode_groups[ep].append(r)
-        
-        selected = list(top_results)
-        already_selected_ids = {r.segment.segment_id for r in selected}
-        all_episodes = set(r.segment.episode_index for r in all_results)
-        
-        # ===== Phase 1: 保证每集至少1个片段 =====#
-        covered_episodes = set(episode_groups.keys())
-        missing_episodes = all_episodes - covered_episodes
-        
-        for ep in sorted(missing_episodes):
-            candidates = [
-                r for r in all_results 
-                if r.segment.episode_index == ep 
-                and r.segment.segment_id not in already_selected_ids
-            ]
-            if candidates:
-                best = max(candidates, key=lambda r: r.total_score)
-                selected.append(best)
-                already_selected_ids.add(best.segment.segment_id)
-                logger.info(f"剧集均衡 Phase1: 为 E{ep} 补充了片段 {best.segment.segment_id}")
-        
-        # ===== Phase 2: 补充到 min_episodes_covered =====#
-        episode_counts = defaultdict(int)
-        for r in selected:
-            episode_counts[r.segment.episode_index] += 1
-        
-        for ep in all_episodes:
-            count = episode_counts.get(ep, 0)
-            if count < min_episodes_covered:
-                needed = min_episodes_covered - count
-                extras = [
-                    r for r in all_results
-                    if r.segment.episode_index == ep
-                    and r.segment.segment_id not in already_selected_ids
-                ]
-                # 按分数排序取前 N 个
-                extras_sorted = sorted(extras, key=lambda r: r.total_score, reverse=True)[:needed]
-                for extra in extras_sorted:
-                    selected.append(extra)
-                    already_selected_ids.add(extra.segment.segment_id)
-                    episode_counts[ep] += 1
-                    logger.info(f"剧集均衡 Phase2: 为 E{ep} 补充到 {episode_counts[ep]} 个片段")
-        
-        return selected
-    
-    def _fit_target_duration(self,
-                              results: List[ScoringResult],
-                              target_duration: float) -> List[ScoringResult]:
-        """适配目标输出时长"""
-        sorted_results = sorted(results, key=lambda r: r.total_score, reverse=True)
-        
-        current_duration = 0.0
-        selected = []
-        min_acceptable = target_duration * 0.70
-        max_acceptable = target_duration * 1.30
-        
-        for r in sorted_results:
-            seg = r.segment
-            if (current_duration + seg.duration > max_acceptable and 
-                current_duration >= min_acceptable):
-                break
-            selected.append(r)
-            current_duration += seg.duration
-            if current_duration >= target_duration * 0.95:
-                break
-        
-        return selected
-    
-    def _finalize_selection(self, results: List[ScoringResult]) -> List[SceneSegment]:
-        """排序、设置rank和selected标记"""
-        sorted_results = sorted(
-            results,
-            key=lambda r: (r.segment.episode_index, r.segment.start_time)
-        )
-        
-        segments = []
-        for rank, r in enumerate(sorted_results, 1):
-            seg = r.segment
-            seg.rank = rank
-            seg.selected = True
-            segments.append(seg)
-        
+        self.top_ratio = top_ratio
+        self.min_segment_duration = min_segment_duration
+        self.max_segments_per_episode = max_segments_per_episode
+        self.min_episodes_covered = min_episodes_covered
+
         logger.info(
-            f"最终筛选: {len(segments)} 片段 | "
-            f"{len(set(s.episode_index for s in segments))} 集 | "
-            f"总时长 {sum(s.duration for s in segments):.1f}s"
+            f"HighlightSelector initialized: "
+            f"top_ratio={top_ratio}, min_duration={min_segment_duration}s, "
+            f"max_per_ep={max_segments_per_episode}"
         )
-        
-        return segments
-    
-    def get_selection_stats(self,
-                            original_count: int,
-                            selected: List[SceneSegment]) -> dict:
-        """获取筛选统计信息"""
-        episodes_represented = set(s.episode_index for s in selected)
-        scores = [s.total_score or 0 for s in selected]
-        
-        return {
-            "original_count": original_count,
-            "selected_count": len(selected),
-            "select_ratio": round(len(selected) / max(1, original_count), 3),
-            "episodes_covered": len(episodes_represented),
-            "total_duration": round(sum(s.duration for s in selected), 1),
-            "avg_score": round(sum(scores) / max(1, len(scores)), 3),
-            "max_score": round(max(scores), 3) if scores else 0,
-            "min_score": round(min(scores), 3) if scores else 0,
-        }
+
+    def select(
+        self,
+        segments: List[HighlightSegment],
+        target_duration: int = 30,
+    ) -> List[HighlightSegment]:
+        """
+        选择高光片段
+
+        Args:
+            segments: 候选片段列表
+            target_duration: 目标总时长（秒），用于智能截断
+
+        Returns:
+            选中的高光片段列表
+        """
+        if not segments:
+            logger.warning("No segments to select from")
+            return []
+
+        logger.info(f"Selecting from {len(segments)} candidate segments")
+
+        # 1. 过滤掉时长不足的片段
+        filtered = [s for s in segments if s.duration >= self.min_segment_duration]
+        logger.info(f"After duration filter (>= {self.min_segment_duration}s): {len(filtered)} segments")
+
+        if not filtered:
+            logger.warning("No segments left after duration filter")
+            return []
+
+        # 2. 按分数排序（降序）
+        sorted_segments = sorted(filtered, key=lambda s: s.score, reverse=True)
+
+        # 3. 选取Top N%
+        top_n = max(1, int(len(sorted_segments) * self.top_ratio))
+        top_segments = sorted_segments[:top_n]
+        logger.info(f"Top {self.top_ratio*100}% segments: {len(top_segments)} segments")
+
+        # 4. 按集数分组，限制每集最多片段数
+        episode_groups = self._group_by_episode(top_segments)
+        balanced_segments = self._balance_episodes(
+            episode_groups, self.max_segments_per_episode
+        )
+        logger.info(f"After balancing (max {self.max_segments_per_episode}/ep): {len(balanced_segments)} segments")
+
+        # 5. 确保最少覆盖集数
+        if len(episode_groups) < self.min_episodes_covered:
+            logger.warning(
+                f"Only {len(episode_groups)} episodes covered, "
+                f"minimum required: {self.min_episodes_covered}"
+            )
+
+        # 6. 按时间顺序重新排序
+        balanced_segments.sort(key=lambda s: (s.video_path, s.start_time))
+
+        # 7. 智能截断到目标时长
+        final_segments = self._truncate_to_duration(
+            balanced_segments, target_duration
+        )
+
+        # 8. 添加入选理由
+        for seg in final_segments:
+            seg.reason = self._generate_reason(seg)
+
+        logger.info(
+            f"Final selection: {len(final_segments)} segments, "
+            f"total duration: {sum(s.duration for s in final_segments):.1f}s"
+        )
+
+        return final_segments
+
+    def _group_by_episode(
+        self, segments: List[HighlightSegment]
+    ) -> Dict[str, List[HighlightSegment]]:
+        """按集数分组"""
+        groups = {}
+        for seg in segments:
+            # 从video_path提取集数信息（假设文件名包含集数）
+            ep_key = self._extract_episode_key(seg.video_path)
+            if ep_key not in groups:
+                groups[ep_key] = []
+            groups[ep_key].append(seg)
+        return groups
+
+    def _extract_episode_key(self, video_path: str) -> str:
+        """从视频路径提取集数标识"""
+        import os
+        filename = os.path.basename(video_path)
+        # 简单处理：使用文件名作为key（实际应该提取集数）
+        return filename
+
+    def _balance_episodes(
+        self,
+        episode_groups: Dict[str, List[HighlightSegment]],
+        max_per_episode: int,
+    ) -> List[HighlightSegment]:
+        """平衡每集的片段数"""
+        balanced = []
+        for ep_key, segs in episode_groups.items():
+            # 每集最多保留max_per_episode个片段
+            balanced.extend(segs[:max_per_episode])
+        return balanced
+
+    def _truncate_to_duration(
+        self,
+        segments: List[HighlightSegment],
+        target_duration: int,
+    ) -> List[HighlightSegment]:
+        """
+        智能截断到目标时长
+
+        策略：
+        1. 优先保留高分片段
+        2. 如果总时长超过目标，从最低分开始移除
+        3. 尽量保留更多片段（短片段优先保留）
+        """
+        if not segments:
+            return []
+
+        # 计算当前总时长
+        total_duration = sum(s.duration for s in segments)
+        logger.info(f"Current total duration: {total_duration:.1f}s, target: {target_duration}s")
+
+        if total_duration <= target_duration:
+            #  already within target
+            return segments
+
+        # 按分数排序（升序），从最低分开始移除
+        sorted_by_score = sorted(segments, key=lambda s: s.score)
+
+        removed = []
+        current_duration = total_duration
+
+        for seg in sorted_by_score:
+            if current_duration <= target_duration:
+                break
+            removed.append(seg)
+            current_duration -= seg.duration
+
+        # 返回未移除的片段
+        final = [s for s in segments if s not in removed]
+        logger.info(
+            f"Truncated: removed {len(removed)} segments, "
+            f"final duration: {sum(s.duration for s in final):.1f}s"
+        )
+        return final
+
+    def _generate_reason(self, seg: HighlightSegment) -> str:
+        """生成入选理由"""
+        reasons = []
+
+        if seg.audio_score >= 0.7:
+            reasons.append("音频爆点强烈")
+        if seg.emotion_score >= 0.7:
+            reasons.append("情绪高涨")
+        if seg.visual_score >= 0.7:
+            reasons.append("画面动感强")
+        if seg.rhythm_score >= 0.7:
+            reasons.append("节奏紧凑")
+
+        if not reasons:
+            if seg.score >= 0.7:
+                reasons.append("综合高分")
+            else:
+                reasons.append("候选高光")
+
+        return "、".join(reasons)
+
+    def select_from_scores(
+        self,
+        scored_segments: List[Dict],
+        video_paths: List[str],
+        start_times: List[float],
+        end_times: List[float],
+        subtitle_texts: Optional[List[Optional[str]]] = None,
+        target_duration: int = 30,
+    ) -> List[HighlightSegment]:
+        """
+        从打分结果直接选择高光片段
+
+        Args:
+            scored_segments: 打分结果列表（每个元素包含各维度分数）
+            video_paths: 对应视频路径列表
+            start_times: 开始时间列表
+            end_times: 结束时间列表
+            subtitle_texts: 字幕文本列表（可选）
+            target_duration: 目标总时长（秒）
+
+        Returns:
+            选中的高光片段列表
+        """
+        if subtitle_texts is None:
+            subtitle_texts = [None] * len(scored_segments)
+
+        # 转换为HighlightSegment对象
+        segments = []
+        for i, score_dict in enumerate(scored_segments):
+            seg = HighlightSegment(
+                video_path=video_paths[i],
+                start_time=start_times[i],
+                end_time=end_times[i],
+                score=score_dict.get("total_score", 0.0),
+                audio_score=score_dict.get("audio_score", 0.0),
+                emotion_score=score_dict.get("emotion_score", 0.0),
+                visual_score=score_dict.get("visual_score", 0.0),
+                rhythm_score=score_dict.get("rhythm_score", 0.0),
+                subtitle_text=subtitle_texts[i],
+            )
+            segments.append(seg)
+
+        # 调用select方法
+        return self.select(segments, target_duration)

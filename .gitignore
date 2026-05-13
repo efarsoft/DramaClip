@@ -1,28 +1,29 @@
 .DS_Store
+
+# 运行时配置
 /config.toml
 /storage/
-/.idea/
-/app/services/__pycache__
-/app/__pycache__/
-/app/config/__pycache__/
-/app/models/__pycache__/
-/app/utils/__pycache__/
-/*/__pycache__/*
-.vscode
-/**/.streamlit
-__pycache__
-logs/
 
+# IDE
+.idea/
+.vscode
+
+# Python
+__pycache__
+*.py[cod]
+
+# Node
 node_modules
-# VuePress 默认临时文件目录
-/sites/docs/.vuepress/.temp
-# VuePress 默认缓存目录
-/sites/docs/.vuepress/.cache
-# VuePress 默认构建生成的静态文件目录
-/sites/docs/.vuepress/dist
+
+# 构建产物
+dist/
+dist-electron/
+
 # 模型目录
 /models/
-./models/*
+*.model
+
+# 资源文件（大文件/媒体）
 resource/scripts/*.json
 resource/videos/*.mp4
 resource/songs/*.mp3
@@ -31,30 +32,21 @@ resource/fonts/*.ttc
 resource/fonts/*.ttf
 resource/fonts/*.otf
 resource/srt/*.srt
-app/models/faster-whisper-large-v2/*
-app/models/faster-whisper-large-v3/*
-app/models/bert/*
 
-bug清单.md
-task.md
-.claude/*
-.serena/*
+# AI 代理工作区
+.atomcode/
+.workbuddy/
+.claude/
+.serena/
 
-# OpenSpec: 忽略活动的变更提案，但保留归档和规范
-openspec/*
-AGENTS.md
-CLAUDE.md
-tests/*
-/SourceProjects
-
-# 临时脚本和测试产物
+# 测试与临时文件
+tests/
+test_output_e2e/
+logs/
 check_*.py
 find_*.py
 iter_check.py
 run_e2e.py
+run.bat
 test_e2e*.py
 test_e2e*.txt
-test_output_e2e/
-
-# WorkBuddy 团队/记忆临时文件
-.workbuddy/teams/

@@ -16,7 +16,7 @@ from .exceptions import LLMServiceError
 # 导入新的提示词管理系统
 from app.services.prompts import PromptManager
 
-# 提供商注册由 webui.py:main() 显式调用（见 LLM 提供商注册机制重构）
+# 提供商注册由 app/services/llm/providers.py:register_all_providers() 显式调用
 # 这样更可靠，错误也更容易调试
 
 
@@ -112,7 +112,7 @@ class LegacyLLMAdapter:
             )
 
             # 使用增强的JSON解析器
-            from webui.tools.generate_short_summary import parse_and_fix_json
+            from app.utils.json_utils import parse_and_fix_json
             parsed_result = parse_and_fix_json(result)
 
             if not parsed_result:

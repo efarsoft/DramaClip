@@ -2,7 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 '''
-@Project: NarratoAI
+@Project: DramaClip
 @File   : clip_video
 @Author : Viccy同学
 @Date   : 2025/5/6 下午6:14

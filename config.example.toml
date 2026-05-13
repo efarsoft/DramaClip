@@ -22,8 +22,8 @@
     text_openai_api_key = ""
     text_openai_base_url = "https://api.siliconflow.cn/v1"
 
-    # WebUI 界面是否显示配置项
-    hide_config = true
+    # 是否隐藏配置项（桌面客户端使用时建议隐藏）
+    hide_config = false
 
 ##########################################
 # TTS (文本转语音) 配置 - AI解说模式使用

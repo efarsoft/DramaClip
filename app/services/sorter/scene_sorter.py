@@ -1,204 +1,294 @@
 """
-DramaClip - 智能排序器
-
-对筛选后的高光片段进行智能排序，确保：
-1. 剧集顺序：E1 → E2 → E3...
-2. 时间顺序：同集内按时间线排列
-3. 情绪递进：整体情绪强度逐步上升
-4. 节奏平衡：避免连续过长/过短片段
+场景排序器 - 对高光片段进行智能排序，确保剧情流畅、情绪递进
 """
 
-from typing import List, Optional
-from loguru import logger
+import logging
+from typing import Dict, List, Optional
+from enum import Enum
 
-from app.models.schema import SceneSegment
+logger = logging.getLogger(__name__)
+
+
+class SortStrategy(str, Enum):
+    """排序策略枚举"""
+
+    CHRONOLOGICAL = "chronological"  # 按时间顺序（默认）
+    EMOTION_CURVE = "emotion_curve"  # 情绪曲线（起承转合）
+    DIVERSITY_FIRST = "diversity_first"  # 多样性优先（避免连续同一场景）
 
 
 class SceneSorter:
-    """
-    智能排序器
-    
-    排序优先级：
-    1. 剧集号（必须保持剧情连贯）
-    2. 时间先后（同一集内按时间线）
-    3. 情绪递进（可选微调：在保持1、2的前提下做局部优化）
-    """
-    
-    # 常量定义
-    MAX_SWAP_DISTANCE_SECONDS = 30  # 最大交换时间差(秒)，超过此值不建议换
-    EMOTION_INVERSION_THRESHOLD = 0.15  # 情绪倒退判定阈值
-    MAX_SORT_ITERATIONS_FACTOR = 2  # 最大迭代次数 = 片段数 × 此因子
+    """场景排序器 - 确保剧情流畅、情绪递进"""
 
-    def __init__(self,
-                 enable_emotion_ramp: bool = True,
-                 max_swap_distance: int = 2):
-        self.enable_emotion_ramp = enable_emotion_ramp
-        self.max_swap_distance = max_swap_distance
-    
-    def sort(self, segments: List[SceneSegment]) -> List[SceneSegment]:
+    def __init__(
+        self,
+        strategy: SortStrategy = SortStrategy.CHRONOLOGICAL,
+        max_same_episode_consecutive: int = 2,  # 同一集最多连续出现次数
+    ):
         """
-        对高光片段进行智能排序
-        
+        初始化排序器
+
         Args:
-            segments: 已筛选的高光片段（无序或部分有序）
-            
+            strategy: 排序策略
+            max_same_episode_consecutive: 同一集最多连续出现次数（避免审美疲劳）
+        """
+        self.strategy = strategy
+        self.max_same_episode_consecutive = max_same_episode_consecutive
+
+        logger.info(
+            f"SceneSorter initialized: strategy={strategy.value}, "
+            f"max_same_ep_consecutive={max_same_episode_consecutive}"
+        )
+
+    def sort(
+        self,
+        segments: List["HighlightSegment"],
+    ) -> List["HighlightSegment"]:
+        """
+        对高光片段进行排序
+
+        Args:
+            segments: 高光片段列表
+
         Returns:
-            List[SceneSegment]: 排序后的片段列表
+            排序后的高光片段列表
+        """
+        if not segments:
+            logger.warning("No segments to sort")
+            return []
+
+        logger.info(
+            f"Sorting {len(segments)} segments using strategy: {self.strategy.value}"
+        )
+
+        # 根据策略排序
+        if self.strategy == SortStrategy.CHRONOLOGICAL:
+            sorted_segments = self._sort_chronological(segments)
+        elif self.strategy == SortStrategy.EMOTION_CURVE:
+            sorted_segments = self._sort_emotion_curve(segments)
+        elif self.strategy == SortStrategy.DIVERSITY_FIRST:
+            sorted_segments = self._sort_diversity_first(segments)
+        else:
+            logger.warning(f"Unknown strategy: {self.strategy}, using chronological")
+            sorted_segments = self._sort_chronological(segments)
+
+        logger.info(f"Sorted {len(sorted_segments)} segments")
+        return sorted_segments
+
+    def _sort_chronological(
+        self, segments: List["HighlightSegment"]
+    ) -> List["HighlightSegment"]:
+        """
+        按时间顺序排序（默认策略）
+
+        保证剧情连贯性，按照：
+        1. 集数顺序
+        2. 片段在集中的时间顺序
+        """
+        return sorted(segments, key=lambda s: (self._extract_episode(s.video_path), s.start_time))
+
+    def _sort_emotion_curve(
+        self, segments: List["HighlightSegment"]
+    ) -> List["HighlightSegment"]:
+        """
+        情绪曲线排序（起承转合）
+
+        目标：创建一个完整的情绪弧线
+        1. 起（铺垫）：低情绪、正情绪 → 温和开场
+        2. 承（发展）：情绪逐渐升温
+        3. 转（冲突）：高情绪、负情绪 → 冲突爆发
+        4. 合（高潮/结尾）：最高情绪爆点
+
+        适用于：希望在短时间内讲述完整故事的情况
         """
         if not segments:
             return []
-        
-        if len(segments) == 1:
-            return segments
-        
-        # ===== 基础排序：剧集 + 时间 =====#
-        sorted_segments = sorted(
-            segments,
-            key=lambda s: (s.episode_index, s.start_time)
+
+        # 1. 分类情绪类型
+        categorized = self._categorize_emotions(segments)
+
+        # 2. 构建情绪曲线
+        ordered = []
+
+        # 起：低唤醒正情绪（温暖、感动、希望）
+        opening = sorted(
+            categorized.get("low_arousal_positive", []),
+            key=lambda s: s.start_time,
         )
-        
-        # ===== 情绪递进优化 =====#
-        if self.enable_emotion_ramp and len(sorted_segments) > 2:
-            sorted_segments = self._apply_emotion_ramp(sorted_segments)
-        
-        # 更新 rank
-        for i, seg in enumerate(sorted_segments, 1):
-            seg.rank = i
-        
-        return sorted_segments
-    
-    def _apply_emotion_ramp(self, 
-                            segments: List[SceneSegment]) -> List[SceneSegment]:
-        """
-        情绪递进优化
-        
-        在不破坏基本剧情顺序的前提下，
-        通过有限范围内的交换使整体情绪曲线呈上升趋势。
-        
-        优化策略：
-        - 按同集内分组，每组内按情绪分数升序排列（递进感）
-        - 交换距离不超过 MAX_SWAP_DISTANCE_SECONDS
-        - 单趟扫描+有限轮修正，O(n) 复杂度
-        """
-        result = list(segments)  # 复制列表
-        n = len(result)
-        
-        if n <= 2:
-            return result
-        
-        # 按剧集分组，同集内按情绪分数升序排列（实现递进效果）
-        from itertools import groupby
-        ep_groups = []
-        for ep_idx, group in groupby(result, key=lambda s: s.episode_index):
-            group_list = list(group)
-            # 只对时间差不超过阈值的相邻片段排序
-            ep_groups.append(self._sort_group_by_emotion(group_list))
-        
-        # 展平回列表
-        result = [seg for group in ep_groups for seg in group]
-        
-        return result
-    
-    def _sort_group_by_emotion(self, segments: List[SceneSegment]) -> List[SceneSegment]:
-        """对同一集内的片段按情绪递进排序（低分在前，高分在后）"""
-        if len(segments) <= 2:
-            return segments
-        
-        # 按情绪分数升序排序（递进效果），但限制交换时间跨度
-        sorted_segs = sorted(segments, key=lambda s: s.total_score or 0)
-        
-        # 验证：如果最大时间跨度超过阈值，退回时间顺序
-        time_span = abs(sorted_segs[0].start_time - sorted_segs[-1].start_time)
-        if time_span > SceneSorter.MAX_SWAP_DISTANCE_SECONDS:
-            return segments
-        
-        return sorted_segs
-    
-    def _can_safely_swap(self, 
-                         segments: List[SceneSegment],
-                         i: int, 
-                         j: int) -> bool:
-        """判断两个片段是否可以安全交换"""
-        # 基本检查：同一集
-        if segments[i].episode_index != segments[j].episode_index:
-            return False
-        
-        # 检查时间差是否合理（避免打乱时间逻辑太严重）
-        time_gap = abs(segments[i].start_time - segments[j].start_time)
-        if time_gap > SceneSorter.MAX_SWAP_DISTANCE_SECONDS:
-            return False
-        
-        return True
-    
-    def analyze_sorting_quality(self, 
-                                 segments: List[SceneSegment]) -> dict:
-        """
-        分析排序质量指标
-        
-        返回：
-        - episode_continuity: 剧集连贯性（是否乱序）
-        - temporal_order: 时间顺序正确率
-        - emotion_curve: 情绪曲线趋势（上升/平稳/波动）
-        - rhythm_balance: 节奏均衡度
-        """
-        n = len(segments)
-        if n < 2:
-            return {"status": "too_few_segments"}
-        
-        # 1. 剧集连贯性
-        episode_inversions = sum(
-            1 for i in range(n - 1)
-            if segments[i].episode_index > segments[i + 1].episode_index
+        ordered.extend(opening[:1])  # 只取1个作为开头
+
+        # 承：中低情绪（任何类型，按时间顺序）
+        developing = (
+            categorized.get("low_arousal_negative", [])
+            + categorized.get("high_arousal_positive", [])[:1]
         )
-        episode_continuity = 1.0 - (episode_inversions / max(1, n - 1))
-        
-        # 2. 同集内时间顺序
-        temporal_errors = 0
-        temporal_checks = 0
-        for i in range(n - 1):
-            if (segments[i].episode_index == segments[i + 1].episode_index and
-                segments[i].start_time > segments[i + 1].start_time):
-                temporal_errors += 1
-                temporal_checks += 1
-            elif segments[i].episode_index == segments[i + 1].episode_index:
-                temporal_checks += 1
-        
-        temporal_order = 1.0 - (temporal_errors / max(1, temporal_checks)) if temporal_checks > 0 else 1.0
-        
-        # 3. 情绪曲线趋势
-        scores = [s.total_score or 0 for s in segments]
-        
-        # 计算趋势（线性回归斜率的简化版）
-        score_changes = [scores[i + 1] - scores[i] for i in range(len(scores) - 1)]
-        increases = sum(1 for c in score_changes if c > 0)
-        decreases = sum(1 for c in score_changes if c < 0)
-        
-        if increases >= decreases:
-            emotion_trend = "rising"
-        elif decreases > increases * 1.5:
-            emotion_trend = "falling"
-        else:
-            emotion_trend = "stable"
-        
-        trend_ratio = increases / max(1, len(score_changes))
-        
-        # 4. 节奏均衡
-        durations = [s.duration for s in segments]
-        avg_dur = sum(durations) / len(durations)
-        duration_variance = sum((d - avg_dur) ** 2 for d in durations) / len(durations)
-        std_dev = duration_variance ** 0.5
-        rhythm_balance = max(0, 1.0 - std_dev / avg_dur) if avg_dur > 0 else 0
-        
-        return {
-            "segment_count": n,
-            "episode_continuity": round(episode_continuity, 3),
-            "temporal_order": round(temporal_order, 3),
-            "emotion_trend": emotion_trend,
-            "trend_ratio": round(trend_ratio, 3),
-            "rhythm_balance": round(rhythm_balance, 3),
-            "avg_duration": round(avg_dur, 2),
-            "duration_std": round(std_dev, 2),
-            "total_duration": round(sum(durations), 1),
-            "score_range": f"{min(scores):.2f} ~ {max(scores):.2f}",
-            "avg_score": round(sum(scores) / n, 3),
+        developing.sort(key=lambda s: s.start_time)
+        ordered.extend(developing[:2])
+
+        # 转：高唤醒负情绪（愤怒、恐惧、冲突）
+        conflict = sorted(
+            categorized.get("high_arousal_negative", []),
+            key=lambda s: s.score,
+            reverse=True,
+        )
+        ordered.extend(conflict[:1])  # 取分数最高的冲突片段
+
+        # 合：高唤醒正情绪（喜悦、胜利、团圆）
+        climax = sorted(
+            categorized.get("high_arousal_positive", []),
+            key=lambda s: s.score,
+            reverse=True,
+        )
+        ordered.extend(climax[:1])  # 取分数最高的高潮片段
+
+        # 3. 添加剩余片段（按时间顺序）
+        used = set(id(s) for s in ordered)
+        remaining = [s for s in segments if id(s) not in used]
+        remaining.sort(key=lambda s: s.start_time)
+        ordered.extend(remaining)
+
+        logger.info(
+            f"Emotion curve: 起({len(opening[:1])}) → "
+            f"承({len(developing[:2])}) → "
+            f"转({len(conflict[:1])}) → "
+            f"合({len(climax[:1])})"
+        )
+
+        return ordered
+
+    def _sort_diversity_first(
+        self, segments: List["HighlightSegment"]
+    ) -> List["HighlightSegment"]:
+        """
+        多样性优先排序
+
+        目标：避免审美疲劳，保证观感多样性
+        策略：
+        1. 按集数分组
+        2. 轮询从各集选取片段
+        3. 保证相邻片段来自不同集数
+        4. 限制同一集连续出现次数
+
+        适用于：希望展示多个精彩瞬间，而非单一剧情线的情况
+        """
+        if not segments:
+            return []
+
+        # 1. 按集数分组
+        episode_groups = self._group_by_episode(segments)
+
+        # 2. 对每组按分数排序（降序）
+        for ep_key in episode_groups:
+            episode_groups[ep_key].sort(key=lambda s: s.score, reverse=True)
+
+        # 3. 轮询从各集选取片段
+        shuffled = []
+        episode_keys = list(episode_groups.keys())
+        indices = {k: 0 for k in episode_keys}
+
+        # 记录连续同一集的次数
+        consecutive_count = 0
+        last_ep_key = None
+
+        while True:
+            added = False
+            for ep_key in episode_keys:
+                # 检查是否应该跳过此集（避免连续出现太多次）
+                if (
+                    ep_key == last_ep_key
+                    and consecutive_count >= self.max_same_episode_consecutive
+                ):
+                    continue
+
+                seg_list = episode_groups[ep_key]
+                idx = indices[ep_key]
+                if idx < len(seg_list):
+                    shuffled.append(seg_list[idx])
+                    indices[ep_key] += 1
+                    added = True
+
+                    # 更新连续计数
+                    if ep_key == last_ep_key:
+                        consecutive_count += 1
+                    else:
+                        consecutive_count = 1
+                    last_ep_key = ep_key
+
+            if not added:
+                break
+
+        logger.info(f"Diversity-first sorting: {len(shuffled)} segments")
+        return shuffled
+
+    def _categorize_emotions(
+        self, segments: List["HighlightSegment"]
+    ) -> Dict[str, List["HighlightSegment"]]:
+        """
+        将片段按情绪类型分类
+
+        分类依据：
+        - emotion_score: 情绪强度（0~1）
+        - audio_score: 音频能量（间接反映唤醒度）
+
+        分类结果：
+        1. high_arousal_positive: 高唤醒正情绪（兴奋、喜悦、胜利）
+        2. high_arousal_negative: 高唤醒负情绪（愤怒、恐惧、冲突）
+        3. low_arousal_positive: 低唤醒正情绪（温暖、感动、平静）
+        4. low_arousal_negative: 低唤醒负情绪（悲伤、失望、犹豫）
+        """
+        categorized = {
+            "high_arousal_positive": [],
+            "high_arousal_negative": [],
+            "low_arousal_positive": [],
+            "low_arousal_negative": [],
         }
+
+        for seg in segments:
+            # 简化判断：基于emotion_score和audio_score
+            is_high_arousal = seg.audio_score >= 0.5  # 音频能量高 → 高唤醒
+            is_positive = seg.emotion_score >= 0.5  # 情绪分数高 → 正情绪
+
+            if is_high_arousal and is_positive:
+                categorized["high_arousal_positive"].append(seg)
+            elif is_high_arousal and not is_positive:
+                categorized["high_arousal_negative"].append(seg)
+            elif not is_high_arousal and is_positive:
+                categorized["low_arousal_positive"].append(seg)
+            else:
+                categorized["low_arousal_negative"].append(seg)
+
+        return categorized
+
+    def _group_by_episode(
+        self, segments: List["HighlightSegment"]
+    ) -> Dict[str, List["HighlightSegment"]]:
+        """按集数分组"""
+        groups = {}
+        for seg in segments:
+            ep_key = self._extract_episode_key(seg.video_path)
+            if ep_key not in groups:
+                groups[ep_key] = []
+            groups[ep_key].append(seg)
+        return groups
+
+    def _extract_episode_key(self, video_path: str) -> str:
+        """从视频路径提取集数标识"""
+        import os
+        filename = os.path.basename(video_path)
+        # 简单处理：使用文件名作为key（实际应该提取集数）
+        return filename
+
+    def _extract_episode(self, video_path: str) -> int:
+        """从视频路径提取集数（用于排序）"""
+        # 简化实现：返回0（实际应该从文件名提取集数）
+        # 例如："第01集.mp4" → 1
+        return 0
+
+    def set_strategy(self, strategy: SortStrategy):
+        """动态修改排序策略"""
+        self.strategy = strategy
+        logger.info(f"Strategy changed to: {strategy.value}")
+
+    def get_strategy(self) -> SortStrategy:
+        """获取当前排序策略"""
+        return self.strategy

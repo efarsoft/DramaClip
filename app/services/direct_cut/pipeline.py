@@ -1,472 +1,436 @@
-"""
-DramaClip - 原片直剪模式流水线
-
-原片直剪模式的完整处理链路：
-输入(多集视频) → 预处理 → 镜头分割 → ASR转写 → 高光打分筛选 → 排序
-→ 竖屏裁剪(人脸居中) → 字幕叠加 → 原声保留拼接 → 输出MP4
-
-特点：保留原片全部音频（人物原声、背景音、BGM），不添加任何额外音频。
-"""
-
+import logging
 import os
-import json
-import re
-import uuid
-from typing import List, Optional, Dict, Callable, Any
-from loguru import logger
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
-from app.models.schema import (
-    SceneSegment, ClipMode, DramaClipOutputConfig,
-    HighlightConfig, HighlightScoreWeights
-)
-from app.services.highlight.scene_detect import SceneDetector, detect_all_episodes
+import cv2
+from pyscenetect import detect_scenes
+
 from app.services.highlight.scorer import HighlightScorer
-from app.services.highlight.selector import HighlightSelector
-from app.services.sorter.scene_sorter import SceneSorter
-from app.utils.srt_utils import seconds_to_srt_time, parse_srt_time, create_simple_srt, concat_srt_files
-from app.utils.video_utils import generate_video_cover
+from app.services.highlight.selector import HighlightSelector, HighlightSegment
+from app.services.sorter.scene_sorter import SceneSorter, SortStrategy
+
+logger = logging.getLogger(__name__)
 
 
 class DirectCutPipeline:
-    """
-    原片直剪流水线
-    
-    使用方式：
-        pipeline = DirectCutPipeline()
-        result = pipeline.run(
-            video_paths=["ep1.mp4", "ep2.mp4"],
-            output_duration=30,
-            progress_callback=my_callback
-        )
-        # result.output_path -> 最终成片路径
-    """
-    
-    def __init__(self, config: Optional[dict] = None):
-        self.config = config or {}
-        
-        # 初始化各模块
-        highlight_cfg = HighlightConfig(
-            weights=HighlightScoreWeights(**{
-                "audio_weight": self.config.get("audio_weight", 0.4),
-                "emotion_weight": self.config.get("emotion_weight", 0.3),
-                "visual_weight": self.config.get("visual_weight", 0.2),
-                "rhythm_weight": self.config.get("rhythm_weight", 0.1),
-            }),
-            top_ratio=self.config.get("top_ratio", 0.3),
-            min_segment_duration=self.config.get("min_segment_duration", 2.0),
-            max_segments_per_episode=self.config.get("max_segments_per_episode", 5),
-            min_episodes_covered=self.config.get("min_episodes_covered", 1),
-        )
-        
-        self.detector = SceneDetector(
-            threshold=self.config.get("scene_threshold", 30),
-            min_scene_len=highlight_cfg.min_segment_duration,
-            max_scene_len=8.0,
-        )
-        self.scorer = HighlightScorer(highlight_cfg)
-        self.selector = HighlightSelector(highlight_cfg)
-        self.sorter = SceneSorter()
-        
-        # 输出目录
-        self.temp_dir = self._get_temp_dir()
-    
-    def run(self,
-            video_paths: List[str],
-            output_duration: int = 30,
-            output_dir: Optional[str] = None,
-            progress_callback: Optional[Callable[[float, str], None]] = None
-            ) -> Dict[str, Any]:
-        """
-        执行完整的原片直剪流程
-        
-        Args:
-            video_paths: 输入视频文件路径列表
-            output_duration: 目标输出时长(秒)
-            output_dir: 输出目录
-            progress_callback: 进度回调 (progress_01, message)
-            
-        Returns:
-            dict: {
-                "output_path": 成品路径,
-                "segments_count": 片段数,
-                "total_duration": 总时长,
-                "cover_path": 封面路径,
-                ...
-            }
-        """
-        task_id = str(uuid.uuid4())[:8]
-        output_dir = output_dir or self.temp_dir
-        
-        def progress(pct, msg):
-            if progress_callback:
-                progress_callback(pct, f"[直剪-{task_id}] {msg}")
-        
-        logger.info(f"[{task_id}] 开始原片直剪模式 | {len(video_paths)}集 | 目标时长:{output_duration}s")
-        
-        try:
-            # ===== Phase 1: 预处理 + 镜头分割 =====#
-            progress(0.05, "正在预处理和镜头分割...")
-            scene_infos = detect_all_episodes(
-                video_paths,
-                config={
-                    "threshold": self.config.get("scene_threshold", 30),
-                    "min_scene_len": self.config.get("min_segment_duration", 2.0),
-                    "max_scene_len": 8.0,
-                },
-                progress_callback=lambda p, m: progress(0.05 + 0.15 * p, m)
-            )
-            
-            # 转换为 SceneSegment 对象
-            segments = [self._info_to_segment(info) for info in scene_infos]
-            
-            # ===== Phase 2: 提取片段音频/字幕 =====#
-            progress(0.20, "正在提取音频和字幕...")
-            segments = self._extract_media(segments, 
-                                           lambda p, m: progress(0.20 + 0.10 * p, m))
-            
-            # ===== Phase 3: 高光打分 =====#
-            progress(0.32, "正在进行高光打分分析...")
-            scored_results = self.scorer.score_segments(
-                segments,
-                progress_callback=lambda p, m: progress(0.32 + 0.18 * p, m)
-            )
-            
-            # 更新 segments（scorer 已修改 in-place）
-            
-            # ===== Phase 4: 筛选高光片段 =====#
-            progress(0.52, "正在筛选最优高光片段...")
-            selected_segments = self.selector.select(
-                scored_results,
-                target_duration=output_duration,
-                progress_callback=lambda p, m: progress(0.52 + 0.08 * p, m)
-            )
-            
-            # ===== Phase 5: 智能排序 =====#
-            progress(0.62, "正在智能排序...")
-            sorted_segments = self.sorter.sort(selected_segments)
-            
-            # 排序质量分析
-            quality = self.sorter.analyze_sorting_quality(sorted_segments)
-            logger.info(f"排序质量: {quality}")
-            
-            # ===== Phase 6: 裁剪+拼接+输出 =====#
-            progress(0.68, "正在裁剪拼接生成成片...")
-            output_info = self._assemble_video(
-                sorted_segments,
-                output_dir=output_dir,
-                output_duration=output_duration,
-                task_id=task_id,
-                progress_callback=lambda p, m: progress(0.68 + 0.27 * p, m)
-            )
-            
-            progress(1.0, f"完成! 成片已生成: {os.path.basename(output_info['output_path'])}")
-            
-            # 返回结果
-            # Serialize segments for UI preview panel
-            highlight_segments = []
-            for seg in sorted_segments:
-                highlight_segments.append({
-                    "episode": seg.episode_index,
-                    "score": round(seg.total_score or 0, 3),
-                    "start_time": round(seg.start_time, 1),
-                    "duration": round(seg.duration, 1),
-                    "reason": self._build_reason(seg),
-                })
+    """原片直剪管道"""
 
-            result = {
-                "task_id": task_id,
-                "mode": "direct_cut",
-                "output_path": output_info["output_path"],
-                "cover_path": output_info.get("cover_path"),
-                "segments_count": len(sorted_segments),
-                "segments_total_duration": round(sum(s.duration for s in sorted_segments), 1),
-                "target_duration": output_duration,
-                "episodes_covered": len(set(s.episode_index for s in sorted_segments)),
-                "avg_score": round(
-                    sum(s.total_score or 0 for s in sorted_segments) / max(1, len(sorted_segments)), 3
-                ),
-                "sorting_quality": quality,
-                "highlight_segments": highlight_segments,
-            }
-            
-            logger.info(f"[{task_id}] 原片直剪完成: {result}")
-            return result
-            
-        except Exception as e:
-            logger.exception(f"[{task_id}] 原片直剪失败: {e}")
-            raise
-    
-    def _info_to_segment(self, info) -> SceneSegment:
-        """将 SceneInfo 转换为 SceneSegment"""
-        return SceneSegment(
-            segment_id=info.to_segment_id(),
-            episode_index=info.episode_index,
-            start_time=info.start_time,
-            end_time=info.end_time,
-            duration=info.duration,
-            video_path=info.video_path,
+    def __init__(
+        self,
+        config: Optional[Dict] = None,
+    ):
+        """
+        初始化管道
+
+        Args:
+            config: 配置字典（从config.toml加载）
+        """
+        # 默认配置
+        self.config = config or {}
+
+        # 高光检测配置
+        highlight_config = self.config.get("highlight", {})
+        self.audio_weight = highlight_config.get("audio_weight", 0.4)
+        self.emotion_weight = highlight_config.get("emotion_weight", 0.3)
+        self.visual_weight = highlight_config.get("visual_weight", 0.2)
+        self.rhythm_weight = highlight_config.get("rhythm_weight", 0.1)
+        self.top_ratio = highlight_config.get("top_ratio", 0.3)
+        self.min_segment_duration = highlight_config.get("min_segment_duration", 2.0)
+        self.max_segments_per_episode = highlight_config.get(
+            "max_segments_per_episode", 5
         )
-    
-    @staticmethod
-    def _build_reason(seg: SceneSegment) -> str:
-        """Build a human-readable reason string for a highlight segment"""
-        reasons = []
-        if seg.is_closeup:
-            reasons.append("特写")
-        if seg.has_face:
-            reasons.append("有人物")
-        if seg.has_action:
-            reasons.append("动作")
-        if seg.audio_score and seg.audio_score > 0.6:
-            reasons.append("音频爆点")
-        if seg.emotion_score and seg.emotion_score > 0.6:
-            reasons.append("情绪")
-        if seg.visual_score and seg.visual_score > 0.6:
-            reasons.append("画面佳")
-        if seg.subtitle_text:
-            preview = seg.subtitle_text[:20].replace("\n", " ")
-            reasons.append(f"\"{preview}\"")
-        return ", ".join(reasons) if reasons else "高光片段"
-    
-    def _extract_media(self, 
-                        segments: List[SceneSegment],
-                        progress_callback=None) -> List[SceneSegment]:
-        """为每个片段提取音频文件"""
-        from app.utils import ffmpeg_utils
-        
-        extract_dir = os.path.join(self.temp_dir, "extracts")
-        os.makedirs(extract_dir, exist_ok=True)
-        
-        for i, seg in enumerate(segments):
-            if progress_callback:
-                progress_callback((i + 1) / len(segments), f"提取 E{seg.episode_index} 片段音频...")
-            
-            try:
-                base_name = seg.segment_id.replace(".", "_")
-                
-                # 提取音频
-                audio_out = os.path.join(extract_dir, f"{base_name}.wav")
-                if not os.path.exists(audio_out):
-                    success = ffmpeg_utils.extract_audio(
-                        seg.video_path,
-                        audio_out,
-                        start_time=seg.start_time,
-                        duration=seg.duration,
-                    )
-                    if success and os.path.exists(audio_out):
-                        seg.audio_path = audio_out
-                
-                # 裁剪视频片段
-                clip_out = os.path.join(extract_dir, f"{base_name}.mp4")
-                if not os.path.exists(clip_out):
-                    success = ffmpeg_utils.clip_video(
-                        seg.video_path,
-                        clip_out,
-                        start_time=seg.start_time,
-                        duration=seg.duration,
-                    )
-                    if success and os.path.exists(clip_out):
-                        # 保留原始 video_path，用 clip_path 存储裁剪片段
-                        seg.clip_path = clip_out
-                        
-            except Exception as e:
-                logger.warning(f"媒体提取失败 ({seg.segment_id}): {e}")
-        
-        return segments
-    
-    def _assemble_video(self,
-                         segments: List[SceneSegment],
-                         output_dir: str,
-                         output_duration: int,
-                         task_id: str,
-                         progress_callback=None) -> dict:
+
+        # 输出配置
+        output_config = self.config.get("output", {})
+        self.default_duration = output_config.get("default_duration", 30)
+        self.resolution = output_config.get("resolution", "1080P")
+        self.aspect_ratio = output_config.get("aspect_ratio", "9:16")
+        self.fps = output_config.get("fps", 25)
+
+        # 场景检测配置
+        scene_config = self.config.get("scene_detect", {})
+        self.scene_threshold = scene_config.get("threshold", 30)
+        self.min_scene_len = scene_config.get("min_scene_len", 2)
+        self.max_scene_len = scene_config.get("max_scene_len", 8)
+
+        # 初始化子模块
+        self.scorer = HighlightScorer(
+            audio_weight=self.audio_weight,
+            emotion_weight=self.emotion_weight,
+            visual_weight=self.visual_weight,
+            rhythm_weight=self.rhythm_weight,
+        )
+        self.selector = HighlightSelector(
+            top_ratio=self.top_ratio,
+            min_segment_duration=self.min_segment_duration,
+            max_segments_per_episode=self.max_segments_per_episode,
+        )
+        self.sorter = SceneSorter(strategy=SortStrategy.CHRONOLOGICAL)
+
+        logger.info("DirectCutPipeline initialized")
+
+    def run(
+        self,
+        video_paths: List[str],
+        output_path: Optional[str] = None,
+        target_duration: Optional[int] = None,
+    ) -> str:
         """
-        组装最终成片：
-        1. 竖屏9:16裁剪 + 人脸居中
-        2. 字幕叠加（ASR结果）
-        3. 原声保留拼接
-        4. 封面生成
+        执行完整的原片直剪流水线
+
+        Args:
+            video_paths: 输入视频路径列表（多集）
+            output_path: 输出文件路径（可选，默认自动生成）
+            target_duration: 目标时长（秒，可选，默认使用配置）
+
+        Returns:
+            输出文件路径
         """
-        from app.services.generate_video import merge_materials
-        from app.utils import ffmpeg_utils
-        
-        output_filename = f"dramaclip_directcut_{task_id}.mp4"
-        output_path = os.path.join(output_dir, output_filename)
-        
-        if not segments:
-            return {"output_path": output_path, "error": "no_segments"}
-        
-        # ===== 1. 逐片段竖屏裁剪 =====#
-        crop_dir = os.path.join(output_dir, "cropped")
-        os.makedirs(crop_dir, exist_ok=True)
-        
-        cropped_paths = []
-        for i, seg in enumerate(segments):
-            if progress_callback:
-                progress_callback((i + 1) / len(segments), f"竖屏裁剪 {i+1}/{len(segments)}...")
-            
-            cropped_path = os.path.join(crop_dir, f"crop_{seg.segment_id}.mp4")
-            
+        if not video_paths:
+            raise ValueError("No video paths provided")
+
+        target_duration = target_duration or self.default_duration
+
+        logger.info(f"Starting DirectCutPipeline with {len(video_paths)} videos")
+        logger.info(f"Target duration: {target_duration}s")
+
+        # 1. 场景检测
+        logger.info("Step 1: Scene detection")
+        scenes = self._detect_scenes(video_paths)
+
+        # 2. 高光打分
+        logger.info("Step 2: Highlight scoring")
+        scored_segments = self._score_scenes(scenes)
+
+        # 3. 高光选择
+        logger.info("Step 3: Highlight selection")
+        selected_segments = self._select_highlights(
+            scored_segments, target_duration
+        )
+
+        # 4. 智能排序
+        logger.info("Step 4: Intelligent sorting")
+        sorted_segments = self._sort_segments(selected_segments)
+
+        # 5. 视频剪辑和拼接
+        logger.info("Step 5: Video cutting and concatenation")
+        if output_path is None:
+            output_path = self._generate_output_path(video_paths[0])
+
+        final_path = self._cut_and_concat(sorted_segments, output_path)
+
+        logger.info(f"Pipeline completed: {final_path}")
+        return final_path
+
+    def _detect_scenes(
+        self, video_paths: List[str]
+    ) -> List[Tuple[str, float, float]]:
+        """
+        场景检测
+
+        Args:
+            video_paths: 视频路径列表
+
+        Returns:
+            [(video_path, start_time, end_time), ...]
+        """
+        scenes = []
+
+        for video_path in video_paths:
+            logger.info(f"Detecting scenes in: {video_path}")
+
             try:
-                # 人脸居中裁剪为 1080x1920 (9:16)
-                # 优先使用 clip_path（裁剪片段），否则用原始 video_path
-                input_video = getattr(seg, 'clip_path', None) or seg.video_path
-                success = ffmpeg_utils.crop_to_portrait_face_centered(
-                    input_path=input_video,
-                    output_path=cropped_path,
-                    target_width=1080,
-                    target_height=1920,
+                # 使用PySceneDetect检测场景
+                scene_list = detect_scenes(
+                    video_path, threshold=self.scene_threshold
                 )
-                if success and os.path.exists(cropped_path):
-                    cropped_paths.append({
-                        "path": cropped_path,
-                        "segment": seg,
-                    })
+
+                # 转换为(start_time, end_time)列表
+                for scene in scene_list:
+                    start_time = scene[0].get_seconds()
+                    end_time = scene[1].get_seconds()
+
+                    # 过滤太短或太长的场景
+                    duration = end_time - start_time
+                    if duration < self.min_scene_len:
+                        continue
+                    if duration > self.max_scene_len:
+                        # 截断到最大长度
+                        end_time = start_time + self.max_scene_len
+                        duration = self.max_scene_len
+
+                    scenes.append((video_path, start_time, end_time))
+
+                logger.info(
+                    f"Detected {len(scene_list)} scenes in {video_path}"
+                )
+
+            except Exception as e:
+                logger.error(f"Error detecting scenes in {video_path}: {e}")
+                # 降级：将整个视频作为一个场景
+                cap = cv2.VideoCapture(video_path)
+                if cap.isOpened():
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                    duration = frame_count / fps if fps > 0 else 0
+                    cap.release()
+                    scenes.append((video_path, 0.0, duration))
                 else:
-                    # fallback：简单居中裁剪
-                    fallback_path = cropped_path.replace(".mp4", "_fallback.mp4")
-                    ffmpeg_utils.crop_to_portrait_centered(
-                        seg.video_path,
-                        fallback_path,
-                        width=1080,
-                        height=1920,
-                    )
-                    if os.path.exists(fallback_path):
-                        cropped_paths.append({"path": fallback_path, "segment": seg})
-                        
-            except Exception as e:
-                logger.warning(f"裁剪失败 ({seg.segment_id}): {e}, 使用原始片段")
-                cropped_paths.append({"path": seg.video_path, "segment": seg})
-        
-        if not cropped_paths:
-            return {"output_path": output_path, "error": "no_cropped_segments"}
-        
-        # ===== 2. 合并所有片段 =====#
-        concat_list_path = os.path.join(output_dir, f"concat_list_{task_id}.txt")
-        with open(concat_list_path, 'w', encoding='utf-8') as f:
-            for item in cropped_paths:
-                f.write(f"file '{item['path']}'\n")
-        
-        merged_path = os.path.join(output_dir, f"merged_{task_id}.mp4")
-        if not ffmpeg_utils.concat_videos(concat_list_path, merged_path):
-            return {"output_path": output_path, "error": "concat_failed"}
-        
-        # ===== 3. 音量均衡处理 =====#
-        normalized_path = os.path.join(output_dir, f"normalized_{task_id}.mp4")
-        try:
-            from app.services.audio_normalizer import AudioNormalizer
-            normalizer = AudioNormalizer()
-            normalizer.normalize_audio_lufs(merged_path, normalized_path)
-        except Exception as e:
-            logger.warning(f"音量均衡处理失败（跳过）: {e}")
-        
-        # 如果归一化成功则使用，否则用合并版本
-        final_video = normalized_path if os.path.exists(normalized_path) else merged_path
-        
-        # ===== 4. 字幕叠加（如果有ASR字幕）=====#
-        # 收集所有片段的字幕并合并
-        srt_merged = self._merge_subtitles(segments, output_dir, task_id)
-        
-        if srt_merged and os.path.exists(srt_merged):
-            subtitled_path = os.path.join(output_dir, f"subtitled_{task_id}.mp4")
+                    logger.warning(f"Cannot open video: {video_path}")
+
+        logger.info(f"Total scenes detected: {len(scenes)}")
+        return scenes
+
+    def _score_scenes(
+        self, scenes: List[Tuple[str, float, float]]
+    ) -> List[Dict]:
+        """
+        对场景进行高光打分
+
+        Args:
+            scenes: [(video_path, start_time, end_time), ...]
+
+        Returns:
+            打分结果列表，每个元素包含各维度分数
+        """
+        scored = []
+
+        for video_path, start_time, end_time in scenes:
+            # 提取场景片段（临时文件）
+            temp_path = self._extract_scene(video_path, start_time, end_time)
+
             try:
-                merge_materials(
-                    video_path=final_video,
-                    audio_path="",  # 视频自带音频
-                    output_path=subtitled_path,
-                    subtitle_path=srt_merged,
-                    options={
-                        "keep_original_audio": True,
-                        "original_audio_volume": 1.0,
-                        "subtitle_enabled": True,
-                        "subtitle_font_size": 40,
-                        "subtitle_color": "#FFFFFF",
-                        "stroke_color": "#000000",
-                        "stroke_width": 2,
-                        "subtitle_position": "bottom",
-                        "fps": 25,
-                    }
-                )
-                if os.path.exists(subtitled_path):
-                    final_video = subtitled_path
-            except Exception as e:
-                logger.warning(f"字幕叠加失败: {e}，使用无字幕版本")
-        
-        # ===== 5. 复制到最终输出路径 =====#
-        import shutil
-        shutil.copy2(final_video, output_path)
-        
-        # ===== 6. 生成封面 =====#
-        cover_path = self._generate_cover(segments, output_dir, task_id)
-        
-        return {
-            "output_path": output_path,
-            "cover_path": cover_path,
-            "segments_processed": len(segments),
-        }
-    
-    def _merge_subtitles(self, 
-                          segments: List[SceneSegment],
-                          output_dir: str,
-                          task_id: str) -> Optional[str]:
-        """合并所有选中片段的字幕为统一SRT文件"""
-        # 直接用简单的 SRT 拼接方式，避免依赖 subtitle_merger 的复杂接口
-        srt_files = []
-        time_offset = 0.0
-        
-        for seg in segments:
-            if seg.subtitle_srt_path and os.path.exists(seg.subtitle_srt_path):
-                srt_files.append(seg.subtitle_srt_path)
-            elif seg.subtitle_text:
-                # 从文本创建临时SRT
-                temp_srt = os.path.join(output_dir, f"temp_sub_{seg.segment_id}.srt")
-                self._create_simple_srt(seg.subtitle_text, time_offset, seg.duration, temp_srt)
-                srt_files.append(temp_srt)
-            
-            time_offset += seg.duration
-        
-        if not srt_files:
-            return None
-        
-        merged_path = os.path.join(output_dir, f"merged_subs_{task_id}.srt")
-        
+                # 打分
+                score_dict = self.scorer.score(temp_path)
+                # 嵌入场景元数据，用于后续重建HighlightSegment
+                score_dict["video_path"] = video_path
+                score_dict["start_time"] = start_time
+                score_dict["end_time"] = end_time
+                scored.append(score_dict)
+            finally:
+                # 清理临时文件
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+
+        return scored
+
+    def _extract_scene(
+        self, video_path: str, start_time: float, end_time: float
+    ) -> str:
+        """
+        提取场景片段为临时文件
+
+        Returns:
+            临时文件路径
+        """
+        temp_path = f"/tmp/scene_{start_time:.1f}_{end_time:.1f}.mp4"
+
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            video_path,
+            "-ss",
+            str(start_time),
+            "-t",
+            str(end_time - start_time),
+            "-c",
+            "copy",
+            temp_path,
+        ]
+
         try:
-            # 手动合并 SRT 文件（按时间偏移拼接）
-            self._concat_srt_files(srt_files, merged_path)
-            return merged_path if os.path.exists(merged_path) else None
-        except Exception as e:
-            logger.warning(f"字幕合并失败: {e}")
-            return None
-    
-    def _concat_srt_files(self, srt_files: List[str], output_path: str):
-        """手动拼接多个 SRT 文件，处理时间偏移"""
-        # 使用公共 SRT 工具函数
-        concat_srt_files(srt_files, output_path)
-    
-    def _parse_srt_time(self, srt_time_str: str) -> float:
-        """将 SRT 时间字符串转换为秒数（委托给公共模块）"""
-        return parse_srt_time(srt_time_str)
-    
-    def _create_simple_srt(self, text: str, start: float, duration: float, output_path: str):
-        """创建简单的SRT字幕文件（委托给公共模块）"""
-        create_simple_srt(text, start, duration, output_path)
-    
-    @staticmethod
-    def _seconds_to_srt_time(seconds: float) -> str:
-        """将秒数转换为 SRT 时间字符串（委托给公共模块）"""
-        return seconds_to_srt_time(seconds)
-    
-    def _generate_cover(self, 
-                         segments: List[SceneSegment],
-                         output_dir: str,
-                         task_id: str) -> Optional[str]:
-        """从得分最高的片段帧生成封面（使用公共工具函数）"""
-        return generate_video_cover(segments, output_dir, task_id)
-    
-    def _get_temp_dir(self) -> str:
-        """获取临时工作目录"""
-        from app.utils import utils
-        base = utils.temp_dir()
-        work_dir = os.path.join(base, "dramaclip_work")
-        os.makedirs(work_dir, exist_ok=True)
-        return work_dir
+            subprocess.run(cmd, check=True, capture_output=True)
+            return temp_path
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error extracting scene: {e}")
+            raise
+
+    def _select_highlights(
+        self,
+        scored_segments: List[Dict],
+        target_duration: int,
+    ) -> List[HighlightSegment]:
+        """
+        选择高光片段
+
+        Args:
+            scored_segments: 打分结果列表
+            target_duration: 目标时长（秒）
+
+        Returns:
+            选中的高光片段列表
+        """
+        # 构建HighlightSegment对象列表
+        segments = []
+        for score_dict in scored_segments:
+            seg = HighlightSegment(
+                video_path=score_dict.get("video_path", ""),
+                start_time=score_dict.get("start_time", 0.0),
+                end_time=score_dict.get("end_time", 0.0),
+                score=score_dict.get("total_score", 0.0),
+                audio_score=score_dict.get("audio_score", 0.0),
+                emotion_score=score_dict.get("emotion_score", 0.0),
+                visual_score=score_dict.get("visual_score", 0.0),
+                rhythm_score=score_dict.get("rhythm_score", 0.0),
+            )
+            segments.append(seg)
+
+        # 调用selector
+        return self.selector.select(segments, target_duration)
+
+    def _sort_segments(
+        self, segments: List[HighlightSegment]
+    ) -> List[HighlightSegment]:
+        """
+        智能排序
+
+        Args:
+            segments: 高光片段列表
+
+        Returns:
+            排序后的高光片段列表
+        """
+        return self.sorter.sort(segments)
+
+    def _cut_and_concat(
+        self, segments: List[HighlightSegment], output_path: str
+    ) -> str:
+        """
+        视频剪辑和拼接
+
+        Args:
+            segments: 排序后的高光片段列表
+            output_path: 输出文件路径
+
+        Returns:
+            输出文件路径
+        """
+        # 1. 切割每个片段
+        cut_paths = []
+        for i, seg in enumerate(segments):
+            cut_path = f"/tmp/cut_{i:03d}.mp4"
+            self._cut_segment(seg, cut_path)
+            cut_paths.append(cut_path)
+
+        # 2. 转换为竖屏（9:16）
+        portrait_paths = []
+        for i, cut_path in enumerate(cut_paths):
+            portrait_path = f"/tmp/portrait_{i:03d}.mp4"
+            self._to_portrait(cut_path, portrait_path)
+            portrait_paths.append(portrait_path)
+
+        # 3. 拼接所有片段
+        self._concat_videos(portrait_paths, output_path)
+
+        # 4. 清理临时文件
+        for path in cut_paths + portrait_paths:
+            if os.path.exists(path):
+                os.remove(path)
+
+        logger.info(f"Video saved to: {output_path}")
+        return output_path
+
+    def _cut_segment(self, seg: HighlightSegment, output_path: str):
+        """切割视频片段"""
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            seg.video_path,
+            "-ss",
+            str(seg.start_time),
+            "-t",
+            str(seg.duration),
+            "-c",
+            "copy",
+            output_path,
+        ]
+
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error cutting segment: {e}")
+            raise
+
+    def _to_portrait(self, input_path: str, output_path: str):
+        """
+        横屏转竖屏（9:16）
+
+        策略：
+        1. 检测画面中的人脸/主体位置
+        2. 智能裁剪到9:16
+        """
+        # 简化实现：直接裁剪到9:16（居中裁剪）
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            input_path,
+            "-vf",
+            "crop=in_h*9/16:in_h:(in_w-in_h*9/16)/2:0",
+            "-c",
+            "a copy",
+            output_path,
+        ]
+
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error converting to portrait: {e}")
+            raise
+
+    def _concat_videos(self, video_paths: List[str], output_path: str):
+        """
+        拼接多个视频片段
+
+        Args:
+            video_paths: 视频片段路径列表
+            output_path: 输出文件路径
+        """
+        # 创建临时列表文件
+        list_file = "/tmp/concat_list.txt"
+        with open(list_file, "w") as f:
+            for path in video_paths:
+                f.write(f"file '{path}'\n")
+
+        # 拼接
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            list_file,
+            "-c",
+            "copy",
+            output_path,
+        ]
+
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error concatenating videos: {e}")
+            raise
+        finally:
+            # 清理列表文件
+            if os.path.exists(list_file):
+                os.remove(list_file)
+
+    def _generate_output_path(self, reference_path: str) -> str:
+        """生成输出文件路径"""
+        import os
+        from datetime import datetime
+
+        base_dir = os.path.dirname(reference_path)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return os.path.join(base_dir, f"dramaclip_output_{timestamp}.mp4")
+
+    def set_sort_strategy(self, strategy: SortStrategy):
+        """设置排序策略"""
+        self.sorter.set_strategy(strategy)

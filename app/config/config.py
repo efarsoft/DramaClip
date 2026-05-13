@@ -114,10 +114,10 @@ hostname = socket.gethostname()
 log_level = _cfg.get("log_level", "DEBUG")
 listen_host = _cfg.get("listen_host", "0.0.0.0")
 listen_port = _cfg.get("listen_port", 8080)
-project_name = _cfg.get("project_name", "NarratoAI")
+project_name = _cfg.get("project_name", "DramaClip")
 project_description = _cfg.get(
     "project_description",
-    "<a href='https://github.com/linyqh/NarratoAI'>https://github.com/linyqh/NarratoAI</a>",
+    "<a href='https://github.com/dramaclip/DramaClip'>DramaClip</a>",
 )
 # 从文件读取版本号，而不是从配置文件中获取
 project_version = get_version_from_file()

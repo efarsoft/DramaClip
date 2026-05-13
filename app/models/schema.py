@@ -1,6 +1,6 @@
 """
 DramaClip - 数据模型定义
-基于 NarratoAI schema 扩展，增加短剧高光剪辑专用模型
+基于原始 schema 扩展，增加短剧高光剪辑专用模型
 """
 
 from enum import Enum
@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 
 # ============================================
-# 原有模型（从 NarratoAI 保留）
+# 原有模型（保留）
 # ============================================
 
 class VideoAspect(str, Enum):

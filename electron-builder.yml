@@ -1,0 +1,38 @@
+appId: com.dramaclip.app
+productName: DramaClip
+directories:
+  buildResources: build
+  output: release
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - resources/**/*
+  - "!node_modules/**/*"
+extraResources:
+  - from: resources/
+    to: resources/
+    filter:
+      - "**/*"
+asar: true
+asarUnpack:
+  - "**/*.exe"
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: true
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: DramaClip
+extraMetadata:
+  main: dist-electron/main/app.js
+publish: null

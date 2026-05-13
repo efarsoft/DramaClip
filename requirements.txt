@@ -1,12 +1,10 @@
-# ============================================
-# DramaClip 短剧自动高光剪辑系统 - 依赖列表
-# ============================================
+# DramaClip 短剧自动高光剪辑系统 - Python 后端依赖
+# 使用: pip install -r requirements.txt
 
 # ----- 核心依赖 -----
 requests>=2.32.0
 moviepy==2.1.1
 edge-tts==7.2.7
-streamlit>=1.45.0
 watchdog==6.0.0
 loguru>=0.7.3
 tomli>=2.2.1
@@ -24,15 +22,11 @@ azure-cognitiveservices-speech>=1.37.0
 tencentcloud-sdk-python>=3.0.1200
 
 # ----- 高光分析核心依赖 -----
-# 镜头分割
-scenedetect>=0.7
-# 音频分析（音频爆点检测）
-librosa>=0.10.0
-soundfile>=0.12.0
-# 图像处理（人脸检测、画面特征）
-opencv-python>=4.11.0.86
-# 中文NLP（台词情绪分析）
-jieba>=0.42.1
+scenedetect>=0.7        # 镜头分割
+librosa>=0.10.0         # 音频爆点检测
+soundfile>=0.12.0       # 音频文件读写
+opencv-python>=4.11.0.86   # 人脸检测、画面特征
+jieba>=0.42.1           # 中文NLP台词情绪分析
 
 # ----- 可选依赖（按需取消注释）-----
 # faster-whisper>=1.0.1      # 本地语音识别

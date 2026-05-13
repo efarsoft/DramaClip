@@ -1,0 +1,58 @@
+/**
+ * 全局 CSS 变量
+ */
+
+:root {
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-size-base: 14px;
+  
+  /* 深色科技主题 */
+  --text-color: #e0e6f0;
+  --background-color: #0a0e1a;
+  --sidebar-bg: #0d1128;
+  --card-bg: #131829;
+  --border-color: #1e2540;
+  
+  /* Primary 色 - 科技青 */
+  --primary-color: #00d4ff;
+  --primary-hover: #33ddff;
+  --primary-active: #00b8d9;
+  
+  /* 发光效果 */
+  --glow-primary: 0 0 8px rgba(0, 212, 255, 0.3), 0 0 20px rgba(0, 212, 255, 0.15);
+  --glow-primary-lg: 0 0 12px rgba(0, 212, 255, 0.5), 0 0 30px rgba(0, 212, 255, 0.25);
+  
+  /* 滚动条 */
+  --scrollbar-track-bg: rgba(255, 255, 255, 0.03);
+  --scrollbar-thumb-bg: rgba(255, 255, 255, 0.12);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.2);
+  --scrollbar-thumb-border: rgba(255, 255, 255, 0.05);
+}
+
+/* ===== 深色滚动条样式 ===== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track-bg);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb-bg);
+  border: 1px solid var(--scrollbar-thumb-border);
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* Firefox 滚动条 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb-bg) var(--scrollbar-track-bg);
+}

@@ -1,4 +1,4 @@
-"""Shared config defaults used by both bootstrap and WebUI fallbacks."""
+"""Shared config defaults for DramaClip backend bootstrap."""
 
 DEFAULT_OPENAI_COMPATIBLE_BASE_URL = "https://api.siliconflow.cn/v1"
 DEFAULT_OPENAI_COMPATIBLE_PROVIDER = "openai"

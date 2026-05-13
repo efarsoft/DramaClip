@@ -111,7 +111,7 @@ def analyze_subtitle(
         )
 
         # 解析JSON响应
-        from webui.tools.generate_short_summary import parse_and_fix_json
+        from app.utils.json_utils import parse_and_fix_json
         summary_data = parse_and_fix_json(response)
 
         if not summary_data:

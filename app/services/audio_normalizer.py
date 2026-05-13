@@ -2,7 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 '''
-@Project: NarratoAI
+@Project: DramaClip
 @File   : audio_normalizer
 @Author : Viccy同学
 @Date   : 2025/1/7 

@@ -1,0 +1,639 @@
+/**
+ * 深色科技感全局样式
+ * 配色：bg: #0a0e1a | primary: #00d4ff 青色发光 | accent: #7c3aed 紫色 | surface: #131829
+ */
+
+@import './variables.css';
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700&display=swap');
+
+/* ===== 深色科技感变量覆盖 ===== */
+:root {
+  --background-color: #0a0e1a;
+  --surface-color: #131829;
+  --text-color: #e0e6ed;
+  --text-color-secondary: #8892a4;
+  --primary-color: #00d4ff;
+  --accent-color: #7c3aed;
+  --border-color: rgba(0, 212, 255, 0.15);
+  --glow-cyan: 0 0 15px rgba(0, 212, 255, 0.4), 0 0 30px rgba(0, 212, 255, 0.15);
+  --glow-purple: 0 0 15px rgba(124, 58, 237, 0.4), 0 0 30px rgba(124, 58, 237, 0.15);
+  --font-family: 'Orbitron', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-family-tech: 'Orbitron', monospace;
+  --scrollbar-track-bg: rgba(10, 14, 26, 0.8);
+  --scrollbar-thumb-bg: rgba(0, 212, 255, 0.2);
+  --scrollbar-thumb-hover: rgba(0, 212, 255, 0.4);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+/* ===== 字体监听：科技感 Orbitron 加载 ===== */
+
+/* Orbitron 字体加载完成后再应用 */
+.font-loaded body,
+.font-loaded * {
+  font-family: var(--font-family) !important;
+}
+
+/* Orbitron 加载检测脚本注入 */
+body::before {
+  content: '';
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* ===== HTML / Body / Root ===== */
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-family);
+  font-size: var(--font-size-base, 14px);
+  color: var(--text-color);
+  background-color: var(--background-color);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  position: relative;
+}
+
+/* 背景网格装饰层 */
+body::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image:
+    linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ===== 暗色发光滚动条 ===== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track-bg);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb-bg);
+  border-radius: 4px;
+  transition: background 0.3s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  box-shadow: var(--glow-cyan);
+}
+
+/* ===== 选中文字样式 ===== */
+::selection {
+  background-color: rgba(0, 212, 255, 0.3);
+  color: #fff;
+}
+
+/* ===== 科技感发光特效 ===== */
+
+/* 全局发光按钮 */
+.glow-button,
+button:hover,
+.ant-btn-primary:hover,
+.ant-btn:hover {
+  box-shadow: var(--glow-cyan) !important;
+}
+
+/* 卡片发光边框 */
+.ant-card {
+  background: var(--surface-color) !important;
+  border: 1px solid var(--border-color) !important;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.ant-card:hover {
+  box-shadow: var(--glow-cyan) !important;
+  border-color: rgba(0, 212, 255, 0.4) !important;
+}
+
+/* 输入框聚焦发光 */
+.ant-input:focus,
+.ant-input-number:focus,
+.ant-input-affix-wrapper:focus {
+  border-color: var(--primary-color) !important;
+  box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.2) !important;
+}
+
+/* 下拉菜单暗色背景 */
+.ant-select-dropdown {
+  background: var(--surface-color) !important;
+  border: 1px solid var(--border-color) !important;
+  box-shadow: var(--glow-cyan) !important;
+}
+
+/* 模态框暗色主题 */
+.ant-modal-content {
+  background: var(--surface-color) !important;
+  border: 1px solid var(--border-color) !important;
+}
+
+.ant-modal-title,
+.ant-modal-header {
+  background: transparent !important;
+  color: var(--text-color) !important;
+}
+
+/* 消息提示暗色主题 */
+.ant-message-notice-content {
+  background: var(--surface-color) !important;
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+/* Tooltip 暗色主题 */
+.ant-tooltip-inner {
+  background: var(--surface-color) !important;
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+/* 通知弹窗暗色主题 */
+.ant-notification-notice {
+  background: var(--surface-color) !important;
+  border: 1px solid var(--border-color) !important;
+}
+
+.ant-notification-notice-icon,
+.ant-notification-notice-message {
+  color: var(--text-color) !important;
+}
+
+/* Dropdown 下拉菜单暗色主题 */
+.ant-dropdown-menu {
+  background: var(--surface-color) !important;
+  border: 1px solid var(--border-color) !important;
+}
+
+.ant-dropdown-menu-item {
+  color: var(--text-color) !important;
+}
+
+.ant-dropdown-menu-item:hover {
+  background: rgba(0, 212, 255, 0.1) !important;
+}
+
+/* Select 下拉暗色主题 */
+.ant-select-selector {
+  background: var(--surface-color) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+.ant-select-selection-item {
+  color: var(--text-color) !important;
+}
+
+/* Checkbox / Radio 暗色主题 */
+.ant-checkbox-inner,
+.ant-radio-inner {
+  border-color: var(--border-color) !important;
+  background: var(--surface-color) !important;
+}
+
+.ant-checkbox-checked .ant-checkbox-inner,
+.ant-radio-checked .ant-radio-inner {
+  background-color: var(--primary-color) !important;
+  border-color: var(--primary-color) !important;
+}
+
+/* Switch 开关暗色主题 */
+.ant-switch {
+  background: rgba(0, 212, 255, 0.25) !important;
+}
+
+.ant-switch-checked {
+  background: var(--primary-color) !important;
+}
+
+/* Tabs 暗色主题 */
+.ant-tabs-tab {
+  color: var(--text-color-secondary) !important;
+}
+
+.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--primary-color) !important;
+}
+
+.ant-tabs-ink-bar {
+  background: var(--primary-color) !important;
+  box-shadow: var(--glow-cyan) !important;
+}
+
+.ant-tabs-tab:hover {
+  color: var(--primary-color) !important;
+}
+
+/* Radio Group 暗色主题 */
+.ant-radio-wrapper {
+  color: var(--text-color) !important;
+}
+
+/* Spin 加载暗色主题 */
+.ant-spin-dot-item {
+  background-color: var(--primary-color) !important;
+}
+
+/* Divider 分割线暗色主题 */
+.ant-divider {
+  border-color: var(--border-color) !important;
+}
+
+/* Table 表格暗色主题 */
+.ant-table {
+  background: transparent !important;
+  color: var(--text-color) !important;
+}
+
+.ant-table-thead > tr > th {
+  background: rgba(19, 24, 41, 0.8) !important;
+  color: var(--text-color) !important;
+  border-color: var(--border-color) !important;
+}
+
+.ant-table-tbody > tr > td {
+  background: transparent !important;
+  color: var(--text-color) !important;
+  border-color: var(--border-color) !important;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background: rgba(0, 212, 255, 0.08) !important;
+}
+
+.ant-table-pagination-wrapper {
+  background: transparent !important;
+}
+
+/* Pagination 分页暗色主题 */
+.ant-pagination-item {
+  background: var(--surface-color) !important;
+  border-color: var(--border-color) !important;
+}
+
+.ant-pagination-item a {
+  color: var(--text-color) !important;
+}
+
+.ant-pagination-item-active {
+  border-color: var(--primary-color) !important;
+}
+
+.ant-pagination-item-active a {
+  color: var(--primary-color) !important;
+}
+
+.ant-pagination-prev button,
+.ant-pagination-next button {
+  background: var(--surface-color) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+/* Collapse 折叠面板暗色主题 */
+.ant-collapse {
+  background: transparent !important;
+  border-color: var(--border-color) !important;
+}
+
+.ant-collapse-item {
+  border-color: var(--border-color) !important;
+}
+
+.ant-collapse-header {
+  color: var(--text-color) !important;
+}
+
+/* Drawer 抽屉暗色主题 */
+.ant-drawer-content {
+  background: var(--surface-color) !important;
+}
+
+.ant-drawer-header {
+  background: var(--surface-color) !important;
+  border-bottom-color: var(--border-color) !important;
+}
+
+.ant-drawer-title {
+  color: var(--text-color) !important;
+}
+
+/* Tag 标签暗色主题 */
+.ant-tag {
+  background: var(--surface-color) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+/* Badge 徽章暗色主题 */
+.ant-badge-count {
+  background: var(--primary-color) !important;
+  box-shadow: var(--glow-cyan) !important;
+}
+
+/* Statistic 统计数字暗色主题 */
+.ant-statistic-title {
+  color: var(--text-color-secondary) !important;
+}
+
+.ant-statistic-content {
+  color: var(--text-color) !important;
+}
+
+/* Avatar 头像暗色主题 */
+.ant-avatar {
+  background: var(--accent-color) !important;
+}
+
+/* Progress 进度条暗色主题 */
+.ant-progress-bg {
+  background: linear-gradient(90deg, var(--primary-color), var(--accent-color)) !important;
+  box-shadow: var(--glow-cyan) !important;
+}
+
+.ant-progress-text {
+  color: var(--text-color) !important;
+}
+
+/* Tree 树形暗色主题 */
+.ant-tree {
+  background: transparent !important;
+  color: var(--text-color) !important;
+}
+
+.ant-tree-node-content-wrapper:hover {
+  background: rgba(0, 212, 255, 0.08) !important;
+}
+
+/* Mentions / AutoComplete 暗色主题 */
+.ant-mentions {
+  background: var(--surface-color) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+/* Date Picker 暗色主题 */
+.ant-picker {
+  background: var(--surface-color) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+.ant-picker-suffix,
+.ant-picker-clear {
+  color: var(--text-color-secondary) !important;
+}
+
+/* Upload 上传暗色主题 */
+.ant-upload {
+  color: var(--text-color-secondary) !important;
+}
+
+.ant-upload-drag {
+  background: var(--surface-color) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Layout 布局 */
+.ant-layout {
+  background: var(--background-color) !important;
+  color: var(--text-color) !important;
+}
+
+.ant-layout-header {
+  background: var(--surface-color) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+.ant-layout-footer {
+  background: var(--surface-color) !important;
+  border-top: 1px solid var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+.ant-layout-sider {
+  background: var(--surface-color) !important;
+  border-right: 1px solid var(--border-color) !important;
+}
+
+.ant-layout-sider-trigger {
+  background: rgba(0, 212, 255, 0.1) !important;
+  border-top: 1px solid var(--border-color) !important;
+  color: var(--primary-color) !important;
+}
+
+/* Menu 菜单 */
+.ant-menu {
+  background: transparent !important;
+  color: var(--text-color) !important;
+}
+
+.ant-menu-dark,
+.ant-menu-dark .ant-menu-sub {
+  background: transparent !important;
+}
+
+.ant-menu-dark .ant-menu-inline {
+  border-right-color: transparent !important;
+}
+
+.ant-menu-item-selected {
+  background-color: rgba(0, 212, 255, 0.15) !important;
+}
+
+.ant-menu-item-selected .ant-menu-item-icon,
+.ant-menu-item-selected span {
+  color: var(--primary-color) !important;
+}
+
+.ant-menu-item:hover,
+.ant-menu-item-active {
+  background-color: rgba(0, 212, 255, 0.08) !important;
+}
+
+.ant-menu-item-icon,
+.ant-menu-submenu-arrow {
+  color: var(--text-color-secondary) !important;
+}
+
+.ant-menu-item:hover .ant-menu-item-icon,
+.ant-menu-item-active .ant-menu-item-icon {
+  color: var(--primary-color) !important;
+}
+
+/* Slider 滑块暗色主题 */
+.ant-slider-track {
+  background: var(--primary-color) !important;
+  box-shadow: var(--glow-cyan) !important;
+}
+
+.ant-slider-rail {
+  background: rgba(0, 212, 255, 0.15) !important;
+}
+
+.ant-slider-handle::after {
+  box-shadow: var(--glow-cyan) !important;
+}
+
+/* Cascader 级联选择暗色主题 */
+.ant-cascader-picker {
+  background: var(--surface-color) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+/* Transfer 穿梭框暗色主题 */
+.ant-transfer {
+  color: var(--text-color) !important;
+}
+
+.ant-transfer-list-header {
+  background: var(--surface-color) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+/* Empty 空状态暗色主题 */
+.ant-empty-description {
+  color: var(--text-color-secondary) !important;
+}
+
+/* Skeleton 骨架屏暗色主题 */
+.ant-skeleton-paragraph > li {
+  background: rgba(0, 212, 255, 0.1) !important;
+}
+
+/* Comment 评论暗色主题 */
+.ant-comment-content-author-name {
+  color: var(--text-color-secondary) !important;
+}
+
+.ant-comment-content-author-name > span {
+  color: var(--text-color) !important;
+}
+
+/* Comment 头像暗色主题 */
+.ant-comment-avatar {
+  border-color: var(--border-color) !important;
+}
+
+/* Image 图片暗色主题 */
+.ant-image-preview-wrap {
+  background: rgba(0, 0, 0, 0.8) !important;
+}
+
+/* List 列表暗色主题 */
+.ant-list-item {
+  border-bottom-color: var(--border-color) !important;
+}
+
+/* Descriptions 描述列表暗色主题 */
+.ant-descriptions-title {
+  color: var(--text-color) !important;
+}
+
+.ant-descriptions-item-label {
+  color: var(--text-color-secondary) !important;
+  background: rgba(19, 24, 41, 0.5) !important;
+}
+
+.ant-descriptions-item-content {
+  color: var(--text-color) !important;
+}
+
+.ant-descriptions-bordered .ant-descriptions-item-label,
+.ant-descriptions-bordered .ant-descriptions-item-content {
+  border-color: var(--border-color) !important;
+}
+
+/* Watermark 水印暗色主题 */
+.ant-watermark {
+  color: rgba(0, 212, 255, 0.08) !important;
+}
+
+/* Timeline 时间线暗色主题 */
+.ant-timeline-item-tail {
+  border-color: var(--border-color) !important;
+}
+
+.ant-timeline-item-head {
+  background: var(--surface-color) !important;
+}
+
+.ant-timeline-item-head-success {
+  color: #52c41a !important;
+  border-color: #52c41a !important;
+}
+
+.ant-timeline-item-head-error {
+  color: #ff4d4f !important;
+  border-color: #ff4d4f !important;
+}
+
+.ant-timeline-item-head-processing {
+  color: var(--primary-color) !important;
+  border-color: var(--primary-color) !important;
+}
+
+/* Steps 步骤条暗色主题 */
+.ant-steps-item-process .ant-steps-item-icon {
+  background: var(--primary-color) !important;
+  box-shadow: var(--glow-cyan) !important;
+}
+
+.ant-steps-item-process .ant-steps-item-icon > .ant-steps-icon {
+  color: #fff !important;
+}
+
+.ant-steps-item-finish .ant-steps-item-icon > .ant-steps-icon {
+  color: var(--primary-color) !important;
+}
+
+/* Popconfirm 暗色主题 */
+.ant-popconfirm {
+  color: var(--text-color) !important;
+}
+
+/* Transfer 穿梭暗色主题 */
+.ant-transfer-list-content-item-selected {
+  background: rgba(0, 212, 255, 0.15) !important;
+  color: var(--primary-color) !important;
+}
+
+/* ===== 科技感动画关键帧 ===== */
+
+/* AppLayout 标题渐变流动 */
+@keyframes dramaClipGradient {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
