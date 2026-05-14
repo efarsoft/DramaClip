@@ -400,6 +400,7 @@ const SettingsPage: React.FC = () => {
                           { label: 'Edge TTS', value: 'edge' },
                           { label: 'ElevenLabs', value: 'elevenlabs' },
                           { label: 'Fish Speech', value: 'fishspeech' },
+                          { label: 'StyleTTS 2 🎭 (本地/情感)', value: 'styletts2' },
                         ]}
                         style={{ width: '100%' }}
                       />

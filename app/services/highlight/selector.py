@@ -79,14 +79,14 @@ class HighlightSelector:
     def select(
         self,
         segments: List[HighlightSegment],
-        target_duration: int = 30,
+        target_duration: Optional[int] = None,
     ) -> List[HighlightSegment]:
         """
         选择高光片段
 
         Args:
             segments: 候选片段列表
-            target_duration: 目标总时长（秒），用于智能截断
+            target_duration: 目标总时长（秒，可选）。为 None 时不截断，返回所有入选片段
 
         Returns:
             选中的高光片段列表
@@ -181,18 +181,23 @@ class HighlightSelector:
     def _truncate_to_duration(
         self,
         segments: List[HighlightSegment],
-        target_duration: int,
+        target_duration: Optional[int] = None,
     ) -> List[HighlightSegment]:
         """
         智能截断到目标时长
 
         策略：
-        1. 优先保留高分片段
-        2. 如果总时长超过目标，从最低分开始移除
-        3. 尽量保留更多片段（短片段优先保留）
+        1. 如果 target_duration 为 None，不截断，返回所有片段
+        2. 优先保留高分片段
+        3. 如果总时长超过目标，从最低分开始移除
+        4. 尽量保留更多片段（短片段优先保留）
         """
         if not segments:
             return []
+
+        # 不限制时长时，返回所有片段
+        if target_duration is None:
+            return segments
 
         # 计算当前总时长
         total_duration = sum(s.duration for s in segments)
@@ -250,7 +255,7 @@ class HighlightSelector:
         start_times: List[float],
         end_times: List[float],
         subtitle_texts: Optional[List[Optional[str]]] = None,
-        target_duration: int = 30,
+        target_duration: Optional[int] = None,
     ) -> List[HighlightSegment]:
         """
         从打分结果直接选择高光片段

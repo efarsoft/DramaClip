@@ -344,8 +344,16 @@ export class DevApiFallback {
         project.name = newName;
         return { ...project } as T;
       }
-      case 'project.importVideos':
-        return this.mockVideos as T;
+      case 'project.importVideos': {
+        const paths = (params?.paths as string[]) || [];
+        const imported: Episode[] = paths.map((p, i) => ({
+          id: `v-${Date.now()}-${i}`,
+          name: p.split('\\').pop() || p.split('/').pop() || p,
+          path: p,
+        }));
+        this.mockVideos.push(...imported);
+        return imported as T;
+      }
       case 'project.getVideos':
         return this.mockVideos as T;
 
@@ -414,6 +422,10 @@ export class DevApiFallback {
       }
       case 'clip.execute': {
         const taskId = `clip-${Date.now()}`;
+        const durMsg = params?.output_duration
+          ? `, output_duration=${params.output_duration}s`
+          : ', no duration limit';
+        console.log(`[DevFallback] clip.execute: taskId=${taskId}${durMsg}`);
         this.jobTasks[taskId] = {
           status: 'pending',
           progress: 0,

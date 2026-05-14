@@ -190,14 +190,14 @@ class NarrationGenerator:
     def generate(
         self,
         plot_info: Dict,
-        target_duration: int = 30,
+        target_duration: Optional[int] = None,
     ) -> List[Dict]:
         """
         生成解说文案
 
         Args:
             plot_info: 剧情解析结果（来自PlotParser）
-            target_duration: 目标时长（秒）
+            target_duration: 目标时长（秒），None 表示不限制时长
 
         Returns:
             解说文案列表，每个元素包含：
@@ -236,8 +236,16 @@ class NarrationGenerator:
             logger.error(f"Error generating narration: {e}")
             raise
 
-    def _build_prompt(self, plot_info: Dict, target_duration: int) -> str:
+    def _build_prompt(self, plot_info: Dict, target_duration: Optional[int] = None) -> str:
         """构建LLM prompt"""
+        duration_instruction = ""
+        if target_duration is not None:
+            duration_instruction = f"""目标时长：{target_duration}秒
+
+注意：
+3. 时间应该连续，总时长约为{target_duration}秒
+"""
+
         prompt = f"""请为以下短剧生成解说文案：
 
 剧情摘要：
@@ -252,9 +260,7 @@ class NarrationGenerator:
 
         prompt += f"""
 
-目标时长：{target_duration}秒
-
-请生成解说文案，输出以下JSON格式：
+{duration_instruction}请生成解说文案，输出以下JSON格式：
 [
   {{
     "text": "解说文本1",
@@ -274,7 +280,6 @@ class NarrationGenerator:
 注意：
 1. 只输出JSON，不要有任何其他文字
 2. 解说词应该生动、有趣、引人入胜
-3. 时间应该连续，总时长约为{target_duration}秒
 4. emotion可以是：兴奋、紧张、悲伤、愤怒、温馨、搞笑等
 """
 
@@ -304,7 +309,7 @@ class TTSComposer:
 
     def __init__(
         self,
-        engine: str = "edge_tts",
+        engine: str = "styletts2",
         voice: Optional[str] = None,
         rate: float = 1.0,
         volume: int = 80,
@@ -362,6 +367,8 @@ class TTSComposer:
                     self._synthesize_tencent(text, output_path)
                 elif self.engine == "cosyvoice":
                     self._synthesize_cosyvoice(text, output_path)
+                elif self.engine == "styletts2":
+                    self._synthesize_styletts2(text, output_path)
                 else:
                     logger.warning(f"Unknown TTS engine: {self.engine}")
                     continue
@@ -452,6 +459,68 @@ class TTSComposer:
 
         logger.info(f"CosyVoice TTS synthesis completed: {output_path}")
 
+    def _synthesize_styletts2(self, text: str, output_path: str):
+        """使用StyleTTS 2自动情感匹配合成语音（纯本地，无需API）"""
+        try:
+            from styletts2 import tts
+
+            # Read config for model settings
+            styletts2_cfg = {}
+            try:
+                from app.config import config as cfg
+                styletts2_cfg = getattr(cfg, "styletts2", {}) or {}
+            except ImportError:
+                pass
+
+            model_checkpoint = styletts2_cfg.get("model_checkpoint", "")
+            config_path = styletts2_cfg.get("config_path", "")
+            embedding_scale = styletts2_cfg.get("embedding_scale", 1.0)
+            alpha = styletts2_cfg.get("alpha", 0.3)
+            beta = styletts2_cfg.get("beta", 0.7)
+
+            # Cache model as module-level singleton
+            if not hasattr(self, "_styletts2_model"):
+                kwargs = {}
+                if model_checkpoint:
+                    kwargs["model_checkpoint_path"] = model_checkpoint
+                if config_path:
+                    kwargs["config_path"] = config_path
+                logger.info("Loading StyleTTS 2 model (first load downloads ~2GB)...")
+                if kwargs:
+                    self._styletts2_model = tts.StyleTTS2(**kwargs)
+                else:
+                    self._styletts2_model = tts.StyleTTS2()
+                logger.info("StyleTTS 2 model loaded successfully")
+
+            model = self._styletts2_model
+
+            # Parse target voice if specified
+            target_voice_path = None
+            if self.voice and self.voice.startswith("styletts2:"):
+                target_voice_path = self.voice[10:].strip()
+
+            kwargs = {
+                "text": text.strip(),
+                "output_wav_file": output_path,
+                "alpha": alpha,
+                "beta": beta,
+                "embedding_scale": embedding_scale,
+            }
+            if target_voice_path:
+                kwargs["target_voice_path"] = target_voice_path
+            if abs(self.rate - 1.0) > 0.05:
+                kwargs["output_sample_rate"] = int(24000 * self.rate)
+
+            model.inference(**kwargs)
+            logger.info(f"StyleTTS 2 synthesis completed: {output_path}")
+
+        except ImportError:
+            logger.error("styletts2 not installed, run: pip install styletts2")
+            raise
+        except Exception as e:
+            logger.error(f"StyleTTS 2 synthesis failed: {e}")
+            raise
+
 
 class NarrationPipeline:
     """AI解说管道 - 完整流水线"""
@@ -484,8 +553,8 @@ class NarrationPipeline:
 
         ui_config = self.config.get("ui", {})
         self.tts_composer = TTSComposer(
-            engine=ui_config.get("tts_engine", "edge_tts"),
-            voice=ui_config.get("edge_voice_name", "zh-CN-XiaoyiNeural-Female"),
+            engine=ui_config.get("tts_engine", "styletts2"),
+            voice=ui_config.get("styletts2_voice", ""),
             rate=ui_config.get("edge_rate", 1.0),
             volume=ui_config.get("edge_volume", 80),
         )
@@ -499,7 +568,7 @@ class NarrationPipeline:
         self,
         video_paths: List[str],
         output_path: Optional[str] = None,
-        target_duration: int = 30,
+        target_duration: Optional[int] = None,
     ) -> str:
         """
         执行完整的AI解说流水线
@@ -507,7 +576,7 @@ class NarrationPipeline:
         Args:
             video_paths: 输入视频路径列表（多集）
             output_path: 输出文件路径（可选，默认自动生成）
-            target_duration: 目标时长（秒）
+            target_duration: 目标时长（秒，可选）。为 None 时不限制时长
 
         Returns:
             输出文件路径
@@ -516,7 +585,10 @@ class NarrationPipeline:
             raise ValueError("No video paths provided")
 
         logger.info(f"Starting NarrationPipeline with {len(video_paths)} videos")
-        logger.info(f"Target duration: {target_duration}s")
+        if target_duration:
+            logger.info(f"Target duration: {target_duration}s")
+        else:
+            logger.info("Target duration: unlimited")
 
         # 1. 剧情解析
         logger.info("Step 1: Plot parsing")

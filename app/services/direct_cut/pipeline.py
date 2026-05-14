@@ -92,11 +92,9 @@ class DirectCutPipeline:
         if not video_paths:
             raise ValueError("No video paths provided")
 
-        target_duration = target_duration or self.default_duration
-
         logger.info(f"Starting DirectCutPipeline with {len(video_paths)} videos")
-        logger.info(f"Target duration: {target_duration}s")
-
+        if target_duration:
+            logger.info(f"Target duration: {target_duration}s")
         # 1. 场景检测
         logger.info("Step 1: Scene detection")
         scenes = self._detect_scenes(video_paths)

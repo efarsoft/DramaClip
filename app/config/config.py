@@ -83,6 +83,7 @@ def save_config():
         _cfg["tts_qwen"] = tts_qwen
         _cfg["indextts2"] = indextts2
         _cfg["cosyvoice"] = cosyvoice
+        _cfg["styletts2"] = styletts2
         _cfg["frames"] = frames
         # DramaClip 配置段
         _cfg["highlight"] = highlight
@@ -103,6 +104,7 @@ frames = _cfg.get("frames", {})
 tts_qwen = _cfg.get("tts_qwen", {})
 indextts2 = _cfg.get("indextts2", {})
 cosyvoice = _cfg.get("cosyvoice", {})
+styletts2 = _cfg.get("styletts2", {})
 
 # DramaClip: 新增配置段
 highlight = _cfg.get("highlight", {})

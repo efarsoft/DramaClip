@@ -75,6 +75,7 @@ const WorkspacePage: React.FC = () => {
   /* 打开项目 */
   useEffect(() => {
     if (projectId) {
+      setCurrentStep('import');
       openProject(projectId).catch(() => {
         message.error('无法打开项目');
         navigate('/');

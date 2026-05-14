@@ -80,7 +80,7 @@ def _run_ai_narration_pipeline(task_id: str, params: VideoClipParams):
 
         # Read config
         output_cfg = config.output or {}
-        target_duration = getattr(params, 'output_duration', output_cfg.get('default_duration', 30))
+        target_duration = getattr(params, 'output_duration', output_cfg.get('default_duration', None))
 
         logger.info(f"[AI-Narration] Input: {len(video_paths)} episode(s), target={target_duration}s")
 
@@ -168,8 +168,7 @@ def _run_direct_cut_pipeline(task_id: str, params: VideoClipParams):
         # Read config
         highlight_cfg = config.highlight or {}
         output_cfg = config.output or {}
-        target_duration = getattr(params, 'output_duration', output_cfg.get('default_duration', 30))
-        aspect_ratio = output_cfg.get('aspect_ratio', '9:16')
+        target_duration = getattr(params, 'output_duration', output_cfg.get('default_duration', None))
 
         logger.info(f"[Direct-Cut] Input: {len(video_paths)} episode(s), target={target_duration}s")
 

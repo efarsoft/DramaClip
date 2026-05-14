@@ -1,16 +1,22 @@
 /**
  * 导出发布面板 — 项目工作区 Step 5
+ * 集成任务队列，支持排队、重试、取消
  */
-
-import React, { useState, useRef, useEffect } from 'react';
-import { Typography, Button, Card, Space, Progress, Select, message, Tag } from 'antd';
+import React, { useState, useMemo } from 'react';
+import { Typography, Button, Card, Space, Progress, Select, message, Tag, Tooltip, Modal } from 'antd';
 import {
   ExportOutlined,
   CheckCircleFilled,
   FolderOpenOutlined,
+  CloseCircleOutlined,
+  ReloadOutlined,
+  MinusCircleOutlined,
+  LoadingOutlined,
+  ClockCircleOutlined,
+  StopOutlined,
 } from '@ant-design/icons';
 import { useProjectStore } from '../../stores/projectStore';
-import { exportApi } from '../../services/ipc';
+import { useTaskQueueStore, type Task } from '../../stores/taskQueueStore';
 
 const { Title, Text } = Typography;
 const CYAN = '#00d4ff';
@@ -30,78 +36,172 @@ interface Props {
   onComplete?: () => void;
 }
 
+// ── 任务状态徽标 ──
+
+const StatusTag: React.FC<{ status: Task['status'] }> = ({ status }) => {
+  const map: Record<Task['status'], { color: string; icon: React.ReactNode; label: string }> = {
+    queued: { color: '#6b7b9d', icon: <ClockCircleOutlined />, label: '排队中' },
+    running: { color: CYAN, icon: <LoadingOutlined />, label: '导出中' },
+    completed: { color: '#10b981', icon: <CheckCircleFilled />, label: '已完成' },
+    failed: { color: '#ef4444', icon: <CloseCircleOutlined />, label: '失败' },
+    cancelled: { color: '#f59e0b', icon: <MinusCircleOutlined />, label: '已取消' },
+  };
+  const m = map[status];
+  return (
+    <Tag style={{ borderRadius: 6, margin: 0, color: m.color, borderColor: `${m.color}44`, background: `${m.color}11` }}>
+      {m.icon} {m.label}
+    </Tag>
+  );
+};
+
+// ── 单条任务行 ──
+
+const TaskRow: React.FC<{ task: Task; onCancel: (id: string) => void; onRetry: (id: string) => void; onRemove: (id: string) => void }> = ({
+  task,
+  onCancel,
+  onRetry,
+  onRemove,
+}) => {
+  const { activeTaskId } = useTaskQueueStore();
+  const isActive = task.id === activeTaskId;
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        padding: '8px 12px',
+        borderRadius: 8,
+        background: isActive ? 'rgba(0,212,255,0.04)' : 'transparent',
+        border: `1px solid ${isActive ? `${CYAN}22` : 'transparent'}`,
+        transition: 'all 0.2s',
+      }}
+    >
+      {/* 状态 */}
+      <div style={{ flexShrink: 0, width: 72 }}>
+        <StatusTag status={task.status} />
+      </div>
+
+      {/* 进度 / 信息 */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+          <Text style={{ color: '#e0e6ed', fontSize: 13, fontWeight: 500 }} ellipsis>
+            {task.type === 'export' ? '导出' : task.type}
+          </Text>
+          <Text style={{ color: '#4a5a7a', fontSize: 11 }}>{task.phase}</Text>
+        </div>
+        {task.status === 'running' && (
+          <Progress
+            percent={task.progress}
+            strokeColor={{ '0%': CYAN, '100%': PURPLE }}
+            trailColor="rgba(255,255,255,0.05)"
+            size="small"
+            style={{ margin: 0 }}
+          />
+        )}
+        {task.status === 'failed' && task.error && (
+          <Text style={{ color: '#ef4444', fontSize: 11 }}>{task.error}</Text>
+        )}
+        {task.status === 'queued' && (
+          <Text style={{ color: '#4a5a7a', fontSize: 11 }}>
+            {new Date(task.createdAt).toLocaleTimeString('zh-CN')} 加入
+          </Text>
+        )}
+      </div>
+
+      {/* 操作 */}
+      <div style={{ flexShrink: 0, display: 'flex', gap: 4 }}>
+        {task.status === 'running' && (
+          <Tooltip title="取消">
+            <Button
+              size="small"
+              shape="circle"
+              icon={<StopOutlined />}
+              onClick={() => onCancel(task.id)}
+              style={{ border: 'none', color: '#f59e0b' }}
+            />
+          </Tooltip>
+        )}
+        {task.status === 'failed' && (
+          <Tooltip title="重试">
+            <Button
+              size="small"
+              shape="circle"
+              icon={<ReloadOutlined />}
+              onClick={() => onRetry(task.id)}
+              style={{ border: 'none', color: CYAN }}
+            />
+          </Tooltip>
+        )}
+        {(task.status === 'completed' || task.status === 'cancelled') && (
+          <Tooltip title="移除">
+            <Button
+              size="small"
+              shape="circle"
+              icon={<MinusCircleOutlined />}
+              onClick={() => onRemove(task.id)}
+              style={{ border: 'none', color: '#4a5a7a' }}
+            />
+          </Tooltip>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ── 主面板 ──
+
 const ExportPanel: React.FC<Props> = ({ onComplete }) => {
   const { currentProject } = useProjectStore();
   const [preset, setPreset] = useState('1080p');
   const [format, setFormat] = useState('mp4');
-  const [exporting, setExporting] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [done, setDone] = useState(false);
-  const [outputPath, setOutputPath] = useState('');
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
+  const { tasks: allTasks, activeTaskId, enqueue, cancel, retry, remove, clearCompleted, isRunning } = useTaskQueueStore();
   const selectedPreset = PRESETS.find(p => p.value === preset) || PRESETS[0];
 
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, []);
+  // 只显示 export 类型的任务
+  const exportTasks = useMemo(
+    () => allTasks.filter(t => t.type === 'export'),
+    [allTasks],
+  );
+  const activeExport = useMemo(
+    () => exportTasks.find(t => t.id === activeTaskId),
+    [exportTasks, activeTaskId],
+  );
+  const latestCompleted = useMemo(
+    () => exportTasks
+      .filter(t => t.status === 'completed')
+      .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0))[0],
+    [exportTasks],
+  );
 
-  const startExport = async () => {
+  // ── 提交导出任务 ──
+
+  const handleExport = () => {
     if (!currentProject) return;
-    setExporting(true);
-    setDone(false);
-    setProgress(0);
-    try {
-      const result = await exportApi.start(currentProject.id, {
-        format,
-        resolution: selectedPreset.resolution,
-        fps: selectedPreset.fps,
-        bitrate: selectedPreset.bitrate,
-      });
-      setOutputPath(`导出任务: ${result.task_id}`);
-      if (result.task_id) {
-        pollRef.current = setInterval(async () => {
-          try {
-            const status = await exportApi.getProgress(result.task_id);
-            if (status) {
-              setProgress(status.progress || 0);
-              if (status.status === 'completed') {
-                clearInterval(pollRef.current!);
-                pollRef.current = null;
-                setExporting(false);
-                setDone(true);
-                setProgress(100);
-                if (status.output_path) setOutputPath(status.output_path);
-                message.success('导出完成！');
-              } else if (status.status === 'failed') {
-                clearInterval(pollRef.current!);
-                pollRef.current = null;
-                setExporting(false);
-                message.error(status.message || '导出失败');
-              }
-            }
-          } catch (err: any) {
-            clearInterval(pollRef.current!);
-            pollRef.current = null;
-            setExporting(false);
-            message.error(err?.message || '轮询导出状态失败');
-          }
-        }, 1000);
-      }
-    } catch (err: any) {
-      setExporting(false);
-      message.error(err?.message || '导出启动失败');
-    }
+    enqueue('export', currentProject.id, {
+      project_id: currentProject.id,
+      format,
+      resolution: selectedPreset.resolution,
+      fps: selectedPreset.fps,
+      bitrate: selectedPreset.bitrate,
+    });
+    message.success('已加入导出队列');
   };
 
-  const openOutputFolder = async () => {
-    if (outputPath) {
+  // ── 打开输出文件夹（取最近完成任务的输出路径） ──
+
+  const handleOpenOutput = async () => {
+    const completed = exportTasks
+      .filter(t => t.status === 'completed' && t.outputPath)
+      .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0))[0];
+    const outPath = completed?.outputPath;
+    if (outPath) {
+      const dir = String(outPath).replace(/[/\\][^/\\]*$/, '');
       try {
-        await window.electronAPI?.system?.openPath(outputPath);
-      } catch (err) {
-        message.info('输出路径：' + outputPath);
+        await window.electronAPI?.system?.openPath(dir);
+      } catch {
+        message.info('输出路径：' + dir);
       }
     } else {
       message.info('输出路径：默认导出目录');
@@ -127,7 +227,8 @@ const ExportPanel: React.FC<Props> = ({ onComplete }) => {
         <Text style={{ color: '#4a5a7a', fontSize: 13 }}>配置输出参数，生成最终视频</Text>
       </div>
 
-      {!done ? (
+      {/* ── 配置区（有活跃任务时隐藏） ── */}
+      {!activeExport ? (
         <>
           {/* 预设卡片 */}
           <Card style={{
@@ -187,39 +288,58 @@ const ExportPanel: React.FC<Props> = ({ onComplete }) => {
           </Card>
 
           {/* 导出按钮 */}
-          <div style={{ textAlign: 'center' }}>
-            {exporting ? (
-              <div style={{ textAlign: 'center', maxWidth: 400, margin: '0 auto' }}>
-                <Progress
-                  percent={progress}
-                  strokeColor={{ '0%': CYAN, '100%': PURPLE }}
-                  style={{ marginBottom: 8 }}
-                  trailColor="rgba(255,255,255,0.05)"
-                />
-                <Text style={{ color: '#4a5a7a', fontSize: 13 }}>正在导出... {progress}%</Text>
+          <div style={{ textAlign: 'center', marginBottom: 32 }}>
+            <Button
+              type="primary"
+              size="large"
+              onClick={handleExport}
+              disabled={isRunning}
+              icon={<ExportOutlined />}
+              style={{
+                height: 48, borderRadius: 10, padding: '0 48px',
+                background: `linear-gradient(135deg, ${CYAN}, ${PURPLE})`,
+                border: 'none', fontWeight: 600, fontSize: 15, letterSpacing: 1,
+                boxShadow: `0 0 24px ${CYAN}33`,
+              }}
+            >
+              {isRunning ? '队列执行中...' : '开始导出'}
+            </Button>
+            {exportTasks.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <Text style={{ color: '#4a5a7a', fontSize: 12 }}>
+                  队列中有 {exportTasks.filter(t => t.status !== 'completed').length} 个待处理任务
+                </Text>
               </div>
-            ) : (
-              <Button
-                type="primary"
-                size="large"
-                onClick={startExport}
-                icon={<ExportOutlined />}
-                style={{
-                  height: 48, borderRadius: 10, padding: '0 48px',
-                  background: `linear-gradient(135deg, ${CYAN}, ${PURPLE})`,
-                  border: 'none', fontWeight: 600, fontSize: 15, letterSpacing: 1,
-                  boxShadow: `0 0 24px ${CYAN}33`,
-                }}
-              >
-                开始导出
-              </Button>
             )}
           </div>
         </>
       ) : (
-        /* 完成界面 */
+        /* ── 当前任务进度 ── */
         <Card style={{
-          textAlign: 'center', padding: '40px 24px',
+          marginBottom: 24,
+          background: 'rgba(0,212,255,0.03)',
+          borderColor: `${CYAN}22`, borderRadius: 12,
+        }}>
+          <div style={{ textAlign: 'center', marginBottom: 16 }}>
+            <LoadingOutlined style={{ fontSize: 32, color: CYAN }} />
+            <Title level={4} style={{ color: '#e0e6ed', margin: '8px 0 0' }}>正在导出...</Title>
+            <Text style={{ color: '#4a5a7a', fontSize: 13 }}>{activeExport.phase}</Text>
+          </div>
+          <Progress
+            percent={activeExport.progress}
+            strokeColor={{ '0%': CYAN, '100%': PURPLE }}
+            trailColor="rgba(255,255,255,0.05)"
+          />
+          <div style={{ marginTop: 12, textAlign: 'center' }}>
+            <Text style={{ color: '#4a5a7a', fontSize: 13 }}>{activeExport.progress}%</Text>
+          </div>
+        </Card>
+      )}
+
+      {/* ── 已完成状态 ── */}
+      {!activeExport && latestCompleted && (
+        <Card style={{
+          textAlign: 'center', padding: '40px 24px', marginBottom: 24,
           background: 'rgba(16,185,129,0.04)',
           borderColor: 'rgba(16,185,129,0.2)', borderRadius: 16,
         }}>
@@ -229,7 +349,7 @@ const ExportPanel: React.FC<Props> = ({ onComplete }) => {
           <div style={{ marginTop: 20, display: 'flex', justifyContent: 'center', gap: 12 }}>
             <Button
               icon={<FolderOpenOutlined />}
-              onClick={openOutputFolder}
+              onClick={handleOpenOutput}
               style={{ borderRadius: 8, height: 40, borderColor: `${CYAN}44`, color: CYAN }}
             >
               打开输出文件夹
@@ -243,6 +363,43 @@ const ExportPanel: React.FC<Props> = ({ onComplete }) => {
                 完成
               </Button>
             )}
+          </div>
+        </Card>
+      )}
+
+      {/* ── 任务队列列表 ── */}
+      {exportTasks.length > 0 && (
+        <Card
+          style={{
+            background: 'rgba(255,255,255,0.02)',
+            borderColor: 'rgba(255,255,255,0.06)', borderRadius: 12,
+          }}
+          title={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: '#e0e6ed' }}>📋 导出队列</span>
+              <Space size={4}>
+                <Button
+                  size="small"
+                  type="text"
+                  onClick={clearCompleted}
+                  style={{ color: '#4a5a7a', fontSize: 12 }}
+                >
+                  清理已完成
+                </Button>
+              </Space>
+            </div>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {exportTasks.map(task => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                onCancel={cancel}
+                onRetry={retry}
+                onRemove={remove}
+              />
+            ))}
           </div>
         </Card>
       )}

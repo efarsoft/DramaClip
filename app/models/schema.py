@@ -87,10 +87,17 @@ class VideoClipParams(BaseModel):
     voice_volume: float = Field(default=1.0, description="人声音量")
     original_audio_volume: float = Field(default=0.2, description="原声音量(作为背景)")
     original_volume: float = Field(default=0.0, description="原声音量(UI slider用)")
-    tts_engine: str = Field(default="edge_tts", description="TTS引擎")
+    tts_engine: str = Field(default="styletts2", description="TTS引擎")
     voice_rate: float = Field(default=1.0, description="TTS语速")
     voice_pitch: float = Field(default=1.0, description="TTS音调")
     tts_volume: float = Field(default=1.0, description="TTS音量")
+    # StyleTTS 2 情感参数
+    styletts2_embedding_scale: float = Field(default=1.0, description="情感强度(0.5-2.0)")
+    styletts2_alpha: float = Field(default=0.3, description="音色适应度(0-1)")
+    styletts2_beta: float = Field(default=0.7, description="韵律适应度(0-1)")
+    styletts2_voice: str = Field(default="", description="参考语音路径")
+    styletts2_model_checkpoint: str = Field(default="", description="模型路径")
+    styletts2_config_path: str = Field(default="", description="配置文件路径")
     bgm_type: str = Field(default="random", description="BGM类型(random/custom/none)")
     bgm_file: str = Field(default="", description="BGM自定义文件路径")
     
@@ -106,8 +113,8 @@ class VideoClipParams(BaseModel):
     
     # 脚本与模式参数
     script_type: str = Field(default="short", description="脚本类型(short/summary/auto)")
-    target_duration: int = Field(default=30, description="目标时长(秒)")
-    output_duration: int = Field(default=30, description="输出时长(秒)")
+    target_duration: Optional[int] = Field(default=None, description="目标时长(秒)")
+    output_duration: Optional[int] = Field(default=None, description="输出时长(秒)")
     video_language: str = Field(default="", description="视频语言")
     video_name: str = Field(default="", description="视频名称")
     n_threads: int = Field(default=2, description="线程数")

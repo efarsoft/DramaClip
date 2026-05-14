@@ -224,10 +224,10 @@ def analyze_cancel(task_id: str) -> Dict:
 def clip_recommend(project_id: str) -> Dict:
     """获取剪辑方案推荐"""
     return {
-        "recommended_scheme": "highlight",
-        "confidence": 0.85,
+        "recommended_scheme": "original_narration",
+        "confidence": 0.92,
         "reasons": ["多集视频", "对话丰富", "情绪波动大"],
-        "alternatives": ["transition", "narration"]
+        "alternatives": ["hybrid_narration", "full_narration"]
     }
 
 
@@ -235,10 +235,19 @@ def clip_execute(project_id: str, scheme: str, params: Dict[str, Any]) -> Dict:
     """执行剪辑"""
     import uuid
     task_id = str(uuid.uuid4())
-    logger.info(f"Started clip task: {task_id} with scheme: {scheme}")
+
+    # 提取可选的目标时长参数（来自前端滑块）
+    target_duration = params.get("output_duration") or params.get("target_duration")
+    if target_duration is not None:
+        logger.info(f"Clip task {task_id}: scheme={scheme}, target_duration={target_duration}s")
+    else:
+        logger.info(f"Clip task {task_id}: scheme={scheme}, no duration limit")
+
+    # TODO: 启动后台线程运行实际 pipeline，传入 target_duration
     return {
         "task_id": task_id,
-        "status": "running"
+        "status": "running",
+        "target_duration": target_duration,
     }
 
 
@@ -286,8 +295,69 @@ def export_get_progress(task_id: str) -> Dict:
 # 设置
 # ============================================================================
 
+
+def _merge_config_into_settings(settings: Dict) -> None:
+    """从 config.toml 的 [app] 段读取 LLM 配置并合并到 settings"""
+    try:
+        from app.config import config as cfg
+
+        api_key = (
+            cfg.app.get("vision_openai_api_key", "")
+            or cfg.app.get("text_openai_api_key", "")
+        )
+        base_url = (
+            cfg.app.get("vision_openai_base_url", "")
+            or cfg.app.get("text_openai_base_url", "")
+        )
+        vision_model = cfg.app.get("vision_openai_model_name", "")
+        text_model = cfg.app.get("text_openai_model_name", "")
+
+        openai_cfg = settings.setdefault("openai_protocol", {})
+        if api_key and not openai_cfg.get("api_key"):
+            openai_cfg["api_key"] = api_key
+        if base_url and not openai_cfg.get("base_url"):
+            openai_cfg["base_url"] = base_url
+        if text_model and not openai_cfg.get("model"):
+            openai_cfg["model"] = text_model
+        openai_cfg.setdefault("max_tokens", 4096)
+        openai_cfg.setdefault("temperature", 0.7)
+    except Exception:
+        logger.warning("Failed to merge config.toml into settings", exc_info=True)
+
+
+def _sync_settings_to_config(settings: Dict) -> None:
+    """将设置中的 LLM API 配置写回 config.toml"""
+    try:
+        from app.config import config as cfg
+
+        openai_cfg = settings.get("openai_protocol", {})
+        api_key = openai_cfg.get("api_key", "")
+        base_url = openai_cfg.get("base_url", "")
+        model = openai_cfg.get("model", "")
+
+        changed = False
+        if api_key:
+            cfg.app["vision_openai_api_key"] = api_key
+            cfg.app["text_openai_api_key"] = api_key
+            changed = True
+        if base_url:
+            cfg.app["vision_openai_base_url"] = base_url
+            cfg.app["text_openai_base_url"] = base_url
+            changed = True
+        if model:
+            cfg.app["vision_openai_model_name"] = model
+            cfg.app["text_openai_model_name"] = model
+            changed = True
+
+        if changed:
+            cfg.save_config()
+            logger.info("LLM settings synced to config.toml")
+    except Exception:
+        logger.warning("Failed to sync settings to config.toml", exc_info=True)
+
+
 def settings_get() -> Dict:
-    """获取设置（前端 AppSettings 格式）"""
+    """获取设置（从 config.toml 和 settings.json 联合读取）"""
     import json
     from pathlib import Path
 
@@ -295,17 +365,17 @@ def settings_get() -> Dict:
     if settings_file.exists():
         try:
             raw = json.loads(settings_file.read_text(encoding="utf-8"))
-            # 迁移兼容：如果保存的是新版嵌套格式，直接返回
             if "openai_protocol" in raw and "output" in raw and "tts" in raw:
+                # 从 config.toml 覆盖 LLM key/base_url
+                _merge_config_into_settings(raw)
                 return raw
-            # 否则从旧版扁平格式升级
-            logger.info("Migrating settings from flat format to nested format")
             return _upgrade_settings(raw)
         except Exception:
             pass
 
-    # 默认设置（新版嵌套结构）
-    return _default_settings()
+    settings = _default_settings()
+    _merge_config_into_settings(settings)
+    return settings
 
 
 def _default_settings() -> Dict:
@@ -404,9 +474,12 @@ def _upgrade_settings(flat: Dict) -> Dict:
 
 
 def settings_update(settings: Dict[str, Any]) -> Dict:
-    """更新设置"""
+    """更新设置（同步 LLM 配置到 config.toml）"""
     import json
     from pathlib import Path
+
+    # 同步 LLM API 配置到 config.toml
+    _sync_settings_to_config(settings)
 
     settings_file = Path.home() / ".dramaclip" / "settings.json"
     settings_file.parent.mkdir(parents=True, exist_ok=True)
@@ -414,7 +487,7 @@ def settings_update(settings: Dict[str, Any]) -> Dict:
         json.dumps(settings, ensure_ascii=False, indent=2),
         encoding="utf-8"
     )
-    logger.info("Settings updated")
+    logger.info("Settings updated and synced to config.toml")
     return {"success": True}
 
 

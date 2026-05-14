@@ -125,6 +125,34 @@ const HomePage: React.FC = () => {
     }
   };
 
+  /* 打开文件夹（浏览已有项目） */
+  const handleOpenFolder = async () => {
+    try {
+      let folderPath: string | undefined;
+      if (window.electronAPI?.dialog?.openFolder) {
+        const result = await window.electronAPI.dialog.openFolder();
+        folderPath = result?.data;
+      }
+      if (!folderPath) {
+        // 无 Electron API 或用户取消，刷新列表展示已有项目
+        await loadProjects();
+        return;
+      }
+      // 查找该路径是否已有项目
+      const existing = projects.find(p => p.path === folderPath);
+      if (existing) {
+        await handleOpen(existing);
+      } else {
+        // 不在此路径下创建项目，提示用户使用"新建项目"
+        message.info('该文件夹尚未创建项目，请使用「新建项目」');
+        // 刷新列表（可能在外部新增了项目文件）
+        await loadProjects();
+      }
+    } catch (e: any) {
+      message.error(e?.message || '打开文件夹失败');
+    }
+  };
+
   /* 删除项目 */
   const handleDelete = async (e: React.MouseEvent, p: Project) => {
     e.stopPropagation();
@@ -272,6 +300,7 @@ const HomePage: React.FC = () => {
 
           {/* 打开项目 */}
           <div className="home-card"
+            onClick={handleOpenFolder}
             style={{
               width: 240, padding: '36px 28px', borderRadius: 16,
               background: 'linear-gradient(135deg, rgba(124,58,237,0.08) 0%, rgba(124,58,237,0.02) 100%)',
@@ -398,55 +427,59 @@ const HomePage: React.FC = () => {
         onCancel={() => setCreating(false)}
         footer={null}
         width={420}
-        style={{ background: 'transparent' }}
-        modalRender={() => (
-          <div style={{
-            background: '#0d1128', borderRadius: 16, border: `1px solid ${CYAN}22`,
-            padding: 32, boxShadow: `0 0 40px rgba(0,0,0,0.6)`,
-          }}>
-            <h2 style={{ margin: '0 0 20px', color: '#e0e6ed', fontSize: 20, fontWeight: 600 }}>
-              新建项目
-            </h2>
-            <Input
-              placeholder="输入项目名称..."
-              value={newName}
-              onChange={e => setNewName(e.target.value)}
-              onPressEnter={handleCreate}
-              size="large"
-              variant="borderless"
-              style={{
-                background: 'rgba(255,255,255,0.04)', borderRadius: 10,
-                color: '#e0e6ed', fontSize: 16, padding: '12px 16px',
-                border: '1px solid rgba(255,255,255,0.08)',
-              }}
-              autoFocus
-            />
-            <div style={{ display: 'flex', gap: 12, marginTop: 20, justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => setCreating(false)}
-                style={{
-                  padding: '8px 24px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)',
-                  background: 'transparent', color: '#7a8aa0', cursor: 'pointer',
-                  fontSize: 14, transition: 'all 0.2s',
-                }}
-              >取消</button>
-              <button
-                onClick={handleCreate}
-                disabled={!newName.trim()}
-                style={{
-                  padding: '8px 24px', borderRadius: 8, border: 'none',
-                  background: `linear-gradient(135deg, ${CYAN}, ${PURPLE})`,
-                  color: '#fff', cursor: newName.trim() ? 'pointer' : 'not-allowed',
-                  fontSize: 14, fontWeight: 600,
-                  opacity: newName.trim() ? 1 : 0.5,
-                  transition: 'all 0.2s',
-                  boxShadow: newName.trim() ? `0 0 20px ${CYAN}44` : 'none',
-                }}
-              >创建并进入</button>
-            </div>
-          </div>
-        )}
-      />
+        maskClosable={false}
+        destroyOnClose
+        styles={{
+          content: {
+            background: '#0d1128',
+            borderRadius: 16,
+            border: `1px solid ${CYAN}22`,
+            boxShadow: `0 0 40px rgba(0,0,0,0.6)`,
+            padding: 32,
+          },
+        }}
+      >
+        <h2 style={{ margin: '0 0 20px', color: '#e0e6ed', fontSize: 20, fontWeight: 600 }}>
+          新建项目
+        </h2>
+        <Input
+          placeholder="输入项目名称..."
+          value={newName}
+          onChange={e => setNewName(e.target.value)}
+          onPressEnter={handleCreate}
+          size="large"
+          variant="borderless"
+          style={{
+            background: 'rgba(255,255,255,0.04)', borderRadius: 10,
+            color: '#e0e6ed', fontSize: 16, padding: '12px 16px',
+            border: '1px solid rgba(255,255,255,0.08)',
+          }}
+          autoFocus
+        />
+        <div style={{ display: 'flex', gap: 12, marginTop: 20, justifyContent: 'flex-end' }}>
+          <button
+            onClick={() => setCreating(false)}
+            style={{
+              padding: '8px 24px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)',
+              background: 'transparent', color: '#7a8aa0', cursor: 'pointer',
+              fontSize: 14, transition: 'all 0.2s',
+            }}
+          >取消</button>
+          <button
+            onClick={handleCreate}
+            disabled={!newName.trim()}
+            style={{
+              padding: '8px 24px', borderRadius: 8, border: 'none',
+              background: `linear-gradient(135deg, ${CYAN}, ${PURPLE})`,
+              color: '#fff', cursor: newName.trim() ? 'pointer' : 'not-allowed',
+              fontSize: 14, fontWeight: 600,
+              opacity: newName.trim() ? 1 : 0.5,
+              transition: 'all 0.2s',
+              boxShadow: newName.trim() ? `0 0 20px ${CYAN}44` : 'none',
+            }}
+          >创建并进入</button>
+        </div>
+      </Modal>
 
       {/* ─── 重命名项目对话框 ─── */}
       <Modal

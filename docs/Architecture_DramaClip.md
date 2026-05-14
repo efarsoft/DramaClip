@@ -531,9 +531,9 @@ DramaClip/
 
 ### 4.1 方案对比
 
-| 维度 | 高光混剪 | 解说过渡 | AI解读 |
-|------|----------|----------|--------|
-| **代号** | `highlight` | `transition` | `narration` |
+| 维度 | 原片解说 | 交叉解说 | 全片解说 |
+|------|----------|----------|----------|
+| **代号** | `original_narration` | `hybrid_narration` | `full_narration` |
 | **音频** | 100% 原声 | 原声+AI 交替 | 100% AI 配音 |
 | **原声处理** | 完整保留 | 高光段保留原声，过渡段 AI 解说 | 原声降至 15% 背景 |
 | **字幕** | ASR 原声字幕 | 原声段原字幕 + AI段解说字幕 | 解说字幕（居中）+ 原声字幕（底部） |
@@ -542,7 +542,7 @@ DramaClip/
 | **复杂度** | 低 | 中 | 高 |
 | **适用场景** | 名场面混剪、卡点视频 | 剧情连贯+节奏变化 | 剧情解说、几分钟看完 |
 
-### 4.2 高光混剪（highlight）数据流
+### 4.2 原片解说（original_narration）数据流
 
 ```mermaid
 flowchart LR
@@ -575,7 +575,7 @@ flowchart LR
 
 **核心逻辑**：直接复用现有 `DirectCutPipeline`，无需 TTS/LLM。
 
-### 4.3 解说过渡（transition）数据流
+### 4.3 交叉解说（hybrid_narration）数据流
 
 ```mermaid
 flowchart LR
@@ -639,7 +639,7 @@ class SegmentClassifier:
 - 解说段：原声降至 15% 背景，TTS 解说音量 1.0，叠加解说字幕
 - 段间过渡：0.5s 交叉淡入淡出（audio crossfade），确保听感自然
 
-### 4.4 AI解读（narration）数据流
+### 4.4 全片解说（full_narration）数据流
 
 ```mermaid
 flowchart LR
@@ -690,9 +690,9 @@ flowchart TB
     PREPROCESS --> SCORING[高光打分<br/>audio+emotion+visual+rhythm]
     SCORING --> SELECT[筛选+排序]
 
-    SELECT --> |"highlight"| H[高光混剪<br/>直剪合成]
-    SELECT --> |"transition"| T[解说过渡<br/>分类+部分AI]
-    SELECT --> |"narration"| N[AI解读<br/>全量AI]
+    SELECT --> |"original_narration"| H[原片解说<br/>直剪合成 100%原声]
+    SELECT --> |"hybrid_narration"| T[交叉解说<br/>分类+部分AI解说]
+    SELECT --> |"full_narration"| N[全片解说<br/>全量AI配音]
 
     H --> OUT[输出 MP4]
     T --> OUT
@@ -708,34 +708,74 @@ flowchart TB
 - 分析结果可在三种方案间复用
 - 预处理是性能瓶颈，一次分析多次使用
 
+**🚨 核心硬约束 — 叙事连贯性（所有模式强制遵守）**：
+- 片段选择必须**以叙事线为核心主线**，不得仅按高光分数高低取 Top-N
+- 选取的片段集合应形成**可理解的故事链条**：起因→发展→高潮→结局
+- 片段之间若存在剧情跳跃，需通过 AI 解说（交叉/全片模式）**补全叙事桥梁**
+- 原片解说模式下，片段排列必须严格遵循**原剧集内时间顺序**，不允许跨片段跳跃后导致情节断裂
+- 情绪曲线应呈现**合理的起伏节奏**，而非一股脑堆叠所有高光片段
+- 短时长截断（output_duration > 0）时，优先删除**叙事冗余片段**而非随机低分片段
+
+**时长控制**：输出时长为可选参数，默认不限制。
+- `output_duration` = `null` / `undefined` → 保留所有高光片段，不限总时长
+- `output_duration` > 0 → 按优先级截断低分片段以适配目标时长
+- 适用于 3~5 集短剧场景，固定时长场景下自动从末尾删除最低分片段
+
+**版本控制**（v1.1 新增）：
+- `version_count`：每种模式生成的版本数量，最小 1，不设上限，默认 1
+- 「全部生成」（`all`）模式下，三种模式均按 `version_count` 各生成 N 份输出
+- 不同版本通过 AI 差异化生成（片段组合微调、解说词改写、标题多样化）
+
+**爆款标题**（v1.1 新增）：
+- 每次输出文件名由 LLM 生成爆款标题，不同版本标题差异化
+- 标题风格：短句 + 悬念/情绪词 + 热度关键词
+- 示例：「全网都在找的爆款短剧，3分钟带你重温名场面🔥」
+- 标题在前端预览阶段提供修改机会（用户在导出前可手动编辑文件名）
+
 ---
 
 ## 5. 任务分解
 
-### 5.1 有序任务列表
+### 5.1 设计决策：输出时长 & 版本数量
+
+> **输出时长**为可选配置，默认不限制。适用于 3~5 集短剧的完整剪辑场景。
+> - 前端：三种方案右侧参数面板均提供输出时长滑块（0~300秒，0=不限）
+> - 后端：`selector._truncate_to_duration(segments, output_duration)` 在方案执行时按**叙事优先级**（保留主线关键节点，裁减旁支/重复性片段）截断
+> - 用户不设置时长时，保留所有高光片段，不限总时长
+> - 🚨 **任何截断操作不得破坏剧情连贯性**：截断后必须保证主线事件的因果完整性，不允许出现「前一秒在求婚、后一秒在分手」的逻辑断裂
+> 
+> **版本数量**（v1.1）：
+> - 每种模式可生成 N 个版本（最小 1，不设上限，默认 1）
+> - 「全部生成」模式下三种模式均按此数量各输出 N 份
+> - 不同版本通过 AI 差异化（片段微调、解说改写、爆款标题多样化），但**每个版本都必须独立满足叙事连贯性要求**
+
+### 5.2 有序任务列表
 
 | # | 任务 | 依赖 | 优先级 | 预估工时 | 说明 |
-|---|------|------|--------|----------|------|
+|----|------|------|--------|----------|------|
 | T1 | 项目脚手架搭建 | — | P0 | 2d | Electron + React + Vite 初始化；Python 后端目录调整；TypeScript/ESLint/Prettier 配置 |
 | T2 | IPC 通信框架 | T1 | P0 | 3d | Python JSON-RPC server；Electron BackendManager；前端 IPC Client；端到端通信验证 |
 | T3 | Electron 主进程骨架 | T1 | P0 | 2d | 窗口管理、应用生命周期、原生对话框、FFmpeg 资源发现 |
 | T4 | React 前端骨架 | T1 | P0 | 2d | 路由配置、AppLayout、Sidebar、StepIndicator、主题配置 |
 | T5 | 项目管理模块 | T2, T3, T4 | P0 | 3d | Python ProjectService；前端 ProjectPage/ProjectCard；新建/打开/删除项目流程 |
 | T6 | 视频导入与分析模块 | T5 | P0 | 5d | ASR 语音识别集成；角色分离；分析进度推送；AnalyzePage UI；EmotionCurve 图表 |
-| T7 | 高光混剪方案 | T6 | P0 | 3d | DirectCutPipeline 适配 IPC；EditPage 高光混剪 Tab；片段预览+排序 |
-| T8 | AI解读方案 | T6 | P0 | 4d | NarrationPipeline 适配 IPC；EditPage AI解读 Tab；双字幕 UI |
-| T9 | 解说过渡方案 | T7, T8 | P1 | 5d | SegmentClassifier 分类器；TransitionPipeline 流水线；EditPage 过渡 Tab；交叉淡入淡出 |
-| T10 | 方案推荐引擎 | T6 | P1 | 2d | 基于剧情分析结果推荐最优方案；RecommendPage UI |
-| T11 | 导出模块 | T7 | P0 | 3d | ExportService；ExportPage UI；参数配置；导出进度 |
-| T12 | 视频播放器 | T4 | P1 | 2d | 内置播放器组件（基于 HTML5 video）；片段预览；播放控制 |
-| T13 | 反思优化模块 | T7, T8, T11 | P1 | 3d | 成品评分 UI；片段标记（喜欢/不喜欢）；反馈记录；评分数据存储 |
-| T14 | 设置页面 | T4 | P1 | 2d | SettingsPage；API Key 配置；输出默认值；FFmpeg 硬件加速检测 |
-| T15 | 后端 PyInstaller 打包 | T2 | P0 | 2d | backend.exe 打包配置；FFmpeg 嵌入；资源路径适配；启动时间优化 |
-| T16 | electron-builder 打包 | T3, T15 | P0 | 2d | Setup.exe 配置；NSIS 安装程序；代码签名；自动更新 |
-| T17 | 端到端集成测试 | T16 | P0 | 3d | 完整用户流程测试；三种方案端到端验证；异常场景测试 |
-| T18 | 性能优化 | T17 | P2 | 3d | 启动时间优化；内存占用控制；GPU 加速集成；大文件处理优化 |
+| T7 | 原片解说方案 | T6 | P0 | 3d | DirectCutPipeline 适配 IPC；EditPage 原片解说 Tab；片段预览+排序；**输出时长滑块+截断逻辑** |
+| T8 | 全片解说方案 | T6 | P0 | 4d | NarrationPipeline 适配 IPC；EditPage 全片解说 Tab；双字幕 UI；**输出时长滑块+截断逻辑** |
+| T9 | 交叉解说方案 | T7, T8 | P1 | 5d | SegmentClassifier 分类器；TransitionPipeline 流水线；EditPage 交叉解说 Tab；交叉淡入淡出；**输出时长滑块+截断逻辑** |
+| T10 | 全部生成 | T7, T8, T9 | P1 | 3d | 三种模式批量调度；并行执行；**统一 version_count 参数分发** |
+| T11 | 方案推荐引擎 | T6 | P1 | 2d | 基于剧情分析结果推荐最优方案；RecommendPage UI |
+| T12 | 版本数量参数 | T7 | P1 | 1d | 前端输入组件；IPC 传递 version_count；后端 pipeline 多版本差异化生成 |
+| T13 | 爆款标题生成 | T7, T8 | P1 | 2d | LLM 生成爆款标题；不同版本标题差异化；标题预览+人工修改 |
+| T14 | 导出模块 | T7 | P0 | 3d | ExportService；ExportPage UI；参数配置；导出进度；输出参数中嵌入 output_duration + version_count |
+| T15 | 视频播放器 | T4 | P1 | 2d | 内置播放器组件（基于 HTML5 video）；片段预览；播放控制 |
+| T16 | 反思优化模块 | T7, T8, T14 | P1 | 3d | 成品评分 UI；片段标记（喜欢/不喜欢）；反馈记录；评分数据存储 |
+| T17 | 设置页面 | T4 | P1 | 2d | SettingsPage；API Key 配置；输出默认值；FFmpeg 硬件加速检测 |
+| T18 | 后端 PyInstaller 打包 | T2 | P0 | 2d | backend.exe 打包配置；FFmpeg 嵌入；资源路径适配；启动时间优化 |
+| T19 | electron-builder 打包 | T3, T18 | P0 | 2d | Setup.exe 配置；NSIS 安装程序；代码签名；自动更新 |
+| T20 | 端到端集成测试 | T19 | P0 | 3d | 完整用户流程测试；三种方案端到端验证；异常场景测试；**duration=null 和 duration>0 两种模式验证**；version_count 多版本验证 |
+| T21 | 性能优化 | T20 | P2 | 3d | 启动时间优化；内存占用控制；GPU 加速集成；大文件处理优化 |
 
-### 5.2 关键路径
+### 5.3 关键路径
 
 ```
 T1 → T2 → T5 → T6 → T7 → T11 → T15 → T16 → T17
@@ -743,8 +783,6 @@ T1 → T2 → T5 → T6 → T7 → T11 → T15 → T16 → T17
 ```
 
 **关键路径预估**：2 + 3 + 3 + 5 + 3 + 3 + 2 + 2 + 3 = **26 个工作日**
-
-### 5.3 里程碑
 
 | 里程碑 | 包含任务 | 交付物 | 预计时间 |
 |--------|----------|--------|----------|
@@ -800,24 +838,31 @@ Python `Pydantic` 模型与 TypeScript 类型需保持一致。采用**手动对
 
 ```python
 class ClipMode(str, Enum):
-    HIGHLIGHT = "highlight"       # 高光混剪
-    TRANSITION = "transition"     # 解说过渡
-    NARRATION = "narration"       # AI解读
+    ORIGINAL_NARRATION = "original_narration"  # 原片解说
+    HYBRID_NARRATION = "hybrid_narration"     # 交叉解说
+    FULL_NARRATION = "full_narration"         # 全片解说
+    ALL = "all"                                # 全部生成
 ```
 
 **TypeScript 端** (`src/types/clip.ts`)：
 
 ```typescript
-export type ClipMode = "highlight" | "transition" | "narration";
+export type ClipMode =
+  | "original_narration"
+  | "hybrid_narration"
+  | "full_narration"
+  | "all";
 
 export interface ClipParams {
   projectId: string;
   scheme: ClipMode;
-  outputDuration: number;       // 目标时长（秒）
-  highlightThreshold: number;   // 高光阈值
-  ttsEngine: string;            // TTS 引擎
-  voiceName: string;            // 音色
-  voiceRate: number;            // 语速
+  outputDuration?: number;       // 目标时长（秒），undefined=不限
+  versionCount?: number;         // 版本数量，默认 1，最小 1，无上限
+  // 以下为公共参数
+  highlightThreshold?: number;   // 高光阈值
+  ttsEngine?: string;            // TTS 引擎
+  voiceName?: string;            // 音色
+  voiceRate?: number;            // 语速
 }
 ```
 
@@ -936,6 +981,7 @@ export interface ClipParams {
 | 版本 | 日期 | 修改内容 | 修改人 |
 |------|------|----------|--------|
 | v1.0 | 2026-05-11 | 初稿 | 高见远 |
+| v1.1 | 2026-05-12 | 重命名三种解说模式（原片/交叉/全片）；新增版本数量参数与爆款标题生成设计决策；更新核心类型匹配 | 高见远 |
 
 ---
 

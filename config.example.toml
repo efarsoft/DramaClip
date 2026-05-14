@@ -49,8 +49,8 @@
     instruction = ""
 
 [ui]
-    # TTS引擎选择 (edge_tts, azure_speech, tencent_tts)
-    tts_engine = "edge_tts"
+    # TTS引擎选择 (styletts2, edge_tts, azure_speech, tencent_tts)
+    tts_engine = "styletts2"
     edge_voice_name = "zh-CN-XiaoyiNeural-Female"
     edge_volume = 80
     edge_rate = 1.0
@@ -59,6 +59,18 @@
     azure_volume = 80
     azure_rate = 1.0
     azure_pitch = 0
+    # StyleTTS 2 参数（纯本地情感语音合成）
+    # embedding_scale: 情感强度 (0.5-2.0, 默认1.0, 越高越有感情)
+    # alpha: 音色适应度 (0.0-1.0, 默认0.3, 越高越偏向文本风格而非参考音色)
+    # beta:  韵律适应度 (0.0-1.0, 默认0.7, 越高越偏向文本风格而非参考音色)
+    # model_checkpoint: 自定义模型路径 (为空则使用默认预训练模型)
+    # config_path: 模型配置文件路径 (为空则使用默认配置)
+    styletts2_embedding_scale = 1.0
+    styletts2_alpha = 0.3
+    styletts2_beta = 0.7
+    styletts2_voice = ""
+    styletts2_model_checkpoint = ""
+    styletts2_config_path = ""
 
 ##########################################
 # 代理和网络配置

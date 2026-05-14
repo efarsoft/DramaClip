@@ -1152,9 +1152,13 @@ def tts(
         logger.info("分发到 CosyVoice TTS")
         return cosyvoice_tts(text, voice_name, voice_file, speed=voice_rate)
 
-    # Fallback for unknown engine - default to azure v1
-    logger.warning(f"未知的 TTS 引擎: '{tts_engine}', 将默认使用 Edge TTS (Azure V1)。")
-    return azure_tts_v1(text, voice_name, voice_rate, voice_pitch, voice_file)
+    if tts_engine == "styletts2":
+        logger.info("分发到 StyleTTS 2（自动情感匹配）")
+        return styletts2_tts(text, voice_name, voice_file, speed=voice_rate)
+
+    # Fallback for unknown engine - default to styletts2
+    logger.warning(f"未知的 TTS 引擎: '{tts_engine}', 将默认使用 StyleTTS 2。")
+    return styletts2_tts(text, voice_name, voice_file, speed=voice_rate)
 
 
 def convert_rate_to_percent(rate: float) -> str:
@@ -2164,6 +2168,132 @@ def parse_cosyvoice_voice(voice_name: str) -> str | None:
     if voice_name.startswith("cosyvoice:"):
         return voice_name[len("cosyvoice:"):].strip()
     return voice_name.strip()
+
+
+def styletts2_tts(
+    text: str,
+    voice_name: str,
+    voice_file: str,
+    speed: float = 1.0,
+    embedding_scale: float = 1.0,
+    alpha: float = 0.3,
+    beta: float = 0.7,
+) -> Union[SubMaker, None]:
+    """
+    使用 StyleTTS 2 进行情感语音合成（纯本地，自动匹配文本情感）
+
+    StyleTTS 2 通过 Style Diffusion 自动为文本生成最合适的语气和情感，
+    无需参考音频。也可通过 target_voice_path 进行零样本语音克隆。
+
+    Args:
+        text: 要合成的文本
+        voice_name: 语音名称，格式 "styletts2:path/to/reference.wav" 或空字符串
+        voice_file: 输出音频文件路径
+        speed: 语速（通过 output_sample_rate 间接控制，默认 1.0）
+        embedding_scale: 情感强度（越高越有情感，默认 1.0，范围 0.5-2.0）
+        alpha: 音色适应度（越高越偏向文本风格，默认 0.3）
+        beta: 韵律适应度（越高越偏向文本风格，默认 0.7）
+
+    Returns:
+        SubMaker with estimated timestamps on success, None on failure.
+    """
+    # Read config
+    styletts2_cfg = getattr(config, "styletts2", {}) or {}
+    model_checkpoint = styletts2_cfg.get("model_checkpoint", "")
+    config_path = styletts2_cfg.get("config_path", "")
+    default_embedding_scale = styletts2_cfg.get("embedding_scale", embedding_scale)
+    default_alpha = styletts2_cfg.get("alpha", alpha)
+    default_beta = styletts2_cfg.get("beta", beta)
+
+    try:
+        from styletts2 import tts
+    except ImportError:
+        logger.error("styletts2 not installed, run: pip install styletts2")
+        return None
+
+    # Init model (lazily cached via function attribute)
+    if not hasattr(styletts2_tts, "_model"):
+        try:
+            kwargs = {}
+            if model_checkpoint:
+                kwargs["model_checkpoint_path"] = model_checkpoint
+            if config_path:
+                kwargs["config_path"] = config_path
+            logger.info("Loading StyleTTS 2 model (first load downloads ~2GB)...")
+            if kwargs:
+                styletts2_tts._model = tts.StyleTTS2(**kwargs)
+            else:
+                styletts2_tts._model = tts.StyleTTS2()
+            logger.info("StyleTTS 2 model loaded successfully")
+        except Exception as e:
+            logger.error(f"Failed to load StyleTTS 2 model: {e}")
+            return None
+
+    model = styletts2_tts._model
+
+    # Parse target voice (if voice_name starts with "styletts2:" it's a reference path)
+    target_voice_path = None
+    if voice_name and voice_name.startswith("styletts2:"):
+        target_voice_path = voice_name[10:].strip()
+
+    text = text.strip()
+    if not text:
+        return None
+
+    try:
+        logger.info(
+            f"StyleTTS 2 inference: text_len={len(text)}, "
+            f"alpha={default_alpha}, beta={default_beta}, "
+            f"embedding_scale={default_embedding_scale}, "
+            f"target_voice={'yes' if target_voice_path else 'no'}"
+        )
+
+        # Build inference parameters
+        kwargs = {
+            "text": text,
+            "output_wav_file": voice_file,
+            "alpha": default_alpha,
+            "beta": default_beta,
+            "embedding_scale": default_embedding_scale,
+        }
+        if target_voice_path:
+            kwargs["target_voice_path"] = target_voice_path
+
+        # StyleTTS 2 doesn't natively support speed control
+        # We approximate by adjusting output_sample_rate (higher = faster playback)
+        if abs(speed - 1.0) > 0.05:
+            kwargs["output_sample_rate"] = int(24000 * speed)
+
+        # Run inference
+        audio_data = model.inference(**kwargs)
+
+        if audio_data is None:
+            logger.error("StyleTTS 2 returned None")
+            return None
+
+        # Estimate subtitle timestamps based on audio duration
+        sample_rate = kwargs.get("output_sample_rate", 24000)
+        if isinstance(audio_data, (list, tuple)):
+            audio_len = len(audio_data[0]) if hasattr(audio_data[0], '__len__') else 0
+        elif hasattr(audio_data, 'shape'):
+            audio_len = audio_data.shape[0]
+        else:
+            audio_len = len(audio_data) if hasattr(audio_data, '__len__') else 0
+
+        sub = new_sub_maker()
+        if audio_len > 0:
+            duration_ms = int(audio_len / sample_rate * 1000)
+        else:
+            duration_ms = max(800, int(len(text) * 200))
+
+        add_subtitle_event(sub, 0, duration_ms, text)
+
+        logger.info(f"StyleTTS 2 synthesis success -> {voice_file}, est_duration={duration_ms}ms")
+        return sub
+
+    except Exception as e:
+        logger.error(f"StyleTTS 2 synthesis failed: {e}")
+        return None
 
 
 def cosyvoice_tts(text: str, voice_name: str, voice_file: str, speed: float = 1.0) -> Union[SubMaker, None]:

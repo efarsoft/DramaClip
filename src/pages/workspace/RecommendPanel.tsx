@@ -1,16 +1,19 @@
 /**
  * 方案推荐面板 — 项目工作区 Step 3
  * AI 智能推荐剪辑方案 + 备选方案
+ *
+ * 时长：可选配置，默认不限制（0 表示不限）
  */
 
 import React, { useState } from 'react';
-import { Typography, Button, Card, Space, Tag, Empty, Descriptions, message } from 'antd';
 import {
-  BulbOutlined,
-  ThunderboltOutlined,
-  SwapOutlined,
-  CheckCircleFilled,
-  RightOutlined,
+  Typography, Button, Card, Space, Tag, Empty, Slider, InputNumber,
+  message, Row, Col,
+} from 'antd';
+import {
+  BulbOutlined, ThunderboltOutlined, SwapOutlined,
+  CheckCircleFilled, RightOutlined, ClockCircleOutlined,
+  AudioOutlined, SoundOutlined, FileTextOutlined, EllipsisOutlined,
 } from '@ant-design/icons';
 import { useProjectStore } from '../../stores/projectStore';
 import { clipApi } from '../../services/ipc';
@@ -19,56 +22,66 @@ const { Title, Text } = Typography;
 const CYAN = '#00d4ff';
 const PURPLE = '#7c3aed';
 
-// ─── Mock 方案数据 ───
-const MOCK_PLANS = [
+// ─── 方案数据 — 三种解说/配音模式 + 全部生成 ───
+const MODES = [
   {
-    id: 'plan-a',
-    name: '智能精简版',
-    desc: '自动提取高光片段，保留核心剧情，生成 30-60 秒精华短片',
-    type: 'highlight',
-    duration: '30-60s',
-    tags: ['高光提取', '自动剪辑', '适合短视频'],
+    id: 'mode-original',
+    name: '原片解说',
+    desc: '提取视频情节和高光，通过截取和合并原视频进行剪辑，全程使用原声',
+    type: 'original_narration',
+    tags: ['原声拼接', '保留原汁原味', '适合剧情片'],
     confidence: 0.92,
   },
   {
-    id: 'plan-b',
-    name: '剧情完整版',
-    desc: '保留完整叙事结构，配以 AI 旁白解说，生成 3-5 分钟解说视频',
-    type: 'narrative',
-    duration: '3-5min',
-    tags: ['旁白解说', '完整剧情', '适合B站'],
-    confidence: 0.87,
+    id: 'mode-hybrid',
+    name: '交叉解说',
+    desc: 'AI 生成解说词，结合原视频高光，形成混合式 AI 解说 + 原声效果',
+    type: 'hybrid_narration',
+    tags: ['AI 解说', '原声混音', '适合解说类'],
+    confidence: 0.88,
   },
   {
-    id: 'plan-c',
-    name: '混剪燃向版',
-    desc: '提取高燃/高情绪片段，配合快节奏转场和背景音乐',
-    type: 'montage',
-    duration: '1-2min',
-    tags: ['混剪', '高燃', '节奏感强'],
-    confidence: 0.78,
+    id: 'mode-full',
+    name: '全片解说',
+    desc: 'AI 生成全部解说文案并配音，不使用原声，纯 AI 旁白风格',
+    type: 'full_narration',
+    tags: ['全 AI 配音', '几分钟看完', '适合速览'],
+    confidence: 0.85,
+  },
+  {
+    id: 'mode-all',
+    name: '全部生成',
+    desc: '一次性生成以上三种模式的剪辑结果，对比择优或同时分发',
+    type: 'all_narrations',
+    tags: ['一键三连', '批量输出', '效率最高'],
+    confidence: 0.95,
   },
 ];
 
 interface Props {
-  onNext: () => void;
+  onNext?: () => void;
 }
 
 const RecommendPanel: React.FC<Props> = ({ onNext }) => {
   const { currentProject } = useProjectStore();
   const [selected, setSelected] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  // 0 表示不限时长
+  const [targetDuration, setTargetDuration] = useState<number>(0);
 
   const handleApply = async () => {
     if (!selected || !currentProject) return;
     setApplying(true);
     try {
-      const plan = MOCK_PLANS.find(p => p.id === selected)!;
-      await clipApi.execute(currentProject.id, plan.type, {});
+      const plan = MODES.find(p => p.id === selected)!;
+      await clipApi.execute(currentProject.id, plan.type, {
+        // 传 0 或 None 到后端，后端接收 None 表示不限制时长
+        output_duration: targetDuration > 0 ? targetDuration : undefined,
+      });
       message.success('方案已应用，进入剪辑阶段');
-      onNext();
-    } catch (err: any) {
-      message.error(err?.message || '方案应用失败');
+      onNext?.();
+    } catch (e: any) {
+      message.error(e?.message || '应用方案失败');
     } finally {
       setApplying(false);
     }
@@ -84,10 +97,11 @@ const RecommendPanel: React.FC<Props> = ({ onNext }) => {
 
   return (
     <div style={{ maxWidth: 760, margin: '0 auto', padding: '32px 24px' }}>
-      {/* ─── 标题 ─── */}
-      <div style={{ marginBottom: 28 }}>
-        <Title level={3} style={{ color: '#e0e6ed', margin: 0 }}>
-          ✨ 智能方案推荐
+      {/* ─── 头部 ─── */}
+      <div style={{ marginBottom: 28, textAlign: 'center' }}>
+        <Title level={4} style={{ color: '#e8edff', marginBottom: 8 }}>
+          <BulbOutlined style={{ marginRight: 10, color: '#fbbf24' }} />
+          AI 方案推荐
         </Title>
         <Text style={{ color: '#4a5a7a', fontSize: 13 }}>
           AI 根据分析结果为 "{currentProject.name}" 生成了以下剪辑方案
@@ -95,96 +109,149 @@ const RecommendPanel: React.FC<Props> = ({ onNext }) => {
       </div>
 
       {/* ─── 方案卡片列表 ─── */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {MOCK_PLANS.map((plan, idx) => (
-          <div
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {MODES.map((plan) => (
+          <Card
             key={plan.id}
+            hoverable
             onClick={() => setSelected(plan.id)}
             style={{
-              padding: '24px', borderRadius: 14,
-              background: selected === plan.id
-                ? `linear-gradient(135deg, ${CYAN}11, ${PURPLE}11)`
-                : 'rgba(255,255,255,0.02)',
-              border: selected === plan.id
-                ? `1.5px solid ${CYAN}66`
-                : '1px solid rgba(255,255,255,0.06)',
+              borderRadius: 14,
+              background:
+                selected === plan.id
+                  ? `linear-gradient(135deg, ${CYAN}11, ${PURPLE}11)`
+                  : 'rgba(255,255,255,0.02)',
+              border:
+                selected === plan.id
+                  ? `1.5px solid ${CYAN}66`
+                  : '1px solid rgba(255,255,255,0.06)',
               cursor: 'pointer',
-              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              transition: 'all 0.3s',
               position: 'relative',
               overflow: 'hidden',
             }}
-            onMouseEnter={e => {
-              if (selected !== plan.id) {
-                e.currentTarget.style.borderColor = `${CYAN}44`;
-                e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
-              }
-            }}
-            onMouseLeave={e => {
-              if (selected !== plan.id) {
-                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)';
-                e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
-              }
-            }}
+            bodyStyle={{ padding: '20px 24px' }}
           >
             {/* 选中标记 */}
             {selected === plan.id && (
-              <div style={{
-                position: 'absolute', top: 12, right: 16,
-                color: CYAN, fontSize: 20,
-              }}>
-                <CheckCircleFilled />
-              </div>
+              <CheckCircleFilled
+                style={{
+                  position: 'absolute', top: 14, right: 14,
+                  color: CYAN, fontSize: 20,
+                }}
+              />
             )}
 
-            {/* 序号 */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12,
-            }}>
-              <span style={{
-                width: 28, height: 28, borderRadius: 8,
-                background: `linear-gradient(135deg, ${CYAN}44, ${PURPLE}44)`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: '#fff', fontSize: 13, fontWeight: 700,
-              }}>{idx + 1}</span>
-              <Title level={4} style={{ color: '#e0e6ed', margin: 0, flex: 1 }}>{plan.name}</Title>
-              <Tag style={{
-                borderRadius: 6, border: 'none', padding: '2px 12px',
-                background: `linear-gradient(135deg, ${CYAN}22, ${CYAN}11)`,
-                color: CYAN, fontSize: 12, fontFamily: "'JetBrains Mono', monospace",
-              }}>
-                {plan.duration}
-              </Tag>
-            </div>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+              {/* 图标 */}
+              <div
+                style={{
+                  width: 44, height: 44, borderRadius: 12,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 22,
+                  background:
+                    selected === plan.id
+                      ? `linear-gradient(135deg, ${CYAN}22, ${PURPLE}22)`
+                      : 'rgba(255,255,255,0.04)',
+                  flexShrink: 0,
+                }}
+              >
+                {plan.id === 'mode-original' ? (
+                  <SoundOutlined style={{ color: CYAN }} />
+                ) : plan.id === 'mode-hybrid' ? (
+                  <SwapOutlined style={{ color: '#f59e0b' }} />
+                ) : plan.id === 'mode-full' ? (
+                  <AudioOutlined style={{ color: '#f472b6' }} />
+                ) : (
+                  <EllipsisOutlined style={{ color: '#a78bfa' }} />
+                )}
+              </div>
 
-            <Text style={{ color: '#8892a4', display: 'block', marginBottom: 12, lineHeight: 1.6 }}>
-              {plan.desc}
-            </Text>
+              {/* 内容 */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                  <Text strong style={{ color: '#e8edff', fontSize: 16 }}>
+                    {plan.name}
+                  </Text>
+                  <Tag
+                    color="cyan"
+                    style={{
+                      borderRadius: 12, fontSize: 11, lineHeight: '20px',
+                      padding: '0 10px', border: 'none', opacity: 0.8,
+                    }}
+                  >
+                    {plan.type === 'original_narration' ? '原声' : plan.type === 'hybrid_narration' ? '混音' : plan.type === 'full_narration' ? 'AI配音' : '一键三连'}
+                  </Tag>
+                </div>
 
-            {/* 标签 */}
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {plan.tags.map(tag => (
-                <span key={tag} style={{
-                  padding: '2px 12px', borderRadius: 20, fontSize: 12,
-                  background: 'rgba(255,255,255,0.05)',
-                  color: '#6b7b9d', border: '1px solid rgba(255,255,255,0.06)',
-                }}>
-                  {tag}
-                </span>
-              ))}
-              {/* 置信度 */}
-              <span style={{
-                marginLeft: 'auto', fontSize: 12, color: '#4a5a7a',
-                fontFamily: "'JetBrains Mono', monospace",
-              }}>
-                匹配度 {Math.round(plan.confidence * 100)}%
-              </span>
+                <Text style={{ color: '#8892a4', display: 'block', marginBottom: 10, lineHeight: 1.6 }}>
+                  {plan.desc}
+                </Text>
+
+                {/* 标签 */}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {plan.tags.map(tag => (
+                    <span key={tag} style={{
+                      padding: '2px 12px', borderRadius: 20, fontSize: 12,
+                      background: 'rgba(255,255,255,0.05)',
+                      color: '#6b7b9d', border: '1px solid rgba(255,255,255,0.06)',
+                    }}>
+                      {tag}
+                    </span>
+                  ))}
+                  <span style={{
+                    marginLeft: 'auto', fontSize: 12, color: '#4a5a7a',
+                    fontFamily: "'JetBrains Mono', monospace",
+                  }}>
+                    匹配度 {Math.round(plan.confidence * 100)}%
+                  </span>
+                </div>
+              </div>
             </div>
-          </div>
+          </Card>
         ))}
       </div>
 
+      {/* ─── 时长配置（可选） ─── */}
+      <Card
+        style={{
+          marginTop: 20, borderRadius: 14,
+          background: 'rgba(255,255,255,0.02)',
+          border: '1px solid rgba(255,255,255,0.06)',
+        }}
+        bodyStyle={{ padding: '16px 24px' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <ClockCircleOutlined style={{ color: CYAN, fontSize: 18 }} />
+          <Text style={{ color: '#8892a4', fontSize: 14, whiteSpace: 'nowrap' }}>输出时长</Text>
+          <div style={{ flex: 1, minWidth: 180, padding: '0 12px' }}>
+            <Slider
+              min={0}
+              max={300}
+              step={5}
+              value={targetDuration}
+              onChange={setTargetDuration}
+              tooltip={{ formatter: (v: number | undefined) => !v || v === 0 ? '不限' : `${v}秒` }}
+              trackStyle={{ background: `linear-gradient(90deg, ${CYAN}, ${PURPLE})` }}
+              handleStyle={{ borderColor: CYAN }}
+            />
+          </div>
+          <InputNumber
+            min={0}
+            max={300}
+            step={5}
+            value={targetDuration}
+            onChange={v => setTargetDuration(v ?? 0)}
+            style={{ width: 80, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#e8edff' }}
+            formatter={v => v === 0 ? '不限' : `${v}s`}
+            parser={v => parseInt(v?.replace(/[^0-9]/g, '') || '0', 10)}
+          />
+          <Text style={{ color: '#4a5a7a', fontSize: 12 }}>0=不限</Text>
+        </div>
+      </Card>
+
       {/* ─── 操作按钮 ─── */}
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 32 }}>
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 28 }}>
         <Button
           type="primary"
           size="large"

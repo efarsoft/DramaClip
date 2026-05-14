@@ -1,9 +1,8 @@
 /**
  * AI 分析面板 — 项目工作区 Step 2
- * 从 AnalyzePage 提取，精华为工作区步骤组件
+ * 集成任务队列，支持排队、重试、取消
  */
-
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useMemo } from 'react';
 import {
   Typography,
   Button,
@@ -14,18 +13,26 @@ import {
   Spin,
   Space,
   Empty,
+  Tag,
+  Tooltip,
 } from 'antd';
 import {
   PlayCircleOutlined,
   StopOutlined,
   CheckCircleFilled,
+  ReloadOutlined,
+  ClockCircleOutlined,
+  LoadingOutlined,
+  CloseCircleOutlined,
+  MinusCircleOutlined,
 } from '@ant-design/icons';
-import { analyzeApi, type AnalysisStatus } from '../../services/ipc';
 import { useProjectStore } from '../../stores/projectStore';
+import { useTaskQueueStore, type Task } from '../../stores/taskQueueStore';
 import { EmotionCurve } from '../../components/chart/EmotionCurve';
 
 const { Title, Text } = Typography;
 const CYAN = '#00d4ff';
+const PURPLE = '#7c3aed';
 
 // ─── Mock 数据 ───
 const MOCK_ASR = [
@@ -50,74 +57,133 @@ const PHASE_LABELS: Record<string, string> = {
   idle: '准备就绪',
 };
 
+// ── 分析任务状态标签 ──
+
+const StatusTag: React.FC<{ status: Task['status'] }> = ({ status }) => {
+  const map: Record<Task['status'], { color: string; icon: React.ReactNode; label: string }> = {
+    queued: { color: '#6b7b9d', icon: <ClockCircleOutlined />, label: '排队中' },
+    running: { color: CYAN, icon: <LoadingOutlined />, label: '分析中' },
+    completed: { color: '#10b981', icon: <CheckCircleFilled />, label: '已完成' },
+    failed: { color: '#ef4444', icon: <CloseCircleOutlined />, label: '失败' },
+    cancelled: { color: '#f59e0b', icon: <MinusCircleOutlined />, label: '已取消' },
+  };
+  const m = map[status];
+  return (
+    <Tag style={{ borderRadius: 6, margin: 0, color: m.color, borderColor: `${m.color}44`, background: `${m.color}11` }}>
+      {m.icon} {m.label}
+    </Tag>
+  );
+};
+
+// ── 单条分析任务行 ──
+
+const AnalyzeTaskRow: React.FC<{
+  task: Task;
+  onCancel: (id: string) => void;
+  onRetry: (id: string) => void;
+  onRemove: (id: string) => void;
+}> = ({ task, onCancel, onRetry, onRemove }) => {
+  const { activeTaskId } = useTaskQueueStore();
+  const isActive = task.id === activeTaskId;
+
+  return (
+    <div
+      style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '8px 12px', borderRadius: 8,
+        background: isActive ? 'rgba(0,212,255,0.04)' : 'transparent',
+        border: `1px solid ${isActive ? `${CYAN}22` : 'transparent'}`,
+        transition: 'all 0.2s',
+      }}
+    >
+      <div style={{ flexShrink: 0, width: 72 }}>
+        <StatusTag status={task.status} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+          <Text style={{ color: '#e0e6ed', fontSize: 13, fontWeight: 500 }}>项目分析</Text>
+          <Text style={{ color: '#4a5a7a', fontSize: 11 }}>
+            {task.phase ? (PHASE_LABELS[task.phase] || task.phase) : ''}
+          </Text>
+        </div>
+        {task.status === 'running' && (
+          <Progress
+            percent={task.progress}
+            strokeColor={{ '0%': CYAN, '100%': PURPLE }}
+            trailColor="rgba(255,255,255,0.05)"
+            size="small"
+            style={{ margin: 0 }}
+          />
+        )}
+        {task.status === 'failed' && task.error && (
+          <Text style={{ color: '#ef4444', fontSize: 11 }}>{task.error}</Text>
+        )}
+        {task.status === 'queued' && (
+          <Text style={{ color: '#4a5a7a', fontSize: 11 }}>
+            {new Date(task.createdAt).toLocaleTimeString('zh-CN')} 加入
+          </Text>
+        )}
+      </div>
+      <div style={{ flexShrink: 0, display: 'flex', gap: 4 }}>
+        {task.status === 'running' && (
+          <Tooltip title="取消">
+            <Button size="small" shape="circle" icon={<StopOutlined />} onClick={() => onCancel(task.id)}
+              style={{ border: 'none', color: '#f59e0b' }} />
+          </Tooltip>
+        )}
+        {task.status === 'failed' && (
+          <Tooltip title="重试">
+            <Button size="small" shape="circle" icon={<ReloadOutlined />} onClick={() => onRetry(task.id)}
+              style={{ border: 'none', color: CYAN }} />
+          </Tooltip>
+        )}
+        {(task.status === 'completed' || task.status === 'cancelled') && (
+          <Tooltip title="移除">
+            <Button size="small" shape="circle" icon={<MinusCircleOutlined />} onClick={() => onRemove(task.id)}
+              style={{ border: 'none', color: '#4a5a7a' }} />
+          </Tooltip>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ── 主面板 ──
+
 interface Props {
   onNext: () => void;
 }
 
 const AnalyzePanel: React.FC<Props> = ({ onNext }) => {
   const { currentProject } = useProjectStore();
+  const { tasks: allTasks, activeTaskId, enqueue, cancel, retry, remove, clearCompleted, isRunning } = useTaskQueueStore();
 
-  const [analyzing, setAnalyzing] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [phase, setPhase] = useState('idle');
-  const [error, setError] = useState<string | null>(null);
-  const [asrResults, setAsrResults] = useState<typeof MOCK_ASR>([]);
-  const [emotionData, setEmotionData] = useState<typeof MOCK_EMOTION>([]);
+  // 只取 analyze 类型任务
+  const analyzeTasks = useMemo(
+    () => allTasks.filter(t => t.type === 'analyze'),
+    [allTasks],
+  );
+  const activeAnalyze = useMemo(
+    () => analyzeTasks.find(t => t.id === activeTaskId),
+    [analyzeTasks, activeTaskId],
+  );
+  const latestCompleted = useMemo(
+    () => analyzeTasks
+      .filter(t => t.status === 'completed')
+      .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0))[0],
+    [analyzeTasks],
+  );
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 是否有分析结果可展示
+  const hasResults = latestCompleted || analyzeTasks.some(t => t.status === 'completed');
 
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, []);
-
-  const startPolling = (taskId: string) => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      try {
-        const status: AnalysisStatus | null = await analyzeApi.getStatus(taskId);
-        if (!status) return;
-        const done = ['completed', 'failed', 'cancelled'].includes(status.status);
-        setProgress(status.progress ?? 0);
-        setPhase(status.phase ?? 'idle');
-        if (done) {
-          clearInterval(pollRef.current!);
-          pollRef.current = null;
-          if (status.status === 'completed') {
-            setAnalyzing(false);
-            setAsrResults(MOCK_ASR);
-            setEmotionData(MOCK_EMOTION);
-            setPhase('completed');
-          } else {
-            setAnalyzing(false);
-            setError(status.message ?? '分析失败');
-          }
-        }
-      } catch (err: any) { clearInterval(pollRef.current!); pollRef.current = null; setAnalyzing(false); setError(err?.message || '轮询分析状态失败'); setPhase('idle'); }
-    }, 1000);
-  };
-
-  const handleStart = async () => {
+  // ── 启动分析 ──
+  const handleStart = () => {
     if (!currentProject) return;
-    setError(null);
-    setAsrResults([]);
-    setEmotionData([]);
-    setProgress(0);
-    try {
-      const { task_id } = await analyzeApi.start(currentProject.id, []);
-      setAnalyzing(true);
-      startPolling(task_id);
-    } catch (err: any) {
-      setError(err?.message || '启动失败');
-    }
-  };
-
-  const handleCancel = () => {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-    setAnalyzing(false);
-    setPhase('idle');
-    setProgress(0);
+    enqueue('analyze', currentProject.id, {
+      project_id: currentProject.id,
+      episode_ids: [],
+    });
   };
 
   if (!currentProject) {
@@ -139,80 +205,117 @@ const AnalyzePanel: React.FC<Props> = ({ onNext }) => {
           </Text>
         </div>
         <Space>
-          {analyzing ? (
-            <Button danger icon={<StopOutlined />} onClick={handleCancel} style={{ borderRadius: 8, height: 40 }}>
-              取消分析
-            </Button>
-          ) : phase !== 'completed' ? (
+          {!activeAnalyze ? (
             <Button
               type="primary"
               icon={<PlayCircleOutlined />}
               onClick={handleStart}
+              disabled={isRunning}
               style={{
-                height: 40, borderRadius: 8, padding: '0 24px',
-                background: `linear-gradient(135deg, ${CYAN}, #7c3aed)`,
+                borderRadius: 8, height: 40, padding: '0 24px',
+                background: `linear-gradient(135deg, ${CYAN}, ${PURPLE})`,
                 border: 'none', fontWeight: 600,
                 boxShadow: `0 0 20px ${CYAN}33`,
               }}
             >
-              开始分析
+              {isRunning ? '队列执行中...' : '开始分析'}
             </Button>
-          ) : (
+          ) : null}
+          {hasResults && !activeAnalyze && (
             <Button
               type="primary"
               onClick={onNext}
-              size="large"
+              icon={<CheckCircleFilled />}
               style={{
-                height: 40, borderRadius: 8, padding: '0 24px',
+                borderRadius: 8, height: 40, padding: '0 24px',
                 background: '#10b981', border: 'none', fontWeight: 600,
               }}
             >
-              查看方案 <CheckCircleFilled style={{ marginLeft: 6 }} />
+              查看方案
             </Button>
           )}
         </Space>
       </div>
 
-      {/* ─── 进度 ─── */}
-      {analyzing && (
+      {/* ─── 当前运行进度 ─── */}
+      {activeAnalyze && (
         <Card style={{ marginBottom: 16, background: 'rgba(0,212,255,0.03)', borderColor: `${CYAN}22`, borderRadius: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <Spin size="small" style={{ color: CYAN }} />
             <div style={{ flex: 1 }}>
-              <Text strong style={{ color: '#e0e6ed' }}>{PHASE_LABELS[phase] || '处理中'}</Text>
+              <Text strong style={{ color: '#e0e6ed' }}>
+                {PHASE_LABELS[activeAnalyze.phase] || activeAnalyze.phase || '处理中'}
+              </Text>
             </div>
-            <Text style={{ color: CYAN, fontFamily: "'JetBrains Mono', monospace" }}>{progress}%</Text>
+            <Text style={{ color: CYAN, fontFamily: "'JetBrains Mono', monospace" }}>{activeAnalyze.progress}%</Text>
           </div>
-          <Progress percent={progress} strokeColor={{ '0%': '#108ee9', '100%': '#87d068' }} style={{ marginTop: 8, borderRadius: 4 }} />
-        </Card>
-      )}
-
-      {/* ─── 错误 ─── */}
-      {error && <Alert message={error} type="error" showIcon closable style={{ marginBottom: 16, borderRadius: 8 }} onClose={() => setError(null)} />}
-
-      {/* ─── ASR 结果 ─── */}
-      {asrResults.length > 0 && (
-        <Card style={{ marginBottom: 16, background: 'rgba(255,255,255,0.02)', borderColor: 'rgba(255,255,255,0.06)', borderRadius: 12 }} title={<span style={{ color: '#e0e6ed' }}>📝 语音识别结果</span>}>
-          <Table
-            dataSource={asrResults}
-            size="small"
-            bordered
-            rowKey={(_, i) => i ?? 0}
-            pagination={false}
-            columns={[
-              { title: '开始', dataIndex: 'start', width: 80, render: (v: number) => `${v.toFixed(1)}s` },
-              { title: '结束', dataIndex: 'end', width: 80, render: (v: number) => `${v.toFixed(1)}s` },
-              { title: '台词', dataIndex: 'text', key: 'text' },
-              { title: '角色', dataIndex: 'speaker', width: 90 },
-            ]}
+          <Progress
+            percent={activeAnalyze.progress}
+            strokeColor={{ '0%': '#108ee9', '100%': '#87d068' }}
+            style={{ marginTop: 8, borderRadius: 4 }}
           />
         </Card>
       )}
 
-      {/* ─── 情绪曲线 ─── */}
-      {emotionData.length > 0 && (
-        <Card style={{ background: 'rgba(255,255,255,0.02)', borderColor: 'rgba(255,255,255,0.06)', borderRadius: 12 }} title={<span style={{ color: '#e0e6ed' }}>📊 情绪曲线</span>}>
-          <EmotionCurve data={emotionData} height={200} />
+      {/* ─── ASR 结果（仅最近完成的任务展示 mock 数据） ─── */}
+      {latestCompleted && (
+        <>
+          <Card style={{
+            marginBottom: 16, background: 'rgba(255,255,255,0.02)',
+            borderColor: 'rgba(255,255,255,0.06)', borderRadius: 12,
+          }} title={<span style={{ color: '#e0e6ed' }}>📝 语音识别结果</span>}>
+            <Table
+              dataSource={MOCK_ASR}
+              size="small"
+              bordered
+              rowKey={(_, i) => i ?? 0}
+              pagination={false}
+              columns={[
+                { title: '开始', dataIndex: 'start', width: 80, render: (v: number) => `${v.toFixed(1)}s` },
+                { title: '结束', dataIndex: 'end', width: 80, render: (v: number) => `${v.toFixed(1)}s` },
+                { title: '台词', dataIndex: 'text', key: 'text' },
+                { title: '角色', dataIndex: 'speaker', width: 90 },
+              ]}
+            />
+          </Card>
+
+          <Card style={{
+            background: 'rgba(255,255,255,0.02)',
+            borderColor: 'rgba(255,255,255,0.06)', borderRadius: 12,
+          }} title={<span style={{ color: '#e0e6ed' }}>📊 情绪曲线</span>}>
+            <EmotionCurve data={MOCK_EMOTION} height={200} />
+          </Card>
+        </>
+      )}
+
+      {/* ─── 分析队列 ─── */}
+      {analyzeTasks.length > 0 && (
+        <Card
+          style={{
+            marginTop: 16, background: 'rgba(255,255,255,0.02)',
+            borderColor: 'rgba(255,255,255,0.06)', borderRadius: 12,
+          }}
+          title={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: '#e0e6ed' }}>📋 分析队列</span>
+              <Button size="small" type="text" onClick={clearCompleted}
+                style={{ color: '#4a5a7a', fontSize: 12 }}>
+                清理已完成
+              </Button>
+            </div>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {analyzeTasks.map(task => (
+              <AnalyzeTaskRow
+                key={task.id}
+                task={task}
+                onCancel={cancel}
+                onRetry={retry}
+                onRemove={remove}
+              />
+            ))}
+          </div>
         </Card>
       )}
     </div>
