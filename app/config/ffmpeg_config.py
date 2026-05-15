@@ -6,11 +6,10 @@ FFmpeg 配置管理模块
 import os
 import platform
 from typing import Dict, List, Optional
-from dataclasses import dataclass
 from loguru import logger
+from app.utils.ffmpeg_utils import get_ffmpeg_path
 
 
-@dataclass
 class FFmpegProfile:
     """FFmpeg 配置文件"""
     name: str
@@ -181,7 +180,7 @@ class FFmpegConfigManager:
         
         # 构建基础命令
         cmd = [
-            "ffmpeg",
+            get_ffmpeg_path(),
             "-hide_banner",
             "-loglevel", "error",
         ]

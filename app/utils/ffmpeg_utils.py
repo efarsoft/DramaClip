@@ -27,6 +27,118 @@ _FFMPEG_HW_ACCEL_INFO = {
 # 线程锁，保护 _FFMPEG_HW_ACCEL_INFO 的并发访问
 _FFMPEG_LOCK = threading.Lock()
 
+# 缓存已解析的 ffmpeg/ffprobe 路径
+_FFMPEG_BIN_PATH: Optional[str] = None
+_FFPROBE_BIN_PATH: Optional[str] = None
+
+
+def get_ffmpeg_path() -> str:
+    """
+    获取 ffmpeg 可执行文件的绝对路径。
+
+    查找优先级：
+    1. 环境变量 DRAMACLIP_FFMPEG_PATH（由 backend_main.py 设置，指向 resources/ 目录）
+    2. 与 Python 可执行文件同目录（PyInstaller 打包模式）
+    3. 项目根目录下的 resources/ 目录
+    4. 系统 PATH 回退（返回 "ffmpeg"）
+
+    Returns:
+        str: ffmpeg 可执行文件的路径
+    """
+    global _FFMPEG_BIN_PATH
+    if _FFMPEG_BIN_PATH is not None:
+        return _FFMPEG_BIN_PATH
+
+    import sys
+    from pathlib import Path
+
+    system = platform.system().lower()
+    exe_name = "ffmpeg.exe" if system == "windows" else "ffmpeg"
+
+    # 1. 环境变量 DRAMACLIP_FFMPEG_PATH
+    env_dir = os.environ.get("DRAMACLIP_FFMPEG_PATH")
+    if env_dir:
+        candidate = os.path.join(env_dir, exe_name)
+        if os.path.isfile(candidate):
+            _FFMPEG_BIN_PATH = candidate
+            logger.info(f"FFmpeg found via DRAMACLIP_FFMPEG_PATH: {_FFMPEG_BIN_PATH}")
+            return _FFMPEG_BIN_PATH
+
+    # 2. PyInstaller 打包模式：与 Python 可执行文件同目录
+    if getattr(sys, 'frozen', False):
+        base_dir = Path(sys.executable).parent
+        candidate = str(base_dir / exe_name)
+        if os.path.isfile(candidate):
+            _FFMPEG_BIN_PATH = candidate
+            logger.info(f"FFmpeg found alongside frozen exe: {_FFMPEG_BIN_PATH}")
+            return _FFMPEG_BIN_PATH
+
+    # 3. 项目根目录下的 resources/
+    try:
+        project_root = Path(__file__).resolve().parent.parent.parent
+        candidate = str(project_root / "resources" / exe_name)
+        if os.path.isfile(candidate):
+            _FFMPEG_BIN_PATH = candidate
+            logger.info(f"FFmpeg found in project resources/: {_FFMPEG_BIN_PATH}")
+            return _FFMPEG_BIN_PATH
+    except Exception:
+        pass
+
+    # 4. 系统 PATH 回退
+    _FFMPEG_BIN_PATH = exe_name
+    logger.debug(f"FFmpeg using system PATH fallback: {exe_name}")
+    return _FFMPEG_BIN_PATH
+
+
+def get_ffprobe_path() -> str:
+    """
+    获取 ffprobe 可执行文件的绝对路径。
+
+    查找优先级与 get_ffmpeg_path() 相同。
+
+    Returns:
+        str: ffprobe 可执行文件的路径
+    """
+    global _FFPROBE_BIN_PATH
+    if _FFPROBE_BIN_PATH is not None:
+        return _FFPROBE_BIN_PATH
+
+    import sys
+    from pathlib import Path
+
+    system = platform.system().lower()
+    exe_name = "ffprobe.exe" if system == "windows" else "ffprobe"
+
+    # 1. 环境变量 DRAMACLIP_FFMPEG_PATH
+    env_dir = os.environ.get("DRAMACLIP_FFMPEG_PATH")
+    if env_dir:
+        candidate = os.path.join(env_dir, exe_name)
+        if os.path.isfile(candidate):
+            _FFPROBE_BIN_PATH = candidate
+            return _FFPROBE_BIN_PATH
+
+    # 2. PyInstaller 打包模式
+    if getattr(sys, 'frozen', False):
+        base_dir = Path(sys.executable).parent
+        candidate = str(base_dir / exe_name)
+        if os.path.isfile(candidate):
+            _FFPROBE_BIN_PATH = candidate
+            return _FFPROBE_BIN_PATH
+
+    # 3. 项目根目录下的 resources/
+    try:
+        project_root = Path(__file__).resolve().parent.parent.parent
+        candidate = str(project_root / "resources" / exe_name)
+        if os.path.isfile(candidate):
+            _FFPROBE_BIN_PATH = candidate
+            return _FFPROBE_BIN_PATH
+    except Exception:
+        pass
+
+    # 4. 系统 PATH 回退
+    _FFPROBE_BIN_PATH = exe_name
+    return _FFPROBE_BIN_PATH
+
 # 硬件加速优先级配置（按平台和GPU类型）
 HWACCEL_PRIORITY = {
     "windows": {
@@ -93,7 +205,7 @@ def create_test_video() -> str:
 
         # 生成一个简单的测试视频（1秒，黑色画面）
         cmd = [
-            'ffmpeg', '-y', '-f', 'lavfi', '-i', 'color=black:size=320x240:duration=1',
+            get_ffmpeg_path(), '-y', '-f', 'lavfi', '-i', 'color=black:size=320x240:duration=1',
             '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-t', '1', temp_path
         ]
 
@@ -129,9 +241,9 @@ def check_ffmpeg_installation() -> bool:
         # 在Windows系统上使用UTF-8编码
         is_windows = os.name == 'nt'
         if is_windows:
-            subprocess.run(['ffmpeg', '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8', check=True)
+            subprocess.run([get_ffmpeg_path(), '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8', check=True)
         else:
-            subprocess.run(['ffmpeg', '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            subprocess.run([get_ffmpeg_path(), '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
         return True
     except (subprocess.SubprocessError, FileNotFoundError):
         logger.error("ffmpeg未安装或不在系统PATH中，请安装ffmpeg")
@@ -196,7 +308,7 @@ def test_hwaccel_method(method: str, test_input: str) -> bool:
     """
     try:
         # 构建测试命令
-        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error"]
+        cmd = [get_ffmpeg_path(), "-hide_banner", "-loglevel", "error"]
 
         # 添加硬件加速参数
         if method == "cuda":
@@ -306,7 +418,7 @@ def _do_detect_hardware_acceleration() -> Dict[str, Union[bool, str, List[str], 
     # 获取FFmpeg支持的硬件加速器列表
     try:
         hwaccels_cmd = subprocess.run(
-            ['ffmpeg', '-hide_banner', '-hwaccels'],
+            [get_ffmpeg_path(), '-hide_banner', '-hwaccels'],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False
         )
         supported_hwaccels = hwaccels_cmd.stdout.lower() if hwaccels_cmd.returncode == 0 else ""
@@ -447,7 +559,7 @@ def _find_vaapi_device() -> Optional[str]:
             if os.path.exists(device):
                 # 测试设备是否可用
                 test_cmd = subprocess.run(
-                    ["ffmpeg", "-hide_banner", "-loglevel", "error",
+                    [get_ffmpeg_path(), "-hide_banner", "-loglevel", "error",
                      "-hwaccel", "vaapi", "-vaapi_device", device,
                      "-f", "lavfi", "-i", "color=black:size=64x64:duration=0.1",
                      "-f", "null", "-"],
@@ -477,7 +589,7 @@ def _detect_macos_acceleration(supported_hwaccels: str) -> None:
         # 测试videotoolbox
         try:
             test_cmd = subprocess.run(
-                ["ffmpeg", "-hwaccel", "videotoolbox", "-i", "/dev/null", "-f", "null", "-"],
+                [get_ffmpeg_path(), "-hwaccel", "videotoolbox", "-i", "/dev/null", "-f", "null", "-"],
                 stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, check=False
             )
             if test_cmd.returncode == 0:
@@ -523,7 +635,7 @@ def _detect_windows_acceleration(supported_hwaccels: str) -> None:
         # 检查NVENC编码器是否可用
         try:
             encoders_cmd = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-encoders"],
+                [get_ffmpeg_path(), "-hide_banner", "-encoders"],
                 stderr=subprocess.PIPE, stdout=subprocess.PIPE, 
                 encoding='utf-8', text=True, check=False
             )
@@ -534,7 +646,7 @@ def _detect_windows_acceleration(supported_hwaccels: str) -> None:
                 # 优先方案：纯NVENC编码器（测试证明最兼容）
                 logger.debug("测试纯NVENC编码器（推荐方案，避免滤镜链问题）")
                 test_cmd = subprocess.run([
-                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    get_ffmpeg_path(), "-hide_banner", "-loglevel", "error",
                     "-f", "lavfi", "-i", "testsrc=duration=0.1:size=640x480:rate=30",
                     "-c:v", "h264_nvenc", "-preset", "medium", "-cq", "23",
                     "-pix_fmt", "yuv420p", "-f", "null", "-"
@@ -555,7 +667,7 @@ def _detect_windows_acceleration(supported_hwaccels: str) -> None:
                 if 'cuda' in supported_hwaccels:
                     logger.debug("测试CUDA硬件解码（仅用于非裁剪场景）")
                     test_cmd = subprocess.run([
-                        "ffmpeg", "-hide_banner", "-loglevel", "error",
+                        get_ffmpeg_path(), "-hide_banner", "-loglevel", "error",
                         "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
                         "-f", "lavfi", "-i", "testsrc=duration=0.1:size=640x480:rate=30",
                         "-c:v", "h264_nvenc", "-preset", "medium", "-cq", "23",
@@ -585,7 +697,7 @@ def _detect_windows_acceleration(supported_hwaccels: str) -> None:
         # 检查AMF编码器是否可用
         try:
             encoders_cmd = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-encoders"],
+                [get_ffmpeg_path(), "-hide_banner", "-encoders"],
                 stderr=subprocess.PIPE, stdout=subprocess.PIPE, 
                 encoding='utf-8', text=True, check=False
             )
@@ -596,7 +708,7 @@ def _detect_windows_acceleration(supported_hwaccels: str) -> None:
                 # 测试AMF编码器
                 logger.debug("测试AMF编码器")
                 test_cmd = subprocess.run([
-                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    get_ffmpeg_path(), "-hide_banner", "-loglevel", "error",
                     "-f", "lavfi", "-i", "testsrc=duration=0.1:size=640x480:rate=30",
                     "-c:v", "h264_amf", "-quality", "balanced", "-qp_i", "23",
                     "-pix_fmt", "yuv420p", "-f", "null", "-"
@@ -622,7 +734,7 @@ def _detect_windows_acceleration(supported_hwaccels: str) -> None:
         
         try:
             encoders_cmd = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-encoders"],
+                [get_ffmpeg_path(), "-hide_banner", "-encoders"],
                 stderr=subprocess.PIPE, stdout=subprocess.PIPE, 
                 encoding='utf-8', text=True, check=False
             )
@@ -633,7 +745,7 @@ def _detect_windows_acceleration(supported_hwaccels: str) -> None:
                 # 测试QSV编码器
                 logger.debug("测试QSV编码器")
                 test_cmd = subprocess.run([
-                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    get_ffmpeg_path(), "-hide_banner", "-loglevel", "error",
                     "-f", "lavfi", "-i", "testsrc=duration=0.1:size=640x480:rate=30",
                     "-c:v", "h264_qsv", "-preset", "medium", "-global_quality", "23",
                     "-pix_fmt", "yuv420p", "-f", "null", "-"
@@ -682,7 +794,7 @@ def _detect_linux_acceleration(supported_hwaccels: str) -> None:
     if 'cuda' in supported_hwaccels and is_nvidia:
         try:
             test_cmd = subprocess.run(
-                ["ffmpeg", "-hwaccel", "cuda", "-i", "/dev/null", "-f", "null", "-"],
+                [get_ffmpeg_path(), "-hwaccel", "cuda", "-i", "/dev/null", "-f", "null", "-"],
                 stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, check=False
             )
             if test_cmd.returncode == 0:
@@ -708,7 +820,7 @@ def _detect_linux_acceleration(supported_hwaccels: str) -> None:
         if render_device:
             try:
                 test_cmd = subprocess.run(
-                    ["ffmpeg", "-hwaccel", "vaapi", "-vaapi_device", render_device,
+                    [get_ffmpeg_path(), "-hwaccel", "vaapi", "-vaapi_device", render_device,
                      "-i", "/dev/null", "-f", "null", "-"],
                     stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, check=False
                 )
@@ -727,7 +839,7 @@ def _detect_linux_acceleration(supported_hwaccels: str) -> None:
     if 'qsv' in supported_hwaccels and is_intel:
         try:
             test_cmd = subprocess.run(
-                ["ffmpeg", "-hwaccel", "qsv", "-i", "/dev/null", "-f", "null", "-"],
+                [get_ffmpeg_path(), "-hwaccel", "qsv", "-i", "/dev/null", "-f", "null", "-"],
                 stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, check=False
             )
             if test_cmd.returncode == 0:
@@ -921,7 +1033,7 @@ def get_ffmpeg_command_with_hwaccel(input_path: str, output_path: str, **kwargs)
     if _FFMPEG_HW_ACCEL_INFO["type"] is None:
         detect_hardware_acceleration()
 
-    cmd = ["ffmpeg", "-y"]
+    cmd = [get_ffmpeg_path(), "-y"]
 
     # 添加硬件加速参数
     if _FFMPEG_HW_ACCEL_INFO["available"]:
@@ -1062,7 +1174,7 @@ def test_nvenc_directly() -> bool:
         
         # 测试纯NVENC编码器
         test_cmd = subprocess.run([
-            "ffmpeg", "-hide_banner", "-loglevel", "error",
+            get_ffmpeg_path(), "-hide_banner", "-loglevel", "error",
             "-f", "lavfi", "-i", "testsrc=duration=1:size=640x480:rate=30",
             "-c:v", "h264_nvenc", "-preset", "fast", "-profile:v", "main",
             "-pix_fmt", "yuv420p", "-t", "1", "-f", "null", "-"
@@ -1162,7 +1274,7 @@ def extract_audio(video_path: str, output_path: str,
     Returns:
         bool: True on success
     """
-    cmd = ["ffmpeg", "-y", "-hide_banner"]
+    cmd = [get_ffmpeg_path(), "-y", "-hide_banner"]
     if start_time is not None:
         cmd += ["-ss", str(start_time)]
     if duration is not None:
@@ -1196,7 +1308,7 @@ def clip_video(video_path: str, output_path: str,
     Returns:
         bool: True on success
     """
-    cmd = ["ffmpeg", "-y", "-hide_banner"]
+    cmd = [get_ffmpeg_path(), "-y", "-hide_banner"]
     if start_time is not None:
         cmd += ["-ss", str(start_time)]
     if duration is not None:
@@ -1304,7 +1416,7 @@ def crop_to_portrait_face_centered(input_path: str, output_path: str,
 
     # Step 3: FFmpeg crop + scale
     cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-i", input_path,
+        get_ffmpeg_path(), "-y", "-hide_banner", "-i", input_path,
         "-vf", f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale={target_width}:{target_height}",
         "-c:v", get_optimal_ffmpeg_encoder(),
         "-preset", "fast", "-crf", "23",
@@ -1364,7 +1476,7 @@ def crop_to_portrait_centered(input_path: str, output_path: str,
     crop_y = max(0, (vh - crop_h) // 2)
 
     cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-i", input_path,
+        get_ffmpeg_path(), "-y", "-hide_banner", "-i", input_path,
         "-vf", f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale={width}:{height}",
         "-c:v", get_optimal_ffmpeg_encoder(),
         "-preset", "fast", "-crf", "23",
@@ -1417,7 +1529,7 @@ def concat_videos(concat_list_path: str, output_path: str,
 
     if stream_copy:
         cmd = [
-            "ffmpeg", "-y", "-hide_banner",
+            get_ffmpeg_path(), "-y", "-hide_banner",
             "-f", "concat", "-safe", "0",
             "-i", concat_list_path,
             "-c", "copy",
@@ -1426,7 +1538,7 @@ def concat_videos(concat_list_path: str, output_path: str,
         ]
     else:
         cmd = [
-            "ffmpeg", "-y", "-hide_banner",
+            get_ffmpeg_path(), "-y", "-hide_banner",
             "-f", "concat", "-safe", "0",
             "-i", concat_list_path,
             "-c:v", get_optimal_ffmpeg_encoder(),
@@ -1466,7 +1578,7 @@ def mix_audio_video(video_path: str, audio_path: str, output_path: str,
         bool: True on success
     """
     cmd = [
-        "ffmpeg", "-y", "-hide_banner",
+        get_ffmpeg_path(), "-y", "-hide_banner",
         "-i", video_path,
         "-i", audio_path,
         "-filter_complex",

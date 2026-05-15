@@ -9,8 +9,11 @@
 """
 
 import logging
+import uuid
 from typing import Dict, List, Optional
 from pathlib import Path
+
+from app.utils.ffmpeg_utils import get_ffmpeg_path
 
 import librosa
 import numpy as np
@@ -35,14 +38,24 @@ NEGATIVE_KEYWORDS = {
 
 
 class HighlightScorer:
-    """高光片段打分器"""
+    """
+    高光片段打分器 - 多模态分析 + 剧情重要性加权
+
+    打分维度：
+    1. 音频能量（35%）：音量、能量、频谱特征
+    2. 情绪强度（30%）：台词情感、冲突度
+    3. 画面动感（20%）：运动强度、镜头切换
+    4. 节奏（10%）：镜头切换频率
+    5. 剧情重要性（5%）：场景时长、字幕密度、情绪曲线位置
+    """
 
     def __init__(
         self,
-        audio_weight: float = 0.4,
-        emotion_weight: float = 0.3,
-        visual_weight: float = 0.2,
-        rhythm_weight: float = 0.1,
+        audio_weight: float = 0.35,
+        emotion_weight: float = 0.30,
+        visual_weight: float = 0.20,
+        rhythm_weight: float = 0.10,
+        plot_importance_weight: float = 0.05,
     ):
         """
         初始化打分器
@@ -52,18 +65,21 @@ class HighlightScorer:
             emotion_weight: 台词情绪权重
             visual_weight: 画面特征权重
             rhythm_weight: 镜头节奏权重
+            plot_importance_weight: 剧情重要性权重
         """
-        # 归一化权重
-        total = audio_weight + emotion_weight + visual_weight + rhythm_weight
+        # 归一化权重（包含plot_importance_weight）
+        total = audio_weight + emotion_weight + visual_weight + rhythm_weight + plot_importance_weight
         self.audio_weight = audio_weight / total
         self.emotion_weight = emotion_weight / total
         self.visual_weight = visual_weight / total
         self.rhythm_weight = rhythm_weight / total
+        self.plot_importance_weight = plot_importance_weight / total
 
         logger.info(
             f"HighlightScorer initialized with weights: "
             f"audio={self.audio_weight:.2f}, emotion={self.emotion_weight:.2f}, "
-            f"visual={self.visual_weight:.2f}, rhythm={self.rhythm_weight:.2f}"
+            f"visual={self.visual_weight:.2f}, rhythm={self.rhythm_weight:.2f}, "
+            f"plot_importance={self.plot_importance_weight:.2f}"
         )
 
     def score(
@@ -71,6 +87,8 @@ class HighlightScorer:
         video_path: str,
         audio_path: Optional[str] = None,
         subtitle_text: Optional[str] = None,
+        duration: float = 0.0,
+        scene_position: str = "middle",  # "beginning", "middle", "climax", "ending"
     ) -> Dict[str, float]:
         """
         对视频片段进行多维度打分
@@ -79,6 +97,8 @@ class HighlightScorer:
             video_path: 视频文件路径
             audio_path: 音频文件路径（如果不提供，从视频中提取）
             subtitle_text: 字幕文本（用于情绪分析）
+            duration: 片段时长（秒），用于剧情重要性计算
+            scene_position: 场景在故事中的位置
 
         Returns:
             包含各维度分数和总分的字典
@@ -97,12 +117,18 @@ class HighlightScorer:
         # 4. 镜头节奏分析
         rhythm_score = self._score_rhythm(video_path)
 
-        # 计算加权总分
+        # 5. 剧情重要性（新增）
+        plot_importance_score = self._score_plot_importance(
+            duration, subtitle_text, scene_position
+        )
+
+        # 计算加权总分（含剧情重要性）
         total_score = (
             self.audio_weight * audio_score
             + self.emotion_weight * emotion_score
             + self.visual_weight * visual_score
             + self.rhythm_weight * rhythm_score
+            + self.plot_importance_weight * plot_importance_score
         )
 
         result = {
@@ -110,12 +136,14 @@ class HighlightScorer:
             "emotion_score": emotion_score,
             "visual_score": visual_score,
             "rhythm_score": rhythm_score,
+            "plot_importance_score": plot_importance_score,
             "total_score": total_score,
         }
 
         logger.info(
             f"Score result: audio={audio_score:.3f}, emotion={emotion_score:.3f}, "
             f"visual={visual_score:.3f}, rhythm={rhythm_score:.3f}, "
+            f"plot_importance={plot_importance_score:.3f}, "
             f"total={total_score:.3f}"
         )
 
@@ -129,9 +157,29 @@ class HighlightScorer:
             0.0 ~ 1.0 的打分
         """
         try:
-            # 如果没有提供音频文件，从视频中提取
+            # 优先使用 ffmpeg 提取音频为 WAV，librosa 对 WAV 支持最好
+            # 直接读 MP4/MKV 容器会依赖 audioread，兼容性差
+            import subprocess as sp
+            import tempfile
+            import os
+
             if audio_path is None:
-                y, sr = librosa.load(video_path, sr=None)
+                # 用 ffmpeg 提取音频到临时 WAV
+                temp_wav = os.path.join(
+                    tempfile.gettempdir(),
+                    f"audio_{uuid.uuid4().hex[:8]}.wav"
+                )
+                try:
+                    sp.run([
+                        get_ffmpeg_path(), "-y", "-i", video_path,
+                        "-vn", "-acodec", "pcm_s16le",
+                        "-ar", "22050", "-ac", "1",
+                        temp_wav
+                    ], check=True, capture_output=True)
+                    y, sr = librosa.load(temp_wav, sr=None)
+                finally:
+                    if os.path.exists(temp_wav):
+                        os.remove(temp_wav)
             else:
                 y, sr = librosa.load(audio_path, sr=None)
 
@@ -306,6 +354,59 @@ class HighlightScorer:
         except Exception as e:
             logger.error(f"Error scoring rhythm: {e}")
             return 0.5
+
+    def _score_plot_importance(
+        self,
+        duration: float,
+        subtitle_text: Optional[str],
+        scene_position: str,
+    ) -> float:
+        """
+        剧情重要性打分 - 基于场景时长、字幕密度、情绪曲线位置
+
+        设计思路：
+        - 开头/高潮/结尾场景权重更高（推动故事发展的关键帧）
+        - 中等时长的场景更有可能是完整对话/关键情节（太短是过渡，太长是铺垫）
+        - 字幕密度高 = 信息量大 = 更值得关注
+
+        Returns:
+            0.0 ~ 1.0 的打分
+        """
+        score = 0.0
+
+        # 1. 场景位置权重（关键位置加分）
+        position_weights = {
+            "beginning": 0.8,   # 开场钩子
+            "climax": 1.0,       # 高潮
+            "ending": 0.7,       # 结尾/悬念
+            "middle": 0.5,       # 中间过渡
+        }
+        score += position_weights.get(scene_position, 0.5)
+
+        # 2. 时长权重（中等时长 3-8秒最佳，太短是过渡，太长是铺垫）
+        if 3.0 <= duration <= 10.0:
+            score += 0.8       # 黄金时长
+        elif 1.0 <= duration < 3.0:
+            score += 0.3       # 偏短，可能是过渡
+        elif duration > 10.0:
+            score += 0.4       # 偏长，可能是铺垫
+        else:
+            score += 0.2       # 不足1秒，快速闪切
+
+        # 3. 字幕密度权重（信息量大加分）
+        if subtitle_text and len(subtitle_text) > 10:
+            density = len(subtitle_text) / max(duration, 1.0)
+            if density > 20:
+                score += 0.9   # 高密度对话
+            elif density > 10:
+                score += 0.7   # 中等密度
+            else:
+                score += 0.4   # 低密度
+        else:
+            score += 0.2       # 无声/字幕缺失
+
+        # 归一化到 0~1
+        return min(1.0, score / 2.5)
 
     def batch_score(
         self,

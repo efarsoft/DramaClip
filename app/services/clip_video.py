@@ -165,7 +165,7 @@ def build_ffmpeg_command(
     Returns:
         List[str]: ffmpeg命令列表
     """
-    cmd = ["ffmpeg", "-y"]
+    cmd = [get_ffmpeg_path(), "-y"]
     
     # 关键修正：对于视频裁剪，不使用CUDA硬件解码，只使用NVENC编码器
     # 这样能避免滤镜链格式转换错误，同时保持编码性能优势
@@ -364,7 +364,7 @@ def try_compatibility_fallback(
     """
     # 兼容性模式：避免所有可能的滤镜链问题
     fallback_cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        get_ffmpeg_path(), "-y", "-hide_banner", "-loglevel", "error",
         "-i", input_path,
         "-ss", start_time,
         "-to", end_time,
@@ -405,7 +405,7 @@ def try_software_fallback(
     """
     # 纯软件编码
     fallback_cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        get_ffmpeg_path(), "-y", "-hide_banner", "-loglevel", "error",
         "-i", input_path,
         "-ss", start_time,
         "-to", end_time,
@@ -445,7 +445,7 @@ def try_basic_fallback(
     """
     # 最基本的编码参数
     fallback_cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        get_ffmpeg_path(), "-y", "-hide_banner", "-loglevel", "error",
         "-i", input_path,
         "-ss", start_time,
         "-to", end_time,
@@ -528,7 +528,7 @@ def try_fallback_encoding(
     """
     # 最简单的软件编码命令
     fallback_cmd = [
-        "ffmpeg", "-y",
+        get_ffmpeg_path(), "-y",
         "-i", input_path,
         "-ss", start_time,
         "-to", end_time,
@@ -716,7 +716,7 @@ def _build_ffmpeg_command_with_audio_control(
     Returns:
         List[str]: ffmpeg命令列表
     """
-    cmd = ["ffmpeg", "-y"]
+    cmd = [get_ffmpeg_path(), "-y"]
 
     # 硬件加速设置（参考原有逻辑）
     if encoder_config["video_codec"] == "h264_nvenc":

@@ -15,6 +15,7 @@ from enum import Enum
 from typing import List, Optional, Tuple
 from loguru import logger
 
+from app.utils.ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
 from app.utils import ffmpeg_utils
 
 
@@ -50,7 +51,7 @@ def check_ffmpeg_installation() -> bool:
         bool: 如果安装则返回True，否则返回False
     """
     try:
-        subprocess.run(['ffmpeg', '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        subprocess.run([get_ffmpeg_path(), '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
         return True
     except (subprocess.SubprocessError, FileNotFoundError):
         logger.error("ffmpeg未安装或不在系统PATH中，请安装ffmpeg")
@@ -67,7 +68,6 @@ def get_hardware_acceleration_option() -> Optional[str]:
     # 使用新的硬件加速检测API
     return ffmpeg_utils.get_ffmpeg_hwaccel_type()
 
-
 def check_video_has_audio(video_path: str) -> bool:
     """
     检查视频是否包含音频流
@@ -82,15 +82,14 @@ def check_video_has_audio(video_path: str) -> bool:
         logger.warning(f"视频文件不存在: {video_path}")
         return False
 
-    probe_cmd = [
-        'ffprobe', '-v', 'error',
-        '-select_streams', 'a:0',
-        '-show_entries', 'stream=codec_type',
-        '-of', 'csv=p=0',
-        video_path
-    ]
-
     try:
+        probe_cmd = [
+            get_ffprobe_path(), '-v', 'error',
+            '-select_streams', 'a:0',
+            '-show_entries', 'stream=codec_type',
+            '-of', 'csv=p=0',
+            video_path
+        ]
         result = subprocess.run(probe_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         return result.stdout.strip() == 'audio'
     except Exception as e:
@@ -156,7 +155,7 @@ def process_single_video(
         raise FileNotFoundError(f"找不到视频文件: {input_path}")
 
     # 构建基本命令
-    command = ['ffmpeg', '-y']
+    command = [get_ffmpeg_path(), '-y']
 
     # 安全检查：如果在Windows上，则慎用硬件加速
     is_windows = os.name == 'nt'
@@ -165,7 +164,7 @@ def process_single_video(
         try:
             # 对视频进行快速探测，检测其基本信息
             probe_cmd = [
-                'ffprobe', '-v', 'error',
+                get_ffprobe_path(), '-v', 'error',
                 '-select_streams', 'v:0',
                 '-show_entries', 'stream=codec_name,width,height',
                 '-of', 'csv=p=0',
@@ -270,7 +269,7 @@ def process_single_video(
                 ffmpeg_utils.force_software_encoding()
 
                 # 构建新的命令，使用软件编码
-                fallback_cmd = ['ffmpeg', '-y', '-i', input_path]
+                fallback_cmd = [get_ffmpeg_path(), '-y', '-i', input_path]
 
                 # 保持原有的音频设置
                 if not keep_audio:
@@ -308,7 +307,7 @@ def process_single_video(
                 try:
                     logger.info("尝试最基本的编码参数")
                     basic_cmd = [
-                        'ffmpeg', '-y', '-i', input_path,
+                        get_ffmpeg_path(), '-y', '-i', input_path,
                         '-c:v', 'libx264', '-preset', 'ultrafast',
                         '-crf', '23', '-pix_fmt', 'yuv420p',
                         output_path
@@ -527,7 +526,7 @@ def combine_clip_videos(
             # 获取每个视频片段的时长
             for i, video in enumerate(processed_videos):
                 duration_cmd = [
-                    'ffprobe', '-v', 'error',
+                    get_ffprobe_path(), '-v', 'error',
                     '-show_entries', 'format=duration',
                     '-of', 'csv=p=0',
                     video["path"]

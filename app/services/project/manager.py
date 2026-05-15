@@ -140,30 +140,102 @@ class ProjectManager:
         return project
 
     def open_project(self, project_id: str) -> Optional[ProjectMeta]:
-        """打开项目，返回项目元数据"""
-        # 先从索引查找
+        """打开项目，自动扫描 videos/ 目录索引视频资源"""
         project = self.get_project(project_id)
-        if project:
-            return project
+        if not project:
+            return None
 
-        # 尝试从目录中恢复
-        for project_dir in self.projects_dir.iterdir():
-            if project_dir.is_dir():
-                meta_file = project_dir / "meta.json"
-                if meta_file.exists():
-                    try:
-                        data = json.loads(meta_file.read_text(encoding="utf-8"))
-                        if data.get("id") == project_id:
-                            # 重新添加到索引
-                            projects = self._load_index()
-                            if not any(p["id"] == project_id for p in projects):
-                                projects.append(data)
-                                self._save_index(projects)
-                            return ProjectMeta(**data)
-                    except (json.JSONDecodeError, IOError):
-                        pass
+        project_path = Path(project.path)
+        videos_dir = project_path / "videos"
+        
+        # 自动扫描视频目录，更新视频索引
+        if videos_dir.exists():
+            self._scan_videos_dir(project_id, videos_dir)
 
-        return None
+        # 更新最后访问时间
+        project.updated_at = datetime.now().isoformat()
+        self._save_meta(project)
+
+        # 更新索引
+        projects = self._load_index()
+        for i, p in enumerate(projects):
+            if p["id"] == project_id:
+                projects[i] = project.to_dict()
+                break
+        self._save_index(projects)
+
+        logger.info(f"Opened project: {project_id} with {project.episode_count} episodes")
+        return project
+
+    def _save_meta(self, project: ProjectMeta) -> None:
+        """保存项目元数据到 meta.json"""
+        meta_file = Path(project.path) / "meta.json"
+        meta_file.write_text(
+            json.dumps(project.to_dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+
+    def _scan_videos_dir(self, project_id: str, videos_dir: Path) -> None:
+        """扫描视频目录，更新 videos.json 索引（不复制文件）"""
+        project = self.get_project(project_id)
+        if not project:
+            return
+
+        project_path = Path(project.path)
+        videos_file = project_path / "videos.json"
+        
+        # 读取已存在的视频记录
+        if videos_file.exists():
+            try:
+                existing_videos = json.loads(videos_file.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                existing_videos = []
+        else:
+            existing_videos = []
+
+        # 建立现有记录的路径映射（key 是文件路径）
+        existing_map = {v.get("path", ""): v for v in existing_videos}
+        
+        # 扫描目录中的视频文件
+        video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.wmv', '.webm', '.flv'}
+        scanned_paths = set()
+        
+        for file_path in videos_dir.iterdir():
+            if file_path.is_file() and file_path.suffix.lower() in video_extensions:
+                scanned_paths.add(str(file_path))
+                if file_path.stem not in existing_map:
+                    # 新发现的视频文件
+                    video_id = str(uuid.uuid4())
+                    now = datetime.now().isoformat()
+                    
+                    video_info = VideoInfo(
+                        id=video_id,
+                        name=file_path.stem,
+                        path=str(file_path),
+                        size=file_path.stat().st_size,
+                        duration=0.0,
+                        format=file_path.suffix.lstrip("."),
+                        imported_at=now,
+                    )
+                    existing_videos.append(video_info.to_dict())
+                    logger.info(f"Discovered video during scan: {file_path.name}")
+
+        # 移除已不在目录中的视频记录
+        removed = len(existing_videos) - len(scanned_paths)
+        if removed < 0:
+            # 目录中有更多新文件，全部保留，只过滤掉已不存在的记录
+            filtered = [v for v in existing_videos if v.get("path", "") in scanned_paths]
+            if len(filtered) < len(existing_videos):
+                existing_videos = filtered
+
+        # 更新项目元数据
+        project.episode_count = len(existing_videos)
+        
+        # 保存更新的视频列表
+        videos_file.write_text(
+            json.dumps(existing_videos, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
 
     def update_project(self, project_id: str, updates: Dict[str, Any]) -> Optional[ProjectMeta]:
         """更新项目元数据"""

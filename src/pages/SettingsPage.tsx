@@ -3,7 +3,7 @@
  * AI 模型提供者、TTS、ASR、ViT、输出参数、硬件加速等完整配置
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Card,
   Typography,
@@ -21,6 +21,9 @@ import {
   Row,
   Col,
   Collapse,
+  Progress,
+  Tag,
+  Modal,
 } from 'antd';
 import {
   SaveOutlined,
@@ -28,15 +31,17 @@ import {
   ApiOutlined,
   AudioOutlined,
   EyeOutlined,
-  TranslationOutlined,
   SettingOutlined,
   ThunderboltOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
   InfoCircleOutlined,
+  DownloadOutlined,
+  DeleteOutlined,
+  CloudDownloadOutlined,
 } from '@ant-design/icons';
-import { settingsApi } from '../services/ipc';
-import type { AppSettings } from '../services/ipc';
+import { settingsApi, modelApi, ipcClient } from '../services/ipc';
+import type { AppSettings, ModelInfo } from '../services/ipc';
 
 const { Title, Text } = Typography;
 
@@ -211,6 +216,82 @@ const ModelProviderCard: React.FC<ModelProviderCardProps> = ({
   );
 };
 
+/* ====== 子组件：模型状态/下载行 ====== */
+interface ModelStatusRowProps {
+  model: ModelInfo;
+  downloadInfo?: { progress: number; message: string };
+  onDownload: (id: string) => void;
+  onDelete: (id: string, name: string) => void;
+}
+
+const ModelStatusRow: React.FC<ModelStatusRowProps> = ({
+  model,
+  downloadInfo,
+  onDownload,
+  onDelete,
+}) => {
+  const downloading = downloadInfo !== undefined;
+  const activeDownload = downloading && (downloadInfo?.progress ?? 0) >= 0;
+  const failed = downloading && (downloadInfo?.progress ?? 0) < 0;
+
+  return (
+    <Row gutter={16} align="middle">
+      <Col flex="auto">
+        <Space direction="vertical" size={4} style={{ width: '100%' }}>
+          <Space>
+            <Text strong>{model.name}</Text>
+            {model.downloaded ? (
+              <Tag color="success" icon={<CheckCircleOutlined />}>
+                已下载
+              </Tag>
+            ) : downloading ? (
+              <Tag color="processing" icon={<CloudDownloadOutlined spin />}>
+                {failed ? '失败' : '下载中'}
+              </Tag>
+            ) : (
+              <Tag icon={<InfoCircleOutlined />}>未下载</Tag>
+            )}
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {model.description} · {model.size_mb >= 1000 ? `${(model.size_mb / 1000).toFixed(1)} GB` : `${model.size_mb} MB`}
+            </Text>
+          </Space>
+          {downloading && (
+            <Progress
+              percent={Math.round(downloadInfo?.progress ?? 0)}
+              status={failed ? 'exception' : 'active'}
+              size="small"
+              format={() => downloadInfo?.message ?? ''}
+            />
+          )}
+        </Space>
+      </Col>
+      <Col>
+        {model.downloaded ? (
+          <Button
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => onDelete(model.id, model.name)}
+          >
+            删除
+          </Button>
+        ) : (
+          <Button
+            size="small"
+            type="primary"
+            icon={<DownloadOutlined />}
+            loading={downloading && !failed}
+            disabled={downloading && !failed}
+            onClick={() => onDownload(model.id)}
+          >
+            {failed ? '重试' : '下载'}
+          </Button>
+        )}
+      </Col>
+    </Row>
+  );
+};
+
 /* ====== SettingsPage 主组件 ====== */
 const SettingsPage: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -218,6 +299,165 @@ const SettingsPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [activeTab, setActiveTab] = useState('models');
+
+  /* ---- 模型管理状态 ---- */
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [modelDownloads, setModelDownloads] = useState<
+    Record<string, { progress: number; message: string }>
+  >({});
+  const modelPollRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+
+  /* 加载模型列表 */
+  const loadModels = useCallback(async () => {
+    try {
+      const list = await modelApi.list();
+      setModels(list);
+    } catch {
+      // Dev fallback - 模拟数据
+      setModels([
+        {
+          id: 'whisper-tiny',
+          name: 'Whisper Tiny',
+          category: 'asr',
+          type: 'whisper',
+          size_mb: 150,
+          description: '轻量级，速度快',
+          downloaded: false,
+          disk_size_bytes: 0,
+        },
+        {
+          id: 'whisper-base',
+          name: 'Whisper Base',
+          category: 'asr',
+          type: 'whisper',
+          size_mb: 290,
+          description: '基础模型',
+          downloaded: true,
+          disk_size_bytes: 300_000_000,
+        },
+        {
+          id: 'whisper-small',
+          name: 'Whisper Small',
+          category: 'asr',
+          type: 'whisper',
+          size_mb: 950,
+          description: '中等大小',
+          downloaded: false,
+          disk_size_bytes: 0,
+        },
+        {
+          id: 'whisper-medium',
+          name: 'Whisper Medium',
+          category: 'asr',
+          type: 'whisper',
+          size_mb: 3000,
+          description: '大模型',
+          downloaded: false,
+          disk_size_bytes: 0,
+        },
+        {
+          id: 'whisper-large-v3',
+          name: 'Whisper Large V3',
+          category: 'asr',
+          type: 'whisper',
+          size_mb: 6000,
+          description: '最大模型',
+          downloaded: false,
+          disk_size_bytes: 0,
+        },
+        {
+          id: 'styletts2',
+          name: 'StyleTTS 2',
+          category: 'tts',
+          type: 'styletts2',
+          size_mb: 2000,
+          description: '情感语音合成',
+          downloaded: false,
+          disk_size_bytes: 0,
+        },
+      ]);
+    }
+  }, []);
+
+  /* 轮询下载进度 */
+  const pollDownload = useCallback((modelId: string) => {
+    // 清除旧轮询
+    if (modelPollRef.current[modelId]) {
+      clearInterval(modelPollRef.current[modelId]);
+    }
+    modelPollRef.current[modelId] = setInterval(async () => {
+      try {
+        const status = await modelApi.status(modelId);
+        if (!status.downloading) {
+          clearInterval(modelPollRef.current[modelId]);
+          delete modelPollRef.current[modelId];
+          // 刷新模型列表
+          loadModels();
+          // 清除下载进度
+          setModelDownloads((prev) => {
+            const next = { ...prev };
+            delete next[modelId];
+            return next;
+          });
+        }
+      } catch {
+        // ignore
+      }
+    }, 2000);
+  }, [loadModels]);
+
+  /* 监听进度通知（通过 IPC） */
+  useEffect(() => {
+    const unsub = ipcClient.onProgress((payload) => {
+      if (payload?.phase === 'download' && payload?.task_id) {
+        setModelDownloads((prev) => ({
+          ...prev,
+          [payload.task_id]: {
+            progress: payload.progress,
+            message: (payload as any).message || '',
+          },
+        }));
+      }
+    });
+    return unsub;
+  }, []);
+
+  /* 下载模型 */
+  const handleDownload = async (modelId: string) => {
+    try {
+      setModelDownloads((prev) => ({ ...prev, [modelId]: { progress: 0, message: '正在启动…' } }));
+      await modelApi.download(modelId);
+      pollDownload(modelId);
+    } catch {
+      setModelDownloads((prev) => ({ ...prev, [modelId]: { progress: -1, message: '启动失败' } }));
+      message.error('启动下载失败');
+    }
+  };
+
+  /* 删除模型 */
+  const handleDelete = async (modelId: string, name: string) => {
+    Modal.confirm({
+      title: `确认删除 ${name}？`,
+      content: '删除后如需使用需重新下载。',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await modelApi.delete(modelId);
+          message.success(`${name} 已删除`);
+          loadModels();
+        } catch {
+          message.error('删除失败');
+        }
+      },
+    });
+  };
+
+  /* 首次加载 */
+  useEffect(() => {
+    loadModels();
+  }, [loadModels]);
 
   /* 加载设置 */
   useEffect(() => {
@@ -380,67 +620,93 @@ const SettingsPage: React.FC = () => {
               </Space>
             ),
             children: (
-              <Card size="small" style={{ borderColor: '#00d4ff44' }}>
-                <Row gutter={16}>
-                  <Col span={8}>
-                    <Form.Item label="启用 TTS">
-                      <Switch
-                        checked={settings.tts.enabled}
-                        onChange={(v) => updateSetting('tts', { enabled: v })}
+              <>
+                <Card size="small" style={{ borderColor: '#00d4ff44', marginBottom: 12 }}>
+                  <Row gutter={16}>
+                    <Col span={8}>
+                      <Form.Item label="启用 TTS">
+                        <Switch
+                          checked={settings.tts.enabled}
+                          onChange={(v) => updateSetting('tts', { enabled: v })}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item label="引擎">
+                        <Select
+                          value={settings.tts.engine}
+                          onChange={(v) => updateSetting('tts', { engine: v })}
+                          options={[
+                            { label: 'OpenAI TTS', value: 'openai' },
+                            { label: 'Edge TTS', value: 'edge' },
+                            { label: 'ElevenLabs', value: 'elevenlabs' },
+                            { label: 'Fish Speech', value: 'fishspeech' },
+                            { label: 'StyleTTS 2 🎭 (本地/情感)', value: 'styletts2' },
+                          ]}
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item label="发音人">
+                        <Input
+                          value={settings.tts.voice}
+                          onChange={(e) => updateSetting('tts', { voice: e.target.value })}
+                          placeholder="nova / alloy / echo ..."
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={6}>
+                      <Form.Item label="语速 (0.25~4.0)">
+                        <InputNumber
+                          min={0.25}
+                          max={4.0}
+                          step={0.25}
+                          value={settings.tts.speed}
+                          onChange={(v) => updateSetting('tts', { speed: v ?? 1.0 })}
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={6}>
+                      <Form.Item label="音调 (0.5~2.0)">
+                        <InputNumber
+                          min={0.5}
+                          max={2.0}
+                          step={0.1}
+                          value={settings.tts.pitch}
+                          onChange={(v) => updateSetting('tts', { pitch: v ?? 1.0 })}
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                </Card>
+
+                {/* StyleTTS 2 模型管理 */}
+                {models
+                  .filter((m) => m.id === 'styletts2')
+                  .map((model) => (
+                    <Card
+                      key={model.id}
+                      size="small"
+                      title={
+                        <Space>
+                          <CloudDownloadOutlined />
+                          <span>StyleTTS 2 模型管理</span>
+                        </Space>
+                      }
+                      style={{ borderColor: '#722ed144' }}
+                    >
+                      <ModelStatusRow
+                        model={model}
+                        downloadInfo={modelDownloads[model.id]}
+                        onDownload={handleDownload}
+                        onDelete={handleDelete}
                       />
-                    </Form.Item>
-                  </Col>
-                  <Col span={8}>
-                    <Form.Item label="引擎">
-                      <Select
-                        value={settings.tts.engine}
-                        onChange={(v) => updateSetting('tts', { engine: v })}
-                        options={[
-                          { label: 'OpenAI TTS', value: 'openai' },
-                          { label: 'Edge TTS', value: 'edge' },
-                          { label: 'ElevenLabs', value: 'elevenlabs' },
-                          { label: 'Fish Speech', value: 'fishspeech' },
-                          { label: 'StyleTTS 2 🎭 (本地/情感)', value: 'styletts2' },
-                        ]}
-                        style={{ width: '100%' }}
-                      />
-                    </Form.Item>
-                  </Col>
-                  <Col span={8}>
-                    <Form.Item label="发音人">
-                      <Input
-                        value={settings.tts.voice}
-                        onChange={(e) => updateSetting('tts', { voice: e.target.value })}
-                        placeholder="nova / alloy / echo ..."
-                      />
-                    </Form.Item>
-                  </Col>
-                  <Col span={6}>
-                    <Form.Item label="语速 (0.25~4.0)">
-                      <InputNumber
-                        min={0.25}
-                        max={4.0}
-                        step={0.25}
-                        value={settings.tts.speed}
-                        onChange={(v) => updateSetting('tts', { speed: v ?? 1.0 })}
-                        style={{ width: '100%' }}
-                      />
-                    </Form.Item>
-                  </Col>
-                  <Col span={6}>
-                    <Form.Item label="音调 (0.5~2.0)">
-                      <InputNumber
-                        min={0.5}
-                        max={2.0}
-                        step={0.1}
-                        value={settings.tts.pitch}
-                        onChange={(v) => updateSetting('tts', { pitch: v ?? 1.0 })}
-                        style={{ width: '100%' }}
-                      />
-                    </Form.Item>
-                  </Col>
-                </Row>
-              </Card>
+                    </Card>
+                  ))}
+              </>
             ),
           },
           {
@@ -452,65 +718,100 @@ const SettingsPage: React.FC = () => {
               </Space>
             ),
             children: (
-              <Card size="small" style={{ borderColor: '#00d4ff44' }}>
-                <Row gutter={16}>
-                  <Col span={6}>
-                    <Form.Item label="启用 ASR">
-                      <Switch
-                        checked={settings.asr.enabled}
-                        onChange={(v) => updateSetting('asr', { enabled: v })}
-                      />
-                    </Form.Item>
-                  </Col>
-                  <Col span={6}>
-                    <Form.Item label="引擎">
-                      <Select
-                        value={settings.asr.engine}
-                        onChange={(v) => updateSetting('asr', { engine: v })}
-                        options={[
-                          { label: 'Whisper', value: 'whisper' },
-                          { label: 'Paraformer', value: 'paraformer' },
-                          { label: 'SenseVoice', value: 'sensevoice' },
-                          { label: 'Faster Whisper', value: 'faster_whisper' },
-                        ]}
-                        style={{ width: '100%' }}
-                      />
-                    </Form.Item>
-                  </Col>
-                  <Col span={6}>
-                    <Form.Item label="模型">
-                      <Input
-                        value={settings.asr.model}
-                        onChange={(e) => updateSetting('asr', { model: e.target.value })}
-                        placeholder="large-v3 / base ..."
-                      />
-                    </Form.Item>
-                  </Col>
-                  <Col span={3}>
-                    <Form.Item label="语言">
-                      <Select
-                        value={settings.asr.language}
-                        onChange={(v) => updateSetting('asr', { language: v })}
-                        options={[
-                          { label: '自动', value: 'auto' },
-                          { label: '中文', value: 'zh' },
-                          { label: '英文', value: 'en' },
-                          { label: '日文', value: 'ja' },
-                        ]}
-                        style={{ width: '100%' }}
-                      />
-                    </Form.Item>
-                  </Col>
-                  <Col span={3}>
-                    <Form.Item label="翻译">
-                      <Switch
-                        checked={settings.asr.translate}
-                        onChange={(v) => updateSetting('asr', { translate: v })}
-                      />
-                    </Form.Item>
-                  </Col>
-                </Row>
-              </Card>
+              <>
+                <Card size="small" style={{ borderColor: '#00d4ff44', marginBottom: 12 }}>
+                  <Row gutter={16}>
+                    <Col span={6}>
+                      <Form.Item label="启用 ASR">
+                        <Switch
+                          checked={settings.asr.enabled}
+                          onChange={(v) => updateSetting('asr', { enabled: v })}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={6}>
+                      <Form.Item label="引擎">
+                        <Select
+                          value={settings.asr.engine}
+                          onChange={(v) => updateSetting('asr', { engine: v })}
+                          options={[
+                            { label: 'Whisper', value: 'whisper' },
+                            { label: 'Paraformer', value: 'paraformer' },
+                            { label: 'SenseVoice', value: 'sensevoice' },
+                            { label: 'Faster Whisper', value: 'faster_whisper' },
+                          ]}
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={6}>
+                      <Form.Item label="模型">
+                        <Select
+                          value={settings.asr.model}
+                          onChange={(v) => updateSetting('asr', { model: v })}
+                          options={[
+                            { label: 'Tiny (轻量快速)', value: 'tiny' },
+                            { label: 'Base', value: 'base' },
+                            { label: 'Small (中等)', value: 'small' },
+                            { label: 'Medium', value: 'medium' },
+                            { label: 'Large V3 (最佳)', value: 'large-v3' },
+                          ]}
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={3}>
+                      <Form.Item label="语言">
+                        <Select
+                          value={settings.asr.language}
+                          onChange={(v) => updateSetting('asr', { language: v })}
+                          options={[
+                            { label: '自动', value: 'auto' },
+                            { label: '中文', value: 'zh' },
+                            { label: '英文', value: 'en' },
+                            { label: '日文', value: 'ja' },
+                          ]}
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={3}>
+                      <Form.Item label="翻译">
+                        <Switch
+                          checked={settings.asr.translate}
+                          onChange={(v) => updateSetting('asr', { translate: v })}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                </Card>
+
+                {/* Whisper 模型管理 */}
+                <Card
+                  size="small"
+                  title={
+                    <Space>
+                      <CloudDownloadOutlined />
+                      <span>Whisper 模型管理</span>
+                    </Space>
+                  }
+                  style={{ borderColor: '#722ed144' }}
+                >
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    {models
+                      .filter((m) => m.category === 'asr')
+                      .map((model) => (
+                        <ModelStatusRow
+                          key={model.id}
+                          model={model}
+                          downloadInfo={modelDownloads[model.id]}
+                          onDownload={handleDownload}
+                          onDelete={handleDelete}
+                        />
+                      ))}
+                  </Space>
+                </Card>
+              </>
             ),
           },
           {
@@ -571,64 +872,6 @@ const SettingsPage: React.FC = () => {
                         value={settings.vit.batch_size}
                         onChange={(v) => updateSetting('vit', { batch_size: v ?? 4 })}
                         style={{ width: '100%' }}
-                      />
-                    </Form.Item>
-                  </Col>
-                </Row>
-              </Card>
-            ),
-          },
-          {
-            key: 'translator',
-            label: (
-              <Space>
-                <TranslationOutlined />
-                <span>翻译</span>
-              </Space>
-            ),
-            children: (
-              <Card size="small" style={{ borderColor: '#00d4ff44' }}>
-                <Row gutter={16}>
-                  <Col span={6}>
-                    <Form.Item label="启用翻译">
-                      <Switch
-                        checked={settings.translator.enabled}
-                        onChange={(v) => updateSetting('translator', { enabled: v })}
-                      />
-                    </Form.Item>
-                  </Col>
-                  <Col span={6}>
-                    <Form.Item label="协议">
-                      <Select
-                        value={settings.translator.provider}
-                        onChange={(v) => updateSetting('translator', { provider: v })}
-                        options={[
-                          { label: 'OpenAI 兼容协议', value: 'openai_protocol' },
-                          { label: 'Anthropic 协议', value: 'anthropic_protocol' },
-                        ]}
-                        style={{ width: '100%' }}
-                      />
-                    </Form.Item>
-                  </Col>
-                  <Col span={6}>
-                    <Form.Item label="源语言">
-                      <Input
-                        value={settings.translator.source_lang}
-                        onChange={(e) =>
-                          updateSetting('translator', { source_lang: e.target.value })
-                        }
-                        placeholder="zh / en / ja ..."
-                      />
-                    </Form.Item>
-                  </Col>
-                  <Col span={6}>
-                    <Form.Item label="目标语言">
-                      <Input
-                        value={settings.translator.target_lang}
-                        onChange={(e) =>
-                          updateSetting('translator', { target_lang: e.target.value })
-                        }
-                        placeholder="en / zh ..."
                       />
                     </Form.Item>
                   </Col>
@@ -781,6 +1024,17 @@ const SettingsPage: React.FC = () => {
                         max={64}
                         value={settings.hardware.threads}
                         onChange={(v) => updateSetting('hardware', { threads: v ?? 4 })}
+                        style={{ width: '100%' }}
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col span={6}>
+                    <Form.Item label="并发任务数">
+                      <InputNumber
+                        min={1}
+                        max={16}
+                        value={settings.hardware.max_workers}
+                        onChange={(v) => updateSetting('hardware', { max_workers: v ?? 5 })}
                         style={{ width: '100%' }}
                       />
                     </Form.Item>

@@ -34,19 +34,27 @@ const { Title, Text } = Typography;
 const CYAN = '#00d4ff';
 const PURPLE = '#7c3aed';
 
-// ─── Mock 数据 ───
-const MOCK_ASR = [
-  { start: 0.0, end: 3.5, text: '这是一个测试台词。', speaker: '角色1' },
-  { start: 4.0, end: 8.2, text: '这是第二段对话内容。', speaker: '角色2' },
-  { start: 9.5, end: 15.0, text: '这里包含更多对话内容用于演示。', speaker: '角色1' },
-];
-const MOCK_EMOTION = [
-  { timestamp: 0, emotion: 'neutral', intensity: 0.3 },
-  { timestamp: 3, emotion: 'joy', intensity: 0.7 },
-  { timestamp: 6, emotion: 'anger', intensity: 0.5 },
-  { timestamp: 9, emotion: 'surprise', intensity: 0.8 },
-  { timestamp: 12, emotion: 'joy', intensity: 0.6 },
-];
+// ─── 类型定义 ───
+
+interface ASRSegment {
+  id: string;
+  text: string;
+  start: number;
+  end: number;
+  speaker: string;
+}
+
+interface EmotionPoint {
+  timestamp: number;
+  emotion: string;
+  intensity: number;
+}
+
+interface AnalysisResults {
+  asr?: { segments: ASRSegment[] };
+  emotion?: { emotion_curve: EmotionPoint[] };
+  highlights?: unknown[];
+}
 
 const PHASE_LABELS: Record<string, string> = {
   asr: '语音识别',
@@ -174,6 +182,11 @@ const AnalyzePanel: React.FC<Props> = ({ onNext }) => {
     [analyzeTasks],
   );
 
+  // 提取分析结果
+  const analysisResults: AnalysisResults | undefined = latestCompleted?.results as AnalysisResults | undefined;
+  const asrSegments: ASRSegment[] = analysisResults?.asr?.segments ?? [];
+  const emotionCurve: EmotionPoint[] = analysisResults?.emotion?.emotion_curve ?? [];
+
   // 是否有分析结果可展示
   const hasResults = latestCompleted || analyzeTasks.some(t => t.status === 'completed');
 
@@ -257,35 +270,35 @@ const AnalyzePanel: React.FC<Props> = ({ onNext }) => {
         </Card>
       )}
 
-      {/* ─── ASR 结果（仅最近完成的任务展示 mock 数据） ─── */}
-      {latestCompleted && (
-        <>
-          <Card style={{
-            marginBottom: 16, background: 'rgba(255,255,255,0.02)',
-            borderColor: 'rgba(255,255,255,0.06)', borderRadius: 12,
-          }} title={<span style={{ color: '#e0e6ed' }}>📝 语音识别结果</span>}>
-            <Table
-              dataSource={MOCK_ASR}
-              size="small"
-              bordered
-              rowKey={(_, i) => i ?? 0}
-              pagination={false}
-              columns={[
-                { title: '开始', dataIndex: 'start', width: 80, render: (v: number) => `${v.toFixed(1)}s` },
-                { title: '结束', dataIndex: 'end', width: 80, render: (v: number) => `${v.toFixed(1)}s` },
-                { title: '台词', dataIndex: 'text', key: 'text' },
-                { title: '角色', dataIndex: 'speaker', width: 90 },
-              ]}
-            />
-          </Card>
+      {/* ─── ASR 结果（来自后端真实数据） ─── */}
+      {asrSegments.length > 0 && (
+        <Card style={{
+          marginBottom: 16, background: 'rgba(255,255,255,0.02)',
+          borderColor: 'rgba(255,255,255,0.06)', borderRadius: 12,
+        }} title={<span style={{ color: '#e0e6ed' }}>📝 语音识别结果</span>}>
+          <Table
+            dataSource={asrSegments}
+            size="small"
+            bordered
+            rowKey={(record) => record.id}
+            pagination={false}
+            columns={[
+              { title: '开始', dataIndex: 'start', width: 80, render: (v: number) => `${v.toFixed(1)}s` },
+              { title: '结束', dataIndex: 'end', width: 80, render: (v: number) => `${v.toFixed(1)}s` },
+              { title: '台词', dataIndex: 'text', key: 'text' },
+              { title: '角色', dataIndex: 'speaker', width: 90 },
+            ]}
+          />
+        </Card>
+      )}
 
-          <Card style={{
-            background: 'rgba(255,255,255,0.02)',
-            borderColor: 'rgba(255,255,255,0.06)', borderRadius: 12,
-          }} title={<span style={{ color: '#e0e6ed' }}>📊 情绪曲线</span>}>
-            <EmotionCurve data={MOCK_EMOTION} height={200} />
-          </Card>
-        </>
+      {emotionCurve.length > 0 && (
+        <Card style={{
+          background: 'rgba(255,255,255,0.02)',
+          borderColor: 'rgba(255,255,255,0.06)', borderRadius: 12,
+        }} title={<span style={{ color: '#e0e6ed' }}>📊 情绪曲线</span>}>
+          <EmotionCurve data={emotionCurve} height={200} />
+        </Card>
       )}
 
       {/* ─── 分析队列 ─── */}

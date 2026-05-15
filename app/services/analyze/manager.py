@@ -177,7 +177,7 @@ class AnalysisManager:
 
         # 使用 ffmpeg 提取音频
         cmd = [
-            "ffmpeg", "-y",
+            get_ffmpeg_path(), "-y",
             "-i", str(video_path),
             "-vn", "-acodec", "pcm_s16le",
             "-ar", "16000", "-ac", "1",
@@ -320,7 +320,7 @@ class AnalysisManager:
         try:
             result = subprocess.run(
                 [
-                    "ffprobe", "-v", "error",
+                    get_ffprobe_path(), "-v", "error",
                     "-show_entries", "format=duration",
                     "-of", "default=noprint_wrappers=1:nokey=1",
                     str(video_path),

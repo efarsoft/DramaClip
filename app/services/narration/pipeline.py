@@ -16,9 +16,9 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import openai
-from moviepy import VideoFileClip, AudioFileClip
 
 from app.services.direct_cut.pipeline import DirectCutPipeline
+from app.utils.ffmpeg_utils import get_ffmpeg_path
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +285,141 @@ class NarrationGenerator:
 
         return prompt
 
+    def generate_with_segments(
+        self,
+        plot_info: Dict,
+        segments: List['HighlightSegment'],
+        target_duration: Optional[int] = None,
+    ) -> List[Dict]:
+        """
+        基于实际选中的高光片段生成解说文案
+
+        Args:
+            plot_info: 剧情解析结果
+            segments: 排序后的高光片段列表（按时间顺序排列）
+            target_duration: 目标时长（秒），None 表示不限制时长
+
+        Returns:
+            解说文案列表，每个元素包含：
+            - text: 解说文本
+            - start_time: 开始时间（秒）
+            - end_time: 结束时间（秒）
+            - emotion: 情绪标签
+        """
+        if not segments:
+            logger.warning("No segments provided, falling back to regular generation")
+            return self.generate(plot_info, target_duration)
+
+        logger.info(f"Generating narration for {len(segments)} segments")
+
+        # 构建基于片段的 prompt
+        prompt = self._build_prompt_with_segments(plot_info, segments, target_duration)
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "你是一个专业的短剧解说文案创作者，擅长根据实际视频片段创作生动、有趣、引人入胜的解说词。你能够根据每个片段的具体内容、情绪和剧情重要性，生成精准匹配的解说文本。",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.8,
+            )
+
+            result_text = response.choices[0].message.content
+            narration = self._parse_result(result_text)
+
+            # 校验并修正时间戳：确保连续性
+            narration = self._fix_timestamps(narration)
+
+            logger.info(f"Generated {len(narration)} narration segments for {len(segments)} video segments")
+            return narration
+
+        except Exception as e:
+            logger.error(f"Error generating narration for segments: {e}")
+            # 降级：使用常规方法
+            return self.generate(plot_info, target_duration)
+
+    def _fix_timestamps(self, narration: List[Dict]) -> List[Dict]:
+        """
+        修复时间戳：确保连续、递增、无重叠
+        """
+        if not narration:
+            return narration
+
+        cumulative = 0.0
+        for item in narration:
+            item["start_time"] = round(cumulative, 2)
+            # 如果 end_time 缺失或错误，估算时长
+            if item.get("end_time", 0) <= item.get("start_time", 0):
+                # 根据文本长度估算：中文平均每秒 4-5 字
+                text_len = len(item.get("text", ""))
+                estimated_dur = max(1.5, text_len / 4.5)
+                item["end_time"] = round(item["start_time"] + estimated_dur, 2)
+            cumulative = item["end_time"]
+
+        return narration
+
+    def _build_prompt_with_segments(
+        self,
+        plot_info: Dict,
+        segments: List['HighlightSegment'],
+        target_duration: Optional[int] = None,
+    ) -> str:
+        """构建基于实际片段的 prompt"""
+        total_dur = sum(s.duration for s in segments)
+        duration_note = f"\n实际总时长：{total_dur:.1f}秒\n" if target_duration is None else f"\n目标时长：{target_duration}秒，实际片段总时长：{total_dur:.1f}秒\n"
+
+        # 构建每个片段的描述
+        segment_descriptions = []
+        for i, seg in enumerate(segments):
+            desc = f"\n  [{i + 1}] 片段时间: [{seg.start_time:.1f}s - {seg.end_time:.1f}s] 时长: {seg.duration:.1f}s | 情绪: {seg.emotion_score:.1f} | 音频: {seg.audio_score:.1f} | 画面: {seg.visual_score:.1f} | 节奏: {seg.rhythm_score:.1f} | 总分: {seg.score:.1f}"
+            if seg.subtitle_text:
+                desc += f"\n     字幕内容: {seg.subtitle_text[:100]}"
+            if seg.reason:
+                desc += f"\n     入选理由: {seg.reason}"
+            segment_descriptions.append(desc)
+
+        prompt = f"""请为以下短剧的高光片段生成解说文案：
+
+剧情摘要：
+{plot_info.get('plot_summary', '')}
+
+关键情节点：
+"""
+        for i, kp in enumerate(plot_info.get("key_points", [])):
+            prompt += f"{i + 1}. {kp}\n"
+
+        prompt += f"\n情绪曲线：{', '.join(plot_info.get('emotional_arc', []))}\n"
+
+        prompt += f"\n选中的高光片段：{duration_note}{''.join(segment_descriptions)}\n"
+
+        prompt += f"""请为上述每个片段生成对应的解说文本。
+
+输出 JSON 格式：
+[
+  {{
+    "text": "解说文本1",
+    "start_time": 0,
+    "end_time": 5,
+    "emotion": "紧张"
+  }},
+  ...
+]
+
+要求：
+1. 只输出 JSON，不要有任何其他文字
+2. 解说词必须与对应片段内容紧密关联，生动、有趣、引人入胜
+3. start_time/end_time 必须连续递增，从 0 开始，总时长等于各片段实际时长之和
+4. 每个片段对应一段解说，解说词长度应与片段时长匹配（中文每秒约 4-5 字）
+5. emotion 可以是：兴奋、紧张、悲伤、愤怒、温馨、搞笑、悬疑等
+6. 解说要制造悬念、推动剧情、解释人物动机，让观众欲罢不能
+"""
+
+        return prompt
+
     def _parse_result(self, result_text: str) -> List[Dict]:
         """解析LLM返回的结果"""
         import json
@@ -346,7 +481,7 @@ class TTSComposer:
             音频文件路径列表
         """
         if output_dir is None:
-            output_dir = "/tmp/narration_audio"
+            output_dir = os.path.join(tempfile.gettempdir(), "narration_audio")
         os.makedirs(output_dir, exist_ok=True)
 
         audio_paths = []
@@ -569,14 +704,18 @@ class NarrationPipeline:
         video_paths: List[str],
         output_path: Optional[str] = None,
         target_duration: Optional[int] = None,
+        mix_mode: str = "replace",
     ) -> str:
         """
-        执行完整的AI解说流水线
+        执行完整的AI解说流水线（已修复：先选片段 → 基于片段生成解说 → 精确对齐）
 
         Args:
             video_paths: 输入视频路径列表（多集）
             output_path: 输出文件路径（可选，默认自动生成）
             target_duration: 目标时长（秒，可选）。为 None 时不限制时长
+            mix_mode: 音画合成模式
+                - "replace": 替换原声为解说（full_narration）
+                - "overlay": 保留原声 + 叠加解说（hybrid_narration）
 
         Returns:
             输出文件路径
@@ -584,98 +723,276 @@ class NarrationPipeline:
         if not video_paths:
             raise ValueError("No video paths provided")
 
-        logger.info(f"Starting NarrationPipeline with {len(video_paths)} videos")
+        logger.info(f"Starting NarrationPipeline with {len(video_paths)} videos, mix_mode={mix_mode}")
         if target_duration:
             logger.info(f"Target duration: {target_duration}s")
-        else:
-            logger.info("Target duration: unlimited")
 
         # 1. 剧情解析
         logger.info("Step 1: Plot parsing")
         plot_info = self.plot_parser.parse(video_paths)
 
-        # 2. 解说文案生成
-        logger.info("Step 2: Narration generation")
-        narration = self.narration_generator.generate(plot_info, target_duration)
+        # 2. 先选取高光片段（复用 DirectCutPipeline，不输出视频）
+        logger.info("Step 2: Selecting highlight segments")
+        sorted_segments = self.direct_cut_pipeline.run_segments_only(
+            video_paths, target_duration
+        )
+        if not sorted_segments:
+            raise ValueError("No highlight segments selected")
+        total_dur = sum(s.duration for s in sorted_segments)
+        logger.info(f"Selected {len(sorted_segments)} segments, total {total_dur:.1f}s")
 
-        # 3. TTS语音合成
-        logger.info("Step 3: TTS synthesis")
-        audio_paths = self.tts_composer.synthesize(narration)
-
-        # 4. 使用DirectCutPipeline剪辑原片
-        logger.info("Step 4: Direct cut for video segments")
-        video_segments = self.direct_cut_pipeline.run(
-            video_paths, target_duration=target_duration
+        # 3. 基于实际片段生成解说文案
+        logger.info("Step 3: Generating narration based on selected segments")
+        narration = self.narration_generator.generate_with_segments(
+            plot_info, sorted_segments, target_duration
         )
 
-        # 5. 音画合成
-        logger.info("Step 5: Audio-video mixing")
+        # 4. TTS语音合成
+        logger.info("Step 4: TTS synthesis")
+        audio_paths = self.tts_composer.synthesize(narration)
+
+        # 5. 精确剪辑 + 转场 + 音画合成
+        logger.info("Step 5: Video cutting, transitions, and audio mixing")
         if output_path is None:
             output_path = self._generate_output_path(video_paths[0])
 
-        final_path = self._mix_audio_video(
-            video_segments, audio_paths, narration, output_path
+        final_path = self._cut_and_mix(
+            video_paths, sorted_segments, audio_paths,
+            output_path, mix_mode=mix_mode
         )
 
         logger.info(f"Pipeline completed: {final_path}")
         return final_path
 
-    def _mix_audio_video(
+    def _cut_segment(self, seg: 'HighlightSegment', output_path: str):
+        """切割视频片段"""
+        cmd = [
+            get_ffmpeg_path(),
+            "-y",
+            "-ss", str(seg.start_time),
+            "-i", seg.video_path,
+            "-t", str(seg.duration),
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-crf", "23",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error cutting segment: {e}")
+            raise
+
+    def _to_portrait(self, input_path: str, output_path: str):
+        """横屏转竖屏（9:16）"""
+        import cv2
+        cap = cv2.VideoCapture(input_path)
+        if not cap.isOpened():
+            logger.warning(f"Cannot open video for aspect check: {input_path}")
+            import shutil
+            shutil.copy2(input_path, output_path)
+            return
+
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+
+        aspect = width / height if height > 0 else 1.0
+        target_aspect = 9.0 / 16.0
+
+        if abs(aspect - target_aspect) < 0.06:
+            import shutil
+            shutil.copy2(input_path, output_path)
+            return
+
+        cmd = [
+            get_ffmpeg_path(),
+            "-y",
+            "-i", input_path,
+            "-vf", "crop=in_h*9/16:in_h:(in_w-in_h*9/16)/2:0",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-c:a", "copy",
+            output_path,
+        ]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error converting to portrait: {e}")
+            raise
+
+    def _calculate_xfade_offset(self, portrait_paths: List[str], index: int, overlap: float) -> float:
+        """计算第 index 个 xfade 的 offset（累积时长减去前面所有转场重叠）"""
+        import cv2
+        offset = 0.0
+        for i in range(index + 1):
+            cap = cv2.VideoCapture(portrait_paths[i])
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            dur = frames / fps if fps > 0 else 0
+            cap.release()
+            offset += dur
+        # 减去前面已经用掉的转场重叠
+        offset -= index * overlap
+        return max(offset, 0.1)
+
+    def _build_xfade_filter(self, portrait_paths: List[str], overlap: float) -> str:
+        """构建 xfade 滤镜字符串（暂未使用，保留接口）"""
+        return ""
+
+    def _cut_and_mix(
         self,
-        video_path: str,
+        video_paths: List[str],
+        segments: List['HighlightSegment'],
         audio_paths: List[str],
-        narration: List[Dict],
         output_path: str,
+        mix_mode: str = "replace",
     ) -> str:
         """
-        音画合成
+        基于片段精确剪辑、添加转场、混合音频
 
         Args:
-            video_path: 视频文件路径（已剪辑好的）
-            audio_paths: 解说音频文件路径列表
-            narration: 解说文案（用于时间戳对齐）
+            video_paths: 原始视频路径列表
+            segments: 排序后的高光片段列表
+            audio_paths: TTS 音频文件路径列表
             output_path: 输出文件路径
+            mix_mode: "replace" 或 "overlay"
 
         Returns:
             输出文件路径
         """
-        logger.info("Mixing audio and video")
+        logger.info(f"Cutting & mixing {len(segments)} segments (mode={mix_mode})")
 
         try:
-            # 1. 加载视频
-            video_clip = VideoFileClip(video_path)
+            temp_dir = tempfile.gettempdir()
 
-            # 2. 合并所有解说音频
-            if audio_paths:
-                audio_clips = []
-                for audio_path in audio_paths:
-                    audio_clip = AudioFileClip(audio_path)
-                    audio_clips.append(audio_clip)
+            # 1. 精确剪辑每个片段
+            cut_paths = []
+            for i, seg in enumerate(segments):
+                cut_path = os.path.join(temp_dir, f"narr_cut_{i:03d}.mp4")
+                self._cut_segment(seg, cut_path)
+                cut_paths.append(cut_path)
 
-                # 拼接音频
-                from moviepy.editor import concatenate_audioclips
+            # 2. 转换为竖屏（9:16）
+            portrait_paths = []
+            for i, cut_path in enumerate(cut_paths):
+                portrait_path = os.path.join(temp_dir, f"narr_portrait_{i:03d}.mp4")
+                self._to_portrait(cut_path, portrait_path)
+                portrait_paths.append(portrait_path)
 
-                narration_audio = concatenate_audioclips(audio_clips)
+            # 3. 拼接所有片段（带 crossfade 转场）
+            if len(portrait_paths) > 1:
+                overlap = 0.5  # 0.5 秒交叉淡入淡出
+                trans_output = os.path.join(temp_dir, f"narr_transited.mp4")
 
-                # 设置音频到视频
-                final_clip = video_clip.set_audio(narration_audio)
+                # 构建输入参数
+                cmd = [get_ffmpeg_path(), "-y"]
+                for p in portrait_paths:
+                    cmd.extend(["-i", p])
+
+                num_inputs = len(portrait_paths)
+
+                # 构建 xfade 链
+                filter_parts = []
+                prev_tags = "[0:v][1:v]"
+                for i in range(num_inputs - 1):
+                    out_tag = f"[xfade_{i}]"
+                    offset = self._calculate_xfade_offset(portrait_paths, i, overlap)
+                    filter_parts.append(
+                        f"{prev_tags}xfade=transition=fade:duration={overlap}:offset={offset}{out_tag}"
+                    )
+                    prev_tags = out_tag
+
+                # 最后一个输出
+                final_out = "[out]"
+                filter_parts.append(f"{prev_tags}copy{final_out}")
+
+                filter_complex = ";".join(filter_parts)
+
+                cmd.extend([
+                    "-filter_complex", filter_complex,
+                    "-map", "[out]",
+                    "-c:v", "libx264",
+                    "-preset", "fast",
+                    "-crf", "23",
+                    "-movflags", "+faststart",
+                    trans_output,
+                ])
+
+                subprocess.run(cmd, check=True, capture_output=True)
+                concat_video = trans_output
             else:
-                final_clip = video_clip
+                # 单片段，直接复制
+                import shutil
+                shutil.copy2(portrait_paths[0], os.path.join(temp_dir, "narr_single.mp4"))
+                concat_video = os.path.join(temp_dir, "narr_single.mp4")
 
-            # 3. 输出
-            final_clip.write_videofile(
-                output_path,
-                codec="libx264",
-                audio_codec="aac",
-                temp_audiofile=os.path.join(tempfile.gettempdir(), 'temp-audio.m4a'),
-                remove_temp=True,
-            )
+            # 4. 合并所有 TTS 音频
+            merged_audio = os.path.join(temp_dir, "merged_narration.mp3")
+            concat_list = os.path.join(temp_dir, "narr_audio_list.txt")
+
+            with open(concat_list, "w") as f:
+                for ap in audio_paths:
+                    escaped = ap.replace("\\", "/").replace("'", "'\\''")
+                    f.write(f"file '{escaped}'\n")
+
+            cmd_merge = [
+                get_ffmpeg_path(), "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", concat_list,
+                "-c:a", "libmp3lame",
+                "-q:a", "4",
+                merged_audio,
+            ]
+            subprocess.run(cmd_merge, check=True, capture_output=True)
+
+            # 5. 混合视频和解说音频
+            if mix_mode == "overlay":
+                cmd_mix = [
+                    get_ffmpeg_path(), "-y",
+                    "-i", concat_video,
+                    "-i", merged_audio,
+                    "-filter_complex",
+                    "[0:a][1:a]amix=inputs=2:duration=longest:dropout_transition=2[aout]",
+                    "-map", "0:v",
+                    "-map", "[aout]",
+                    "-c:v", "libx264",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    output_path,
+                ]
+            else:
+                cmd_mix = [
+                    get_ffmpeg_path(), "-y",
+                    "-i", concat_video,
+                    "-i", merged_audio,
+                    "-map", "0:v",
+                    "-map", "1:a",
+                    "-c:v", "libx264",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-shortest",
+                    output_path,
+                ]
+
+            subprocess.run(cmd_mix, check=True, capture_output=True)
+
+            # 6. 清理临时文件
+            for path in cut_paths + portrait_paths + [concat_list, merged_audio, concat_video]:
+                if os.path.exists(path):
+                    os.remove(path)
+            if len(portrait_paths) > 1 and os.path.exists(trans_output):
+                os.remove(trans_output)
 
             logger.info(f"Audio-video mixing completed: {output_path}")
             return output_path
 
         except Exception as e:
-            logger.error(f"Error mixing audio and video: {e}")
+            logger.error(f"Error cutting and mixing: {e}")
             raise
 
     def _generate_output_path(self, reference_path: str) -> str:

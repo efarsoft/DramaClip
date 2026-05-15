@@ -5,9 +5,11 @@ IPC 处理函数实现
 
 import asyncio
 import json
+import tempfile
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -19,6 +21,10 @@ from .protocol import RPCError
 
 # Server reference for sending progress notifications
 _server = None  # type: ignore
+
+# ── 全局线程池 ──
+_WORKER_COUNT = 5  # 默认5个并发工作线程
+_pool = ThreadPoolExecutor(max_workers=_WORKER_COUNT, thread_name_prefix="work")
 
 
 def set_server(server):
@@ -62,7 +68,7 @@ def project_create(name: str, path: str) -> Dict:
 
 
 def project_open(project_id: str) -> Dict:
-    """打开项目"""
+    """打开项目，自动扫描视频目录"""
     manager = get_manager()
     project = manager.open_project(project_id)
 
@@ -70,7 +76,12 @@ def project_open(project_id: str) -> Dict:
         raise RPCError(-32001, f"Project not found: {project_id}")
 
     logger.info(f"Opened project: {project_id}")
-    return project.to_dict()
+    
+    # 返回视频列表
+    videos = manager.get_videos(project_id)
+    result = project.to_dict()
+    result["videos"] = [v.to_dict() for v in videos]
+    return result
 
 
 def project_delete(project_id: str, keep_files: bool = False) -> Dict:
@@ -148,7 +159,7 @@ def _run_async_analysis(analysis_mgr, task_id: str):
 
 
 def analyze_start(project_id: str, episode_ids: List[str]) -> Dict:
-    """开始视频分析（支持多集）"""
+    """开始视频分析（支持多集，线程池调度）"""
     if not episode_ids:
         raise RPCError(-32602, "episode_ids is required")
 
@@ -167,15 +178,10 @@ def analyze_start(project_id: str, episode_ids: List[str]) -> Dict:
         task = analysis_mgr.create_task(project_id, video.path)
         task_ids.append(task.task_id)
 
-        # 在后台线程中运行分析
-        thread = threading.Thread(
-            target=_run_async_analysis,
-            args=(analysis_mgr, task.task_id),
-            daemon=True,
-        )
-        thread.start()
+        # 用线程池提交分析任务（自动限流为 max_workers 个并发）
+        _pool.submit(_run_async_analysis, analysis_mgr, task.task_id)
 
-    logger.info(f"Started {len(task_ids)} analysis tasks for project {project_id}")
+    logger.info(f"Queued {len(task_ids)} analysis tasks for project {project_id} (max concurrent: {_WORKER_COUNT})")
     return {
         "task_id": task_ids[0],  # 返回第一个任务的 task_id，保持前端兼容
         "task_ids": task_ids,     # 附带所有任务 ID
@@ -221,18 +227,305 @@ def analyze_cancel(task_id: str) -> Dict:
 # 剪辑
 # ============================================================================
 
+# 剪辑任务跟踪：task_id -> { status, progress, phase, message, output_path }
+_clip_tasks: Dict[str, Dict] = {}
+_clip_tasks_lock = threading.Lock()
+
+
+def _update_clip_task(task_id: str, **kwargs):
+    """线程安全地更新剪辑任务状态"""
+    with _clip_tasks_lock:
+        if task_id not in _clip_tasks:
+            _clip_tasks[task_id] = {
+                "task_id": task_id,
+                "status": "running",
+                "progress": 0,
+                "phase": "",
+                "message": "",
+                "output_path": None,
+            }
+        _clip_tasks[task_id].update(kwargs)
+
+
+def _run_single_clip_mode(
+    task_id: str,
+    mode_name: str,
+    pipeline_type: str,
+    video_paths: List[str],
+    output_path: str,
+    message_start: str,
+    message_done: str,
+    target_duration: Optional[int] = None,
+) -> Dict:
+    """线程安全地运行单个剪辑模式，返回结果字典"""
+    try:
+        _update_clip_task(task_id, progress=5, phase=mode_name, message=message_start)
+
+        if pipeline_type == "direct":
+            from app.services.direct_cut.pipeline import DirectCutPipeline
+            pipeline = DirectCutPipeline()
+
+            _update_clip_task(task_id, progress=10, phase=mode_name, message="场景检测...")
+            scenes = pipeline._detect_scenes(video_paths)
+            _update_clip_task(task_id, progress=20, phase=mode_name, message=f"检测到 {len(scenes)} 个场景")
+
+            _update_clip_task(task_id, progress=25, phase=mode_name, message="高光打分...")
+            scored = pipeline._score_scenes(scenes)
+            _update_clip_task(task_id, progress=35, phase=mode_name, message=f"完成 {len(scored)} 个片段打分")
+
+            _update_clip_task(task_id, progress=40, phase=mode_name, message="选择高光片段...")
+            selected = pipeline._select_highlights(scored, target_duration)
+            _update_clip_task(task_id, progress=50, phase=mode_name, message=f"选中 {len(selected)} 个高光片段")
+
+            _update_clip_task(task_id, progress=55, phase=mode_name, message="智能排序...")
+            sorted_segments = pipeline._sort_segments(selected)
+            _update_clip_task(task_id, progress=60, phase=mode_name, message="排序完成")
+
+            _update_clip_task(task_id, progress=65, phase=mode_name, message="正在剪辑拼接...")
+            final_path = pipeline._cut_and_concat(sorted_segments, output_path)
+            _update_clip_task(task_id, progress=100, phase="completed", message=message_done)
+            logger.info(f"Mode {mode_name} ({task_id}): {final_path}")
+            return {"output_path": final_path, "mode": mode_name}
+
+        elif pipeline_type in ("hybrid", "full"):
+            from app.services.narration.pipeline import NarrationPipeline
+
+            pipeline = NarrationPipeline()
+            _update_clip_task(task_id, progress=10, phase=mode_name, message="解析剧情...")
+            _update_clip_task(task_id, progress=25, phase=mode_name, message="生成解说文案...")
+            _update_clip_task(task_id, progress=40, phase=mode_name, message="语音合成...")
+            _update_clip_task(task_id, progress=55, phase=mode_name, message="剪辑原片...")
+
+            mix_mode = "overlay" if pipeline_type == "hybrid" else "replace"
+            _update_clip_task(task_id, progress=60, phase=mode_name, message="音画合成...")
+            final_path = pipeline.run(
+                video_paths, output_path=output_path, target_duration=target_duration, mix_mode=mix_mode,
+            )
+            _update_clip_task(task_id, progress=100, phase="completed", message=message_done)
+            logger.info(f"Mode {mode_name} ({task_id}): {final_path}")
+            return {"output_path": final_path, "mode": mode_name}
+
+        else:
+            raise ValueError(f"Unknown pipeline type: {pipeline_type}")
+
+    except Exception as e:
+        logger.exception(f"Mode {mode_name} ({task_id}) failed: {e}")
+        _update_clip_task(task_id, progress=100, phase="error", message=f"{mode_name} 失败: {e}")
+        return {"error": str(e), "mode": mode_name, "output_path": None}
+
+
+def _run_clip_pipeline(
+    task_id: str,
+    scheme: str,
+    video_paths: List[str],
+    target_duration: Optional[int] = None,
+    output_path: Optional[str] = None,
+):
+    """在后台线程中运行剪辑流水线"""
+    try:
+        _update_clip_task(task_id, status="running", progress=0, phase="preparing", message="准备剪辑...")
+
+        if scheme == "original_narration":
+            from app.services.direct_cut.pipeline import DirectCutPipeline
+
+            pipeline = DirectCutPipeline()
+
+            # 场景检测 (进度 0-25)
+            _update_clip_task(task_id, progress=5, phase="scene_detect", message="检测场景...")
+            scenes = pipeline._detect_scenes(video_paths)
+            _update_clip_task(task_id, progress=25, phase="scene_detect", message=f"检测到 {len(scenes)} 个场景")
+
+            # 高光打分 (进度 25-50)
+            _update_clip_task(task_id, progress=30, phase="scoring", message="高光打分...")
+            scored = pipeline._score_scenes(scenes)
+            _update_clip_task(task_id, progress=50, phase="scoring", message=f"完成 {len(scored)} 个片段打分")
+
+            # 高光选择 (进度 50-70)
+            _update_clip_task(task_id, progress=55, phase="selecting", message="选择高光片段...")
+            selected = pipeline._select_highlights(scored, target_duration)
+            _update_clip_task(task_id, progress=70, phase="selecting", message=f"选中 {len(selected)} 个高光片段")
+
+            # 智能排序 (进度 70-80)
+            _update_clip_task(task_id, progress=75, phase="sorting", message="智能排序...")
+            sorted_segments = pipeline._sort_segments(selected)
+            _update_clip_task(task_id, progress=80, phase="sorting", message="排序完成")
+
+            # 视频剪辑和拼接 (进度 80-100)
+            _update_clip_task(task_id, progress=85, phase="encoding", message="正在剪辑拼接...")
+            if output_path is None:
+                output_path = pipeline._generate_output_path(video_paths[0])
+            final_path = pipeline._cut_and_concat(sorted_segments, output_path)
+            _update_clip_task(task_id, progress=100, phase="completed", message="剪辑完成", status="completed", output_path=final_path)
+            logger.info(f"Clip task {task_id} completed: {final_path}")
+
+        elif scheme == "hybrid_narration":
+            # 混合解说：保留原声 + 叠加解说
+            from app.services.narration.pipeline import NarrationPipeline
+
+            pipeline = NarrationPipeline()
+            _update_clip_task(task_id, progress=5, phase="plot_parse", message="解析剧情...")
+            _update_clip_task(task_id, progress=30, phase="narration_gen", message="生成解说文案...")
+            _update_clip_task(task_id, progress=50, phase="tts", message="语音合成...")
+            _update_clip_task(task_id, progress=70, phase="cutting", message="剪辑原片...")
+            _update_clip_task(task_id, progress=85, phase="mixing", message="音画合成（保留原声）...")
+            if output_path is None:
+                output_path = pipeline.direct_cut_pipeline._generate_output_path(video_paths[0])
+            final_path = pipeline.run(video_paths, output_path=output_path, target_duration=target_duration, mix_mode="overlay")
+            _update_clip_task(task_id, progress=100, phase="completed", message="混合解说完成", status="completed", output_path=final_path)
+            logger.info(f"Clip task {task_id} (hybrid_narration) completed: {final_path}")
+
+        elif scheme == "full_narration":
+            # 全解说：替换原声为解说
+            from app.services.narration.pipeline import NarrationPipeline
+
+            pipeline = NarrationPipeline()
+            _update_clip_task(task_id, progress=5, phase="plot_parse", message="解析剧情...")
+            _update_clip_task(task_id, progress=30, phase="narration_gen", message="生成解说文案...")
+            _update_clip_task(task_id, progress=50, phase="tts", message="语音合成...")
+            _update_clip_task(task_id, progress=70, phase="cutting", message="剪辑原片...")
+            _update_clip_task(task_id, progress=85, phase="mixing", message="音画合成（替换原声）...")
+            if output_path is None:
+                output_path = pipeline.direct_cut_pipeline._generate_output_path(video_paths[0])
+            final_path = pipeline.run(video_paths, output_path=output_path, target_duration=target_duration, mix_mode="replace")
+            _update_clip_task(task_id, progress=100, phase="completed", message="全解说完成", status="completed", output_path=final_path)
+            logger.info(f"Clip task {task_id} (full_narration) completed: {final_path}")
+
+        elif scheme == "all_narrations":
+            # 全模式：3种模式并行执行（线程池调度，默认5线程可同时处理3个模式+其他任务）
+            from app.services.direct_cut.pipeline import DirectCutPipeline
+            from app.services.narration.pipeline import NarrationPipeline
+            from concurrent.futures import wait, FIRST_COMPLETED
+            from pathlib import Path
+
+            base_dir = Path(output_path).parent if output_path else Path(tempfile.gettempdir())
+
+            # 定义3个并行任务的输出路径
+            mode_configs = {
+                "direct": {
+                    "output": str(base_dir / f"dramaclip_{task_id[:8]}_direct.mp4"),
+                    "message_start": "原片直剪...",
+                    "message_done": "原片直剪完成",
+                    "pipeline_type": "direct",
+                },
+                "hybrid": {
+                    "output": str(base_dir / f"dramaclip_{task_id[:8]}_hybrid.mp4"),
+                    "message_start": "混合解说...",
+                    "message_done": "混合解说完成",
+                    "pipeline_type": "hybrid",
+                },
+                "full": {
+                    "output": str(base_dir / f"dramaclip_{task_id[:8]}_full.mp4"),
+                    "message_start": "全解说...",
+                    "message_done": "全解说完成",
+                    "pipeline_type": "full",
+                },
+            }
+
+            # 提交3个并行任务，用 future -> mode_name 映射来跟踪结果
+            future_to_mode: Dict["concurrent.futures.Future", str] = {}
+            _pool.submit(_update_clip_task, task_id, progress=5, phase="preparing", message="启动三种模式...")
+
+            for mode_name, cfg in mode_configs.items():
+                future = _pool.submit(
+                    _run_single_clip_mode,
+                    task_id, mode_name, cfg["pipeline_type"], video_paths,
+                    cfg["output"], cfg["message_start"], cfg["message_done"],
+                    target_duration,
+                )
+                future_to_mode[future] = mode_name
+
+            # 等待所有模式完成，实时聚合进度
+            all_paths: Dict[str, Optional[str]] = {}
+            errors: Dict[str, str] = {}
+
+            while future_to_mode:
+                done, future_to_mode = wait(future_to_mode.keys(), return_when=FIRST_COMPLETED)
+                for future in done:
+                    mode_name = future_to_mode.pop(future)  # 从映射中移除，记录结果
+                    try:
+                        result = future.result()
+                        if result and "output_path" in result:
+                            all_paths[mode_name] = result["output_path"]
+                    except Exception as e:
+                        errors[mode_name] = str(e)
+                        logger.warning(f"Mode {mode_name} failed: {e}")
+
+            # 汇总进度
+            final_path = all_paths.get("direct", "")
+            _update_clip_task(
+                task_id, progress=100, phase="completed",
+                message="三种模式全部完成" + (f"，{len(errors)} 个失败" if errors else ""),
+                status="completed",
+                output_path=final_path,
+                extra_outputs={
+                    "hybrid": all_paths.get("hybrid"),
+                    "full": all_paths.get("full"),
+                },
+            )
+            logger.info(f"Clip task {task_id} (all_narrations) completed: direct={all_paths.get('direct')}, hybrid={all_paths.get('hybrid')}, full={all_paths.get('full')}, errors={list(errors.keys())}")
+
+        else:
+            raise ValueError(f"Unknown clip scheme: {scheme}")
+
+    except Exception as e:
+        logger.exception(f"Clip task {task_id} failed: {e}")
+        _update_clip_task(task_id, status="failed", progress=-1, phase="error", message=str(e))
+
+
 def clip_recommend(project_id: str) -> Dict:
-    """获取剪辑方案推荐"""
+    """获取剪辑方案推荐，根据项目视频数量智能推荐"""
+    from app.services.project.manager import get_manager
+
+    manager = get_manager()
+    videos = manager.get_videos(project_id)
+    episode_count = len(videos) if videos else 0
+
+    # 判断剧集类型
+    if episode_count == 0:
+        episode_type = "unknown"
+    elif episode_count == 1:
+        episode_type = "single"
+    else:
+        episode_type = "multi"
+
+    if episode_type == "multi":
+        # 多集：优先推荐「全部生成」（三种模式一键三连）和「原片解说」
+        recommended_scheme = "all_narrations"
+        recommended_modes = ["all_narrations", "original_narration", "hybrid_narration", "full_narration"]
+        reasons = [
+            f"共 {episode_count} 集视频",
+            "对话丰富、情节完整",
+            "AI 推荐：一键三连批量输出三种模式对比",
+        ]
+        alternatives = ["original_narration", "hybrid_narration", "full_narration"]
+    elif episode_type == "single":
+        # 单集：优先推荐「原片解说」和「全片解说」
+        recommended_scheme = "original_narration"
+        recommended_modes = ["original_narration", "full_narration", "hybrid_narration"]
+        reasons = [
+            "单集视频",
+            "建议保留原声剪辑或尝试全片 AI 解说",
+        ]
+        alternatives = ["full_narration", "hybrid_narration"]
+    else:
+        recommended_scheme = "original_narration"
+        recommended_modes = ["original_narration", "hybrid_narration", "full_narration", "all_narrations"]
+        reasons = ["请先导入视频"]
+        alternatives = []
+
     return {
-        "recommended_scheme": "original_narration",
+        "episode_count": episode_count,
+        "episode_type": episode_type,
+        "recommended_scheme": recommended_scheme,
         "confidence": 0.92,
-        "reasons": ["多集视频", "对话丰富", "情绪波动大"],
-        "alternatives": ["hybrid_narration", "full_narration"]
+        "reasons": reasons,
+        "alternatives": alternatives,
+        "recommended_modes": recommended_modes,  # 按推荐顺序排列的完整模式列表
     }
 
 
 def clip_execute(project_id: str, scheme: str, params: Dict[str, Any]) -> Dict:
-    """执行剪辑"""
+    """执行剪辑（支持多版本、多尺寸、多模式）"""
     import uuid
     task_id = str(uuid.uuid4())
 
@@ -243,7 +536,49 @@ def clip_execute(project_id: str, scheme: str, params: Dict[str, Any]) -> Dict:
     else:
         logger.info(f"Clip task {task_id}: scheme={scheme}, no duration limit")
 
-    # TODO: 启动后台线程运行实际 pipeline，传入 target_duration
+    # 提取剪辑模式和输出配置
+    clip_mode = params.get("clip_mode", "highlight")       # highlight/transition/narration
+    output_size = params.get("output_size", "16:9")        # 16:9/9:16/1:1
+    output_quality = params.get("output_quality", "1080p") # 720p/1080p/2K/4K
+    num_versions = params.get("num_versions", 1)           # 生成版本数
+
+    # 获取项目的视频路径列表
+    mgr = get_manager()
+    videos = mgr.get_videos(project_id)
+    if not videos:
+        raise RPCError(-32002, f"No videos found in project {project_id}")
+
+    video_paths = [v.path for v in videos]
+    logger.info(f"Clip task {task_id}: {len(video_paths)} videos, mode={clip_mode}, scheme={scheme}, size={output_size}, quality={output_quality}, versions={num_versions}")
+
+    # 创建输出路径
+    from pathlib import Path
+    project = mgr.get_project(project_id)
+    output_dir = Path(project.path) / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = str(output_dir / f"dramaclip_{task_id[:8]}.mp4")
+
+    # 更新任务状态
+    _update_clip_task(
+        task_id,
+        status="running",
+        progress=0,
+        phase="preparing",
+        message="准备开始...",
+        output_config={
+            "clip_mode": clip_mode,
+            "output_size": output_size,
+            "output_quality": output_quality,
+            "num_versions": num_versions,
+        }
+    )
+
+    # 用线程池调度剪辑流水线（自动限流为 max_workers 个并发）
+    _pool.submit(
+        _run_clip_pipeline,
+        task_id, scheme, video_paths, target_duration, output_path,
+    )
+
     return {
         "task_id": task_id,
         "status": "running",
@@ -253,18 +588,29 @@ def clip_execute(project_id: str, scheme: str, params: Dict[str, Any]) -> Dict:
 
 def clip_get_progress(task_id: str) -> Dict:
     """获取剪辑进度"""
+    with _clip_tasks_lock:
+        task = _clip_tasks.get(task_id)
+    if not task:
+        return {
+            "task_id": task_id,
+            "status": "running",
+            "progress": 0,
+            "phase": "",
+            "message": "任务已创建，等待启动...",
+        }
     return {
-        "task_id": task_id,
-        "status": "running",
-        "progress": 0,
-        "message": "Preparing clips..."
+        "task_id": task["task_id"],
+        "status": task["status"],
+        "progress": task["progress"],
+        "phase": task.get("phase", ""),
+        "message": task.get("message", ""),
+        "output_path": task.get("output_path"),
     }
 
 
 def clip_preview(project_id: str, scheme: str) -> Dict:
     """预览剪辑结果"""
     return {"preview_url": "", "ready": False}
-
 
 # ============================================================================
 # 导出
@@ -418,12 +764,6 @@ def _default_settings() -> Dict:
             "model": "qwen-vl-max",
             "batch_size": 4,
         },
-        "translator": {
-            "enabled": True,
-            "provider": "openai_protocol",
-            "source_lang": "zh",
-            "target_lang": "en",
-        },
         "output": {
             "path": str(Path.home() / "DramaClip" / "Outputs"),
             "quality": "1080p",
@@ -436,6 +776,7 @@ def _default_settings() -> Dict:
             "ffmpeg_hwaccel": "auto",
             "gpu_device": "0",
             "threads": 4,
+            "max_workers": 5,
         },
     }
 
@@ -554,4 +895,51 @@ def ping(timestamp: int) -> Dict:
 def shutdown(reason: str = "requested") -> Dict:
     """优雅关闭"""
     logger.info(f"Shutdown requested: {reason}")
+    _pool.shutdown(wait=True)
     return {"shutdown": True, "reason": reason}
+
+
+# ============================================================================
+# 模型管理
+# ============================================================================
+
+def model_list() -> List[Dict]:
+    """列出所有可管理模型及其下载状态"""
+    from app.services.model_manager import list_models
+    return list_models()
+
+
+def model_download(model_id: str) -> Dict:
+    """开始下载模型（后台执行，进度通过通知推送）"""
+    from app.services.model_manager import download_model
+
+    def _progress(pct: int, msg: str):
+        if _server:
+            _server.send_progress(model_id, pct, msg, phase="download")
+
+    success = download_model(model_id, progress_callback=_progress)
+    return {
+        "success": success,
+        "model_id": model_id,
+        "status": "started" if success else "already_downloading",
+    }
+
+
+def model_cancel(model_id: str) -> Dict:
+    """取消正在进行的模型下载"""
+    from app.services.model_manager import cancel_download
+    cancelled = cancel_download(model_id)
+    return {"success": cancelled, "model_id": model_id}
+
+
+def model_delete(model_id: str) -> Dict:
+    """删除已下载的模型"""
+    from app.services.model_manager import delete_model
+    deleted = delete_model(model_id)
+    return {"success": deleted, "model_id": model_id}
+
+
+def model_status(model_id: str) -> Dict:
+    """获取模型下载状态"""
+    from app.services.model_manager import get_download_status
+    return get_download_status(model_id)

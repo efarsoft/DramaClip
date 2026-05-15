@@ -88,4 +88,11 @@ def create_router() -> Router:
     router.register("system", "ping", handlers.ping)
     router.register("system", "shutdown", handlers.shutdown)
 
+    # 模型管理
+    router.register("model", "list", handlers.model_list)
+    router.register("model", "download", handlers.model_download)
+    router.register("model", "cancel", handlers.model_cancel)
+    router.register("model", "delete", handlers.model_delete)
+    router.register("model", "status", handlers.model_status)
+
     return router

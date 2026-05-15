@@ -27,13 +27,7 @@ const { Title, Text } = Typography;
 const CYAN = '#00d4ff';
 const PURPLE = '#7c3aed';
 
-// ─── Mock 片段数据 ───
-const MOCK_SEGMENTS = [
-  { id: 's1', start: 0, end: 3.5, label: '开场', desc: '角色1出场', emotion: 'neutral', duration: 3.5 },
-  { id: 's2', start: 4.0, end: 8.2, label: '对话', desc: '角色1与角色2对话', emotion: 'joy', duration: 4.2 },
-  { id: 's3', start: 9.5, end: 15.0, label: '高潮', desc: '剧情转折点', emotion: 'anger', duration: 5.5 },
-  { id: 's4', start: 16.0, end: 20.0, label: '解局', desc: '冲突化解', emotion: 'surprise', duration: 4.0 },
-];
+
 
 const EMOTION_COLORS: Record<string, string> = {
   neutral: '#6b7b9d', joy: '#10b981', anger: '#ef4444', surprise: '#f59e0b', sad: '#6366f1',
@@ -57,16 +51,46 @@ const ClipStatusTag: React.FC<{ status: Task['status'] }> = ({ status }) => {
   );
 };
 
+export interface Segment {
+  id: string;
+  start: number;
+  end: number;
+  label: string;
+  desc: string;
+  emotion: string;
+  duration: number;
+}
+
+export interface AnalysisResults {
+  highlights?: Array<{
+    id: string;
+    start: number;
+    end: number;
+    score: number;
+    label?: string;
+  }>;
+}
+
 interface Props {
   onNext: () => void;
 }
 
+interface TaskWithResults extends Task {
+  results?: AnalysisResults;
+}
+
 const EditPanel: React.FC<Props> = ({ onNext }) => {
   const { currentProject } = useProjectStore();
-  const [segments, setSegments] = useState(MOCK_SEGMENTS);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(segments.map(s => s.id)));
+  const [segments, setSegments] = useState<Segment[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const { tasks: allTasks, activeTaskId, enqueue, cancel, retry, remove, clearCompleted } = useTaskQueueStore();
+
+  // 取当前项目最近的 analyze 任务
+  const analyzeTasks = useMemo(
+    () => allTasks.filter((t): t is TaskWithResults => t.type === 'analyze'),
+    [allTasks],
+  );
 
   // 取当前项目最近的 clip 任务
   const clipTasks = useMemo(
@@ -83,6 +107,34 @@ const EditPanel: React.FC<Props> = ({ onNext }) => {
       .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0))[0],
     [clipTasks],
   );
+
+  // 从已完成的分析任务中提取片段数据
+  const latestAnalysisResult = useMemo(
+    () => analyzeTasks
+      .filter(t => t.status === 'completed')
+      .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0))[0],
+    [analyzeTasks],
+  );
+
+  // 同步 segments 数据（来自分析任务结果中的 highlights）
+  React.useEffect(() => {
+    if (latestAnalysisResult?.results?.highlights) {
+      const segs: Segment[] = latestAnalysisResult.results.highlights.map((h, i) => ({
+        id: h.id || `h-${i}`,
+        start: h.start,
+        end: h.end,
+        label: h.label || `片段 ${i + 1}`,
+        desc: '',
+        emotion: 'neutral',
+        duration: h.end - h.start,
+      }));
+      setSegments(segs);
+      setSelectedIds(new Set(segs.map(s => s.id)));
+    } else {
+      setSegments([]);
+      setSelectedIds(new Set());
+    }
+  }, [latestAnalysisResult]);
 
   // 有活跃剪辑任务 → 展示进度；没活跃但最近完成过 → 可跳转下一步
   const hasClipCompleted = !!latestClipResult;

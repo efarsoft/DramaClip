@@ -19,7 +19,7 @@ from typing import List, Dict
 from loguru import logger
 from tqdm import tqdm
 
-from app.utils import ffmpeg_utils
+from app.utils.ffmpeg_utils import ffmpeg_utils, get_ffmpeg_path, get_ffprobe_path
 from app.config.ffmpeg_config import FFmpegConfigManager
 
 
@@ -50,7 +50,7 @@ class VideoProcessor:
             Dict[str, str]: 包含视频基本信息的字典
         """
         cmd = [
-            "ffprobe",
+            get_ffprobe_path(),
             "-v", "error",
             "-select_streams", "v:0",
             "-show_entries", "stream=width,height,r_frame_rate,duration",
@@ -232,7 +232,7 @@ class VideoProcessor:
         """
         # 参考 clip_video.py 中的兼容性方案，专门针对图片输出优化
         cmd = [
-            "ffmpeg",
+            get_ffmpeg_path(),
             "-hide_banner",
             "-loglevel", "error",
             "-ss", str(timestamp),  # 先定位时间戳
@@ -259,7 +259,7 @@ class VideoProcessor:
             bool: 是否成功
         """
         cmd = [
-            "ffmpeg",
+            get_ffmpeg_path(),
             "-hide_banner",
             "-loglevel", "error",
         ]
@@ -293,7 +293,7 @@ class VideoProcessor:
         """
         # 最基本的兼容性方案，参考 clip_video.py 的 try_basic_fallback
         cmd = [
-            "ffmpeg",
+            get_ffmpeg_path(),
             "-hide_banner",
             "-loglevel", "warning",  # 更详细的日志用于调试
             "-ss", str(timestamp),
@@ -322,7 +322,7 @@ class VideoProcessor:
         # 方案1: 使用 PNG 格式避免 MJPEG 问题
         png_output = output_path.replace('.jpg', '.png')
         cmd1 = [
-            "ffmpeg",
+            get_ffmpeg_path(),
             "-hide_banner",
             "-loglevel", "error",
             "-ss", str(timestamp),
@@ -359,7 +359,7 @@ class VideoProcessor:
 
         # 方案2: 使用最简单的参数
         cmd2 = [
-            "ffmpeg",
+            get_ffmpeg_path(),
             "-hide_banner",
             "-loglevel", "error",
             "-i", self.video_path,
@@ -377,7 +377,7 @@ class VideoProcessor:
         # 方案3: 最后的尝试 - 使用 BMP 格式
         bmp_output = output_path.replace('.jpg', '.bmp')
         cmd3 = [
-            "ffmpeg",
+            get_ffmpeg_path(),
             "-hide_banner",
             "-loglevel", "error",
             "-i", self.video_path,
@@ -597,7 +597,7 @@ class VideoProcessor:
         # 使用 PNG 格式避免 MJPEG 问题
         png_output = output_path.replace('.jpg', '.png')
         cmd = [
-            "ffmpeg",
+            get_ffmpeg_path(),
             "-hide_banner",
             "-loglevel", "error",
             "-ss", str(timestamp),

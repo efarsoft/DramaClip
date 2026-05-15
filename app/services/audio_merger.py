@@ -7,17 +7,15 @@ from pydub import AudioSegment
 from typing import List, Dict
 from loguru import logger
 from app.utils import utils
-
+from app.utils.ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
 
 def check_ffmpeg():
     """检查FFmpeg是否已安装"""
     try:
-        subprocess.run(['ffmpeg', '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run([get_ffmpeg_path(), '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
     except FileNotFoundError:
         return False
-
-
 def merge_audio_files(task_id: str, total_duration: float, list_script: list):
     """
     合并音频文件

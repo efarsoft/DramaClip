@@ -28,6 +28,14 @@ export interface Task {
   completedAt?: number;
   /** 唯一标识同类型重复提交（相同 projectId+type+params 视为重复） */
   dedupKey?: string;
+  /** 分析结果（用于 analyze 任务完成时） */
+  results?: AnalysisResults;
+}
+
+export interface AnalysisResults {
+  asr?: unknown;
+  emotion?: unknown;
+  highlights?: unknown;
 }
 
 // ── IPC 方法表 ──
@@ -106,6 +114,7 @@ async function pollTask(
         phase?: string;
         message?: string;
         output_path?: string;
+        results?: { asr?: unknown; emotion?: unknown; highlights?: unknown };
       }>(method, { task_id: task.id });
 
       if (!status) {
@@ -126,6 +135,7 @@ async function pollTask(
           progress: 100,
           completedAt: Date.now(),
           outputPath: status.output_path,
+          ...(status.results && { results: status.results }),
         });
         onDone();
         return;

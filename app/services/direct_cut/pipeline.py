@@ -2,6 +2,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -11,6 +12,7 @@ from pyscenetect import detect_scenes
 from app.services.highlight.scorer import HighlightScorer
 from app.services.highlight.selector import HighlightSelector, HighlightSegment
 from app.services.sorter.scene_sorter import SceneSorter, SortStrategy
+from app.utils.ffmpeg_utils import get_ffmpeg_path
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +64,7 @@ class DirectCutPipeline:
             emotion_weight=self.emotion_weight,
             visual_weight=self.visual_weight,
             rhythm_weight=self.rhythm_weight,
+            plot_importance_weight=0.15,  # 剧情重要性权重 15%
         )
         self.selector = HighlightSelector(
             top_ratio=self.top_ratio,
@@ -71,6 +74,19 @@ class DirectCutPipeline:
         self.sorter = SceneSorter(strategy=SortStrategy.CHRONOLOGICAL)
 
         logger.info("DirectCutPipeline initialized")
+
+    def run_segments_only(
+        self, video_paths: List[str], target_duration: Optional[int] = None
+    ) -> List['HighlightSegment']:
+        """
+        仅执行片段选择（不输出视频），返回排序后的高光片段列表。
+        供解说管线复用：先选片段 → 基于片段生成解说 → 精确对齐剪辑+混合。
+        """
+        scenes = self._detect_scenes(video_paths)
+        scored_segments = self._score_scenes(scenes)
+        selected_segments = self._select_highlights(scored_segments, target_duration)
+        sorted_segments = self._sort_segments(selected_segments)
+        return sorted_segments
 
     def run(
         self,
@@ -224,19 +240,24 @@ class DirectCutPipeline:
         Returns:
             临时文件路径
         """
-        temp_path = f"/tmp/scene_{start_time:.1f}_{end_time:.1f}.mp4"
+        temp_dir = tempfile.gettempdir()
+        # 使用 uuid 防止并发冲突
+        temp_path = os.path.join(temp_dir, f"scene_{uuid.uuid4().hex[:8]}_{start_time:.1f}_{end_time:.1f}.mp4")
 
+        # 使用重编码而非 -c copy，确保输出文件可被 cv2/librosa 正确读取
+        # -c copy 在非关键帧对齐时会输出损坏的 MP4
         cmd = [
-            "ffmpeg",
+            get_ffmpeg_path(),
             "-y",
-            "-i",
-            video_path,
-            "-ss",
-            str(start_time),
-            "-t",
-            str(end_time - start_time),
-            "-c",
-            "copy",
+            "-ss", str(start_time),       # 放在 -i 前实现快速 seek
+            "-i", video_path,
+            "-t", str(end_time - start_time),
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-crf", "23",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-movflags", "+faststart",
             temp_path,
         ]
 
@@ -250,7 +271,7 @@ class DirectCutPipeline:
     def _select_highlights(
         self,
         scored_segments: List[Dict],
-        target_duration: int,
+        target_duration: Optional[int] = None,
     ) -> List[HighlightSegment]:
         """
         选择高光片段
@@ -308,16 +329,17 @@ class DirectCutPipeline:
             输出文件路径
         """
         # 1. 切割每个片段
+        temp_dir = tempfile.gettempdir()
         cut_paths = []
         for i, seg in enumerate(segments):
-            cut_path = f"/tmp/cut_{i:03d}.mp4"
+            cut_path = os.path.join(temp_dir, f"cut_{i:03d}.mp4")
             self._cut_segment(seg, cut_path)
             cut_paths.append(cut_path)
 
         # 2. 转换为竖屏（9:16）
         portrait_paths = []
         for i, cut_path in enumerate(cut_paths):
-            portrait_path = f"/tmp/portrait_{i:03d}.mp4"
+            portrait_path = os.path.join(temp_dir, f"portrait_{i:03d}.mp4")
             self._to_portrait(cut_path, portrait_path)
             portrait_paths.append(portrait_path)
 
@@ -333,18 +355,19 @@ class DirectCutPipeline:
         return output_path
 
     def _cut_segment(self, seg: HighlightSegment, output_path: str):
-        """切割视频片段"""
+        """切割视频片段 — 使用重编码确保输出完整"""
         cmd = [
-            "ffmpeg",
+            get_ffmpeg_path(),
             "-y",
-            "-i",
-            seg.video_path,
-            "-ss",
-            str(seg.start_time),
-            "-t",
-            str(seg.duration),
-            "-c",
-            "copy",
+            "-ss", str(seg.start_time),       # -ss 放 -i 前做快速 seek
+            "-i", seg.video_path,
+            "-t", str(seg.duration),
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-crf", "23",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-movflags", "+faststart",
             output_path,
         ]
 
@@ -359,19 +382,42 @@ class DirectCutPipeline:
         横屏转竖屏（9:16）
 
         策略：
-        1. 检测画面中的人脸/主体位置
-        2. 智能裁剪到9:16
+        1. 检测视频宽高比，如果已经是 9:16 竖屏则直接复制
+        2. 否则居中裁剪到 9:16
         """
-        # 简化实现：直接裁剪到9:16（居中裁剪）
+        # 检测视频宽高
+        cap = cv2.VideoCapture(input_path)
+        if not cap.isOpened():
+            logger.warning(f"Cannot open video for aspect check: {input_path}, skipping portrait conversion")
+            import shutil
+            shutil.copy2(input_path, output_path)
+            return
+
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+
+        # 计算当前宽高比
+        aspect = width / height if height > 0 else 1.0
+        target_aspect = 9.0 / 16.0  # ≈ 0.5625
+
+        # 如果宽高比接近 9:16（±10%），直接复制不重编码
+        if abs(aspect - target_aspect) < 0.06:
+            logger.info(f"Video already near 9:16 (aspect={aspect:.3f}), copying as-is")
+            import shutil
+            shutil.copy2(input_path, output_path)
+            return
+
+        # 横屏转竖屏：居中裁剪到 9:16
         cmd = [
-            "ffmpeg",
+            get_ffmpeg_path(),
             "-y",
-            "-i",
-            input_path,
-            "-vf",
-            "crop=in_h*9/16:in_h:(in_w-in_h*9/16)/2:0",
-            "-c",
-            "a copy",
+            "-i", input_path,
+            "-vf", "crop=in_h*9/16:in_h:(in_w-in_h*9/16)/2:0",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-c:a", "copy",
             output_path,
         ]
 
@@ -389,44 +435,68 @@ class DirectCutPipeline:
             video_paths: 视频片段路径列表
             output_path: 输出文件路径
         """
-        # 创建临时列表文件
-        list_file = "/tmp/concat_list.txt"
+        if len(video_paths) == 0:
+            raise ValueError("No video paths to concatenate")
+        if len(video_paths) == 1:
+            # 单片段，直接复制
+            import shutil
+            shutil.copy2(video_paths[0], output_path)
+            return
+
+        # 创建临时列表文件（用 uuid 防止并发冲突）
+        temp_dir = tempfile.gettempdir()
+        list_file = os.path.join(temp_dir, f"concat_{uuid.uuid4().hex[:8]}.txt")
+        # ffmpeg concat 需要正斜杠路径
         with open(list_file, "w") as f:
             for path in video_paths:
-                f.write(f"file '{path}'\n")
+                escaped = path.replace("\\", "/").replace("'", "'\\''")
+                f.write(f"file '{escaped}'\n")
 
-        # 拼接
-        cmd = [
-            "ffmpeg",
+        # 先尝试 concat + stream copy（最快）
+        # 如果片段编码参数不一致，会失败，此时降级到重编码
+        cmd_copy = [
+            get_ffmpeg_path(),
             "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            list_file,
-            "-c",
-            "copy",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", list_file,
+            "-c", "copy",
             output_path,
         ]
 
         try:
-            subprocess.run(cmd, check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Error concatenating videos: {e}")
-            raise
+            result = subprocess.run(cmd_copy, check=True, capture_output=True, text=True)
+            logger.info("Concatenated with stream copy (fast)")
+        except subprocess.CalledProcessError:
+            # 降级：concat + 重编码（兼容不同编码参数的片段）
+            logger.warning("Stream copy concat failed, falling back to re-encode")
+            cmd_reencode = [
+                get_ffmpeg_path(),
+                "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", list_file,
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-crf", "23",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                output_path,
+            ]
+            try:
+                subprocess.run(cmd_reencode, check=True, capture_output=True, text=True)
+                logger.info("Concatenated with re-encode (compatible)")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Error concatenating videos (re-encode): {e.stderr}")
+                raise
         finally:
-            # 清理列表文件
             if os.path.exists(list_file):
                 os.remove(list_file)
 
     def _generate_output_path(self, reference_path: str) -> str:
-        """生成输出文件路径"""
-        import os
-        from datetime import datetime
-
+        """生成默认输出路径"""
         base_dir = os.path.dirname(reference_path)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = uuid.uuid4().hex[:8]
         return os.path.join(base_dir, f"dramaclip_output_{timestamp}.mp4")
 
     def set_sort_strategy(self, strategy: SortStrategy):

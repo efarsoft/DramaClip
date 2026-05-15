@@ -14,8 +14,7 @@ from moviepy.video.io.VideoFileClip import VideoFileClip
 from app.config import config
 from app.models.schema import VideoAspect, VideoConcatMode, MaterialInfo
 from app.utils import utils
-from app.utils import ffmpeg_utils
-
+from app.utils.ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
 requested_count = 0
 
 
@@ -364,7 +363,7 @@ def save_clip_video(timestamp: str, origin_video: str, save_dir: str = "") -> st
 
         # 获取视频总时长
         try:
-            probe_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+            probe_cmd = [get_ffprobe_path(), "-v", "error", "-show_entries", "format=duration",
                         "-of", "default=noprint_wrappers=1:nokey=1", origin_video]
             total_duration = float(subprocess.check_output(probe_cmd).decode('utf-8').strip())
         except subprocess.CalledProcessError as e:
@@ -406,7 +405,7 @@ def save_clip_video(timestamp: str, origin_video: str, save_dir: str = "") -> st
         encoder = ffmpeg_utils.get_optimal_ffmpeg_encoder()
 
         ffmpeg_cmd = [
-            "ffmpeg", "-y", *hwaccel_args,
+            get_ffmpeg_path(), "-y", *hwaccel_args,
             "-i", origin_video,
             "-ss", ffmpeg_start_time,
             "-to", ffmpeg_end_time,
@@ -466,7 +465,7 @@ def save_clip_video(timestamp: str, origin_video: str, save_dir: str = "") -> st
         # 验证生成的视频文件
         if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
             # 检查视频是否可播放
-            probe_cmd = ["ffprobe", "-v", "error", video_path]
+            probe_cmd = [get_ffprobe_path(), "-v", "error", video_path]
             # 在Windows系统上使用UTF-8编码
             if is_windows:
                 validate_result = subprocess.run(probe_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8')
@@ -545,13 +544,13 @@ def merge_videos(video_paths, ost_list):
             else:
                 # 如果不保留原声，创建一个无声的临时视频
                 silent_video = f"silent_{os.path.basename(video_path)}"
-                subprocess.run(["ffmpeg", "-i", video_path, "-c:v", "copy", "-an", silent_video], check=True)
+                subprocess.run([get_ffmpeg_path(), "-i", video_path, "-c:v", "copy", "-an", silent_video], check=True)
                 f.write(f"file '{silent_video}'\n")
 
     # 合并视频
     output_file = "combined.mp4"
     ffmpeg_cmd = [
-        "ffmpeg",
+        get_ffmpeg_path(),
         "-f", "concat",
         "-safe", "0",
         "-i", temp_file,

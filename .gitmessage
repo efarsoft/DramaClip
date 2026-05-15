@@ -1,0 +1,34 @@
+refactor: eliminate mock data and integrate real backend APIs for local file processing
+
+Frontend:
+- Remove DevApiFallback from ipc.ts - all calls now route through window.electronAPI
+- AnalyzePanel.tsx: use real ASR, emotion, and highlight data from backend
+- EditPanel.tsx: convert backend highlights to segments for editing
+- RecommendPanel.tsx: use real clipApi.recommend endpoint
+- ExportPanel.tsx: use real enqueue/export endpoint
+- taskQueueStore.ts: integrate backend polling with results data
+
+Backend:
+- handlers.py: complete RPC handler layer for all IPC endpoints
+- manager.py: ASR + emotion + highlight analysis pipeline
+- direct_cut/pipeline.py: direct cutting pipeline
+- narration/pipeline.py: AI narration pipeline
+- highlight/scorer.py: highlight scoring algorithm
+- model_manager.py: model management service
+- ffmpeg_config.py: FFmpeg profile configuration
+- project/manager.py: project CRUD operations
+- scene_sorter.py: scene detection and sorting
+- ffmpeg_utils.py: FFmpeg utility functions
+- video_processor.py: video processing utilities
+- audio_merger.py: audio merging service
+- clip_video.py: video clip operations
+- merger_video.py: video merging operations
+
+Resources:
+- ffmpeg.exe and ffprobe.exe binaries
+- Ollama integration plan documentation
+
+Cleanup:
+- Remove test files, temporary scripts, and logs
+
+Co-Authored-By: AtomCode (Qwen/Qwen3.6-35B-A3B) <noreply@atomgit.com>

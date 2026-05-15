@@ -3,6 +3,7 @@
 """
 
 import logging
+import os
 from typing import Dict, List, Optional
 from enum import Enum
 
@@ -244,9 +245,19 @@ class SceneSorter:
         }
 
         for seg in segments:
-            # 简化判断：基于emotion_score和audio_score
-            is_high_arousal = seg.audio_score >= 0.5  # 音频能量高 → 高唤醒
-            is_positive = seg.emotion_score >= 0.5  # 情绪分数高 → 正情绪
+            # 唤醒度：综合音频能量、节奏、画面动感
+            arousal_score = (
+                seg.audio_score * 0.4
+                + seg.rhythm_score * 0.3
+                + seg.visual_score * 0.3
+            )
+
+            # 效价：情绪分数（后续可结合subtitle关键词）
+            valence_score = seg.emotion_score
+
+            # 使用动态阈值（更宽松）
+            is_high_arousal = arousal_score >= 0.45
+            is_positive = valence_score >= 0.45
 
             if is_high_arousal and is_positive:
                 categorized["high_arousal_positive"].append(seg)
@@ -256,6 +267,10 @@ class SceneSorter:
                 categorized["low_arousal_positive"].append(seg)
             else:
                 categorized["low_arousal_negative"].append(seg)
+
+        # 日志输出
+        for cat, segs in categorized.items():
+            logger.debug(f"Categorized [{cat}]: {len(segs)} segments")
 
         return categorized
 
@@ -275,13 +290,31 @@ class SceneSorter:
         """从视频路径提取集数标识"""
         import os
         filename = os.path.basename(video_path)
-        # 简单处理：使用文件名作为key（实际应该提取集数）
+        # 使用文件名作为key（实际应该提取集数）
         return filename
 
     def _extract_episode(self, video_path: str) -> int:
-        """从视频路径提取集数（用于排序）"""
-        # 简化实现：返回0（实际应该从文件名提取集数）
-        # 例如："第01集.mp4" → 1
+        """从视频路径提取集数（用于排序）
+
+        支持多种命名格式：
+        - "第01集.mp4" / "第1集.mp4"
+        - "episode_01.mp4" / "ep01.mp4"
+        - "video_01.mp4"
+        - "01.mp4"
+        """
+        import re
+
+        filename = os.path.basename(video_path).lower()
+        # 尝试匹配常见模式
+        patterns = [
+            r"第?(\d+)[集话期episodeep]?",   # 第01集 / episode_01
+            r"ep(\d+)",                         # ep01
+            r"(\d+)\.(mp4|mkv|avi|mov)$",       # 01.mp4
+        ]
+        for pattern in patterns:
+            m = re.search(pattern, filename)
+            if m:
+                return int(m.group(1))
         return 0
 
     def set_strategy(self, strategy: SortStrategy):
