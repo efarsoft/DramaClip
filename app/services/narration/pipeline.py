@@ -8,7 +8,6 @@ AI解说管道 - 完整的AI解说模式流水线
 4. 音画合成输出
 """
 
-import logging
 import os
 import subprocess
 import tempfile
@@ -19,8 +18,7 @@ import openai
 
 from app.services.direct_cut.pipeline import DirectCutPipeline
 from app.utils.ffmpeg_utils import get_ffmpeg_path
-
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 class PlotParser:

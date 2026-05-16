@@ -13,6 +13,8 @@ interface ProjectState {
   selectedEpisodeIds: string[];
   isLoading: boolean;
   error: string | null;
+  clipScheme: string | null;
+  clipTargetDuration: number;
 
   // 操作
   loadProjects: () => Promise<void>;
@@ -25,6 +27,8 @@ interface ProjectState {
   setSelectedEpisodeIds: (ids: string[]) => void;
   setCurrentProject: (project: Project | null) => void;
   clearError: () => void;
+  setClipScheme: (scheme: string | null) => void;
+  setClipTargetDuration: (duration: number) => void;
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -35,6 +39,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   selectedEpisodeIds: [],
   isLoading: false,
   error: null,
+  clipScheme: null,
+  clipTargetDuration: 0,
 
   // 加载项目列表
   loadProjects: async () => {
@@ -151,9 +157,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const videos = await projectApi.getVideos(projectId);
       set({ currentVideos: videos, isLoading: false });
     } catch (error) {
-      console.warn('Failed to load project videos:', error);
-      set({ isLoading: false });
-      throw error; // 让调用方（如刷新按钮）感知错误
+      const message = error instanceof Error ? error.message : 'Failed to load project videos';
+      set({ error: message, isLoading: false });
+      throw error;
     }
   },
 
@@ -170,5 +176,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   // 清除错误
   clearError: () => {
     set({ error: null });
+  },
+
+  // 设置剪辑方案
+  setClipScheme: (scheme: string | null) => {
+    set({ clipScheme: scheme });
+  },
+
+  // 设置剪辑目标时长
+  setClipTargetDuration: (duration: number) => {
+    set({ clipTargetDuration: duration });
   },
 }));

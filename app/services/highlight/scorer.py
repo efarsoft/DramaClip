@@ -8,7 +8,6 @@
 4. 镜头节奏 (rhythm) - 权重 0.1
 """
 
-import logging
 import uuid
 from typing import Dict, List, Optional
 from pathlib import Path
@@ -21,7 +20,7 @@ import cv2
 import jieba
 from pyscenetect import detect_scenes
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 # 情感关键词词典
 POSITIVE_KEYWORDS = {

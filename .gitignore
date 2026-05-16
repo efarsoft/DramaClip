@@ -40,7 +40,6 @@ resource/srt/*.srt
 .serena/
 
 # 测试与临时文件
-tests/
 test_output_e2e/
 logs/
 check_*.py

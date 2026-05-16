@@ -16,6 +16,7 @@ from loguru import logger
 
 from .asr_service import ASRService, ASRResult
 from .emotion_service import EmotionService, EmotionAnalysis
+from app.utils.ffmpeg_utils import get_ffmpeg_path
 
 
 @dataclass
@@ -248,7 +249,11 @@ class AnalysisManager:
         selector = HighlightSelector()
 
         # 构建评分数据
-        scoring_data = []
+        scored_segments = []
+        start_times = []
+        end_times = []
+        subtitle_texts = []
+
         for i, seg in enumerate(asr_result.segments):
             # 情绪评分
             emotion_score = 0.0
@@ -257,24 +262,53 @@ class AnalysisManager:
                     emotion_score = ep.intensity
                     break
 
-            scoring_data.append({
+            scored_segments.append({
                 "segment_index": i,
-                "start": seg.start,
-                "end": seg.end,
+                "start_time": seg.start,
+                "end_time": seg.end,
                 "text": seg.text,
+                "audio_score": 0.0,
                 "emotion_score": emotion_score,
-                "duration": seg.end - seg.start,
+                "visual_score": 0.0,
+                "rhythm_score": 0.0,
             })
+            start_times.append(seg.start)
+            end_times.append(seg.end)
+            subtitle_texts.append(seg.text)
 
         # 选择高光片段
-        highlights = selector.select(
-            scoring_data,
-            max_segments=10,
-            min_duration=5.0,
-            max_duration=60.0,
+        highlights = selector.select_from_scores(
+            scored_segments=scored_segments,
+            video_paths=[task.video_path],
+            start_times=start_times,
+            end_times=end_times,
+            subtitle_texts=subtitle_texts,
+            target_duration=None,
         )
 
-        return highlights
+        # 转换结果为字典格式
+        result: List[Dict] = []
+        for i, h in enumerate(highlights):
+            if isinstance(h, dict):
+                h["video_path"] = task.video_path
+                h["id"] = h.get("id", f"h-{task.video_id}-{i}")
+                result.append(h)
+            else:
+                result.append({
+                    "video_path": task.video_path,
+                    "start_time": h.start_time,
+                    "end_time": h.end_time,
+                    "score": getattr(h, "score", 0),
+                    "audio_score": getattr(h, "audio_score", 0),
+                    "emotion_score": getattr(h, "emotion_score", 0),
+                    "visual_score": getattr(h, "visual_score", 0),
+                    "rhythm_score": getattr(h, "rhythm_score", 0),
+                    "subtitle_text": getattr(h, "subtitle_text", ""),
+                    "segment_id": getattr(h, "segment_id", f"h-{task.video_id}-{i}"),
+                    "reason": getattr(h, "reason", ""),
+                })
+
+        return result
 
     def _save_results(self, task: AnalysisTask):
         """保存分析结果"""

@@ -2,11 +2,10 @@
 高光排序器 - 对高光片段进行智能排序
 """
 
-import logging
 from enum import Enum
 from typing import Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 class SortStrategy(str, Enum):

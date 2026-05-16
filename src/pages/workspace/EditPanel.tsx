@@ -19,10 +19,11 @@ import {
   ReloadOutlined,
   CloseCircleOutlined,
   MinusCircleOutlined,
+  EyeOutlined,
 } from '@ant-design/icons';
 import { useProjectStore } from '../../stores/projectStore';
 import { useTaskQueueStore, type Task } from '../../stores/taskQueueStore';
-
+import { VideoPlayerModal, MiniPreview } from '../../components/common/VideoPlayer';
 const { Title, Text } = Typography;
 const CYAN = '#00d4ff';
 const PURPLE = '#7c3aed';
@@ -59,15 +60,25 @@ export interface Segment {
   desc: string;
   emotion: string;
   duration: number;
+  video_path?: string;
+  score?: number;
 }
 
 export interface AnalysisResults {
   highlights?: Array<{
-    id: string;
-    start: number;
-    end: number;
-    score: number;
+    id?: string;
+    segment_id?: string;
+    start_time: number;
+    end_time: number;
+    score?: number;
     label?: string;
+    reason?: string;
+    video_path?: string;
+    emotion_score?: number;
+    audio_score?: number;
+    visual_score?: number;
+    rhythm_score?: number;
+    subtitle_text?: string;
   }>;
 }
 
@@ -75,17 +86,18 @@ interface Props {
   onNext: () => void;
 }
 
-interface TaskWithResults extends Task {
+export interface TaskWithResults extends Task {
   results?: AnalysisResults;
 }
 
 const EditPanel: React.FC<Props> = ({ onNext }) => {
-  const { currentProject } = useProjectStore();
-  const [segments, setSegments] = useState<Segment[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const { currentProject, clipTargetDuration, currentVideos } = useProjectStore();
 
   const { tasks: allTasks, activeTaskId, enqueue, cancel, retry, remove, clearCompleted } = useTaskQueueStore();
 
+  const [segments, setSegments] = useState<Segment[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [previewSegment, setPreviewSegment] = useState<Segment | null>(null);
   // 取当前项目最近的 analyze 任务
   const analyzeTasks = useMemo(
     () => allTasks.filter((t): t is TaskWithResults => t.type === 'analyze'),
@@ -120,13 +132,15 @@ const EditPanel: React.FC<Props> = ({ onNext }) => {
   React.useEffect(() => {
     if (latestAnalysisResult?.results?.highlights) {
       const segs: Segment[] = latestAnalysisResult.results.highlights.map((h, i) => ({
-        id: h.id || `h-${i}`,
-        start: h.start,
-        end: h.end,
-        label: h.label || `片段 ${i + 1}`,
-        desc: '',
-        emotion: 'neutral',
-        duration: h.end - h.start,
+        id: h.id || h.segment_id || `h-${i}`,
+        start: h.start_time,
+        end: h.end_time,
+        label: h.label || h.subtitle_text || `片段 ${i + 1}`,
+        desc: h.reason || h.subtitle_text || '',
+        emotion: h.emotion_score && h.emotion_score > 0.7 ? 'intense' : 'neutral',
+        duration: h.end_time - h.start_time,
+        video_path: h.video_path,
+        score: h.score,
       }));
       setSegments(segs);
       setSelectedIds(new Set(segs.map(s => s.id)));
@@ -158,8 +172,12 @@ const EditPanel: React.FC<Props> = ({ onNext }) => {
     }
     enqueue('clip', currentProject.id, {
       project_id: currentProject.id,
-      segments: Array.from(selectedIds),
-      mode: 'highlight',
+      scheme: useProjectStore.getState().clipScheme || 'original_narration',
+      params: {
+        segments: Array.from(selectedIds),
+        segment_ids: Array.from(selectedIds),
+        clip_mode: 'highlight',
+      },
     });
     message.success('剪辑任务已加入队列');
   };
@@ -208,6 +226,8 @@ const EditPanel: React.FC<Props> = ({ onNext }) => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
         {segments.map((seg, idx) => {
           const selected = selectedIds.has(seg.id);
+          // 片段对应的视频文件路径：优先用 video_path，否则从 currentVideos 查找
+          const videoFilePath = seg.video_path || currentVideos[0]?.path || '';
           return (
             <div
               key={seg.id}
@@ -229,6 +249,35 @@ const EditPanel: React.FC<Props> = ({ onNext }) => {
                 background: `rgba(255,255,255,0.06)`, color: '#4a5a7a',
                 fontSize: 12, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace",
               }}>{idx + 1}</span>
+
+              {/* 缩略图预览 */}
+              {videoFilePath && (
+                <div
+                  onClick={(e) => { e.stopPropagation(); setPreviewSegment(seg); }}
+                  style={{ flexShrink: 0, position: 'relative', cursor: 'pointer' }}
+                >
+                  <MiniPreview
+                    filePath={videoFilePath}
+                    width={96}
+                    height={54}
+                    startTime={seg.start}
+                    endTime={seg.end}
+                  />
+                  {/* 播放按钮覆盖层 */}
+                  <div style={{
+                    position: 'absolute', inset: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(0,0,0,0.3)', borderRadius: 6,
+                    opacity: 0, transition: 'opacity 0.2s',
+                  }}
+                    className="mini-preview-overlay"
+                    onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                    onMouseLeave={(e) => (e.currentTarget.style.opacity = '0')}
+                  >
+                    <PlayCircleOutlined style={{ fontSize: 20, color: '#fff' }} />
+                  </div>
+                </div>
+              )}
 
               {/* 标签 */}
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -254,6 +303,19 @@ const EditPanel: React.FC<Props> = ({ onNext }) => {
               }}>
                 {seg.emotion}
               </div>
+
+              {/* 预览按钮 */}
+              {videoFilePath && (
+                <Tooltip title="预览片段">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<EyeOutlined />}
+                    onClick={(e) => { e.stopPropagation(); setPreviewSegment(seg); }}
+                    style={{ color: '#4a5a7a', flexShrink: 0 }}
+                  />
+                </Tooltip>
+              )}
 
               {/* 选择指示器 */}
               <div style={{
@@ -426,6 +488,16 @@ const EditPanel: React.FC<Props> = ({ onNext }) => {
           </div>
         </Card>
       )}
+
+      {/* ─── 片段视频预览模态框 ─── */}
+      <VideoPlayerModal
+        open={!!previewSegment}
+        onClose={() => setPreviewSegment(null)}
+        filePath={previewSegment?.video_path || currentVideos[0]?.path || ''}
+        title={previewSegment?.label}
+        startTime={previewSegment?.start}
+        endTime={previewSegment?.end}
+      />
     </div>
   );
 };

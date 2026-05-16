@@ -2,11 +2,10 @@
 高光选择器 - 根据打分结果筛选高光片段
 """
 
-import logging
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 @dataclass
@@ -23,6 +22,7 @@ class HighlightSegment:
     rhythm_score: float  # 节奏分数
     subtitle_text: Optional[str] = None  # 字幕文本
     reason: Optional[str] = None  # 入选理由
+    segment_id: Optional[str] = None  # 前端传递的片段 ID（来自分析结果）
 
     @property
     def duration(self) -> float:
@@ -43,6 +43,7 @@ class HighlightSegment:
             "rhythm_score": self.rhythm_score,
             "subtitle_text": self.subtitle_text,
             "reason": self.reason,
+            "segment_id": self.segment_id,
         }
 
 
@@ -275,13 +276,24 @@ class HighlightSelector:
             subtitle_texts = [None] * len(scored_segments)
 
         # 转换为HighlightSegment对象
+        # 当video_paths长度小于segment数量时，循环使用（单视频多片段场景）
         segments = []
         for i, score_dict in enumerate(scored_segments):
+            vp = video_paths[i % len(video_paths)] if video_paths else ""
+            # 如果没有total_score，从各维度加权计算
+            total = score_dict.get("total_score", None)
+            if total is None:
+                total = (
+                    score_dict.get("audio_score", 0.0) * 0.4
+                    + score_dict.get("emotion_score", 0.0) * 0.3
+                    + score_dict.get("visual_score", 0.0) * 0.2
+                    + score_dict.get("rhythm_score", 0.0) * 0.1
+                )
             seg = HighlightSegment(
-                video_path=video_paths[i],
+                video_path=vp,
                 start_time=start_times[i],
                 end_time=end_times[i],
-                score=score_dict.get("total_score", 0.0),
+                score=total,
                 audio_score=score_dict.get("audio_score", 0.0),
                 emotion_score=score_dict.get("emotion_score", 0.0),
                 visual_score=score_dict.get("visual_score", 0.0),

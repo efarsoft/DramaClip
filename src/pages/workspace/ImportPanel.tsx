@@ -5,16 +5,18 @@
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, message, Typography, Empty, Space, Checkbox, Card, Spin } from 'antd';
+import { Button, message, Typography, Empty, Space, Checkbox, Card, Spin, Tooltip } from 'antd';
 import {
   FolderOpenOutlined,
   UploadOutlined,
   PlayCircleOutlined,
   DeleteOutlined,
   ReloadOutlined,
+  EyeOutlined,
 } from '@ant-design/icons';
 import { useProjectStore } from '../../stores/projectStore';
 import type { Episode } from '../../services/ipc';
+import { VideoPlayerModal, MiniPreview } from '../../components/common/VideoPlayer';
 
 const { Title, Text } = Typography;
 
@@ -52,6 +54,7 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
   const [importing, setImporting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [previewVideo, setPreviewVideo] = useState<Episode | null>(null);
   const dragCounterRef = React.useRef(0);
 
   // 打开项目时加载视频列表，并显示同步结果
@@ -298,10 +301,9 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
               return (
                 <div
                   key={video.id}
-                  onClick={() => handleSelect(video.id, !selected)}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 12,
-                    padding: '12px 16px', borderRadius: 12,
+                    padding: '10px 16px', borderRadius: 12,
                     background: selected
                       ? `linear-gradient(135deg, ${CYAN}08, ${PURPLE}08)`
                       : 'rgba(255,255,255,0.02)',
@@ -320,17 +322,34 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
                     style={{ flexShrink: 0 }}
                   />
 
-                  {/* 序号 */}
-                  <span style={{
-                    width: 24, height: 24, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: 'rgba(255,255,255,0.06)', color: '#4a5a7a', fontSize: 11, fontWeight: 600,
-                    fontFamily: "'JetBrains Mono', monospace", flexShrink: 0,
-                  }}>
-                    {idx + 1}
-                  </span>
+                  {/* 视频缩略图 */}
+                  <div
+                    onClick={(e) => { e.stopPropagation(); setPreviewVideo(video); }}
+                    style={{ flexShrink: 0, position: 'relative' }}
+                  >
+                    <MiniPreview
+                      filePath={video.path}
+                      width={120}
+                      height={68}
+                    />
+                    {/* 播放按钮叠加 */}
+                    <div style={{
+                      position: 'absolute', inset: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      opacity: 0, transition: 'opacity 0.2s',
+                      background: 'rgba(0,0,0,0.3)', borderRadius: 8,
+                      cursor: 'pointer',
+                    }}
+                      className="mini-preview-overlay"
+                      onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                      onMouseLeave={(e) => (e.currentTarget.style.opacity = '0')}
+                    >
+                      <PlayCircleOutlined style={{ fontSize: 24, color: '#fff' }} />
+                    </div>
+                  </div>
 
                   {/* 视频信息 */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ flex: 1, minWidth: 0 }} onClick={() => handleSelect(video.id, !selected)}>
                     <div style={{ fontWeight: 500, color: '#e0e6ed', fontSize: 14, marginBottom: 2 }}>
                       {video.name}
                     </div>
@@ -352,6 +371,17 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
                       )}
                     </Space>
                   </div>
+
+                  {/* 预览按钮 */}
+                  <Tooltip title="预览视频">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<EyeOutlined />}
+                      onClick={(e) => { e.stopPropagation(); setPreviewVideo(video); }}
+                      style={{ color: '#4a5a7a', flexShrink: 0 }}
+                    />
+                  </Tooltip>
 
                   {/* 选中状态 */}
                   <div style={{
@@ -421,6 +451,14 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
           <Text style={{ color: CYAN }}>刷新视频列表中…</Text>
         </div>
       )}
+
+      {/* ─── 视频预览模态框 ─── */}
+      <VideoPlayerModal
+        open={!!previewVideo}
+        onClose={() => setPreviewVideo(null)}
+        filePath={previewVideo?.path ?? ''}
+        title={previewVideo?.name}
+      />
     </div>
   );
 };

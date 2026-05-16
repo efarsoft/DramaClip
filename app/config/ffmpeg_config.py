@@ -12,15 +12,28 @@ from app.utils.ffmpeg_utils import get_ffmpeg_path
 
 class FFmpegProfile:
     """FFmpeg 配置文件"""
-    name: str
-    description: str
-    hwaccel_enabled: bool
-    hwaccel_type: Optional[str]
-    encoder: str
-    quality_preset: str
-    pixel_format: str
-    additional_args: List[str]
-    compatibility_level: int  # 1-5, 5为最高兼容性
+    
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        hwaccel_enabled: bool,
+        hwaccel_type: Optional[str],
+        encoder: str,
+        quality_preset: str,
+        pixel_format: str,
+        additional_args: List[str],
+        compatibility_level: int,  # 1-5, 5为最高兼容性
+    ):
+        self.name = name
+        self.description = description
+        self.hwaccel_enabled = hwaccel_enabled
+        self.hwaccel_type = hwaccel_type
+        self.encoder = encoder
+        self.quality_preset = quality_preset
+        self.pixel_format = pixel_format
+        self.additional_args = additional_args
+        self.compatibility_level = compatibility_level
 
 
 class FFmpegConfigManager:

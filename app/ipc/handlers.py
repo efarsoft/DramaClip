@@ -48,26 +48,9 @@ def project_list() -> List[Dict]:
     logger.info("project_list: entry")
     manager = get_manager()
     projects = manager.list_projects()
-    result = []
-    for p in projects:
-        created_at = p.created_at
-        if isinstance(created_at, str):
-            pass  # already a string
-        elif hasattr(created_at, "isoformat"):
-            created_at = created_at.isoformat()
-        updated_at = p.updated_at
-        if isinstance(updated_at, str):
-            pass  # already a string
-        elif hasattr(updated_at, "isoformat"):
-            updated_at = updated_at.isoformat()
-        result.append({
-            "id": p.id,
-            "name": p.name,
-            "path": p.path,
-            "created_at": created_at,
-            "updated_at": updated_at,
-            "video_count": p.video_count if hasattr(p, "video_count") else 0,
-        })
+    # 直接使用 to_dict()，与 ProjectMeta.model_dump() 保持一致
+    # 前端 Project 接口需要: id, name, path, created_at, updated_at, episode_count, status
+    result = [p.to_dict() for p in projects]
     logger.info(f"project_list: returning {len(result)} projects")
     return result
 
@@ -233,13 +216,7 @@ def analyze_start(project_id: str, episode_ids: List[str]) -> Dict:
         raise RPCError(-32002, f"No valid videos to analyze in project {project_id}")
 
     logger.info(f"Queued {len(task_ids)} analysis tasks for project {project_id} (max concurrent: {_WORKER_COUNT})")
-    return {
-        "task_id": task_ids[0],  # 返回第一个任务的 task_id，保持前端兼容
-        "task_ids": task_ids,     # 附带所有任务 ID
-        "status": "started",
-        "count": len(task_ids),
-        "message": f"Started {len(task_ids)} analysis tasks",
-    }
+    return {"task_ids": task_ids}
 
 
 def analyze_get_status(task_id: str) -> Dict:
@@ -248,6 +225,26 @@ def analyze_get_status(task_id: str) -> Dict:
     task = analysis_mgr.get_task(task_id)
     if not task:
         raise RPCError(-32002, f"Task not found: {task_id}")
+
+    # 为每个高光片段添加 video_path，并确保为可序列化的 dict
+    highlights = task.highlight_segments
+    if highlights:
+        enriched = []
+        for h in highlights:
+            if isinstance(h, dict):
+                h = dict(h)
+                if "video_path" not in h or not h["video_path"]:
+                    h["video_path"] = task.video_path
+                enriched.append(h)
+            elif hasattr(h, 'to_dict'):
+                # HighlightSegment 对象 → 转为 dict
+                d = h.to_dict()
+                if not d.get("video_path"):
+                    d["video_path"] = task.video_path
+                enriched.append(d)
+            else:
+                enriched.append(h)
+        highlights = enriched
 
     return {
         "task_id": task.task_id,
@@ -258,7 +255,7 @@ def analyze_get_status(task_id: str) -> Dict:
         "results": {
             "asr": task.asr_result,
             "emotion": task.emotion_result,
-            "highlights": task.highlight_segments,
+            "highlights": highlights,
         } if task.status in ("completed",) else None,
         "error": task.error,
     }
@@ -307,6 +304,8 @@ def _run_single_clip_mode(
     message_start: str,
     message_done: str,
     target_duration: Optional[int] = None,
+    num_versions: int = 1,
+    segments: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict:
     """线程安全地运行单个剪辑模式，返回结果字典"""
     try:
@@ -314,19 +313,34 @@ def _run_single_clip_mode(
 
         if pipeline_type == "direct":
             from app.services.direct_cut.pipeline import DirectCutPipeline
+            from app.services.highlight.selector import HighlightSegment
             pipeline = DirectCutPipeline()
 
-            _update_clip_task(task_id, progress=10, phase=mode_name, message="场景检测...")
-            scenes = pipeline._detect_scenes(video_paths)
-            _update_clip_task(task_id, progress=20, phase=mode_name, message=f"检测到 {len(scenes)} 个场景")
+            # 如果提供了预选片段，跳过场景检测/打分/选择
+            if segments:
+                _update_clip_task(task_id, progress=10, phase=mode_name, message=f"使用 {len(segments)} 个预选片段...")
+                selected = [
+                    HighlightSegment(
+                        video_path=s.get("video_path", video_paths[0]),
+                        start_time=s["start_time"],
+                        end_time=s["end_time"],
+                        score=s.get("score", 1.0),
+                        segment_id=s.get("id", f"seg-{i}"),
+                    )
+                    for i, s in enumerate(segments)
+                ]
+            else:
+                _update_clip_task(task_id, progress=10, phase=mode_name, message="场景检测...")
+                scenes = pipeline._detect_scenes(video_paths)
+                _update_clip_task(task_id, progress=20, phase=mode_name, message=f"检测到 {len(scenes)} 个场景")
 
-            _update_clip_task(task_id, progress=25, phase=mode_name, message="高光打分...")
-            scored = pipeline._score_scenes(scenes)
-            _update_clip_task(task_id, progress=35, phase=mode_name, message=f"完成 {len(scored)} 个片段打分")
+                _update_clip_task(task_id, progress=25, phase=mode_name, message="高光打分...")
+                scored = pipeline._score_scenes(scenes)
+                _update_clip_task(task_id, progress=35, phase=mode_name, message=f"完成 {len(scored)} 个片段打分")
 
-            _update_clip_task(task_id, progress=40, phase=mode_name, message="选择高光片段...")
-            selected = pipeline._select_highlights(scored, target_duration)
-            _update_clip_task(task_id, progress=50, phase=mode_name, message=f"选中 {len(selected)} 个高光片段")
+                _update_clip_task(task_id, progress=40, phase=mode_name, message="选择高光片段...")
+                selected = pipeline._select_highlights(scored, target_duration)
+                _update_clip_task(task_id, progress=50, phase=mode_name, message=f"选中 {len(selected)} 个高光片段")
 
             _update_clip_task(task_id, progress=55, phase=mode_name, message="智能排序...")
             sorted_segments = pipeline._sort_segments(selected)
@@ -361,55 +375,23 @@ def _run_single_clip_mode(
 
     except Exception as e:
         logger.exception(f"Mode {mode_name} ({task_id}) failed: {e}")
-        _update_clip_task(task_id, progress=100, phase="error", message=f"{mode_name} 失败: {e}")
-        return {"error": str(e), "mode": mode_name, "output_path": None}
+        return {"error": str(e), "mode": mode_name}
 
-
+# ============================================================================
+# _run_clip_pipeline — 根据 scheme 调度不同的剪辑流水线
+# ============================================================================
 def _run_clip_pipeline(
     task_id: str,
     scheme: str,
     video_paths: List[str],
+    output_path: str,
     target_duration: Optional[int] = None,
-    output_path: Optional[str] = None,
-):
-    """在后台线程中运行剪辑流水线"""
+    num_versions: int = 1,
+    segments: Optional[List[Dict[str, Any]]] = None,
+) -> None:
+    """根据 scheme 执行不同的剪辑流水线"""
     try:
-        _update_clip_task(task_id, status="running", progress=0, phase="preparing", message="准备剪辑...")
-
-        if scheme == "original_narration":
-            from app.services.direct_cut.pipeline import DirectCutPipeline
-
-            pipeline = DirectCutPipeline()
-
-            # 场景检测 (进度 0-25)
-            _update_clip_task(task_id, progress=5, phase="scene_detect", message="检测场景...")
-            scenes = pipeline._detect_scenes(video_paths)
-            _update_clip_task(task_id, progress=25, phase="scene_detect", message=f"检测到 {len(scenes)} 个场景")
-
-            # 高光打分 (进度 25-50)
-            _update_clip_task(task_id, progress=30, phase="scoring", message="高光打分...")
-            scored = pipeline._score_scenes(scenes)
-            _update_clip_task(task_id, progress=50, phase="scoring", message=f"完成 {len(scored)} 个片段打分")
-
-            # 高光选择 (进度 50-70)
-            _update_clip_task(task_id, progress=55, phase="selecting", message="选择高光片段...")
-            selected = pipeline._select_highlights(scored, target_duration)
-            _update_clip_task(task_id, progress=70, phase="selecting", message=f"选中 {len(selected)} 个高光片段")
-
-            # 智能排序 (进度 70-80)
-            _update_clip_task(task_id, progress=75, phase="sorting", message="智能排序...")
-            sorted_segments = pipeline._sort_segments(selected)
-            _update_clip_task(task_id, progress=80, phase="sorting", message="排序完成")
-
-            # 视频剪辑和拼接 (进度 80-100)
-            _update_clip_task(task_id, progress=85, phase="encoding", message="正在剪辑拼接...")
-            if output_path is None:
-                output_path = pipeline._generate_output_path(video_paths[0])
-            final_path = pipeline._cut_and_concat(sorted_segments, output_path)
-            _update_clip_task(task_id, progress=100, phase="completed", message="剪辑完成", status="completed", output_path=final_path)
-            logger.info(f"Clip task {task_id} completed: {final_path}")
-
-        elif scheme == "hybrid_narration":
+        if scheme == "hybrid_narration":
             # 混合解说：保留原声 + 叠加解说
             from app.services.narration.pipeline import NarrationPipeline
 
@@ -481,7 +463,7 @@ def _run_clip_pipeline(
                     _run_single_clip_mode,
                     task_id, mode_name, cfg["pipeline_type"], video_paths,
                     cfg["output"], cfg["message_start"], cfg["message_done"],
-                    target_duration,
+                    target_duration, num_versions, segments,
                 )
                 future_to_mode[future] = mode_name
 
@@ -489,17 +471,16 @@ def _run_clip_pipeline(
             all_paths: Dict[str, Optional[str]] = {}
             errors: Dict[str, str] = {}
 
-            while future_to_mode:
-                done, future_to_mode = wait(future_to_mode.keys(), return_when=FIRST_COMPLETED)
-                for future in done:
-                    mode_name = future_to_mode.pop(future)  # 从映射中移除，记录结果
-                    try:
-                        result = future.result()
-                        if result and "output_path" in result:
-                            all_paths[mode_name] = result["output_path"]
-                    except Exception as e:
-                        errors[mode_name] = str(e)
-                        logger.warning(f"Mode {mode_name} failed: {e}")
+            from concurrent.futures import as_completed
+            for future in as_completed(future_to_mode):
+                mode_name = future_to_mode[future]
+                try:
+                    result = future.result()
+                    if result and "output_path" in result:
+                        all_paths[mode_name] = result["output_path"]
+                except Exception as e:
+                    errors[mode_name] = str(e)
+                    logger.warning(f"Mode {mode_name} failed: {e}")
 
             # 汇总进度
             final_path = all_paths.get("direct", "")
@@ -514,6 +495,48 @@ def _run_clip_pipeline(
                 },
             )
             logger.info(f"Clip task {task_id} (all_narrations) completed: direct={all_paths.get('direct')}, hybrid={all_paths.get('hybrid')}, full={all_paths.get('full')}, errors={list(errors.keys())}")
+
+        elif scheme == "original_narration":
+            # 原片解说：DirectCutPipeline（同 direct 模式）
+            from app.services.direct_cut.pipeline import DirectCutPipeline
+            from app.services.highlight.selector import HighlightSegment
+
+            pipeline = DirectCutPipeline()
+            _update_clip_task(task_id, progress=5, phase="original_narration", message="原片直剪...")
+
+            if segments:
+                _update_clip_task(task_id, progress=10, phase="original_narration", message=f"使用 {len(segments)} 个预选片段...")
+                selected = [
+                    HighlightSegment(
+                        video_path=s.get("video_path", video_paths[0]),
+                        start_time=s["start_time"],
+                        end_time=s["end_time"],
+                        score=s.get("score", 1.0),
+                        segment_id=s.get("id", f"seg-{i}"),
+                    )
+                    for i, s in enumerate(segments)
+                ]
+            else:
+                _update_clip_task(task_id, progress=10, phase="original_narration", message="场景检测...")
+                scenes = pipeline._detect_scenes(video_paths)
+                _update_clip_task(task_id, progress=20, phase="original_narration", message=f"检测到 {len(scenes)} 个场景")
+
+                _update_clip_task(task_id, progress=25, phase="original_narration", message="高光打分...")
+                scored = pipeline._score_scenes(scenes)
+                _update_clip_task(task_id, progress=35, phase="original_narration", message=f"完成 {len(scored)} 个片段打分")
+
+                _update_clip_task(task_id, progress=40, phase="original_narration", message="选择高光片段...")
+                selected = pipeline._select_highlights(scored, target_duration)
+                _update_clip_task(task_id, progress=50, phase="original_narration", message=f"选中 {len(selected)} 个高光片段")
+
+            _update_clip_task(task_id, progress=55, phase="original_narration", message="智能排序...")
+            sorted_segments = pipeline._sort_segments(selected)
+            _update_clip_task(task_id, progress=60, phase="original_narration", message="排序完成")
+
+            _update_clip_task(task_id, progress=65, phase="original_narration", message="正在剪辑拼接...")
+            final_path = pipeline._cut_and_concat(sorted_segments, output_path)
+            _update_clip_task(task_id, progress=100, phase="completed", message="原片直剪完成", status="completed", output_path=final_path)
+            logger.info(f"Clip task {task_id} (original_narration) completed: {final_path}")
 
         else:
             raise ValueError(f"Unknown clip scheme: {scheme}")
@@ -605,6 +628,8 @@ def clip_execute(project_id: str, scheme: str, params: Dict[str, Any]) -> Dict:
     # 创建输出路径
     from pathlib import Path
     project = mgr.get_project(project_id)
+    if not project:
+        raise RPCError(-32001, f"Project not found: {project_id}")
     output_dir = Path(project.path) / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = str(output_dir / f"dramaclip_{task_id[:8]}.mp4")
@@ -624,10 +649,13 @@ def clip_execute(project_id: str, scheme: str, params: Dict[str, Any]) -> Dict:
         }
     )
 
+    # 提取预选片段（从编辑面板传入的 segment_ids → 高光片段）
+    segments = params.get("segments") or params.get("selected_segments")
+
     # 用线程池调度剪辑流水线（自动限流为 max_workers 个并发）
     _pool.submit(
         _run_clip_pipeline,
-        task_id, scheme, video_paths, target_duration, output_path,
+        task_id, scheme, video_paths, target_duration, output_path, num_versions, segments,
     )
 
     return {
@@ -947,6 +975,14 @@ def shutdown(reason: str = "requested") -> Dict:
     """优雅关闭"""
     logger.info(f"Shutdown requested: {reason}")
     _pool.shutdown(wait=True)
+    if _server:
+        _server.stop()
+    # 关闭 stdin 以退出 server.run() 的 for line in sys.stdin 循环
+    import sys as _sys
+    try:
+        _sys.stdin.close()
+    except Exception:
+        pass
     return {"shutdown": True, "reason": reason}
 
 

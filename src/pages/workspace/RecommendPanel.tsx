@@ -121,11 +121,7 @@ const RecommendPanel: React.FC<Props> = ({ onNext }) => {
     setApplying(true);
     try {
       const plan = ALL_MODES.find(p => p.id === selected)!;
-      await clipApi.execute(currentProject.id, plan.type, {
-        // 传 0 或 None 到后端，后端接收 None 表示不限制时长
-        output_duration: targetDuration > 0 ? targetDuration : undefined,
-      });
-      message.success('方案已应用，进入剪辑阶段');
+      useProjectStore.getState().setClipScheme(plan.type);
       onNext?.();
     } catch (e: any) {
       message.error(e?.message || '应用方案失败');

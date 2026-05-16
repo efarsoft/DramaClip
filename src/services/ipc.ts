@@ -4,7 +4,15 @@
  */
 
 import type { ElectronAPI, ProgressPayload } from '../../main/preload';
+import type { IpcError } from '../types/ipc';
 
+/**
+ * 将本地文件路径转换为可在渲染进程中访问的 URL
+ * 使用 dramaclip:// 自定义协议
+ */
+export function videoUrl(filePath: string): string {
+  return `dramaclip://local/${encodeURIComponent(filePath)}`;
+}
 
 // ============================================================================
 // 类型定义
@@ -14,12 +22,6 @@ export interface IpcResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: IpcError;
-}
-
-export interface IpcError {
-  code: number;
-  message: string;
-  data?: unknown;
 }
 
 export interface ProgressCallback {
@@ -315,6 +317,7 @@ export interface Episode {
   duration?: number;
   size?: number;
   format?: string;
+  thumbnail_path?: string;
 }
 
 export interface AnalysisStatus {

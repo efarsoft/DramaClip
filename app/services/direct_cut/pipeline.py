@@ -1,7 +1,9 @@
-import logging
+import concurrent.futures
 import os
+import random
 import subprocess
 import tempfile
+import threading
 import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -13,8 +15,7 @@ from app.services.highlight.scorer import HighlightScorer
 from app.services.highlight.selector import HighlightSelector, HighlightSegment
 from app.services.sorter.scene_sorter import SceneSorter, SortStrategy
 from app.utils.ffmpeg_utils import get_ffmpeg_path
-
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 class DirectCutPipeline:
@@ -151,49 +152,53 @@ class DirectCutPipeline:
         Returns:
             [(video_path, start_time, end_time), ...]
         """
-        scenes = []
+        scenes: List[Tuple[str, float, float]] = []
+        scenes_lock = threading.Lock()
 
-        for video_path in video_paths:
+        def _detect_one(video_path: str) -> List[Tuple[str, float, float]]:
+            """检测单个视频的场景"""
             logger.info(f"Detecting scenes in: {video_path}")
-
             try:
-                # 使用PySceneDetect检测场景
                 scene_list = detect_scenes(
                     video_path, threshold=self.scene_threshold
                 )
-
-                # 转换为(start_time, end_time)列表
+                result = []
                 for scene in scene_list:
                     start_time = scene[0].get_seconds()
                     end_time = scene[1].get_seconds()
-
-                    # 过滤太短或太长的场景
                     duration = end_time - start_time
                     if duration < self.min_scene_len:
                         continue
                     if duration > self.max_scene_len:
-                        # 截断到最大长度
                         end_time = start_time + self.max_scene_len
                         duration = self.max_scene_len
-
-                    scenes.append((video_path, start_time, end_time))
-
-                logger.info(
-                    f"Detected {len(scene_list)} scenes in {video_path}"
-                )
-
+                    result.append((video_path, start_time, end_time))
+                logger.info(f"Detected {len(scene_list)} scenes in {video_path}")
+                return result
             except Exception as e:
                 logger.error(f"Error detecting scenes in {video_path}: {e}")
-                # 降级：将整个视频作为一个场景
                 cap = cv2.VideoCapture(video_path)
-                if cap.isOpened():
-                    fps = cap.get(cv2.CAP_PROP_FPS)
-                    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                    duration = frame_count / fps if fps > 0 else 0
+                try:
+                    if cap.isOpened():
+                        fps = cap.get(cv2.CAP_PROP_FPS)
+                        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                        duration = frame_count / fps if fps > 0 else 0
+                        return [(video_path, 0.0, duration)]
+                    else:
+                        logger.warning(f"Cannot open video: {video_path}")
+                        return []
+                finally:
                     cap.release()
-                    scenes.append((video_path, 0.0, duration))
-                else:
-                    logger.warning(f"Cannot open video: {video_path}")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(_detect_one, vp): vp for vp in video_paths}
+            for future in concurrent.futures.as_completed(futures):
+                with scenes_lock:
+                    scenes.extend(future.result())
+
+        # 保持原始视频顺序
+        video_order = {vp: i for i, vp in enumerate(video_paths)}
+        scenes.sort(key=lambda s: video_order.get(s[0], 0))
 
         logger.info(f"Total scenes detected: {len(scenes)}")
         return scenes
@@ -211,23 +216,38 @@ class DirectCutPipeline:
             打分结果列表，每个元素包含各维度分数
         """
         scored = []
+        scored_lock = threading.Lock()
 
-        for video_path, start_time, end_time in scenes:
-            # 提取场景片段（临时文件）
+        def _score_one(video_path: str, start_time: float, end_time: float) -> Optional[Dict]:
+            """对单个场景进行打分"""
             temp_path = self._extract_scene(video_path, start_time, end_time)
-
             try:
-                # 打分
                 score_dict = self.scorer.score(temp_path)
-                # 嵌入场景元数据，用于后续重建HighlightSegment
                 score_dict["video_path"] = video_path
                 score_dict["start_time"] = start_time
                 score_dict["end_time"] = end_time
-                scored.append(score_dict)
+                return score_dict
+            except Exception as e:
+                logger.error(f"Error scoring scene {video_path} [{start_time:.1f}-{end_time:.1f}]: {e}")
+                return None
             finally:
-                # 清理临时文件
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {
+                executor.submit(_score_one, vp, st, et): (vp, st, et)
+                for vp, st, et in scenes
+            }
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    with scored_lock:
+                        scored.append(result)
+
+        # 按原始输入顺序排序
+        scene_order = {(vp, st, et): i for i, (vp, st, et) in enumerate(scenes)}
+        scored.sort(key=lambda s: scene_order.get((s["video_path"], s["start_time"], s["end_time"]), 0))
 
         return scored
 

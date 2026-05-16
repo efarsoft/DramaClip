@@ -14,9 +14,12 @@ import {
   LoadingOutlined,
   ClockCircleOutlined,
   StopOutlined,
+  PlayCircleOutlined,
+  EyeOutlined,
 } from '@ant-design/icons';
 import { useProjectStore } from '../../stores/projectStore';
 import { useTaskQueueStore, type Task } from '../../stores/taskQueueStore';
+import { VideoPlayerModal } from '../../components/common/VideoPlayer';
 
 const { Title, Text } = Typography;
 const CYAN = '#00d4ff';
@@ -56,11 +59,12 @@ const StatusTag: React.FC<{ status: Task['status'] }> = ({ status }) => {
 
 // ── 单条任务行 ──
 
-const TaskRow: React.FC<{ task: Task; onCancel: (id: string) => void; onRetry: (id: string) => void; onRemove: (id: string) => void }> = ({
+const TaskRow: React.FC<{ task: Task; onCancel: (id: string) => void; onRetry: (id: string) => void; onRemove: (id: string) => void; onPreview?: (path: string) => void }> = ({
   task,
   onCancel,
   onRetry,
   onRemove,
+  onPreview,
 }) => {
   const { activeTaskId } = useTaskQueueStore();
   const isActive = task.id === activeTaskId;
@@ -135,8 +139,20 @@ const TaskRow: React.FC<{ task: Task; onCancel: (id: string) => void; onRetry: (
           </Tooltip>
         )}
         {(task.status === 'completed' || task.status === 'cancelled') && (
-          <Tooltip title="移除">
-            <Button
+          <>
+            {task.status === 'completed' && task.outputPath && onPreview && (
+              <Tooltip title="预览视频">
+                <Button
+                  size="small"
+                  shape="circle"
+                  icon={<EyeOutlined />}
+                  onClick={() => onPreview(task.outputPath!)}
+                  style={{ border: 'none', color: CYAN }}
+                />
+              </Tooltip>
+            )}
+            <Tooltip title="移除">
+              <Button
               size="small"
               shape="circle"
               icon={<MinusCircleOutlined />}
@@ -144,6 +160,7 @@ const TaskRow: React.FC<{ task: Task; onCancel: (id: string) => void; onRetry: (
               style={{ border: 'none', color: '#4a5a7a' }}
             />
           </Tooltip>
+          </>
         )}
       </div>
     </div>
@@ -156,6 +173,8 @@ const ExportPanel: React.FC<Props> = ({ onComplete }) => {
   const { currentProject } = useProjectStore();
   const [preset, setPreset] = useState('1080p');
   const [format, setFormat] = useState('mp4');
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
+  const [previewTitle, setPreviewTitle] = useState<string | undefined>();
   const { tasks: allTasks, activeTaskId, enqueue, cancel, retry, remove, clearCompleted, isRunning } = useTaskQueueStore();
   const selectedPreset = PRESETS.find(p => p.value === preset) || PRESETS[0];
 
@@ -181,10 +200,12 @@ const ExportPanel: React.FC<Props> = ({ onComplete }) => {
     if (!currentProject) return;
     enqueue('export', currentProject.id, {
       project_id: currentProject.id,
-      format,
-      resolution: selectedPreset.resolution,
-      fps: selectedPreset.fps,
-      bitrate: selectedPreset.bitrate,
+      output_config: {
+        format,
+        resolution: selectedPreset.resolution,
+        fps: selectedPreset.fps,
+        bitrate: selectedPreset.bitrate,
+      },
     });
     message.success('已加入导出队列');
   };
@@ -347,6 +368,15 @@ const ExportPanel: React.FC<Props> = ({ onComplete }) => {
           <Title level={3} style={{ color: '#e0e6ed', margin: '16px 0 8px' }}>导出完成！</Title>
           <Text style={{ color: '#4a5a7a' }}>视频已成功导出</Text>
           <div style={{ marginTop: 20, display: 'flex', justifyContent: 'center', gap: 12 }}>
+            {latestCompleted.outputPath && (
+              <Button
+                icon={<PlayCircleOutlined />}
+                onClick={() => { setPreviewPath(latestCompleted.outputPath!); setPreviewTitle('导出结果预览'); }}
+                style={{ borderRadius: 8, height: 40, background: `linear-gradient(135deg, ${CYAN}, ${PURPLE})`, border: 'none', color: '#fff', fontWeight: 600 }}
+              >
+                预览视频
+              </Button>
+            )}
             <Button
               icon={<FolderOpenOutlined />}
               onClick={handleOpenOutput}
@@ -398,11 +428,20 @@ const ExportPanel: React.FC<Props> = ({ onComplete }) => {
                 onCancel={cancel}
                 onRetry={retry}
                 onRemove={remove}
+                onPreview={(path) => { setPreviewPath(path); setPreviewTitle('导出结果预览'); }}
               />
             ))}
           </div>
         </Card>
       )}
+
+      {/* ─── 导出视频预览模态框 ─── */}
+      <VideoPlayerModal
+        open={!!previewPath}
+        onClose={() => { setPreviewPath(null); setPreviewTitle(undefined); }}
+        filePath={previewPath ?? ''}
+        title={previewTitle}
+      />
     </div>
   );
 };

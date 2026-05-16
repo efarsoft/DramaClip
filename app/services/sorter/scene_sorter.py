@@ -2,12 +2,11 @@
 场景排序器 - 对高光片段进行智能排序，确保剧情流畅、情绪递进
 """
 
-import logging
 import os
 from typing import Dict, List, Optional
 from enum import Enum
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 class SortStrategy(str, Enum):

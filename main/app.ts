@@ -3,14 +3,13 @@
  * Electron 主进程入口点
  */
 
-import { app, BrowserWindow, Menu } from 'electron';
-import { BackendManager } from './backend/manager';
+import { app, BrowserWindow, Menu, protocol, net } from 'electron';
 import path from 'path';
 import { WindowManager } from './window/manager';
 import { setupIpcHandlers, setBackendManager, setWindowManager } from './ipc/bridge';
 import { BackendLauncher } from './backend/launcher';
+import { BackendManager } from './backend/manager';
 import { IPC_CHANNELS } from './ipc/channels';
-import fs from 'fs';
 
 // 保持全局引用，防止 GC 回收
 let windowManager: WindowManager | null = null;
@@ -69,7 +68,7 @@ async function initializeBackend(mainWindow: BrowserWindow): Promise<void> {
     mainWindow.webContents.send(IPC_CHANNELS.BACKEND_READY);
   });
 
-  backendManager.on('progress', (payload) => {
+  backendManager.on('progress', (payload: unknown) => {
     mainWindow.webContents.send(IPC_CHANNELS.BACKEND_PROGRESS, payload);
   });
 
@@ -113,6 +112,21 @@ function setupGlobalExceptionHandlers(): void {
   });
 }
 
+// 注册自定义协议，用于在渲染进程中安全访问本地视频文件
+// 必须在 app.ready 之前调用
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'dramaclip',
+    privileges: {
+      bypassCSP: true,
+      stream: true,
+      supportFetchAPI: true,
+      standard: false,
+      secure: true,
+    },
+  },
+]);
+
 // 应用启动
 app.whenReady().then(async () => {
   console.log('[Main][App] DramaClip starting...');
@@ -128,6 +142,20 @@ app.whenReady().then(async () => {
 
   // 创建主窗口
   const mainWindow = await createWindow();
+
+  // 注册 dramaclip:// 协议处理器
+  protocol.handle('dramaclip', (request) => {
+    // dramaclip://local/C%3A%5CVideos%5Cfile.mp4 → file:///C:/Videos/file.mp4
+    const filePath = decodeURIComponent(request.url.replace('dramaclip://local/', ''));
+    // Windows: 反斜杠 → 正斜杠
+    const normalized = filePath.replace(/\\/g, '/');
+    // UNC 路径 (//server/share/...) → file://server/share/...
+    // 本地路径 (C:/...) → file:///C:/...
+    if (normalized.startsWith('//')) {
+      return net.fetch(`file:${normalized}`);
+    }
+    return net.fetch(`file:///${normalized}`);
+  });
 
   // 初始化后端
   await initializeBackend(mainWindow);

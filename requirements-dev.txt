@@ -1,0 +1,25 @@
+# DramaClip Python 后端开发依赖
+# 使用: pip install -r requirements-dev.txt
+
+# ----- 测试 -----
+pytest>=8.0.0
+pytest-cov>=4.1.0
+pytest-asyncio>=0.23.0
+
+# ----- 代码质量 -----
+black>=24.0.0
+isort>=5.13.0
+mypy>=1.8.0
+ruff>=0.3.0
+
+# ----- 类型检查 -----
+types-requests>=2.31.0
+types-PyYAML>=6.0.0
+
+# ----- 开发工具 -----
+ipython>=8.12.0
+ipdb>=0.13.0
+
+# ----- 文档 -----
+mkdocs>=1.5.0
+mkdocs-material>=9.5.0
