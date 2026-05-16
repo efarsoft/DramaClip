@@ -49,6 +49,8 @@ class ProjectManager:
     处理项目的创建、读取、更新、删除操作
     """
 
+    VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi', '.mkv', '.wmv', '.webm', '.flv'}
+
     def __init__(self, base_dir: Optional[Path] = None):
         if base_dir is None:
             base_dir = Path.home() / ".dramaclip"
@@ -101,6 +103,9 @@ class ProjectManager:
         Returns:
             创建的项目元数据
         """
+        if not name or not name.strip():
+            raise ValueError('Project name cannot be empty')
+
         project_id = str(uuid.uuid4())
         project_path = Path(path) / name
 
@@ -202,12 +207,11 @@ class ProjectManager:
         existing_map: Dict[str, Dict] = {v.get("path", ""): v for v in existing_videos}
 
         # 扫描目录中实际的视频文件
-        video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.wmv', '.webm', '.flv'}
         scanned_paths: Set[str] = set()
         found_count = 0
 
         for file_path in videos_dir.iterdir():
-            if file_path.is_file() and file_path.suffix.lower() in video_extensions:
+            if file_path.is_file() and file_path.suffix.lower() in self.VIDEO_EXTENSIONS:
                 scanned_paths.add(str(file_path))
                 # 用路径匹配，而非文件名
                 if str(file_path) not in existing_map:
@@ -387,6 +391,14 @@ class ProjectManager:
             src_path = Path(video_path)
             if not src_path.exists():
                 logger.warning(f"Video file not found: {video_path}")
+                continue
+
+            # 跳过不支持的视频格式
+            if src_path.suffix.lower() not in self.VIDEO_EXTENSIONS:
+                logger.warning(
+                    f"Skipping unsupported video format: {video_path} "
+                    f"(extension: {src_path.suffix})"
+                )
                 continue
 
             # 生成唯一 ID

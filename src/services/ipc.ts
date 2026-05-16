@@ -144,8 +144,8 @@ export const projectApi = {
     ipcClient.call<Project>('project.create', { name, path }),
   open: (projectId: string) =>
     ipcClient.call<Project>('project.open', { project_id: projectId }),
-  delete: (projectId: string) =>
-    ipcClient.call<{ success: boolean }>('project.delete', { project_id: projectId }),
+  delete: (projectId: string, keepFiles?: boolean) =>
+    ipcClient.call<{ success: boolean }>('project.delete', { project_id: projectId, keep_files: keepFiles }),
   rename: (projectId: string, newName: string) =>
     ipcClient.call<Project>('project.rename', { project_id: projectId, new_name: newName }),
   getVideos: (projectId: string) =>

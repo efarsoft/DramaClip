@@ -56,6 +56,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set((state) => ({
         projects: [...state.projects, project],
         currentProject: project,
+        currentVideos: [],
         isLoading: false,
       }));
       return project;
@@ -89,7 +90,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   deleteProject: async (projectId: string, keepFiles = false) => {
     set({ isLoading: true, error: null });
     try {
-      await projectApi.delete(projectId);
+      await projectApi.delete(projectId, keepFiles);
       set((state) => ({
         projects: state.projects.filter((p) => p.id !== projectId),
         currentProject: state.currentProject?.id === projectId ? null : state.currentProject,
@@ -145,11 +146,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   // 加载项目视频列表
   loadProjectVideos: async (projectId: string) => {
+    set({ isLoading: true, error: null });
     try {
       const videos = await projectApi.getVideos(projectId);
-      set({ currentVideos: videos });
+      set({ currentVideos: videos, isLoading: false });
     } catch (error) {
       console.warn('Failed to load project videos:', error);
+      set({ isLoading: false });
       throw error; // 让调用方（如刷新按钮）感知错误
     }
   },
