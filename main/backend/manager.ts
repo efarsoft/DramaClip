@@ -60,6 +60,73 @@ export class BackendManager extends EventEmitter {
   private restartAttempts = 0;
   private pongTimeout: NodeJS.Timeout | null = null;
 
+  private cleanup(): void {
+    this.isRunning = false;
+    this.isShuttingDown = true;
+
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+    if (this.pongTimeout) {
+      clearTimeout(this.pongTimeout);
+      this.pongTimeout = null;
+    }
+
+    // 取消所有待处理的请求
+    for (const [id, pending] of this.pendingRequests) {
+      pending.reject(new Error('Backend disconnected'));
+      this.pendingRequests.delete(id);
+    }
+
+    this.process = null;
+  }
+
+  async call<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
+    if (!this.isRunning || !this.process?.stdin) {
+      throw new Error('Backend not running');
+    }
+
+    const id = ++this.requestId;
+    const request: RpcRequest = {
+      jsonrpc: '2.0',
+      method,
+      params,
+      id,
+    };
+
+    console.log(`[Main][BackendManager] Request sent: method=${method}, id=${id}`, JSON.stringify(params));
+
+    return new Promise((resolve, reject) => {
+      this.pendingRequests.set(id, { resolve: resolve as (value: unknown) => void, reject });
+
+      try {
+        const requestStr = JSON.stringify(request) + '\n';
+        this.process!.stdin!.write(requestStr, (error) => {
+          if (error) {
+            console.error(`[Main][BackendManager] Write failed: method=${method}, id=${id}`, error);
+            this.pendingRequests.delete(id);
+            reject(error);
+          }
+        });
+      } catch (error) {
+        console.error(`[Main][BackendManager] Write exception: method=${method}, id=${id}`, error);
+        this.pendingRequests.delete(id);
+        reject(error);
+      }
+
+      // 超时处理（默认 60 秒，长任务可调整）
+      const timeout = (params as Record<string, unknown>)?.timeout as number || 60000;
+      setTimeout(() => {
+        if (this.pendingRequests.has(id)) {
+          this.pendingRequests.delete(id);
+          console.warn(`[Main][BackendManager] Request timed out: method=${method}, id=${id}, timeout=${timeout}ms`);
+          reject(new Error(`Request ${method} timed out after ${timeout}ms`));
+        }
+      }, timeout);
+    });
+  }
+
   constructor(backendPath: string, cwd?: string, env?: NodeJS.ProcessEnv) {
     super();
     this.backendPath = backendPath;
@@ -258,34 +325,10 @@ export class BackendManager extends EventEmitter {
           this.emit('maxRestartAttemptsReached');
         }
       }
-    }, RESTART_DELAY);
-  }
-
-  private cleanup(): void {
-    this.isRunning = false;
-
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = null;
-    }
-
-    if (this.pongTimeout) {
-      clearTimeout(this.pongTimeout);
-      this.pongTimeout = null;
-    }
-
-    // 清理待处理的请求
-    for (const [, pending] of this.pendingRequests) {
-      pending.reject(new Error('Backend process terminated'));
-    }
-    this.pendingRequests.clear();
+    }, this.restartAttempts * 2000);
   }
 
   async stop(): Promise<void> {
-    if (!this.process || !this.isRunning) {
-      return;
-    }
-
     this.isShuttingDown = true;
 
     return new Promise((resolve) => {
@@ -319,45 +362,6 @@ export class BackendManager extends EventEmitter {
         this.process = null;
         resolve();
       });
-    });
-  }
-  async call<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
-    if (!this.isRunning || !this.process?.stdin) {
-      throw new Error('Backend not running');
-    }
-
-    const id = ++this.requestId;
-    const request: RpcRequest = {
-      jsonrpc: '2.0',
-      method,
-      params,
-      id,
-    };
-
-    return new Promise((resolve, reject) => {
-      this.pendingRequests.set(id, { resolve: resolve as (value: unknown) => void, reject });
-
-      try {
-        const requestStr = JSON.stringify(request) + '\n';
-        this.process!.stdin!.write(requestStr, (error) => {
-          if (error) {
-            this.pendingRequests.delete(id);
-            reject(error);
-          }
-        });
-      } catch (error) {
-        this.pendingRequests.delete(id);
-        reject(error);
-      }
-
-      // 超时处理（默认 60 秒，长任务可调整）
-      const timeout = (params as Record<string, unknown>)?.timeout as number || 60000;
-      setTimeout(() => {
-        if (this.pendingRequests.has(id)) {
-          this.pendingRequests.delete(id);
-          reject(new Error(`Request ${method} timed out after ${timeout}ms`));
-        }
-      }, timeout);
     });
   }
 

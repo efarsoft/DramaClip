@@ -428,7 +428,7 @@ const HomePage: React.FC = () => {
         footer={null}
         width={420}
         maskClosable={false}
-        destroyOnClose
+        destroyOnHidden
         styles={{
           content: {
             background: '#0d1128',

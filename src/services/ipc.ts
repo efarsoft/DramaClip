@@ -5,11 +5,6 @@
 
 import type { ElectronAPI, ProgressPayload } from '../../main/preload';
 
-declare global {
-  interface Window {
-    electronAPI: ElectronAPI;
-  }
-}
 
 // ============================================================================
 // 类型定义
@@ -95,18 +90,28 @@ class IpcClient {
     params?: Record<string, unknown>,
     timeout?: number
   ): Promise<T> {
-    if (window.electronAPI) {
-      const response = await window.electronAPI.backend.call<T>(method, params);
-      if (!response.success) {
-        const error = response.error;
-        const message = error?.message || 'Unknown error';
-        const code = error?.code || -32000;
-        throw new IpcException(code, message, error?.data);
+    console.debug(`[IPC] 调用 ${method}`, params ?? {});
+    try {
+      if (window.electronAPI) {
+        const response = await window.electronAPI.backend.call<T>(method, params);
+        if (!response.success) {
+          const error = response.error;
+          const message = error?.message || 'Unknown error';
+          const code = error?.code || -32000;
+          console.error(`[IPC] 调用 ${method} 失败`, { code, message, data: error?.data });
+          throw new IpcException(code, message, error?.data);
+        }
+        console.debug(`[IPC] ${method} 成功`, { dataType: typeof response.data, hasData: response.data !== undefined });
+        return response.data as T;
       }
-      return response.data as T;
+      // Dev mode: no backend available
+      console.warn(`[IPC] 后端不可用 (开发模式)`);
+      throw new IpcException(-32000, 'No backend available in dev mode');
+    } catch (err) {
+      if (err instanceof IpcException) throw err;
+      console.error(`[IPC] ${method} 发生未知错误`, err);
+      throw new IpcException(-32001, `调用 ${method} 异常: ${err instanceof Error ? err.message : String(err)}`);
     }
-    // Dev mode: no backend available
-    throw new IpcException(-32000, 'No backend available in dev mode');
   }
 }
 
@@ -293,6 +298,14 @@ export interface Project {
   updated_at?: string;
   episode_count: number;
   status: 'idle' | 'analyzing' | 'ready' | 'clipping' | 'exporting';
+  /** 打开项目时自动扫描目录的同步结果 */
+  sync_result?: {
+    found: number;
+    removed: number;
+    missing: number;
+  };
+  /** 打开时一并返回的视频列表 */
+  videos?: Episode[];
 }
 
 export interface Episode {

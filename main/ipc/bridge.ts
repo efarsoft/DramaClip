@@ -55,6 +55,8 @@ export function setupIpcHandlers(): void {
 
   // ============= 后端调用处理器 =============
   ipcMain.handle(IPC_CHANNELS.BACKEND_CALL, async (_event, method: string, params?: Record<string, unknown>) => {
+    console.log(`[Main][IpcBridge] backend:call → method=${method}`, params ?? {});
+
     if (!backendManager) {
       return {
         success: false,

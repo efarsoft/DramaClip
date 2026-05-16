@@ -50,3 +50,8 @@ run_e2e.py
 run.bat
 test_e2e*.py
 test_e2e*.txt
+# 临时文件
+_*.py
+_commit*.txt
+_tmp_list_*.py
+_tmp_dirs.json

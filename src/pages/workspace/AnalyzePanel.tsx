@@ -15,6 +15,7 @@ import {
   Empty,
   Tag,
   Tooltip,
+  message,
 } from 'antd';
 import {
   PlayCircleOutlined,
@@ -163,7 +164,7 @@ interface Props {
 }
 
 const AnalyzePanel: React.FC<Props> = ({ onNext }) => {
-  const { currentProject } = useProjectStore();
+  const { currentProject, selectedEpisodeIds } = useProjectStore();
   const { tasks: allTasks, activeTaskId, enqueue, cancel, retry, remove, clearCompleted, isRunning } = useTaskQueueStore();
 
   // 只取 analyze 类型任务
@@ -193,9 +194,14 @@ const AnalyzePanel: React.FC<Props> = ({ onNext }) => {
   // ── 启动分析 ──
   const handleStart = () => {
     if (!currentProject) return;
+    const ids = selectedEpisodeIds.length > 0 ? selectedEpisodeIds : [];
+    if (ids.length === 0) {
+      message.warning('请先在导入页面选择要分析的视频');
+      return;
+    }
     enqueue('analyze', currentProject.id, {
       project_id: currentProject.id,
-      episode_ids: [],
+      episode_ids: ids,
     });
   };
 

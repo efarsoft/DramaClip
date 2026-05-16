@@ -44,15 +44,37 @@ def _send_progress(task_id: str, progress: int, message: str, phase: str = None)
 # ============================================================================
 
 def project_list() -> List[Dict]:
-    """列出所有项目"""
+    """获取所有项目列表"""
+    logger.info("project_list: entry")
     manager = get_manager()
     projects = manager.list_projects()
-    logger.debug(f"Listed {len(projects)} projects")
-    return [p.to_dict() for p in projects]
+    result = []
+    for p in projects:
+        created_at = p.created_at
+        if isinstance(created_at, str):
+            pass  # already a string
+        elif hasattr(created_at, "isoformat"):
+            created_at = created_at.isoformat()
+        updated_at = p.updated_at
+        if isinstance(updated_at, str):
+            pass  # already a string
+        elif hasattr(updated_at, "isoformat"):
+            updated_at = updated_at.isoformat()
+        result.append({
+            "id": p.id,
+            "name": p.name,
+            "path": p.path,
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "video_count": p.video_count if hasattr(p, "video_count") else 0,
+        })
+    logger.info(f"project_list: returning {len(result)} projects")
+    return result
 
 
 def project_create(name: str, path: str) -> Dict:
     """创建新项目"""
+    logger.info(f"project_create: entry (name={name!r}, path={path!r})")
     if not name:
         raise RPCError(-32602, "Name is required")
 
@@ -69,6 +91,10 @@ def project_create(name: str, path: str) -> Dict:
 
 def project_open(project_id: str) -> Dict:
     """打开项目，自动扫描视频目录"""
+    logger.info(f"project_open: entry (project_id={project_id!r})")
+    if not project_id:
+        raise RPCError(-32602, "project_id is required")
+
     manager = get_manager()
     project = manager.open_project(project_id)
 
@@ -86,6 +112,10 @@ def project_open(project_id: str) -> Dict:
 
 def project_delete(project_id: str, keep_files: bool = False) -> Dict:
     """删除项目"""
+    logger.info(f"project_delete: entry (project_id={project_id!r}, keep_files={keep_files})")
+    if not project_id:
+        raise RPCError(-32602, "project_id is required")
+
     manager = get_manager()
     success = manager.delete_project(project_id, keep_files)
 
@@ -98,6 +128,9 @@ def project_delete(project_id: str, keep_files: bool = False) -> Dict:
 
 def project_rename(project_id: str, new_name: str) -> Dict:
     """重命名项目"""
+    logger.info(f"project_rename: entry (project_id={project_id!r}, new_name={new_name!r})")
+    if not project_id:
+        raise RPCError(-32602, "project_id is required")
     if not new_name:
         raise RPCError(-32602, "Name is required")
 
@@ -113,6 +146,9 @@ def project_rename(project_id: str, new_name: str) -> Dict:
 
 def project_import_videos(project_id: str, paths: List[str]) -> List[Dict]:
     """导入视频文件到项目"""
+    logger.info(f"project_import_videos: entry (project_id={project_id!r}, paths_count={len(paths)})")
+    if not project_id:
+        raise RPCError(-32602, "project_id is required")
     if not paths:
         return []
 
@@ -124,6 +160,10 @@ def project_import_videos(project_id: str, paths: List[str]) -> List[Dict]:
 
 def project_get_videos(project_id: str) -> List[Dict]:
     """获取项目的视频列表"""
+    logger.info(f"project_get_videos: entry (project_id={project_id!r})")
+    if not project_id:
+        raise RPCError(-32602, "project_id is required")
+
     manager = get_manager()
     videos = manager.get_videos(project_id)
     return [v.to_dict() for v in videos]
@@ -159,27 +199,38 @@ def _run_async_analysis(analysis_mgr, task_id: str):
 
 
 def analyze_start(project_id: str, episode_ids: List[str]) -> Dict:
-    """开始视频分析（支持多集，线程池调度）"""
-    if not episode_ids:
+    if episode_ids is None:
         raise RPCError(-32602, "episode_ids is required")
 
     mgr = get_manager()
     analysis_mgr = get_analysis_manager()
 
-    task_ids = []
-    for idx, episode_id in enumerate(episode_ids):
-        # 获取视频路径
-        videos = mgr.get_videos(project_id)
-        video = next((v for v in videos if v.id == episode_id), None)
-        if not video:
-            raise RPCError(-32002, f"Episode not found: {episode_id}")
+    # 获取项目所有视频
+    videos = mgr.get_videos(project_id)
+    if not videos:
+        raise RPCError(-32002, f"No videos found in project {project_id}")
 
-        # 创建分析任务
+    # 空列表 = 分析该项目所有视频
+    if episode_ids == []:
+        episode_ids = [v.id for v in videos]
+
+    # 建立 id -> video 映射
+    video_map = {v.id: v for v in videos}
+
+    task_ids = []
+    for episode_id in episode_ids:
+        video = video_map.get(episode_id)
+        if not video:
+            logger.warning(f"Video {episode_id} not found in project {project_id}, skipping")
+            continue
         task = analysis_mgr.create_task(project_id, video.path)
         task_ids.append(task.task_id)
 
         # 用线程池提交分析任务（自动限流为 max_workers 个并发）
         _pool.submit(_run_async_analysis, analysis_mgr, task.task_id)
+
+    if not task_ids:
+        raise RPCError(-32002, f"No valid videos to analyze in project {project_id}")
 
     logger.info(f"Queued {len(task_ids)} analysis tasks for project {project_id} (max concurrent: {_WORKER_COUNT})")
     return {

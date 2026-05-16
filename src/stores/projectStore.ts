@@ -10,6 +10,7 @@ interface ProjectState {
   projects: Project[];
   currentProject: Project | null;
   currentVideos: Episode[];
+  selectedEpisodeIds: string[];
   isLoading: boolean;
   error: string | null;
 
@@ -20,6 +21,8 @@ interface ProjectState {
   deleteProject: (projectId: string, keepFiles?: boolean) => Promise<void>;
   importVideos: (projectId: string, paths: string[]) => Promise<Episode[]>;
   renameProject: (projectId: string, newName: string) => Promise<void>;
+  loadProjectVideos: (projectId: string) => Promise<void>;
+  setSelectedEpisodeIds: (ids: string[]) => void;
   setCurrentProject: (project: Project | null) => void;
   clearError: () => void;
 }
@@ -29,6 +32,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: [],
   currentProject: null,
   currentVideos: [],
+  selectedEpisodeIds: [],
   isLoading: false,
   error: null,
 
@@ -67,7 +71,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const project = await projectApi.open(projectId);
-      set({ currentProject: project, isLoading: false });
+      // 后端 open 已自动扫描视频目录，数据在 project.videos 中
+      set({
+        currentProject: project,
+        currentVideos: project.videos ?? [],
+        isLoading: false,
+      });
       return project;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to open project';
@@ -132,6 +141,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ error: message, isLoading: false });
       throw error;
     }
+  },
+
+  // 加载项目视频列表
+  loadProjectVideos: async (projectId: string) => {
+    try {
+      const videos = await projectApi.getVideos(projectId);
+      set({ currentVideos: videos });
+    } catch (error) {
+      console.warn('Failed to load project videos:', error);
+      throw error; // 让调用方（如刷新按钮）感知错误
+    }
+  },
+
+  // 设置选择的视频 ID
+  setSelectedEpisodeIds: (ids: string[]) => {
+    set({ selectedEpisodeIds: ids });
   },
 
   // 设置当前项目

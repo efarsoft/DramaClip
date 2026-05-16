@@ -29,17 +29,21 @@ class IpcServer:
     def handle(self, request: dict) -> dict:
         """处理单个请求"""
         try:
+            # 记录接收到的请求
             parsed = self.protocol.parse_request(request)
             if parsed is None:
+                logger.debug(f"Received invalid request: {request}")
                 return self.protocol.error_response(
                     None, -32600, "Invalid Request"
                 )
 
             request_id, method, params = parsed
+            logger.debug(f"Received request: method={method}, params={params}, id={request_id}")
 
             # 查找处理器
             handler = self.router.resolve(method)
             if handler is None:
+                logger.warning(f"Method not found: {method}")
                 return self.protocol.error_response(
                     request_id, -32601, f"Method not found: {method}"
                 )
@@ -47,8 +51,10 @@ class IpcServer:
             # 执行处理
             try:
                 result = handler(**(params or {}))
+                logger.debug(f"Request {method} completed successfully")
                 return self.protocol.success_response(request_id, result)
             except TypeError as e:
+                logger.warning(f"Invalid params for {method}: {e}")
                 return self.protocol.error_response(
                     request_id, -32602, f"Invalid params: {e}"
                 )
@@ -117,7 +123,7 @@ class IpcServer:
                     print(json.dumps(response), flush=True)
 
             except json.JSONDecodeError as e:
-                logger.error(f"JSON decode error: {e}")
+                logger.error(f"JSON decode error: {e}, raw data: {line[:200]}")
                 error_response = self.protocol.error_response(
                     None, -32600, f"Parse error: {e}"
                 )

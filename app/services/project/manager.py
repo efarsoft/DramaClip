@@ -23,6 +23,7 @@ class ProjectMeta(BaseModel):
     updated_at: str
     episode_count: int = 0
     status: str = "idle"  # idle/analyzing/ready/clipping/exporting
+    sync_result: Optional[Dict[str, int]] = None  # 打开时自动扫描的结果
 
     def to_dict(self) -> Dict:
         return self.model_dump()
@@ -148,9 +149,10 @@ class ProjectManager:
         project_path = Path(project.path)
         videos_dir = project_path / "videos"
         
+        sync_result = {"found": 0, "removed": 0, "missing": 0}
         # 自动扫描视频目录，更新视频索引
         if videos_dir.exists():
-            self._scan_videos_dir(project_id, videos_dir)
+            sync_result = self._scan_videos_dir(project_id, videos_dir)
 
         # 更新最后访问时间
         project.updated_at = datetime.now().isoformat()
@@ -164,6 +166,9 @@ class ProjectManager:
                 break
         self._save_index(projects)
 
+        # 将同步结果存到 project 上，方便 handler 返回
+        project.sync_result = sync_result
+
         logger.info(f"Opened project: {project_id} with {project.episode_count} episodes")
         return project
 
@@ -175,11 +180,11 @@ class ProjectManager:
             encoding="utf-8"
         )
 
-    def _scan_videos_dir(self, project_id: str, videos_dir: Path) -> None:
-        """扫描视频目录，更新 videos.json 索引（不复制文件）"""
+    def _scan_videos_dir(self, project_id: str, videos_dir: Path) -> Dict[str, int]:
+        """扫描视频目录，同步 videos.json 索引"""
         project = self.get_project(project_id)
         if not project:
-            return
+            return {"found": 0, "removed": 0, "missing": 0}
 
         project_path = Path(project.path)
         videos_file = project_path / "videos.json"
@@ -194,20 +199,21 @@ class ProjectManager:
             existing_videos = []
 
         # 建立现有记录的路径映射（key 是文件路径）
-        existing_map = {v.get("path", ""): v for v in existing_videos}
-        
-        # 扫描目录中的视频文件
+        existing_map: Dict[str, Dict] = {v.get("path", ""): v for v in existing_videos}
+
+        # 扫描目录中实际的视频文件
         video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.wmv', '.webm', '.flv'}
-        scanned_paths = set()
-        
+        scanned_paths: Set[str] = set()
+        found_count = 0
+
         for file_path in videos_dir.iterdir():
             if file_path.is_file() and file_path.suffix.lower() in video_extensions:
                 scanned_paths.add(str(file_path))
-                if file_path.stem not in existing_map:
+                # 用路径匹配，而非文件名
+                if str(file_path) not in existing_map:
                     # 新发现的视频文件
                     video_id = str(uuid.uuid4())
                     now = datetime.now().isoformat()
-                    
                     video_info = VideoInfo(
                         id=video_id,
                         name=file_path.stem,
@@ -218,24 +224,44 @@ class ProjectManager:
                         imported_at=now,
                     )
                     existing_videos.append(video_info.to_dict())
-                    logger.info(f"Discovered video during scan: {file_path.name}")
+                    found_count += 1
+                    logger.info(f"Discovered new video during scan: {file_path.name}")
 
-        # 移除已不在目录中的视频记录
-        removed = len(existing_videos) - len(scanned_paths)
-        if removed < 0:
-            # 目录中有更多新文件，全部保留，只过滤掉已不存在的记录
-            filtered = [v for v in existing_videos if v.get("path", "") in scanned_paths]
-            if len(filtered) < len(existing_videos):
-                existing_videos = filtered
+        # 移除已不存在于磁盘的视频记录
+        before = len(existing_videos)
+        existing_videos = [v for v in existing_videos if v.get("path", "") in scanned_paths]
+        removed_count = before - len(existing_videos)
+
+        # 检查那些仍保留但文件可能不可读的记录
+        stats_by_path: Dict[str, int] = {}
+        missing_count = 0
+        for v in existing_videos:
+            p = v.get("path", "")
+            if p:
+                p_obj = Path(p)
+                if not p_obj.exists():
+                    missing_count += 1
 
         # 更新项目元数据
         project.episode_count = len(existing_videos)
+        if found_count > 0 or removed_count > 0:
+            logger.info(
+                f"Sync result for {project_id}: "
+                f"+{found_count} new, -{removed_count} removed, "
+                f"{missing_count} missing on disk"
+            )
         
         # 保存更新的视频列表
         videos_file.write_text(
             json.dumps(existing_videos, ensure_ascii=False, indent=2),
             encoding="utf-8"
         )
+
+        return {
+            "found": found_count,
+            "removed": removed_count,
+            "missing": missing_count,
+        }
 
     def update_project(self, project_id: str, updates: Dict[str, Any]) -> Optional[ProjectMeta]:
         """更新项目元数据"""

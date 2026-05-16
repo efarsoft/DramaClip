@@ -3,6 +3,7 @@
  */
 
 import React, { useEffect } from 'react';
+import { App as AntdApp } from 'antd';
 import Router from './router';
 import { useUiStore } from './stores/uiStore';
 
@@ -29,7 +30,11 @@ function App() {
     }
   }, [setBackendStatus]);
 
-  return <Router />;
+  return (
+    <AntdApp>
+      <Router />
+    </AntdApp>
+  );
 }
 
 export default App;
