@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, message, Typography, Empty, Space, Checkbox, Card, Spin, Tooltip } from 'antd';
+import { Button, App, Typography, Empty, Space, Checkbox, Card, Spin, Tooltip } from 'antd';
 import {
   FolderOpenOutlined,
   UploadOutlined,
@@ -42,6 +42,7 @@ function formatSize(bytes: number): string {
 }
 
 const ImportPanel: React.FC<Props> = ({ onNext }) => {
+  const { message } = App.useApp();
   const {
     currentProject,
     currentVideos,
@@ -177,8 +178,29 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
 
   const allSelected = currentVideos.length > 0 && selectedEpisodeIds.length === currentVideos.length;
 
+  // 智能排序：按文件名中的数字排序（支持中文数字和英文数字）
+  const sortedVideos = [...currentVideos].sort((a, b) => {
+    const extractNumbers = (name: string): number[] => {
+      const matches = name.match(/\d+/g);
+      return matches ? matches.map(Number) : [];
+    };
+    const numsA = extractNumbers(a.name);
+    const numsB = extractNumbers(b.name);
+    
+    // 逐个比较数字
+    for (let i = 0; i < Math.min(numsA.length, numsB.length); i++) {
+      if (numsA[i] !== numsB[i]) return numsA[i] - numsB[i];
+    }
+    
+    // 数字数量不同，数字少的排前面
+    if (numsA.length !== numsB.length) return numsA.length - numsB.length;
+    
+    // 数字相同，按字母顺序
+    return a.name.localeCompare(b.name, 'zh-CN');
+  });
+
   return (
-    <div style={{ maxWidth: 860, margin: '0 auto', padding: '32px 24px' }}>
+    <div style={{ maxWidth: 860, margin: '0 auto', padding: '32px 24px', height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* ─── 标题 ─── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
         <div>
@@ -294,9 +316,16 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
             )}
           </div>
 
-          {/* ─── 视频卡片列表 ─── */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-            {currentVideos.map((video, idx) => {
+          {/* ─── 视频卡片列表（可滚动） ─── */}
+          <div style={{ 
+            display: 'flex', flexDirection: 'column', gap: 8, 
+            marginBottom: 24, 
+            flex: 1, 
+            overflowY: 'auto',
+            maxHeight: 'calc(100vh - 420px)',
+            paddingRight: 4,
+          }}>
+            {sortedVideos.map((video, idx) => {
               const selected = selectedEpisodeIds.includes(video.id);
               return (
                 <div
@@ -402,11 +431,12 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
             })}
           </div>
 
-          {/* ─── 底部操作 ─── */}
+          {/* ─── 底部操作（固定在底部） ─── */}
           <div style={{
             display: 'flex', justifyContent: 'center', gap: 16,
             padding: '16px 0',
             borderTop: '1px solid rgba(255,255,255,0.04)',
+            flexShrink: 0,
           }}>
             <Button
               type="primary"

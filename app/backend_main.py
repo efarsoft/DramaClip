@@ -5,6 +5,7 @@ Backend 入口点
 
 import sys
 import os
+import threading
 from pathlib import Path
 from loguru import logger
 
@@ -78,10 +79,43 @@ def setup_resources():
     return base_dir
 
 
+def setup_exception_handler():
+    """配置全局异常处理器"""
+    
+    def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
+        """处理未捕获的异常"""
+        if issubclass(exc_type, KeyboardInterrupt):
+            # KeyboardInterrupt 交给系统处理
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        
+        logger.critical(
+            "未捕获的异常",
+            exc_info=(exc_type, exc_value, exc_traceback)
+        )
+    
+    def handle_thread_exception(args):
+        """处理线程中的异常"""
+        logger.error(
+            f"线程异常: {args.threading_excepthook}",
+            exc_info=(args.exc_type, args.exc_value, args.exc_traceback)
+        )
+    
+    # 设置全局异常处理器
+    sys.excepthook = handle_uncaught_exception
+    
+    # 设置线程异常处理器（Python 3.8+）
+    if hasattr(threading, 'excepthook'):
+        threading.excepthook = handle_thread_exception
+    
+    logger.info("全局异常处理器已配置")
+
+
 def main():
     """主入口"""
     base_dir = setup_resources()
     setup_logging()
+    setup_exception_handler()
 
     logger.info("=" * 60)
     logger.info("DramaClip Backend starting...")
@@ -118,7 +152,16 @@ def main():
 
     except KeyboardInterrupt:
         logger.info("Received interrupt signal, shutting down...")
+    except (ImportError, ModuleNotFoundError) as e:
+        # 模块导入错误通常是配置问题，不需要完整堆栈
+        logger.error(f"Backend startup failed due to import error: {e}")
+        sys.exit(1)
+    except (OSError, PermissionError, FileNotFoundError) as e:
+        # 文件或网络相关错误
+        logger.error(f"Backend failed due to system error: {e}")
+        sys.exit(1)
     except Exception as e:
+        # 其他未预期的错误，记录完整堆栈
         logger.exception(f"Backend fatal error: {e}")
         sys.exit(1)
     finally:

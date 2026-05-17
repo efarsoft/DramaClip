@@ -62,15 +62,23 @@ class IpcServer:
                 return self.protocol.error_response(
                     request_id, e.code, e.message, e.data
                 )
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 logger.exception(f"Handler error for {method}")
                 return self.protocol.error_response(
                     request_id, -32603, f"Internal error: {e}"
                 )
+            except Exception as e:
+                logger.exception(f"Unexpected handler error for {method}")
+                return self.protocol.error_response(
+                    request_id, -32603, f"Internal error: {type(e).__name__}"
+                )
 
-        except Exception as e:
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
             logger.exception("Server handle error")
-            return self.protocol.error_response(None, -32603, str(e))
+            return self.protocol.error_response(None, -32600, str(e))
+        except Exception as e:
+            logger.exception("Unexpected server handle error")
+            return self.protocol.error_response(None, -32603, type(e).__name__)
 
     def send_notification(self, method: str, params: Optional[dict] = None):
         """发送进度通知到 stdout"""
@@ -132,7 +140,7 @@ class IpcServer:
             except Exception as e:
                 logger.exception("Server loop error")
                 error_response = self.protocol.error_response(
-                    None, -32603, str(e)
+                    None, -32603, f"{type(e).__name__}: {str(e)[:200]}"
                 )
                 print(json.dumps(error_response), flush=True)
 

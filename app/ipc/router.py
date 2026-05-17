@@ -59,6 +59,7 @@ def create_router() -> Router:
     router.register("project", "delete", handlers.project_delete)
     router.register("project", "importVideos", handlers.project_import_videos)
     router.register("project", "getVideos", handlers.project_get_videos)
+    router.register("project", "updateVideoOrder", handlers.project_update_video_order)
     router.register("project", "rename", handlers.project_rename)
 
     # 分析
@@ -71,6 +72,7 @@ def create_router() -> Router:
     router.register("clip", "execute", handlers.clip_execute)
     router.register("clip", "getProgress", handlers.clip_get_progress)
     router.register("clip", "preview", handlers.clip_preview)
+    router.register("clip", "stop", handlers.clip_stop)
 
     # 导出
     router.register("export", "start", handlers.export_start)

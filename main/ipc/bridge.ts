@@ -4,6 +4,8 @@
  */
 
 import { ipcMain, BrowserWindow, dialog, app, shell } from 'electron';
+import * as fs from 'fs';
+import * as path from 'path';
 import { IPC_CHANNELS } from './channels';
 import { BackendManager } from '../backend/manager';
 import { DialogService } from '../services/dialog';
@@ -148,6 +150,41 @@ export function setupIpcHandlers(): void {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to open path',
+      };
+    }
+  });
+
+  // ============= 文件系统 - 扫描目录（递归扫描包括子目录）============
+  ipcMain.handle(IPC_CHANNELS.FS_SCAN_DIRECTORY, async (_event, dirPath: string) => {
+    try {
+      const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.wmv', '.webm', '.flv'];
+      const videoFiles: string[] = [];
+      
+      // 递归扫描目录
+      const scanDirectory = async (currentPath: string) => {
+        const entries = await fs.promises.readdir(currentPath, { withFileTypes: true });
+        
+        for (const entry of entries) {
+          const fullPath = path.join(currentPath, entry.name);
+          
+          if (entry.isFile()) {
+            const ext = path.extname(entry.name).toLowerCase();
+            if (videoExtensions.includes(ext)) {
+              videoFiles.push(fullPath);
+            }
+          } else if (entry.isDirectory()) {
+            // 递归扫描子目录
+            await scanDirectory(fullPath);
+          }
+        }
+      };
+      
+      await scanDirectory(dirPath);
+      return { success: true, data: videoFiles };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to scan directory',
       };
     }
   });

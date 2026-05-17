@@ -191,12 +191,18 @@ export const clipApi = {
       project_id: projectId,
       scheme,
     }),
+  /** 停止/取消正在运行的剪辑任务 */
+  stop: (taskId: string) =>
+    ipcClient.call<{ success: boolean; task_id?: string; message?: string }>('clip.stop', {
+      task_id: taskId,
+    }),
 };
 
 // 导出相关 API
 export const exportApi = {
+  /** 对 clip 任务的输出进行转码/封装导出 */
   start: (projectId: string, outputConfig: Record<string, unknown>) =>
-    ipcClient.call<{ task_id: string }>('export.start', {
+    ipcClient.call<{ task_id: string; output_path: string }>('export.start', {
       project_id: projectId,
       output_config: outputConfig,
     }),

@@ -13,7 +13,7 @@ import {
   AppstoreOutlined,
   RightOutlined,
 } from '@ant-design/icons';
-import { Modal, Input, message } from 'antd';
+import { Modal, Input, App } from 'antd';
 import { useProjectStore } from '../stores/projectStore';
 import type { Project } from '../services/ipc';
 
@@ -94,6 +94,7 @@ const fmtDate = (iso: string) => {
 /* ─── 首页组件 ─── */
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
+  const { message } = App.useApp();
   const { projects, loadProjects, createProject, openProject, deleteProject, renameProject } = useProjectStore();
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -125,7 +126,7 @@ const HomePage: React.FC = () => {
     }
   };
 
-  /* 打开文件夹（浏览已有项目） */
+  /* 打开文件夹 → 创建项目 → 扫描视频 → 导入 → 打开工作台 */
   const handleOpenFolder = async () => {
     try {
       let folderPath: string | undefined;
@@ -134,19 +135,73 @@ const HomePage: React.FC = () => {
         folderPath = result?.data;
       }
       if (!folderPath) {
-        // 无 Electron API 或用户取消，刷新列表展示已有项目
-        await loadProjects();
+        // 用户取消选择
         return;
       }
+      
+      // 获取文件夹名称和父目录路径
+      const separators = folderPath.includes('\\') ? '\\' : '/';
+      const folderName = folderPath.split(separators).pop() || '未命名项目';
+      const parentPath = folderPath.substring(0, folderPath.lastIndexOf(separators));
+      
       // 查找该路径是否已有项目
-      const existing = projects.find(p => p.path === folderPath);
+      const existing = projects.find(p => p.path === folderPath || p.path === `${folderPath}${separators}${folderName}`);
       if (existing) {
+        // 已有项目，直接打开
         await handleOpen(existing);
       } else {
-        // 不在此路径下创建项目，提示用户使用"新建项目"
-        message.info('该文件夹尚未创建项目，请使用「新建项目」');
-        // 刷新列表（可能在外部新增了项目文件）
-        await loadProjects();
+        // 没有项目，使用文件夹名称创建新项目
+        message.loading({ content: `正在创建项目「${folderName}」...`, key: 'createFromFolder' });
+        
+        try {
+          // 创建项目（path 是父目录，后端会自动拼接 name）
+          console.log('[OpenFolder] Creating project:', folderName, 'in', parentPath);
+          const p = await createProject(folderName, parentPath);
+          console.log('[OpenFolder] Project created:', p.id, 'path:', p.path);
+          
+          // 扫描所选文件夹中的视频文件
+          let videoPaths: string[] = [];
+          
+          if (window.electronAPI?.fs?.scanDirectory) {
+            console.log('[OpenFolder] Scanning directory:', folderPath);
+            const scanResult = await window.electronAPI.fs.scanDirectory(folderPath);
+            console.log('[OpenFolder] Scan result:', scanResult);
+            if (scanResult?.success && scanResult?.data) {
+              videoPaths = scanResult.data;
+              console.log('[OpenFolder] Found videos:', videoPaths.length);
+            } else {
+              console.log('[OpenFolder] Scan failed or no data:', scanResult?.error);
+            }
+          } else {
+            console.log('[OpenFolder] scanDirectory API not available');
+          }
+          
+          // 如果有视频，先导入
+          if (videoPaths.length > 0) {
+            message.loading({ content: `正在导入 ${videoPaths.length} 个视频...`, key: 'createFromFolder' });
+            const { importVideos } = useProjectStore.getState();
+            const imported = await importVideos(p.id, videoPaths);
+            console.log('[OpenFolder] Imported videos:', imported?.length);
+          } else {
+            console.log('[OpenFolder] No videos to import');
+          }
+          
+          // 打开项目
+          console.log('[OpenFolder] Opening project:', p.id);
+          await openProject(p.id);
+          
+          message.success({ 
+            content: `项目「${folderName}」创建成功${videoPaths.length > 0 ? `，已导入 ${videoPaths.length} 个视频` : ''}`, 
+            key: 'createFromFolder' 
+          });
+          
+          // 导航到工作台
+          console.log('[OpenFolder] Navigating to workspace:', p.id);
+          navigate(`/workspace/${p.id}`);
+        } catch (err: any) {
+          console.error('[OpenFolder] Error:', err);
+          message.error({ content: err?.message || '创建项目失败', key: 'createFromFolder' });
+        }
       }
     } catch (e: any) {
       message.error(e?.message || '打开文件夹失败');
@@ -157,7 +212,9 @@ const HomePage: React.FC = () => {
   const handleDelete = async (e: React.MouseEvent, p: Project) => {
     e.stopPropagation();
     try {
-      await deleteProject(p.id, false);
+      // 删除项目时保留原始文件夹，只从索引移除
+      await deleteProject(p.id, true);
+      message.success('项目已删除');
     } catch (err: any) {
       message.error(err?.message || '删除失败');
     }

@@ -24,21 +24,19 @@ dist-electron/
 *.model
 
 # 资源文件（大文件/媒体）
-resources/
-resource/scripts/*.json
-resource/videos/*.mp4
-resource/songs/*.mp3
-resource/songs/*.flac
-resource/fonts/*.ttc
-resource/fonts/*.ttf
-resource/fonts/*.otf
-resource/srt/*.srt
+resources/*
+!resources/ffmpeg.exe
+!resources/ffprobe.exe
+!resources/README.md
 
 # AI 代理工作区
+.adnify/
 .atomcode/
 .workbuddy/
 .claude/
 .serena/
+.sisyphus/
+.spec-workflow/
 
 # 测试与临时文件
 test_output_e2e/

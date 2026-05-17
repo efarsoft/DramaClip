@@ -5,7 +5,7 @@
  */
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Modal, Slider, Tooltip, message } from 'antd';
+import { Modal, Slider, Tooltip, App } from 'antd';
 import {
   PlayCircleOutlined,
   PauseCircleOutlined,
@@ -190,9 +190,11 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   open,
   onClose,
 }) => {
+  const { message } = App.useApp();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
@@ -207,6 +209,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     if (!video) return;
 
     const handleLoaded = () => {
+      setLoaded(true);
       setDuration(video.duration);
       if (startTime != null && startTime > 0) {
         video.currentTime = startTime;
@@ -241,11 +244,12 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     };
   }, [open, startTime, endTime]);
 
-  // 关闭时暂停视频
+  // 关闭时暂停视频并重置状态
   useEffect(() => {
     if (!open && videoRef.current) {
       videoRef.current.pause();
       setPlaying(false);
+      setLoaded(false);
     }
   }, [open]);
 
@@ -364,9 +368,12 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
       footer={null}
       width={960}
       centered
-      destroyOnClose
+      destroyOnHidden
       closable={false}
-      bodyStyle={{ padding: 0, background: '#000', borderRadius: 12, overflow: 'hidden' }}
+      styles={{ 
+        body: { padding: 0, background: '#000', borderRadius: 12, overflow: 'hidden' },
+        mask: { backdropFilter: 'blur(8px)' },
+      }}
       style={{ top: 20 }}
     >
       <div ref={containerRef} style={{ position: 'relative', background: '#000' }}>
@@ -400,13 +407,14 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         />
 
         {/* 大播放按钮（暂停时显示） */}
-        {!playing && (
+        {!playing && loaded && (
           <div
             onClick={togglePlay}
             style={{
               position: 'absolute', inset: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               cursor: 'pointer',
+              zIndex: 5,
             }}
           >
             <div style={{

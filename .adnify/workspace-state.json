@@ -1,16 +1,38 @@
 {
   "openFiles": [
-    "D:/DramaClip/.adnify/plan/--1778987932955.json"
+    "D:/DramaClip/app/utils/gemini_analyzer.py",
+    "D:/DramaClip/app/ipc/server.py",
+    "D:/DramaClip/app/ipc/handlers.py",
+    "D:/DramaClip/main/ipc/bridge.ts",
+    "D:/DramaClip/src/components/common/VideoPlayer.tsx",
+    "D:/DramaClip/app/services/project/manager.py",
+    "D:/DramaClip/test_sqlite.py",
+    "D:/DramaClip/app/services/project/database.py",
+    "D:/DramaClip/app/services/project/manager_sqlite.py",
+    "D:/DramaClip/ico.png",
+    "D:/DramaClip/resources/ffmpeg-release-essentials.zip",
+    "D:/DramaClip/resources/ffmpeg.zip"
   ],
-  "activeFile": "D:/DramaClip/.adnify/plan/--1778987932955.json",
+  "activeFile": "D:/DramaClip/resources/ffmpeg.zip",
   "expandedFolders": [
-    "D:\\DramaClip"
+    "D:\\DramaClip",
+    "diff://D:/DramaClip",
+    "diff://D:/DramaClip/app",
+    "diff://D:/DramaClip/app/services",
+    "diff://D:/DramaClip/app/services/project",
+    "D:\\DramaClip\\resource\\videos",
+    "D:\\DramaClip\\resource\\srt",
+    "D:\\DramaClip\\resource\\songs",
+    "D:\\DramaClip\\resource\\scripts",
+    "D:\\DramaClip\\resource\\public",
+    "D:\\DramaClip\\resource\\fonts",
+    "D:\\DramaClip\\resources"
   ],
   "scrollPositions": {},
   "cursorPositions": {},
   "layout": {
     "sidebarWidth": 260,
-    "chatWidth": 450,
+    "chatWidth": 626,
     "terminalVisible": false,
     "terminalLayout": "tabs"
   }

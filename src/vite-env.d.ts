@@ -69,11 +69,16 @@ interface ElectronSystemAPI {
   }>;
 }
 
+interface ElectronFSAPI {
+  scanDirectory: (dirPath: string) => Promise<{ success: boolean; data?: string[]; error?: string }>;
+}
+
 interface ElectronAPI {
   backend: ElectronBackendAPI;
   dialog: ElectronDialogAPI;
   window: ElectronWindowAPI;
   system: ElectronSystemAPI;
+  fs: ElectronFSAPI;
 }
 
 interface Window {

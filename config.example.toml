@@ -114,3 +114,39 @@
 [frames]
     frame_interval_input = 3
     vision_batch_size = 10
+
+##########################################
+# 🔧 稳定性配置（重试、超时、并发）
+##########################################
+
+[stability]
+    # 通用重试配置
+    retry_max_attempts = 3        # 最大重试次数
+    retry_wait_min = 4            # 最小等待时间(秒)
+    retry_wait_max = 30           # 最大等待时间(秒)
+    retry_wait_multiplier = 1.0   # 退避乘数
+
+    # API 专用重试配置（更激进的重试策略）
+    api_retry_max_attempts = 5
+    api_retry_wait_min = 4
+    api_retry_wait_max = 60
+    api_retry_wait_multiplier = 2.0
+
+    # FFmpeg 超时配置（秒）
+    ffmpeg_short_timeout = 30     # 短操作（如查询信息）
+    ffmpeg_medium_timeout = 120   # 中等操作（如裁剪）
+    ffmpeg_long_timeout = 300     # 长操作（如转码）
+    ffmpeg_merge_timeout = 600    # 合并操作
+
+    # 下载超时配置（秒）
+    download_connect_timeout = 30  # 连接超时
+    download_read_timeout = 60     # 读取超时
+    model_download_timeout = 600   # 模型下载超时
+
+    # 视频处理超时配置（秒）
+    frame_extract_timeout = 30     # 帧提取超时
+    scene_detect_timeout = 120     # 场景检测超时
+
+    # 并发限制
+    max_concurrent_downloads = 3   # 最大并发下载数
+    max_concurrent_analyses = 2    # 最大并发分析数

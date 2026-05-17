@@ -57,7 +57,9 @@ def to_json(obj):
 
         # 序列化处理后的对象为JSON符串
         return json.dumps(serialized_obj, ensure_ascii=False, indent=4)
-    except Exception as e:
+    except (TypeError, ValueError, OverflowError) as e:
+        # JSON序列化可能的异常类型
+        logger.debug(f"JSON序列化失败: {e}")
         return None
 
 
@@ -548,7 +550,7 @@ def clear_keyframes_cache(video_path: str = None):
             shutil.rmtree(keyframes_dir)
             logger.info("已清理所有关键帧缓存")
 
-    except Exception as e:
+    except (OSError, PermissionError) as e:
         logger.error(f"清理关键帧缓存失败: {e}")
 
 

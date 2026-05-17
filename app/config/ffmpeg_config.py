@@ -124,7 +124,7 @@ class FFmpegConfigManager:
             hwaccel_available = hwaccel_info.get("available", False)
             hwaccel_type = hwaccel_info.get("type", "software")
             gpu_vendor = hwaccel_info.get("gpu_vendor", "unknown")
-        except Exception as e:
+        except (ImportError, AttributeError, RuntimeError) as e:
             logger.warning(f"无法检测硬件加速信息: {e}")
             hwaccel_available = False
             hwaccel_type = "software"
@@ -206,8 +206,8 @@ class FFmpegConfigManager:
                     from app.utils import ffmpeg_utils
                     hw_args = ffmpeg_utils.get_ffmpeg_hwaccel_args()
                     cmd.extend(hw_args)
-                except Exception:
-                    pass
+                except (ImportError, RuntimeError) as e:
+                    logger.debug(f"获取硬件加速参数失败: {e}")
             elif profile.hwaccel_type == "nvenc_pure":
                 # 纯 NVENC 编码器，不使用硬件解码
                 pass
@@ -267,7 +267,8 @@ class FFmpegConfigManager:
         try:
             from app.utils import ffmpeg_utils
             hwaccel_info = ffmpeg_utils.get_ffmpeg_hwaccel_info()
-        except Exception:
+        except (ImportError, RuntimeError) as e:
+            logger.debug(f"获取硬件加速信息失败: {e}")
             hwaccel_info = {"available": False, "message": "检测失败"}
         
         return {

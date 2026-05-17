@@ -308,12 +308,15 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
     // 启动任务
     const method = IPC_METHODS[next.type].start;
     ipcClient
-      .call<{ task_id: string }>(method, next.params)
+      .call<{ task_id?: string; task_ids?: string[] }>(method, next.params)
       .then((result) => {
+        // analyze.start 返回 task_ids（多个），其他返回 task_id（单个）
+        const backendTaskId = result?.task_id || (result?.task_ids && result.task_ids[0]);
+
         // 后端可能返回不同的 task_id，用它覆盖，确保轮询能匹配
-        if (result?.task_id && result.task_id !== runtimeTaskId) {
+        if (backendTaskId && backendTaskId !== runtimeTaskId) {
           const oldId = runtimeTaskId;
-          runtimeTaskId = result.task_id;
+          runtimeTaskId = backendTaskId;
           set(s => ({
             tasks: s.tasks.map(t =>
               t.id === oldId ? { ...t, id: runtimeTaskId } : t,

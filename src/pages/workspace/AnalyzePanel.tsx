@@ -199,9 +199,12 @@ const AnalyzePanel: React.FC<Props> = ({ onNext }) => {
       message.warning('请先在导入页面选择要分析的视频');
       return;
     }
-    enqueue('analyze', currentProject.id, {
-      project_id: currentProject.id,
-      episode_ids: ids,
+    // 为每个选中的 episode 单独入队（后端为每个 episode 创建独立任务）
+    ids.forEach(episodeId => {
+      enqueue('analyze', currentProject.id, {
+        project_id: currentProject.id,
+        episode_ids: [episodeId],
+      });
     });
   };
 

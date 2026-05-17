@@ -18,7 +18,7 @@ def get_version_from_file():
             with open(version_file, "r", encoding="utf-8") as f:
                 return f.read().strip()
         return "0.1.0"  # 默认版本号
-    except Exception as e:
+    except (IOError, OSError) as e:
         logger.error(f"读取版本号文件失败: {str(e)}")
         return "0.1.0"  # 默认版本号
 
@@ -45,7 +45,7 @@ def load_toml_file(file_path):
     """Load a TOML file and fall back to utf-8-sig when needed."""
     try:
         return toml.load(file_path)
-    except Exception as e:
+    except (toml.TomlDecodeError, IOError, OSError) as e:
         logger.warning(f"load config failed: {str(e)}, try to load as utf-8-sig")
         with open(file_path, mode="r", encoding="utf-8-sig") as fp:
             _cfg_content = fp.read()

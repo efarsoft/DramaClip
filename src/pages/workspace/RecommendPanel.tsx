@@ -8,7 +8,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Typography, Button, Card, Space, Tag, Empty, Slider, InputNumber,
-  message, Skeleton, Alert,
+  App, Skeleton, Alert,
 } from 'antd';
 import {
   BulbOutlined, ThunderboltOutlined, ClockCircleOutlined,
@@ -67,6 +67,7 @@ interface Props {
 }
 
 const RecommendPanel: React.FC<Props> = ({ onNext }) => {
+  const { message } = App.useApp();
   const { currentProject } = useProjectStore();
   const [selected, setSelected] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
@@ -210,7 +211,7 @@ const RecommendPanel: React.FC<Props> = ({ onNext }) => {
                   position: 'relative',
                   overflow: 'hidden',
                 }}
-                bodyStyle={{ padding: '20px 24px' }}
+                styles={{ body: { padding: '20px 24px' } }}
               >
                 {/* 选中标记 */}
                 {isSelected && (
@@ -298,7 +299,7 @@ const RecommendPanel: React.FC<Props> = ({ onNext }) => {
           background: 'rgba(255,255,255,0.02)',
           border: '1px solid rgba(255,255,255,0.06)',
         }}
-        bodyStyle={{ padding: '16px 24px' }}
+        styles={{ body: { padding: '16px 24px' } }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <ClockCircleOutlined style={{ color: CYAN, fontSize: 18 }} />

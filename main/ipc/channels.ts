@@ -24,6 +24,9 @@ export const IPC_CHANNELS = {
   SYSTEM_GET_VERSION: 'system:getVersion',
   SYSTEM_GET_FFMPEG_INFO: 'system:getFFmpegInfo',
   SYSTEM_OPEN_PATH: 'system:openPath',
+
+  // ============= 文件系统 =============
+  FS_SCAN_DIRECTORY: 'fs:scanDirectory',
 } as const;
 
 export type IpcChannel = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

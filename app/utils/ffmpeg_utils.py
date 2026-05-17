@@ -31,6 +31,9 @@ _FFMPEG_LOCK = threading.Lock()
 _FFMPEG_BIN_PATH: Optional[str] = None
 _FFPROBE_BIN_PATH: Optional[str] = None
 
+# 防止递归检测的标志
+_is_detecting = False
+
 
 def get_ffmpeg_path() -> str:
     """
@@ -81,8 +84,10 @@ def get_ffmpeg_path() -> str:
             _FFMPEG_BIN_PATH = candidate
             logger.info(f"FFmpeg found in project resources/: {_FFMPEG_BIN_PATH}")
             return _FFMPEG_BIN_PATH
-    except Exception:
-        pass
+    except (OSError, PermissionError, TypeError) as e:
+        logger.debug(f"Failed to check project resources directory: {e}")
+    except Exception as e:
+        logger.debug(f"Unexpected error checking project resources: {e}")
 
     # 4. 系统 PATH 回退
     _FFMPEG_BIN_PATH = exe_name
@@ -132,8 +137,10 @@ def get_ffprobe_path() -> str:
         if os.path.isfile(candidate):
             _FFPROBE_BIN_PATH = candidate
             return _FFPROBE_BIN_PATH
-    except Exception:
-        pass
+    except (OSError, PermissionError, TypeError) as e:
+        logger.debug(f"Failed to check project resources directory for ffprobe: {e}")
+    except Exception as e:
+        logger.debug(f"Unexpected error checking project resources for ffprobe: {e}")
 
     # 4. 系统 PATH 回退
     _FFPROBE_BIN_PATH = exe_name
@@ -364,19 +371,21 @@ def test_hwaccel_method(method: str, test_input: str) -> bool:
         return False
 
 
+# Module-level flag to prevent recursive detection
+_is_detecting: bool = False
+
+
 def detect_hardware_acceleration() -> Dict[str, Union[bool, str, List[str], None]]:
     """
-    Detect available hardware accelerators with progressive detection and fallback.
-
+    Detect and configure hardware acceleration for the current platform.
+    
     Returns:
         Dict: Hardware acceleration information
     """
-    global _FFMPEG_HW_ACCEL_INFO
+    global _FFMPEG_HW_ACCEL_INFO, _is_detecting
 
     # P1-9: Prevent recursive re-entry (e.g., _get_gpu_info -> ... -> detect)
-    if not hasattr(detect_hardware_acceleration, "_detecting"):
-        detect_hardware_acceleration._detecting = False
-    if detect_hardware_acceleration._detecting:
+    if _is_detecting:
         logger.warning("Recursive detect_hardware_acceleration() call blocked")
         return _FFMPEG_HW_ACCEL_INFO
 
@@ -390,11 +399,11 @@ def detect_hardware_acceleration() -> Dict[str, Union[bool, str, List[str], None
         if _FFMPEG_HW_ACCEL_INFO["type"] is not None:
             return _FFMPEG_HW_ACCEL_INFO
 
-        detect_hardware_acceleration._detecting = True
+        _is_detecting = True
         try:
             return _do_detect_hardware_acceleration()
         finally:
-            detect_hardware_acceleration._detecting = False
+            _is_detecting = False
 
 
 def _do_detect_hardware_acceleration() -> Dict[str, Union[bool, str, List[str], None]]:
@@ -1216,7 +1225,7 @@ def force_use_nvenc_pure() -> None:
         logger.error("❌ NVENC编码器不可用，无法强制启用")
 
 
-def get_hwaccel_status() -> Dict[str, any]:
+def get_hwaccel_status() -> Dict[str, Any]:
     """
     获取当前硬件加速状态的详细信息
     
@@ -1262,7 +1271,7 @@ _auto_reset_on_import()
 # ============================================================
 
 def extract_audio(video_path: str, output_path: str,
-                  start_time: float = None, duration: float = None) -> bool:
+                  start_time: Optional[float] = None, duration: Optional[float] = None) -> bool:
     """Extract audio track from video file to WAV.
 
     Args:
@@ -1296,7 +1305,7 @@ def extract_audio(video_path: str, output_path: str,
 
 
 def clip_video(video_path: str, output_path: str,
-               start_time: float = None, duration: float = None) -> bool:
+               start_time: Optional[float] = None, duration: Optional[float] = None) -> bool:
     """Clip a video segment using stream copy (no re-encoding).
 
     Args:
@@ -1369,7 +1378,7 @@ def crop_to_portrait_face_centered(input_path: str, output_path: str,
         face_cx = None
         sample_positions = [total_frames // 4, total_frames // 2, total_frames * 3 // 4]
 
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")  # type: ignore[attr-defined]
         if face_cascade.empty():
             cap.release()
             logger.warning("Face cascade classifier not loaded, fallback to center crop")

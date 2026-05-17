@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from loguru import logger
 
-from app.services.project.manager import get_manager, ProjectManager
+from app.services.project.manager_sqlite import get_manager, ProjectManager
 from app.services.analyze.manager import get_analysis_manager
 from .protocol import RPCError
 
@@ -78,19 +78,25 @@ def project_open(project_id: str) -> Dict:
     if not project_id:
         raise RPCError(-32602, "project_id is required")
 
-    manager = get_manager()
-    project = manager.open_project(project_id)
+    try:
+        manager = get_manager()
+        project = manager.open_project(project_id)
 
-    if not project:
-        raise RPCError(-32001, f"Project not found: {project_id}")
+        if not project:
+            raise RPCError(-32001, f"Project not found: {project_id}")
 
-    logger.info(f"Opened project: {project_id}")
-    
-    # 返回视频列表
-    videos = manager.get_videos(project_id)
-    result = project.to_dict()
-    result["videos"] = [v.to_dict() for v in videos]
-    return result
+        logger.info(f"Opened project: {project_id}")
+        
+        # 返回视频列表
+        videos = manager.get_videos(project_id)
+        result = project.to_dict()
+        result["videos"] = [v.to_dict() for v in videos]
+        return result
+    except RPCError:
+        raise
+    except Exception as e:
+        logger.exception(f"Failed to open project {project_id}: {e}")
+        raise RPCError(-32003, f"Failed to open project: {str(e)}")
 
 
 def project_delete(project_id: str, keep_files: bool = False) -> Dict:
@@ -141,15 +147,37 @@ def project_import_videos(project_id: str, paths: List[str]) -> List[Dict]:
     return [v.to_dict() for v in videos]
 
 
-def project_get_videos(project_id: str) -> List[Dict]:
-    """获取项目的视频列表"""
-    logger.info(f"project_get_videos: entry (project_id={project_id!r})")
+def project_get_videos(project_id: str, order_by: str = "sort_order") -> List[Dict]:
+    """获取项目的视频列表
+    
+    Args:
+        project_id: 项目ID
+        order_by: 排序字段，可选 "sort_order"（默认）、"name"、"duration"、"size"
+    """
+    logger.info(f"project_get_videos: entry (project_id={project_id!r}, order_by={order_by!r})")
     if not project_id:
         raise RPCError(-32602, "project_id is required")
 
     manager = get_manager()
-    videos = manager.get_videos(project_id)
+    videos = manager.get_videos(project_id, order_by=order_by)
     return [v.to_dict() for v in videos]
+
+
+def project_update_video_order(video_orders: List[Dict[str, Any]]) -> int:
+    """批量更新视频排序
+    
+    Args:
+        video_orders: [{"id": "video_id", "sort_order": 0}, ...]
+    
+    Returns:
+        更新的记录数
+    """
+    logger.info(f"project_update_video_order: entry (count={len(video_orders)})")
+    if not video_orders:
+        return 0
+
+    manager = get_manager()
+    return manager.update_video_order(video_orders)
 
 
 # ============================================================================
@@ -548,7 +576,7 @@ def _run_clip_pipeline(
 
 def clip_recommend(project_id: str) -> Dict:
     """获取剪辑方案推荐，根据项目视频数量智能推荐"""
-    from app.services.project.manager import get_manager
+    from app.services.project.manager_sqlite import get_manager
 
     manager = get_manager()
     videos = manager.get_videos(project_id)
@@ -691,28 +719,245 @@ def clip_preview(project_id: str, scheme: str) -> Dict:
     """预览剪辑结果"""
     return {"preview_url": "", "ready": False}
 
+
+def clip_stop(task_id: str) -> Dict:
+    """停止/取消正在运行的剪辑任务"""
+    with _clip_tasks_lock:
+        task = _clip_tasks.get(task_id)
+
+    if not task:
+        raise RPCError(-32002, f"Clip task not found: {task_id}")
+
+    current_status = task.get("status", "")
+    if current_status in ("completed", "failed", "cancelled"):
+        return {"success": False, "message": f"任务已处于终态: {current_status}"}
+
+    # 标记为取消（线程池中的任务无法强行中断，但可通过状态标记阻止后续写入）
+    _update_clip_task(
+        task_id,
+        status="cancelled",
+        progress=-1,
+        phase="cancelled",
+        message="用户取消",
+    )
+    logger.info(f"Clip task {task_id} marked as cancelled by user")
+    return {"success": True, "task_id": task_id}
+
 # ============================================================================
 # 导出
 # ============================================================================
 
+# 导出任务状态跟踪：task_id -> { status, progress, phase, message, output_path }
+_export_tasks: Dict[str, Dict] = {}
+_export_tasks_lock = threading.Lock()
+
+
+def _update_export_task(task_id: str, **kwargs):
+    """线程安全地更新导出任务状态"""
+    with _export_tasks_lock:
+        if task_id not in _export_tasks:
+            _export_tasks[task_id] = {
+                "task_id": task_id,
+                "status": "running",
+                "progress": 0,
+                "phase": "",
+                "message": "",
+                "output_path": None,
+            }
+        _export_tasks[task_id].update(kwargs)
+
+
+# 分辨率 preset 映射
+_RESOLUTION_MAP = {
+    "1080p":   ("1920", "1080"),
+    "1080p_v": ("1080", "1920"),
+    "4k":      ("3840", "2160"),
+    "720p_v":  ("720",  "1280"),
+    "gif":     ("640",  "360"),
+}
+
+# 码率 preset 映射
+_BITRATE_MAP = {
+    "1080p":   "8M",
+    "1080p_v": "6M",
+    "4k":      "20M",
+    "720p_v":  "4M",
+    "gif":     "2M",
+}
+
+
+def _run_export_pipeline(
+    task_id: str,
+    input_path: str,
+    output_path: str,
+    preset: str,
+    fmt: str,
+    fps: int,
+) -> None:
+    """后台线程：调用 FFmpeg 进行转码/封装，实时更新进度"""
+    from app.utils.ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
+    import subprocess as _sp
+
+    try:
+        _update_export_task(task_id, progress=5, phase="probe", message="探测视频信息...")
+
+        # --- 1. 使用 ffprobe 获取总时长 ---
+        probe = _sp.run(
+            [get_ffprobe_path(), "-v", "error",
+             "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1",
+             input_path],
+            capture_output=True, text=True, timeout=30,
+        )
+        total_duration = float(probe.stdout.strip() or 0) or 1.0
+
+        # --- 2. 构建 FFmpeg 命令 ---
+        w, h = _RESOLUTION_MAP.get(preset, ("1920", "1080"))
+        vbitrate = _BITRATE_MAP.get(preset, "8M")
+
+        _update_export_task(task_id, progress=10, phase="transcode", message=f"转码中（{w}×{h}）...")
+
+        ffmpeg_path = get_ffmpeg_path()
+        if fmt == "gif":
+            # GIF 特殊处理：先生成 palette 再合成
+            palette_path = output_path.replace(".gif", "_palette.png")
+            _sp.run([
+                ffmpeg_path, "-y", "-i", input_path,
+                "-vf", f"fps={fps},scale={w}:{h}:flags=lanczos,palettegen",
+                palette_path,
+            ], capture_output=True, timeout=120)
+            cmd = [
+                ffmpeg_path, "-y", "-i", input_path, "-i", palette_path,
+                "-filter_complex", f"fps={fps},scale={w}:{h}:flags=lanczos[x];[x][1:v]paletteuse",
+                output_path,
+            ]
+        else:
+            cmd = [
+                ffmpeg_path, "-y", "-i", input_path,
+                "-vf", f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+                       f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2",
+                "-r", str(fps),
+                "-b:v", vbitrate,
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-crf", "23",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-movflags", "+faststart",
+                "-progress", "pipe:1",
+                "-nostats",
+                output_path,
+            ]
+
+        # --- 3. 运行 FFmpeg，解析 progress 行实时上报 ---
+        proc = _sp.Popen(
+            cmd,
+            stdout=_sp.PIPE, stderr=_sp.PIPE,
+            text=True, bufsize=1,
+        )
+
+        current_time = 0.0
+        for line in proc.stdout:  # type: ignore[union-attr]
+            line = line.strip()
+            if line.startswith("out_time_ms="):
+                try:
+                    ms = int(line.split("=")[1])
+                    current_time = ms / 1_000_000
+                    pct = min(int(current_time / total_duration * 85) + 10, 95)
+                    _update_export_task(
+                        task_id, progress=pct, phase="transcode",
+                        message=f"转码 {int(current_time)}/{int(total_duration)}s",
+                    )
+                except (ValueError, IndexError):
+                    pass
+
+        proc.wait()
+        if proc.returncode != 0:
+            stderr_out = proc.stderr.read() if proc.stderr else ""  # type: ignore[union-attr]
+            raise RuntimeError(f"FFmpeg 退出码 {proc.returncode}: {stderr_out[-300:]}")
+
+        _update_export_task(
+            task_id, status="completed", progress=100,
+            phase="done", message="导出完成",
+            output_path=output_path,
+        )
+        logger.info(f"Export task {task_id} completed: {output_path}")
+
+    except Exception as exc:
+        logger.exception(f"Export task {task_id} failed: {exc}")
+        _update_export_task(task_id, status="failed", progress=-1, phase="error", message=str(exc))
+
+
 def export_start(project_id: str, output_config: Dict[str, Any]) -> Dict:
-    """开始导出"""
-    import uuid
-    task_id = str(uuid.uuid4())
-    logger.info(f"Started export task: {task_id}")
+    """开始导出 — 对 clip 任务产出文件进行转码/封装"""
+    export_task_id = str(uuid.uuid4())
+
+    # 从 output_config 中读取参数
+    clip_task_id: str = output_config.get("clip_task_id", "")
+    preset: str = output_config.get("preset", "1080p")          # 分辨率预设
+    fmt: str = output_config.get("format", "mp4")               # 输出格式
+    fps: int = int(output_config.get("fps", 30))
+    custom_output_path: str = output_config.get("output_path", "")
+
+    # 找到待导出的源文件
+    input_path = ""
+    if clip_task_id:
+        with _clip_tasks_lock:
+            clip_task = _clip_tasks.get(clip_task_id)
+        if clip_task:
+            input_path = clip_task.get("output_path", "")
+
+    # 若前端直接传了 input_path，优先使用
+    if not input_path:
+        input_path = output_config.get("input_path", "")
+
+    if not input_path:
+        raise RPCError(-32602, "无法确定导出源文件，请提供 clip_task_id 或 input_path")
+
+    # 构建输出路径
+    if custom_output_path:
+        output_path = custom_output_path
+    else:
+        mgr = get_manager()
+        project = mgr.get_project(project_id)
+        if not project:
+            raise RPCError(-32001, f"Project not found: {project_id}")
+        export_dir = Path(project.path) / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        output_path = str(export_dir / f"export_{export_task_id[:8]}.{fmt}")
+
+    _update_export_task(export_task_id, status="running", progress=0, phase="preparing", message="准备导出...")
+
+    _pool.submit(_run_export_pipeline, export_task_id, input_path, output_path, preset, fmt, fps)
+
+    logger.info(f"Export task {export_task_id} queued: {input_path} -> {output_path} [{preset}/{fmt}/{fps}fps]")
     return {
-        "task_id": task_id,
-        "status": "running"
+        "task_id": export_task_id,
+        "status": "running",
+        "output_path": output_path,
     }
 
 
 def export_get_progress(task_id: str) -> Dict:
     """获取导出进度"""
+    with _export_tasks_lock:
+        task = _export_tasks.get(task_id)
+    if not task:
+        return {
+            "task_id": task_id,
+            "status": "running",
+            "progress": 0,
+            "phase": "preparing",
+            "message": "任务已创建，等待启动...",
+            "output_path": None,
+        }
     return {
-        "task_id": task_id,
-        "status": "running",
-        "progress": 0,
-        "message": "Exporting..."
+        "task_id": task["task_id"],
+        "status": task["status"],
+        "progress": task["progress"],
+        "phase": task.get("phase", ""),
+        "message": task.get("message", ""),
+        "output_path": task.get("output_path"),
     }
 
 
@@ -795,8 +1040,8 @@ def settings_get() -> Dict:
                 _merge_config_into_settings(raw)
                 return raw
             return _upgrade_settings(raw)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to load settings from {settings_file}: {e}")
 
     settings = _default_settings()
     _merge_config_into_settings(settings)
@@ -887,8 +1132,8 @@ def _upgrade_settings(flat: Dict) -> Dict:
             json.dumps(result, ensure_ascii=False, indent=2),
             encoding="utf-8"
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to save upgraded settings to {settings_file}: {e}")
 
     return result
 

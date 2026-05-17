@@ -6,12 +6,36 @@
 import json
 import os
 import shutil
+import subprocess
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from loguru import logger
+
+from app.utils.ffmpeg_utils import get_ffprobe_path
+
+
+def _probe_video_duration(video_path: str) -> float:
+    """使用 ffprobe 获取视频时长（秒），失败时返回 0.0"""
+    try:
+        result = subprocess.run(
+            [
+                get_ffprobe_path(), "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(video_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        val = result.stdout.strip()
+        return float(val) if val else 0.0
+    except Exception as exc:
+        logger.debug(f"ffprobe duration failed for {video_path}: {exc}")
+        return 0.0
 
 
 class ProjectMeta(BaseModel):
@@ -68,16 +92,26 @@ class ProjectManager:
     def _load_index(self) -> List[Dict]:
         """加载项目索引"""
         try:
-            return json.loads(self.index_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, IOError):
+            content = self.index_file.read_text(encoding="utf-8")
+            projects = json.loads(content)
+            logger.debug(f"[Index] Loaded {len(projects)} projects from {self.index_file}")
+            return projects
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in index file: {e}")
+            return []
+        except (OSError, PermissionError, FileNotFoundError) as e:
+            logger.error(f"Failed to read index file: {e}")
             return []
 
     def _save_index(self, projects: List[Dict]) -> None:
         """保存项目索引"""
-        self.index_file.write_text(
-            json.dumps(projects, ensure_ascii=False, indent=2),
-            encoding="utf-8"
-        )
+        try:
+            content = json.dumps(projects, ensure_ascii=False, indent=2)
+            self.index_file.write_text(content, encoding="utf-8")
+            logger.debug(f"[Index] Saved {len(projects)} projects to {self.index_file}")
+        except (OSError, PermissionError) as e:
+            logger.error(f"Failed to save index file: {e}")
+            raise
 
     def list_projects(self) -> List[ProjectMeta]:
         """列出所有项目"""
@@ -87,9 +121,12 @@ class ProjectManager:
     def get_project(self, project_id: str) -> Optional[ProjectMeta]:
         """获取指定项目"""
         projects = self._load_index()
+        logger.debug(f"[Index] Looking for project {project_id}, index has {len(projects)} projects")
         for p in projects:
             if p["id"] == project_id:
+                logger.debug(f"[Index] Found project: {p['name']} at {p['path']}")
                 return ProjectMeta(**p)
+        logger.warning(f"[Index] Project {project_id} NOT FOUND in index")
         return None
 
     def create_project(self, name: str, path: str) -> ProjectMeta:
@@ -139,17 +176,28 @@ class ProjectManager:
 
         # 更新索引
         projects = self._load_index()
+        logger.debug(f"[Create] Before append: {len(projects)} projects")
         projects.append(project.to_dict())
+        logger.debug(f"[Create] After append: {len(projects)} projects, new id={project_id}")
         self._save_index(projects)
+        logger.debug(f"[Create] Index saved, verifying...")
+        
+        # 验证保存是否成功
+        verify = self._load_index()
+        found = any(p["id"] == project_id for p in verify)
+        logger.debug(f"[Create] Verification: project {project_id} in index = {found}")
 
         logger.info(f"Created project: {name} ({project_id})")
         return project
 
     def open_project(self, project_id: str) -> Optional[ProjectMeta]:
         """打开项目，自动扫描 videos/ 目录索引视频资源"""
+        logger.debug(f"[Open] Attempting to open project {project_id}")
         project = self.get_project(project_id)
         if not project:
+            logger.error(f"[Open] Project {project_id} not found!")
             return None
+        logger.debug(f"[Open] Found project {project.name} at {project.path}")
 
         project_path = Path(project.path)
         videos_dir = project_path / "videos"
@@ -179,11 +227,15 @@ class ProjectManager:
 
     def _save_meta(self, project: ProjectMeta) -> None:
         """保存项目元数据到 meta.json"""
-        meta_file = Path(project.path) / "meta.json"
-        meta_file.write_text(
-            json.dumps(project.to_dict(), ensure_ascii=False, indent=2),
-            encoding="utf-8"
-        )
+        try:
+            meta_file = Path(project.path) / "meta.json"
+            meta_file.write_text(
+                json.dumps(project.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8"
+            )
+        except (OSError, PermissionError) as e:
+            logger.error(f"Failed to save project meta: {e}")
+            raise
 
     def _scan_videos_dir(self, project_id: str, videos_dir: Path) -> Dict[str, int]:
         """扫描视频目录，同步 videos.json 索引"""
@@ -210,26 +262,40 @@ class ProjectManager:
         scanned_paths: Set[str] = set()
         found_count = 0
 
-        for file_path in videos_dir.iterdir():
-            if file_path.is_file() and file_path.suffix.lower() in self.VIDEO_EXTENSIONS:
-                scanned_paths.add(str(file_path))
-                # 用路径匹配，而非文件名
-                if str(file_path) not in existing_map:
-                    # 新发现的视频文件
-                    video_id = str(uuid.uuid4())
-                    now = datetime.now().isoformat()
-                    video_info = VideoInfo(
-                        id=video_id,
-                        name=file_path.stem,
-                        path=str(file_path),
-                        size=file_path.stat().st_size,
-                        duration=0.0,
-                        format=file_path.suffix.lstrip("."),
-                        imported_at=now,
-                    )
-                    existing_videos.append(video_info.to_dict())
-                    found_count += 1
-                    logger.info(f"Discovered new video during scan: {file_path.name}")
+        try:
+            dir_iter = videos_dir.iterdir()
+        except (OSError, PermissionError) as e:
+            logger.error(f"Failed to iterate videos directory: {e}")
+            return {"found": 0, "removed": 0, "missing": 0}
+
+        for file_path in dir_iter:
+            try:
+                if file_path.is_file() and file_path.suffix.lower() in self.VIDEO_EXTENSIONS:
+                    scanned_paths.add(str(file_path))
+                    # 用路径匹配，而非文件名
+                    if str(file_path) not in existing_map:
+                        # 新发现的视频文件
+                        video_id = str(uuid.uuid4())
+                        now = datetime.now().isoformat()
+                        try:
+                            file_size = file_path.stat().st_size
+                        except (OSError, PermissionError):
+                            file_size = 0
+                        video_info = VideoInfo(
+                            id=video_id,
+                            name=file_path.stem,
+                            path=str(file_path),
+                            size=file_size,
+                            duration=0.0,
+                            format=file_path.suffix.lstrip("."),
+                            imported_at=now,
+                        )
+                        existing_videos.append(video_info.to_dict())
+                        found_count += 1
+                        logger.info(f"Discovered new video during scan: {file_path.name}")
+            except (OSError, PermissionError) as e:
+                logger.warning(f"Failed to process file {file_path}: {e}")
+                continue
 
         # 移除已不存在于磁盘的视频记录
         before = len(existing_videos)
@@ -256,10 +322,13 @@ class ProjectManager:
             )
         
         # 保存更新的视频列表
-        videos_file.write_text(
-            json.dumps(existing_videos, ensure_ascii=False, indent=2),
-            encoding="utf-8"
-        )
+        try:
+            videos_file.write_text(
+                json.dumps(existing_videos, ensure_ascii=False, indent=2),
+                encoding="utf-8"
+            )
+        except (OSError, PermissionError) as e:
+            logger.error(f"Failed to save videos.json: {e}")
 
         return {
             "found": found_count,
@@ -421,7 +490,7 @@ class ProjectManager:
                     name=src_path.stem,
                     path=str(dest_path),
                     size=dest_path.stat().st_size,
-                    duration=0.0,  # TODO: 使用 ffprobe 获取
+                    duration=_probe_video_duration(str(dest_path)),
                     format=src_path.suffix.lstrip("."),
                     imported_at=now
                 )
@@ -433,10 +502,13 @@ class ProjectManager:
 
         # 保存视频列表
         if videos:
-            videos_file.write_text(
-                json.dumps(videos, ensure_ascii=False, indent=2),
-                encoding="utf-8"
-            )
+            try:
+                videos_file.write_text(
+                    json.dumps(videos, ensure_ascii=False, indent=2),
+                    encoding="utf-8"
+                )
+            except (OSError, PermissionError) as e:
+                logger.error(f"Failed to save videos.json: {e}")
 
             # 更新项目视频数量
             self.update_project(project_id, {"episode_count": len(videos)})

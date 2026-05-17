@@ -47,7 +47,7 @@ class VisionAnalyzer:
         except requests.exceptions.RequestException as e:
             logger.warning(f"Gemini API请求异常: {str(e)}")
             raise
-        except Exception as e:
+        except (ValueError, KeyError, RuntimeError) as e:
             logger.error(f"Gemini API生成内容时发生错误: {str(e)}")
             raise
 
@@ -221,7 +221,7 @@ class VisionAnalyzer:
                             })
                             break
 
-                        except Exception as e:
+                        except (RuntimeError, ValueError, KeyError) as e:
                             retry_count += 1
                             error_msg = f"批次 {i // batch_size} 处理出错: {str(e)}"
                             logger.error(error_msg)
@@ -241,10 +241,10 @@ class VisionAnalyzer:
 
             return results
 
-        except Exception as e:
+        except (RuntimeError, ValueError) as e:
             error_msg = f"图片分析过程中发生错误: {str(e)}\n{traceback.format_exc()}"
             logger.error(error_msg)
-            raise Exception(error_msg)
+            raise
 
     def save_results_to_txt(self, results: List[Dict], output_dir: str):
         """将分析结果保存到txt文件"""
@@ -273,7 +273,7 @@ class VisionAnalyzer:
                     milliseconds = int((seconds_remainder - whole_seconds) * 1000)
                     
                     return f"{hours:02d}:{minutes:02d}:{whole_seconds:02d},{milliseconds:03d}"
-                except Exception as e:
+                except (ValueError, IndexError) as e:
                     logger.error(f"时间戳格式转换错误: {timestamp}, {str(e)}")
                     return timestamp
 
@@ -313,7 +313,7 @@ class VisionAnalyzer:
                     img = img.convert('RGB')
                 images.append(img)
 
-            except Exception as e:
+            except (IOError, OSError, PIL.UnidentifiedImageError) as e:
                 logger.error(f"无法加载图片 {img_path}: {str(e)}")
                 failed_images.append(img_path)
 
