@@ -6,13 +6,18 @@ directories:
 files:
   - dist/**/*
   - dist-electron/**/*
-  - resources/**/*
   - "!node_modules/**/*"
 extraResources:
-  - from: resources/
-    to: resources/
+  # 打包 Python 后端
+  - from: dist/backend/
+    to: backend/
     filter:
       - "**/*"
+  # 打包 FFmpeg（安装后开箱即用）
+  - from: resources/ffmpeg.exe
+    to: backend/resources/ffmpeg.exe
+  - from: resources/ffprobe.exe
+    to: backend/resources/ffprobe.exe
 asar: true
 asarUnpack:
   - "**/*.exe"

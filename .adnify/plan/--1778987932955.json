@@ -1,0 +1,62 @@
+{
+  "id": "--1778987932955",
+  "name": "项目分析与风险扫描",
+  "createdAt": 1778987932955,
+  "updatedAt": 1778988152840,
+  "requirementsDoc": "--1778987932955.md",
+  "executionMode": "sequential",
+  "status": "draft",
+  "tasks": [
+    {
+      "id": "task-1",
+      "title": "分析项目目录结构",
+      "description": "使用list_directory查看项目根目录及子目录，理解项目组织结构",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "role": "coder",
+      "dependencies": [],
+      "status": "pending"
+    },
+    {
+      "id": "task-2",
+      "title": "检查核心依赖配置",
+      "description": "读取package.json、requirements.txt等配置文件，分析项目依赖和版本",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "role": "coder",
+      "dependencies": [],
+      "status": "pending"
+    },
+    {
+      "id": "task-3",
+      "title": "扫描潜在风险与安全隐患",
+      "description": "使用search_files和codebase_search扫描常见安全漏洞、性能问题和代码异味",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "role": "reviewer",
+      "dependencies": [],
+      "status": "pending"
+    },
+    {
+      "id": "task-4",
+      "title": "分析性能缺陷",
+      "description": "查找可能导致性能问题的代码模式，如无限循环、内存泄漏、低效算法等",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "role": "reviewer",
+      "dependencies": [],
+      "status": "pending"
+    },
+    {
+      "id": "task-5",
+      "title": "汇总分析结果并提供修复建议",
+      "description": "整合所有发现，生成结构化报告和具体修复建议",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "role": "reviewer",
+      "dependencies": [],
+      "status": "pending"
+    }
+  ],
+  "revision": 2
+}

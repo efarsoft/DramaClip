@@ -41,19 +41,39 @@ def setup_resources():
     """配置资源路径"""
     if getattr(sys, 'frozen', False):
         # PyInstaller 打包模式
+        # sys._MEIPASS 指向临时解压目录
         base_dir = Path(sys._MEIPASS)
+        # 可执行文件所在目录（安装目录/backend/）
+        exe_dir = Path(sys.executable).parent
     else:
         base_dir = project_root
+        exe_dir = project_root
 
-    # FFmpeg 路径
-    ffmpeg_dir = base_dir / "resources"
-    if ffmpeg_dir.exists():
-        os.environ["DRAMACLIP_FFMPEG_PATH"] = str(ffmpeg_dir)
+    # FFmpeg 路径查找（按优先级）
+    ffmpeg_candidates = [
+        exe_dir / "resources",           # 安装目录/backend/resources/
+        base_dir / "resources",          # PyInstaller 临时目录/resources/
+        exe_dir.parent / "resources",    # 安装目录/resources/
+    ]
+    
+    for ffmpeg_dir in ffmpeg_candidates:
+        if ffmpeg_dir.exists():
+            os.environ["DRAMACLIP_FFMPEG_PATH"] = str(ffmpeg_dir)
+            logger.info(f"FFmpeg path set to: {ffmpeg_dir}")
+            break
 
     # 模型路径
-    models_dir = base_dir / "resources" / "models"
-    if models_dir.exists():
-        os.environ["DRAMACLIP_MODELS_PATH"] = str(models_dir)
+    models_candidates = [
+        exe_dir / "resources" / "models",
+        base_dir / "resources" / "models",
+        exe_dir.parent / "resources" / "models",
+    ]
+    
+    for models_dir in models_candidates:
+        if models_dir.exists():
+            os.environ["DRAMACLIP_MODELS_PATH"] = str(models_dir)
+            logger.info(f"Models path set to: {models_dir}")
+            break
 
     return base_dir
 

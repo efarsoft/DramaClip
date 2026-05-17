@@ -1,0 +1,172 @@
+name: Build Windows Installer
+
+on:
+  push:
+    tags:
+      - 'v*'  # 触发条件：推送 tag（如 v1.0.0）
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+      # ============================================================
+      # 1. 检出代码
+      # ============================================================
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ============================================================
+      # 2. 设置 Node.js
+      # ============================================================
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # ============================================================
+      # 3. 设置 Python
+      # ============================================================
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # ============================================================
+      # 4. 下载 FFmpeg（静态编译版本，包含在安装包中）
+      # ============================================================
+      - name: Download FFmpeg
+        run: |
+          # 创建资源目录
+          New-Item -ItemType Directory -Force -Path resources
+          
+          # 下载 FFmpeg Essentials 版本（约 80MB）
+          $ffmpegUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          $zipPath = "$env:TEMP\ffmpeg.zip"
+          $extractPath = "$env:TEMP\ffmpeg"
+          
+          Write-Host "Downloading FFmpeg..."
+          Invoke-WebRequest -Uri $ffmpegUrl -OutFile $zipPath -UseBasicParsing
+          
+          Write-Host "Extracting FFmpeg..."
+          Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+          
+          # 查找 ffmpeg.exe 和 ffprobe.exe
+          $ffmpegDir = Get-ChildItem -Path $extractPath -Directory | Select-Object -First 1
+          $binPath = Join-Path $ffmpegDir.FullName "bin"
+          
+          # 复制到 resources 目录
+          Copy-Item "$binPath\ffmpeg.exe" "resources\ffmpeg.exe" -Force
+          Copy-Item "$binPath\ffprobe.exe" "resources\ffprobe.exe" -Force
+          
+          # 验证
+          Write-Host "FFmpeg version:"
+          .\resources\ffmpeg.exe -version
+          
+          # 清理
+          Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+          Remove-Item $extractPath -Recurse -Force -ErrorAction SilentlyContinue
+          
+          Write-Host "FFmpeg downloaded to resources/"
+
+      # ============================================================
+      # 5. 安装 Python 依赖
+      # ============================================================
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      # ============================================================
+      # 6. 安装 Node.js 依赖
+      # ============================================================
+      - name: Install Node.js dependencies
+        run: npm ci
+
+      # ============================================================
+      # 7. 构建 Python 后端
+      # ============================================================
+      - name: Build Python backend
+        run: python scripts/build-backend.py
+        env:
+          PYTHONPATH: .
+
+      # ============================================================
+      # 8. 构建前端
+      # ============================================================
+      - name: Build frontend
+        run: npm run build:vite
+
+      # ============================================================
+      # 9. 打包 Electron 应用
+      # ============================================================
+      - name: Build Electron app
+        run: npx electron-builder --win --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ============================================================
+      # 10. 验证安装包内容
+      # ============================================================
+      - name: Verify installer contents
+        run: |
+          Write-Host "=== Release files ==="
+          Get-ChildItem -Path release -Recurse | Select-Object FullName, Length
+          
+          # 检查 FFmpeg 是否被包含
+          $nsisFile = Get-ChildItem -Path release -Filter "*.exe" | Select-Object -First 1
+          if ($nsisFile) {
+            Write-Host "`nInstaller created: $($nsisFile.Name) ($([math]::Round($nsisFile.Length / 1MB, 2)) MB)"
+          }
+
+      # ============================================================
+      # 11. 上传构建产物
+      # ============================================================
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: dramaclip-installer
+          path: |
+            release/*.exe
+            release/*.zip
+          retention-days: 30
+
+      # ============================================================
+      # 12. 创建 GitHub Release（仅在 tag 推送时）
+      # ============================================================
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            release/*.exe
+            release/*.zip
+          draft: false
+          prerelease: false
+          body: |
+            ## DramaClip ${{ github.ref_name }}
+            
+            ### 安装说明
+            1. 下载 `DramaClip Setup *.exe`
+            2. 运行安装程序
+            3. 按照提示完成安装
+            4. 启动 DramaClip
+            
+            ### 系统要求
+            - Windows 10/11 (64-bit)
+            - 4GB RAM（推荐 8GB）
+            - 2GB 可用磁盘空间
+            
+            ### 包含组件
+            - DramaClip 应用程序
+            - FFmpeg（内嵌，无需额外安装）
+            - Python 后端
+            
+            ### 更新日志
+            - 初始版本
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
