@@ -24,6 +24,7 @@ dist-electron/
 *.model
 
 # 资源文件（大文件/媒体）
+resources/
 resource/scripts/*.json
 resource/videos/*.mp4
 resource/songs/*.mp3
