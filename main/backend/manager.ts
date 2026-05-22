@@ -5,6 +5,7 @@
 
 import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
+import { app } from 'electron';
 import { JSONRPCProtocol } from './protocol';
 
 export interface BackendOptions {
@@ -147,22 +148,53 @@ export class BackendManager extends EventEmitter {
       console.log('[Main][BackendManager] Starting backend:', this.backendPath);
 
       try {
-        // 处理 Python 脚本（开发模式）
+        // 处理 Python 脚本
         const isPythonScript = this.backendPath.endsWith('.py');
         let command: string;
         const args: string[] = [];
 
         if (isPythonScript) {
-          // 优先使用项目 .venv 中的 Python 解释器，确保加载正确的虚拟环境和依赖
           const path = require('path');
           const fs = require('fs');
-          const venvPython = path.join(process.cwd(), '.venv', 'Scripts', 'python.exe');
-          if (fs.existsSync(venvPython)) {
-            command = venvPython;
-            console.log('[Main][BackendManager] Using project venv Python:', venvPython);
+
+          // 根据系统平台确定 Python 可执行文件名及虚拟环境的子目录结构
+          const isWin = process.platform === 'win32';
+          const pythonExeName = isWin ? 'python.exe' : 'python';
+          const venvSubPath = isWin ? ['Scripts', 'python.exe'] : ['bin', 'python'];
+
+          // 候选 Python 解释器路径列表（优先级从高到低）
+          const pythonCandidates: string[] = [];
+
+          if (app.isPackaged) {
+            // 生产环境下：优先查找打包内置的 Python 解释器或内置虚拟环境
+            pythonCandidates.push(
+              path.join(process.resourcesPath, 'python', pythonExeName),
+              path.join(process.resourcesPath, 'backend', 'python', pythonExeName),
+              path.join(process.resourcesPath, '.venv', ...venvSubPath),
+              path.join(process.resourcesPath, 'backend', '.venv', ...venvSubPath)
+            );
           } else {
-            command = 'python';
-            console.warn('[Main][BackendManager] Project .venv not found, falling back to system Python');
+            // 开发环境下：优先使用项目根目录下的 .venv 虚拟环境
+            pythonCandidates.push(
+              path.join(process.cwd(), '.venv', ...venvSubPath)
+            );
+          }
+
+          // 寻找第一个存在的解释器
+          let foundPython = '';
+          for (const cand of pythonCandidates) {
+            if (fs.existsSync(cand)) {
+              foundPython = cand;
+              break;
+            }
+          }
+
+          if (foundPython) {
+            command = foundPython;
+            console.log('[Main][BackendManager] Using built-in/venv Python interpreter:', foundPython);
+          } else {
+            command = isWin ? 'python' : 'python3';
+            console.warn('[Main][BackendManager] Built-in Python interpreter or .venv not found, falling back to system Python:', command);
           }
           args.push(this.backendPath);
         } else {

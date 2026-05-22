@@ -43,7 +43,7 @@ async function createWindow(): Promise<BrowserWindow> {
 async function initializeBackend(mainWindow: BrowserWindow): Promise<void> {
   const resourcesPath = isDev
     ? path.join(process.cwd(), 'resources')
-    : path.join(process.resourcesPath, 'resources');
+    : process.resourcesPath;
 
   const backendLauncher = new BackendLauncher(resourcesPath);
   const backendPath = await backendLauncher.findBackend();

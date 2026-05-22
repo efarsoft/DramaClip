@@ -22,10 +22,17 @@ export class BackendLauncher {
       path.join(process.cwd(), 'app', 'backend_main.py'),
     ];
 
-    // 生产模式：resources 目录
+    // 生产模式：resources 目录（支持三种打包形态）
     const prodPaths = [
+      // 1. 支持 --onefile 单文件打包可执行程序（Windows/Linux/macOS）
       path.join(this.resourcesPath, 'backend', 'backend.exe'),
       path.join(this.resourcesPath, 'backend', 'backend'),
+      // 2. 支持 --onedir 单目录文件夹打包模式（Windows/Linux/macOS）
+      path.join(this.resourcesPath, 'backend', 'backend', 'backend.exe'),
+      path.join(this.resourcesPath, 'backend', 'backend', 'backend'),
+      // 3. 支持 Python 源码配合内置 Python 解释器打包模式
+      path.join(this.resourcesPath, 'backend', 'backend_main.py'),
+      path.join(this.resourcesPath, 'backend', 'app', 'backend_main.py'),
     ];
 
     const searchPaths = app.isPackaged ? prodPaths : devPaths;

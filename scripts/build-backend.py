@@ -20,11 +20,24 @@ def get_pyinstaller_cmd(
     build_dir: Path,
     spec_file: Path = None
 ) -> list:
-    """构建 PyInstaller 命令"""
     src_dir = project_root / "app"
 
+    # 优先使用项目虚拟环境 .venv 中的 pyinstaller 进行打包，避免污染或遗漏依赖
+    pyinstaller_bin = "pyinstaller"
+    venv_dir = project_root / ".venv"
+    if sys.platform == "win32":
+        venv_pyinstaller = venv_dir / "Scripts" / "pyinstaller.exe"
+    else:
+        venv_pyinstaller = venv_dir / "bin" / "pyinstaller"
+
+    if venv_pyinstaller.exists():
+        pyinstaller_bin = str(venv_pyinstaller)
+        logger.info(f"Using project virtual environment pyinstaller: {pyinstaller_bin}")
+    else:
+        logger.warning("Project virtual environment pyinstaller not found, falling back to system 'pyinstaller'")
+
     cmd = [
-        "pyinstaller",
+        pyinstaller_bin,
         "--name", "backend",
         "--onefile",
         "--console",
