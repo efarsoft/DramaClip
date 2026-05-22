@@ -9,8 +9,8 @@ files:
   - "!node_modules/**/*"
 extraResources:
   # 打包 Python 后端
-  - from: dist/backend/
-    to: backend/
+  - from: dist-backend
+    to: backend
     filter:
       - "**/*"
   # 打包 FFmpeg（安装后开箱即用）
@@ -23,7 +23,10 @@ asarUnpack:
   - "**/*.exe"
 win:
   target:
-    - target: nsis
+    - target: zip
+      arch:
+        - x64
+    - target: dir
       arch:
         - x64
   icon: build/icon.ico

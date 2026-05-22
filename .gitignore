@@ -19,6 +19,8 @@ node_modules
 dist/
 dist-electron/
 /release/
+/dist-backend/
+/build/
 
 # 模型目录
 /resources/models/

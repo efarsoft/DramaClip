@@ -41,7 +41,6 @@ def get_pyinstaller_cmd(
         "--name", "backend",
         "--onefile",
         "--console",
-        "--clean",
         "--noconfirm",
         "--distpath", str(dist_dir),
         "--workpath", str(build_dir),
@@ -62,7 +61,7 @@ def get_pyinstaller_cmd(
 
 def build_backend():
     """执行打包"""
-    dist_dir = project_root / "dist" / "backend"
+    dist_dir = project_root / "dist-backend"
     build_dir = project_root / "build"
 
     # 创建输出目录
