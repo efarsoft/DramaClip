@@ -384,13 +384,25 @@ class SpeakerDiarizationService:
                 n_fft=frame_length, hop_length=hop_length
             )[0]
             
+            # 安全计算 pitch 的统计特征，防止全 NaN 帧或空切片触发 NumPy/Librosa 运行时警告
+            if pitch is not None and len(pitch) > 0 and not np.isnan(pitch).all():
+                pitch_mean = np.nanmean(pitch)
+                pitch_std = np.nanstd(pitch)
+                if np.isnan(pitch_mean):
+                    pitch_mean = 0.0
+                if np.isnan(pitch_std):
+                    pitch_std = 0.0
+            else:
+                pitch_mean = 0.0
+                pitch_std = 0.0
+
             # 组合特征
             feature_vector = np.concatenate([
                 np.mean(mfcc, axis=1),           # 13维
                 np.std(mfcc, axis=1),            # 13维
                 np.mean(delta_mfcc, axis=1),     # 13维
                 np.mean(delta2_mfcc, axis=1),    # 13维
-                [np.nanmean(pitch), np.nanstd(pitch)],  # 2维
+                [pitch_mean, pitch_std],         # 2维
                 [np.mean(rms), np.std(rms)],     # 2维
                 [np.mean(zcr)],                  # 1维
                 np.mean(contrast, axis=1),       # 7维 (n_bands+1=7)

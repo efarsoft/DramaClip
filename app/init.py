@@ -137,14 +137,21 @@ def init_all():
     os.environ["XDG_CACHE_HOME"] = str(workspace_models / "styletts2")
     os.environ["SUPERONIC_CACHE_DIR"] = str(workspace_models / "supertonic")
 
-    # 使用用户提供的令牌登录 ModelScope 平台
-    try:
-        from modelscope.hub.api import HubApi
-        api = HubApi()
-        api.login('ms-17a92991-9999-43fe-a68e-0dd996ca18dd')
-        logger.info("[Init] 已成功使用提供令牌完成 ModelScope 平台身份验证")
-    except Exception as ms_login_err:
-        logger.warning(f"[Init] ModelScope 平台身份验证失败: {ms_login_err}")
+    # 使用用户提供的令牌登录 ModelScope 平台 (异步执行，避免因网络响应慢或断网阻塞主线程 IPC 建立)
+    def do_modelscope_login():
+        try:
+            from modelscope.hub.api import HubApi
+            api = HubApi()
+            api.login('ms-17a92991-9999-43fe-a68e-0dd996ca18dd')
+            logger.info("[Init] 已成功使用提供令牌完成 ModelScope 平台身份验证")
+        except Exception as ms_login_err:
+            logger.warning(f"[Init] ModelScope 平台身份验证失败: {ms_login_err}")
+
+    import threading
+    login_thread = threading.Thread(target=do_modelscope_login, name="ModelScopeAuthThread", daemon=True)
+    login_thread.start()
+    logger.info("[Init] 后台 ModelScope 平台身份验证已启动")
+
 
     logger.info("=" * 60)
     logger.info("开始应用初始化...")
