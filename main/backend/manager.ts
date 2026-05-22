@@ -149,8 +149,25 @@ export class BackendManager extends EventEmitter {
       try {
         // 处理 Python 脚本（开发模式）
         const isPythonScript = this.backendPath.endsWith('.py');
-        const command = isPythonScript ? 'python' : this.backendPath;
-        const args = isPythonScript ? [this.backendPath] : [];
+        let command: string;
+        const args: string[] = [];
+
+        if (isPythonScript) {
+          // 优先使用项目 .venv 中的 Python 解释器，确保加载正确的虚拟环境和依赖
+          const path = require('path');
+          const fs = require('fs');
+          const venvPython = path.join(process.cwd(), '.venv', 'Scripts', 'python.exe');
+          if (fs.existsSync(venvPython)) {
+            command = venvPython;
+            console.log('[Main][BackendManager] Using project venv Python:', venvPython);
+          } else {
+            command = 'python';
+            console.warn('[Main][BackendManager] Project .venv not found, falling back to system Python');
+          }
+          args.push(this.backendPath);
+        } else {
+          command = this.backendPath;
+        }
 
         this.process = spawn(command, args, {
           stdio: ['pipe', 'pipe', 'pipe'],
