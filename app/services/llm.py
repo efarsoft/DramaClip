@@ -15,8 +15,33 @@ from google.generativeai.types import *
 import subprocess
 from typing import Union, TextIO
 
-from app.config import config
+from app.config.unified_config import get_config
 from app.utils.utils import clean_model_output
+
+# 获取统一配置实例
+_config = get_config()
+
+
+def _get_app_config(key: str, default=None):
+    """获取旧版配置项（向后兼容）"""
+    return _config.get_legacy_app_config(key, default)
+
+
+# 兼容旧的 config 对象访问
+class _ConfigCompat:
+    """兼容旧的 config.app.get() 调用"""
+    class _AppCompat:
+        @staticmethod
+        def get(key: str, default=None):
+            return _get_app_config(key, default)
+        
+        def __getitem__(self, key: str):
+            return _get_app_config(key, "")
+    
+    app = _AppCompat()
+
+
+config = _ConfigCompat()
 
 _max_retries = 5
 
@@ -157,7 +182,6 @@ def _generate_response(prompt: str, llm_provider: str = None) -> str:
             model_name = config.app.get("moonshot_model_name")
             base_url = "https://api.moonshot.cn/v1"
         elif llm_provider == "ollama":
-            # api_key = config.app.get("openai_api_key")
             api_key = "ollama"  # any string works but you are required to have one
             model_name = config.app.get("ollama_model_name")
             base_url = config.app.get("ollama_base_url", "")
@@ -655,9 +679,6 @@ def gemini_video2json(video_origin_name: str, video_origin_path: str, video_plot
         logger.debug(f"视频当前状态(ACTIVE才可用): {gemini_video_file.state.name}")
     if gemini_video_file.state.name == "FAILED":
         raise ValueError(gemini_video_file.state.name)
-    # except Exception as err:
-    #     logger.error(f"上传视频至 Google cloud 失败, 请检查 VPN 配置和 APIKey 是否正确 \n{traceback.format_exc()}")
-    #     raise TimeoutError(f"上传视频至 Google cloud 失败, 请检查 VPN 配置和 APIKey 是否正确; {err}")
 
     streams = model.generate_content([prompt, gemini_video_file], stream=True)
     response = []

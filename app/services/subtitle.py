@@ -4,19 +4,21 @@ import re
 import traceback
 from typing import Optional
 
-# from faster_whisper import WhisperModel
+from faster_whisper import WhisperModel
 from timeit import default_timer as timer
 from loguru import logger
 import google.generativeai as genai
 from moviepy import VideoFileClip
 import os
 
-from app.config import config
+from app.config.unified_config import config
 from app.utils import utils
 
-model_size = config.whisper.get("model_size", "faster-whisper-large-v2")
-device = config.whisper.get("device", "cpu")
-compute_type = config.whisper.get("compute_type", "int8")
+# 从 UnifiedConfig 获取 ASR 配置
+_asr_config = config.get_asr_config()
+model_size = _asr_config.get("model", "large-v3")
+device = _asr_config.get("device", "cpu")
+compute_type = "int8"  # faster-whisper 默认计算类型
 model = None
 
 
@@ -102,6 +104,7 @@ def create(audio_file, subtitle_file: str = ""):
     if not subtitle_file:
         subtitle_file = f"{audio_file}.srt"
 
+    assert model is not None
     segments, info = model.transcribe(
         audio_file,
         beam_size=5,
@@ -132,7 +135,7 @@ def create(audio_file, subtitle_file: str = ""):
 
     for segment in segments:
         words_idx = 0
-        words_len = len(segment.words)
+        words_len = len(segment.words) if segment.words else 0
 
         seg_start = 0
         seg_end = 0
@@ -350,11 +353,11 @@ def create_with_gemini(audio_file: str, subtitle_file: str = "", api_key: Option
         logger.error("Gemini API key is not provided")
         return None
 
-    genai.configure(api_key=api_key)
+    genai.configure(api_key=api_key)  # type: ignore
 
     logger.info(f"开始使用Gemini模型处理音频文件: {audio_file}")
     
-    model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+    model = genai.GenerativeModel(model_name="gemini-1.5-flash")  # type: ignore
     prompt = "生成这段语音的转录文本。请以SRT格式输出，包含时间戳。"
 
     try:
@@ -439,24 +442,3 @@ if __name__ == "__main__":
     video_file = "/Users/apple/Desktop/home/NarratoAI/storage/temp/merge/qyn2-2-720p.mp4"
 
     extract_audio_and_create_subtitle(video_file, subtitle_file)
-
-    # subtitles = file_to_subtitles(subtitle_file)
-    # print(subtitles)
-
-    # # script_file = f"{task_dir}/script.json"
-    # # with open(script_file, "r") as f:
-    # #     script_content = f.read()
-    # # s = json.loads(script_content)
-    # # script = s.get("script")
-    # #
-    # # correct(subtitle_file, script)
-
-    # subtitle_file = f"{task_dir}/subtitle111.srt"
-    # create(audio_file, subtitle_file)
-
-    # # # 使用Gemini模型处理音频
-    # # gemini_api_key = config.app.get("gemini_api_key")  # 请替换为实际的API密钥
-    # # gemini_subtitle_file = create_with_gemini(audio_file, api_key=gemini_api_key)
-    # #
-    # # if gemini_subtitle_file:
-    # #     print(f"Gemini生成的字幕文件: {gemini_subtitle_file}")

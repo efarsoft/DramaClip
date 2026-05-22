@@ -13,7 +13,7 @@ import json
 import requests
 from typing import Dict, Any, Optional
 from loguru import logger
-from app.config import config
+from app.config.unified_config import config
 from app.utils.utils import get_uuid, storage_dir
 from app.services.subtitle_text import read_subtitle_text
 # 导入新的提示词管理系统
@@ -61,7 +61,7 @@ class SubtitleAnalyzer:
 
     def _detect_provider(self):
         """根据配置自动检测提供商类型"""
-        return config.app.get('text_llm_provider', 'gemini').lower()
+        return config.get_legacy_app_config('text_llm_provider', 'gemini').lower()
     
     def _init_headers(self):
         """初始化HTTP请求头"""
@@ -623,8 +623,8 @@ class SubtitleAnalyzer:
 
 
 def analyze_subtitle(
-        subtitle_content: str = None,
-        subtitle_file_path: str = None,
+        subtitle_content: Optional[str] = None,
+        subtitle_file_path: Optional[str] = None,
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         base_url: Optional[str] = None,
@@ -682,9 +682,9 @@ def analyze_subtitle(
 
 
 def generate_narration_script(
-    short_name: str = None,
-    plot_analysis: str = None,
-    subtitle_content: str = None,
+    short_name: Optional[str] = None,
+    plot_analysis: Optional[str] = None,
+    subtitle_content: Optional[str] = None,
     api_key: Optional[str] = None,
     model: Optional[str] = None,
     base_url: Optional[str] = None,

@@ -85,35 +85,77 @@ class IpcClient {
   }
 
   /**
-   * 执行后端调用
+   * 执行后端调用（带超时支持）
+   * @param method RPC 方法名
+   * @param params 参数
+   * @param options 调用选项
    */
   async call<T = unknown>(
     method: string,
     params?: Record<string, unknown>,
-    timeout?: number
+    options: { timeout?: number; retries?: number } = {}
   ): Promise<T> {
+    const { timeout = 60000, retries = 0 } = options;  // 默认 60 秒超时
+
     console.debug(`[IPC] 调用 ${method}`, params ?? {});
-    try {
-      if (window.electronAPI) {
-        const response = await window.electronAPI.backend.call<T>(method, params);
-        if (!response.success) {
-          const error = response.error;
-          const message = error?.message || 'Unknown error';
-          const code = error?.code || -32000;
-          console.error(`[IPC] 调用 ${method} 失败`, { code, message, data: error?.data });
-          throw new IpcException(code, message, error?.data);
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        if (window.electronAPI) {
+          // 使用 Promise.race 实现超时
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            const timerId = setTimeout(() => {
+              reject(new IpcException(-32004, `调用 ${method} 超时 (${timeout}ms)`));
+            }, timeout);
+            // 清理定时器
+            setTimeout(() => clearTimeout(timerId), timeout + 100);
+          });
+
+          const response = await Promise.race([
+            window.electronAPI.backend.call<T>(method, params),
+            timeoutPromise,
+          ]);
+
+          if (!response.success) {
+            const error = response.error;
+            const message = error?.message || 'Unknown error';
+            const code = error?.code || -32000;
+            console.error(`[IPC] 调用 ${method} 失败`, { code, message, data: error?.data });
+            throw new IpcException(code, message, error?.data);
+          }
+
+          console.debug(`[IPC] ${method} 成功`);
+          return response.data as T;
         }
-        console.debug(`[IPC] ${method} 成功`, { dataType: typeof response.data, hasData: response.data !== undefined });
-        return response.data as T;
+
+        console.warn(`[IPC] 后端不可用 (开发模式)`);
+        throw new IpcException(-32000, 'No backend available in dev mode');
+
+      } catch (err) {
+        if (err instanceof IpcException) {
+          // IpcException 可能是超时，此时可以重试
+          if (attempt < retries && err.code === -32004) {
+            console.warn(`[IPC] ${method} 超时，第 ${attempt + 1} 次重试...`);
+            await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+            continue;
+          }
+          throw err;
+        }
+
+        // 其他错误
+        if (attempt < retries) {
+          console.warn(`[IPC] ${method} 失败 (${attempt + 1}/${retries}):`, err);
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+          continue;
+        }
+
+        console.error(`[IPC] ${method} 发生未知错误`, err);
+        throw new IpcException(-32001, `调用 ${method} 异常: ${err instanceof Error ? err.message : String(err)}`);
       }
-      // Dev mode: no backend available
-      console.warn(`[IPC] 后端不可用 (开发模式)`);
-      throw new IpcException(-32000, 'No backend available in dev mode');
-    } catch (err) {
-      if (err instanceof IpcException) throw err;
-      console.error(`[IPC] ${method} 发生未知错误`, err);
-      throw new IpcException(-32001, `调用 ${method} 异常: ${err instanceof Error ? err.message : String(err)}`);
     }
+
+    // 不应到达这里
+    throw new IpcException(-32001, 'Unreachable');
   }
 }
 
@@ -196,6 +238,12 @@ export const clipApi = {
     ipcClient.call<{ success: boolean; task_id?: string; message?: string }>('clip.stop', {
       task_id: taskId,
     }),
+  /** 生成AI标题 */
+  generateTitle: (projectId: string, count: number = 5) =>
+    ipcClient.call<TitleGenerationResult>('clip.generateTitle', {
+      project_id: projectId,
+      count,
+    }),
 };
 
 // 导出相关 API
@@ -208,6 +256,11 @@ export const exportApi = {
     }),
   getProgress: (taskId: string) =>
     ipcClient.call<ExportProgress>('export.getProgress', { task_id: taskId }),
+  /** 取消正在运行的导出任务 */
+  cancel: (taskId: string) =>
+    ipcClient.call<{ success: boolean; task_id?: string; message?: string }>('export.cancel', {
+      task_id: taskId,
+    }),
 };
 
 // 设置相关 API
@@ -218,13 +271,61 @@ export const settingsApi = {
 };
 
 // 系统相关 API
+export interface StorageInfo {
+  outputsDir: string;
+  outputsCount: number;
+  outputsSize: number;
+  cacheSize: number;
+  tempSize: number;
+  totalSize: number;
+}
+
 export const systemApi = {
   getVersion: () => ipcClient.call<{ version: string; name: string }>('system.getVersion'),
   getFFmpegInfo: () =>
     ipcClient.call<{ available: boolean; version: string; hwaccel: string }>(
       'system.getFFmpegInfo'
     ),
+  getStorageInfo: () => ipcClient.call<StorageInfo>('system.getStorageInfo'),
   ping: () => ipcClient.call<{ pong: boolean }>('system.ping', { timestamp: Date.now() }),
+};
+
+// 小工具相关 API
+export interface TranscribeSegment {
+  id: string;
+  text: string;
+  start: number;
+  end: number;
+  speaker?: string;
+}
+
+export interface TranscribeResult {
+  segments: TranscribeSegment[];
+  prose: string;
+}
+
+export interface TranscribeTaskStatus {
+  task_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  progress: number;
+  message: string;
+  results?: TranscribeResult;
+  error?: string;
+}
+
+export const toolsApi = {
+  transcribe: (videoPath: string, mode: 'fast' | 'precise') =>
+    ipcClient.call<{ task_id: string; status: string }>('tools.transcribe', {
+      video_path: videoPath,
+      mode,
+    }),
+  getProgress: (taskId: string) =>
+    ipcClient.call<TranscribeTaskStatus>('tools.getProgress', { task_id: taskId }),
+  rewrite: (script: string, promptStyle: 'shocking' | 'suspense' | 'emotional' | 'rewriter') =>
+    ipcClient.call<{ rewritten: string }>('tools.rewrite', {
+      script,
+      prompt_style: promptStyle,
+    }),
 };
 
 // ---- 模型管理 ----
@@ -346,6 +447,28 @@ export interface ClipRecommendation {
   recommended_modes: string[];
 }
 
+export interface GeneratedTitle {
+  title: string;
+  style: 'shocking' | 'suspense' | 'emotional' | 'humorous' | 'curiosity' | 'controversial';
+  style_label: string;
+  description: string;
+  score: number;
+}
+
+export interface GeneratedIntro {
+  short: string;
+  medium: string;
+  long: string;
+  hashtags: string[];
+}
+
+export interface TitleGenerationResult {
+  success: boolean;
+  titles: GeneratedTitle[];
+  intro: GeneratedIntro;
+  platform_suggestions: string[];
+}
+
 export interface ClipProgress {
   task_id: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
@@ -385,7 +508,7 @@ export interface OutputConfig {
 /** TTS（语音合成）配置 */
 export interface TtsConfig {
   enabled: boolean;
-  engine: 'openai' | 'edge' | 'elevenlabs' | 'fishspeech';
+  engine: 'openai' | 'edge' | 'elevenlabs' | 'fishspeech' | 'supertonic' | 'styletts2' | 'soulvoice' | string;
   voice: string;
   speed: number;
   pitch: number;
@@ -394,10 +517,12 @@ export interface TtsConfig {
 /** ASR（语音识别）配置 */
 export interface AsrConfig {
   enabled: boolean;
-  engine: 'whisper' | 'paraformer' | 'sensevoice' | 'faster_whisper';
+  engine: 'whisper' | 'paraformer' | 'sensevoice' | 'faster_whisper' | string;
   model: string;
-  language: 'auto' | 'zh' | 'en' | 'ja';
+  language: 'auto' | 'zh' | 'en' | 'ja' | string;
   translate: boolean;
+  enable_emotion?: boolean;
+  enable_audio_events?: boolean;
 }
 
 /** ViT（视觉分析）配置 */

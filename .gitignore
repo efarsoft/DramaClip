@@ -18,8 +18,10 @@ node_modules
 # 构建产物
 dist/
 dist-electron/
+/release/
 
 # 模型目录
+/resources/models/
 /models/
 *.model
 

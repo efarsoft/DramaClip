@@ -1,0 +1,128 @@
+/**
+ * WorkspacePage 样式模块
+ * 工作台页面样式
+ */
+
+/* 容器样式 */
+.workspaceContainer {
+  height: 100vh;
+  background: var(--bg-deep);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 头部样式 */
+.workspaceHeader {
+  padding: 24px 32px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  flex-shrink: 0;
+}
+
+.headerTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.backButton {
+  color: #6b7b9d;
+  font-size: 14px;
+}
+
+.backButton:hover {
+  color: #00d4ff;
+}
+
+.projectInfo {
+  flex: 1;
+  margin-left: 24px;
+}
+
+.projectTitle {
+  font-size: 20px;
+  font-weight: 600;
+  color: #e0e6ed;
+  margin-bottom: 4px;
+}
+
+.projectMeta {
+  font-size: 13px;
+  color: #6b7b9d;
+}
+
+/* 步骤条样式 */
+.stepBar {
+  display: flex;
+  gap: 8px;
+  padding: 0 32px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  flex-shrink: 0;
+}
+
+.stepItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border-bottom: 2px solid transparent;
+  color: #6b7b9d;
+}
+
+.stepItem:hover {
+  color: #c8d0dc;
+}
+
+.stepItem.active {
+  color: #00d4ff;
+  border-bottom-color: #00d4ff;
+}
+
+.stepItem.completed {
+  color: #10b981;
+}
+
+.stepIcon {
+  font-size: 16px;
+}
+
+.stepLabel {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* 内容区域 */
+.contentArea {
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* 加载状态 */
+.loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  color: #6b7b9d;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .workspaceHeader {
+    padding: 16px;
+  }
+
+  .stepBar {
+    padding: 0 16px;
+    overflow-x: auto;
+  }
+
+  .stepLabel {
+    font-size: 13px;
+  }
+}

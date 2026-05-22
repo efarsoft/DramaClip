@@ -6,10 +6,30 @@
 
 - 🎬 **智能高光检测**：多维度分析（音频爆点、台词情绪、画面特征、镜头节奏）
 - 🤖 **AI 驱动**：集成 LLM 视觉分析、ASR 语音识别、台词情绪分析
+- 🛡️ **智能消重与台词保护**：首创基于 SRT 字幕的**静音区避让 (智能 Jitter) 算法**，配合极微变速、等尺寸微缩放、画面色彩抖动及文件指纹抹除，零损伤剧情连续性，在平台眼里全是“原创孤品”！
 - 🎙️ **AI 解说**：支持本地 StyleTTS2 / Edge TTS / Azure Speech / 腾讯 TTS / CosyVoice
 - ✂️ **智能剪辑**：场景分割 → 高光筛选 → 片段拼接 → 字幕合成
 - 📦 **批量处理**：支持多集剧集批量分析和处理
 - 🖥️ **桌面应用**：基于 Electron 的跨平台桌面客户端
+
+## 🛡️ 智能消重与台词静音区避让系统
+
+本工具在行业中首创了**剧情零损伤的影院级去重闭环系统**，专门解决短剧剪辑中同质化素材在短视频平台（如抖音、快手、视频号等）的排重机制（重合度检测）：
+
+1. **静音区避让与台词防吞 (Smart Jitter)**:
+   - **绝对禁止盲切**：避免纯数学随机加减导致“吞字”或“闪帧”。
+   - **台词保护区**：自动读取同名 `.srt` 字幕，将每行字幕的 `[开始 - 0.2s, 结束 + 0.15s]` 标定为**台词保护禁区**。
+   - **智能避让与抖动**：当首尾裁切点落在禁区内时，自动向外避让（Snap）保留台词完整性；若落在安静的空白间隙，则允许在物理间隙边界内进行 `+/- 0.1s ~ 0.3s` 的随机安全抖动（Jitter）。
+2. **极微变速抖动 (Micro-Speed Jitter)**:
+   - 为每个片段应用极微弱的随机变速（`0.996` - `1.004` 之间），拉开与源视频的时间轴与波形对齐。
+   - 自动启用 FFmpeg `atempo` 音频滤镜进行**变速不变调（变调补偿）**处理，重新编码为 `AAC` 格式，音质饱满连续。
+3. **等尺寸画面微缩放 (Micro-Scaling)**:
+   - 对画面应用 `[1.2%, 1.8%]` 的随机微缩放（`scale_factor`）。
+   - 裁切出的局部画面通过 `scale` 滤镜等比例**拉伸回原定标准输出尺寸**（如竖屏 1080x1920），彻底破坏像素哈希指纹的同时防止不同片段产生分辨率偏差或黑边。
+4. **像素与亮度色彩微抖动 (Visual eq)**:
+   - 叠加 `eq` 滤镜对对比度进行 `[0.99, 1.01]` 的轻微抖动，亮度进行 `[-0.01, 0.01]` 微幅波动，改变每一帧的特征向量与色域哈希。
+5. **元数据指纹彻底擦除 (Metadata Cleansing)**:
+   - 在片段分割与最终拼接（Concat）的 FFmpeg 命令中全程注入 `-map_metadata -1` 参数，物理上百分之百抹除原视频相机的创建时间、地理位置、编码工具等设备标签。
 
 ## 🛠️ 技术栈
 
@@ -27,11 +47,12 @@
 - **JSON-RPC 2.0** - 进程间通信协议
 
 ### AI/ML
-- **OpenAI API** - LLM 视觉分析
-- **librosa** - 音频分析
-- **OpenCV** - 视频处理
-- **PySceneDetect** - 场景分割
-- **jieba** - 中文分词
+- **OpenAI API / Dashscope (Qwen)** - LLM 视觉与剧本分析
+- **faster-whisper / SenseVoice** - 离线高精度 ASR 语音识别与情感/音频事件检测
+- **librosa** - 音频爆点与节奏分析
+- **OpenCV** - 视频智能帧内容检测
+- **PySceneDetect** - 物理镜头与场景分割
+- **jieba** - 中文台词分词与文本挖掘
 
 ## 📦 安装
 
@@ -132,17 +153,21 @@ DramaClip/
 
 ```toml
 [app]
-# LLM 配置
+# LLM 兼容配置 (如 Dashscope / 通义千问等兼容 OpenAI 接口的模型)
 vision_llm_provider = "openai"
-vision_openai_model_name = "Qwen/Qwen2.5-VL-32B-Instruct"
-vision_openai_api_key = "your-api-key"
-vision_openai_base_url = "https://api.siliconflow.cn/v1"
+vision_openai_model_name = "qwen3.6-plus"
+vision_openai_api_key = "your-dashscope-api-key"
+vision_openai_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
-# TTS 配置
-tts_engine = "styletts2"
+# ASR 语音识别配置
+[asr]
+engine = "faster_whisper"    # ASR引擎: faster_whisper | sensevoice
+model = "large-v3"           # whisper 模型尺寸或 SenseVoice 型号
+device = "auto"              # 自动检测 cuda/cpu 硬件加速
+enable_emotion = true        # 启用情绪识别（SenseVoice 独有）
 
+# 视频剪辑高光打分权重
 [highlight]
-# 高光检测权重
 audio_weight = 0.4
 emotion_weight = 0.3
 visual_weight = 0.2

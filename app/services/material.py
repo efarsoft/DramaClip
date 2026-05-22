@@ -11,19 +11,31 @@ from typing import List, Optional
 from loguru import logger
 from moviepy.video.io.VideoFileClip import VideoFileClip
 
-from app.config import config
+from app.config.unified_config import config
 from app.models.schema import VideoAspect, VideoConcatMode, MaterialInfo
 from app.utils import utils
+from app.utils import ffmpeg_utils
 from app.utils.ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
 requested_count = 0
 
 
-def get_api_key(cfg_key: str):
-    api_keys = config.app.get(cfg_key)
+def get_api_key(key_type: str):
+    """获取素材源 API Key
+    
+    Args:
+        key_type: 'pexels' 或 'pixabay'
+    """
+    if key_type == "pexels":
+        api_keys = config.get_pexels_api_keys()
+    elif key_type == "pixabay":
+        api_keys = config.get_pixabay_api_keys()
+    else:
+        api_keys = []
+    
     if not api_keys:
         raise ValueError(
-            f"\n\n##### {cfg_key} is not set #####\n\nPlease set it in the config.toml file: {config.config_file}\n\n"
-            f"{utils.to_json(config.app)}"
+            f"\n\n##### {key_type}_api_keys is not set #####\n\n"
+            f"Please set it in the settings.json file.\n\n"
         )
 
     # if only one key is provided, return it
@@ -43,18 +55,19 @@ def search_videos_pexels(
     aspect = VideoAspect(video_aspect)
     video_orientation = aspect.name
     video_width, video_height = aspect.to_resolution()
-    api_key = get_api_key("pexels_api_keys")
+    api_key = get_api_key("pexels")
     headers = {"Authorization": api_key}
     # Build URL
     params = {"query": search_term, "per_page": 20, "orientation": video_orientation}
     query_url = f"https://api.pexels.com/videos/search?{urlencode(params)}"
-    logger.info(f"searching videos: {query_url}, with proxies: {config.proxy}")
+    proxy_config = config.get_proxy_config()
+    logger.info(f"searching videos: {query_url}, with proxies: {proxy_config}")
 
     try:
         r = requests.get(
             query_url,
             headers=headers,
-            proxies=config.proxy,
+            proxies=proxy_config,
             verify=False,
             timeout=(30, 60),
         )
@@ -107,11 +120,12 @@ def search_videos_pixabay(
         "key": api_key,
     }
     query_url = f"https://pixabay.com/api/videos/?{urlencode(params)}"
-    logger.info(f"searching videos: {query_url}, with proxies: {config.proxy}")
+    proxy_config = config.get_proxy_config()
+    logger.info(f"searching videos: {query_url}, with proxies: {proxy_config}")
 
     try:
         r = requests.get(
-            query_url, proxies=config.proxy, verify=False, timeout=(30, 60)
+            query_url, proxies=proxy_config, verify=False, timeout=(30, 60)
         )
         response = r.json()
         video_items = []
@@ -163,10 +177,11 @@ def save_video(video_url: str, save_dir: str = "") -> str:
         return video_path
 
     # if video does not exist, download it
+    proxy_config = config.get_proxy_config()
     with open(video_path, "wb") as f:
         f.write(
             requests.get(
-                video_url, proxies=config.proxy, verify=False, timeout=(60, 240)
+                video_url, proxies=proxy_config, verify=False, timeout=(60, 240)
             ).content
         )
 
@@ -221,7 +236,7 @@ def download_videos(
     )
     video_paths = []
 
-    material_directory = config.app.get("material_directory", "").strip()
+    material_directory = config.get_legacy_app_config("material_directory", "").strip()
     if material_directory == "task":
         material_directory = utils.task_dir(task_id)
     elif material_directory and not os.path.isdir(material_directory):
@@ -389,7 +404,6 @@ def save_clip_video(timestamp: str, origin_video: str, save_dir: str = "") -> st
 
         # 计算剪辑时长
         duration = end - start
-        # logger.info(f"开始剪辑视频: {format_timestamp(start)} - {format_timestamp(end)}，时长 {format_timestamp(duration)}")
 
         # 获取硬件加速选项
         hwaccel = _detect_hardware_acceleration()
@@ -432,9 +446,6 @@ def save_clip_video(timestamp: str, origin_video: str, save_dir: str = "") -> st
             ffmpeg_cmd.insert(-1, "23")
 
         # 执行FFmpeg命令
-        # logger.info(f"裁剪视频片段: {timestamp} -> {ffmpeg_start_time}到{ffmpeg_end_time}")
-        # logger.debug(f"执行命令: {' '.join(ffmpeg_cmd)}")
-
         # 在Windows系统上使用UTF-8编码处理输出，避免GBK编码错误
         is_windows = os.name == 'nt'
         if is_windows:
@@ -503,7 +514,7 @@ def clip_videos(task_id: str, timestamp_terms: List[str], origin_video: str, pro
     video_paths = {}
     total_items = len(timestamp_terms)
     for index, item in enumerate(timestamp_terms):
-        material_directory = config.app.get("material_directory", "").strip()
+        material_directory = config.get_legacy_app_config("material_directory", "").strip()
         try:
             saved_video_path = save_clip_video(timestamp=item, origin_video=origin_video, save_dir=material_directory)
             if saved_video_path:
@@ -517,7 +528,6 @@ def clip_videos(task_id: str, timestamp_terms: List[str], origin_video: str, pro
             return {}
 
     logger.success(f"裁剪 {len(video_paths)} videos")
-    # logger.debug(json.dumps(video_paths, indent=4, ensure_ascii=False))
     return video_paths
 
 

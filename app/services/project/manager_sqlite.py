@@ -225,9 +225,9 @@ class ProjectManager:
         existing_videos = self.db.get_videos(project_id)
         existing_paths = {v["path"]: v for v in existing_videos}
         
-        # 扫描目录
+        # 扫描目录 (只扫描当前目录)
         try:
-            for file_path in videos_dir.rglob("*"):  # 递归扫描
+            for file_path in videos_dir.glob("*"):  # 非递归扫描
                 if file_path.is_file() and file_path.suffix.lower() in self.VIDEO_EXTENSIONS:
                     str_path = str(file_path)
                     scanned_paths.add(str_path)
@@ -343,17 +343,31 @@ class ProjectManager:
         current_videos = self.db.get_videos(project_id)
         next_order = len(current_videos)
 
-        imported = []
+        # 展开所有文件夹，扫描并去重/排序视频文件
+        expanded_paths = []
         for video_path in video_paths:
             src_path = Path(video_path)
             if not src_path.exists():
-                logger.warning(f"Video file not found: {video_path}")
+                logger.warning(f"Video file/folder not found: {video_path}")
                 continue
 
-            if src_path.suffix.lower() not in self.VIDEO_EXTENSIONS:
-                logger.warning(f"Skipping unsupported format: {video_path}")
-                continue
+            if src_path.is_dir():
+                # 只读取当前选择目录的文件夹，不需要读取子目录相关视频
+                dir_videos = []
+                for sub_path in src_path.glob("*"):
+                    if sub_path.is_file() and sub_path.suffix.lower() in self.VIDEO_EXTENSIONS:
+                        dir_videos.append(sub_path)
+                # 对该目录下的视频路径进行排序，保证按文件名顺序导入
+                dir_videos.sort(key=lambda p: str(p))
+                expanded_paths.extend(dir_videos)
+            else:
+                if src_path.suffix.lower() in self.VIDEO_EXTENSIONS:
+                    expanded_paths.append(src_path)
+                else:
+                    logger.warning(f"Skipping unsupported format: {video_path}")
 
+        imported = []
+        for src_path in expanded_paths:
             video_id = str(uuid.uuid4())
             now = datetime.now().isoformat()
 
@@ -378,7 +392,7 @@ class ProjectManager:
                 next_order += 1
                 
             except Exception as e:
-                logger.error(f"Failed to import {video_path}: {e}")
+                logger.error(f"Failed to import {src_path}: {e}")
 
         # 更新项目视频数量
         video_count = self.db.get_video_count(project_id)

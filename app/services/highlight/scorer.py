@@ -18,7 +18,6 @@ import librosa
 import numpy as np
 import cv2
 import jieba
-from pyscenetect import detect_scenes
 
 from loguru import logger
 
@@ -320,34 +319,53 @@ class HighlightScorer:
 
     def _score_rhythm(self, video_path: str) -> float:
         """
-        镜头节奏分析 - 使用PySceneDetect检测镜头切换
+        镜头节奏分析 - 基于帧间差异检测画面运动节奏
+
+        注意：此方法接收的是已切好的单个场景片段，不适合再跑场景检测。
+        改用帧间差异方差来衡量画面变化节奏。
 
         Returns:
-            0.0 ~ 1.0 的打分（高分=节奏快、剪辑密集）
+            0.0 ~ 1.0 的打分（高分=节奏快、画面变化频繁）
         """
         try:
-            # 使用PySceneDetect检测场景切换
-            scene_list = detect_scenes(video_path, threshold=30)
-
-            if not scene_list:
-                return 0.5  # 默认中等节奏
-
-            # 计算镜头切换频率
-            num_scenes = len(scene_list)
             cap = cv2.VideoCapture(video_path)
-            fps = cap.get(cv2.CAP_PROP_FPS)
+            if not cap.isOpened():
+                return 0.5
+
+            fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
             frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            duration = frame_count / fps if fps > 0 else 1
+            if frame_count < 2:
+                cap.release()
+                return 0.5
+
+            # 均匀采样最多 30 帧，计算相邻帧差分
+            n_samples = min(30, frame_count)
+            step = frame_count // n_samples
+            diffs = []
+            prev_gray = None
+
+            for i in range(n_samples):
+                cap.set(cv2.CAP_PROP_POS_FRAMES, i * step)
+                ret, frame = cap.read()
+                if not ret:
+                    continue
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                if prev_gray is not None:
+                    diff = cv2.absdiff(prev_gray, gray).mean()
+                    diffs.append(diff)
+                prev_gray = gray
+
             cap.release()
 
-            # 镜头切换频率（个/秒）
-            scene_freq = num_scenes / duration
+            if not diffs:
+                return 0.5
 
-            # 综合打分：切换频率高→节奏快→高分
-            # 短剧高光通常节奏较快，2-4个镜头/秒较为理想
-            score = min(1.0, scene_freq / 4.0)
+            # 平均帧差越大 → 运动越剧烈；方差越大 → 节奏变化丰富
+            mean_diff = np.mean(diffs)
+            std_diff = np.std(diffs)
+            score = min(1.0, mean_diff / 30.0 * 0.6 + min(1.0, std_diff / 15.0) * 0.4)
 
-            logger.debug(f"Rhythm score: {score:.3f} (scene_freq={scene_freq:.2f}/s)")
+            logger.debug(f"Rhythm score: {score:.3f} (mean_diff={mean_diff:.2f}, std={std_diff:.2f})")
             return score
 
         except Exception as e:

@@ -1,9 +1,75 @@
 """
 方法路由与分发
+P0 收尾：采用显式导入，依赖清晰、可维护性更高
 """
 
 from typing import Any, Callable, Dict, Optional
 from loguru import logger
+
+# ==================== 显式导入各个 Handler ====================
+
+# Project
+from app.ipc.handlers.project_handler import (
+    project_list,
+    project_create,
+    project_open,
+    project_delete,
+    project_rename,
+    project_import_videos,
+    project_get_videos,
+    project_update_video_order,
+)
+
+# Analyze
+from app.ipc.handlers.analyze_handler import (
+    analyze_start,
+    analyze_get_status,
+    analyze_cancel,
+)
+
+# Clip
+from app.ipc.handlers.clip_handler import (
+    clip_recommend,
+    clip_execute,
+    clip_get_progress,
+    clip_preview,
+    clip_stop,
+    clip_generate_title,
+)
+
+# Export
+from app.ipc.handlers.export_handler import (
+    export_start,
+    export_get_progress,
+    export_cancel,
+)
+
+# Settings
+from app.ipc.handlers.settings_handler import (
+    settings_get,
+    settings_update,
+)
+
+# Tools
+from app.ipc.handlers.tools_handler import (
+    tools_transcribe,
+    tools_get_progress,
+    tools_rewrite,
+)
+
+# System & Model
+from app.ipc.handlers.system_handler import (
+    system_get_version,
+    system_get_ffmpeg_info,
+    system_get_storage_info,
+    ping,
+    shutdown,
+    model_list,
+    model_download,
+    model_cancel,
+    model_delete,
+    model_status,
+)
 
 
 class Router:
@@ -49,52 +115,59 @@ class Router:
 
 def create_router() -> Router:
     """创建路由并注册所有处理函数"""
-    from app.ipc import handlers
     router = Router()
 
-    # 项目管理
-    router.register("project", "list", handlers.project_list)
-    router.register("project", "create", handlers.project_create)
-    router.register("project", "open", handlers.project_open)
-    router.register("project", "delete", handlers.project_delete)
-    router.register("project", "importVideos", handlers.project_import_videos)
-    router.register("project", "getVideos", handlers.project_get_videos)
-    router.register("project", "updateVideoOrder", handlers.project_update_video_order)
-    router.register("project", "rename", handlers.project_rename)
+    # ==================== 项目管理 ====================
+    router.register("project", "list", project_list)
+    router.register("project", "create", project_create)
+    router.register("project", "open", project_open)
+    router.register("project", "delete", project_delete)
+    router.register("project", "importVideos", project_import_videos)
+    router.register("project", "getVideos", project_get_videos)
+    router.register("project", "updateVideoOrder", project_update_video_order)
+    router.register("project", "rename", project_rename)
 
-    # 分析
-    router.register("analyze", "start", handlers.analyze_start)
-    router.register("analyze", "getStatus", handlers.analyze_get_status)
-    router.register("analyze", "cancel", handlers.analyze_cancel)
+    # ==================== 分析 ====================
+    router.register("analyze", "start", analyze_start)
+    router.register("analyze", "getStatus", analyze_get_status)
+    router.register("analyze", "cancel", analyze_cancel)
 
-    # 剪辑
-    router.register("clip", "recommend", handlers.clip_recommend)
-    router.register("clip", "execute", handlers.clip_execute)
-    router.register("clip", "getProgress", handlers.clip_get_progress)
-    router.register("clip", "preview", handlers.clip_preview)
-    router.register("clip", "stop", handlers.clip_stop)
+    # ==================== 剪辑 ====================
+    router.register("clip", "recommend", clip_recommend)
+    router.register("clip", "execute", clip_execute)
+    router.register("clip", "getProgress", clip_get_progress)
+    router.register("clip", "preview", clip_preview)
+    router.register("clip", "stop", clip_stop)
+    router.register("clip", "generateTitle", clip_generate_title)
 
-    # 导出
-    router.register("export", "start", handlers.export_start)
-    router.register("export", "getProgress", handlers.export_get_progress)
+    # ==================== 导出 ====================
+    router.register("export", "start", export_start)
+    router.register("export", "getProgress", export_get_progress)
+    router.register("export", "cancel", export_cancel)
 
-    # 设置
-    router.register("settings", "get", handlers.settings_get)
-    router.register("settings", "update", handlers.settings_update)
+    # ==================== 设置 ====================
+    router.register("settings", "get", settings_get)
+    router.register("settings", "update", settings_update)
 
-    # 系统
-    router.register("system", "getVersion", handlers.system_get_version)
-    router.register("system", "getFFmpegInfo", handlers.system_get_ffmpeg_info)
+    # ==================== 小工具 ====================
+    router.register("tools", "transcribe", tools_transcribe)
+    router.register("tools", "getProgress", tools_get_progress)
+    router.register("tools", "rewrite", tools_rewrite)
+
+    # ==================== 系统 ====================
+    router.register("system", "getVersion", system_get_version)
+    router.register("system", "getFFmpegInfo", system_get_ffmpeg_info)
+    router.register("system", "getStorageInfo", system_get_storage_info)
 
     # 心跳和健康检查（无命名空间）
-    router.register("system", "ping", handlers.ping)
-    router.register("system", "shutdown", handlers.shutdown)
+    router.register("system", "ping", ping)
+    router.register("system", "shutdown", shutdown)
 
-    # 模型管理
-    router.register("model", "list", handlers.model_list)
-    router.register("model", "download", handlers.model_download)
-    router.register("model", "cancel", handlers.model_cancel)
-    router.register("model", "delete", handlers.model_delete)
-    router.register("model", "status", handlers.model_status)
+    # ==================== 模型管理 ====================
+    router.register("model", "list", model_list)
+    router.register("model", "download", model_download)
+    router.register("model", "cancel", model_cancel)
+    router.register("model", "delete", model_delete)
+    router.register("model", "status", model_status)
 
     return router

@@ -1,0 +1,62 @@
+name: Auto Update
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 每天凌晨2点
+  workflow_dispatch:
+
+jobs:
+  # 检查依赖更新
+  check-updates:
+    name: Check for Updates
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Check npm updates
+        run: npm outdated || true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check Python updates
+        run: |
+          pip list --outdated || true
+
+  # 自动依赖更新
+  auto-update:
+    name: Auto Update Dependencies
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Update npm dependencies
+        run: npx npm-check-updates -u && npm install
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: auto-update/dependencies
+          title: 'chore(deps): auto-update dependencies'
+          commit-message: 'chore(deps): auto-update dependencies'
+          delete-branch: true

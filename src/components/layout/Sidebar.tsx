@@ -9,6 +9,7 @@ import {
   FolderOutlined,
   SettingOutlined,
   CloseOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons';
 
 const { Sider } = Layout;
@@ -171,6 +172,7 @@ const injectStyles = () => {
 
 const menuItems = [
   { key: '/', icon: <FolderOutlined />, label: '创作工作台' },
+  { key: '/tools/extractor', icon: <FileTextOutlined />, label: '台词提取器' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
 ];
 

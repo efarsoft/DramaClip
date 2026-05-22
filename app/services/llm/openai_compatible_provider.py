@@ -20,7 +20,7 @@ from openai import (
     RateLimitError as OpenAIRateLimitError,
 )
 
-from app.config import config
+from app.config.unified_config import config
 from app.config.defaults import normalize_openai_compatible_model_name
 from .base import TextModelProvider, VisionModelProvider
 from .exceptions import APICallError, AuthenticationError, ContentFilterError, RateLimitError
@@ -77,8 +77,8 @@ class _OpenAICompatibleBase:
         api_key = api_key_override or self.api_key
         base_url = base_url_override or self.base_url or None
 
-        timeout_seconds: float = timeout_override or config.app.get("llm_text_timeout", 180)
-        max_retries: int = config.app.get("llm_max_retries", 3)
+        timeout_seconds: float = timeout_override or config.get_legacy_app_config("llm_text_timeout", 180)
+        max_retries: int = config.get_legacy_app_config("llm_max_retries", 3)
 
         return AsyncOpenAI(
             api_key=api_key,
@@ -131,7 +131,7 @@ class OpenAICompatibleVisionProvider(_OpenAICompatibleBase, VisionModelProvider)
         client = self._build_client(
             api_key_override=kwargs.get("api_key"),
             base_url_override=kwargs.get("api_base"),
-            timeout_override=config.app.get("llm_vision_timeout", 120),
+            timeout_override=config.get_legacy_app_config("llm_vision_timeout", 120),
         )
 
         try:
@@ -189,7 +189,7 @@ class OpenAICompatibleTextProvider(_OpenAICompatibleBase, TextModelProvider):
         client = self._build_client(
             api_key_override=kwargs.get("api_key"),
             base_url_override=kwargs.get("api_base"),
-            timeout_override=config.app.get("llm_text_timeout", 180),
+            timeout_override=config.get_legacy_app_config("llm_text_timeout", 180),
         )
 
         completion_kwargs: Dict[str, Any] = {

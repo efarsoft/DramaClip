@@ -21,7 +21,7 @@ except ImportError:
     logger.warning("moviepy 未安装，将使用估算方法计算音频时长")
 import time
 
-from app.config import config
+from app.config.unified_config import config
 from app.utils import utils
 
 
@@ -1156,9 +1156,13 @@ def tts(
         logger.info("分发到 StyleTTS 2（自动情感匹配）")
         return styletts2_tts(text, voice_name, voice_file, speed=voice_rate)
 
-    # Fallback for unknown engine - default to styletts2
-    logger.warning(f"未知的 TTS 引擎: '{tts_engine}', 将默认使用 StyleTTS 2。")
-    return styletts2_tts(text, voice_name, voice_file, speed=voice_rate)
+    if tts_engine == "supertonic":
+        logger.info("分发到 Supertonic（99M参数本地TTS）")
+        return supertonic_tts(text, voice_name, voice_file, speed=voice_rate)
+
+    # Fallback for unknown engine - default to supertonic
+    logger.warning(f"未知的 TTS 引擎: '{tts_engine}', 将默认使用 Supertonic。")
+    return supertonic_tts(text, voice_name, voice_file, speed=voice_rate)
 
 
 def convert_rate_to_percent(rate: float) -> str:
@@ -1183,11 +1187,12 @@ def convert_pitch_to_percent(rate: float) -> str:
 
 def get_edge_tts_proxy() -> str | None:
     """返回 Edge TTS 应使用的代理地址。"""
-    proxy_enabled = config.proxy.get("enabled")
+    proxy_config = config.get_proxy_config()
+    proxy_enabled = proxy_config.get("enabled")
     if proxy_enabled is False:
         return None
 
-    proxy_url = (config.proxy.get("https") or config.proxy.get("http") or "").strip()
+    proxy_url = (proxy_config.get("https") or proxy_config.get("http") or "").strip()
     return proxy_url or None
 
 
@@ -1298,8 +1303,9 @@ def azure_tts_v2(text: str, voice_name: str, voice_file: str) -> Union[SubMaker,
                 add_subtitle_event(sub_maker, offset, offset + duration, evt.text)
 
             # Creates an instance of a speech config with specified subscription key and service region.
-            speech_key = config.azure.get("speech_key", "")
-            service_region = config.azure.get("speech_region", "")
+            azure_config = config.get_azure_config()
+            speech_key = azure_config.get("speech_key", "")
+            service_region = azure_config.get("speech_region", "")
             audio_config = speechsdk.audio.AudioOutputConfig(
                 filename=voice_file, use_default_speaker=True
             )
@@ -1831,7 +1837,7 @@ def tencent_tts(text: str, voice_name: str, voice_file: str, speed: float = 1.0)
         return None
     
     # 获取腾讯云配置
-    tencent_config = config.tencent
+    tencent_config = config.get_tencent_config()
     secret_id = tencent_config.get("secret_id")
     secret_key = tencent_config.get("secret_key")
     region = tencent_config.get("region", "ap-beijing")
@@ -1932,9 +1938,9 @@ def soulvoice_tts(text: str, voice_name: str, voice_file: str, speed: float = 1.
         SubMaker: 包含时间戳信息的字幕制作器，失败时返回 None
     """
     # 获取配置
-    api_key = config.soulvoice.get("api_key", "")
-    api_url = config.soulvoice.get("api_url", "https://tts.scsmtech.cn/tts")
-    default_model = config.soulvoice.get("model", "FunAudioLLM/CosyVoice2-0.5B")
+    api_key = config.get_soulvoice_config().get("api_key", "")
+    api_url = config.get_soulvoice_config().get("api_url", "https://tts.scsmtech.cn/tts")
+    default_model = config.get_soulvoice_config().get("model", "FunAudioLLM/CosyVoice2-0.5B")
 
     if not api_key:
         logger.error("SoulVoice API key 未配置")
@@ -1963,10 +1969,11 @@ def soulvoice_tts(text: str, voice_name: str, voice_file: str, speed: float = 1.
 
             # 设置代理
             proxies = {}
-            if config.proxy.get("http"):
+            proxy_config = config.get_proxy_config()
+            if proxy_config.get("http"):
                 proxies = {
-                    'http': config.proxy.get("http"),
-                    'https': config.proxy.get("https", config.proxy.get("http"))
+                    'http': proxy_config.get("http"),
+                    'https': proxy_config.get("https", proxy_config.get("http"))
                 }
 
             # 调用 API
@@ -2055,14 +2062,14 @@ def indextts2_tts(text: str, voice_name: str, voice_file: str, speed: float = 1.
         SubMaker: 包含时间戳信息的字幕制作器，失败时返回 None
     """
     # 获取配置
-    api_url = config.indextts2.get("api_url", "http://192.168.3.6:8081/tts")
-    infer_mode = config.indextts2.get("infer_mode", "普通推理")
-    temperature = config.indextts2.get("temperature", 1.0)
-    top_p = config.indextts2.get("top_p", 0.8)
-    top_k = config.indextts2.get("top_k", 30)
-    do_sample = config.indextts2.get("do_sample", True)
-    num_beams = config.indextts2.get("num_beams", 3)
-    repetition_penalty = config.indextts2.get("repetition_penalty", 10.0)
+    api_url = config.get_indextts2_config().get("api_url", "http://192.168.3.6:8081/tts")
+    infer_mode = config.get_indextts2_config().get("infer_mode", "普通推理")
+    temperature = config.get_indextts2_config().get("temperature", 1.0)
+    top_p = config.get_indextts2_config().get("top_p", 0.8)
+    top_k = config.get_indextts2_config().get("top_k", 30)
+    do_sample = config.get_indextts2_config().get("do_sample", True)
+    num_beams = config.get_indextts2_config().get("num_beams", 3)
+    repetition_penalty = config.get_indextts2_config().get("repetition_penalty", 10.0)
 
     # 解析参考音频路径
     reference_audio_path = parse_indextts2_voice(voice_name)
@@ -2094,10 +2101,11 @@ def indextts2_tts(text: str, voice_name: str, voice_file: str, speed: float = 1.
 
             # 设置代理
             proxies = {}
-            if config.proxy.get("http"):
+            proxy_config = config.get_proxy_config()
+            if proxy_config.get("http"):
                 proxies = {
-                    'http': config.proxy.get("http"),
-                    'https': config.proxy.get("https", config.proxy.get("http"))
+                    'http': proxy_config.get("http"),
+                    'https': proxy_config.get("https", proxy_config.get("http"))
                 }
 
             # 调用 API
@@ -2393,4 +2401,87 @@ def cosyvoice_tts(text: str, voice_name: str, voice_file: str, speed: float = 1.
                 time.sleep(1)
 
     logger.error("CosyVoice TTS failed after 3 attempts")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Supertonic TTS - 99M参数本地TTS，31种语言，44.1kHz CD音质
+# ---------------------------------------------------------------------------
+
+def parse_supertonic_voice(voice_name: str) -> str:
+    """解析 Supertonic 语音名称"""
+    # Supertonic 支持 M1, M2, F1, F2 等语音
+    voice_map = {
+        "supertonic:m1": "M1",
+        "supertonic:m2": "M2",
+        "supertonic:f1": "F1",
+        "supertonic:f2": "F2",
+        "M1": "M1",
+        "M2": "M2",
+        "F1": "F1",
+        "F2": "F2",
+    }
+    voice = voice_map.get(voice_name.lower().strip(), "M1")
+    return voice
+
+
+def supertonic_tts(
+    text: str, voice_name: str, voice_file: str, speed: float = 1.0
+) -> Union[SubMaker, None]:
+    """
+    Supertonic TTS - 超轻量本地TTS引擎
+    
+    特点:
+    - 仅99M参数，比云端快10倍
+    - 支持31种语言
+    - 44.1kHz CD音质输出
+    - 支持表情标签 (<laugh>, <breath>, <sigh>等)
+    - 可在Raspberry Pi上运行
+    """
+    try:
+        from supertonic import TTS
+    except ImportError:
+        logger.error("supertonic 未安装，请运行: pip install supertonic")
+        return None
+
+    voice = parse_supertonic_voice(voice_name)
+    
+    for i in range(3):
+        try:
+            logger.info(f"Supertonic TTS: voice={voice}, speed={speed}, text_len={len(text)}")
+            
+            # 初始化 TTS（首次会自动下载模型）
+            tts = TTS(auto_download=True)
+            style = tts.get_voice_style(voice_name=voice)
+            
+            # 语速调整 (speed = 1.0 为正常速度)
+            actual_speed = max(0.5, min(2.0, speed))
+            
+            # 合成语音
+            wav, duration = tts.synthesize(
+                text=text,
+                lang="auto",  # 自动检测语言
+                voice_style=style,
+                total_steps=8,
+                speed=actual_speed,
+            )
+            
+            # 保存音频文件
+            tts.save_audio(wav, voice_file)
+            
+            # 估算字幕（Supertonic 不返回精确时间戳）
+            sub = new_sub_maker()
+            est_ms = max(800, int(len(text) * 150))  # 估算时长
+            add_subtitle_event(sub, 0, est_ms, text)
+            
+            duration_sec = duration[0] if duration else est_ms / 1000.0
+            logger.info(f"Supertonic TTS success: duration={duration_sec:.2f}s")
+            return sub
+
+        except Exception as e:
+            logger.error(f"Supertonic TTS synthesis failed (attempt {i+1}/3): {e}")
+            if i < 2:
+                time.sleep(1)
+
+    logger.error("Supertonic TTS failed after 3 attempts")
     return None

@@ -13,6 +13,7 @@ import {
   DeleteOutlined,
   ReloadOutlined,
   EyeOutlined,
+  FileOutlined,
 } from '@ant-design/icons';
 import { useProjectStore } from '../../stores/projectStore';
 import type { Episode } from '../../services/ipc';
@@ -94,32 +95,80 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
   // 拖拽导入（原生桌面拖拽）
   const handleDrop = useCallback(async (files: FileList | File[]) => {
     if (!currentProject || files.length === 0) return;
+    
+    // 开发环境（非 Electron 环境）路径检测与友好提示
+    const invalidPaths = Array.from(files).filter((f: any) => !f.path);
+    if (invalidPaths.length > 0 && !window.electronAPI) {
+      message.warning('开发环境网页端拖拽无法获取完整绝对路径。请使用 Electron 客户端客户端，或点击“从文件夹选择”按钮导入。');
+      return;
+    }
+
     setImporting(true);
     try {
       const paths = Array.from(files).map((f: any) => f.path || f.name);
-      await importVideos(currentProject.id, paths);
-      message.success(`成功导入 ${paths.length} 个视频`);
+      const imported = await importVideos(currentProject.id, paths);
+      if (imported && imported.length > 0) {
+        message.success(`成功导入 ${imported.length} 个视频`);
+      } else {
+        message.warning('导入失败：未找到有效视频文件，或格式不受支持');
+      }
     } catch (err: any) {
       message.error(err?.message || '导入失败');
     } finally {
       setImporting(false);
     }
-  }, [currentProject, importVideos]);
+  }, [currentProject, importVideos, message]);
 
-  // 文件夹选择导入
-  const handleOpenFolder = async () => {
+  // 选择视频文件导入
+  const handleSelectFiles = async () => {
     if (!currentProject) return;
     try {
       if (window.electronAPI?.dialog?.openFile) {
         const result = await window.electronAPI.dialog.openFile({
           properties: ['openFile', 'multiSelections'],
-          filters: [{ name: '视频文件', extensions: ['mp4', 'mov', 'avi', 'mkv', 'wmv'] }],
+          filters: [
+            { name: '视频文件', extensions: ['mp4', 'mov', 'avi', 'mkv', 'wmv', 'webm', 'flv'] },
+            { name: '所有文件', extensions: ['*'] }
+          ],
         });
         if (result.success && result.data && result.data.length > 0) {
           setImporting(true);
           try {
-            await importVideos(currentProject.id, result.data);
-            message.success(`成功导入 ${result.data.length} 个视频`);
+            const imported = await importVideos(currentProject.id, result.data);
+            if (imported && imported.length > 0) {
+              message.success(`成功导入 ${imported.length} 个视频`);
+            } else {
+              message.warning('导入失败：所选视频可能已存在、路径无效或格式不受支持');
+            }
+          } finally {
+            setImporting(false);
+          }
+        }
+      } else {
+        message.info('开发环境：请通过拖拽导入视频');
+      }
+    } catch (err: any) {
+      message.error(err?.message || '导入失败');
+    }
+  };
+
+  // 选择视频文件夹导入
+  const handleSelectFolder = async () => {
+    if (!currentProject) return;
+    try {
+      if (window.electronAPI?.dialog?.openFile) {
+        const result = await window.electronAPI.dialog.openFile({
+          properties: ['openDirectory'],
+        });
+        if (result.success && result.data && result.data.length > 0) {
+          setImporting(true);
+          try {
+            const imported = await importVideos(currentProject.id, result.data);
+            if (imported && imported.length > 0) {
+              message.success(`成功导入 ${imported.length} 个视频`);
+            } else {
+              message.warning('导入失败：所选文件夹内未找到有效视频');
+            }
           } finally {
             setImporting(false);
           }
@@ -146,13 +195,29 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
     }
   };
 
-  // 开始分析（跳转到下一步）
-  const handleStartAnalysis = () => {
+  // 开始分析（直接启动分析并跳转到分析页面）
+  const handleStartAnalysis = async () => {
     if (selectedEpisodeIds.length === 0) {
       message.warning('请至少选择一个视频进行分析');
       return;
     }
     if (!currentProject) return;
+    
+    // 直接调用 analyze API 启动分析
+    const { useTaskQueueStore } = await import('../../stores/taskQueueStore');
+    const { enqueue } = useTaskQueueStore.getState();
+    
+    // 为每个选中的视频创建分析任务
+    selectedEpisodeIds.forEach(episodeId => {
+      enqueue('analyze', currentProject.id, {
+        project_id: currentProject.id,
+        episode_ids: [episodeId],
+      });
+    });
+    
+    message.success(`已添加 ${selectedEpisodeIds.length} 个分析任务`);
+    
+    // 跳转到分析页面
     onNext();
   };
 
@@ -178,14 +243,17 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
 
   const allSelected = currentVideos.length > 0 && selectedEpisodeIds.length === currentVideos.length;
 
-  // 智能排序：按文件名中的数字排序（支持中文数字和英文数字）
+  // 智能排序：按文件名中的数字排序（支持中文数字和英文数字），极其鲁棒以防止属性缺失引起的渲染崩溃
   const sortedVideos = [...currentVideos].sort((a, b) => {
+    if (!a || !b) return 0;
+    const nameA = a.name || '';
+    const nameB = b.name || '';
     const extractNumbers = (name: string): number[] => {
       const matches = name.match(/\d+/g);
       return matches ? matches.map(Number) : [];
     };
-    const numsA = extractNumbers(a.name);
-    const numsB = extractNumbers(b.name);
+    const numsA = extractNumbers(nameA);
+    const numsB = extractNumbers(nameB);
     
     // 逐个比较数字
     for (let i = 0; i < Math.min(numsA.length, numsB.length); i++) {
@@ -196,13 +264,13 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
     if (numsA.length !== numsB.length) return numsA.length - numsB.length;
     
     // 数字相同，按字母顺序
-    return a.name.localeCompare(b.name, 'zh-CN');
+    return nameA.localeCompare(nameB, 'zh-CN');
   });
 
   return (
-    <div style={{ maxWidth: 860, margin: '0 auto', padding: '32px 24px', height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ maxWidth: 860, margin: '0 auto', padding: '32px 24px', height: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
       {/* ─── 标题 ─── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, flexShrink: 0 }}>
         <div>
           <Title level={3} style={{ color: '#e0e6ed', margin: 0 }}>🎬 导入视频素材</Title>
           <Text style={{ color: '#4a5a7a', fontSize: 13 }}>
@@ -236,7 +304,7 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
           }
         }}
         onClick={() => {
-          if (!importing) handleOpenFolder();
+          if (!importing) handleSelectFiles();
         }}
         style={{
           borderRadius: 16,
@@ -249,6 +317,7 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
           border: `2px dashed ${dragging ? CYAN : `${CYAN}33`}`,
           transition: 'all 0.3s',
           textAlign: 'center',
+          flexShrink: 0,
         }}
       >
         <div style={{ fontSize: 40, color: CYAN, marginBottom: 8 }}>
@@ -261,28 +330,42 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
         <p style={{ color: '#c8d0dc', fontSize: 15, fontWeight: 500, margin: '8px 0 4px' }}>
           {importing ? '正在导入…' : '拖拽视频文件到此处，或点击选择'}
         </p>
-        <p style={{ color: '#4a5a7a', fontSize: 12, marginBottom: 12 }}>
+        <p style={{ color: '#4a5a7a', fontSize: 12, marginBottom: 16 }}>
           支持 MP4 / MOV / AVI / MKV / WMV
         </p>
-        <Button
-          icon={<FolderOpenOutlined />}
-          onClick={(e) => { e.stopPropagation(); handleOpenFolder(); }}
-          disabled={importing}
-          style={{
-            borderRadius: 8, borderColor: `${CYAN}44`, color: CYAN,
-            background: 'transparent',
-          }}
-        >
-          从文件夹选择
-        </Button>
+        <Space size="middle">
+          <Button
+            icon={<FileOutlined />}
+            onClick={(e) => { e.stopPropagation(); handleSelectFiles(); }}
+            disabled={importing}
+            style={{
+              borderRadius: 8, borderColor: `${CYAN}44`, color: CYAN,
+              background: 'transparent',
+            }}
+          >
+            选择视频文件
+          </Button>
+          <Button
+            icon={<FolderOpenOutlined />}
+            onClick={(e) => { e.stopPropagation(); handleSelectFolder(); }}
+            disabled={importing}
+            style={{
+              borderRadius: 8, borderColor: `${CYAN}44`, color: CYAN,
+              background: 'transparent',
+            }}
+          >
+            选择视频文件夹
+          </Button>
+        </Space>
       </div>
 
-      {/* ─── 视频列表标题栏 ─── */}
+      {/* ─── 视频列表区域（可滚动） ─── */}
       {currentVideos.length > 0 && (
-        <>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+          {/* 视频列表标题栏 */}
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '4px 8px', marginBottom: 12,
+            padding: '4px 8px', marginBottom: 12, flexShrink: 0,
           }}>
             <Space>
               <Checkbox
@@ -319,10 +402,10 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
           {/* ─── 视频卡片列表（可滚动） ─── */}
           <div style={{ 
             display: 'flex', flexDirection: 'column', gap: 8, 
-            marginBottom: 24, 
             flex: 1, 
+            minHeight: 0,
             overflowY: 'auto',
-            maxHeight: 'calc(100vh - 420px)',
+            overflowX: 'hidden',
             paddingRight: 4,
           }}>
             {sortedVideos.map((video, idx) => {
@@ -341,6 +424,7 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
                       : '1px solid rgba(255,255,255,0.05)',
                     cursor: 'pointer',
                     transition: 'all 0.2s',
+                    flexShrink: 0,
                   }}
                 >
                   {/* 复选框 */}
@@ -411,21 +495,6 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
                       style={{ color: '#4a5a7a', flexShrink: 0 }}
                     />
                   </Tooltip>
-
-                  {/* 选中状态 */}
-                  <div style={{
-                    width: 20, height: 20, borderRadius: 6,
-                    border: `2px solid ${selected ? CYAN : '#2a3050'}`,
-                    background: selected ? CYAN : 'transparent',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    transition: 'all 0.2s', flexShrink: 0,
-                  }}>
-                    {selected && (
-                      <svg viewBox="0 0 12 12" style={{ width: 10, height: 10 }}>
-                        <path d="M2 6L5 9L10 3" stroke="#0a0e1a" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </div>
                 </div>
               );
             })}
@@ -437,6 +506,7 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
             padding: '16px 0',
             borderTop: '1px solid rgba(255,255,255,0.04)',
             flexShrink: 0,
+            marginTop: 12,
           }}>
             <Button
               type="primary"
@@ -454,13 +524,14 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
               开始 AI 分析 ({selectedEpisodeIds.length} 个视频)
             </Button>
           </div>
-        </>
+        </div>
       )}
 
       {/* ─── 无视频时的空态 ─── */}
       {currentVideos.length === 0 && !importing && !refreshing && (
         <div style={{
-          textAlign: 'center', padding: 48,
+          flex: 1,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
           color: '#4a5a7a',
         }}>
           <Empty
@@ -474,9 +545,33 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
         </div>
       )}
 
-      {/* ─── 刷新中加载提示 ─── */}
+      {/* ─── 导入中加载提示（无视频时） ─── */}
+      {currentVideos.length === 0 && importing && (
+        <div style={{
+          flex: 1,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 12, color: CYAN,
+        }}>
+          <Spin size="large" />
+          <Text style={{ color: CYAN, fontSize: 14 }}>正在解析并导入视频资源，请稍候...</Text>
+        </div>
+      )}
+
+      {/* ─── 刷新中加载提示（无视频时） ─── */}
+      {currentVideos.length === 0 && refreshing && (
+        <div style={{
+          flex: 1,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 12, color: CYAN,
+        }}>
+          <Spin size="large" />
+          <Text style={{ color: CYAN, fontSize: 14 }}>正在重新扫描项目目录，请稍候...</Text>
+        </div>
+      )}
+
+      {/* ─── 刷新中加载提示（已有视频时） ─── */}
       {refreshing && currentVideos.length > 0 && (
-        <div style={{ textAlign: 'center', padding: 16, color: CYAN }}>
+        <div style={{ textAlign: 'center', padding: 16, color: CYAN, flexShrink: 0 }}>
           <Spin size="small" style={{ marginRight: 8 }} />
           <Text style={{ color: CYAN }}>刷新视频列表中…</Text>
         </div>

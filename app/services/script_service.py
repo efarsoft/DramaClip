@@ -9,7 +9,32 @@ from typing import List, Dict, Any, Callable
 
 from app.utils import utils, gemini_analyzer, video_processor
 from app.utils.script_generator import ScriptProcessor
-from app.config import config
+from app.config.unified_config import get_config
+
+# 获取统一配置实例
+_config = get_config()
+
+
+def _get_app_config(key: str, default=None):
+    """获取旧版配置项（向后兼容）"""
+    return _config.get_legacy_app_config(key, default)
+
+
+# 兼容旧的 config 对象访问
+class _ConfigCompat:
+    """兼容旧的 config.app.get() 调用"""
+    class _AppCompat:
+        @staticmethod
+        def get(key: str, default=None):
+            return _get_app_config(key, default)
+        
+        def __getitem__(self, key: str):
+            return _get_app_config(key, "")
+    
+    app = _AppCompat()
+
+
+config = _ConfigCompat()
 
 
 class ScriptGenerator:

@@ -161,8 +161,25 @@ class AudioConfig:
             return cls.DEFAULT_VOLUMES.copy()
 
 
+# 声音避让 (Audio Ducking) 配置
+DUCKING_CONFIG = {
+    'enabled': True,              # 是否启用声音避让
+    'threshold': -30.0,           # 触发避让的音量阈值 (dB)
+    'ratio': 12.0,                # 压缩比 (原声降低比例)
+    'attack': 0.005,              # 避让响应时间 (秒)，越快越灵敏
+    'release': 0.3,               # 恢复时间 (秒)，越平滑越自然
+    'ducked_volume': 0.25,        # 避让时原声音量 (0-1)
+    'fade_duration': 0.2,         # 淡入淡出时长 (秒)
+}
+
+
 # 全局音频配置实例
 audio_config = AudioConfig()
+
+
+def get_ducking_config(cls) -> Dict[str, Any]:
+    """获取声音避让配置"""
+    return DUCKING_CONFIG.copy()
 
 
 def get_recommended_volumes_for_content(content_type: str = 'mixed') -> Dict[str, float]:

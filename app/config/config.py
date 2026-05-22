@@ -73,23 +73,36 @@ def write_config_file(config_data):
 
 
 def save_config():
-    with open(config_file, "w", encoding="utf-8") as f:
-        _cfg["app"] = app
-        _cfg["proxy"] = proxy
-        _cfg["azure"] = azure
-        _cfg["tencent"] = tencent
-        _cfg["soulvoice"] = soulvoice
-        _cfg["ui"] = ui
-        _cfg["tts_qwen"] = tts_qwen
-        _cfg["indextts2"] = indextts2
-        _cfg["cosyvoice"] = cosyvoice
-        _cfg["styletts2"] = styletts2
-        _cfg["frames"] = frames
-        # DramaClip 配置段
-        _cfg["highlight"] = highlight
-        _cfg["output"] = output
-        _cfg["scene_detect"] = scene_detect
-        f.write(toml.dumps(_cfg))
+    """保存配置到文件（修复版本）
+
+    将当前内存中的配置更新到 _cfg，然后写入 config.toml
+    """
+    global _cfg
+
+    # 更新 _cfg 中的所有配置段
+    _cfg["app"] = app
+    _cfg["proxy"] = proxy
+    _cfg["whisper"] = whisper
+    _cfg["azure"] = azure
+    _cfg["tencent"] = tencent
+    _cfg["soulvoice"] = soulvoice
+    _cfg["ui"] = ui
+    _cfg["tts_qwen"] = tts_qwen
+    _cfg["indextts2"] = indextts2
+    _cfg["cosyvoice"] = cosyvoice
+    _cfg["styletts2"] = styletts2
+    _cfg["frames"] = frames
+    # DramaClip 配置段
+    _cfg["highlight"] = highlight
+    _cfg["output"] = output
+    _cfg["scene_detect"] = scene_detect
+    _cfg["asr"] = asr
+    _cfg["log_level"] = log_level
+    _cfg["listen_host"] = listen_host
+    _cfg["listen_port"] = listen_port
+
+    write_config_file(_cfg)
+    logger.info(f"[Config] Saved {len(_cfg)} sections to {config_file}")
 
 
 _cfg = load_config()
@@ -110,6 +123,7 @@ styletts2 = _cfg.get("styletts2", {})
 highlight = _cfg.get("highlight", {})
 output = _cfg.get("output", {})
 scene_detect = _cfg.get("scene_detect", {})
+asr = _cfg.get("asr", {})
 
 hostname = socket.gethostname()
 

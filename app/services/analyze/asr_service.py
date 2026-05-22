@@ -1,10 +1,20 @@
 """
-ASR 语音识别服务 - 基于 faster-whisper 本地离线识别
+ASR 语音识别服务 - 支持多种引擎
+
+引擎选项:
+    - faster-whisper: 基于 OpenAI Whisper 的优化版本
+    - sensevoice: 阿里达摩院 SenseVoice，针对中文优化
+
+通过 config.toml 配置:
+    [asr]
+    engine = "faster_whisper"  # faster_whisper | sensevoice
+    model = "large-v3"         # faster-whisper: tiny/base/small/medium/large-v3/distil-large-v3
+                              # sensevoice: SenseVoice-small/SenseVoice-large
 """
 
 import os
 import threading
-from typing import List, Dict, Optional, Callable
+from typing import Any, List, Dict, Optional, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from loguru import logger
@@ -45,28 +55,72 @@ class ASRResult:
 
 
 # ---------------------------------------------------------------------------
-# Model manager – singleton, lazy-loaded
+# Model manager – thread-local storage for thread safety
+# 每个线程拥有独立的模型实例，避免并行执行时的线程安全问题
 # ---------------------------------------------------------------------------
 
-_model_instance = None
+_thread_local = threading.local()
 _model_lock = threading.Lock()
 _model_device = "cpu"
 _model_compute = "int8"
 
 
-def _get_model(model_size: str = "large-v3", device: str = None,
-               compute_type: str = None):
-    """获取或创建 WhisperModel 单例"""
-    global _model_instance, _model_device, _model_compute
+def _get_model(model_size: str = "large-v3", device: Optional[str] = None,
+               compute_type: Optional[str] = None) -> Any:
+    """获取或创建 WhisperModel（线程本地存储版本）
+    
+    每个线程拥有独立的模型实例，支持并行执行多个ASR任务。
+    """
+    # 检查当前线程是否已有模型实例
+    if hasattr(_thread_local, 'model_instance') and _thread_local.model_instance is not None:
+        return _thread_local.model_instance
 
-    if _model_instance is not None:
-        return _model_instance
-
+    # 模型加载需要加锁（避免同时加载多个相同模型）
     with _model_lock:
-        if _model_instance is not None:
-            return _model_instance
+        # 双重检查
+        if hasattr(_thread_local, 'model_instance') and _thread_local.model_instance is not None:
+            return _thread_local.model_instance
 
         from faster_whisper import WhisperModel
+
+        # ---------- 本地模型解析 & 自动下载 ----------
+        from app.services.model_manager import check_whisper_model, download_whisper_model, WHISPER_MODELS, _get_hf_model_dir
+        
+        # 兼容 "whisper-large-v3" 或 "large-v3" 的入参格式
+        size_key = model_size
+        if size_key.startswith("whisper-"):
+            size_key = size_key.replace("whisper-", "", 1)
+            
+        local_files_only = False
+        resolved_model_path = model_size
+        
+        if size_key in WHISPER_MODELS:
+            try:
+                if not check_whisper_model(size_key):
+                    logger.info(f"ASR model '{size_key}' not found locally. Starting auto-download from ModelScope...")
+                    download_whisper_model(size_key)
+                    if not check_whisper_model(size_key):
+                        raise RuntimeError(f"ASR model '{size_key}' could not be verified after auto-download.")
+                
+                info = WHISPER_MODELS[size_key]
+                model_dir = _get_hf_model_dir(info["hf_repo"])
+                snapshots_dir = model_dir / "snapshots"
+                snapshots = list(snapshots_dir.iterdir())
+                if snapshots:
+                    latest_snapshot = max(snapshots, key=lambda p: p.stat().st_mtime)
+                    resolved_model_path = str(latest_snapshot.absolute())
+                    local_files_only = True
+                    logger.info(f"Resolved ASR model '{model_size}' to local offline path: {resolved_model_path}")
+                else:
+                    logger.warning(f"No snapshot found for ASR model '{size_key}' even though check_whisper_model returned True.")
+            except Exception as model_err:
+                logger.error(f"Error resolving offline ASR model path: {model_err}. Falling back to default online initialization.")
+                resolved_model_path = model_size
+                local_files_only = False
+        elif os.path.isdir(model_size):
+            resolved_model_path = model_size
+            local_files_only = True
+            logger.info(f"ASR model path is already a directory: {resolved_model_path}")
 
         # ---------- 设备探测 ----------
         use_cuda = False
@@ -79,17 +133,24 @@ def _get_model(model_size: str = "large-v3", device: str = None,
         else:
             use_cuda = device == "cuda"
 
+        # Determine CPU thread count to prevent full CPU core starvation
+        import multiprocessing
+        cores = multiprocessing.cpu_count()
+        cpu_threads_count = max(1, min(4, cores // 2))
+        logger.info(f"Setting WhisperModel cpu_threads={cpu_threads_count} (total CPU cores: {cores})")
+
         if use_cuda:
             _model_device = "cuda"
             _model_compute = compute_type or "float16"
             try:
-                _model_instance = WhisperModel(
-                    model_size_or_path=model_size,
+                _thread_local.model_instance = WhisperModel(
+                    model_size_or_path=resolved_model_path,
                     device="cuda",
                     compute_type=_model_compute,
-                    local_files_only=False,  # 允许自动下载
+                    local_files_only=local_files_only,
+                    cpu_threads=cpu_threads_count,
                 )
-                logger.info(f"ASR model loaded on CUDA: {model_size}")
+                logger.info(f"ASR model loaded on CUDA: {model_size} (thread={threading.current_thread().name})")
             except Exception as e:
                 logger.warning(f"CUDA load failed, fallback to CPU: {e}")
                 use_cuda = False
@@ -97,15 +158,16 @@ def _get_model(model_size: str = "large-v3", device: str = None,
         if not use_cuda:
             _model_device = "cpu"
             _model_compute = compute_type or "int8"
-            _model_instance = WhisperModel(
-                model_size_or_path=model_size,
+            _thread_local.model_instance = WhisperModel(
+                model_size_or_path=resolved_model_path,
                 device="cpu",
                 compute_type=_model_compute,
-                local_files_only=False,
+                local_files_only=local_files_only,
+                cpu_threads=cpu_threads_count,
             )
-            logger.info(f"ASR model loaded on CPU: {model_size}")
+            logger.info(f"ASR model loaded on CPU: {model_size} (thread={threading.current_thread().name})")
 
-        return _model_instance
+        return _thread_local.model_instance
 
 
 # ---------------------------------------------------------------------------
@@ -152,9 +214,12 @@ class ASRService:
         logger.info(f"ASR start: {tag} (model={model}, lang={language})")
 
         if progress_callback:
-            progress_callback(0, "加载语音识别模型...")
+            progress_callback(0, "加载语音识别模型（首次加载可能需要较长时间）...")
 
         whisper = _get_model(model_size=model)
+        
+        if progress_callback:
+            progress_callback(10, "模型加载完成，准备开始识别...")
 
         if self._cancelled:
             logger.warning(f"ASR cancelled before transcription: {tag}")
@@ -183,6 +248,9 @@ class ASRService:
             progress_callback(30, f"识别语言: {detected_lang}")
 
         # ---------- 遍历 segments ----------
+        # 先发送一个中间进度，让用户知道开始处理了
+        if progress_callback:
+            progress_callback(35, "正在处理识别结果...")
         segments: List[ASRSegment] = []
         total_segments_approx = 50  # 用于进度估算
         seg_count = 0

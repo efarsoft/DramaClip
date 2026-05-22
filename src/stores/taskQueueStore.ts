@@ -42,8 +42,8 @@ export interface AnalysisResults {
 
 const IPC_METHODS: Record<TaskType, { start: string; progress: string; cancel: string }> = {
   analyze: { start: 'analyze.start', progress: 'analyze.getStatus', cancel: 'analyze.cancel' },
-  clip:    { start: 'clip.execute', progress: 'clip.getProgress', cancel: '' },
-  export:  { start: 'export.start', progress: 'export.getProgress', cancel: '' },
+  clip:    { start: 'clip.execute', progress: 'clip.getProgress', cancel: 'clip.stop' },
+  export:  { start: 'export.start', progress: 'export.getProgress', cancel: 'export.cancel' },
 };
 
 // ── Store ──
@@ -51,7 +51,9 @@ const IPC_METHODS: Record<TaskType, { start: string; progress: string; cancel: s
 interface TaskQueueState {
   /** 所有任务，按入队顺序排列 */
   tasks: Task[];
-  /** 当前正在执行的任务 ID（无并发） */
+  /** 当前正在执行的任务 ID 列表（支持并发） */
+  activeTaskIds: string[];
+  /** 单个主任务 ID，供传统单任务面板读取 */
   activeTaskId: string | null;
   /** 是否正在执行（简化外部判断） */
   isRunning: boolean;
@@ -72,6 +74,8 @@ interface TaskQueueState {
   clearAll: () => void;
   /** @internal 执行队列中下一个等待的任务 */
   executeNext: () => void;
+  /** 添加已在后端运行的任务（用于并行分析场景） */
+  addRunningTask: (type: TaskType, projectId: string, taskId: string, params: Record<string, unknown>) => void;
 }
 
 // ── 辅助：生成去重 Key ──
@@ -164,6 +168,7 @@ async function pollTask(
 
 export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
   tasks: [],
+  activeTaskIds: [],
   activeTaskId: null,
   isRunning: false,
 
@@ -197,7 +202,7 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
     set(s => ({ tasks: [...s.tasks, task] }));
 
     // 如果当前没有活跃任务，立即执行
-    if (!get().activeTaskId) {
+    if (get().activeTaskIds.length === 0) {
       get().executeNext();
     }
 
@@ -224,12 +229,16 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
           await ipcClient.call(cancelMethod, { task_id: taskId });
         } catch { /* ignore */ }
       }
-      set(s => ({
-        tasks: s.tasks.map(t =>
-          t.id === taskId ? { ...t, status: 'cancelled', message: '已取消', completedAt: Date.now() } : t,
-        ),
-        activeTaskId: s.activeTaskId === taskId ? null : s.activeTaskId,
-      }));
+      set(s => {
+        const nextActiveIds = s.activeTaskIds.filter(id => id !== taskId);
+        return {
+          tasks: s.tasks.map(t =>
+            t.id === taskId ? { ...t, status: 'cancelled', message: '已取消', completedAt: Date.now() } : t,
+          ),
+          activeTaskIds: nextActiveIds,
+          activeTaskId: s.activeTaskId === taskId ? (nextActiveIds[0] || null) : s.activeTaskId,
+        };
+      });
       // 执行下一个
       get().executeNext();
     }
@@ -257,7 +266,7 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
       tasks: s.tasks.map(t => (t.id === taskId ? resetTask : t)),
     }));
 
-    if (!get().activeTaskId) {
+    if (get().activeTaskIds.length === 0) {
       get().executeNext();
     }
   },
@@ -277,13 +286,53 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
   },
 
   clearAll: () => {
-    set({ tasks: [], activeTaskId: null, isRunning: false });
+    set({ tasks: [], activeTaskIds: [], activeTaskId: null, isRunning: false });
+  },
+
+  // 添加已在后端运行的任务（用于并行分析场景）
+  addRunningTask: (type, projectId, taskId, params) => {
+    const task: Task = {
+      id: taskId,
+      type,
+      projectId,
+      status: 'running',
+      progress: 0,
+      phase: '启动中...',
+      message: '任务执行中',
+      params: { ...params },
+      createdAt: Date.now(),
+      startedAt: Date.now(),
+    };
+
+    set(s => ({
+      tasks: [...s.tasks, task],
+      isRunning: true,
+      activeTaskId: taskId,
+    }));
+
+    // 开始轮询进度
+    pollTask(
+      task,
+      (updates) => {
+        const current = get().tasks.find(t => t.id === taskId);
+        if (!current || current.status === 'cancelled') return;
+        set(s => ({
+          tasks: s.tasks.map(t => (t.id === taskId ? { ...t, ...updates } : t)),
+        }));
+      },
+      () => {
+        // 检查是否还有其他运行中的任务
+        const state = get();
+        const hasRunning = state.tasks.some(t => t.status === 'running' && t.id !== taskId);
+        set({ isRunning: hasRunning });
+      },
+    );
   },
 
   // ── 内部：执行下一个任务 ──
   executeNext: () => {
     const state = get();
-    if (state.activeTaskId) return; // 有活跃任务，不执行
+    // 允许并行执行，不再检查是否有活跃任务
 
     const next = state.tasks.find(t => t.status === 'queued');
     if (!next) {
@@ -296,6 +345,7 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
 
     // 标记为 running
     set(s => ({
+      activeTaskIds: [...s.activeTaskIds, runtimeTaskId],
       activeTaskId: runtimeTaskId,
       isRunning: true,
       tasks: s.tasks.map(t =>
@@ -342,9 +392,13 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
           },
           () => {
             // 当前任务结束，清理并执行下一个
-            set(s => ({
-              activeTaskId: s.activeTaskId === runtimeTaskId ? null : s.activeTaskId,
-            }));
+            set(s => {
+              const nextActiveIds = s.activeTaskIds.filter(id => id !== runtimeTaskId);
+              return {
+                activeTaskIds: nextActiveIds,
+                activeTaskId: s.activeTaskId === runtimeTaskId ? (nextActiveIds[0] || null) : s.activeTaskId,
+              };
+            });
             // 给状态更新一点时间再执行下一个
             setTimeout(() => get().executeNext(), 300);
           },
@@ -352,12 +406,16 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
       })
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
-        set(s => ({
-          activeTaskId: null,
-          tasks: s.tasks.map(t =>
-            t.id === runtimeTaskId ? { ...t, status: 'failed', error: msg, message: msg, completedAt: Date.now() } : t,
-          ),
-        }));
+        set(s => {
+          const nextActiveIds = s.activeTaskIds.filter(id => id !== runtimeTaskId);
+          return {
+            activeTaskId: s.activeTaskId === runtimeTaskId ? (nextActiveIds[0] || null) : s.activeTaskId,
+            activeTaskIds: nextActiveIds,
+            tasks: s.tasks.map(t =>
+              t.id === runtimeTaskId ? { ...t, status: 'failed', error: msg, message: msg, completedAt: Date.now() } : t,
+            ),
+          };
+        });
         setTimeout(() => get().executeNext(), 300);
       });
   },

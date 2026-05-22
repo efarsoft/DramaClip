@@ -74,7 +74,6 @@ class Database:
                 
                 -- 创建索引
                 CREATE INDEX IF NOT EXISTS idx_videos_project_id ON videos(project_id);
-                CREATE INDEX IF NOT EXISTS idx_videos_sort_order ON videos(project_id, sort_order);
                 CREATE INDEX IF NOT EXISTS idx_projects_path ON projects(path);
             """)
             
@@ -109,11 +108,12 @@ class Database:
                 )
                 order += 1
             
-            # 创建索引
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_videos_sort_order ON videos(project_id, sort_order)"
-            )
             logger.info("Migration completed: sort_order column added")
+        
+        # 创建 sort_order 索引（如果不存在）
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_videos_sort_order ON videos(project_id, sort_order)"
+        )
     
     # ==================== 项目操作 ====================
     

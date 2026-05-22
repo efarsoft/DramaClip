@@ -1,6 +1,6 @@
 import ast
 from abc import ABC, abstractmethod
-from app.config import config
+from app.config.unified_config import config
 from app.models import const
 
 
@@ -72,8 +72,8 @@ class RedisState(BaseState):
         for field, value in fields.items():
             self._redis.hset(task_id, field, str(value))
 
-    def get_task(self, task_id: str):
-        task_data = self._redis.hgetall(task_id)
+    def get_task(self, task_id: str) -> dict[str, any] | None:
+        task_data: dict[bytes, bytes] = self._redis.hgetall(task_id)
         if not task_data:
             return None
 
@@ -107,11 +107,11 @@ class RedisState(BaseState):
 
 
 # Global state
-_enable_redis = config.app.get("enable_redis", False)
-_redis_host = config.app.get("redis_host", "localhost")
-_redis_port = config.app.get("redis_port", 6379)
-_redis_db = config.app.get("redis_db", 0)
-_redis_password = config.app.get("redis_password", None)
+_enable_redis = config.get_legacy_app_config("enable_redis", False)
+_redis_host = config.get_legacy_app_config("redis_host", "localhost")
+_redis_port = config.get_legacy_app_config("redis_port", 6379)
+_redis_db = config.get_legacy_app_config("redis_db", 0)
+_redis_password = config.get_legacy_app_config("redis_password", None)
 
 state = (
     RedisState(

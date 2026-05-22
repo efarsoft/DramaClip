@@ -154,32 +154,24 @@ export function setupIpcHandlers(): void {
     }
   });
 
-  // ============= 文件系统 - 扫描目录（递归扫描包括子目录）============
+  // ============= 文件系统 - 扫描目录（只扫描当前目录，不包括子目录）============
   ipcMain.handle(IPC_CHANNELS.FS_SCAN_DIRECTORY, async (_event, dirPath: string) => {
     try {
       const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.wmv', '.webm', '.flv'];
       const videoFiles: string[] = [];
       
-      // 递归扫描目录
-      const scanDirectory = async (currentPath: string) => {
-        const entries = await fs.promises.readdir(currentPath, { withFileTypes: true });
-        
-        for (const entry of entries) {
-          const fullPath = path.join(currentPath, entry.name);
-          
-          if (entry.isFile()) {
-            const ext = path.extname(entry.name).toLowerCase();
-            if (videoExtensions.includes(ext)) {
-              videoFiles.push(fullPath);
-            }
-          } else if (entry.isDirectory()) {
-            // 递归扫描子目录
-            await scanDirectory(fullPath);
+      // 只扫描当前目录下的视频文件，不递归扫描子目录
+      const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile()) {
+          const ext = path.extname(entry.name).toLowerCase();
+          if (videoExtensions.includes(ext)) {
+            const fullPath = path.join(dirPath, entry.name);
+            videoFiles.push(fullPath);
           }
         }
-      };
+      }
       
-      await scanDirectory(dirPath);
       return { success: true, data: videoFiles };
     } catch (error) {
       return {

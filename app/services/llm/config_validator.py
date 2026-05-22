@@ -7,7 +7,7 @@ LLM服务配置验证器
 from typing import Dict, List, Any, Optional
 from loguru import logger
 
-from app.config import config
+from app.config.unified_config import config
 from .manager import LLMServiceManager
 from .exceptions import ConfigurationError
 
@@ -105,9 +105,9 @@ class LLMConfigValidator:
         try:
             # 获取配置
             config_prefix = f"vision_{provider_name}"
-            api_key = config.app.get(f'{config_prefix}_api_key')
-            model_name = config.app.get(f'{config_prefix}_model_name')
-            base_url = config.app.get(f'{config_prefix}_base_url')
+            api_key = config.get_legacy_app_config(f'{config_prefix}_api_key')
+            model_name = config.get_legacy_app_config(f'{config_prefix}_model_name')
+            base_url = config.get_legacy_app_config(f'{config_prefix}_base_url')
             
             result["config"] = {
                 "api_key": "***" if api_key else None,
@@ -162,9 +162,9 @@ class LLMConfigValidator:
         try:
             # 获取配置
             config_prefix = f"text_{provider_name}"
-            api_key = config.app.get(f'{config_prefix}_api_key')
-            model_name = config.app.get(f'{config_prefix}_model_name')
-            base_url = config.app.get(f'{config_prefix}_base_url')
+            api_key = config.get_legacy_app_config(f'{config_prefix}_api_key')
+            model_name = config.get_legacy_app_config(f'{config_prefix}_model_name')
+            base_url = config.get_legacy_app_config(f'{config_prefix}_base_url')
             
             result["config"] = {
                 "api_key": "***" if api_key else None,

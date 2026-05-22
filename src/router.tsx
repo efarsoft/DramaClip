@@ -11,6 +11,7 @@ import AppLayout from './components/layout/AppLayout';
 import HomePage from './pages/HomePage';
 import WorkspacePage from './pages/WorkspacePage';
 import SettingsPage from './pages/SettingsPage';
+import ScriptExtractorPage from './pages/tools/ScriptExtractorPage';
 
 function Router() {
   return (
@@ -20,9 +21,10 @@ function Router() {
         <Route path="/" element={<HomePage />} />
         <Route path="/workspace/:projectId" element={<WorkspacePage />} />
 
-        {/* 系统设置：使用带侧边栏的 AppLayout */}
-        <Route path="/settings" element={<AppLayout />}>
-          <Route index element={<SettingsPage />} />
+        {/* 系统设置与小工具：使用带侧边栏的 AppLayout */}
+        <Route path="/" element={<AppLayout />}>
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="tools/extractor" element={<ScriptExtractorPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -30,7 +30,6 @@ const STEPS = [
   { key: 'import', label: '导入视频', icon: '📁', desc: '导入视频素材' },
   { key: 'analyze', label: 'AI 分析', icon: '🤖', desc: '智能分析内容' },
   { key: 'recommend', label: '方案推荐', icon: '✨', desc: '选择剪辑方案' },
-  { key: 'edit', label: '智能剪辑', icon: '✂️', desc: '调整片段' },
   { key: 'export', label: '导出发布', icon: '🚀', desc: '输出成品' },
 ] as const;
 
@@ -110,8 +109,6 @@ const WorkspacePage: React.FC = () => {
         return <AnalyzePanel onNext={goNext} />;
       case 'recommend':
         return <RecommendPanel onNext={goNext} />;
-      case 'edit':
-        return <EditPanel onNext={goNext} />;
       case 'export':
         return <ExportPanel onComplete={() => navigate('/')} />;
       default:
@@ -125,8 +122,9 @@ const WorkspacePage: React.FC = () => {
 
   return (
     <div style={{
-      minHeight: '100vh', background: BG_DEEP,
+      height: '100vh', background: BG_DEEP,
       display: 'flex', flexDirection: 'column',
+      overflow: 'hidden',
     }}>
       {/* ─── 顶部导航栏 ─── */}
       <header style={{
@@ -270,7 +268,7 @@ const WorkspacePage: React.FC = () => {
       {/* ─── 主面板区 ─── */}
       <main style={{
         flex: 1, display: 'flex', flexDirection: 'column',
-        overflow: 'auto', position: 'relative',
+        overflow: 'auto', position: 'relative', minHeight: 0,
       }}>
         <div className="workspace-panel" style={{ flex: 1 }}>
           {renderPanel()}

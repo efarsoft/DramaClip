@@ -1,0 +1,244 @@
+/**
+ * ImportPanel 样式模块
+ * 导入面板样式
+ */
+
+/* 容器样式 */
+.container {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 32px 24px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* 标题区域 */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+  flex-shrink: 0;
+}
+
+.title {
+  color: #e0e6ed;
+  margin: 0;
+}
+
+.subtitle {
+  color: #4a5a7a;
+  font-size: 13px;
+}
+
+/* 拖拽区域 */
+.dropZone {
+  border-radius: 16px;
+  margin-bottom: 24px;
+  padding: 32px;
+  cursor: pointer;
+  background: rgba(0, 212, 255, 0.03);
+  border: 2px dashed rgba(0, 212, 255, 0.2);
+  transition: all 0.3s;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.dropZone:hover {
+  border-color: rgba(0, 212, 255, 0.4);
+  background: rgba(0, 212, 255, 0.06);
+}
+
+.dropZone.dragging {
+  background: rgba(0, 212, 255, 0.12);
+  border-color: #00d4ff;
+}
+
+.dropIcon {
+  font-size: 40px;
+  color: #00d4ff;
+  margin-bottom: 8px;
+}
+
+.dropText {
+  color: #c8d0dc;
+  font-size: 15px;
+  font-weight: 500;
+  margin: 8px 0 4px;
+}
+
+.dropHint {
+  color: #4a5a7a;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+/* 视频列表区域 */
+.listArea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.listHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.selectAll {
+  color: #a0aec0;
+  font-size: 13px;
+}
+
+/* 视频列表（可滚动） */
+.videoList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+
+/* 视频卡片 */
+.videoCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.videoCard:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.videoCard.selected {
+  background: rgba(0, 212, 255, 0.08);
+  border-color: rgba(0, 212, 255, 0.27);
+}
+
+.videoCard.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 视频缩略图 */
+.thumbnail {
+  flex-shrink: 0;
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.thumbnailOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.thumbnail:hover .thumbnailOverlay {
+  opacity: 1;
+}
+
+/* 视频信息 */
+.videoInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.videoName {
+  font-weight: 500;
+  color: #e0e6ed;
+  font-size: 14px;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.videoMeta {
+  color: #4a5a7a;
+  font-size: 12px;
+}
+
+/* 选中状态指示器 */
+.selectIndicator {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 2px solid #2a3050;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.selectIndicator.selected {
+  border-color: #00d4ff;
+  background: #00d4ff;
+}
+
+/* 底部操作区域 */
+.footer {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  padding: 16px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  flex-shrink: 0;
+  margin-top: 12px;
+}
+
+.startButton {
+  height: 48px;
+  border-radius: 10px;
+  padding: 0 40px;
+  background: linear-gradient(135deg, #00d4ff, #7c3aed);
+  border: none;
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 1;
+  box-shadow: 0 0 24px rgba(0, 212, 255, 0.2);
+}
+
+/* 空状态 */
+.emptyState {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #4a5a7a;
+}
+
+/* 刷新中提示 */
+.refreshing {
+  text-align: center;
+  padding: 16px;
+  color: #00d4ff;
+  flex-shrink: 0;
+}

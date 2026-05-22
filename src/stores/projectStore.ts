@@ -116,14 +116,28 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const videos = await projectApi.importVideos(projectId, paths);
       const currentProject = get().currentProject;
       if (currentProject && currentProject.id === projectId) {
-        set((state) => ({
-          currentVideos: [...state.currentVideos, ...videos],
+        // 重新从数据库加载最新的视频列表，保证状态与数据库完全一致。
+        // 加入健壮的降级容错逻辑，防止 API 出错或测试环境 mock 未设置导致崩溃
+        let latestVideos = videos;
+        try {
+          const fetched = await projectApi.getVideos(projectId);
+          if (fetched && Array.isArray(fetched)) {
+            latestVideos = fetched;
+          } else {
+            latestVideos = [...get().currentVideos, ...videos];
+          }
+        } catch {
+          latestVideos = [...get().currentVideos, ...videos];
+        }
+
+        set({
+          currentVideos: latestVideos,
           currentProject: {
-            ...state.currentProject!,
-            episode_count: state.currentVideos.length + videos.length,
+            ...currentProject,
+            episode_count: latestVideos.length,
           },
           isLoading: false,
-        }));
+        });
       }
       return videos;
     } catch (error) {

@@ -6,6 +6,7 @@ Backend 入口点
 import sys
 import os
 import threading
+import multiprocessing
 from pathlib import Path
 from loguru import logger
 
@@ -113,6 +114,7 @@ def setup_exception_handler():
 
 def main():
     """主入口"""
+    multiprocessing.freeze_support()
     base_dir = setup_resources()
     setup_logging()
     setup_exception_handler()
@@ -123,6 +125,10 @@ def main():
     logger.info(f"Working directory: {os.getcwd()}")
     logger.info(f"Base directory: {base_dir}")
     logger.info("=" * 60)
+
+    # 初始化所有核心服务
+    from app.init import init_all
+    init_all()
 
     try:
         from app.ipc.server import IpcServer
@@ -135,9 +141,9 @@ def main():
         # 创建 IPC 服务器
         server = IpcServer(router)
 
-        # 注册服务器引用到 handlers，用于发送进度通知
-        from app.ipc import handlers as ipc_handlers
-        ipc_handlers.set_server(server)
+        # 注册服务器引用到 handlers base，用于发送进度通知
+        from app.ipc.handlers.base import set_server
+        set_server(server)
 
         # 发送就绪通知
         server.send_notification("ready", {
@@ -165,6 +171,14 @@ def main():
         logger.exception(f"Backend fatal error: {e}")
         sys.exit(1)
     finally:
+        # 关闭时清理资源
+        try:
+            from app.services.cleanup_service import stop_cleanup_service
+            stop_cleanup_service()
+            logger.info("清理服务已停止")
+        except Exception:
+            pass
+
         logger.info("Backend stopped")
 
 

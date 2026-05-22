@@ -7,7 +7,6 @@
 from typing import Dict, Type, Optional, Tuple
 from loguru import logger
 
-from app.config import config
 from .base import VisionModelProvider, TextModelProvider
 from .exceptions import ProviderNotFoundError, ConfigurationError
 
@@ -80,11 +79,23 @@ class LLMServiceManager:
         获取 provider 配置。
 
         model_type: 'vision' 或 'text'
+        使用统一配置（settings.json）读取配置
         """
-        config_prefix = f"{model_type}_{provider_name}"
-        api_key = config.app.get(f"{config_prefix}_api_key")
-        model_name = config.app.get(f"{config_prefix}_model_name")
-        base_url = config.app.get(f"{config_prefix}_base_url")
+        from app.config.unified_config import config as unified_config
+
+        provider_map = {
+            "vision_openai": "openai_protocol",
+            "text_openai": "openai_protocol",
+            "vision_anthropic": "anthropic_protocol",
+            "text_anthropic": "anthropic_protocol",
+        }
+
+        config_key = provider_map.get(f"{model_type}_{provider_name}", "openai_protocol")
+        provider_config = unified_config.get(config_key, {})
+
+        api_key = provider_config.get("api_key")
+        model_name = provider_config.get("model")
+        base_url = provider_config.get("base_url")
 
         return api_key, model_name, base_url
     
@@ -112,7 +123,12 @@ class LLMServiceManager:
 
         # 确定提供商名称
         if not provider_name:
-            provider_name = config.app.get('vision_llm_provider', 'openai')
+            from app.config.unified_config import config as unified_config
+            provider_name = unified_config.get("vit.provider", "openai_protocol")
+            if provider_name == "openai_protocol":
+                provider_name = "openai"
+            elif provider_name == "anthropic_protocol":
+                provider_name = "anthropic"
         provider_name = cls._normalize_provider_name(provider_name)
 
         # 检查缓存
@@ -177,7 +193,14 @@ class LLMServiceManager:
 
         # 确定提供商名称
         if not provider_name:
-            provider_name = config.app.get('text_llm_provider', 'openai')
+            from app.config.unified_config import config as unified_config
+            provider_name = unified_config.get("openai_protocol.model", "gpt-4o")
+            if "gpt" in provider_name.lower():
+                provider_name = "openai"
+            elif "claude" in provider_name.lower():
+                provider_name = "anthropic"
+            else:
+                provider_name = "openai"
         provider_name = cls._normalize_provider_name(provider_name)
 
         logger.debug(f"获取文本模型提供商: {provider_name}")

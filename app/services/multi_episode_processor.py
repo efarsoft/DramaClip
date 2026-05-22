@@ -34,7 +34,7 @@ from app.services import update_script
 from app.services.clip_video import clip_video_unified_multi
 from app.config.audio_config import AudioConfig, get_recommended_volumes_for_content
 from app.utils import utils, video_processor
-from app.config import config
+from app.config.unified_config import config
 
 
 def _natural_sort_key(s: str):
@@ -90,8 +90,7 @@ async def _extract_keyframes_multi(
             processor = video_processor.VideoProcessor(ep_path)
             processor.process_video_pipeline(
                 output_dir=ep_keyframes_dir,
-                skip_seconds=skip_seconds,
-                threshold=threshold
+                interval_seconds=skip_seconds if skip_seconds > 0 else 5.0
             )
             frames = sorted([
                 os.path.join(ep_keyframes_dir, f)
@@ -123,9 +122,9 @@ async def _analyze_all_frames_multi(
 
     from app.services.llm.migration_adapter import create_vision_analyzer
 
-    vision_api_key = config.app.get(f'vision_{vision_llm_provider}_api_key')
-    vision_model = config.app.get(f'vision_{vision_llm_provider}_model_name')
-    vision_base_url = config.app.get(f'vision_{vision_llm_provider}_base_url')
+    vision_api_key = config.get_legacy_app_config(f'vision_{vision_llm_provider}_api_key')
+    vision_model = config.get_legacy_app_config(f'vision_{vision_llm_provider}_model_name')
+    vision_base_url = config.get_legacy_app_config(f'vision_{vision_llm_provider}_base_url')
 
     if not vision_api_key or not vision_model:
         raise ValueError(f"未配置 {vision_llm_provider} API Key 或模型")
@@ -162,7 +161,7 @@ async def _analyze_all_frames_multi(
         frame_paths = [f[1] for f in batch]
 
         # 每个 episode 单独分析，避免跨集混淆
-        prompt = config.app.get(
+        prompt = config.get_legacy_app_config(
             'vision_analysis_prompt',
             f"描述这个短剧片段的画面内容、人物、动作、情绪。"
         )
@@ -238,10 +237,10 @@ async def _generate_narration_script_multi(
     )
 
     # 使用文本 LLM 生成
-    text_provider = config.app.get('text_llm_provider', 'openai').lower()
-    text_api_key = config.app.get(f'text_{text_provider}_api_key')
-    text_model = config.app.get(f'text_{text_provider}_model_name')
-    text_base_url = config.app.get(f'text_{text_provider}_base_url')
+    text_provider = config.get_legacy_app_config('text_llm_provider', 'openai').lower()
+    text_api_key = config.get_legacy_app_config(f'text_{text_provider}_api_key')
+    text_model = config.get_legacy_app_config(f'text_{text_provider}_model_name')
+    text_base_url = config.get_legacy_app_config(f'text_{text_provider}_base_url')
 
     from openai import OpenAI
     client = OpenAI(api_key=text_api_key, base_url=text_base_url)
@@ -258,8 +257,11 @@ async def _generate_narration_script_multi(
         )
         content = response.choices[0].message.content
         # 清理 markdown 代码块
-        content = re.sub(r'^```json\s*', '', content.strip())
-        content = re.sub(r'\s*```$', '', content)
+        if content:
+            content = re.sub(r'^```json\s*', '', content.strip())
+            content = re.sub(r'\s*```$', '', content)
+        else:
+            raise ValueError("LLM 返回空内容")
         result = json.loads(content)
 
         # 支持 {"clips": [...]} 或直接数组
@@ -362,7 +364,7 @@ def start_multi_episode(
             episode_keyframes=episode_keyframes,
             video_theme=params.video_plot or "",
             custom_prompt="",
-            vision_llm_provider=params.vision_llm_provider or "gemini",
+            vision_llm_provider=getattr(params, 'vision_llm_provider', None) or config.get_legacy_app_config('vision_llm_provider', 'openai'),
         ))
 
         # ── 3. 生成高光解说脚本 ───────────────────────

@@ -19,7 +19,13 @@ from typing import List, Dict
 from loguru import logger
 from tqdm import tqdm
 
-from app.utils.ffmpeg_utils import ffmpeg_utils, get_ffmpeg_path, get_ffprobe_path
+from app.utils.ffmpeg_utils import (
+    get_ffmpeg_path, 
+    get_ffprobe_path,
+    get_ffmpeg_hwaccel_info,
+    is_ffmpeg_hwaccel_available,
+    get_ffmpeg_hwaccel_args
+)
 from app.config.ffmpeg_config import FFmpegConfigManager
 
 
@@ -119,7 +125,7 @@ class VideoProcessor:
             return []
 
         # 获取硬件加速信息
-        hwaccel_info = ffmpeg_utils.get_ffmpeg_hwaccel_info()
+        hwaccel_info = get_ffmpeg_hwaccel_info()
         hwaccel_type = hwaccel_info.get("type", "software")
 
         # 提取帧 - 使用优化的进度条
@@ -206,8 +212,8 @@ class VideoProcessor:
                 return True
 
         # 策略2: 尝试标准硬件加速
-        if use_hw_accel and ffmpeg_utils.is_ffmpeg_hwaccel_available():
-            hw_accel = ffmpeg_utils.get_ffmpeg_hwaccel_args()
+        if use_hw_accel and is_ffmpeg_hwaccel_available():
+            hw_accel = get_ffmpeg_hwaccel_args()
             if self._try_extract_with_hwaccel(timestamp, output_path, hw_accel):
                 return True
 
@@ -457,8 +463,8 @@ class VideoProcessor:
             List[str]: 硬件加速器ffmpeg命令参数
         """
         # 使用集中式硬件加速检测
-        if ffmpeg_utils.is_ffmpeg_hwaccel_available():
-            return ffmpeg_utils.get_ffmpeg_hwaccel_args()
+        if is_ffmpeg_hwaccel_available():
+            return get_ffmpeg_hwaccel_args()
         return []
 
     def process_video_pipeline(self,

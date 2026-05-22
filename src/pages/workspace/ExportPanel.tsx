@@ -3,23 +3,26 @@
  * 集成任务队列，支持排队、重试、取消
  */
 import React, { useState, useMemo } from 'react';
-import { Typography, Button, Card, Space, Progress, Select, message, Tag, Tooltip, Modal } from 'antd';
+import { Typography, Button, Card, Space, Progress, Select, message, Tooltip, Modal, Tag } from 'antd';
 import {
   ExportOutlined,
   CheckCircleFilled,
   FolderOpenOutlined,
-  CloseCircleOutlined,
   ReloadOutlined,
-  MinusCircleOutlined,
-  LoadingOutlined,
-  ClockCircleOutlined,
   StopOutlined,
   PlayCircleOutlined,
   EyeOutlined,
+  MinusCircleOutlined,
+  ThunderboltOutlined,
+  CopyOutlined,
+
+  LoadingOutlined,
 } from '@ant-design/icons';
 import { useProjectStore } from '../../stores/projectStore';
 import { useTaskQueueStore, type Task } from '../../stores/taskQueueStore';
 import { VideoPlayerModal } from '../../components/common/VideoPlayer';
+import { TaskStatusTag } from '../../components/common/TaskStatus';
+import { clipApi, type TitleGenerationResult, type GeneratedTitle } from '../../services/ipc';
 
 const { Title, Text } = Typography;
 const CYAN = '#00d4ff';
@@ -33,29 +36,11 @@ const PRESETS = [
   { label: 'GIF 动图', value: 'gif', resolution: '640x360', fps: 10, bitrate: '2M' },
 ];
 
-const FORMATS = ['mp4', 'mov', 'gif', 'webm'];
-
 interface Props {
   onComplete?: () => void;
 }
 
-// ── 任务状态徽标 ──
 
-const StatusTag: React.FC<{ status: Task['status'] }> = ({ status }) => {
-  const map: Record<Task['status'], { color: string; icon: React.ReactNode; label: string }> = {
-    queued: { color: '#6b7b9d', icon: <ClockCircleOutlined />, label: '排队中' },
-    running: { color: CYAN, icon: <LoadingOutlined />, label: '导出中' },
-    completed: { color: '#10b981', icon: <CheckCircleFilled />, label: '已完成' },
-    failed: { color: '#ef4444', icon: <CloseCircleOutlined />, label: '失败' },
-    cancelled: { color: '#f59e0b', icon: <MinusCircleOutlined />, label: '已取消' },
-  };
-  const m = map[status];
-  return (
-    <Tag style={{ borderRadius: 6, margin: 0, color: m.color, borderColor: `${m.color}44`, background: `${m.color}11` }}>
-      {m.icon} {m.label}
-    </Tag>
-  );
-};
 
 // ── 单条任务行 ──
 
@@ -84,7 +69,7 @@ const TaskRow: React.FC<{ task: Task; onCancel: (id: string) => void; onRetry: (
     >
       {/* 状态 */}
       <div style={{ flexShrink: 0, width: 72 }}>
-        <StatusTag status={task.status} />
+        <TaskStatusTag status={task.status} taskType="export" />
       </div>
 
       {/* 进度 / 信息 */}
@@ -175,6 +160,9 @@ const ExportPanel: React.FC<Props> = ({ onComplete }) => {
   const [format, setFormat] = useState('mp4');
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [previewTitle, setPreviewTitle] = useState<string | undefined>();
+  const [titleResult, setTitleResult] = useState<TitleGenerationResult | null>(null);
+  const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
+  const [copiedTitle, setCopiedTitle] = useState<string | null>(null);
   const { tasks: allTasks, activeTaskId, enqueue, cancel, retry, remove, clearCompleted, isRunning } = useTaskQueueStore();
   const selectedPreset = PRESETS.find(p => p.value === preset) || PRESETS[0];
 
@@ -193,6 +181,34 @@ const ExportPanel: React.FC<Props> = ({ onComplete }) => {
       .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0))[0],
     [exportTasks],
   );
+
+  // ── 生成AI标题 ──
+  const handleGenerateTitle = async () => {
+    if (!currentProject) return;
+    setIsGeneratingTitle(true);
+    try {
+      const result = await clipApi.generateTitle(currentProject.id, 5);
+      setTitleResult(result);
+      message.success('标题生成成功！');
+    } catch (error) {
+      message.error('标题生成失败，请重试');
+      console.error('Title generation error:', error);
+    } finally {
+      setIsGeneratingTitle(false);
+    }
+  };
+
+  // ── 复制标题到剪贴板 ──
+  const handleCopyTitle = async (title: string) => {
+    try {
+      await navigator.clipboard.writeText(title);
+      setCopiedTitle(title);
+      message.success('已复制到剪贴板');
+      setTimeout(() => setCopiedTitle(null), 2000);
+    } catch {
+      message.error('复制失败');
+    }
+  };
 
   // ── 提交导出任务 ──
 
@@ -289,22 +305,17 @@ const ExportPanel: React.FC<Props> = ({ onComplete }) => {
             borderColor: 'rgba(255,255,255,0.06)', borderRadius: 12,
           }} title={<span style={{ color: '#e0e6ed' }}>💾 输出格式</span>}>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {FORMATS.map(f => (
-                <Tag
-                  key={f}
-                  onClick={() => setFormat(f)}
-                  style={{
-                    padding: '4px 16px', borderRadius: 8, fontSize: 14,
-                    cursor: 'pointer', border: `1px solid ${format === f ? CYAN + '66' : 'rgba(255,255,255,0.08)'}`,
-                    background: format === f ? `${CYAN}11` : 'transparent',
-                    color: format === f ? CYAN : '#6b7b9d',
-                    fontWeight: format === f ? 600 : 400,
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  .{f}
-                </Tag>
-              ))}
+              <Tag
+                style={{
+                  padding: '4px 16px', borderRadius: 8, fontSize: 14,
+                  border: `1px solid ${CYAN}66`,
+                  background: `${CYAN}11`,
+                  color: CYAN,
+                  fontWeight: 600,
+                }}
+              >
+                .mp4 (最通用/推荐)
+              </Tag>
             </div>
           </Card>
 
@@ -333,6 +344,114 @@ const ExportPanel: React.FC<Props> = ({ onComplete }) => {
               </div>
             )}
           </div>
+
+          {/* AI 标题生成 */}
+          <Card style={{
+            marginBottom: 24, background: 'rgba(124,58,237,0.04)',
+            borderColor: 'rgba(124,58,237,0.2)', borderRadius: 12,
+          }} title={<span style={{ color: '#e0e6ed' }}>✨ AI 标题生成</span>}>
+            <div style={{ marginBottom: 16 }}>
+              <Button
+                type="primary"
+                onClick={handleGenerateTitle}
+                disabled={isGeneratingTitle}
+                icon={isGeneratingTitle ? <ReloadOutlined spin /> : <ThunderboltOutlined />}
+                style={{
+                  width: '100%', height: 44, borderRadius: 8,
+                  background: `linear-gradient(135deg, ${PURPLE}, #a855f7)`,
+                  border: 'none', fontWeight: 600,
+                }}
+              >
+                {isGeneratingTitle ? '生成中...' : '生成 AI 标题 & 简介'}
+              </Button>
+            </div>
+
+            {titleResult && titleResult.success && (
+              <div>
+                {/* 标题列表 */}
+                <div style={{ marginBottom: 16 }}>
+                  <Text style={{ color: '#6b7b9d', fontSize: 12, marginBottom: 8, display: 'block' }}>
+                    推荐标题 ({titleResult.titles.length}个)
+                  </Text>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {titleResult.titles.map((title: GeneratedTitle, index: number) => (
+                      <div
+                        key={index}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 12,
+                          padding: '10px 12px', borderRadius: 8,
+                          background: 'rgba(255,255,255,0.03)',
+                          border: `1px solid rgba(255,255,255,0.06)`,
+                        }}
+                      >
+                        <div style={{
+                          padding: '2px 8px', borderRadius: 4, fontSize: 11,
+                          background: `${PURPLE}22`, color: PURPLE,
+                        }}>
+                          {title.style_label}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={{ color: '#e0e6ed', fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {title.title}
+                          </Text>
+                        </div>
+                        <Button
+                          size="small"
+                          icon={copiedTitle === title.title ? <CheckCircleFilled /> : <CopyOutlined />}
+                          onClick={() => handleCopyTitle(title.title)}
+                          style={{
+                            border: 'none', color: copiedTitle === title.title ? '#10b981' : '#6b7b9d',
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 简介 */}
+                <div style={{ marginBottom: 16 }}>
+                  <Text style={{ color: '#6b7b9d', fontSize: 12, marginBottom: 8, display: 'block' }}>
+                    视频简介
+                  </Text>
+                  <div
+                    style={{
+                      padding: '12px', borderRadius: 8,
+                      background: 'rgba(255,255,255,0.03)',
+                      border: '1px solid rgba(255,255,255,0.06)',
+                    }}
+                  >
+                    <Text style={{ color: '#c8d0dc', fontSize: 14, lineHeight: 1.6 }}>
+                      {titleResult.intro.medium || titleResult.intro.short}
+                    </Text>
+                  </div>
+                </div>
+
+                {/* 标签 */}
+                {titleResult.intro.hashtags && titleResult.intro.hashtags.length > 0 && (
+                  <div>
+                    <Text style={{ color: '#6b7b9d', fontSize: 12, marginBottom: 8, display: 'block' }}>
+                      推荐标签
+                    </Text>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {titleResult.intro.hashtags.map((tag: string, index: number) => (
+                        <Tag
+                          key={index}
+                          style={{
+                            background: 'rgba(0,212,255,0.1)',
+                            borderColor: 'rgba(0,212,255,0.2)',
+                            color: CYAN,
+                            borderRadius: 4,
+                          }}
+                        >
+                          #{tag}
+                        </Tag>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
         </>
       ) : (
         /* ── 当前任务进度 ── */

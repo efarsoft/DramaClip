@@ -17,6 +17,7 @@ from typing import Dict, List, Optional
 from pathlib import Path
 
 from app.utils import ffmpeg_utils
+from app.utils.ffmpeg_utils import get_ffmpeg_path
 
 def parse_timestamp(timestamp: str) -> tuple:
     """
@@ -141,12 +142,12 @@ def get_safe_encoder_config(hwaccel_type: Optional[str] = None) -> Dict[str, str
 
 
 def build_ffmpeg_command(
-    input_path: str, 
-    output_path: str, 
-    start_time: str, 
+    input_path: str,
+    output_path: str,
+    start_time: str,
     end_time: str,
     encoder_config: Dict[str, str],
-    hwaccel_args: List[str] = None
+    hwaccel_args: Optional[List[str]] = None
 ) -> List[str]:
     """
     构建优化的ffmpeg命令，基于测试结果使用正确的硬件加速方案
@@ -250,8 +251,6 @@ def execute_ffmpeg_with_fallback(
         bool: 是否成功
     """
     try:
-        # logger.debug(f"执行ffmpeg命令: {' '.join(cmd)}")
-        
         # 在Windows系统上使用UTF-8编码处理输出
         is_windows = os.name == 'nt'
         process_kwargs = {
@@ -268,7 +267,6 @@ def execute_ffmpeg_with_fallback(
         
         # 验证输出文件
         if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            # logger.info(f"✓ 视频裁剪成功: {timestamp}")
             return True
         else:
             logger.warning(f"输出文件无效: {output_path}")
@@ -646,12 +644,14 @@ def _process_mixed_segment(
     tts_map: Dict,
     output_dir: str,
     encoder_config: Dict,
-    hwaccel_args: List[str]
+    hwaccel_args: List[str],
+    enable_ducking: bool = True,
 ) -> Optional[str]:
     """
     处理OST=2的解说+原声混合片段
     - 根据TTS音频时长动态裁剪
     - 保持原声，确保视频时长等于TTS音频时长
+    - 支持声音避让 (Audio Ducking) - 解说时自动降低原声音量
     """
     _id = script_item["_id"]
     timestamp = script_item["timestamp"]
@@ -677,11 +677,24 @@ def _process_mixed_segment(
     output_filename = f"ost2_vid_{safe_start_time}@{safe_end_time}.mp4"
     output_path = os.path.join(output_dir, output_filename)
 
-    # 构建FFmpeg命令 - 保持原声
-    cmd = _build_ffmpeg_command_with_audio_control(
-        video_origin_path, output_path, ffmpeg_start_time, ffmpeg_end_time,
-        encoder_config, hwaccel_args, remove_audio=False
-    )
+    # 获取解说音频路径
+    narration_audio = tts_item.get("audio_file", "")
+
+    # 构建FFmpeg命令 - 带声音避让的解说+原声混合
+    if enable_ducking and narration_audio and os.path.exists(narration_audio):
+        cmd = _build_ffmpeg_command_with_ducking(
+            video_origin_path, narration_audio, output_path,
+            ffmpeg_start_time, ffmpeg_end_time,
+            encoder_config, hwaccel_args
+        )
+        logger.debug(f"OST=2: 使用声音避让模式混合解说+原声")
+    else:
+        # 降级到普通模式（不应用声音避让）
+        cmd = _build_ffmpeg_command_with_audio_control(
+            video_origin_path, output_path, ffmpeg_start_time, ffmpeg_end_time,
+            encoder_config, hwaccel_args, remove_audio=False
+        )
+        logger.debug(f"OST=2: 使用普通模式（无声音避让）")
 
     # 执行命令
     success = execute_ffmpeg_with_fallback(
@@ -692,13 +705,125 @@ def _process_mixed_segment(
     return output_path if success else None
 
 
+def _build_ffmpeg_command_with_ducking(
+    video_path: str,
+    narration_audio: str,
+    output_path: str,
+    start_time: str,
+    end_time: str,
+    encoder_config: Dict[str, str],
+    hwaccel_args: Optional[List[str]] = None,
+    original_volume: float = 1.0,
+    narration_volume: float = 1.0,
+    ducked_volume: float = 0.25,
+) -> List[str]:
+    """
+    构建带声音避让(Audio Ducking)的FFmpeg命令
+    
+    使用sidechaincompress滤镜，当解说音频出现时自动降低原声音量
+    
+    Args:
+        video_path: 输入视频路径
+        narration_audio: 解说音频路径
+        output_path: 输出视频路径
+        start_time: 开始时间
+        end_time: 结束时间
+        encoder_config: 编码器配置
+        hwaccel_args: 硬件加速参数
+        original_volume: 原声音量 (0-1)
+        narration_volume: 解说音量 (0-1)
+        ducked_volume: 避让时原声音量 (0-1)
+        
+    Returns:
+        List[str]: ffmpeg命令列表
+    """
+    from app.config.audio_config import DUCKING_CONFIG
+    
+    # 获取避让配置
+    threshold = DUCKING_CONFIG.get('threshold', -30.0)
+    ratio = DUCKING_CONFIG.get('ratio', 12.0)
+    attack = DUCKING_CONFIG.get('attack', 0.005)
+    release = DUCKING_CONFIG.get('release', 0.3)
+    
+    cmd = [get_ffmpeg_path(), "-y"]
+    
+    # 硬件加速设置
+    if encoder_config["video_codec"] == "h264_nvenc":
+        pass  # NVENC不使用硬件解码以避免滤镜链问题
+    elif hwaccel_args:
+        cmd.extend(hwaccel_args)
+    
+    # 输入文件：视频和解说音频
+    cmd.extend(["-i", video_path])
+    cmd.extend(["-i", narration_audio])
+    
+    # 时间范围（对视频输入）
+    cmd.extend(["-ss", start_time, "-to", end_time])
+    
+    # 构建滤镜链：原声 + 解说混合，原声应用sidechaincompress实现声音避让
+    # [0:a] = 视频原声, [1:a] = 解说音频
+    # sidechaincompress使用解说作为侧链输入，当解说出现时压缩原声
+    filter_complex = (
+        f"[0:a]volume={original_volume}[orig];"
+        f"[1:a]volume={narration_volume}[narr];"
+        f"[orig][narr]amix=inputs=2:duration=first:dropout_transition=2,"
+        f"sidechaincompress="
+        f"threshold={threshold}:"
+        f"ratio={ratio}:"
+        f"attack={attack}:"
+        f"release={release}:"
+        f"makeup=0[aout]"
+    )
+    cmd.extend(["-filter_complex", filter_complex])
+    
+    # 视频编码器设置
+    cmd.extend(["-c:v", encoder_config["video_codec"]])
+    
+    # 音频输出设置
+    cmd.extend(["-map", "0:v"])  # 视频流来自输入视频
+    cmd.extend(["-map", "[aout]"])  # 音频流来自滤镜输出
+    cmd.extend(["-c:a", encoder_config["audio_codec"]])
+    cmd.extend(["-ar", "44100", "-ac", "2"])
+    
+    # 像素格式
+    cmd.extend(["-pix_fmt", encoder_config["pixel_format"]])
+    
+    # 质量和预设参数
+    if encoder_config["video_codec"] == "h264_nvenc":
+        cmd.extend(["-preset", encoder_config["preset"]])
+        cmd.extend(["-cq", encoder_config["quality_value"]])
+        cmd.extend(["-profile:v", "main"])
+    elif encoder_config["video_codec"] == "h264_amf":
+        cmd.extend(["-quality", encoder_config["preset"]])
+        cmd.extend(["-qp_i", encoder_config["quality_value"]])
+    elif encoder_config["video_codec"] == "h264_qsv":
+        cmd.extend(["-preset", encoder_config["preset"]])
+        cmd.extend(["-global_quality", encoder_config["quality_value"]])
+    elif encoder_config["video_codec"] == "h264_videotoolbox":
+        cmd.extend(["-profile:v", "high"])
+        cmd.extend(["-b:v", encoder_config["quality_value"]])
+    else:
+        # 软件编码器（libx264）
+        cmd.extend(["-preset", encoder_config["preset"]])
+        cmd.extend(["-crf", encoder_config["quality_value"]])
+    
+    # 优化参数
+    cmd.extend(["-avoid_negative_ts", "make_zero"])
+    cmd.extend(["-movflags", "+faststart"])
+    
+    # 输出文件
+    cmd.append(output_path)
+    
+    return cmd
+
+
 def _build_ffmpeg_command_with_audio_control(
     input_path: str,
     output_path: str,
     start_time: str,
     end_time: str,
     encoder_config: Dict[str, str],
-    hwaccel_args: List[str] = None,
+    hwaccel_args: Optional[List[str]] = None,
     remove_audio: bool = False
 ) -> List[str]:
     """
@@ -1204,41 +1329,4 @@ if __name__ == "__main__":
     pass
 
 
-if __name__ == "__main__":
-    video_origin_path = "/Users/apple/Desktop/home/NarratoAI/resource/videos/qyn2-2无片头片尾.mp4"
 
-    tts_result = [{'timestamp': '00:00:00-00:01:15',
-                   'audio_file': '/Users/apple/Desktop/home/NarratoAI/storage/tasks/qyn2-2-demo/audio_00_00_00-00_01_15.mp3',
-                   'subtitle_file': '/Users/apple/Desktop/home/NarratoAI/storage/tasks/qyn2-2-demo/subtitle_00_00_00-00_01_15.srt',
-                   'duration': 25.55,
-                   'text': '好的各位，欢迎回到我的频道！《庆余年 2》刚开播就给了我们一个王炸！范闲在北齐"死"了？这怎么可能！上集片尾那个巨大的悬念，这一集就立刻揭晓了！范闲假死归来，他面临的第一个，也是最大的难关，就是如何面对他最敬爱的，同时也是最可怕的那个人——庆帝！'},
-                  {'timestamp': '00:01:15-00:04:40',
-                   'audio_file': '/Users/apple/Desktop/home/NarratoAI/storage/tasks/qyn2-2-demo/audio_00_01_15-00_04_40.mp3',
-                   'subtitle_file': '/Users/apple/Desktop/home/NarratoAI/storage/tasks/qyn2-2-demo/subtitle_00_01_15-00_04_40.srt',
-                   'duration': 13.488,
-                   'text': '但我们都知道，他绝不可能就这么轻易退场！第二集一开场，范闲就已经秘密回到了京都。他的生死传闻，可不像我们想象中那样只是小范围流传，而是…'},
-                  {'timestamp': '00:04:58-00:05:45',
-                   'audio_file': '/Users/apple/Desktop/home/NarratoAI/storage/tasks/qyn2-2-demo/audio_00_04_58-00_05_45.mp3',
-                   'subtitle_file': '/Users/apple/Desktop/home/NarratoAI/storage/tasks/qyn2-2-demo/subtitle_00_04_58-00_05_45.srt',
-                   'duration': 21.363,
-                   'text': '"欺君之罪"！在封建王朝，这可是抄家灭族的大罪！搁一般人，肯定脚底抹油溜之大吉了。但范闲是谁啊？他偏要反其道而行之！他竟然决定，直接去见庆帝！冒着天大的风险，用"假死"这个事实去赌庆帝的态度！'},
-                  {'timestamp': '00:05:45-00:06:00',
-                   'audio_file': '/Users/apple/Desktop/home/NarratoAI/storage/tasks/qyn2-2-demo/audio_00_05_45-00_06_00.mp3',
-                   'subtitle_file': '/Users/apple/Desktop/home/NarratoAI/storage/tasks/qyn2-2-demo/subtitle_00_05_45-00_06_00.srt',
-                   'duration': 7.675, 'text': '但想见庆帝，哪有那么容易？范闲艺高人胆大，竟然选择了最激进的方式——闯宫！'}]
-    subclip_path_videos = {
-        '00:00:00-00:01:15': '/Users/apple/Desktop/home/NarratoAI/storage/temp/clip_video/6e7e343c7592c7d6f9a9636b55000f23/vid-00-00-00-00-01-15.mp4',
-        '00:01:15-00:04:40': '/Users/apple/Desktop/home/NarratoAI/storage/temp/clip_video/6e7e343c7592c7d6f9a9636b55000f23/vid-00-01-15-00-04-40.mp4',
-        '00:04:41-00:04:58': '/Users/apple/Desktop/home/NarratoAI/storage/temp/clip_video/6e7e343c7592c7d6f9a9636b55000f23/vid-00-04-41-00-04-58.mp4',
-        '00:04:58-00:05:45': '/Users/apple/Desktop/home/NarratoAI/storage/temp/clip_video/6e7e343c7592c7d6f9a9636b55000f23/vid-00-04-58-00-05-45.mp4',
-        '00:05:45-00:06:00': '/Users/apple/Desktop/home/NarratoAI/storage/temp/clip_video/6e7e343c7592c7d6f9a9636b55000f23/vid-00-05-45-00-06-00.mp4',
-        '00:06:00-00:06:03': '/Users/apple/Desktop/home/NarratoAI/storage/temp/clip_video/6e7e343c7592c7d6f9a9636b55000f23/vid-00-06-00-00-06-03.mp4',
-    }
-
-    # 使用方法示例
-    try:
-        result = clip_video(video_origin_path, tts_result, subclip_path_videos)
-        print("裁剪结果:")
-        print(json.dumps(result, indent=4, ensure_ascii=False))
-    except Exception as e:
-        print(f"发生错误: {e}")

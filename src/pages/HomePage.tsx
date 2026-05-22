@@ -10,8 +10,8 @@ import {
   FolderOpenOutlined,
   EditOutlined,
   DeleteOutlined,
-  AppstoreOutlined,
   RightOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons';
 import { Modal, Input, App } from 'antd';
 import { useProjectStore } from '../stores/projectStore';
@@ -20,7 +20,16 @@ import type { Project } from '../services/ipc';
 /* ─── 颜色常量 ─── */
 const CYAN = '#00d4ff';
 const PURPLE = '#7c3aed';
+const PINK = '#ec4899';
 const BG_DEEP = '#060a17';
+
+/* ─── 小图标 ─── */
+const VideoIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="23 7 16 12 23 17 23 7" />
+    <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+  </svg>
+);
 
 /* ─── CSS 注入 ─── */
 const injectHomeStyles = () => {
@@ -144,10 +153,33 @@ const HomePage: React.FC = () => {
       const folderName = folderPath.split(separators).pop() || '未命名项目';
       const parentPath = folderPath.substring(0, folderPath.lastIndexOf(separators));
       
-      // 查找该路径是否已有项目
-      const existing = projects.find(p => p.path === folderPath || p.path === `${folderPath}${separators}${folderName}`);
+      // 辅助函数：标准化路径以便于可靠的比较
+      const normalizePath = (p: string) => {
+        if (!p) return '';
+        return p.replace(/\\/g, '/').toLowerCase().replace(/\/$/, '');
+      };
+      
+      const normFolderPath = normalizePath(folderPath);
+      const normComboPath1 = normalizePath(`${folderPath}/${folderName}`);
+      const normComboPath2 = normalizePath(`${parentPath}/${folderName}`);
+      
+      console.log('[OpenFolder] Normalized search paths:', {
+        folderPath: normFolderPath,
+        comboPath1: normComboPath1,
+        comboPath2: normComboPath2
+      });
+      
+      // 查找该路径是否已有项目（不区分大小写和斜杠类型，去除末尾斜杠）
+      const existing = projects.find(p => {
+        const normPPath = normalizePath(p.path);
+        return normPPath === normFolderPath || 
+               normPPath === normComboPath1 || 
+               normPPath === normComboPath2;
+      });
+      
       if (existing) {
         // 已有项目，直接打开
+        console.log('[OpenFolder] Existing project found, opening:', existing.id, existing.path);
         await handleOpen(existing);
       } else {
         // 没有项目，使用文件夹名称创建新项目
@@ -320,15 +352,15 @@ const HomePage: React.FC = () => {
           </p>
         </div>
 
-        {/* ── 三张 Action 卡片 ── */}
+        {/* ── 核心创作 Action 卡片 ── */}
         <div style={{
-          display: 'flex', gap: 24, marginBottom: 60,
+          display: 'flex', gap: 32, marginBottom: 60,
           flexWrap: 'wrap', justifyContent: 'center',
         }}>
           {/* 新建项目 */}
           <div className="home-card" onClick={() => setCreating(true)}
             style={{
-              width: 240, padding: '36px 28px', borderRadius: 16,
+              width: 280, padding: '40px 32px', borderRadius: 16,
               background: 'linear-gradient(135deg, rgba(0,212,255,0.08) 0%, rgba(0,212,255,0.02) 100%)',
               border: `1px solid ${CYAN}22`, cursor: 'pointer',
               backdropFilter: 'blur(12px)',
@@ -352,14 +384,14 @@ const HomePage: React.FC = () => {
               fontSize: 26, color: CYAN,
             }}><PlusOutlined /></div>
             <h3 style={{ margin: '0 0 8px', color: '#e0e6ed', fontSize: 18, fontWeight: 600 }}>新建项目</h3>
-            <p style={{ margin: 0, color: '#5a6a8a', fontSize: 13 }}>创建一个新的剪辑项目</p>
+            <p style={{ margin: 0, color: '#5a6a8a', fontSize: 13 }}>创建一个全新的剪辑项目</p>
           </div>
 
-          {/* 打开项目 */}
+          {/* 打开项目/导入文件夹 */}
           <div className="home-card"
             onClick={handleOpenFolder}
             style={{
-              width: 240, padding: '36px 28px', borderRadius: 16,
+              width: 280, padding: '40px 32px', borderRadius: 16,
               background: 'linear-gradient(135deg, rgba(124,58,237,0.08) 0%, rgba(124,58,237,0.02) 100%)',
               border: `1px solid ${PURPLE}22`, cursor: 'pointer',
               backdropFilter: 'blur(12px)',
@@ -382,29 +414,39 @@ const HomePage: React.FC = () => {
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 26, color: PURPLE,
             }}><FolderOpenOutlined /></div>
-            <h3 style={{ margin: '0 0 8px', color: '#e0e6ed', fontSize: 18, fontWeight: 600 }}>打开项目</h3>
-            <p style={{ margin: 0, color: '#5a6a8a', fontSize: 13 }}>继续未完成的创作</p>
+            <h3 style={{ margin: '0 0 8px', color: '#e0e6ed', fontSize: 18, fontWeight: 600 }}>打开项目/文件夹</h3>
+            <p style={{ margin: 0, color: '#5a6a8a', fontSize: 13 }}>选择包含视频的本地目录直接导入</p>
           </div>
 
-          {/* 从模板创建 */}
+          {/* 台词/文案提取 */}
           <div className="home-card"
+            onClick={() => navigate('/tools/extractor')}
             style={{
-              width: 240, padding: '36px 28px', borderRadius: 16,
-              background: 'linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(16,185,129,0.02) 100%)',
-              border: '1px solid rgba(16,185,129,0.15)', cursor: 'pointer',
+              width: 280, padding: '40px 32px', borderRadius: 16,
+              background: 'linear-gradient(135deg, rgba(236,72,153,0.08) 0%, rgba(236,72,153,0.02) 100%)',
+              border: `1px solid ${PINK}22`, cursor: 'pointer',
               backdropFilter: 'blur(12px)',
               textAlign: 'center', transition: 'all 0.3s',
-              opacity: 0.5, pointerEvents: 'none',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.borderColor = `${PINK}66`;
+              e.currentTarget.style.boxShadow = `0 0 30px ${PINK}22, inset 0 0 30px ${PINK}11`;
+              e.currentTarget.style.transform = 'translateY(-4px)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.borderColor = `${PINK}22`;
+              e.currentTarget.style.boxShadow = 'none';
+              e.currentTarget.style.transform = 'translateY(0)';
             }}
           >
             <div style={{
               width: 56, height: 56, borderRadius: 16, margin: '0 auto 16px',
-              background: 'linear-gradient(135deg, rgba(16,185,129,0.22), rgba(16,185,129,0.44))',
+              background: `linear-gradient(135deg, ${PINK}22, ${PINK}44)`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 26, color: '#10b981',
-            }}><AppstoreOutlined /></div>
-            <h3 style={{ margin: '0 0 8px', color: '#e0e6ed', fontSize: 18, fontWeight: 600 }}>从模板创建</h3>
-            <p style={{ margin: 0, color: '#5a6a8a', fontSize: 13 }}>即将上线</p>
+              fontSize: 26, color: PINK,
+            }}><FileTextOutlined /></div>
+            <h3 style={{ margin: '0 0 8px', color: '#e0e6ed', fontSize: 18, fontWeight: 600 }}>台词/文案提取</h3>
+            <p style={{ margin: 0, color: '#5a6a8a', fontSize: 13 }}>快速提取视频字幕，支持AI一键洗稿二创</p>
           </div>
         </div>
 
@@ -598,12 +640,6 @@ const HomePage: React.FC = () => {
   );
 };
 
-/* ─── 小图标 ─── */
-const VideoIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polygon points="23 7 16 12 23 17 23 7" />
-    <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-  </svg>
-);
+
 
 export default HomePage;
