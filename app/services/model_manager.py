@@ -150,6 +150,18 @@ SUPERTONIC_MODEL = {
     "required_files": ["model.onnx", "config.json"],
 }
 
+# SenseVoice-Small 模型信息 (ASR 极速高精推荐)
+SENSEVOICE_MODEL = {
+    "id": "SenseVoice-large",  # 兼容前端 asrConfig.model = 'SenseVoice-large'
+    "name": "SenseVoice-Small (默认)",
+    "category": "asr",
+    "type": "sensevoice",
+    "size_mb": 890,
+    "description": "方言、情绪与BGM识别天花板。极速非自回归，适合大部分中文及情绪对齐场景。",
+    "model_id": "iic/SenseVoiceSmall",
+    "required_files": ["model.pt", "config.yaml", "tokens.json"]
+}
+
 # Pyannote 说话人分离模型信息
 PYANNOTE_MODELS = {
     "diarization-3.1": {
@@ -349,10 +361,9 @@ def _get_supertonic_cache_dir() -> Path:
 def check_supertonic_model() -> bool:
     """检查 Supertonic 模型是否已下载"""
     cache_dir = _get_supertonic_cache_dir()
-    # Supertonic 会自动下载模型到缓存目录
-    # 检查是否存在模型文件
-    model_files = list(cache_dir.glob("**/*.onnx")) if cache_dir.exists() else []
-    return len(model_files) > 0
+    model_file = cache_dir / "model.onnx"
+    config_file = cache_dir / "config.json"
+    return model_file.exists() and config_file.exists()
 
 
 def get_supertonic_model_size_on_disk() -> int:
@@ -382,6 +393,52 @@ def delete_supertonic_model() -> bool:
         return True
     except Exception as e:
         logger.error(f"Failed to delete Supertonic model: {e}")
+        return False
+
+
+def _get_sensevoice_dir() -> Path:
+    """获取 SenseVoice-Small 模型绝对物理路径"""
+    return Path("d:/DramaClip/resources/models/asr/iic/SenseVoiceSmall")
+
+
+def check_sensevoice_model() -> bool:
+    """检查 SenseVoice-Small 模型是否已下载 (物理路径直读验证)"""
+    target_dir = _get_sensevoice_dir()
+    if not target_dir.exists():
+        return False
+    # 支持 PyTorch (model.pt + config.yaml) 或 ONNX (model.onnx + config.json)
+    has_pt = (target_dir / "model.pt").exists() and (target_dir / "config.yaml").exists()
+    has_onnx = (target_dir / "model.onnx").exists() and (target_dir / "config.json").exists()
+    return has_pt or has_onnx
+
+
+def get_sensevoice_model_size_on_disk() -> int:
+    """获取已下载的 SenseVoice 模型占用磁盘大小（字节）"""
+    target_dir = _get_sensevoice_dir()
+    if not target_dir.exists():
+        return 0
+    total = 0
+    for root, dirs, files in os.walk(str(target_dir)):
+        for f in files:
+            try:
+                total += (Path(root) / f).stat().st_size
+            except OSError:
+                pass
+    return total
+
+
+def delete_sensevoice_model() -> bool:
+    """删除 SenseVoice 模型"""
+    target_dir = _get_sensevoice_dir()
+    if not target_dir.exists():
+        logger.warning(f"SenseVoice model not found at {target_dir}")
+        return False
+    try:
+        shutil.rmtree(str(target_dir))
+        logger.info("Deleted SenseVoice model")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to delete SenseVoice model: {e}")
         return False
 
 
@@ -992,6 +1049,43 @@ def download_supertonic_model(
                 progress_callback(-1, f"下载及初始化失败: {write_err}")
 
 
+def download_sensevoice_model(
+    progress_callback: Optional[Callable] = None,
+    cancel_flag: Optional[threading.Event] = None,
+):
+    """
+    下载 SenseVoice-Small ASR 模型 (使用 ModelScope 纯物理平铺直写)
+    """
+    if cancel_flag is None:
+        cancel_flag = threading.Event()
+
+    target_dir = _get_sensevoice_dir()
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    if progress_callback:
+        progress_callback(0, "正在启动 ModelScope 纯净下载 (SenseVoiceSmall)...")
+
+    try:
+        from modelscope.hub.snapshot_download import snapshot_download
+
+        if progress_callback:
+            progress_callback(10, "连接 ModelScope 下载服务器中...")
+
+        # 执行纯物理平铺下载
+        snapshot_download(
+            "iic/SenseVoiceSmall",
+            local_dir=str(target_dir),
+            cache_dir=None
+        )
+
+        if progress_callback:
+            progress_callback(100, "下载并平铺完成")
+    except Exception as e:
+        logger.error(f"Failed to download SenseVoice model: {e}")
+        if progress_callback:
+            progress_callback(-1, f"下载失败: {e}")
+
+
 # ---------------------------------------------------------------------------
 # 模型管理 API
 # ---------------------------------------------------------------------------
@@ -1004,17 +1098,27 @@ def list_models() -> List[Dict]:
         [{
             "id": str,
             "name": str,
-            "category": "asr" | "tts",
-            "type": "whisper" | "styletts2",
+            "category": "asr" | "tts" | "diarization",
+            "type": "whisper" | "styletts2" | "supertonic" | "sensevoice" | "pyannote" | "custom",
             "size_mb": float,
             "description": str,
             "downloaded": bool,
             "disk_size_bytes": int,
+            "flat_path": str,
+            "source_id": str,
+            "scenarios": str,
         }, ...]
     """
     models = []
 
     # Whisper 模型
+    whisper_scenarios = {
+        "tiny": "极速转写，准确度较低。适合快速测试或硬件配置极低的设备。",
+        "base": "入门级转写。适合一般性语音识别或显存受限环境。",
+        "small": "中端高性价比。日常音视频识别首选，速度较快，准确率适中。",
+        "medium": "专业级转写。对中英文混合、多语种翻译有良好支持，需 3GB+ 显存。",
+        "large-v3": "极高准确度，支持复杂专有名词、生僻字及多语种高精度转写，需 6GB+ 显存。"
+    }
     for size, info in WHISPER_MODELS.items():
         downloaded = check_whisper_model(size)
         disk_size = get_whisper_model_size_on_disk(size) if downloaded else 0
@@ -1027,7 +1131,27 @@ def list_models() -> List[Dict]:
             "description": info["description"],
             "downloaded": downloaded,
             "disk_size_bytes": disk_size,
+            "flat_path": str(_get_hf_model_dir(info["hf_repo"])),
+            "source_id": info["hf_repo"],
+            "scenarios": whisper_scenarios.get(size, info["description"]),
         })
+
+    # SenseVoice-Small (默认 ASR)
+    downloaded = check_sensevoice_model()
+    disk_size = get_sensevoice_model_size_on_disk() if downloaded else 0
+    models.append({
+        "id": SENSEVOICE_MODEL["id"],
+        "name": SENSEVOICE_MODEL["name"],
+        "category": "asr",
+        "type": "sensevoice",
+        "size_mb": SENSEVOICE_MODEL["size_mb"],
+        "description": SENSEVOICE_MODEL["description"],
+        "downloaded": downloaded,
+        "disk_size_bytes": disk_size,
+        "flat_path": str(_get_sensevoice_dir()),
+        "source_id": SENSEVOICE_MODEL["model_id"],
+        "scenarios": SENSEVOICE_MODEL["description"],
+    })
 
     # StyleTTS 2
     downloaded = check_styletts2_model()
@@ -1041,6 +1165,9 @@ def list_models() -> List[Dict]:
         "description": STYLETTS2_MODEL["description"],
         "downloaded": downloaded,
         "disk_size_bytes": disk_size,
+        "flat_path": str(_get_styletts2_cache_dir()),
+        "source_id": STYLETTS2_MODEL["hf_repo"],
+        "scenarios": "次世代情感 TTS，支持声线克隆、语气风格迁移，表现力极强（适合高端配置）。",
     })
 
     # Supertonic - 超轻量本地TTS
@@ -1055,9 +1182,16 @@ def list_models() -> List[Dict]:
         "description": SUPERTONIC_MODEL["description"],
         "downloaded": downloaded,
         "disk_size_bytes": disk_size,
+        "flat_path": str(_get_supertonic_cache_dir()),
+        "source_id": SUPERTONIC_MODEL["hf_repo"],
+        "scenarios": "默认超轻量本地 TTS。99M 超小体积，运行极速（比 StyleTTS2 快 10 倍以上），CD 级高音质。",
     })
 
     # Pyannote 说话人分离模型
+    pyannote_scenarios = {
+        "diarization-3.1": "高精度说话人日志。识别“谁在什么时间说了什么”，支持多角色声纹分割定位。",
+        "segmentation-3.0": "说话人分割基础模型。提取语音片段中的活动区间。"
+    }
     for name, info in PYANNOTE_MODELS.items():
         downloaded = check_pyannote_model(name)
         disk_size = get_pyannote_model_size_on_disk(name) if downloaded else 0
@@ -1070,6 +1204,79 @@ def list_models() -> List[Dict]:
             "description": info["description"],
             "downloaded": downloaded,
             "disk_size_bytes": disk_size,
+            "flat_path": str(_get_hf_model_dir(info["hf_repo"])),
+            "source_id": info["hf_repo"],
+            "scenarios": pyannote_scenarios.get(name, info["description"]),
+        })
+
+    # 加载 settings 中的自定义模型
+    custom_models = {"asr": [], "tts": []}
+    settings_file = Path.home() / ".dramaclip" / "settings.json"
+    if settings_file.exists():
+        try:
+            raw = json.loads(settings_file.read_text(encoding="utf-8"))
+            custom_models = raw.get("custom_models", {"asr": [], "tts": []})
+        except Exception as e:
+            logger.warning(f"Failed to read custom models from settings: {e}")
+
+    # ASR 自定义模型
+    for item in custom_models.get("asr", []):
+        flat_path = item.get("path", "")
+        downloaded = False
+        disk_size = 0
+        if flat_path:
+            p = Path(flat_path)
+            if p.exists() and p.is_dir():
+                downloaded = True
+                for root, dirs, files in os.walk(str(p)):
+                    for f in files:
+                        try:
+                            disk_size += (Path(root) / f).stat().st_size
+                        except OSError:
+                            pass
+        
+        models.append({
+            "id": item.get("id", ""),
+            "name": item.get("name", ""),
+            "category": "asr",
+            "type": "custom",
+            "size_mb": round(disk_size / (1024 * 1024), 1) if downloaded else 0,
+            "description": item.get("description", "用户导入的自定义 ASR 模型"),
+            "downloaded": downloaded,
+            "disk_size_bytes": disk_size,
+            "flat_path": flat_path,
+            "source_id": item.get("mode", "Local Path") + ": " + (item.get("path") or item.get("onlineId", "")),
+            "scenarios": item.get("description", "自定义导入模型"),
+        })
+
+    # TTS 自定义模型
+    for item in custom_models.get("tts", []):
+        flat_path = item.get("path", "")
+        downloaded = False
+        disk_size = 0
+        if flat_path:
+            p = Path(flat_path)
+            if p.exists() and p.is_dir():
+                downloaded = True
+                for root, dirs, files in os.walk(str(p)):
+                    for f in files:
+                        try:
+                            disk_size += (Path(root) / f).stat().st_size
+                        except OSError:
+                            pass
+        
+        models.append({
+            "id": item.get("id", ""),
+            "name": item.get("name", ""),
+            "category": "tts",
+            "type": "custom",
+            "size_mb": round(disk_size / (1024 * 1024), 1) if downloaded else 0,
+            "description": item.get("description", "用户导入的自定义 TTS 模型"),
+            "downloaded": downloaded,
+            "disk_size_bytes": disk_size,
+            "flat_path": flat_path,
+            "source_id": item.get("mode", "Local Path") + ": " + (item.get("path") or item.get("onlineId", "")),
+            "scenarios": item.get("description", "自定义导入模型"),
         })
 
     return models
@@ -1104,6 +1311,8 @@ def download_model(
                 download_styletts2_model(progress_callback, cancel_flag)
             elif model_id == "supertonic":
                 download_supertonic_model(progress_callback, cancel_flag)
+            elif model_id == "SenseVoice-large":
+                download_sensevoice_model(progress_callback, cancel_flag)
             elif model_id.startswith("whisper-"):
                 size = model_id.replace("whisper-", "", 1)
                 download_whisper_model(size, progress_callback, cancel_flag)
@@ -1139,6 +1348,8 @@ def delete_model(model_id: str) -> bool:
         return delete_styletts2_model()
     elif model_id == "supertonic":
         return delete_supertonic_model()
+    elif model_id == "SenseVoice-large":
+        return delete_sensevoice_model()
     elif model_id.startswith("whisper-"):
         size = model_id.replace("whisper-", "", 1)
         return delete_whisper_model(size)

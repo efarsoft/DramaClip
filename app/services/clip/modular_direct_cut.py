@@ -57,15 +57,9 @@ class ModularDirectCutPipeline:
         progress_callback: Optional[Callable] = None,
         crop_mode: str = "smart",
         target_ratio: str = "9:16",
+        segments: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         pipeline = ModularPipeline()
-
-        pipeline.add_stage(SceneDetectionStage(self.config.get("scene_detect")))
-        pipeline.add_stage(HighlightScoringStage(self.config.get("highlight")))
-        pipeline.add_stage(HighlightSelectionStage(target_duration=target_duration))
-        pipeline.add_stage(SegmentSortingStage())
-        pipeline.add_stage(VideoCuttingStage(crop_mode=crop_mode, target_ratio=target_ratio))
-
         context = PipelineContext(
             video_paths=video_paths,
             target_duration=target_duration,
@@ -73,6 +67,39 @@ class ModularDirectCutPipeline:
             output_path=output_path,
             target_ratio=target_ratio,
         )
+
+        if segments:
+            # 100% 自动化流程：直接装载由 Step 2 AI 智能分析产生的高光切片，完美绕过冗余耗时的 CPU 场景探测与打分
+            from app.services.highlight.selector import HighlightSegment
+            selected = []
+            for s in segments:
+                video_path = s.get("video_path")
+                start_time = s.get("start_time") or s.get("start") or 0.0
+                end_time = s.get("end_time") or s.get("end") or 0.0
+                score = s.get("score") or s.get("total_score") or 0.0
+                if not video_path and video_paths:
+                    video_path = video_paths[0]
+                selected.append(HighlightSegment(
+                    video_path=video_path,
+                    start_time=start_time,
+                    end_time=end_time,
+                    score=score,
+                    audio_score=s.get("audio_score", 0.0),
+                    emotion_score=s.get("emotion_score", 0.0),
+                    visual_score=s.get("visual_score", 0.0),
+                    rhythm_score=s.get("rhythm_score", 0.0),
+                    subtitle_text=s.get("subtitle_text"),
+                    reason=s.get("reason"),
+                    segment_id=s.get("segment_id") or s.get("id"),
+                ))
+            context.selected_segments = selected
+        else:
+            pipeline.add_stage(SceneDetectionStage(self.config.get("scene_detect")))
+            pipeline.add_stage(HighlightScoringStage(self.config.get("highlight")))
+            pipeline.add_stage(HighlightSelectionStage(target_duration=target_duration))
+
+        pipeline.add_stage(SegmentSortingStage())
+        pipeline.add_stage(VideoCuttingStage(crop_mode=crop_mode, target_ratio=target_ratio))
 
         if progress_callback:
             pipeline.set_progress_callback(progress_callback)

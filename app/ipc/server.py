@@ -5,6 +5,8 @@ JSON-RPC 服务端
 
 import sys
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
 from loguru import logger
 from .protocol import JsonRpcProtocol, RPCError
@@ -21,6 +23,18 @@ class IpcServer:
         self.protocol = JsonRpcProtocol()
         self.router = router or Router()
         self._running = False
+        self._write_lock = threading.Lock()
+        self._executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="ipc_handler")
+
+    def _write_to_stdout(self, data: dict):
+        """线程安全地将 JSON 响应或通知写入 stdout"""
+        try:
+            serialized = json.dumps(data)
+            with self._write_lock:
+                sys.stdout.write(serialized + "\n")
+                sys.stdout.flush()
+        except Exception as e:
+            logger.error(f"Failed to write to stdout: {e}")
 
     def register_handler(self, namespace: str, method: str, handler: Callable):
         """注册 RPC 方法处理器"""
@@ -83,7 +97,7 @@ class IpcServer:
     def send_notification(self, method: str, params: Optional[dict] = None):
         """发送进度通知到 stdout"""
         notification = self.protocol.notification(method, params)
-        print(json.dumps(notification), flush=True)
+        self._write_to_stdout(notification)
 
     def send_progress(
         self,
@@ -113,6 +127,15 @@ class IpcServer:
             "level": level
         })
 
+    def _handle_and_respond(self, request: dict):
+        """在线程池中处理单个请求并返回响应"""
+        try:
+            response = self.handle(request)
+            if response:
+                self._write_to_stdout(response)
+        except Exception as e:
+            logger.exception("Error processing request in thread pool")
+
     def run(self):
         """运行服务端主循环"""
         self._running = True
@@ -125,28 +148,27 @@ class IpcServer:
 
             try:
                 request = json.loads(line)
-                response = self.handle(request)
-
-                if response:
-                    print(json.dumps(response), flush=True)
+                # 提交到线程池并发执行，避免阻塞主线程的 stdin 读取（如 ping 心跳）
+                self._executor.submit(self._handle_and_respond, request)
 
             except json.JSONDecodeError as e:
                 logger.error(f"JSON decode error: {e}, raw data: {line[:200]}")
                 error_response = self.protocol.error_response(
                     None, -32600, f"Parse error: {e}"
                 )
-                print(json.dumps(error_response), flush=True)
+                self._write_to_stdout(error_response)
 
             except Exception as e:
                 logger.exception("Server loop error")
                 error_response = self.protocol.error_response(
                     None, -32603, f"{type(e).__name__}: {str(e)[:200]}"
                 )
-                print(json.dumps(error_response), flush=True)
+                self._write_to_stdout(error_response)
 
         self._running = False
         logger.info("IPC Server stopped")
 
     def stop(self):
-        """停止服务端"""
+        """停止服务端并关闭线程池"""
         self._running = False
+        self._executor.shutdown(wait=False)

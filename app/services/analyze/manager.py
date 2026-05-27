@@ -66,8 +66,8 @@ class AnalysisManager:
         
         # 根据配置初始化 ASR 服务
         asr_config = _get_asr_config()
-        self._asr_engine = asr_config.get("engine", "faster_whisper")
-        self._asr_model = asr_config.get("model", "large-v3")
+        self._asr_engine = asr_config.get("engine", "sensevoice")
+        self._asr_model = asr_config.get("model", "SenseVoice-large")
         self._asr_device = asr_config.get("device", "auto")
         self._asr_enable_emotion = asr_config.get("enable_emotion", True)
         self._asr_enable_audio_events = asr_config.get("enable_audio_events", True)
@@ -113,6 +113,13 @@ def _run_process_analysis(
     project_root = Path(__file__).resolve().parent.parent.parent.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
+
+    # 初始化应用环境与核心配置（解决 Windows spawn 子进程丢失全局 os.environ 导致的本地离线模型及 VAD 无法物理直读、加载失败问题）
+    try:
+        from app.init import init_all
+        init_all()
+    except Exception as init_err:
+        pass
 
     # 配置子进程的日志系统
     try:
@@ -254,8 +261,8 @@ class AnalysisManager:
         
         # 根据配置初始化 ASR 服务
         asr_config = _get_asr_config()
-        self._asr_engine = asr_config.get("engine", "faster_whisper")
-        self._asr_model = asr_config.get("model", "large-v3")
+        self._asr_engine = asr_config.get("engine", "sensevoice")
+        self._asr_model = asr_config.get("model", "SenseVoice-large")
         self._asr_device = asr_config.get("device", "auto")
         self._asr_enable_emotion = asr_config.get("enable_emotion", True)
         self._asr_enable_audio_events = asr_config.get("enable_audio_events", True)
@@ -272,13 +279,9 @@ class AnalysisManager:
         self.rhythm_service = RhythmService()
         self.diarization_service = SpeakerDiarizationService()
         self._cancel_flags: Dict[str, bool] = {}
+        self._max_concurrent_tasks_override = None
 
-        # 智能并发调度队列配置
-        try:
-            from app.config.unified_config import config
-            self.max_concurrent_tasks = config.get("hardware.max_workers", 2)
-        except Exception:
-            self.max_concurrent_tasks = 2
+        # 智能并发调度队列配置由 max_concurrent_tasks 属性动态提供，实现热更新
         logger.info(f"[AnalysisManager] Max concurrent analysis tasks (unified from settings max_workers): {self.max_concurrent_tasks}")
 
         # 多进程隔离与状态同步同步队列
@@ -297,6 +300,99 @@ class AnalysisManager:
             )
             self._listener_thread.start()
             logger.info("[AnalysisManager] Multiprocessing progress listener thread started")
+
+            # 启动后台进程监控守护线程，彻底解决子进程意外退出、崩溃导致的队列卡死问题
+            self._monitor_thread = threading.Thread(
+                target=self._monitor_active_processes,
+                daemon=True,
+                name="AnalysisProcessMonitor"
+            )
+            self._monitor_thread.start()
+            logger.info("[AnalysisManager] Background process monitor thread started")
+
+    @property
+    def max_concurrent_tasks(self) -> int:
+        """动态读取并发任务数，使系统设置中的并发任务数（max_workers）在排队调度中热更新实时生效"""
+        if hasattr(self, '_max_concurrent_tasks_override') and self._max_concurrent_tasks_override is not None:
+            return self._max_concurrent_tasks_override
+        try:
+            from app.config.unified_config import config
+            return int(config.get("hardware.max_workers", 2))
+        except Exception:
+            return 2
+
+    @max_concurrent_tasks.setter
+    def max_concurrent_tasks(self, value: int):
+        """支持设置并发任务数（主要为了兼容单元测试中的直接赋值修改）"""
+        self._max_concurrent_tasks_override = value
+
+    def _update_project_status_if_done(self, project_id: str):
+        """当项目的所有分析任务均处于终态（完成/失败/取消）时，更新项目整体状态"""
+        try:
+            # 获取该项目的所有任务
+            project_tasks = [t for t in self.tasks.values() if t.project_id == project_id]
+            if not project_tasks:
+                return
+
+            all_done = True
+            has_success = False
+            for t in project_tasks:
+                if t.status in ("queued", "running"):
+                    all_done = False
+                    break
+                if t.status == "completed":
+                    has_success = True
+
+            if all_done:
+                from app.services.project.manager_sqlite import get_manager
+                mgr = get_manager()
+                new_status = "ready" if has_success else "idle"
+                mgr.update_project(project_id, {"status": new_status})
+                logger.info(f"[AnalysisManager] All tasks for project {project_id} finished. Project status updated to {new_status}")
+        except Exception as e:
+            logger.error(f"[AnalysisManager] Failed to update project status: {e}")
+
+    def _monitor_active_processes(self):
+        """后台轮询监控子进程是否存活的守护线程"""
+        logger.info("[AnalysisManager] Background process monitor loop started")
+        import time
+        while True:
+            try:
+                time.sleep(1.0)  # 1秒轮询一次
+                dead_tasks = []
+                # 复制一份以防迭代时字典被修改
+                for task_id, process in list(self._active_processes.items()):
+                    if process and not process.is_alive():
+                        dead_tasks.append((task_id, process.exitcode))
+                
+                for task_id, exitcode in dead_tasks:
+                    task = self.tasks.get(task_id)
+                    if task and task.status in ("running", "queued"):
+                        logger.error(f"[AnalysisManager] Monitor detected dead process for task {task_id} with exitcode {exitcode}")
+                        task.status = "failed"
+                        task.error = f"分析进程异常退出 (Exit code: {exitcode})"
+                        task.message = f"分析进程异常退出 (Exit code: {exitcode})"
+                        
+                        # 触发进度回调通知前端
+                        callback = self._progress_callbacks.get(task_id)
+                        if callback:
+                            try:
+                                callback({
+                                    "task_id": task_id,
+                                    "progress": -1,
+                                    "phase": "error",
+                                    "message": f"分析进程异常退出 (Exit code: {exitcode})",
+                                    "detail": {},
+                                })
+                            except Exception as e:
+                                logger.error(f"[AnalysisManager] Error notifying crash via callback: {e}")
+                        
+                        # 从 active 中移除并触发下一个任务与项目状态更新
+                        self._active_processes.pop(task_id, None)
+                        self._trigger_next_tasks()
+                        self._update_project_status_if_done(task.project_id)
+            except Exception as e:
+                logger.error(f"[AnalysisManager] Error in background process monitor: {e}")
 
     def _listen_to_progress_queue(self):
         """监听子进程发出的进度与结果消息并分发"""
@@ -380,6 +476,7 @@ class AnalysisManager:
             finally:
                 self._active_processes.pop(task_id, None)
                 self._trigger_next_tasks()
+                self._update_project_status_if_done(task.project_id)
 
         elif msg_type == "failed":
             task.status = "failed"
@@ -400,6 +497,7 @@ class AnalysisManager:
             
             self._active_processes.pop(task_id, None)
             self._trigger_next_tasks()
+            self._update_project_status_if_done(task.project_id)
 
     def _load_results_from_disk(self, task: AnalysisTask):
         """从磁盘反序列化结果回 AnalysisTask"""
@@ -631,17 +729,17 @@ class AnalysisManager:
                 self._trigger_next_tasks()
                 break
 
-    def create_task(self, project_id: str, video_path: str) -> AnalysisTask:
+    def create_task(self, project_id: str, video_path: str, video_id: Optional[str] = None) -> AnalysisTask:
         """创建分析任务"""
         task_id = str(uuid.uuid4())
         task = AnalysisTask(
             task_id=task_id,
             project_id=project_id,
-            video_id=str(uuid.uuid4()),
+            video_id=video_id or str(uuid.uuid4()),
             video_path=video_path,
         )
         self.tasks[task_id] = task
-        logger.info(f"Created analysis task: {task_id}")
+        logger.info(f"Created analysis task: {task_id} (video_id: {task.video_id})")
         return task
 
     def get_task(self, task_id: str) -> Optional[AnalysisTask]:
@@ -658,6 +756,7 @@ class AnalysisManager:
                 task.message = f"分析进程异常退出 (Exit code: {exitcode})"
                 self._active_processes.pop(task_id, None)
                 self._trigger_next_tasks()
+                self._update_project_status_if_done(task.project_id)
         return task
 
     def cancel_task(self, task_id: str) -> bool:
@@ -692,6 +791,7 @@ class AnalysisManager:
 
             logger.info(f"Cancelled task: {task_id}")
             self._trigger_next_tasks()
+            self._update_project_status_if_done(task.project_id)
             return True
         return False
 
@@ -855,6 +955,7 @@ class AnalysisManager:
         else:
             result = self.asr_service.recognize(
                 str(audio_path),
+                model=self._asr_model,
                 video_id=task.video_id,
                 progress_callback=asr_progress,
             )
@@ -965,21 +1066,54 @@ class AnalysisManager:
             emotion_score = 0.5
             if emotion_result and i < len(emotion_result.emotion_curve):
                 ep = emotion_result.emotion_curve[i]
-                emotion_score = ep.intensity * ep.confidence
+                intensity = ep.intensity if (ep and ep.intensity is not None) else 0.5
+                confidence = ep.confidence if (ep and ep.confidence is not None) else 1.0
+                try:
+                    emotion_score = float(intensity) * float(confidence)
+                except (ValueError, TypeError):
+                    emotion_score = 0.5
+
+            # 辅助浮点安全转换函数
+            def safe_float(val, default):
+                if val is None:
+                    return default
+                try:
+                    return float(val)
+                except (TypeError, ValueError):
+                    return default
 
             # 视觉分数
             visual_score = 0.5
             if visual_result:
-                visual_score = self.visual_service.get_frame_score_at_time(
+                frame_data = self.visual_service.get_frame_score_at_time(
                     visual_result, seg.start
                 )
+                if frame_data:
+                    visual_score = self.visual_service.calculate_visual_score(
+                        brightness=safe_float(frame_data.get("brightness"), 0.5),
+                        contrast=safe_float(frame_data.get("contrast"), 0.5),
+                        motion=safe_float(frame_data.get("motion_score"), 0.0),
+                        face_score=safe_float(frame_data.get("face_score"), 0.0),
+                        sharpness=safe_float(frame_data.get("sharpness"), 0.5),
+                    )
+                else:
+                    visual_score = 0.5
 
             # 节奏分数
             rhythm_score = 0.5
             if rhythm_result:
-                rhythm_score = self.rhythm_service.get_rhythm_score_at_time(
+                point_data = self.rhythm_service.get_rhythm_score_at_time(
                     rhythm_result, seg.start
                 )
+                if point_data:
+                    rhythm_score = self.rhythm_service.calculate_rhythm_score(
+                        energy=safe_float(point_data.get("energy"), 0.5),
+                        is_beat=bool(point_data.get("is_beat", False)),
+                        is_silence=bool(point_data.get("is_silence", False)),
+                        bpm_variance=safe_float(rhythm_result.bpm_variance, 0.0),
+                    )
+                else:
+                    rhythm_score = 0.5
 
             scored_segments.append({
                 "audio_score": 0.5,

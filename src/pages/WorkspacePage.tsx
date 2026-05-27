@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons';
 import { useProjectStore } from '../stores/projectStore';
 import { useUiStore } from '../stores/uiStore';
+import { useTaskQueueStore } from '../stores/taskQueueStore';
 
 import ImportPanel from './workspace/ImportPanel';
 import AnalyzePanel from './workspace/AnalyzePanel';
@@ -66,6 +67,7 @@ const WorkspacePage: React.FC = () => {
   const navigate = useNavigate();
   const { currentProject, openProject, loadProjects } = useProjectStore();
   const { backendStatus } = useUiStore();
+  const { isRunning } = useTaskQueueStore();
 
   const [currentStep, setCurrentStep] = useState<StepKey>('import');
 
@@ -74,8 +76,20 @@ const WorkspacePage: React.FC = () => {
   /* 打开项目 */
   useEffect(() => {
     if (projectId) {
-      setCurrentStep('import');
-      openProject(projectId).catch(() => {
+      openProject(projectId).then((p) => {
+        if (p.status === 'analyzing') {
+          setCurrentStep('analyze');
+        } else if (p.status === 'ready' || p.status === 'clipping') {
+          setCurrentStep('recommend');
+        } else if (p.status === 'exporting') {
+          setCurrentStep('export');
+        } else if (p.episode_count && p.episode_count > 0) {
+          // Idle项目有导入视频时，应当默认停在导入/勾选视频的第一步，而非直接跳过选择视频阶段
+          setCurrentStep('import');
+        } else {
+          setCurrentStep('import');
+        }
+      }).catch(() => {
         message.error('无法打开项目');
         navigate('/');
       });
@@ -302,11 +316,15 @@ const WorkspacePage: React.FC = () => {
         {currentStep !== 'export' && (
           <Button
             onClick={goNext}
+            disabled={currentStep === 'analyze' && isRunning}
             style={{
               borderRadius: 8, height: 38, padding: '0 24px',
-              background: `linear-gradient(135deg, ${CYAN}, ${PURPLE})`,
-              border: 'none', color: '#fff', fontWeight: 600,
-              boxShadow: `0 0 16px ${CYAN}22`,
+              background: (currentStep === 'analyze' && isRunning) ? 'rgba(255,255,255,0.03)' : `linear-gradient(135deg, ${CYAN}, ${PURPLE})`,
+              border: (currentStep === 'analyze' && isRunning) ? '1px solid rgba(255,255,255,0.05)' : 'none',
+              color: (currentStep === 'analyze' && isRunning) ? '#4a5a7a' : '#fff',
+              fontWeight: 600,
+              boxShadow: (currentStep === 'analyze' && isRunning) ? 'none' : `0 0 16px ${CYAN}22`,
+              cursor: (currentStep === 'analyze' && isRunning) ? 'not-allowed' : 'pointer',
             }}
           >
             下一步

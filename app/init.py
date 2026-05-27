@@ -135,7 +135,7 @@ def init_all():
     os.environ["HF_HOME"] = str(workspace_models / "huggingface")
     os.environ["MODELSCOPE_CACHE"] = str(workspace_models / "modelscope")
     os.environ["XDG_CACHE_HOME"] = str(workspace_models / "styletts2")
-    os.environ["SUPERONIC_CACHE_DIR"] = str(workspace_models / "supertonic")
+    os.environ["SUPERONIC_CACHE_DIR"] = str(workspace_models / "tts" / "supertonic")
 
     # 使用用户提供的令牌登录 ModelScope 平台 (异步执行，避免因网络响应慢或断网阻塞主线程 IPC 建立)
     def do_modelscope_login():

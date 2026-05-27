@@ -106,6 +106,39 @@ const SettingsPage: React.FC = () => {
 
   /* 删除模型 */
   const handleDelete = async (modelId: string, name: string) => {
+    const isCustomAsr = settings?.custom_models?.asr?.some(m => m.id === modelId);
+    const isCustomTts = settings?.custom_models?.tts?.some(m => m.id === modelId);
+    
+    if (isCustomAsr || isCustomTts) {
+      Modal.confirm({
+        title: `确认移除自定义模型 ${name}？`,
+        content: '这将从配置中注销此模型（不会物理删除文件夹）。',
+        okText: '确认移除',
+        okType: 'danger',
+        cancelText: '取消',
+        onOk: async () => {
+          try {
+            const updatedASR = settings?.custom_models?.asr?.filter(m => m.id !== modelId) || [];
+            const updatedTTS = settings?.custom_models?.tts?.filter(m => m.id !== modelId) || [];
+            const newSettings = {
+              ...settings!,
+              custom_models: {
+                asr: updatedASR,
+                tts: updatedTTS
+              }
+            };
+            setSettings(newSettings);
+            await settingsApi.update(newSettings);
+            message.success(`${name} 已从配置中移除`);
+            loadModels();
+          } catch {
+            message.error('移除失败');
+          }
+        }
+      });
+      return;
+    }
+
     Modal.confirm({
       title: `确认删除 ${name}？`,
       content: '删除后如需使用需重新下载。',
@@ -233,6 +266,20 @@ const SettingsPage: React.FC = () => {
           modelDownloads={modelDownloads}
           onDownload={handleDownload}
           onDelete={handleDelete}
+          customModels={settings.custom_models}
+          onCustomModelsChange={async (v) => {
+            if (!settings) return;
+            const newSettings: AppSettings = {
+              ...settings,
+              custom_models: {
+                asr: v.asr ?? settings.custom_models?.asr ?? [],
+                tts: v.tts ?? settings.custom_models?.tts ?? [],
+              }
+            };
+            setSettings(newSettings);
+            await settingsApi.update(newSettings);
+            loadModels();
+          }}
         />
       ),
     },
@@ -247,6 +294,20 @@ const SettingsPage: React.FC = () => {
           modelDownloads={modelDownloads}
           onDownload={handleDownload}
           onDelete={handleDelete}
+          customModels={settings.custom_models}
+          onCustomModelsChange={async (v) => {
+            if (!settings) return;
+            const newSettings: AppSettings = {
+              ...settings,
+              custom_models: {
+                asr: v.asr ?? settings.custom_models?.asr ?? [],
+                tts: v.tts ?? settings.custom_models?.tts ?? [],
+              }
+            };
+            setSettings(newSettings);
+            await settingsApi.update(newSettings);
+            loadModels();
+          }}
         />
       ),
     },

@@ -100,6 +100,39 @@ const fmtDate = (iso: string) => {
   } catch { return iso; }
 };
 
+/* ─── 项目状态配置 ─── */
+const STATUS_GLOW_COLORS: Record<string, { bg: string; text: string; glow: string }> = {
+  empty:      { bg: 'rgba(100, 116, 139, 0.1)', text: '#64748b', glow: '#64748b' },
+  idle:       { bg: 'rgba(148, 163, 184, 0.1)', text: '#94a3b8', glow: '#94a3b8' },
+  analyzing:  { bg: 'rgba(255, 170, 0, 0.1)',   text: '#ffaa00', glow: '#ffaa00' },
+  ready:      { bg: 'rgba(0, 255, 136, 0.1)',   text: '#00ff88', glow: '#00ff88' },
+  clipping:   { bg: 'rgba(255, 102, 0, 0.1)',   text: '#ff6600', glow: '#ff6600' },
+  exporting:  { bg: 'rgba(0, 212, 255, 0.1)',   text: '#00d4ff', glow: '#00d4ff' },
+};
+
+const getProjectStatus = (project: Project): string => {
+  if (!project.episode_count) return 'empty';
+  switch (project.status) {
+    case 'analyzing': return 'analyzing';
+    case 'ready': return 'ready';
+    case 'clipping': return 'clipping';
+    case 'exporting': return 'exporting';
+    default: return 'idle';
+  }
+};
+
+const getStatusLabel = (status: string): string => {
+  const labels: Record<string, string> = {
+    empty: '空项目',
+    idle: '待分析',
+    analyzing: '分析中',
+    ready: '已完成',
+    clipping: '剪辑中',
+    exporting: '导出中',
+  };
+  return labels[status] || status;
+};
+
 /* ─── 首页组件 ─── */
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
@@ -445,8 +478,8 @@ const HomePage: React.FC = () => {
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 26, color: PINK,
             }}><FileTextOutlined /></div>
-            <h3 style={{ margin: '0 0 8px', color: '#e0e6ed', fontSize: 18, fontWeight: 600 }}>台词/文案提取</h3>
-            <p style={{ margin: 0, color: '#5a6a8a', fontSize: 13 }}>快速提取视频字幕，支持AI一键洗稿二创</p>
+            <h3 style={{ margin: '0 0 8px', color: '#e0e6ed', fontSize: 18, fontWeight: 600 }}>字幕与文案提取</h3>
+            <p style={{ margin: 0, color: '#5a6a8a', fontSize: 13 }}>高精度多人对白字幕打轴与口播文案智能转写</p>
           </div>
         </div>
 
@@ -463,32 +496,60 @@ const HomePage: React.FC = () => {
               <span style={{ flex: 1, height: 1, background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.04))' }} />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {projects.slice(0, 8).map((p) => (
-                <div key={p.id} className="home-recent-item" onClick={() => handleOpen(p)}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '14px 20px', borderRadius: 12,
-                    background: 'rgba(255,255,255,0.02)',
-                    border: '1px solid rgba(255,255,255,0.04)',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                    <div style={{
-                      width: 36, height: 36, borderRadius: 10,
-                      background: `linear-gradient(135deg, ${CYAN}22, ${CYAN}11)`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: CYAN, fontSize: 16,
-                    }}>
-                      <VideoIcon />
-                    </div>
-                    <div>
-                      <div style={{ color: '#c8d0dc', fontSize: 15, fontWeight: 500 }}>{p.name}</div>
-                      <div style={{ color: '#4a5a7a', fontSize: 12, display: 'flex', gap: 12 }}>
-                        <span>{p.episode_count ?? 0} 个视频</span>
-                        <span>创建于 {fmtDate(p.created_at ?? '')}</span>
+              {projects.slice(0, 8).map((p) => {
+                const statusKey = getProjectStatus(p);
+                const statusTheme = STATUS_GLOW_COLORS[statusKey] || STATUS_GLOW_COLORS.empty;
+                return (
+                  <div key={p.id} className="home-recent-item" onClick={() => handleOpen(p)}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '14px 20px', borderRadius: 12,
+                      background: 'rgba(255,255,255,0.02)',
+                      border: '1px solid rgba(255,255,255,0.04)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                      <div style={{
+                        width: 36, height: 36, borderRadius: 10,
+                        background: `linear-gradient(135deg, ${CYAN}22, ${CYAN}11)`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: CYAN, fontSize: 16,
+                      }}>
+                        <VideoIcon />
+                      </div>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div style={{ color: '#c8d0dc', fontSize: 15, fontWeight: 500 }}>{p.name}</div>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            padding: '2px 8px',
+                            background: statusTheme.bg,
+                            border: `1px solid ${statusTheme.glow}30`,
+                            borderRadius: 4,
+                            color: statusTheme.text,
+                            fontSize: 11,
+                            fontFamily: "'Orbitron', sans-serif",
+                            textShadow: `0 0 4px ${statusTheme.glow}40`,
+                          }}>
+                            <span style={{
+                              display: 'inline-block',
+                              width: 5,
+                              height: 5,
+                              borderRadius: '50%',
+                              background: statusTheme.glow,
+                              boxShadow: `0 0 4px ${statusTheme.glow}`,
+                            }} />
+                            {getStatusLabel(statusKey)}
+                          </span>
+                        </div>
+                        <div style={{ color: '#4a5a7a', fontSize: 12, display: 'flex', gap: 12, marginTop: 4 }}>
+                          <span>{p.episode_count ?? 0} 个视频</span>
+                          <span>创建于 {fmtDate(p.created_at ?? '')}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <button
                       onClick={(e) => handleRenameOpen(e, p)}
@@ -510,10 +571,11 @@ const HomePage: React.FC = () => {
                       onMouseEnter={e => { e.currentTarget.style.color = '#ff4d4f'; e.currentTarget.style.background = 'rgba(255,77,79,0.1)'; }}
                       onMouseLeave={e => { e.currentTarget.style.color = '#3a4a6a'; e.currentTarget.style.background = 'transparent'; }}
                     ><DeleteOutlined /></button>
-                    <RightOutlined style={{ color: '#3a4a6a', fontSize: 12 }} />
+                    <RightOutlined style={{ color: '#3a4a6a', fontSize: 12, marginLeft: 8 }} />
                   </div>
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

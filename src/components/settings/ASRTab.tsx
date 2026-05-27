@@ -1,12 +1,21 @@
 /**
- * ASR 语音识别设置
+ * ASR 语音识别设置 Tab
  */
 
-import React from 'react';
-import { Card, Row, Col, Form, Switch, Select, Space } from 'antd';
-import { CloudDownloadOutlined } from '@ant-design/icons';
+import React, { useState } from 'react';
+import { Card, Row, Col, Form, Switch, Select, Space, Button, Modal, Input, Radio, message } from 'antd';
+import { CloudDownloadOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ModelInfo } from './ModelDownloadCard';
 import { ModelStatusRow } from './ModelDownloadCard';
+
+interface CustomModelConfig {
+  id: string;
+  name: string;
+  mode: 'Local Path' | 'Online ID';
+  path?: string;
+  onlineId?: string;
+  description?: string;
+}
 
 interface ASRTabProps {
   asrConfig: {
@@ -31,6 +40,11 @@ interface ASRTabProps {
   modelDownloads: Record<string, { progress: number; message: string }>;
   onDownload: (modelId: string) => void;
   onDelete: (modelId: string, modelName: string) => void;
+  customModels?: {
+    asr: CustomModelConfig[];
+    tts: CustomModelConfig[];
+  };
+  onCustomModelsChange: (v: { asr?: CustomModelConfig[]; tts?: CustomModelConfig[] }) => void;
 }
 
 export const ASRTab: React.FC<ASRTabProps> = ({
@@ -40,17 +54,66 @@ export const ASRTab: React.FC<ASRTabProps> = ({
   modelDownloads,
   onDownload,
   onDelete,
+  customModels,
+  onCustomModelsChange,
 }) => {
-  const whisperModels = [
-    { label: 'Tiny (轻量快速)', value: 'tiny' },
-    { label: 'Base (基础款)', value: 'base' },
-    { label: 'Small (中等)', value: 'small' },
-    { label: 'Medium (大模型)', value: 'medium' },
-    { label: 'Large V3 (旗舰效果)', value: 'large-v3' },
-  ];
-  const sensevoiceModels = [
-    { label: 'SenseVoice Large (本地极速且最佳)', value: 'SenseVoice-large' },
-  ];
+  const [modalVisible, setModalVisible] = useState(false);
+  const [form] = Form.useForm();
+  const [mode, setMode] = useState<'Local Path' | 'Online ID'>('Local Path');
+
+  // Dynamically populate model options
+  const whisperModels = models
+    .filter((m) => m.category === 'asr' && m.type === 'whisper')
+    .map((m) => ({
+      label: `${m.name} (${m.downloaded ? '已部署' : '未部署'})`,
+      value: m.id.replace('whisper-', ''),
+    }));
+
+  const sensevoiceModels = models
+    .filter((m) => m.category === 'asr' && m.type === 'sensevoice')
+    .map((m) => ({
+      label: `${m.name} (${m.downloaded ? '已部署' : '未部署'})`,
+      value: m.id,
+    }));
+
+  const customASROptions = models
+    .filter((m) => m.category === 'asr' && m.type === 'custom')
+    .map((m) => ({
+      label: `[自定义] ${m.name} (${m.downloaded ? '已加载' : '无效路径'})`,
+      value: m.id,
+    }));
+
+  const whisperOptions = [...whisperModels, ...customASROptions];
+  const sensevoiceOptions = [...sensevoiceModels, ...customASROptions];
+
+  // Handle adding custom model
+  const handleAddCustomModel = async () => {
+    try {
+      const values = await form.validateFields();
+      const id = `custom-asr-${Date.now()}`;
+      
+      const newModel: CustomModelConfig = {
+        id,
+        name: values.name,
+        mode: values.mode,
+        path: values.mode === 'Local Path' ? values.path : '',
+        onlineId: values.mode === 'Online ID' ? values.onlineId : '',
+        description: values.description || '用户导入的自定义 ASR 识别模型',
+      };
+
+      const currentList = customModels?.asr || [];
+      onCustomModelsChange({
+        asr: [...currentList, newModel],
+      });
+
+      setModalVisible(false);
+      form.resetFields();
+      setMode('Local Path');
+      message.success(`自定义模型 ${values.name} 注册成功`);
+    } catch (err) {
+      // Form validation error
+    }
+  };
 
   return (
     <>
@@ -79,7 +142,7 @@ export const ASRTab: React.FC<ASRTabProps> = ({
               <Select
                 value={asrConfig.model}
                 onChange={(v) => onASRChange({ model: v })}
-                options={asrConfig.engine === 'sensevoice' ? sensevoiceModels : whisperModels}
+                options={asrConfig.engine === 'sensevoice' ? sensevoiceOptions : whisperOptions}
                 style={{ width: '100%' }}
               />
             </Form.Item>
@@ -140,20 +203,98 @@ export const ASRTab: React.FC<ASRTabProps> = ({
             <span>ASR 语音识别模型管理</span>
           </Space>
         }
+        extra={
+          <Button
+            type="primary"
+            ghost
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={() => setModalVisible(true)}
+            style={{ borderRadius: '4px' }}
+          >
+            导入自定义模型
+          </Button>
+        }
         style={{ borderColor: '#722ed144' }}
       >
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
-          {models.filter((m) => m.category === 'asr').map((model) => (
-            <ModelStatusRow
-              key={model.id}
-              model={model}
-              downloadInfo={modelDownloads[model.id]}
-              onDownload={onDownload}
-              onDelete={onDelete}
-            />
-          ))}
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          {models
+            .filter((m) => m.category === 'asr')
+            .map((model) => (
+              <ModelStatusRow
+                key={model.id}
+                model={model}
+                downloadInfo={modelDownloads[model.id]}
+                onDownload={onDownload}
+                onDelete={onDelete}
+              />
+            ))}
         </Space>
       </Card>
+
+      {/* Add Custom Model Modal */}
+      <Modal
+        title="导入自定义 ASR 模型配置"
+        open={modalVisible}
+        onOk={handleAddCustomModel}
+        onCancel={() => {
+          setModalVisible(false);
+          form.resetFields();
+          setMode('Local Path');
+        }}
+        okText="确认导入"
+        cancelText="取消"
+        width={520}
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{ mode: 'Local Path' }}
+          onValuesChange={(changed) => {
+            if (changed.mode) setMode(changed.mode);
+          }}
+          style={{ marginTop: 16 }}
+        >
+          <Form.Item
+            name="name"
+            label="模型显示名称"
+            rules={[{ required: true, message: '请输入显示名称' }]}
+          >
+            <Input placeholder="例如: My-Custom-Whisper-Base" />
+          </Form.Item>
+
+          <Form.Item name="mode" label="导入模式">
+            <Radio.Group>
+              <Radio.Button value="Local Path">本地目录导入</Radio.Button>
+              <Radio.Button value="Online ID">线上 Repo 注册</Radio.Button>
+            </Radio.Group>
+          </Form.Item>
+
+          {mode === 'Local Path' ? (
+            <Form.Item
+              name="path"
+              label="本地模型绝对路径"
+              rules={[{ required: true, message: '请输入物理绝对路径' }]}
+              extra="请输入存放 model.bin/model.onnx 等结构文件的本地绝对物理目录"
+            >
+              <Input placeholder="D:\models\my-whisper-small" />
+            </Form.Item>
+          ) : (
+            <Form.Item
+              name="onlineId"
+              label="线上 HuggingFace/ModelScope Repo ID"
+              rules={[{ required: true, message: '请输入线上模型 ID' }]}
+              extra="例如: Systran/faster-whisper-small"
+            >
+              <Input placeholder="Systran/faster-whisper-small" />
+            </Form.Item>
+          )}
+
+          <Form.Item name="description" label="模型功能定位与适用场景描述">
+            <Input.TextArea placeholder="例如: 针对垂直领域专业术语微调后的 ASR 模型，适合科研/医疗剧本转写。" rows={3} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </>
   );
 };

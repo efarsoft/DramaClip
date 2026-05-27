@@ -15,11 +15,11 @@ class HighlightSegment:
     video_path: str
     start_time: float  # 开始时间（秒）
     end_time: float  # 结束时间（秒）
-    score: float  # 总分
-    audio_score: float  # 音频分数
-    emotion_score: float  # 情绪分数
-    visual_score: float  # 画面分数
-    rhythm_score: float  # 节奏分数
+    score: float = 0.0  # 总分
+    audio_score: float = 0.0  # 音频分数
+    emotion_score: float = 0.0  # 情绪分数
+    visual_score: float = 0.0  # 画面分数
+    rhythm_score: float = 0.0  # 节奏分数
     subtitle_text: Optional[str] = None  # 字幕文本
     reason: Optional[str] = None  # 入选理由
     segment_id: Optional[str] = None  # 前端传递的片段 ID（来自分析结果）
@@ -280,24 +280,43 @@ class HighlightSelector:
         segments = []
         for i, score_dict in enumerate(scored_segments):
             vp = video_paths[i % len(video_paths)] if video_paths else ""
+            
+            def get_float_score(key: str) -> float:
+                val = score_dict.get(key, 0.0)
+                if val is None:
+                    return 0.0
+                if isinstance(val, dict):
+                    # 如果不小心传入了字典，尝试取其中的 score/intensity 字段或默认值
+                    return float(val.get("score") or val.get("motion_score") or val.get("energy") or 0.5)
+                try:
+                    return float(val)
+                except (ValueError, TypeError):
+                    return 0.0
+
             # 如果没有total_score，从各维度加权计算
             total = score_dict.get("total_score", None)
             if total is None:
                 total = (
-                    score_dict.get("audio_score", 0.0) * 0.4
-                    + score_dict.get("emotion_score", 0.0) * 0.3
-                    + score_dict.get("visual_score", 0.0) * 0.2
-                    + score_dict.get("rhythm_score", 0.0) * 0.1
+                    get_float_score("audio_score") * 0.4
+                    + get_float_score("emotion_score") * 0.3
+                    + get_float_score("visual_score") * 0.2
+                    + get_float_score("rhythm_score") * 0.1
                 )
+            else:
+                try:
+                    total = float(total)
+                except (ValueError, TypeError):
+                    total = 0.0
+
             seg = HighlightSegment(
                 video_path=vp,
                 start_time=start_times[i],
                 end_time=end_times[i],
                 score=total,
-                audio_score=score_dict.get("audio_score", 0.0),
-                emotion_score=score_dict.get("emotion_score", 0.0),
-                visual_score=score_dict.get("visual_score", 0.0),
-                rhythm_score=score_dict.get("rhythm_score", 0.0),
+                audio_score=get_float_score("audio_score"),
+                emotion_score=get_float_score("emotion_score"),
+                visual_score=get_float_score("visual_score"),
+                rhythm_score=get_float_score("rhythm_score"),
                 subtitle_text=subtitle_texts[i],
             )
             segments.append(seg)

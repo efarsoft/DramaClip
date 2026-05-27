@@ -54,7 +54,7 @@ def analyze_start(project_id: str, episode_ids: List[str]) -> Dict:
         if not video:
             logger.warning(f"[Analyze] Video {episode_id} not found in project {project_id}, skipping")
             continue
-        task = analysis_mgr.create_task(project_id, video.path)
+        task = analysis_mgr.create_task(project_id, video.path, video_id=video.id)
         task_ids.append(task.task_id)
 
         analysis_mgr.start_task_process(
@@ -64,6 +64,9 @@ def analyze_start(project_id: str, episode_ids: List[str]) -> Dict:
 
     if not task_ids:
         raise RPCError(-32002, f"No valid videos to analyze in project {project_id}")
+
+    # 更新项目状态为分析中
+    mgr.update_project(project_id, {"status": "analyzing"})
 
     logger.info(f"[Analyze] Queued {len(task_ids)} tasks inside child processes")
     return {"task_ids": task_ids}
@@ -157,3 +160,54 @@ def analyze_cancel(task_id: str) -> Dict:
 
     logger.info(f"[Analyze] Cancelled task: {task_id}")
     return {"success": True}
+
+
+def analyze_get_completed_results(project_id: str, video_ids: List[str]) -> Dict[str, Any]:
+    """获取视频已完成的分析结果（自适应持久化恢复，避免重复转写计算）
+
+    Args:
+        project_id: 项目ID
+        video_ids: 视频ID列表
+
+    Returns:
+        键为 video_id，值为分析结果（asr, emotion, highlights）的字典
+    """
+    import json
+    from pathlib import Path
+
+    logger.info(f"[Analyze] Querying completed results for {len(video_ids)} videos in project {project_id}")
+    results = {}
+
+    for vid in video_ids:
+        output_dir = Path.home() / ".dramaclip" / "analysis" / vid
+        if not output_dir.exists():
+            continue
+
+        asr_file = output_dir / "asr.json"
+        highlights_file = output_dir / "highlights.json"
+
+        # 只要存在 ASR 结果，就视作该视频已完成分析
+        if asr_file.exists():
+            try:
+                asr_data = json.loads(asr_file.read_text(encoding="utf-8"))
+
+                # 读取情绪分析（可选）
+                emotion_data = None
+                emotion_file = output_dir / "emotion.json"
+                if emotion_file.exists():
+                    emotion_data = json.loads(emotion_file.read_text(encoding="utf-8"))
+
+                # 读取高光（可选）
+                highlights_data = []
+                if highlights_file.exists():
+                    highlights_data = json.loads(highlights_file.read_text(encoding="utf-8"))
+
+                results[vid] = {
+                    "asr": asr_data,
+                    "emotion": emotion_data,
+                    "highlights": highlights_data,
+                }
+            except Exception as e:
+                logger.warning(f"[Analyze] Failed to load cached result for video {vid}: {e}")
+
+    return {"results": results}

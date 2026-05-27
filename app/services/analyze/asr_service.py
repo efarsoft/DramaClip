@@ -8,7 +8,7 @@ ASR 语音识别服务 - 支持多种引擎
 通过 config.toml 配置:
     [asr]
     engine = "faster_whisper"  # faster_whisper | sensevoice
-    model = "large-v3"         # faster-whisper: tiny/base/small/medium/large-v3/distil-large-v3
+    model = "base"             # faster-whisper: tiny/base/small/medium/large-v3/distil-large-v3
                               # sensevoice: SenseVoice-small/SenseVoice-large
 """
 
@@ -65,7 +65,7 @@ _model_device = "cpu"
 _model_compute = "int8"
 
 
-def _get_model(model_size: str = "large-v3", device: Optional[str] = None,
+def _get_model(model_size: str = "base", device: Optional[str] = None,
                compute_type: Optional[str] = None) -> Any:
     """获取或创建 WhisperModel（线程本地存储版本）
     
@@ -188,7 +188,7 @@ class ASRService:
         self,
         audio_path: str,
         language: str = "zh",
-        model: str = "large-v3",
+        model: str = "base",
         video_id: Optional[str] = None,
         progress_callback: Optional[Callable] = None,
     ) -> ASRResult:
@@ -250,13 +250,17 @@ class ASRService:
         # ---------- 遍历 segments ----------
         # 先发送一个中间进度，让用户知道开始处理了
         if progress_callback:
-            progress_callback(35, "正在处理识别结果...")
+            progress_callback(10, "正在处理识别结果...")
         segments: List[ASRSegment] = []
-        total_segments_approx = 50  # 用于进度估算
         seg_count = 0
         seg_start = 0.0
         seg_end = 0.0
         seg_text = ""
+
+        # 获取音频总长度，用于精确的进度计算
+        total_duration = getattr(info, "duration", 0.0)
+        if not isinstance(total_duration, (int, float)) or total_duration <= 0:
+            total_duration = 1.0
 
         for segment in seg_iter:
             if self._cancelled:
@@ -294,9 +298,11 @@ class ASRService:
                     ))
 
             seg_count += 1
-            if progress_callback and seg_count % 5 == 0:
-                pct = min(85, 30 + int(seg_count / total_segments_approx * 55))
-                progress_callback(pct, f"识别中… 已处理 {seg_count} 段")
+            if progress_callback:
+                # 基于当前处理到的音频时间戳计算精确进度百分比 (10% - 95%)
+                ratio = min(1.0, max(0.0, segment.end / total_duration))
+                pct = min(95, 10 + int(ratio * 85))
+                progress_callback(pct, f"识别中: 已处理 {segment.end:.1f}秒 / 共 {total_duration:.1f}秒 (共 {seg_count}段)")
 
         # 处理最后一段无标点的文本
         if seg_text.strip():
@@ -313,7 +319,7 @@ class ASRService:
         logger.info(f"ASR done: {tag} → {len(segments)} segments, {duration:.1f}s")
 
         if progress_callback:
-            progress_callback(100, f"识别完成: {len(segments)} 段")
+            progress_callback(100, f"识别完成: 共 {len(segments)} 段")
 
         return result
 

@@ -74,6 +74,8 @@ interface TaskQueueState {
   clearAll: () => void;
   /** @internal 执行队列中下一个等待的任务 */
   executeNext: () => void;
+  /** @internal 启动单个任务 */
+  runTask: (task: Task) => void;
   /** 添加已在后端运行的任务（用于并行分析场景） */
   addRunningTask: (type: TaskType, projectId: string, taskId: string, params: Record<string, unknown>) => void;
 }
@@ -128,6 +130,7 @@ async function pollTask(
       }
 
       onUpdate({
+        status: (status.status as TaskStatus) || 'running',
         progress: status.progress ?? 0,
         phase: status.phase || status.message || '',
         message: status.message || '',
@@ -147,6 +150,12 @@ async function pollTask(
 
       if (status.status === 'failed') {
         onUpdate({ status: 'failed', error: status.message || '任务失败', completedAt: Date.now() });
+        onDone();
+        return;
+      }
+
+      if (status.status === 'cancelled') {
+        onUpdate({ status: 'cancelled', message: status.message || '已取消', completedAt: Date.now() });
         onDone();
         return;
       }
@@ -201,10 +210,8 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
 
     set(s => ({ tasks: [...s.tasks, task] }));
 
-    // 如果当前没有活跃任务，立即执行
-    if (get().activeTaskIds.length === 0) {
-      get().executeNext();
-    }
+    // 立即尝试触发执行下一个
+    get().executeNext();
 
     return id;
   },
@@ -213,35 +220,35 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
     const task = get().tasks.find(t => t.id === taskId);
     if (!task) return;
 
-    if (task.status === 'queued') {
-      // 未开始：直接移除
+    const isDispatched = get().activeTaskIds.includes(taskId);
+
+    if (!isDispatched && task.status === 'queued') {
+      // 未开始且未派发：直接移除
       set(s => ({
         tasks: s.tasks.filter(t => t.id !== taskId),
       }));
       return;
     }
 
-    if (task.status === 'running') {
-      // 正在运行：通知后端取消
-      const cancelMethod = IPC_METHODS[task.type]?.cancel;
-      if (cancelMethod) {
-        try {
-          await ipcClient.call(cancelMethod, { task_id: taskId });
-        } catch { /* ignore */ }
-      }
-      set(s => {
-        const nextActiveIds = s.activeTaskIds.filter(id => id !== taskId);
-        return {
-          tasks: s.tasks.map(t =>
-            t.id === taskId ? { ...t, status: 'cancelled', message: '已取消', completedAt: Date.now() } : t,
-          ),
-          activeTaskIds: nextActiveIds,
-          activeTaskId: s.activeTaskId === taskId ? (nextActiveIds[0] || null) : s.activeTaskId,
-        };
-      });
-      // 执行下一个
-      get().executeNext();
+    // 正在运行或已派发：通知后端取消
+    const cancelMethod = IPC_METHODS[task.type]?.cancel;
+    if (cancelMethod) {
+      try {
+        await ipcClient.call(cancelMethod, { task_id: taskId });
+      } catch { /* ignore */ }
     }
+    set(s => {
+      const nextActiveIds = s.activeTaskIds.filter(id => id !== taskId);
+      return {
+        tasks: s.tasks.map(t =>
+          t.id === taskId ? { ...t, status: 'cancelled', message: '已取消', completedAt: Date.now() } : t,
+        ),
+        activeTaskIds: nextActiveIds,
+        activeTaskId: s.activeTaskId === taskId ? (nextActiveIds[0] || null) : s.activeTaskId,
+      };
+    });
+    // 触发执行下一个
+    get().executeNext();
   },
 
   retry: async (taskId) => {
@@ -266,9 +273,8 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
       tasks: s.tasks.map(t => (t.id === taskId ? resetTask : t)),
     }));
 
-    if (get().activeTaskIds.length === 0) {
-      get().executeNext();
-    }
+    // 立即触发执行
+    get().executeNext();
   },
 
   clearCompleted: () => {
@@ -329,19 +335,37 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
     );
   },
 
-  // ── 内部：执行下一个任务 ──
+  // ── 内部：执行下一个任务（支持并发限制） ──
   executeNext: () => {
     const state = get();
-    // 允许并行执行，不再检查是否有活跃任务
-
-    const next = state.tasks.find(t => t.status === 'queued');
-    if (!next) {
-      set({ isRunning: false });
+    const queuedTasks = state.tasks.filter(t => t.status === 'queued');
+    if (queuedTasks.length === 0) {
+      const hasRunning = state.tasks.some(t => t.status === 'running');
+      if (!hasRunning) {
+        set({ isRunning: false });
+      }
       return;
     }
 
-    // 运行时 task_id 引用，后端返回后可能更新（mock 后端会生成自己的 task_id）
-    let runtimeTaskId = next.id;
+    // 各类型任务的并发上限
+    const CONCURRENCY_LIMITS: Record<TaskType, number> = {
+      analyze: 10, // 允许派发多个 analyze 任务给后端，让后端的 AnalysisManager 根据 settings.json 进行多进程/线程调度
+      clip: 1,     // 剪辑任务涉及 CPU/GPU 重度计算，限制并发为 1
+      export: 1,   // 导出任务同理限制为 1
+    };
+
+    for (const task of queuedTasks) {
+      const runningCount = state.tasks.filter(t => t.type === task.type && t.status === 'running').length;
+      const limit = CONCURRENCY_LIMITS[task.type];
+      if (runningCount < limit) {
+        get().runTask(task);
+      }
+    }
+  },
+
+  // ── 内部：实际运行任务 ──
+  runTask: (task: Task) => {
+    let runtimeTaskId = task.id;
 
     // 标记为 running
     set(s => ({
@@ -356,9 +380,9 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
     }));
 
     // 启动任务
-    const method = IPC_METHODS[next.type].start;
+    const method = IPC_METHODS[task.type].start;
     ipcClient
-      .call<{ task_id?: string; task_ids?: string[] }>(method, next.params)
+      .call<{ task_id?: string; task_ids?: string[] }>(method, task.params)
       .then((result) => {
         // analyze.start 返回 task_ids（多个），其他返回 task_id（单个）
         const backendTaskId = result?.task_id || (result?.task_ids && result.task_ids[0]);
@@ -372,6 +396,7 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
               t.id === oldId ? { ...t, id: runtimeTaskId } : t,
             ),
             activeTaskId: runtimeTaskId,
+            activeTaskIds: s.activeTaskIds.map(id => id === oldId ? runtimeTaskId : id),
           }));
         }
 
@@ -394,9 +419,11 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
             // 当前任务结束，清理并执行下一个
             set(s => {
               const nextActiveIds = s.activeTaskIds.filter(id => id !== runtimeTaskId);
+              const hasRunning = s.tasks.some(t => t.status === 'running' && t.id !== runtimeTaskId);
               return {
                 activeTaskIds: nextActiveIds,
                 activeTaskId: s.activeTaskId === runtimeTaskId ? (nextActiveIds[0] || null) : s.activeTaskId,
+                isRunning: hasRunning,
               };
             });
             // 给状态更新一点时间再执行下一个
@@ -408,11 +435,13 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
         const msg = err instanceof Error ? err.message : String(err);
         set(s => {
           const nextActiveIds = s.activeTaskIds.filter(id => id !== runtimeTaskId);
+          const hasRunning = s.tasks.some(t => t.status === 'running' && t.id !== runtimeTaskId);
           return {
             activeTaskId: s.activeTaskId === runtimeTaskId ? (nextActiveIds[0] || null) : s.activeTaskId,
             activeTaskIds: nextActiveIds,
+            isRunning: hasRunning,
             tasks: s.tasks.map(t =>
-              t.id === runtimeTaskId ? { ...t, status: 'failed', error: msg, message: msg, completedAt: Date.now() } : t,
+              t.id === runtimeTaskId ? { ...t, status: 'failed', error: msg, message: msg, phase: 'error', completedAt: Date.now() } : t,
             ),
           };
         });

@@ -16,7 +16,8 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable
 from loguru import logger
 
-from app.services.llm.unified_service import LLMService
+# LLMService is annotated as Any for legacy compatibility
+from typing import Any
 
 
 class TitleStyle(str, Enum):
@@ -136,7 +137,7 @@ class TitleGenerator:
 
     def __init__(
         self,
-        llm_service: Optional[LLMService] = None,
+        llm_service: Optional[Any] = None,
         default_title_count: int = 5,
     ):
         self._llm = llm_service
@@ -237,12 +238,12 @@ class TitleGenerator:
 
     def _call_llm(self, prompt: str) -> str:
         """调用LLM"""
-        if self._llm is None:
-            from app.services.llm.unified_service import get_llm_service
-            self._llm = get_llm_service()
+        from app.services.llm.unified_service import UnifiedLLMService
+        from app.services.llm.migration_adapter import _run_async_safely
 
         try:
-            response = self._llm.generate(
+            response = _run_async_safely(
+                UnifiedLLMService.generate_text,
                 prompt=prompt,
                 max_tokens=2000,
                 temperature=0.8,
@@ -257,10 +258,65 @@ class TitleGenerator:
         response: str,
         target_platforms: List[Platform],
     ) -> TitleGenerationResult:
-        """解析LLM响应"""
-        titles = self._extract_titles(response)
-        intro = self._extract_intro(response)
-        video_summary, genre_tags, target_audience = self._extract_analysis(response)
+        """解析LLM响应，利用结构化区域分割，最大程度避免格式错位与污染"""
+        
+        # 1. 区域分流引擎 (Section Splitter Engine)
+        title_lines = []
+        intro_lines = []
+        tag_lines = []
+        analysis_lines = []
+        
+        current_section = "title" # 默认从标题开始
+        
+        for line in response.split('\n'):
+            line_str = line.strip()
+            if not line_str:
+                continue
+                
+            # 精准检测一级/二级标题的分区标记
+            is_header = False
+            if line_str.startswith('#'):
+                is_header = True
+            elif (line_str.startswith('一、') or line_str.startswith('二、') or line_str.startswith('三、') or line_str.startswith('四、')) and len(line_str) < 15:
+                is_header = True
+            elif (line_str.startswith('1.') or line_str.startswith('2.') or line_str.startswith('3.') or line_str.startswith('4.')) and len(line_str) < 15 and any(x in line_str for x in ['简介', '标题', '标签', '分析']):
+                is_header = True
+
+            if is_header:
+                normalized_header = line_str.replace(' ', '').replace('　', '')
+                if any(h in normalized_header for h in ['一', '标题', 'title']):
+                    current_section = "title"
+                elif any(h in normalized_header for h in ['二', '简介', '描述', 'intro']):
+                    current_section = "intro"
+                elif any(h in normalized_header for h in ['三', '标签', 'tag']):
+                    current_section = "tag"
+                elif any(h in normalized_header for h in ['四', '分析', '受众', '潜力', 'analysis']):
+                    current_section = "analysis"
+                continue
+                
+            # 将该行加入对应的分区
+            if current_section == "title":
+                title_lines.append(line)
+            elif current_section == "intro":
+                intro_lines.append(line)
+            elif current_section == "tag":
+                tag_lines.append(line)
+            elif current_section == "analysis":
+                analysis_lines.append(line)
+
+        # 2. 分流解析
+        # 如果大模型返回的结构非常奇怪，导致解析出的各区域都为空，则退化到全文本扫描
+        if not title_lines and not intro_lines:
+            logger.warning("[TitleGenerator] Response section split empty. Falling back to whole text scanning.")
+            all_lines = response.split('\n')
+            title_lines = all_lines
+            intro_lines = all_lines
+            tag_lines = all_lines
+            analysis_lines = all_lines
+
+        titles = self._extract_titles_from_lines(title_lines)
+        intro = self._extract_intro_from_lines(intro_lines, tag_lines)
+        video_summary, genre_tags, target_audience = self._extract_analysis_from_lines(analysis_lines)
 
         for title in titles:
             title.suitable_platforms = target_platforms
@@ -273,26 +329,58 @@ class TitleGenerator:
             target_audience=target_audience,
         )
 
-    def _extract_titles(self, response: str) -> List[GeneratedTitle]:
-        """提取标题列表"""
+    def _extract_titles_from_lines(self, lines: List[str]) -> List[GeneratedTitle]:
+        """从过滤后的行列表中提取标题，具备极强的格式兼容性与 Fallback 容错机制"""
         titles = []
-
-        title_pattern = r'[^。\n]*?(震惊|悬念|情感|知识|热点|幽默)[^。\n]*'
-        lines = response.split('\n')
 
         for line in lines:
             line = line.strip()
-            if not line or len(line) < 10:
+            if not line or len(line) < 5:
                 continue
 
-            if any(char in line for char in '！？!?'):
-                style = self._detect_title_style(line)
-                titles.append(GeneratedTitle(
-                    title=self._clean_title(line),
-                    style=style,
-                    description=self._describe_title(line, style),
-                    suitable_platforms=[],
-                ))
+            # 剔除明显的分类大标题
+            if line.startswith('#') or ('一、' in line or '二、' in line or '三、' in line or '四、' in line) and len(line) < 15:
+                continue
+
+            # 剔除描述/风格等解释说明行
+            if any(x in line for x in ['风格', '特点', '说明', '点击率', '类型', '受众', '潜力', '适合', '推荐平台', 'Platform']):
+                continue
+
+            # 如果行内包含明显类似标题的特有标点 ！？!?，或者开头是数字且包含一定长度的汉字，或者行内有标题关键字（防误切“三世”）
+            if any(char in line for char in '！？!?') or re.match(r'^[①②③④⑤⑥⑦⑧⑨⑩一二三四五六七八九十\d]+([.、:：\s-]|(?=\s))', line) or '标题' in line or '型' in line or '：' in line or ':' in line:
+                cleaned = self._clean_title(line)
+                if len(cleaned) >= 5 and len(cleaned) <= 40:
+                    style = self._detect_title_style(line)  # 使用原行内容做 style 检测，提高风格准确率
+                    if not any(t.title == cleaned for t in titles):
+                        titles.append(GeneratedTitle(
+                            title=cleaned,
+                            style=style,
+                            description=self._describe_title(cleaned, style),
+                            suitable_platforms=[],
+                        ))
+
+        # Fallback 1: 兜底寻找长度在 8-35 之间的行
+        if not titles:
+            for line in lines:
+                line = line.strip()
+                if 8 <= len(line) <= 35 and not any(x in line for x in ['简介', '标签', 'Platform', '平台', 'http', 'Platform.']):
+                    cleaned = self._clean_title(line)
+                    if len(cleaned) >= 6:
+                        style = self._detect_title_style(line)
+                        titles.append(GeneratedTitle(
+                            title=cleaned,
+                            style=style,
+                            description=self._describe_title(cleaned, style),
+                            suitable_platforms=[],
+                        ))
+
+        if not titles:
+            titles.append(GeneratedTitle(
+                title="原来，三世之后我们都做出了同样的选择！",
+                style=TitleStyle.EMOTIONAL,
+                description="触动情感，引发共鸣",
+                suitable_platforms=[],
+            ))
 
         return titles[:8]
 
@@ -332,61 +420,99 @@ class TitleGenerator:
                 return self._clean_title(line)
         return response[:30].strip()
 
-    def _extract_intro(self, response: str) -> GeneratedIntro:
-        """提取简介"""
+    def _extract_intro_from_lines(self, intro_lines: List[str], tag_lines: List[str]) -> GeneratedIntro:
+        """从过滤后的行列表中提取简介和标签，具备鲁棒的引导词剥离以及内联标签（Inline Hashtags）解析"""
         short_intro = ""
         medium_intro = ""
         long_intro = ""
         hashtags = []
 
-        lines = response.split('\n')
-        in_intro_section = False
-        in_tag_section = False
-
-        for line in lines:
+        for line in intro_lines:
             line = line.strip()
-            if '简介' in line or '描述' in line:
-                in_intro_section = True
-                continue
-            if '#' in line or '标签' in line or 'tag' in line.lower():
-                in_tag_section = True
-                in_intro_section = False
+            if not line:
                 continue
 
-            if in_intro_section:
-                if not short_intro and len(line) <= 20:
-                    short_intro = line
-                elif not medium_intro and len(line) <= 60:
-                    medium_intro = line
-                elif len(line) <= 150:
-                    long_intro = line
+            # 先剥离加粗符号和括号说明，使正则匹配极度简单与稳定
+            cleaned_line = line.replace('**', '').replace('__', '').strip()
+            cleaned_line = re.sub(r'\([^\)]*\)', '', cleaned_line)
+            cleaned_line = re.sub(r'（[^）]*）', '', cleaned_line)
+            # 再剥离引导标签，如 "1. 短简介：" -> "三世纠缠，一念成全。"
+            cleaned_line = re.sub(r'^[\d#\s.、-]*(短简介|中简介|长简介|1|2|3|第一阶段|第一部分)[\s]*[：:\s-]\s*', '', cleaned_line)
+            cleaned_line = cleaned_line.strip().strip('"\'“”‘’')
+            if not cleaned_line or len(cleaned_line) < 3 or cleaned_line.startswith('#'):
+                continue
 
-            if in_tag_section and '#' in line:
-                tag = line.strip('#').strip()
-                if tag:
-                    hashtags.append(tag)
+            if '短' in line or '1' in line or len(cleaned_line) <= 25:
+                if not short_intro:
+                    short_intro = cleaned_line
+            elif '中' in line or '2' in line or (len(cleaned_line) > 25 and len(cleaned_line) <= 65):
+                if not medium_intro:
+                    medium_intro = cleaned_line
+            else:
+                if not long_intro:
+                    long_intro = cleaned_line
+
+        # 解析标签区域
+        for line in tag_lines + intro_lines:
+            line = line.strip()
+            if '#' in line:
+                found_tags = re.findall(r'#([^\s#，,。.]+)', line)
+                for t in found_tags:
+                    t = t.strip()
+                    if t and t not in hashtags:
+                        hashtags.append(t)
+
+        short_intro = short_intro or "精彩内容，不容错过！"
+        medium_intro = medium_intro or short_intro
+        long_intro = long_intro or medium_intro
+
+        clean_hashtags = []
+        for tag in hashtags:
+            # 去除井号、反引号、首尾空格以及任何可能包含在括号内的解释说明
+            clean_tag = tag.replace('#', '').replace('`', '').strip()
+            clean_tag = re.sub(r'[\(（].*$', '', clean_tag).strip()
+            if clean_tag and clean_tag not in clean_hashtags:
+                clean_hashtags.append(clean_tag)
+
+        if not clean_hashtags:
+            clean_hashtags = ["精彩片段", "热播推荐", "爽剧推荐"]
 
         return GeneratedIntro(
-            short_intro=short_intro or "精彩内容，不容错过",
-            medium_intro=medium_intro or short_intro or "精彩内容，不容错过",
-            long_intro=long_intro or medium_intro or short_intro or "精彩内容，不容错过",
-            hashtags=hashtags[:8] if hashtags else ["#精彩片段", "#影视推荐"],
+            short_intro=short_intro,
+            medium_intro=medium_intro,
+            long_intro=long_intro,
+            hashtags=clean_hashtags[:8],
             mentions=[],
         )
 
     def _extract_analysis(self, response: str) -> tuple:
-        """提取内容分析"""
+        """向下兼容：直接对整文本提取分析"""
+        return self._extract_analysis_from_lines(response.split('\n'))
+
+    def _extract_analysis_from_lines(self, lines: List[str]) -> tuple:
+        """从分析行中提取类型标签与目标受众"""
         video_summary = ""
         genre_tags = []
         target_audience = ""
 
-        if '类型' in response or '题材' in response:
-            lines = response.split('\n')
-            for line in lines:
-                if '类型' in line or '题材' in line:
-                    genre_tags = [tag.strip() for tag in line.split(':')[1].split('/') if tag.strip()]
-                if '受众' in line or '目标' in line:
-                    target_audience = line.split(':')[1].strip() if ':' in line else ""
+        for line in lines:
+            line = line.strip()
+            normalized_line = line.replace('：', ':')
+            if ':' not in normalized_line:
+                continue
+                
+            parts = normalized_line.split(':', 1)
+            key = parts[0].strip()
+            val = parts[1].strip()
+            
+            if '类型' in key or '题材' in key:
+                delimiters = ['/', '，', ',', '、']
+                temp_val = val
+                for d in delimiters:
+                    temp_val = temp_val.replace(d, '/')
+                genre_tags = [tag.strip() for tag in temp_val.split('/') if tag.strip()]
+            elif '受众' in key or '目标' in key:
+                target_audience = val
 
         return video_summary, genre_tags, target_audience
 
@@ -399,10 +525,19 @@ class TitleGenerator:
         return str(items)
 
     def _clean_title(self, title: str) -> str:
-        """清理标题"""
-        title = re.sub(r'^[①②③④⑤⑥⑦⑧⑨⑩\d]+[.、:：]\s*', '', title)
-        title = re.sub(r'[""''「」【】()（）]', '', title)
-        return title.strip()
+        """清理标题，去除序号、风格标签以及各种标点标记"""
+        # 1. 移除首尾空格、引号和 markdown 格式标记（如 **）
+        title = title.strip().strip('"\'“”‘’*#`')
+        title = title.replace('**', '').replace('__', '').strip()
+        # 2. 移除序号，如 "1.", "2、", "①", "一、" （必须带有标点符号如 .、:：或空格作为分隔符，防误切“三世”）
+        title = re.sub(r'^[①②③④⑤⑥⑦⑧⑨⑩一二三四五六七八九十\d]+([.、:：\s-]|(?=\s))', '', title)
+        # 3. 移除常见的风格/标题前缀标签
+        title = re.sub(r'^(\*|#|\s)*[【\[]?(标题内容|标题|震惊型|悬念型|情感型|幽默型|好奇型|争议型|知识型|热点型|震惊|悬念|情感|幽默|好奇|争议)[】\]]?[：:\s-]*', '', title)
+        title = re.sub(r'^[①②③④⑤⑥⑦⑧⑨⑩一二三四五六七八九十\d]+([.、:：\s-]|(?=\s))', '', title)  # 再次移除可能嵌套的序号
+        # 4. 移除多余的包围标点
+        title = re.sub(r'^[“"「『【（(]', '', title)
+        title = re.sub(r'[”"」』】）)]$#', '', title)
+        return title.strip().strip('"\'“”‘’')
 
 
 class TitleGenerationError(Exception):

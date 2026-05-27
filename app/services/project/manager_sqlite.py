@@ -99,6 +99,11 @@ class ProjectManager:
         logger.debug(f"[DB] Looking for project {project_id}")
         project_data = self.db.get_project(project_id)
         if project_data:
+            # 实时同步视频数量
+            video_count = self.db.get_video_count(project_id)
+            if project_data.get("episode_count", 0) != video_count:
+                project_data["episode_count"] = video_count
+                self.db.update_project(project_id, {"episode_count": video_count})
             logger.debug(f"[DB] Found project: {project_data['name']}")
             return ProjectMeta(**project_data)
         logger.warning(f"[DB] Project {project_id} NOT FOUND")
@@ -181,6 +186,11 @@ class ProjectManager:
         # 自动扫描视频目录，更新视频索引
         if videos_dir.exists():
             sync_result = self._scan_videos_dir(project_id, videos_dir)
+
+        # 无论是否扫描，都同步实际的视频数量，保证 episode_count 在以任意方式导入后都能保持最新且与数据库强一致
+        video_count = self.db.get_video_count(project_id)
+        project.episode_count = video_count
+        self.db.update_project(project_id, {"episode_count": video_count})
 
         # 更新最后访问时间
         project.updated_at = datetime.now().isoformat()

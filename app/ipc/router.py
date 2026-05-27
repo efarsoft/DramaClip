@@ -25,6 +25,7 @@ from app.ipc.handlers.analyze_handler import (
     analyze_start,
     analyze_get_status,
     analyze_cancel,
+    analyze_get_completed_results,
 )
 
 # Clip
@@ -131,6 +132,7 @@ def create_router() -> Router:
     router.register("analyze", "start", analyze_start)
     router.register("analyze", "getStatus", analyze_get_status)
     router.register("analyze", "cancel", analyze_cancel)
+    router.register("analyze", "getCompletedResults", analyze_get_completed_results)
 
     # ==================== 剪辑 ====================
     router.register("clip", "recommend", clip_recommend)

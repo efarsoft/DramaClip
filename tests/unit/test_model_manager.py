@@ -122,14 +122,15 @@ class TestListModel:
         models = list_models()
         
         # 应该包含所有 Whisper 模型
-        whisper_models = [m for m in models if m["category"] == "asr"]
+        whisper_models = [m for m in models if m["type"] == "whisper"]
         assert len(whisper_models) == len(WHISPER_MODELS)
         
-        # 应该包含 TTS 模型（至少包含 styletts2，可能还有其他 TTS 模型）
+        # 应该包含 TTS 模型（包含 styletts2 和 supertonic）
         tts_models = [m for m in models if m["category"] == "tts"]
-        assert len(tts_models) >= 1
+        assert len(tts_models) >= 2
         tts_ids = [m["id"] for m in tts_models]
         assert "styletts2" in tts_ids
+        assert "supertonic" in tts_ids
         
         # 应该包含 Pyannote 模型
         diarization_models = [m for m in models if m["category"] == "diarization"]

@@ -88,6 +88,40 @@ const injectExtractorStyles = () => {
       border-color: rgba(255, 255, 255, 0.15);
       background: rgba(255, 255, 255, 0.04);
     }
+    /* 航天科技感 Segmented Tab Switcher */
+    .cyber-tabs {
+      display: inline-flex;
+      background: rgba(19, 24, 41, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      padding: 4px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    }
+    .cyber-tab-btn {
+      padding: 8px 24px;
+      border-radius: 8px;
+      border: none;
+      background: transparent;
+      color: #7a8aa0;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .cyber-tab-btn.active {
+      color: #fff;
+      background: linear-gradient(135deg, ${PINK}dd 0%, ${PURPLE}dd 100%);
+      box-shadow: 0 0 15px rgba(236, 72, 153, 0.3);
+    }
+    .cyber-tab-btn:hover:not(.active) {
+      color: ${PINK};
+      background: rgba(255, 255, 255, 0.02);
+    }
     /* 美化原生滚动条 */
     .custom-scroll::-webkit-scrollbar {
       width: 6px;
@@ -131,6 +165,7 @@ const ScriptExtractorPage: React.FC = () => {
   const [videoName, setVideoName] = useState('');
   const [engineMode, setEngineMode] = useState<'fast' | 'precise'>('fast');
   const [isDragActive, setIsDragActive] = useState(false);
+  const [activeTab, setActiveTab] = useState<'subtitle' | 'copywriter'>('subtitle');
   
   // 运行状态与任务进度
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -393,7 +428,7 @@ const ScriptExtractorPage: React.FC = () => {
       }}
     >
       {/* ─── 顶部返回与发光标题 ─── */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <button
             onClick={() => navigate('/')}
@@ -437,13 +472,54 @@ const ScriptExtractorPage: React.FC = () => {
                 textShadow: `0 0 20px ${PINK}22`,
               }}
             >
-              台词/文案提取小工具
+              字幕与文案提取
             </h1>
             <span style={{ fontSize: 12, color: '#5a6a8a', marginTop: 2, display: 'inline-block' }}>
-              高灵敏语音识别，支持秒级音频转写字幕、段落重新排版和 AI 一键爆款二创洗稿。
+              高灵敏智能音轨解析，一键提取视频对白字幕及干净口播演讲文案。
             </span>
           </div>
         </div>
+      </div>
+
+      {/* ─── 科幻导航 Tab Switcher ─── */}
+      <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+        <div className="cyber-tabs">
+          <button
+            className={`cyber-tab-btn ${activeTab === 'subtitle' ? 'active' : ''}`}
+            onClick={() => setActiveTab('subtitle')}
+          >
+            <VideoCameraOutlined /> 🎬 AI 智能声轨打轴器
+          </button>
+          <button
+            className={`cyber-tab-btn ${activeTab === 'copywriter' ? 'active' : ''}`}
+            onClick={() => setActiveTab('copywriter')}
+          >
+            <FileTextOutlined /> 🎙️ AI 口播文案提取器
+          </button>
+        </div>
+      </div>
+
+      {/* 动态工作说明 */}
+      <div
+        style={{
+          padding: '12px 20px',
+          borderRadius: 8,
+          background: 'rgba(255, 255, 255, 0.02)',
+          borderLeft: `3px solid ${activeTab === 'subtitle' ? PINK : CYAN}`,
+          marginBottom: 24,
+          fontSize: 13,
+          color: '#a0aed0',
+        }}
+      >
+        {activeTab === 'subtitle' ? (
+          <>
+            <strong>🎬 AI 智能声轨打轴器：</strong> 专为对话、短剧原片打轴设计。精准锁定台词发音的首尾时间戳，生成标准 <code>.srt</code> 字幕，方便直接导入剪辑软件。
+          </>
+        ) : (
+          <>
+            <strong>🎙️ AI 口播文案提取器：</strong> 专为口播、解说、演讲类视频设计。自动忽略“呃、啊”等口癖语气词，自动进行段落标点重整，可直接一键进行 AI 二创洗稿改写。
+          </>
+        )}
       </div>
 
       {/* ─── 核心面板区域 ─── */}
@@ -475,17 +551,17 @@ const ScriptExtractorPage: React.FC = () => {
                 width: 68,
                 height: 68,
                 borderRadius: 20,
-                background: `linear-gradient(135deg, ${PINK}11, ${PINK}33)`,
+                background: `linear-gradient(135deg, ${activeTab === 'subtitle' ? PINK : CYAN}11, ${activeTab === 'subtitle' ? PINK : CYAN}33)`,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: PINK,
+                color: activeTab === 'subtitle' ? PINK : CYAN,
                 fontSize: 28,
                 marginBottom: 20,
-                boxShadow: `0 0 20px ${PINK}11`,
+                boxShadow: `0 0 20px ${activeTab === 'subtitle' ? PINK : CYAN}11`,
               }}
             >
-              <VideoCameraOutlined />
+              {activeTab === 'subtitle' ? <VideoCameraOutlined /> : <FileTextOutlined />}
             </div>
             
             {videoPath ? (
@@ -501,7 +577,7 @@ const ScriptExtractorPage: React.FC = () => {
             ) : (
               <div style={{ textAlign: 'center' }}>
                 <h3 style={{ color: '#c8d0dc', fontSize: 16, marginBottom: 8, fontWeight: 600 }}>
-                  点击或拖拽视频到此处
+                  点击或拖拽视频到此处开始 {activeTab === 'subtitle' ? '字幕转轴提取' : '口播文案转写'}
                 </h3>
                 <p style={{ color: '#5a6a8a', fontSize: 13, margin: 0 }}>
                   支持常见格式：MP4, MKV, AVI, MOV, FLV 等格式
@@ -531,7 +607,7 @@ const ScriptExtractorPage: React.FC = () => {
                   style={{ display: 'flex', gap: 16 }}
                 >
                   <Radio value="fast" className="cyber-radio">
-                    <Tooltip title="基于 SenseVoice 模型，速度极快（通常1分钟视频仅需数秒），支持自动标点与高灵敏降噪分段，非常推荐二创文案改写使用。">
+                    <Tooltip title="基于 SenseVoice 模型，速度极快（通常1分钟视频仅需数秒），支持自动标点与高灵敏降噪分段，非常推荐使用。">
                       <span style={{ color: '#e0e6ed', cursor: 'pointer' }}>
                         ⚡ 极速引擎 <span style={{ color: CYAN, fontSize: 11, background: `${CYAN}11`, padding: '2px 6px', borderRadius: 4, marginLeft: 4 }}>SenseVoice</span>
                       </span>
@@ -557,7 +633,7 @@ const ScriptExtractorPage: React.FC = () => {
                   minWidth: 160,
                 }}
               >
-                开始提取台词
+                开始一键提取
               </button>
             </div>
           </div>
@@ -570,7 +646,7 @@ const ScriptExtractorPage: React.FC = () => {
               padding: '60px 40px',
               borderRadius: 16,
               background: 'rgba(255, 255, 255, 0.02)',
-              border: `1px solid ${PINK}33`,
+              border: `1px solid ${activeTab === 'subtitle' ? PINK : CYAN}33`,
               animation: 'extractorGlow 4s ease-in-out infinite',
               backdropFilter: 'blur(12px)',
               textAlign: 'center',
@@ -583,13 +659,13 @@ const ScriptExtractorPage: React.FC = () => {
           >
             <div style={{ width: '100%', maxWidth: 500 }}>
               <div style={{ display: 'flex', justifyItems: 'center', justifyContent: 'center', marginBottom: 20 }}>
-                <LoadingOutlined style={{ fontSize: 44, color: PINK }} />
+                <LoadingOutlined style={{ fontSize: 44, color: activeTab === 'subtitle' ? PINK : CYAN }} />
               </div>
               <h3 style={{ color: '#e0e6ed', fontSize: 18, marginBottom: 8, fontWeight: 600 }}>
-                正在提取台词字幕...
+                正在提取声轨数据...
               </h3>
               <p style={{ color: '#8892a4', fontSize: 13, marginBottom: 24 }}>
-                后台工作线程正通过 FFmpeg 智能截取无损音频流并派发给 ASR 引擎识别。
+                系统正在通过后台智能提取音频，并自动生成【精准时间对白】与【段落口播纯文案】。
               </p>
               
               <Progress
@@ -660,7 +736,7 @@ const ScriptExtractorPage: React.FC = () => {
           </div>
         )}
 
-        {/* 第三阶段：转写识别成功，呈现双栏结果 & AI 改写 */}
+        {/* 第三阶段：转写识别成功，呈现两套精细化视图 */}
         {status === 'completed' && transcribeResult && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
             {/* 顶层视频名称 & 更换视频 */}
@@ -699,77 +775,86 @@ const ScriptExtractorPage: React.FC = () => {
               </button>
             </div>
 
-            {/* 双栏面板 */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, minHeight: 380 }}>
-              {/* 左侧：字幕段落显示 (SRT) */}
+            {/* TAB 1: 🎬 AI 智能声轨打轴器工作面板 */}
+            {activeTab === 'subtitle' && (
               <div
                 style={{
                   background: 'rgba(255, 255, 255, 0.01)',
                   border: '1px solid rgba(255, 255, 255, 0.04)',
                   borderRadius: 16,
-                  padding: 20,
+                  padding: 24,
                   display: 'flex',
                   flexDirection: 'column',
                   backdropFilter: 'blur(12px)',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={{ width: 12, height: 12, borderRadius: '50%', background: PINK, boxShadow: `0 0 8px ${PINK}` }} />
-                    <h3 style={{ color: '#e0e6ed', fontSize: 15, margin: 0, fontWeight: 600 }}>字幕格式 (SRT Mode)</h3>
+                    <h3 style={{ color: '#e0e6ed', fontSize: 16, margin: 0, fontWeight: 600 }}>
+                      🎬 声轨字幕打轴工作台 (Subtitle Track Aligner)
+                    </h3>
                   </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 12 }}>
                     <button
                       onClick={handleCopySRT}
                       style={{
                         background: 'rgba(255, 255, 255, 0.03)',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
-                        borderRadius: 6,
-                        padding: '4px 10px',
-                        color: '#a0aed0',
-                        fontSize: 12,
+                        border: `1px solid ${PINK}44`,
+                        borderRadius: 8,
+                        padding: '6px 16px',
+                        color: PINK,
+                        fontSize: 13,
+                        fontWeight: 600,
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: 4,
+                        gap: 6,
+                        transition: 'all 0.2s',
                       }}
+                      onMouseEnter={e => { e.currentTarget.style.background = `rgba(236,72,153,0.08)`; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
                     >
-                      <CopyOutlined /> 复制 SRT
+                      <CopyOutlined /> 复制标准 SRT 字幕
                     </button>
                     <button
                       onClick={handleExportSRT}
                       style={{
-                        background: 'rgba(255, 255, 255, 0.03)',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
-                        borderRadius: 6,
-                        padding: '4px 10px',
-                        color: '#a0aed0',
-                        fontSize: 12,
+                        background: `linear-gradient(135deg, ${PINK}dd 0%, ${PURPLE}dd 100%)`,
+                        border: 'none',
+                        borderRadius: 8,
+                        padding: '6px 16px',
+                        color: '#fff',
+                        fontSize: 13,
+                        fontWeight: 600,
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: 4,
+                        gap: 6,
+                        boxShadow: `0 4px 12px rgba(236, 72, 153, 0.25)`,
+                        transition: 'all 0.2s',
                       }}
+                      onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.transform = 'none'; }}
                     >
-                      <DownloadOutlined /> 导出 SRT
+                      <DownloadOutlined /> 导出 SRT 字幕文件
                     </button>
                   </div>
                 </div>
 
-                {/* 字幕内容区域 */}
+                {/* 字幕滚动列表 */}
                 <div
                   className="custom-scroll"
                   style={{
-                    flex: 1,
                     overflowY: 'auto',
-                    background: 'rgba(0, 0, 0, 0.2)',
+                    background: 'rgba(0, 0, 0, 0.25)',
                     border: '1px solid rgba(255, 255, 255, 0.03)',
-                    borderRadius: 8,
-                    padding: 12,
+                    borderRadius: 12,
+                    padding: 16,
                     display: 'flex',
                     flexDirection: 'column',
                     gap: 12,
-                    maxHeight: 400,
+                    maxHeight: 520,
                   }}
                 >
                   {transcribeResult.segments.length > 0 ? (
@@ -777,260 +862,303 @@ const ScriptExtractorPage: React.FC = () => {
                       <div
                         key={seg.id || idx}
                         style={{
-                          padding: '8px 12px',
+                          padding: '12px 16px',
                           background: 'rgba(255, 255, 255, 0.01)',
-                          borderLeft: `2px solid ${PINK}33`,
-                          borderRadius: '0 6px 6px 0',
-                          fontSize: 13,
+                          borderLeft: `3px solid ${PINK}`,
+                          borderRadius: '0 8px 8px 0',
+                          fontSize: 14,
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          justifyContent: 'space-between',
+                          gap: 20,
+                          transition: 'all 0.2s',
                         }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.01)'; }}
                       >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#5a6a8a', fontSize: 11, marginBottom: 4, fontFamily: 'monospace' }}>
-                          <span>#{idx + 1}</span>
-                          <span>{formatTimeLabel(seg.start)} → {formatTimeLabel(seg.end)}</span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: '#5a6a8a', fontSize: 11, marginBottom: 6, fontFamily: 'monospace' }}>
+                            <span style={{ color: PINK, fontWeight: 'bold' }}>#{String(idx + 1).padStart(3, '0')}</span>
+                            <span style={{ background: 'rgba(255,255,255,0.04)', padding: '2px 8px', borderRadius: 4 }}>
+                              {formatTimeLabel(seg.start)} → {formatTimeLabel(seg.end)}
+                            </span>
+                          </div>
+                          <div style={{ color: '#c8d0dc', lineHeight: 1.5 }}>{seg.text}</div>
                         </div>
-                        <div style={{ color: '#c8d0dc', lineHeight: 1.4 }}>{seg.text}</div>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(seg.text);
+                            message.success(`已复制第 ${idx + 1} 句台词`);
+                          }}
+                          style={{
+                            background: 'transparent',
+                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            borderRadius: 6,
+                            width: 28,
+                            height: 28,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#7a8aa0',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s',
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.color = PINK; e.currentTarget.style.borderColor = PINK; }}
+                          onMouseLeave={e => { e.currentTarget.style.color = '#7a8aa0'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; }}
+                          title="复制单行"
+                        >
+                          <CopyOutlined style={{ fontSize: 12 }} />
+                        </button>
                       </div>
                     ))
                   ) : (
-                    <div style={{ textAlign: 'center', color: '#5a6a8a', padding: 40 }}>未提取到字幕段落</div>
+                    <div style={{ textAlign: 'center', color: '#5a6a8a', padding: 60 }}>未提取到字幕段落</div>
                   )}
                 </div>
               </div>
+            )}
 
-              {/* 右侧：完整段落聚合文案 (Prose) */}
-              <div
-                style={{
-                  background: 'rgba(255, 255, 255, 0.01)',
-                  border: '1px solid rgba(255, 255, 255, 0.04)',
-                  borderRadius: 16,
-                  padding: 20,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  backdropFilter: 'blur(12px)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ width: 12, height: 12, borderRadius: '50%', background: CYAN, boxShadow: `0 0 8px ${CYAN}` }} />
-                    <h3 style={{ color: '#e0e6ed', fontSize: 15, margin: 0, fontWeight: 600 }}>段落聚合文案 (Prose Mode)</h3>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button
-                      onClick={handleCopyProse}
-                      style={{
-                        background: 'rgba(255, 255, 255, 0.03)',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
-                        borderRadius: 6,
-                        padding: '4px 10px',
-                        color: '#a0aed0',
-                        fontSize: 12,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
-                      }}
-                    >
-                      <CopyOutlined /> 复制文案
-                    </button>
-                    <button
-                      onClick={handleExportProse}
-                      style={{
-                        background: 'rgba(255, 255, 255, 0.03)',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
-                        borderRadius: 6,
-                        padding: '4px 10px',
-                        color: '#a0aed0',
-                        fontSize: 12,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
-                      }}
-                    >
-                      <DownloadOutlined /> 导出 TXT
-                    </button>
-                  </div>
-                </div>
-
-                {/* 聚合大段文案 */}
+            {/* TAB 2: 🎙️ AI 口播文案提取器面板 */}
+            {activeTab === 'copywriter' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+                {/* 左栏：口播提取纯净文案 */}
                 <div
-                  className="custom-scroll"
                   style={{
-                    flex: 1,
-                    overflowY: 'auto',
-                    background: 'rgba(0, 0, 0, 0.2)',
-                    border: '1px solid rgba(255, 255, 255, 0.03)',
-                    borderRadius: 8,
-                    padding: 16,
-                    fontSize: 14,
-                    color: '#c8d0dc',
-                    lineHeight: 1.6,
-                    whiteSpace: 'pre-wrap',
-                    textAlign: 'justify',
-                    maxHeight: 400,
-                  }}
-                >
-                  {transcribeResult.prose || '未提取到文案'}
-                </div>
-              </div>
-            </div>
-
-            {/* 下部：AI 二创爆款改写面板 */}
-            <div
-              style={{
-                padding: '24px 32px',
-                borderRadius: 16,
-                background: 'linear-gradient(135deg, rgba(236,72,153,0.03) 0%, rgba(124,58,237,0.03) 100%)',
-                border: '1px solid rgba(236, 72, 153, 0.1)',
-                backdropFilter: 'blur(12px)',
-                marginTop: 8,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-                <ThunderboltOutlined style={{ color: PINK, fontSize: 18, filter: `drop-shadow(0 0 6px ${PINK})` }} />
-                <h3 style={{ color: '#e0e6ed', fontSize: 16, margin: 0, fontWeight: 600 }}>AI 爆款二创洗稿改写</h3>
-              </div>
-
-              {/* 风格选项 */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                  gap: 16,
-                  marginBottom: 24,
-                }}
-              >
-                {/* 冲突爆发 */}
-                <div
-                  className={`style-card ${selectedStyle === 'shocking' ? 'selected' : ''}`}
-                  onClick={() => setSelectedStyle('shocking')}
-                  style={{ padding: '14px 18px', borderRadius: 10, cursor: 'pointer' }}
-                >
-                  <div style={{ color: PINK, fontWeight: 600, fontSize: 14, marginBottom: 4 }}>⚡ 冲突爆发</div>
-                  <div style={{ color: '#5a6a8a', fontSize: 11, lineHeight: 1.3 }}>抓黄金前3秒，加强主干冲突，解说话术凌厉抓眼球。</div>
-                </div>
-
-                {/* 悬疑拉满 */}
-                <div
-                  className={`style-card ${selectedStyle === 'suspense' ? 'selected' : ''}`}
-                  onClick={() => setSelectedStyle('suspense')}
-                  style={{ padding: '14px 18px', borderRadius: 10, cursor: 'pointer' }}
-                >
-                  <div style={{ color: CYAN, fontWeight: 600, fontSize: 14, marginBottom: 4 }}>🕵️ 悬疑拉满</div>
-                  <div style={{ color: '#5a6a8a', fontSize: 11, lineHeight: 1.3 }}>层层勾引好奇心，增加情节反转，结尾具有高能戏剧性。</div>
-                </div>
-
-                {/* 情感共鸣 */}
-                <div
-                  className={`style-card ${selectedStyle === 'emotional' ? 'selected' : ''}`}
-                  onClick={() => setSelectedStyle('emotional')}
-                  style={{ padding: '14px 18px', borderRadius: 10, cursor: 'pointer' }}
-                >
-                  <div style={{ color: '#a78bfa', fontWeight: 600, fontSize: 14, marginBottom: 4 }}>❤️ 情感共鸣</div>
-                  <div style={{ color: '#5a6a8a', fontSize: 11, lineHeight: 1.3 }}>深度代入情绪，文辞优美真挚，触动同理心，极具文艺范。</div>
-                </div>
-
-                {/* 智能洗稿 */}
-                <div
-                  className={`style-card ${selectedStyle === 'rewriter' ? 'selected' : ''}`}
-                  onClick={() => setSelectedStyle('rewriter')}
-                  style={{ padding: '14px 18px', borderRadius: 10, cursor: 'pointer' }}
-                >
-                  <div style={{ color: '#34d399', fontWeight: 600, fontSize: 14, marginBottom: 4 }}>✍️ 智能洗稿</div>
-                  <div style={{ color: '#5a6a8a', fontSize: 11, lineHeight: 1.3 }}>核心情节不变，更换流行网络话术，规避原创版权检测。</div>
-                </div>
-              </div>
-
-              {/* 开始改写操作栏 */}
-              <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                <button
-                  className="cyber-btn-pink"
-                  disabled={rewriting}
-                  onClick={handleAIRewrite}
-                  style={{
-                    padding: '10px 28px',
-                    borderRadius: 8,
-                    fontSize: 14,
-                    minWidth: 160,
+                    background: 'rgba(255, 255, 255, 0.01)',
+                    border: '1px solid rgba(255, 255, 255, 0.04)',
+                    borderRadius: 16,
+                    padding: 24,
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 6,
+                    flexDirection: 'column',
+                    backdropFilter: 'blur(12px)',
                   }}
                 >
-                  {rewriting ? (
-                    <>
-                      <SyncOutlined spin /> 改写中...
-                    </>
-                  ) : (
-                    <>
-                      <ThunderboltOutlined /> 一键爆款二创
-                    </>
-                  )}
-                </button>
-                <span style={{ fontSize: 12, color: '#5a6a8a' }}>
-                  一键改写将使用预设提示词发送给本地/云端 LLM，耗时约 5-15 秒。
-                </span>
-              </div>
-
-              {/* AI 改写输出区域 */}
-              {(rewriting || rewrittenText) && (
-                <div
-                  style={{
-                    marginTop: 24,
-                    padding: 20,
-                    background: 'rgba(0,0,0,0.3)',
-                    borderRadius: 12,
-                    border: `1px solid ${PINK}33`,
-                    animation: rewrittenText ? 'none' : 'textStreamGlow 3s infinite',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                    <div style={{ color: PINK, fontWeight: 600, fontSize: 13 }}>二创文案生成结果</div>
-                    {rewrittenText && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ width: 12, height: 12, borderRadius: '50%', background: CYAN, boxShadow: `0 0 8px ${CYAN}` }} />
+                      <h3 style={{ color: '#e0e6ed', fontSize: 16, margin: 0, fontWeight: 600 }}>🎙️ 口播纯净文案 (Clean Prose)</h3>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
                       <button
-                        onClick={handleCopyRewritten}
+                        onClick={handleCopyProse}
                         style={{
-                          background: 'rgba(236, 72, 153, 0.08)',
-                          border: `1px solid ${PINK}33`,
+                          background: 'rgba(255, 255, 255, 0.03)',
+                          border: '1px solid rgba(255, 255, 255, 0.08)',
                           borderRadius: 6,
-                          padding: '4px 10px',
-                          color: PINK,
-                          fontSize: 11,
+                          padding: '6px 12px',
+                          color: '#a0aed0',
+                          fontSize: 12,
                           cursor: 'pointer',
                           display: 'flex',
                           alignItems: 'center',
                           gap: 4,
                         }}
                       >
-                        <CopyOutlined /> 复制改写文案
+                        <CopyOutlined /> 复制文案
                       </button>
-                    )}
-                  </div>
-                  
-                  {rewriting && !rewrittenText ? (
-                    <div style={{ color: '#5a6a8a', display: 'flex', alignItems: 'center', gap: 8, padding: '16px 0' }}>
-                      <LoadingOutlined /> AI 编剧正在激情改写中，请稍候...
+                      <button
+                        onClick={handleExportProse}
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.03)',
+                          border: '1px solid rgba(255, 255, 255, 0.08)',
+                          borderRadius: 6,
+                          padding: '6px 12px',
+                          color: '#a0aed0',
+                          fontSize: 12,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                        }}
+                      >
+                        <DownloadOutlined /> 导出 TXT
+                      </button>
                     </div>
-                  ) : (
+                  </div>
+
+                  {/* 聚合大段文案 */}
+                  <div
+                    className="custom-scroll"
+                    style={{
+                      flex: 1,
+                      overflowY: 'auto',
+                      background: 'rgba(0, 0, 0, 0.25)',
+                      border: '1px solid rgba(255, 255, 255, 0.03)',
+                      borderRadius: 12,
+                      padding: 20,
+                      fontSize: 14,
+                      color: '#c8d0dc',
+                      lineHeight: 1.7,
+                      whiteSpace: 'pre-wrap',
+                      textAlign: 'justify',
+                      minHeight: 400,
+                      maxHeight: 520,
+                    }}
+                  >
+                    {transcribeResult.prose || '未提取到口播文案'}
+                  </div>
+                </div>
+
+                {/* 右栏：AI 爆款二创洗稿改写面板 */}
+                <div
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.01)',
+                    border: '1px solid rgba(236, 72, 153, 0.1)',
+                    borderRadius: 16,
+                    padding: 24,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    backdropFilter: 'blur(12px)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
+                    <ThunderboltOutlined style={{ color: PINK, fontSize: 18, filter: `drop-shadow(0 0 6px ${PINK})` }} />
+                    <h3 style={{ color: '#e0e6ed', fontSize: 16, margin: 0, fontWeight: 600 }}>AI 爆款二创洗稿改写</h3>
+                  </div>
+
+                  {/* 风格选项 */}
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr',
+                      gap: 12,
+                      marginBottom: 20,
+                    }}
+                  >
+                    {/* 冲突爆发 */}
                     <div
-                      className="custom-scroll"
+                      className={`style-card ${selectedStyle === 'shocking' ? 'selected' : ''}`}
+                      onClick={() => setSelectedStyle('shocking')}
+                      style={{ padding: '12px 14px', borderRadius: 8, cursor: 'pointer' }}
+                    >
+                      <div style={{ color: PINK, fontWeight: 600, fontSize: 13, marginBottom: 2 }}>⚡ 冲突爆发</div>
+                      <div style={{ color: '#5a6a8a', fontSize: 11, lineHeight: 1.3 }}>抓黄金前3秒，加强剧情冲突与凌厉质感。</div>
+                    </div>
+
+                    {/* 悬疑拉满 */}
+                    <div
+                      className={`style-card ${selectedStyle === 'suspense' ? 'selected' : ''}`}
+                      onClick={() => setSelectedStyle('suspense')}
+                      style={{ padding: '12px 14px', borderRadius: 8, cursor: 'pointer' }}
+                    >
+                      <div style={{ color: CYAN, fontWeight: 600, fontSize: 13, marginBottom: 2 }}>🕵️ 悬疑拉满</div>
+                      <div style={{ color: '#5a6a8a', fontSize: 11, lineHeight: 1.3 }}>设置多重悬念钩子，拉高完播率与反转效果。</div>
+                    </div>
+
+                    {/* 情感共鸣 */}
+                    <div
+                      className={`style-card ${selectedStyle === 'emotional' ? 'selected' : ''}`}
+                      onClick={() => setSelectedStyle('emotional')}
+                      style={{ padding: '12px 14px', borderRadius: 8, cursor: 'pointer' }}
+                    >
+                      <div style={{ color: '#a78bfa', fontWeight: 600, fontSize: 13, marginBottom: 2 }}>❤️ 情感共鸣</div>
+                      <div style={{ color: '#5a6a8a', fontSize: 11, lineHeight: 1.3 }}>词句真挚触动同理心，极具代入情绪。</div>
+                    </div>
+
+                    {/* 智能洗稿 */}
+                    <div
+                      className={`style-card ${selectedStyle === 'rewriter' ? 'selected' : ''}`}
+                      onClick={() => setSelectedStyle('rewriter')}
+                      style={{ padding: '12px 14px', borderRadius: 8, cursor: 'pointer' }}
+                    >
+                      <div style={{ color: '#34d399', fontWeight: 600, fontSize: 13, marginBottom: 2 }}>✍️ 智能洗稿</div>
+                      <div style={{ color: '#5a6a8a', fontSize: 11, lineHeight: 1.3 }}>保留核心要素，全面规避原创版权查重。</div>
+                    </div>
+                  </div>
+
+                  {/* 改写操作按钮 */}
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 20 }}>
+                    <button
+                      className="cyber-btn-pink"
+                      disabled={rewriting}
+                      onClick={handleAIRewrite}
                       style={{
-                        color: '#d0d8e6',
+                        padding: '10px 24px',
+                        borderRadius: 8,
                         fontSize: 14,
-                        lineHeight: 1.6,
-                        whiteSpace: 'pre-wrap',
-                        textAlign: 'justify',
-                        maxHeight: 250,
-                        overflowY: 'auto',
+                        minWidth: 160,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
                       }}
                     >
-                      {rewrittenText}
+                      {rewriting ? (
+                        <>
+                          <SyncOutlined spin /> 正在编造故事...
+                        </>
+                      ) : (
+                        <>
+                          <ThunderboltOutlined /> 一键爆款改写
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* AI 改写输出区 */}
+                  {(rewriting || rewrittenText) && (
+                    <div
+                      style={{
+                        flex: 1,
+                        padding: 16,
+                        background: 'rgba(0,0,0,0.3)',
+                        borderRadius: 12,
+                        border: `1px solid ${PINK}33`,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        minHeight: 180,
+                        animation: rewrittenText ? 'none' : 'textStreamGlow 3s infinite',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                        <div style={{ color: PINK, fontWeight: 600, fontSize: 13 }}>✨ AI 改写二创脚本结果</div>
+                        {rewrittenText && (
+                          <button
+                            onClick={handleCopyRewritten}
+                            style={{
+                              background: 'rgba(236, 72, 153, 0.08)',
+                              border: `1px solid ${PINK}33`,
+                              borderRadius: 6,
+                              padding: '4px 10px',
+                              color: PINK,
+                              fontSize: 11,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                          >
+                            <CopyOutlined /> 复制结果
+                          </button>
+                        )}
+                      </div>
+                      
+                      {rewriting && !rewrittenText ? (
+                        <div style={{ color: '#5a6a8a', display: 'flex', alignItems: 'center', gap: 8, padding: '16px 0', fontSize: 13 }}>
+                          <LoadingOutlined /> AI 编剧正在精细雕琢中，请稍候...
+                        </div>
+                      ) : (
+                        <div
+                          className="custom-scroll"
+                          style={{
+                            flex: 1,
+                            color: '#d0d8e6',
+                            fontSize: 13,
+                            lineHeight: 1.6,
+                            whiteSpace: 'pre-wrap',
+                            textAlign: 'justify',
+                            overflowY: 'auto',
+                            maxHeight: 220,
+                          }}
+                        >
+                          {rewrittenText}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         )}
       </div>

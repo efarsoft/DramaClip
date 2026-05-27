@@ -68,7 +68,7 @@ def _do_transcribe(task_id: str, video_path: str, mode: str):
             from app.services.analyze.asr_service import ASRService
             from app.config.unified_config import config as unified_config
             
-            whisper_model = unified_config.get("asr.model", "large-v3")
+            whisper_model = unified_config.get("asr.model", "base")
             logger.info(f"[Tools] Starting Whisper ASR on task {task_id} using model: {whisper_model}")
             
             service = ASRService()

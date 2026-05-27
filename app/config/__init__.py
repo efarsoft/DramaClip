@@ -17,8 +17,11 @@ def __init_logger():
     def format_record(record):
         """格式化日志记录"""
         file_path = record["file"].path
-        relative_path = os.path.relpath(file_path, root_dir)
-        record["file"].path = f"./{relative_path}"
+        try:
+            relative_path = os.path.relpath(file_path, root_dir)
+            record["file"].path = f"./{relative_path}"
+        except ValueError:
+            record["file"].path = os.path.basename(file_path)
         _format = (
             "<green>{time:%Y-%m-%d %H:%M:%S}</> | "
             + "<level>{level}</> | "

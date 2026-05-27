@@ -212,6 +212,11 @@ export const analyzeApi = {
     ipcClient.call<AnalysisStatus>('analyze.getStatus', { task_id: taskId }),
   cancel: (taskId: string) =>
     ipcClient.call<{ success: boolean }>('analyze.cancel', { task_id: taskId }),
+  getCompletedResults: (projectId: string, videoIds: string[]) =>
+    ipcClient.call<{ results: Record<string, any> }>('analyze.getCompletedResults', {
+      project_id: projectId,
+      video_ids: videoIds,
+    }),
 };
 
 // 剪辑相关 API
@@ -333,12 +338,15 @@ export const toolsApi = {
 export interface ModelInfo {
   id: string;
   name: string;
-  category: 'asr' | 'tts';
-  type: 'whisper' | 'styletts2';
+  category: 'asr' | 'tts' | 'diarization';
+  type: 'whisper' | 'styletts2' | 'supertonic' | 'sensevoice' | 'pyannote' | 'custom';
   size_mb: number;
   description: string;
   downloaded: boolean;
   disk_size_bytes: number;
+  flat_path?: string;
+  source_id?: string;
+  scenarios?: string;
 }
 
 export const modelApi = {
@@ -543,6 +551,15 @@ export interface HardwareConfig {
   max_workers: number;
 }
 
+export interface CustomModelConfig {
+  id: string;
+  name: string;
+  mode: 'Local Path' | 'Online ID';
+  path?: string;
+  onlineId?: string;
+  description?: string;
+}
+
 /** 完整的应用设置 */
 export interface AppSettings {
   // LLM 协议
@@ -555,4 +572,9 @@ export interface AppSettings {
   // 输出与硬件
   output: OutputConfig;
   hardware: HardwareConfig;
+  // 自定义模型
+  custom_models?: {
+    asr: CustomModelConfig[];
+    tts: CustomModelConfig[];
+  };
 }

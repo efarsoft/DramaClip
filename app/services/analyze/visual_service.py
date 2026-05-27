@@ -138,12 +138,12 @@ class VisualService:
                     logger.info("视觉分析已取消")
                     break
                 
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                
                 # 采样分析
                 if frame_idx % sample_frame_interval == 0:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    
                     timestamp = frame_idx / fps
                     
                     # 分析单帧
@@ -157,6 +157,10 @@ class VisualService:
                     if progress_callback and len(frame_scores) % 5 == 0:
                         progress = min(95, int((frame_idx / frame_count) * 100))
                         progress_callback(progress, f"视觉分析: {int(timestamp)}/{int(duration)}秒...")
+                else:
+                    ret = cap.grab()
+                    if not ret:
+                        break
                 
                 frame_idx += 1
             
@@ -248,11 +252,11 @@ class VisualService:
         if not frame_scores:
             return self._create_empty_result(video_id)
         
-            # 计算平均值
-            avg_brightness = float(np.mean([f["brightness"] for f in frame_scores]))
-            avg_contrast = float(np.mean([f["contrast"] for f in frame_scores]))
-            avg_motion = float(np.mean([f["motion_score"] for f in frame_scores]))
-            avg_sharpness = float(np.mean([f["sharpness"] for f in frame_scores]))
+        # 计算平均值
+        avg_brightness = float(np.mean([f["brightness"] for f in frame_scores]))
+        avg_contrast = float(np.mean([f["contrast"] for f in frame_scores]))
+        avg_motion = float(np.mean([f["motion_score"] for f in frame_scores]))
+        avg_sharpness = float(np.mean([f["sharpness"] for f in frame_scores]))
         
         # 人脸统计
         total_faces = sum(f["face_count"] for f in frame_scores)

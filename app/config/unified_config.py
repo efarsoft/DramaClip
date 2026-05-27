@@ -66,6 +66,7 @@ class UnifiedConfig:
             try:
                 self._settings = json.loads(settings_file.read_text(encoding="utf-8"))
                 logger.debug("[Config] 从 settings.json 加载配置")
+                self._sync_path_manager_output()
                 return
             except Exception as e:
                 logger.warning(f"[Config] 加载 settings.json 失败: {e}")
@@ -128,8 +129,8 @@ class UnifiedConfig:
                 # ASR 配置
                 "asr": {
                     "enabled": True,
-                    "engine": cfg.asr.get("engine", "faster_whisper"),
-                    "model": cfg.asr.get("model", "large-v3"),
+                    "engine": cfg.asr.get("engine", "sensevoice"),
+                    "model": cfg.asr.get("model", "SenseVoice-large"),
                     "language": cfg.asr.get("language", "auto"),
                     "translate": cfg.asr.get("translate", False),
                     "enable_emotion": cfg.asr.get("enable_emotion", True),
@@ -162,9 +163,22 @@ class UnifiedConfig:
                 "proxy": cfg._cfg.get("proxy", {}),
             }
             logger.debug("[Config] 从 config.toml 降级加载配置")
+            self._sync_path_manager_output()
         except Exception as e:
             logger.warning(f"[Config] 加载 config.toml 失败: {e}")
             self._settings = self._get_default_settings()
+            self._sync_path_manager_output()
+
+    def _sync_path_manager_output(self):
+        """同步配置的输出路径到全局路径管理器"""
+        output_path = self.get("output.path")
+        if output_path:
+            try:
+                from app.utils.path_manager import get_path_manager
+                get_path_manager().set_output_root(output_path)
+                logger.info(f"[Config] 已同步全局路径管理器输出根目录: {output_path}")
+            except Exception as e:
+                logger.warning(f"[Config] 同步路径管理器输出根目录失败: {e}")
 
     def _get_default_settings(self) -> Dict[str, Any]:
         """获取默认配置 - 统一配置结构"""
@@ -218,8 +232,8 @@ class UnifiedConfig:
             # ASR 配置
             "asr": {
                 "enabled": True,
-                "engine": "faster_whisper",
-                "model": "large-v3",
+                "engine": "sensevoice",
+                "model": "SenseVoice-large",
                 "language": "auto",
                 "translate": False,
                 "enable_emotion": True,

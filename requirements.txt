@@ -29,5 +29,5 @@ opencv-python>=4.11.0.86   # 人脸检测、画面特征
 jieba>=0.42.1           # 中文NLP台词情绪分析
 
 # ----- 可选依赖（按需取消注释）-----
-# faster-whisper>=1.0.1      # 本地语音识别
-# torch>=2.0.0                # CUDA加速支持
+faster-whisper>=1.0.1      # 本地语音识别
+torch>=2.0.0                # CUDA加速支持

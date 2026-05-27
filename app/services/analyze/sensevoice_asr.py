@@ -58,16 +58,16 @@ class SenseVoiceResult:
 _sv_thread_local = threading.local()
 _sv_model_lock = threading.Lock()
 
-# 情感标签映射
+# 情感标签映射 — 使用标准 English 键以与前端 EmotionCurve.tsx 完美契合
 _SV_EMOTION_LABELS = {
-    "<|happy|>": "开心",
-    "<|sad|>": "悲伤",
-    "<|angry|>": "愤怒",
-    "<|fear|>": "恐惧",
-    "<|surprise|>": "惊讶",
-    "<|neutral|>": "中性",
-    "<|disgust|>": "厌恶",
-    "<|contempt|>": "轻蔑",
+    "<|happy|>": "joy",
+    "<|sad|>": "sadness",
+    "<|angry|>": "anger",
+    "<|fear|>": "fear",
+    "<|surprise|>": "surprise",
+    "<|neutral|>": "neutral",
+    "<|disgust|>": "disgust",
+    "<|contempt|>": "contempt",
 }
 
 # 音频事件标签映射
@@ -92,13 +92,14 @@ def _parse_sv_output(text: str) -> Dict:
     for tag, label in _SV_EMOTION_LABELS.items():
         if tag in text:
             emotion = label
-            clean_text = clean_text.replace(tag, "")
             break
     
     for tag, label in _SV_AUDIO_EVENT_LABELS.items():
         if tag in text:
             audio_events.append(label)
-            clean_text = clean_text.replace(tag, "")
+    
+    # 用最精简且完全无损的正则剥离所有 <|...|> 标签，留下干净纯粹的对白文字
+    clean_text = re.sub(r'<\|.*?>', '', clean_text)
     
     return {"text": clean_text.strip(), "emotion": emotion, "audio_events": audio_events}
 
@@ -126,11 +127,38 @@ def _load_sv_model(model_size: str = "SenseVoice-large", device: Optional[str] =
             except Exception:
                 device = "cpu"
         
-        model_map = {"SenseVoice-small": "iic/SenseVoice-small", "SenseVoice-large": "iic/SenseVoice-large"}
-        model_path = model_map.get(model_size, model_size)
-        
+        model_map = {
+            "SenseVoice-small": "iic/SenseVoiceSmall",
+            "SenseVoice-large": "iic/SenseVoiceSmall",
+            "iic/SenseVoice-small": "iic/SenseVoiceSmall",
+            "iic/SenseVoice-large": "iic/SenseVoiceSmall",
+            "iic/SenseVoiceLarge": "iic/SenseVoiceSmall",
+            "SenseVoiceSmall": "iic/SenseVoiceSmall",
+            "SenseVoiceLarge": "iic/SenseVoiceSmall",
+        }
+        model_name = model_map.get(model_size, model_size)
+        if model_name in ("iic/SenseVoice-small", "iic/SenseVoice-large"):
+            model_name = "iic/SenseVoiceSmall"
+
+        # 优先使用规整的本地物理直读路径
+        local_sv_dir = os.path.normpath("d:/DramaClip/resources/models/asr/iic/SenseVoiceSmall")
+        if os.path.isdir(local_sv_dir) and (
+            os.path.exists(os.path.join(local_sv_dir, "model.pt")) or
+            os.path.exists(os.path.join(local_sv_dir, "model.onnx"))
+        ):
+            logger.info(f"[ASR] 检测到规整的本地内置 SenseVoiceSmall 模型，执行 100% 本地物理绝对路径直读: {local_sv_dir}")
+            model_path = local_sv_dir
+        else:
+            model_path = model_name
+            logger.warning(f"[ASR] 未在规整物理路径检测到模型 ({local_sv_dir})，降级使用 ModelScope 缓存加载: {model_path}")
+
         logger.info(f"Loading SenseVoice: {model_path} on {device}")
-        _sv_thread_local.model = AutoModel(model=model_path, device=device)
+        _sv_thread_local.model = AutoModel(
+            model=model_path,
+            vad_model="iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+            device=device,
+            trust_remote_code=True
+        )
         logger.info(f"SenseVoice loaded on {device}")
 
         return _sv_thread_local.model
@@ -197,10 +225,10 @@ class SenseVoiceService:
                 
                 if isinstance(result_data, dict):
                     raw_text = result_data.get("text", "")
-                    parsed = _parse_sv_output(raw_text)
                     
-                    if parsed["text"]:
-                        sentences = re.split(r'[。！？；\n]+', parsed["text"])
+                    if raw_text:
+                        # 先按标点和换行分割，保留原本的标签以精确匹配每句的情绪/事件
+                        sentences = re.split(r'[。！？；\n]+', raw_text)
                         current_time = 0.0
                         
                         for i, sent in enumerate(sentences):
@@ -208,12 +236,19 @@ class SenseVoiceService:
                             if not sent:
                                 continue
                             
-                            duration = len(sent) / 4.5
+                            # 针对每个句子进行标签解析和提取，使情绪曲线和事件流高度精确和动态变化
+                            parsed = _parse_sv_output(sent)
+                            clean_text = parsed["text"]
+                            
+                            if not clean_text:
+                                continue
+                            
+                            duration = max(1.0, len(clean_text) / 4.5)  # 至少 1.0 秒，确保有一定长度
                             segment = SenseVoiceSegment(
-                                id=str(i + 1),
-                                text=sent,
-                                start=current_time,
-                                end=current_time + duration,
+                                id=str(len(segments) + 1),
+                                text=clean_text,
+                                start=round(current_time, 2),
+                                end=round(current_time + duration, 2),
                                 emotion=parsed["emotion"] if enable_emotion else "",
                                 audio_events=parsed["audio_events"] if enable_audio_events else [],
                             )

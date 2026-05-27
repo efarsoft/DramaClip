@@ -291,6 +291,67 @@ class SpeakerDiarizationService:
         
         return speech_samples.astype(bool)
     
+    def _estimate_pitch_numpy(self, y: np.ndarray, sr: int, frame_length: int, hop_length: int, fmin: float = 65.4, fmax: float = 2093.0) -> np.ndarray:
+        """
+        高效的 NumPy 自相关 F0 (音高) 估计算法，从根本上避开 librosa.pyin 在 Windows 多进程环境下的死锁问题。
+        """
+        if len(y) < frame_length:
+            return np.array([])
+            
+        n_frames = 1 + (len(y) - frame_length) // hop_length
+        pitches = []
+        
+        min_lag = int(sr / fmax)
+        max_lag = int(sr / fmin)
+        
+        for i in range(n_frames):
+            start = i * hop_length
+            frame = y[start:start + frame_length]
+            
+            # 去直流分量并加汉宁窗以提高自相关精度
+            frame = frame - np.mean(frame)
+            window = np.hanning(len(frame))
+            windowed_frame = frame * window
+            
+            # 计算自相关函数 (ACF)
+            n_fft = 2 ** int(np.ceil(np.log2(2 * frame_length - 1)))
+            fft_val = np.fft.rfft(windowed_frame, n=n_fft)
+            acf = np.fft.irfft(fft_val * np.conj(fft_val))[:frame_length]
+            
+            if len(acf) <= max_lag:
+                pitches.append(0.0)
+                continue
+                
+            search_area = acf[min_lag:max_lag]
+            if len(search_area) == 0:
+                pitches.append(0.0)
+                continue
+                
+            peak_idx = np.argmax(search_area) + min_lag
+            if acf[0] > 1e-5 and acf[peak_idx] / acf[0] > 0.35:
+                # 抛物线插值，提升频率估计精度
+                if 0 < peak_idx < frame_length - 1:
+                    alpha = acf[peak_idx - 1]
+                    beta = acf[peak_idx]
+                    gamma = acf[peak_idx + 1]
+                    denominator = alpha - 2 * beta + gamma
+                    p = 0.5 * (alpha - gamma) / denominator if denominator != 0 else 0
+                    refined_lag = peak_idx + p
+                else:
+                    refined_lag = peak_idx
+                
+                f0 = sr / refined_lag
+                if fmin <= f0 <= fmax:
+                    pitches.append(f0)
+                else:
+                    pitches.append(0.0)
+            else:
+                pitches.append(0.0)
+                
+        pitches = np.array(pitches)
+        pitches[pitches == 0.0] = np.nan
+        return pitches
+
     def _extract_segment_features(
         self, 
         y: np.ndarray, 
@@ -311,7 +372,7 @@ class SpeakerDiarizationService:
         - 频谱对比度 (1维)
         - 频谱质心 (1维)
         
-        总计: 46维特征
+        总计: 65维特征
         """
         frame_length = int(0.025 * sr)  # 25ms
         hop_length = int(0.010 * sr)    # 10ms
@@ -353,14 +414,11 @@ class SpeakerDiarizationService:
             delta_mfcc = librosa.feature.delta(mfcc)
             delta2_mfcc = librosa.feature.delta(mfcc, order=2)
             
-            # 提取音高（忽略 fmin 帧长警告）
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                pitch, voiced_flag, _ = librosa.pyin(
-                    segment, fmin=float(librosa.note_to_hz('C2')),
-                    fmax=float(librosa.note_to_hz('C7')),
-                    sr=sr, frame_length=frame_length, hop_length=hop_length
-                )
+            # 提取音高
+            pitch = self._estimate_pitch_numpy(
+                segment, sr=sr, frame_length=frame_length, hop_length=hop_length,
+                fmin=float(librosa.note_to_hz('C2')), fmax=float(librosa.note_to_hz('C7'))
+            )
             
             # 提取能量
             rms = librosa.feature.rms(
@@ -612,8 +670,8 @@ class SpeakerDiarizationService:
             speaker_timestamps = timestamps[mask]
             
             # 计算统计特征
-            avg_pitch = float(np.mean(speaker_features[:, 26])) if speaker_features.shape[1] > 26 else 0.0
-            avg_energy = float(np.mean(speaker_features[:, 28])) if speaker_features.shape[1] > 28 else 0.0
+            avg_pitch = float(np.mean(speaker_features[:, 52])) if speaker_features.shape[1] > 52 else 0.0
+            avg_energy = float(np.mean(speaker_features[:, 54])) if speaker_features.shape[1] > 54 else 0.0
             mfcc_mean = np.mean(speaker_features[:, :13], axis=0).tolist()
             
             segment_count = int(np.sum(mask))

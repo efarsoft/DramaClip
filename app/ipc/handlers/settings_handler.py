@@ -10,7 +10,7 @@
 
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from loguru import logger
 
@@ -64,6 +64,13 @@ def settings_get() -> Dict:
             raw = json.loads(settings_file.read_text(encoding="utf-8"))
             if "openai_protocol" in raw and "output" in raw and "tts" in raw:
                 _merge_config_into_settings(raw)
+                if "custom_models" not in raw:
+                    raw["custom_models"] = {"asr": [], "tts": []}
+                else:
+                    if "asr" not in raw["custom_models"]:
+                        raw["custom_models"]["asr"] = []
+                    if "tts" not in raw["custom_models"]:
+                        raw["custom_models"]["tts"] = []
                 return raw
             return _upgrade_settings(raw)
         except Exception as e:
@@ -126,8 +133,8 @@ def _default_settings() -> Dict:
         # ASR 配置
         "asr": {
             "enabled": True,
-            "engine": "faster_whisper",  # faster_whisper | sensevoice
-            "model": "large-v3",         # whisper: tiny/base/small/medium/large-v3
+            "engine": "sensevoice",      # faster_whisper | sensevoice
+            "model": "SenseVoice-large",  # whisper: tiny/base/small/medium/large-v3
                                          # sensevoice: SenseVoice-small/SenseVoice-large
             "language": "auto",
             "translate": False,
@@ -156,6 +163,11 @@ def _default_settings() -> Dict:
             "gpu_device": "0",
             "threads": 4,
             "max_workers": 5,
+        },
+        # 自定义模型
+        "custom_models": {
+            "asr": [],
+            "tts": [],
         },
     }
 
@@ -191,16 +203,19 @@ def _upgrade_settings(flat: Dict) -> Dict:
     return result
 
 
-def settings_update(settings: Dict[str, Any]) -> Dict:
+def settings_update(settings: Optional[Dict[str, Any]] = None, **kwargs) -> Dict:
     """更新设置（同步 LLM 配置到 config.toml，并热更新统一配置）
 
     Args:
         settings: 新的设置字典
+        **kwargs: 兼容直接解包传入的设置字段
 
     Returns:
         更新结果
     """
     logger.info("[Settings] Updating settings")
+    if settings is None:
+        settings = kwargs
 
     _sync_settings_to_config(settings)
 

@@ -79,9 +79,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const project = await projectApi.open(projectId);
       // 后端 open 已自动扫描视频目录，数据在 project.videos 中
+      const storedSelected = localStorage.getItem(`dramaclip-selected-episodes-${projectId}`);
+      const storedScheme = localStorage.getItem(`dramaclip-clipscheme-${projectId}`);
+      const storedDuration = localStorage.getItem(`dramaclip-targetduration-${projectId}`);
       set({
         currentProject: project,
         currentVideos: project.videos ?? [],
+        selectedEpisodeIds: storedSelected ? JSON.parse(storedSelected) : [],
+        clipScheme: storedScheme ?? null,
+        clipTargetDuration: storedDuration ? Number(storedDuration) : 0,
         isLoading: false,
       });
       return project;
@@ -97,6 +103,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       await projectApi.delete(projectId, keepFiles);
+      // 同时清理该项目的本地状态缓存
+      localStorage.removeItem(`dramaclip-selected-episodes-${projectId}`);
+      localStorage.removeItem(`dramaclip-clipscheme-${projectId}`);
+      localStorage.removeItem(`dramaclip-targetduration-${projectId}`);
+      localStorage.removeItem(`dramaclip-preset-${projectId}`);
+      localStorage.removeItem(`dramaclip-completed-exports-${projectId}`);
+      localStorage.removeItem(`dramaclip-title-result-${projectId}`);
+      
       set((state) => ({
         projects: state.projects.filter((p) => p.id !== projectId),
         currentProject: state.currentProject?.id === projectId ? null : state.currentProject,
@@ -179,6 +193,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   // 设置选择的视频 ID
   setSelectedEpisodeIds: (ids: string[]) => {
+    const currentProject = get().currentProject;
+    if (currentProject) {
+      localStorage.setItem(`dramaclip-selected-episodes-${currentProject.id}`, JSON.stringify(ids));
+    }
     set({ selectedEpisodeIds: ids });
   },
 
@@ -194,11 +212,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   // 设置剪辑方案
   setClipScheme: (scheme: string | null) => {
+    const currentProject = get().currentProject;
+    if (currentProject) {
+      if (scheme) {
+        localStorage.setItem(`dramaclip-clipscheme-${currentProject.id}`, scheme);
+      } else {
+        localStorage.removeItem(`dramaclip-clipscheme-${currentProject.id}`);
+      }
+    }
     set({ clipScheme: scheme });
   },
 
   // 设置剪辑目标时长
   setClipTargetDuration: (duration: number) => {
+    const currentProject = get().currentProject;
+    if (currentProject) {
+      localStorage.setItem(`dramaclip-targetduration-${currentProject.id}`, String(duration));
+    }
     set({ clipTargetDuration: duration });
   },
 }));

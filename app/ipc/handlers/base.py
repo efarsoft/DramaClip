@@ -74,6 +74,7 @@ def update_clip_task(
     message: Optional[str] = None,
     error: Optional[str] = None,
     output_path: Optional[str] = None,
+    project_id: Optional[str] = None,
     **kwargs
 ) -> None:
     """
@@ -86,6 +87,10 @@ def update_clip_task(
     task_info = task_mgr.get_task(task_id)
     if not task_info:
         task_mgr.create_task(task_id)
+        task_info = task_mgr.get_task(task_id)
+
+    if project_id:
+        task_info.metadata["project_id"] = project_id
 
     # 转换状态字符串
     task_status = None
@@ -109,6 +114,18 @@ def update_clip_task(
         error=error,
         output_path=output_path,
     )
+
+    # 任务结束时自动重置项目状态为 ready
+    if status in ("completed", "failed", "cancelled", "timeout"):
+        pid = project_id or task_info.metadata.get("project_id")
+        if pid:
+            try:
+                from app.services.project.manager_sqlite import get_manager
+                mgr = get_manager()
+                mgr.update_project(pid, {"status": "ready"})
+                logger.info(f"[Base] Clip task {task_id} transitioned to {status}. Project {pid} status updated to 'ready'")
+            except Exception as e:
+                logger.error(f"[Base] Failed to update project status: {e}")
 
     # 发送 IPC 通知
     if message:
@@ -138,6 +155,7 @@ def update_export_task(
     message: Optional[str] = None,
     error: Optional[str] = None,
     output_path: Optional[str] = None,
+    project_id: Optional[str] = None,
     **kwargs
 ) -> None:
     """
@@ -150,6 +168,10 @@ def update_export_task(
     task_info = task_mgr.get_task(task_id)
     if not task_info:
         task_mgr.create_task(task_id)
+        task_info = task_mgr.get_task(task_id)
+
+    if project_id:
+        task_info.metadata["project_id"] = project_id
 
     # 转换状态字符串
     task_status = None
@@ -173,6 +195,18 @@ def update_export_task(
         error=error,
         output_path=output_path,
     )
+
+    # 任务结束时自动重置项目状态为 ready
+    if status in ("completed", "failed", "cancelled", "timeout"):
+        pid = project_id or task_info.metadata.get("project_id")
+        if pid:
+            try:
+                from app.services.project.manager_sqlite import get_manager
+                mgr = get_manager()
+                mgr.update_project(pid, {"status": "ready"})
+                logger.info(f"[Base] Export task {task_id} transitioned to {status}. Project {pid} status updated to 'ready'")
+            except Exception as e:
+                logger.error(f"[Base] Failed to update project status: {e}")
 
     # 发送 IPC 通知
     if message:

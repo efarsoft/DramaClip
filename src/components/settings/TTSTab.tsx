@@ -1,12 +1,21 @@
 /**
- * TTS 语音合成设置
+ * TTS 语音合成设置 Tab
  */
 
-import React from 'react';
-import { Card, Form, Row, Col, Switch, Select, InputNumber, Space } from 'antd';
-import { AudioOutlined } from '@ant-design/icons';
+import React, { useState } from 'react';
+import { Card, Form, Row, Col, Switch, Select, InputNumber, Space, Button, Modal, Input, Radio, message } from 'antd';
+import { AudioOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ModelInfo } from './ModelDownloadCard';
 import { ModelStatusRow } from './ModelDownloadCard';
+
+interface CustomModelConfig {
+  id: string;
+  name: string;
+  mode: 'Local Path' | 'Online ID';
+  path?: string;
+  onlineId?: string;
+  description?: string;
+}
 
 interface TTSTabProps {
   ttsConfig: {
@@ -27,6 +36,11 @@ interface TTSTabProps {
   modelDownloads: Record<string, { progress: number; message: string }>;
   onDownload: (modelId: string) => void;
   onDelete: (modelId: string, modelName: string) => void;
+  customModels?: {
+    asr: CustomModelConfig[];
+    tts: CustomModelConfig[];
+  };
+  onCustomModelsChange: (v: { asr?: CustomModelConfig[]; tts?: CustomModelConfig[] }) => void;
 }
 
 const engineOptions = [
@@ -44,7 +58,13 @@ export const TTSTab: React.FC<TTSTabProps> = ({
   modelDownloads,
   onDownload,
   onDelete,
+  customModels,
+  onCustomModelsChange,
 }) => {
+  const [modalVisible, setModalVisible] = useState(false);
+  const [form] = Form.useForm();
+  const [mode, setMode] = useState<'Local Path' | 'Online ID'>('Local Path');
+
   const getVoiceOptions = () => {
     switch (ttsConfig.engine) {
       case 'supertonic':
@@ -87,6 +107,45 @@ export const TTSTab: React.FC<TTSTabProps> = ({
 
   const ttsModels = models.filter((m) => m.category === 'tts');
 
+  // Dynamically append custom TTS options to the synthesis engines
+  const customTTSOptions = models
+    .filter((m) => m.category === 'tts' && m.type === 'custom')
+    .map((m) => ({
+      label: `[自定义] ${m.name} (${m.downloaded ? '已加载' : '无效路径'})`,
+      value: m.id,
+    }));
+
+  const allEngineOptions = [...engineOptions, ...customTTSOptions];
+
+  // Handle adding custom TTS model
+  const handleAddCustomModel = async () => {
+    try {
+      const values = await form.validateFields();
+      const id = `custom-tts-${Date.now()}`;
+
+      const newModel: CustomModelConfig = {
+        id,
+        name: values.name,
+        mode: values.mode,
+        path: values.mode === 'Local Path' ? values.path : '',
+        onlineId: values.mode === 'Online ID' ? values.onlineId : '',
+        description: values.description || '用户导入的自定义 TTS 语音合成模型',
+      };
+
+      const currentList = customModels?.tts || [];
+      onCustomModelsChange({
+        tts: [...currentList, newModel],
+      });
+
+      setModalVisible(false);
+      form.resetFields();
+      setMode('Local Path');
+      message.success(`自定义模型 ${values.name} 注册成功`);
+    } catch (err) {
+      // Validation error
+    }
+  };
+
   return (
     <Space direction="vertical" style={{ width: '100%' }} size={12}>
       {/* --- TTS 配置 --- */}
@@ -111,14 +170,13 @@ export const TTSTab: React.FC<TTSTabProps> = ({
               <Select
                 value={ttsConfig.engine}
                 onChange={(v) => {
-                  // 自动切换为该引擎的第一个默认声音
                   let defaultVoice = 'default';
                   if (v === 'supertonic') defaultVoice = 'M1';
                   else if (v === 'edge') defaultVoice = 'zh-CN-YunxiNeural';
                   else if (v === 'openai') defaultVoice = 'alloy';
                   onTTSChange({ engine: v, voice: defaultVoice });
                 }}
-                options={engineOptions}
+                options={allEngineOptions}
                 style={{ width: '100%' }}
               />
             </Form.Item>
@@ -165,9 +223,21 @@ export const TTSTab: React.FC<TTSTabProps> = ({
               <span>TTS 语音合成模型管理</span>
             </Space>
           }
+          extra={
+            <Button
+              type="primary"
+              ghost
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={() => setModalVisible(true)}
+              style={{ borderRadius: '4px' }}
+            >
+              导入自定义模型
+            </Button>
+          }
           style={{ borderColor: '#722ed144' }}
         >
-          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
             {ttsModels.map((model) => (
               <ModelStatusRow
                 key={model.id}
@@ -180,6 +250,72 @@ export const TTSTab: React.FC<TTSTabProps> = ({
           </Space>
         </Card>
       )}
+
+      {/* Add Custom Model Modal */}
+      <Modal
+        title="导入自定义 TTS 模型配置"
+        open={modalVisible}
+        onOk={handleAddCustomModel}
+        onCancel={() => {
+          setModalVisible(false);
+          form.resetFields();
+          setMode('Local Path');
+        }}
+        okText="确认导入"
+        cancelText="取消"
+        width={520}
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{ mode: 'Local Path' }}
+          onValuesChange={(changed) => {
+            if (changed.mode) setMode(changed.mode);
+          }}
+          style={{ marginTop: 16 }}
+        >
+          <Form.Item
+            name="name"
+            label="模型显示名称"
+            rules={[{ required: true, message: '请输入显示名称' }]}
+          >
+            <Input placeholder="例如: My-Custom-TTS-Model" />
+          </Form.Item>
+
+          <Form.Item name="mode" label="导入模式">
+            <Radio.Group>
+              <Radio.Group>
+                <Radio.Button value="Local Path">本地目录导入</Radio.Button>
+                <Radio.Button value="Online ID">线上 Repo 注册</Radio.Button>
+              </Radio.Group>
+            </Radio.Group>
+          </Form.Item>
+
+          {mode === 'Local Path' ? (
+            <Form.Item
+              name="path"
+              label="本地模型绝对路径"
+              rules={[{ required: true, message: '请输入物理绝对路径' }]}
+              extra="请输入存放 model.onnx/config.json 等结构文件的本地绝对物理目录"
+            >
+              <Input placeholder="D:\models\my-tts-model" />
+            </Form.Item>
+          ) : (
+            <Form.Item
+              name="onlineId"
+              label="线上 HuggingFace/ModelScope Repo ID"
+              rules={[{ required: true, message: '请输入线上模型 ID' }]}
+              extra="例如: supertone-inc/supertonic"
+            >
+              <Input placeholder="supertone-inc/supertonic" />
+            </Form.Item>
+          )}
+
+          <Form.Item name="description" label="模型功能定位与适用场景描述">
+            <Input.TextArea placeholder="例如: 针对甜美播音腔微调后的 TTS 模型，适合有声书/剧本旁白配音。" rows={3} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Space>
   );
 };
