@@ -152,7 +152,19 @@ DramaClip/
 
 ## ⚙️ 配置
 
-配置文件位于 `config.toml`，主要配置项：
+DramaClip 采用了一套高内聚的**双重配置与热更新体系 (Dual-Config & Hot-Reload System)**，兼顾桌面端用户的可视化易用性与开发者的命令行高度可控性：
+
+### 🔄 配置优先级与热更新策略
+1. **`settings.json`（GUI 可视化设置，高优先级）**：
+   - **路径**：`C:\Users\您的用户名\.dramaclip\settings.json` (Windows 平台)
+   - **特点**：当您在桌面端客户端界面的 **「系统设置」** 页面修改并保存配置时，应用会自动将新配置写入该文件。底层的 Python 后端服务在检测到更改后会触发**热重载机制 (Hot-Reload)**，新配置将**瞬间在全局生效**。因此，您不需要将设置手动同步拷贝回本地的 `config.toml` 文件中，即可享用最新配置。
+2. **`config.toml`（文件级默认配置，兼容性后备）**：
+   - **路径**：项目根目录 `/config.toml`（首次使用时从 `/config.example.toml` 复制）
+   - **特点**：主要用作软件首次安装的初始默认参数，或者在命令行模式（CLI）下的直接加载与参数调试。
+3. **优先级合并逻辑 (Fallback Priority)**：
+   - 统一配置管理器 `UnifiedConfig` 会将两个配置源合并。以高优先级的 `settings.json` 为主；只有当某些字段在 `settings.json` 中不存在时，系统才会降级去读取 `config.toml` 的对应默认值，提供极致的健壮性。
+
+### 📄 config.toml 配置模板示范
 
 ```toml
 [app]
