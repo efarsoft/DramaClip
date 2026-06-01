@@ -445,7 +445,12 @@ const EditPanel: React.FC<Props> = ({ onNext }) => {
                 }}>
                   <TaskStatusTag status={task.status} taskType="clip" />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={{ color: '#e0e6ed', fontSize: 13 }}>智能剪辑</Text>
+                    <Text style={{ color: '#e0e6ed', fontSize: 13 }}>
+                      {task.params?.scheme === 'original_narration' ? '智能剪辑 - 原片直剪' :
+                       task.params?.scheme === 'hybrid_narration' ? '智能剪辑 - 交叉解说' :
+                       task.params?.scheme === 'full_narration' ? '智能剪辑 - 全片解说' :
+                       '智能剪辑'}
+                    </Text>
                     {task.status === 'running' && (
                       <Progress percent={task.progress} strokeColor={{ '0%': CYAN, '100%': PURPLE }}
                         trailColor="rgba(255,255,255,0.05)" size="small" style={{ margin: 0 }} />

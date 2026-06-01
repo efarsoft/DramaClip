@@ -436,11 +436,21 @@ const AnalyzePanel: React.FC<Props> = ({ onNext }) => {
       tasks: s.tasks.filter(t => !(t.type === 'analyze' && t.projectId === currentProject.id))
     }));
     
-    const { ipcClient } = await import('../../services/ipc');
+    const { ipcClient, settingsApi } = await import('../../services/ipc');
     try {
+      // P4: 读取当前 diarization 配置，决定是否启用 pyannote 高精度路径
+      let options: { use_pyannote_diarization?: boolean } | undefined;
+      try {
+        const full = await settingsApi.get();
+        if (full?.diarization?.engine === 'pyannote') {
+          options = { use_pyannote_diarization: true };
+        }
+      } catch {}
+
       const result = await ipcClient.call<{ task_ids: string[] }>('analyze.start', {
         project_id: currentProject.id,
         episode_ids: ids,
+        ...(options ? { options } : {}),
       });
       
       if (result?.task_ids && result.task_ids.length > 0) {
@@ -450,9 +460,10 @@ const AnalyzePanel: React.FC<Props> = ({ onNext }) => {
             project_id: currentProject.id,
             episode_id: ids[index],
             episode_ids: [ids[index]],
+            ...(options ? { options } : {}),
           });
         });
-        message.success(`已成功启动 ${result.task_ids.length} 个分析任务`);
+        message.success(`已成功启动 ${result.task_ids.length} 个分析任务${options ? '（pyannote 精准模式）' : ''}`);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -823,27 +834,6 @@ const AnalyzePanel: React.FC<Props> = ({ onNext }) => {
               </Card>
             )}
 
-            {/* 情绪趋势图 */}
-            {emotionCurve.length > 0 ? (
-              <Card style={{
-                background: 'rgba(255, 255, 255, 0.01)',
-                borderColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 12,
-              }} title={<span style={{ color: '#e0e6ed', fontWeight: 600 }}>📊 情绪变化曲线</span>}>
-                <EmotionCurve data={emotionCurve} height={200} />
-              </Card>
-            ) : (
-              <Card style={{
-                background: 'rgba(255, 255, 255, 0.01)',
-                borderColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 12,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '24px 0',
-              }} title={<span style={{ color: '#e0e6ed', fontWeight: 600 }}>📊 情绪变化曲线</span>}>
-                <Empty description={<span style={{ color: '#4a5a7a', fontSize: 12 }}>暂无情绪变化数据</span>} image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              </Card>
-            )}
-
             {/* 任务队列 */}
             {analyzeTasks.length > 0 && (
               <Card
@@ -873,6 +863,29 @@ const AnalyzePanel: React.FC<Props> = ({ onNext }) => {
                   ))}
                 </div>
               </Card>
+            )}
+
+            {/* 情绪趋势图 */}
+            {!isRunning && (
+              emotionCurve.length > 0 ? (
+                <Card style={{
+                  background: 'rgba(255, 255, 255, 0.01)',
+                  borderColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 12,
+                }} title={<span style={{ color: '#e0e6ed', fontWeight: 600 }}>📊 情绪变化曲线</span>}>
+                  <EmotionCurve data={emotionCurve} height={200} />
+                </Card>
+              ) : (
+                <Card style={{
+                  background: 'rgba(255, 255, 255, 0.01)',
+                  borderColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 12,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '24px 0',
+                }} title={<span style={{ color: '#e0e6ed', fontWeight: 600 }}>📊 情绪变化曲线</span>}>
+                  <Empty description={<span style={{ color: '#4a5a7a', fontSize: 12 }}>暂无情绪变化数据</span>} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                </Card>
+              )
             )}
 
           </Space>

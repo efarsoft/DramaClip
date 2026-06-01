@@ -40,6 +40,7 @@ class VisualAnalysis:
     avg_sharpness: float
     total_faces: int
     face_ratio: float           # 有人脸的帧比例
+    avg_stability: float = 0.5  # 新增：平均画面稳定性（越高越自然）
     frame_scores: List[Dict] = field(default_factory=list)
     
     def to_dict(self) -> Dict:
@@ -50,6 +51,7 @@ class VisualAnalysis:
             "avg_contrast": self.avg_contrast,
             "avg_motion": self.avg_motion,
             "avg_sharpness": self.avg_sharpness,
+            "avg_stability": getattr(self, 'avg_stability', 0.5),
             "total_faces": self.total_faces,
             "face_ratio": self.face_ratio,
             "frame_scores": self.frame_scores,
@@ -191,6 +193,7 @@ class VisualService:
                 "face_count": int,
                 "face_score": float,
                 "sharpness": float,
+                "stability_score": float,  # 新增：画面稳定性（越高越自然，适合高光）
             }
         """
         # 转灰度
@@ -215,6 +218,11 @@ class VisualService:
             diff = cv2.absdiff(gray, prev_gray)
             motion_score = np.mean(diff) / 255.0
             motion_score = min(1.0, motion_score * 3)  # 放大
+
+        # 新增：稳定性分数（反向运动 + 清晰度作为代理）
+        # 低运动 + 高清晰度 = 更自然的画面（更适合竖屏高光）
+        stability_score = max(0.0, 1.0 - motion_score * 0.7) * 0.6 + sharpness * 0.4
+        stability_score = min(1.0, max(0.0, stability_score))
         
         # 人脸检测
         face_count = 0
@@ -240,6 +248,7 @@ class VisualService:
             "face_count": face_count,
             "face_score": round(face_score, 3),
             "sharpness": round(sharpness, 3),
+            "stability_score": round(stability_score, 3),
         }
     
     def _aggregate_results(
@@ -257,6 +266,7 @@ class VisualService:
         avg_contrast = float(np.mean([f["contrast"] for f in frame_scores]))
         avg_motion = float(np.mean([f["motion_score"] for f in frame_scores]))
         avg_sharpness = float(np.mean([f["sharpness"] for f in frame_scores]))
+        avg_stability = float(np.mean([f.get("stability_score", 0.5) for f in frame_scores]))
         
         # 人脸统计
         total_faces = sum(f["face_count"] for f in frame_scores)

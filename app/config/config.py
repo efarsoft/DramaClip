@@ -1,14 +1,17 @@
+"""
+config.toml 加载模块（向后兼容，主配置源已迁移到 settings.json）
+"""
+
 import os
-import socket
 import toml
-import shutil
+from pathlib import Path
 from loguru import logger
 
 from app.config.defaults import build_default_app_config, merge_missing_app_defaults
 
-root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-config_file = f"{root_dir}/config.toml"
-version_file = f"{root_dir}/project_version"
+root_dir = str(Path(__file__).resolve().parent.parent.parent)
+config_file = os.path.join(root_dir, "config.toml")
+version_file = os.path.join(root_dir, "project_version")
 
 
 def get_version_from_file():
@@ -24,14 +27,11 @@ def get_version_from_file():
 
 
 def load_config():
-    # fix: IsADirectoryError: [Errno 21] Is a directory: '/NarratoAI/config.toml'
-    if os.path.isdir(config_file):
-        shutil.rmtree(config_file)
-
+    """加载 config.toml（仅在 settings.json 不存在时使用）"""
     if not os.path.isfile(config_file):
         _config_ = build_default_config()
         write_config_file(_config_)
-        logger.info("create config.toml with shared defaults")
+        logger.info("已从模板创建 config.toml")
         return _config_
 
     logger.info(f"load config from file: {config_file}")
@@ -72,72 +72,14 @@ def write_config_file(config_data):
         f.write(toml.dumps(config_data))
 
 
-def save_config():
-    """保存配置到文件（修复版本）
-
-    将当前内存中的配置更新到 _cfg，然后写入 config.toml
-    """
-    global _cfg
-
-    # 更新 _cfg 中的所有配置段
-    _cfg["app"] = app
-    _cfg["proxy"] = proxy
-    _cfg["whisper"] = whisper
-    _cfg["azure"] = azure
-    _cfg["tencent"] = tencent
-    _cfg["soulvoice"] = soulvoice
-    _cfg["ui"] = ui
-    _cfg["tts_qwen"] = tts_qwen
-    _cfg["indextts2"] = indextts2
-    _cfg["cosyvoice"] = cosyvoice
-    _cfg["styletts2"] = styletts2
-    _cfg["frames"] = frames
-    # DramaClip 配置段
-    _cfg["highlight"] = highlight
-    _cfg["output"] = output
-    _cfg["scene_detect"] = scene_detect
-    _cfg["asr"] = asr
-    _cfg["log_level"] = log_level
-    _cfg["listen_host"] = listen_host
-    _cfg["listen_port"] = listen_port
-
-    write_config_file(_cfg)
-    logger.info(f"[Config] Saved {len(_cfg)} sections to {config_file}")
-
-
+# ---- 从 config.toml 加载全局变量（向后兼容，新代码请使用 UnifiedConfig）----
 _cfg = load_config()
 app = _cfg.get("app", {})
-whisper = _cfg.get("whisper", {})
-proxy = _cfg.get("proxy", {})
-azure = _cfg.get("azure", {})
-tencent = _cfg.get("tencent", {})
-soulvoice = _cfg.get("soulvoice", {})
-ui = _cfg.get("ui", {})
-frames = _cfg.get("frames", {})
-tts_qwen = _cfg.get("tts_qwen", {})
-indextts2 = _cfg.get("indextts2", {})
-cosyvoice = _cfg.get("cosyvoice", {})
-styletts2 = _cfg.get("styletts2", {})
-
-# DramaClip: 新增配置段
-highlight = _cfg.get("highlight", {})
-output = _cfg.get("output", {})
-scene_detect = _cfg.get("scene_detect", {})
 asr = _cfg.get("asr", {})
 
-hostname = socket.gethostname()
-
-log_level = _cfg.get("log_level", "DEBUG")
-listen_host = _cfg.get("listen_host", "0.0.0.0")
-listen_port = _cfg.get("listen_port", 8080)
 project_name = _cfg.get("project_name", "DramaClip")
-project_description = _cfg.get(
-    "project_description",
-    "<a href='https://github.com/dramaclip/DramaClip'>DramaClip</a>",
-)
-# 从文件读取版本号，而不是从配置文件中获取
+project_description = _cfg.get("project_description", "")
 project_version = get_version_from_file()
-reload_debug = False
 
 imagemagick_path = app.get("imagemagick_path", "")
 if imagemagick_path and os.path.isfile(imagemagick_path):

@@ -91,70 +91,76 @@ class SceneSorter:
         self, segments: List["HighlightSegment"]
     ) -> List["HighlightSegment"]:
         """
-        情绪曲线排序（起承转合）
+        情绪曲线排序（起承转合） - 增强版（Phase 1 优化）
 
-        目标：创建一个完整的情绪弧线
-        1. 起（铺垫）：低情绪、正情绪 → 温和开场
-        2. 承（发展）：情绪逐渐升温
-        3. 转（冲突）：高情绪、负情绪 → 冲突爆发
-        4. 合（高潮/结尾）：最高情绪爆点
-
-        适用于：希望在短时间内讲述完整故事的情况
+        目标：创建一个更自然、更有张力的情绪弧线，服务于成片效果。
+        改进点：
+        - 动态分配各阶段片段数量（根据总片段数）
+        - 更好的“承”和“转”阶段填充
+        - 剩余片段智能穿插，避免情绪平铺
+        - 更强的“高潮保护”
         """
         if not segments:
             return []
 
-        # 1. 分类情绪类型
+        total = len(segments)
+        # 动态阶段分配（根据总长度，让曲线更丰满）
+        if total <= 4:
+            n_opening, n_developing, n_conflict, n_climax = 1, 1, 1, 1
+        else:
+            n_opening = max(1, total // 6)
+            n_developing = max(2, total // 4)
+            n_conflict = max(1, total // 5)
+            n_climax = max(1, total // 5)
+
+        # 1. 分类情绪类型（使用增强后的分类）
         categorized = self._categorize_emotions(segments)
 
-        # 2. 构建情绪曲线
         ordered = []
 
-        # 起：低唤醒正情绪（温暖、感动、希望）
-        opening = sorted(
-            categorized.get("low_arousal_positive", []),
-            key=lambda s: s.start_time,
-        )
-        ordered.extend(opening[:1])  # 只取1个作为开头
+        # 起：低唤醒正情绪（温和开场）
+        opening = sorted(categorized.get("low_arousal_positive", []), key=lambda s: s.start_time)
+        ordered.extend(opening[:n_opening])
 
-        # 承：中低情绪（任何类型，按时间顺序）
+        # 承：情绪逐渐升温（低负 + 中正）
         developing = (
-            categorized.get("low_arousal_negative", [])
-            + categorized.get("high_arousal_positive", [])[:1]
+            sorted(categorized.get("low_arousal_negative", []), key=lambda s: s.start_time) +
+            sorted(categorized.get("high_arousal_positive", []), key=lambda s: s.start_time)
         )
-        developing.sort(key=lambda s: s.start_time)
-        ordered.extend(developing[:2])
+        developing = sorted(developing, key=lambda s: s.start_time)  # 保持时间感
+        ordered.extend(developing[:n_developing])
 
-        # 转：高唤醒负情绪（愤怒、恐惧、冲突）
-        conflict = sorted(
-            categorized.get("high_arousal_negative", []),
-            key=lambda s: s.score,
-            reverse=True,
-        )
-        ordered.extend(conflict[:1])  # 取分数最高的冲突片段
+        # 转：高唤醒负情绪（冲突爆发）- 取最高分的几个
+        conflict = sorted(categorized.get("high_arousal_negative", []), key=lambda s: s.score, reverse=True)
+        ordered.extend(conflict[:n_conflict])
 
-        # 合：高唤醒正情绪（喜悦、胜利、团圆）
-        climax = sorted(
-            categorized.get("high_arousal_positive", []),
-            key=lambda s: s.score,
-            reverse=True,
-        )
-        ordered.extend(climax[:1])  # 取分数最高的高潮片段
+        # 合：高潮（高唤醒正）- 保护最高分
+        climax = sorted(categorized.get("high_arousal_positive", []), key=lambda s: s.score, reverse=True)
+        ordered.extend(climax[:n_climax])
 
-        # 3. 添加剩余片段（按时间顺序）
-        used = set(id(s) for s in ordered)
+        # 3. 智能添加剩余片段（穿插低-中情绪，避免高潮后直接结束）
+        used = {id(s) for s in ordered}
         remaining = [s for s in segments if id(s) not in used]
-        remaining.sort(key=lambda s: s.start_time)
-        ordered.extend(remaining)
+
+        # 将剩余片段按情绪强度排序，优先插入中低情绪作为缓冲
+        remaining.sort(key=lambda s: (s.emotion_score + s.audio_score) * 0.5)
+
+        # 简单穿插策略：每隔几个片段插入一个剩余片段
+        final = []
+        rem_idx = 0
+        for i, seg in enumerate(ordered):
+            final.append(seg)
+            if rem_idx < len(remaining) and (i + 1) % 2 == 0:
+                final.append(remaining[rem_idx])
+                rem_idx += 1
+        final.extend(remaining[rem_idx:])  # 剩余全部追加
 
         logger.info(
-            f"Emotion curve: 起({len(opening[:1])}) → "
-            f"承({len(developing[:2])}) → "
-            f"转({len(conflict[:1])}) → "
-            f"合({len(climax[:1])})"
+            f"Enhanced Emotion curve (total={total}): "
+            f"起({n_opening}) → 承({n_developing}) → 转({n_conflict}) → 合({n_climax})"
         )
 
-        return ordered
+        return final
 
     def _sort_diversity_first(
         self, segments: List["HighlightSegment"]
@@ -244,19 +250,20 @@ class SceneSorter:
         }
 
         for seg in segments:
-            # 唤醒度：综合音频能量、节奏、画面动感
+            # 唤醒度：综合音频能量、节奏、画面动感（更重视音频和节奏，因为和情绪相关性更高）
             arousal_score = (
-                seg.audio_score * 0.4
-                + seg.rhythm_score * 0.3
-                + seg.visual_score * 0.3
+                seg.audio_score * 0.45
+                + seg.rhythm_score * 0.35
+                + seg.visual_score * 0.20
             )
 
-            # 效价：情绪分数（后续可结合subtitle关键词）
-            valence_score = seg.emotion_score
+            # 效价：情绪分数为主，结合是否有实质性台词（subtitle_text长度）
+            subtitle_bonus = min(0.15, (len(seg.subtitle_text or "") / 80.0) * 0.15)
+            valence_score = seg.emotion_score + subtitle_bonus
 
-            # 使用动态阈值（更宽松）
-            is_high_arousal = arousal_score >= 0.45
-            is_positive = valence_score >= 0.45
+            # 动态阈值（根据数据分布更宽松）
+            is_high_arousal = arousal_score >= 0.42
+            is_positive = valence_score >= 0.42
 
             if is_high_arousal and is_positive:
                 categorized["high_arousal_positive"].append(seg)

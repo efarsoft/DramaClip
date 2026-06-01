@@ -3,8 +3,9 @@
  */
 
 import React, { useState } from 'react';
-import { Card, Row, Col, Form, Switch, Select, Space, Button, Modal, Input, Radio, message } from 'antd';
-import { CloudDownloadOutlined, PlusOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
+import { Card, Row, Col, Form, Switch, Select, Space, Button, Modal, Input, Radio, message, Segmented, Alert, Typography } from 'antd';
+import { CloudDownloadOutlined, PlusOutlined, UsergroupAddOutlined, ExperimentOutlined, WarningOutlined } from '@ant-design/icons';
 import type { ModelInfo } from './ModelDownloadCard';
 import { ModelStatusRow } from './ModelDownloadCard';
 
@@ -45,6 +46,9 @@ interface ASRTabProps {
     tts: CustomModelConfig[];
   };
   onCustomModelsChange: (v: { asr?: CustomModelConfig[]; tts?: CustomModelConfig[] }) => void;
+  // P4: 说话人分离配置（从 SettingsPage 传入，统一管理）
+  diarizationConfig?: { engine?: 'clustering' | 'pyannote'; use_pyannote_by_default?: boolean };
+  onDiarizationChange?: (value: Partial<{ engine?: 'clustering' | 'pyannote'; use_pyannote_by_default?: boolean }>) => void;
 }
 
 export const ASRTab: React.FC<ASRTabProps> = ({
@@ -56,7 +60,10 @@ export const ASRTab: React.FC<ASRTabProps> = ({
   onDelete,
   customModels,
   onCustomModelsChange,
+  diarizationConfig,
+  onDiarizationChange,
 }) => {
+  const navigate = useNavigate();
   const [modalVisible, setModalVisible] = useState(false);
   const [form] = Form.useForm();
   const [mode, setMode] = useState<'Local Path' | 'Online ID'>('Local Path');
@@ -230,6 +237,77 @@ export const ASRTab: React.FC<ASRTabProps> = ({
               />
             ))}
         </Space>
+      </Card>
+
+      {/* P4: 说话人分离 (Diarization) 设置 - 高精度 pyannote 路径入口 */}
+      <Card
+        size="small"
+        title={
+          <Space>
+            <UsergroupAddOutlined />
+            <span>说话人分离 (Diarization)</span>
+            <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
+              影响高光检测、角色对话节奏与旁白分配
+            </Typography.Text>
+          </Space>
+        }
+        style={{ borderColor: '#fa8c1644', marginTop: 12 }}
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Typography.Text strong style={{ display: 'block', marginBottom: 6 }}>分离引擎</Typography.Text>
+          <Segmented
+            value={diarizationConfig?.engine || 'clustering'}
+            onChange={(val) => {
+              const engine = val as 'clustering' | 'pyannote';
+              const usePy = engine === 'pyannote';
+              onDiarizationChange?.({ engine, use_pyannote_by_default: usePy });
+            }}
+            options={[
+              {
+                label: (
+                  <Space size={4}>
+                    <span>轻量聚类</span>
+                    <Typography.Text type="secondary" style={{ fontSize: 11 }}>(默认，快速)</Typography.Text>
+                  </Space>
+                ),
+                value: 'clustering',
+              },
+              {
+                label: (
+                  <Space size={4}>
+                    <ExperimentOutlined />
+                    <span>pyannote 3.1 精准</span>
+                  </Space>
+                ),
+                value: 'pyannote',
+              },
+            ]}
+            style={{ marginBottom: 8 }}
+          />
+        </div>
+
+        {(diarizationConfig?.engine === 'pyannote') && (
+          <Alert
+            type="warning"
+            showIcon
+            icon={<WarningOutlined />}
+            style={{ marginBottom: 8 }}
+            message="pyannote 3.1 为 gated 高精度模型"
+            description={
+              <div>
+                必须先在 <b>模型管理</b> 页面下载 <code>pyannote/speaker-diarization-3.1</code>，并在系统环境变量配置有效的 <code>HF_TOKEN</code>（需先在 HF 同意模型许可协议）。
+                <Button type="link" size="small" style={{ padding: '0 4px', fontSize: 12 }} onClick={() => navigate('/models')}>前往模型管理</Button>
+                <br />
+                精准模式会显著提升多角色短剧的说话人边界与角色一致性，推荐用于成片质量优先场景。
+              </div>
+            }
+          />
+        )}
+
+        <div style={{ fontSize: 12, color: '#71717a' }}>
+          聚类模式：无需额外大模型，适合快速迭代。<br />
+          pyannote 模式：使用中央目录模型 + 真实声学特征，质量显著更高（已完整实现 SpeakerProfile + timeline 回传）。
+        </div>
       </Card>
 
       {/* Add Custom Model Modal */}

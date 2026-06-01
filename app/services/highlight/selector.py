@@ -23,6 +23,9 @@ class HighlightSegment:
     subtitle_text: Optional[str] = None  # 字幕文本
     reason: Optional[str] = None  # 入选理由
     segment_id: Optional[str] = None  # 前端传递的片段 ID（来自分析结果）
+    dialogue_importance: float = 0.0  # 新增：原声保护重要性（0~1），用于 hybrid 模式优先保留有价值原声的片段
+    speaker: Optional[str] = None           # P5: 来自 diarization 的 speaker_id (speaker_0 等)
+    speaker_score: float = 0.0              # P5: 说话人重要性分数（主导角色加分、说话人切换节奏等）
 
     @property
     def duration(self) -> float:
@@ -44,6 +47,9 @@ class HighlightSegment:
             "subtitle_text": self.subtitle_text,
             "reason": self.reason,
             "segment_id": self.segment_id,
+            "dialogue_importance": self.dialogue_importance,
+            "speaker": self.speaker,                 # P5
+            "speaker_score": self.speaker_score,     # P5
         }
 
 
@@ -294,13 +300,15 @@ class HighlightSelector:
                     return 0.0
 
             # 如果没有total_score，从各维度加权计算
+            # P5: 加入 speaker_score 小权重（pyannote 精准模式下会产生更有意义的 speaker-aware 高光）
             total = score_dict.get("total_score", None)
             if total is None:
                 total = (
-                    get_float_score("audio_score") * 0.4
-                    + get_float_score("emotion_score") * 0.3
-                    + get_float_score("visual_score") * 0.2
-                    + get_float_score("rhythm_score") * 0.1
+                    get_float_score("audio_score") * 0.38
+                    + get_float_score("emotion_score") * 0.28
+                    + get_float_score("visual_score") * 0.18
+                    + get_float_score("rhythm_score") * 0.08
+                    + get_float_score("speaker_score") * 0.08   # P5
                 )
             else:
                 try:
@@ -317,6 +325,9 @@ class HighlightSelector:
                 emotion_score=get_float_score("emotion_score"),
                 visual_score=get_float_score("visual_score"),
                 rhythm_score=get_float_score("rhythm_score"),
+                dialogue_importance=get_float_score("dialogue_importance"),
+                speaker_score=get_float_score("speaker_score"),   # P5
+                speaker=score_dict.get("speaker"),                # P5
                 subtitle_text=subtitle_texts[i],
             )
             segments.append(seg)

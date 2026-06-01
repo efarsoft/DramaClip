@@ -17,26 +17,9 @@ if str(project_root) not in sys.path:
 
 
 def setup_logging():
-    """配置日志"""
-    # 开发模式输出到 stderr，生产模式输出到文件
-    log_dir = Path.home() / ".dramaclip" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    logger.add(
-        log_dir / "backend.log",
-        rotation="10 MB",
-        retention="7 days",
-        level="DEBUG",
-        format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} - {message}"
-    )
-
-    # 开发模式也输出到 stderr
-    if not getattr(sys, 'frozen', False):
-        logger.add(
-            sys.stderr,
-            level="DEBUG",
-            format="{time:HH:mm:ss} | {level} | {message}"
-        )
+    """配置日志（委托给 core.logging_config 统一配置）"""
+    from app.core.logging_config import configure_logging
+    configure_logging()
 
 
 def setup_resources():
@@ -126,6 +109,17 @@ def main():
     logger.info(f"Base directory: {base_dir}")
     logger.info("=" * 60)
 
+    # Phase 3.3: 首次运行智能引导
+    from app.services.onboarding import is_first_run, mark_first_run_completed, get_recommended_packs, get_hardware_recommendation
+    if is_first_run():
+        recommended = get_hardware_recommendation()
+        packs = get_recommended_packs()
+        logger.info("首次运行检测到！推荐质量套装：")
+        for p in packs:
+            logger.info(f"  - {p['name']} ({p['estimated_size_gb']}GB) - {p['recommended_for']}")
+        logger.info(f"硬件推荐套装 ID: {recommended}")
+        mark_first_run_completed()
+
     # 初始化所有核心服务
     from app.init import init_all
     init_all()
@@ -144,6 +138,20 @@ def main():
         # 注册服务器引用到 handlers base，用于发送进度通知
         from app.ipc.handlers.base import set_server
         set_server(server)
+
+        # 订阅 event_bus 进度事件，转发到 IPC stdout 通知
+        from app.core import event_bus
+
+        def _forward_progress(event: dict):
+            """event_bus → IPC server stdout 转发"""
+            server.send_progress(
+                task_id=event.get("task_id", ""),
+                progress=event.get("progress", 0),
+                message=event.get("message", ""),
+                phase=event.get("phase"),
+            )
+
+        event_bus.subscribe("progress", _forward_progress)
 
         # 发送就绪通知
         server.send_notification("ready", {

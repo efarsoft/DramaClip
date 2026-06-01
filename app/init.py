@@ -66,6 +66,24 @@ def init_cleanup_service():
         logger.error(f"[Init] 自动清理服务启动失败: {e}")
 
 
+def init_job_store():
+    """
+    初始化任务持久化存储
+
+    清扫上次运行遗留的孤儿任务（pending/running → failed），
+    避免前端显示虚假的加载动画。
+    """
+    try:
+        from app.services.state import state
+        if hasattr(state, 'sweep_orphans'):
+            n = state.sweep_orphans()
+            if n > 0:
+                logger.info(f"[Init] 已清扫 {n} 个孤儿任务")
+        logger.info("[Init] 任务持久化存储已初始化")
+    except Exception as e:
+        logger.error(f"[Init] 任务持久化存储初始化失败: {e}")
+
+
 def init_llm_providers():
     """
     初始化 LLM 提供商注册
@@ -131,11 +149,15 @@ def init_all():
     os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
     
     # 将所有本地 AI 模型缓存重定向至项目 resources 目录下的 models 文件夹（便于 Electron 打包分发与 Git 管理）
-    workspace_models = Path("d:/DramaClip/resources/models")
-    os.environ["HF_HOME"] = str(workspace_models / "huggingface")
-    os.environ["MODELSCOPE_CACHE"] = str(workspace_models / "modelscope")
-    os.environ["XDG_CACHE_HOME"] = str(workspace_models / "styletts2")
-    os.environ["SUPERONIC_CACHE_DIR"] = str(workspace_models / "tts" / "supertonic")
+    models_dir = os.environ.get("DRAMACLIP_MODELS_PATH")
+    if not models_dir:
+        from app.utils.utils import root_dir
+        models_dir = os.path.join(root_dir(), "resources", "models")
+    workspace_models = Path(models_dir)
+    os.environ["HF_HOME"] = str(workspace_models / ".cache" / "huggingface")
+    os.environ["MODELSCOPE_CACHE"] = str(workspace_models / ".cache" / "modelscope")
+    os.environ["XDG_CACHE_HOME"] = str(workspace_models / ".cache" / "styletts2")
+
 
     # 使用用户提供的令牌登录 ModelScope 平台 (异步执行，避免因网络响应慢或断网阻塞主线程 IPC 建立)
     def do_modelscope_login():
@@ -163,13 +185,16 @@ def init_all():
     # 2. 初始化统一配置系统（后续服务依赖配置）
     config_valid, config_messages = init_unified_config()
 
-    # 3. 初始化 LLM 提供商
+    # 3. 初始化任务持久化存储（清扫孤儿任务）
+    init_job_store()
+
+    # 4. 初始化 LLM 提供商
     init_llm_providers()
 
-    # 4. 初始化数据库
+    # 5. 初始化数据库
     init_database()
 
-    # 5. 最后启动自动清理服务（依赖其他服务就绪）
+    # 6. 最后启动自动清理服务（依赖其他服务就绪）
     init_cleanup_service()
 
     logger.info("=" * 60)

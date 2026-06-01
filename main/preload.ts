@@ -94,6 +94,8 @@ const electronAPI = {
     },
   },
 
+
+
   // 窗口控制
   window: {
     minimize: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_MINIMIZE),

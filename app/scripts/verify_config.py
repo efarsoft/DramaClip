@@ -56,14 +56,12 @@ def test_config_validation() -> Tuple[bool, str]:
 def test_service_imports() -> List[Tuple[str, bool, str]]:
     """测试服务模块导入"""
     services_to_test = [
-        "app.services.subtitle",
         "app.services.task",
         "app.services.state",
         "app.services.llm.openai_compatible_provider",
         "app.services.llm.config_validator",
-        "app.services.multi_episode_processor",
         "app.services.clip.modular_direct_cut",
-        "app.services.SDE.short_drama_explanation",
+        "app.services.sde.short_drama_explanation",
     ]
     
     results = []

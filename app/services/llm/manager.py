@@ -121,6 +121,8 @@ class LLMServiceManager:
                 f"\n当前已注册的提供商: {cls.get_registered_providers_info()}"
             )
 
+        cls._register_reload_callback()  # M1 进阶：确保热重载支持已激活
+
         # 确定提供商名称
         if not provider_name:
             from app.config.unified_config import config as unified_config
@@ -169,6 +171,30 @@ class LLMServiceManager:
             logger.error(f"创建视觉模型提供商实例失败: {provider_name} - {str(e)}")
             raise ConfigurationError(f"创建提供商实例失败: {str(e)}")
     
+    @classmethod
+    def clear_all_caches(cls) -> None:
+        """
+        清空所有已缓存的提供商实例（M1 进阶：支持配置热重载）
+        下次 get_*_provider 时会使用最新配置重新创建实例。
+        """
+        cls._vision_instance_cache.clear()
+        cls._text_instance_cache.clear()
+        logger.info("[LLM] 已清空所有 LLM 提供商实例缓存（配置热重载）")
+
+    @classmethod
+    def _register_reload_callback(cls):
+        """向 UnifiedConfig 注册热重载回调（仅注册一次）"""
+        if getattr(cls, "_reload_registered", False):
+            return
+        try:
+            from app.config.unified_config import get_config
+            cfg = get_config()
+            cfg.register_on_reload(cls.clear_all_caches)
+            cls._reload_registered = True
+            logger.debug("[LLM] 已向 UnifiedConfig 注册热重载回调")
+        except Exception as e:
+            logger.warning(f"[LLM] 注册热重载回调失败: {e}")
+
     @classmethod
     def get_text_provider(cls, provider_name: Optional[str] = None) -> TextModelProvider:
         """

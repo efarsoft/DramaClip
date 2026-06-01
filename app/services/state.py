@@ -1,24 +1,33 @@
+"""
+DramaClip 任务状态管理（SQLite 持久化 + 内存缓存）
+
+参考 OmniVoice-Studio 的 TaskManager + job_store 模式：
+- 每次状态变更同时写入内存缓存和 SQLite
+- 进程崩溃后可从 SQLite 恢复
+- 启动时自动清扫孤儿任务
+"""
+
 import ast
-from abc import ABC, abstractmethod
-from app.config.unified_config import config
+from typing import Any, Dict, Optional
+from loguru import logger
+
 from app.models import const
+from app.core.job_store import get_job_store
+from app.core import event_bus
 
 
-# Base class for state management
-class BaseState(ABC):
-    @abstractmethod
-    def update_task(self, task_id: str, state: int, progress: int = 0, **kwargs):
-        pass
+class PersistentState:
+    """
+    SQLite 持久化 + 内存缓存的任务状态管理
 
-    @abstractmethod
-    def get_task(self, task_id: str):
-        pass
+    - 写入时：先写 SQLite，再更新内存缓存
+    - 读取时：优先从内存缓存读取，缓存未命中则查 SQLite
+    - 崩溃恢复：启动时从 SQLite 清扫孤儿任务
+    """
 
-
-# Memory state management
-class MemoryState(BaseState):
     def __init__(self):
-        self._tasks = {}
+        self._cache: Dict[str, Dict[str, Any]] = {}
+        self._store = get_job_store()
 
     def update_task(
         self,
@@ -27,96 +36,131 @@ class MemoryState(BaseState):
         progress: int = 0,
         **kwargs,
     ):
-        progress = int(progress)
-        if progress > 100:
-            progress = 100
+        """更新任务状态（持久化 + 缓存）"""
+        progress = min(int(progress), 100)
 
-        self._tasks[task_id] = {
+        # 更新内存缓存
+        self._cache[task_id] = {
             "state": state,
             "progress": progress,
             **kwargs,
         }
 
-    def get_task(self, task_id: str):
-        return self._tasks.get(task_id, None)
-
-    def delete_task(self, task_id: str):
-        if task_id in self._tasks:
-            del self._tasks[task_id]
-
-
-# Redis state management
-class RedisState(BaseState):
-    def __init__(self, host="localhost", port=6379, db=0, password=None):
-        import redis
-
-        self._redis = redis.StrictRedis(host=host, port=port, db=db, password=password)
-
-    def update_task(
-        self,
-        task_id: str,
-        state: int = const.TASK_STATE_PROCESSING,
-        progress: int = 0,
-        **kwargs,
-    ):
-        progress = int(progress)
-        if progress > 100:
-            progress = 100
-
-        fields = {
+        # 通过事件总线广播状态变更
+        event_bus.emit("task_status", {
+            "task_id": task_id,
             "state": state,
             "progress": progress,
-            **kwargs,
-        }
+        })
 
-        for field, value in fields.items():
-            self._redis.hset(task_id, field, str(value))
-
-    def get_task(self, task_id: str) -> dict[str, any] | None:
-        task_data: dict[bytes, bytes] = self._redis.hgetall(task_id)
-        if not task_data:
-            return None
-
-        task = {
-            key.decode("utf-8"): self._convert_to_original_type(value)
-            for key, value in task_data.items()
-        }
-        return task
-
-    def delete_task(self, task_id: str):
-        self._redis.delete(task_id)
-
-    @staticmethod
-    def _convert_to_original_type(value):
-        """
-        Convert the value from byte string to its original data type.
-        You can extend this method to handle other data types as needed.
-        """
-        value_str = value.decode("utf-8")
-
+        # 同步到 SQLite（容错：磁盘写入失败不阻塞主流程）
         try:
-            # try to convert byte string array to list
-            return ast.literal_eval(value_str)
-        except (ValueError, SyntaxError):
+            job = self._store.get(task_id)
+            if job is None:
+                # 首次写入，创建记录
+                self._store.create(
+                    task_id,
+                    job_type=kwargs.get("task_type", "unknown"),
+                    project_id=kwargs.get("project_id"),
+                    meta=kwargs.get("meta"),
+                )
+
+            # 映射状态常量到 SQLite 状态字符串
+            status_map = {
+                const.TASK_STATE_PROCESSING: "running",
+                const.TASK_STATE_COMPLETE: "done",
+                const.TASK_STATE_FAILED: "failed",
+            }
+            sqlite_status = status_map.get(state)
+            if sqlite_status == "running":
+                self._store.mark_running(task_id)
+            elif sqlite_status == "done":
+                self._store.mark_done(task_id)
+            elif sqlite_status == "failed":
+                error = kwargs.get("error", "未知错误")
+                self._store.mark_failed(task_id, str(error))
+
+            # 记录事件（状态变更日志）
+            import json
+            event = json.dumps({
+                "type": "status",
+                "state": state,
+                "progress": progress,
+                **{k: str(v) for k, v in kwargs.items() if k not in ("error",)},
+            }, ensure_ascii=False)
+            self._store.append_event(task_id, f"data: {event}\n\n")
+
+        except Exception as e:
+            logger.warning(f"[State] SQLite 持久化失败（非致命）: {e}")
+
+    def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """获取任务状态（优先缓存，降级 SQLite）"""
+        # 优先内存缓存
+        cached = self._cache.get(task_id)
+        if cached is not None:
+            return cached
+
+        # 降级到 SQLite
+        try:
+            job = self._store.get(task_id)
+            if job:
+                # 反向映射 SQLite 状态到常量
+                status_map = {
+                    "pending": const.TASK_STATE_PROCESSING,
+                    "running": const.TASK_STATE_PROCESSING,
+                    "done": const.TASK_STATE_COMPLETE,
+                    "failed": const.TASK_STATE_FAILED,
+                    "cancelled": const.TASK_STATE_FAILED,
+                }
+                result = {
+                    "state": status_map.get(job.get("status", ""), const.TASK_STATE_PROCESSING),
+                    "progress": 100 if job.get("status") == "done" else 0,
+                }
+                if job.get("error"):
+                    result["error"] = job["error"]
+                # 写入缓存
+                self._cache[task_id] = result
+                return result
+        except Exception as e:
+            logger.warning(f"[State] SQLite 查询失败: {e}")
+
+        return None
+
+    def delete_task(self, task_id: str):
+        """删除任务"""
+        self._cache.pop(task_id, None)
+        try:
+            self._store.delete(task_id)
+        except Exception:
             pass
 
-        if value_str.isdigit():
-            return int(value_str)
-        # Add more conversions here if needed
-        return value_str
+    def sweep_orphans(self) -> int:
+        """启动时清扫孤儿任务"""
+        n = self._store.sweep_orphans_on_startup()
+        # 清空内存缓存（刚启动时应该是空的）
+        self._cache.clear()
+        return n
 
 
-# Global state
-_enable_redis = config.get_legacy_app_config("enable_redis", False)
-_redis_host = config.get_legacy_app_config("redis_host", "localhost")
-_redis_port = config.get_legacy_app_config("redis_port", 6379)
-_redis_db = config.get_legacy_app_config("redis_db", 0)
-_redis_password = config.get_legacy_app_config("redis_password", None)
+# ---- 向后兼容：保留旧接口名 ----
 
-state = (
-    RedisState(
-        host=_redis_host, port=_redis_port, db=_redis_db, password=_redis_password
-    )
-    if _enable_redis
-    else MemoryState()
-)
+class MemoryState:
+    """纯内存状态管理（已废弃，保留向后兼容）"""
+
+    def __init__(self):
+        self._tasks: Dict[str, Dict[str, Any]] = {}
+
+    def update_task(self, task_id: str, state: int = const.TASK_STATE_PROCESSING,
+                    progress: int = 0, **kwargs):
+        progress = min(int(progress), 100)
+        self._tasks[task_id] = {"state": state, "progress": progress, **kwargs}
+
+    def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+        return self._tasks.get(task_id)
+
+    def delete_task(self, task_id: str):
+        self._tasks.pop(task_id, None)
+
+
+# 全局状态实例（默认使用持久化版本）
+state = PersistentState()

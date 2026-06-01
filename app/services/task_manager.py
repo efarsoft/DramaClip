@@ -1,12 +1,13 @@
 """
 任务管理器
-P1 重构：统一管理所有任务，支持真正的取消机制
+统一管理任务生命周期，支持并发控制、进程终止、超时和持久化。
 
-改进点：
-1. 移除全局 dict + Lock，改用 TaskManager 类
-2. 任务生命周期管理（创建 → 运行 → 完成/取消）
-3. 真正的进程终止（不仅仅是状态变更）
-4. 超时和自动清理
+架构：
+    TaskManager (运行时编排: 并发控制/进程管理/取消)
+       ↓ 持久化
+    PersistentState (缓存 + SQLite + 事件总线)
+       ↓
+    core.job_store (SQLite CRUD)
 """
 
 import uuid
@@ -21,6 +22,9 @@ from pathlib import Path
 import threading
 import queue
 from loguru import logger
+
+from app.core.job_store import get_job_store
+from app.core import event_bus
 
 
 class TaskStatus(str, Enum):
@@ -93,6 +97,7 @@ class TaskManager:
         self._task_queue: queue.Queue = queue.Queue()
         self._running_count = 0
         self._running_lock = threading.Lock()
+        self._store = get_job_store()  # SQLite 持久化
 
     def create_task(
         self,
@@ -122,8 +127,51 @@ class TaskManager:
                 metadata=metadata or {}
             )
 
+            # 持久化到 SQLite
+            self._persist_task(task)
+
             logger.info(f"[TaskManager] Created task: {task_id}")
             return task_id
+
+    def _persist_task(self, task: TaskInfo):
+        """将任务状态同步到 SQLite（容错）"""
+        try:
+            job = self._store.get(task.task_id)
+            if job is None:
+                self._store.create(
+                    task.task_id,
+                    job_type=task.metadata.get("type", "unknown"),
+                    project_id=task.metadata.get("project_id"),
+                    meta=task.metadata,
+                )
+            status_map = {
+                TaskStatus.PENDING: "pending",
+                TaskStatus.RUNNING: "running",
+                TaskStatus.COMPLETED: "done",
+                TaskStatus.FAILED: "failed",
+                TaskStatus.CANCELLED: "cancelled",
+                TaskStatus.TIMEOUT: "failed",
+            }
+            sqlite_status = status_map.get(task.status, "pending")
+            if sqlite_status == "pending":
+                pass  # already created
+            elif sqlite_status == "running":
+                self._store.mark_running(task.task_id)
+            elif sqlite_status == "done":
+                self._store.mark_done(task.task_id)
+            elif sqlite_status == "failed":
+                self._store.mark_failed(task.task_id, task.error or "未知错误")
+            elif sqlite_status == "cancelled":
+                self._store.mark_cancelled(task.task_id)
+
+            # 广播事件
+            event_bus.emit("task_status", {
+                "task_id": task.task_id,
+                "status": task.status.value,
+                "progress": task.progress,
+            })
+        except Exception as e:
+            logger.warning(f"[TaskManager] SQLite 持久化失败（非致命）: {e}")
 
     def get_task(self, task_id: str) -> Optional[TaskInfo]:
         """获取任务信息"""
@@ -165,12 +213,14 @@ class TaskManager:
                 return False
 
             if status is not None:
+                old_status = task.status
                 task.status = status
 
                 if status == TaskStatus.RUNNING and task.started_at is None:
                     task.started_at = time.time()
 
-                if status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+                if (status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED) and
+                    old_status not in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)):
                     task.completed_at = time.time()
 
                     # 任务完成时减少运行计数
@@ -199,6 +249,9 @@ class TaskManager:
 
             if process is not None:
                 task.process = process
+
+            # 持久化
+            self._persist_task(task)
 
             return True
 
@@ -234,6 +287,9 @@ class TaskManager:
             with self._running_lock:
                 self._running_count += 1
 
+            # 持久化
+            self._persist_task(task)
+
             logger.info(f"[TaskManager] Started task: {task_id}")
             return True
 
@@ -253,6 +309,10 @@ class TaskManager:
         with self._lock:
             task = self._tasks.get(task_id)
             if not task:
+                return False
+
+            if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+                logger.warning(f"[TaskManager] Task {task_id} is already in final state: {task.status}")
                 return False
 
             # 如果任务正在运行，终止进程
@@ -288,6 +348,9 @@ class TaskManager:
                 if self._running_count > 0:
                     self._running_count -= 1
                     self._semaphore.release()
+
+            # 持久化
+            self._persist_task(task)
 
             logger.info(f"[TaskManager] Cancelled task: {task_id}")
             return True
@@ -331,6 +394,9 @@ class TaskManager:
                     self._running_count -= 1
                     self._semaphore.release()
 
+            # 持久化
+            self._persist_task(task)
+
             logger.info(f"[TaskManager] Completed task: {task_id}")
             return True
 
@@ -360,6 +426,9 @@ class TaskManager:
                 if self._running_count > 0:
                     self._running_count -= 1
                     self._semaphore.release()
+
+            # 持久化
+            self._persist_task(task)
 
             logger.error(f"[TaskManager] Failed task: {task_id}, error: {error}")
             return True

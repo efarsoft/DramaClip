@@ -17,7 +17,7 @@ from datetime import datetime
 from enum import Enum
 from loguru import logger
 
-from app.services.clip_style import ClipStyle, PresetStyles, get_style_manager
+from app.services.clip.style import ClipStyle, PresetStyles, get_style_manager
 
 
 class TemplateCategory(str, Enum):

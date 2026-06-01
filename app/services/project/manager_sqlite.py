@@ -118,11 +118,11 @@ class ProjectManager:
 
     def create_project(self, name: str, path: str) -> ProjectMeta:
         """
-        创建新项目
+        创建新项目（强制使用短 UUID 作为物理文件夹名，彻底避免中文/特殊字符路径问题）
 
         Args:
-            name: 项目名称
-            path: 项目存储路径（父目录）
+            name: 项目显示名称（可包含中文，仅用于界面展示）
+            path: 项目存储的父目录
 
         Returns:
             创建的项目元数据
@@ -131,9 +131,12 @@ class ProjectManager:
             raise ValueError('Project name cannot be empty')
 
         project_id = str(uuid.uuid4())
-        project_path = Path(path) / name
+        # 关键修复：使用短的纯字母数字 ID 作为物理文件夹名（README 承诺的“数字路径安全编码”）
+        # 10 字符 hex 足够唯一 + 安全（Windows/所有文件系统友好）
+        safe_folder = project_id.split('-')[0]   # e.g. "a1b2c3d4e5"
+        project_path = Path(path) / safe_folder
 
-        # 创建项目目录
+        # 创建项目目录（使用安全 ID）
         project_path.mkdir(parents=True, exist_ok=True)
 
         # 创建子目录
@@ -146,8 +149,8 @@ class ProjectManager:
         now = datetime.now().isoformat()
         project = ProjectMeta(
             id=project_id,
-            name=name,
-            path=str(project_path),
+            name=name,                    # 保留用户友好的显示名称
+            path=str(project_path),       # 实际磁盘路径使用安全 ID 文件夹
             created_at=now,
             updated_at=now,
             episode_count=0,
@@ -164,7 +167,7 @@ class ProjectManager:
         # 保存到数据库
         self.db.create_project(project.to_dict())
 
-        logger.info(f"[DB] Created project: {name} ({project_id})")
+        logger.info(f"[DB] Created project: '{name}' (id={project_id}, safe_folder={safe_folder}) at {project_path}")
         return project
 
     def open_project(self, project_id: str) -> Optional[ProjectMeta]:
@@ -430,6 +433,92 @@ class ProjectManager:
             更新的记录数
         """
         return self.db.update_video_order(video_orders)
+
+    # ====================== M5 进阶：老项目迁移工具 ======================
+
+    def migrate_legacy_project_folders(self, parent_dir: Optional[str] = None) -> Dict[str, Any]:
+        """
+        扫描旧式项目目录（文件夹名 = 项目显示名称，包含中文/特殊字符），
+        将其安全迁移为使用短 ID 作为文件夹名的结构。
+
+        迁移策略：
+        - 如果发现文件夹名看起来像人类名称（包含非 ASCII 或空格），则：
+          1. 在数据库中查找匹配的 project（通过 name 或旧 path）
+          2. 创建新的安全文件夹（short_id）
+          3. 移动整个目录内容
+          4. 更新数据库中的 path 字段
+
+        这能彻底解决遗留的中文路径问题。
+
+        Returns:
+            迁移报告 { migrated: int, skipped: int, errors: [...] }
+        """
+        import shutil
+
+        if parent_dir is None:
+            parent_dir = os.path.expanduser("~/DramaClipProjects")
+
+        parent = Path(parent_dir)
+        if not parent.exists():
+            return {"migrated": 0, "skipped": 0, "errors": ["parent dir not found"]}
+
+        report = {"migrated": 0, "skipped": 0, "errors": []}
+
+        for folder in parent.iterdir():
+            if not folder.is_dir():
+                continue
+
+            folder_name = folder.name
+            # 判断是否是“危险”旧文件夹（非纯短 hex）
+            if len(folder_name) == 10 and all(c in "0123456789abcdef" for c in folder_name):
+                report["skipped"] += 1
+                continue  # 已经是安全 ID
+
+            # 尝试在数据库中找到对应的项目
+            projects = self.list_projects()
+            matching = [p for p in projects if p.name == folder_name or Path(p.path).name == folder_name]
+
+            if not matching:
+                report["skipped"] += 1
+                continue
+
+            project = matching[0]
+            if Path(project.path).name == folder_name:
+                # 已经是当前记录的路径
+                report["skipped"] += 1
+                continue
+
+            try:
+                short_id = project.id.split('-')[0]
+                new_path = parent / short_id
+
+                if new_path.exists():
+                    report["errors"].append(f"Target {short_id} already exists for {folder_name}")
+                    continue
+
+                # 执行重命名/移动
+                shutil.move(str(folder), str(new_path))
+
+                # 更新数据库
+                self.db.update_project(project.id, {"path": str(new_path)})
+
+                # 更新 meta.json（如果存在）
+                meta_file = new_path / "meta.json"
+                if meta_file.exists():
+                    try:
+                        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                        meta["path"] = str(new_path)
+                        meta_file.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+                    except Exception:
+                        pass
+
+                logger.info(f"[M5-Migration] 已安全迁移项目 '{project.name}' : {folder_name} → {short_id}")
+                report["migrated"] += 1
+
+            except Exception as e:
+                report["errors"].append(f"{folder_name}: {e}")
+
+        return report
 
 
 # 全局单例

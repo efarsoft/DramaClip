@@ -41,9 +41,9 @@ export interface AnalysisResults {
 // ── IPC 方法表 ──
 
 const IPC_METHODS: Record<TaskType, { start: string; progress: string; cancel: string }> = {
-  analyze: { start: 'analyze.start', progress: 'analyze.getStatus', cancel: 'analyze.cancel' },
-  clip:    { start: 'clip.execute', progress: 'clip.getProgress', cancel: 'clip.stop' },
-  export:  { start: 'export.start', progress: 'export.getProgress', cancel: 'export.cancel' },
+  analyze: { start: 'analyze.start', progress: 'analyze.get_status', cancel: 'analyze.cancel' },
+  clip:    { start: 'clip.execute', progress: 'clip.get_progress', cancel: 'clip.stop' },
+  export:  { start: 'export.start', progress: 'export.get_progress', cancel: 'export.cancel' },
 };
 
 // ── Store ──

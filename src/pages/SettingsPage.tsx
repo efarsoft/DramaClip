@@ -1,12 +1,14 @@
 /**
  * 页面：系统设置
  * 由各 Tab 子组件组装而成
+ * 模型管理已分离到 /models 页面，这里只负责“用哪个引擎/参数”
  */
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Typography, Space, Button, message, Tabs, Modal, Alert } from 'antd';
-import { SaveOutlined, SettingOutlined, UndoOutlined } from '@ant-design/icons';
-import { settingsApi, modelApi, ipcClient, StorageInfo } from '../services/ipc';
+import React, { useEffect, useState, useCallback } from 'react';
+import { Typography, Space, Button, message, Tabs, Alert, Card } from 'antd';
+import { SaveOutlined, SettingOutlined, UndoOutlined, DatabaseOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
+import { settingsApi, modelApi, systemApi } from '../services/ipc';
 import type { AppSettings, ModelInfo } from '../services/ipc';
 
 import { AIModelsTab } from '../components/settings/AIModelsTab';
@@ -17,150 +19,73 @@ import { OutputTab } from '../components/settings/OutputTab';
 import { HardwareTab } from '../components/settings/HardwareTab';
 import { StorageManagementTab } from '../components/settings/StorageManagementTab';
 
+
 const { Title, Text } = Typography;
 
 /* ====== SettingsPage 主组件 ====== */
 const SettingsPage: React.FC = () => {
+  const navigate = useNavigate();
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
-  const [activeTab, setActiveTab] = useState('models');
+  const [activeTab, setActiveTab] = useState('models-config');
 
-  /* ---- 模型管理状态 ---- */
+  /* ---- 轻量模型状态（仅供 TTSTab/ASRTab 下拉选项，完整管理在 /models 页） ---- */
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [ttsBackends, setTtsBackends] = useState<any[]>([]);
   const [modelDownloads, setModelDownloads] = useState<
     Record<string, { progress: number; message: string }>
   >({});
-  const modelPollRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
 
-  /* 加载模型列表 */
+  /* 加载模型列表（轻量版，仅用于引擎选择下拉框） */
   const loadModels = useCallback(async () => {
     try {
-      const list = await modelApi.list();
+      const res = await modelApi.list() as any;
+      let list: any[] = [];
+      if (res && Array.isArray(res)) {
+        list = res;
+      } else if (res) {
+        list = [...(res.legacy || []), ...(res.central_catalog || [])];
+      }
+      const seen = new Set();
+      list = list.filter((m: any) => {
+        const key = m.id || m.repo_id || m.name;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
       setModels(list);
     } catch {
-      // Dev fallback - 模拟数据
-      setModels([
-        { id: 'whisper-tiny', name: 'Whisper Tiny', category: 'asr', type: 'whisper', size_mb: 150, description: '轻量级，速度快', downloaded: false, disk_size_bytes: 0 },
-        { id: 'whisper-base', name: 'Whisper Base', category: 'asr', type: 'whisper', size_mb: 290, description: '基础模型', downloaded: true, disk_size_bytes: 300_000_000 },
-        { id: 'whisper-small', name: 'Whisper Small', category: 'asr', type: 'whisper', size_mb: 950, description: '中等大小', downloaded: false, disk_size_bytes: 0 },
-        { id: 'whisper-medium', name: 'Whisper Medium', category: 'asr', type: 'whisper', size_mb: 3000, description: '大模型', downloaded: false, disk_size_bytes: 0 },
-        { id: 'whisper-large-v3', name: 'Whisper Large V3', category: 'asr', type: 'whisper', size_mb: 6000, description: '最大模型', downloaded: false, disk_size_bytes: 0 },
-        { id: 'styletts2', name: 'StyleTTS 2', category: 'tts', type: 'styletts2', size_mb: 2000, description: '情感语音合成', downloaded: false, disk_size_bytes: 0 },
-      ]);
+      setModels([]);
     }
   }, []);
 
-  /* 轮询下载进度 */
-  const pollDownload = useCallback((modelId: string) => {
-    if (modelPollRef.current[modelId]) {
-      clearInterval(modelPollRef.current[modelId]);
-    }
-    modelPollRef.current[modelId] = setInterval(async () => {
-      try {
-        const status = await modelApi.status(modelId);
-        if (!status.downloading) {
-          clearInterval(modelPollRef.current[modelId]);
-          delete modelPollRef.current[modelId];
-          loadModels();
-          setModelDownloads((prev) => {
-            const next = { ...prev };
-            delete next[modelId];
-            return next;
-          });
-        }
-      } catch {
-        // ignore
-      }
-    }, 2000);
-  }, [loadModels]);
-
-  /* 监听进度通知（通过 IPC） */
-  useEffect(() => {
-    const unsub = ipcClient.onProgress((payload) => {
-      if (payload?.phase === 'download' && payload?.task_id) {
-        setModelDownloads((prev) => ({
-          ...prev,
-          [payload.task_id]: {
-            progress: payload.progress,
-            message: (payload as any).message || '',
-          },
-        }));
-      }
-    });
-    return unsub;
-  }, []);
-
-  /* 下载模型 */
-  const handleDownload = async (modelId: string) => {
+  const loadTtsBackends = useCallback(async () => {
     try {
-      setModelDownloads((prev) => ({ ...prev, [modelId]: { progress: 0, message: '正在启动…' } }));
-      await modelApi.download(modelId);
-      pollDownload(modelId);
+      const list = await systemApi.ttsBackends() as any[] || [];
+      setTtsBackends(list);
     } catch {
-      setModelDownloads((prev) => ({ ...prev, [modelId]: { progress: -1, message: '启动失败' } }));
-      message.error('启动下载失败');
+      setTtsBackends([]);
     }
+  }, []);
+
+  /* 下载 / 删除：重定向到模型管理页 */
+  const handleDownload = async (_modelId: string) => {
+    message.info('请前往「模型管理」页面进行下载');
+    navigate('/models');
   };
 
-  /* 删除模型 */
-  const handleDelete = async (modelId: string, name: string) => {
-    const isCustomAsr = settings?.custom_models?.asr?.some(m => m.id === modelId);
-    const isCustomTts = settings?.custom_models?.tts?.some(m => m.id === modelId);
-    
-    if (isCustomAsr || isCustomTts) {
-      Modal.confirm({
-        title: `确认移除自定义模型 ${name}？`,
-        content: '这将从配置中注销此模型（不会物理删除文件夹）。',
-        okText: '确认移除',
-        okType: 'danger',
-        cancelText: '取消',
-        onOk: async () => {
-          try {
-            const updatedASR = settings?.custom_models?.asr?.filter(m => m.id !== modelId) || [];
-            const updatedTTS = settings?.custom_models?.tts?.filter(m => m.id !== modelId) || [];
-            const newSettings = {
-              ...settings!,
-              custom_models: {
-                asr: updatedASR,
-                tts: updatedTTS
-              }
-            };
-            setSettings(newSettings);
-            await settingsApi.update(newSettings);
-            message.success(`${name} 已从配置中移除`);
-            loadModels();
-          } catch {
-            message.error('移除失败');
-          }
-        }
-      });
-      return;
-    }
-
-    Modal.confirm({
-      title: `确认删除 ${name}？`,
-      content: '删除后如需使用需重新下载。',
-      okText: '删除',
-      okType: 'danger',
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          await modelApi.delete(modelId);
-          message.success(`${name} 已删除`);
-          loadModels();
-        } catch {
-          message.error('删除失败');
-        }
-      },
-    });
+  const handleDelete = async (_modelId: string, _name: string) => {
+    message.info('请前往「模型管理」页面进行删除');
+    navigate('/models');
   };
 
   /* 首次加载 */
   useEffect(() => {
     loadModels();
-  }, [loadModels]);
+    loadTtsBackends();
+  }, [loadModels, loadTtsBackends]);
 
   /* 加载设置 */
   useEffect(() => {
@@ -245,6 +170,30 @@ const SettingsPage: React.FC = () => {
 
   const tabs = [
     {
+      key: 'models-config',
+      label: <Space><SettingOutlined /><span>模型相关配置</span></Space>,
+      children: (
+        <div style={{ maxWidth: 800 }}>
+          <Card title="Hugging Face 配置" style={{ marginBottom: 24 }}>
+            <p>用于下载 gated 模型（pyannote 等）。建议在「模型管理」中进行完整下载与安装。</p>
+            <Button 
+              type="primary" 
+              icon={<DatabaseOutlined />}
+              onClick={() => navigate('/models')}
+            >
+              前往模型管理（下载 / 安装 / 健康监控）
+            </Button>
+          </Card>
+
+          <Card title="默认引擎选择">
+            <p>在这里选择默认使用的 TTS / ASR / Diarization 引擎。实际模型请到模型管理页安装。</p>
+            {/* 这里可以保留原来的 TTS / ASR / Diarization 配置表单 */}
+            <Text type="secondary">（详细引擎配置已移至独立的「模型管理」页面）</Text>
+          </Card>
+        </div>
+      ),
+    },
+    {
       key: 'models',
       label: <Space><SettingOutlined /><span>AI 模型</span></Space>,
       children: (
@@ -263,6 +212,7 @@ const SettingsPage: React.FC = () => {
           ttsConfig={settings.tts}
           onTTSChange={(v) => updateSetting('tts', v)}
           models={models}
+          ttsBackends={ttsBackends}  // 新：带 required_models 的引擎列表
           modelDownloads={modelDownloads}
           onDownload={handleDownload}
           onDelete={handleDelete}
@@ -307,6 +257,21 @@ const SettingsPage: React.FC = () => {
             setSettings(newSettings);
             await settingsApi.update(newSettings);
             loadModels();
+          }}
+          diarizationConfig={settings.diarization}
+          onDiarizationChange={async (v) => {
+            if (!settings) return;
+            const newSettings: AppSettings = {
+              ...settings,
+              diarization: {
+                ...settings.diarization,
+                ...v,
+                engine: v.engine ?? settings.diarization?.engine ?? 'clustering',
+                use_pyannote_by_default: v.use_pyannote_by_default ?? (v.engine === 'pyannote'),
+              }
+            };
+            setSettings(newSettings);
+            await settingsApi.update(newSettings);
           }}
         />
       ),

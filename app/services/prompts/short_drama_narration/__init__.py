@@ -11,6 +11,8 @@
 
 from .plot_analysis import PlotAnalysisPrompt
 from .script_generation import ScriptGenerationPrompt
+from .highlight_narration import HighlightNarrationPrompt
+from .narration_refinement import NarrationRefinementPrompt
 from ..manager import PromptManager
 
 
@@ -25,9 +27,19 @@ def register_prompts():
     script_generation_prompt = ScriptGenerationPrompt()
     PromptManager.register_prompt(script_generation_prompt, is_default=True)
 
+    # 注册高光片段解说脚本生成提示词（NarrationPipeline 专用）
+    highlight_narration_prompt = HighlightNarrationPrompt()
+    PromptManager.register_prompt(highlight_narration_prompt, is_default=True)
+
+    # 注册成片级解说文案打磨提示词
+    refinement_prompt = NarrationRefinementPrompt()
+    PromptManager.register_prompt(refinement_prompt, is_default=True)
+
 
 __all__ = [
     "PlotAnalysisPrompt",
     "ScriptGenerationPrompt",
+    "HighlightNarrationPrompt",
+    "NarrationRefinementPrompt",
     "register_prompts"
 ]

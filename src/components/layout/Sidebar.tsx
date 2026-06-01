@@ -10,6 +10,7 @@ import {
   SettingOutlined,
   CloseOutlined,
   FileTextOutlined,
+  DatabaseOutlined,
 } from '@ant-design/icons';
 
 const { Sider } = Layout;
@@ -172,6 +173,7 @@ const injectStyles = () => {
 
 const menuItems = [
   { key: '/', icon: <FolderOutlined />, label: '创作工作台' },
+  { key: '/models', icon: <DatabaseOutlined />, label: '模型管理' },
   { key: '/tools/extractor', icon: <FileTextOutlined />, label: '字幕与文案提取' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
 ];

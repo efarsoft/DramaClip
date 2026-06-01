@@ -21,6 +21,9 @@ class PipelineContext:
     project_name: str = "temp"
     output_path: Optional[str] = None
 
+    # 新增：用于区分剪辑模式，便于在排序、选片、画面处理等阶段做出差异化决策
+    narration_mode: str = "original"   # original | hybrid | full
+
     scenes: List[Dict[str, Any]] = field(default_factory=list)
     scored_segments: List[Dict[str, Any]] = field(default_factory=list)
     selected_segments: List[Dict[str, Any]] = field(default_factory=list)

@@ -203,19 +203,33 @@ const ImportPanel: React.FC<Props> = ({ onNext }) => {
     }
     if (!currentProject) return;
     
+    // P4: 读取当前说话人分离偏好（支持 pyannote 高精度路径）
+    let diarizationOptions: { use_pyannote_diarization?: boolean } | undefined;
+    try {
+      const { settingsApi } = await import('../../services/ipc');
+      const fullSettings = await settingsApi.get();
+      const engine = fullSettings?.diarization?.engine || 'clustering';
+      if (engine === 'pyannote') {
+        diarizationOptions = { use_pyannote_diarization: true };
+      }
+    } catch (e) {
+      // 忽略，保持默认聚类模式
+    }
+    
     // 直接调用 analyze API 启动分析
     const { useTaskQueueStore } = await import('../../stores/taskQueueStore');
     const { enqueue } = useTaskQueueStore.getState();
     
-    // 为每个选中的视频创建分析任务
+    // 为每个选中的视频创建分析任务（携带 diarization options）
     selectedEpisodeIds.forEach(episodeId => {
       enqueue('analyze', currentProject.id, {
         project_id: currentProject.id,
         episode_ids: [episodeId],
+        ...(diarizationOptions ? { options: diarizationOptions } : {}),
       });
     });
     
-    message.success(`已添加 ${selectedEpisodeIds.length} 个分析任务`);
+    message.success(`已添加 ${selectedEpisodeIds.length} 个分析任务${diarizationOptions ? '（pyannote 精准模式）' : ''}`);
     
     // 跳转到分析页面
     onNext();

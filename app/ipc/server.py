@@ -27,9 +27,13 @@ class IpcServer:
         self._executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="ipc_handler")
 
     def _write_to_stdout(self, data: dict):
-        """线程安全地将 JSON 响应或通知写入 stdout"""
+        """线程安全地将 JSON 响应或通知写入 stdout（M4 大 payload 保护）"""
         try:
-            serialized = json.dumps(data)
+            # 使用标准 json + ensure_ascii=False，避免依赖不存在的 DateTimeEncoder
+            serialized = json.dumps(data, ensure_ascii=False, default=str)
+            size = len(serialized)
+            if size > 40 * 1024 * 1024:
+                logger.warning(f"[IPC] 响应体过大 ({size/1024/1024:.1f}MB)，建议改用文件路径或分片传输")
             with self._write_lock:
                 sys.stdout.write(serialized + "\n")
                 sys.stdout.flush()
@@ -137,22 +141,32 @@ class IpcServer:
             logger.exception("Error processing request in thread pool")
 
     def run(self):
-        """运行服务端主循环"""
+        """运行服务端主循环（带大 payload 保护 - M4）"""
         self._running = True
         logger.info("IPC Server started, listening on stdin...")
+
+        MAX_LINE_SIZE = 50 * 1024 * 1024  # 50MB 硬上限，防止内存爆炸
 
         for line in sys.stdin:
             line = line.strip()
             if not line:
                 continue
 
+            if len(line) > MAX_LINE_SIZE:
+                logger.error(f"[IPC] 收到超大消息 ({len(line)} bytes)，已丢弃以保护稳定性")
+                error_response = self.protocol.error_response(
+                    None, -32603, "Payload too large (max 50MB)"
+                )
+                self._write_to_stdout(error_response)
+                continue
+
             try:
                 request = json.loads(line)
-                # 提交到线程池并发执行，避免阻塞主线程的 stdin 读取（如 ping 心跳）
+                # 提交到线程池并发执行
                 self._executor.submit(self._handle_and_respond, request)
 
             except json.JSONDecodeError as e:
-                logger.error(f"JSON decode error: {e}, raw data: {line[:200]}")
+                logger.error(f"JSON decode error: {e}, raw data (truncated): {line[:300]}...")
                 error_response = self.protocol.error_response(
                     None, -32600, f"Parse error: {e}"
                 )

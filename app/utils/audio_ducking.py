@@ -43,9 +43,17 @@ def apply_ducking_sidechain(
     config = ducking_config or DUCKING_CONFIG
     
     threshold = config.get('threshold', -30.0)
+    # Convert dB threshold to linear amplitude if negative
+    if threshold < 0:
+        import math
+        threshold = math.pow(10, threshold / 20.0)
     ratio = config.get('ratio', 12.0)
     attack = config.get('attack', 0.005)
     release = config.get('release', 0.3)
+    
+    # FFmpeg sidechaincompress expects attack and release in milliseconds
+    attack = max(0.01, attack * 1000.0)
+    release = max(0.01, release * 1000.0)
     
     try:
         # sidechaincompress 滤镜
@@ -61,7 +69,7 @@ def apply_ducking_sidechain(
             f'ratio={ratio}:'
             f'attack={attack}:'
             f'release={release}:'
-            f'makeup=0[aout]',
+            f'makeup=1[aout]',
             '-map', '[aout]',
             '-map', '1:a',
             '-c:a', 'aac',
@@ -180,9 +188,17 @@ def mix_audio_with_ducking(
     config = ducking_config or DUCKING_CONFIG
     
     threshold = config.get('threshold', -30.0)
+    # Convert dB threshold to linear amplitude if negative
+    if threshold < 0:
+        import math
+        threshold = math.pow(10, threshold / 20.0)
     ratio = config.get('ratio', 12.0)
     attack = config.get('attack', 0.005)
     release = config.get('release', 0.3)
+    
+    # FFmpeg sidechaincompress expects attack and release in milliseconds
+    attack = max(0.01, attack * 1000.0)
+    release = max(0.01, release * 1000.0)
     
     try:
         # 使用 sidechaincompress 实现视频中的声音避让
@@ -199,7 +215,7 @@ def mix_audio_with_ducking(
             f'ratio={ratio}:'
             f'attack={attack}:'
             f'release={release}:'
-            f'makeup=0[ducked];'
+            f'makeup=1[ducked];'
             f'[ducked][n]amix=inputs=2:duration=first:dropout_transition=2[aout]',
             '-map', '0:v',
             '-map', '[aout]',
@@ -248,9 +264,17 @@ def get_ducking_filter_string(
     config = ducking_config or DUCKING_CONFIG
     
     threshold = config.get('threshold', -30.0)
+    # Convert dB threshold to linear amplitude if negative
+    if threshold < 0:
+        import math
+        threshold = math.pow(10, threshold / 20.0)
     ratio = config.get('ratio', 12.0)
     attack = config.get('attack', 0.005)
     release = config.get('release', 0.3)
+    
+    # FFmpeg sidechaincompress expects attack and release in milliseconds
+    attack = max(0.01, attack * 1000.0)
+    release = max(0.01, release * 1000.0)
     
     return (
         f'volume={original_volume}[orig];'
@@ -260,6 +284,6 @@ def get_ducking_filter_string(
         f'ratio={ratio}:'
         f'attack={attack}:'
         f'release={release}:'
-        f'makeup=0[ducked];'
+        f'makeup=1[ducked];'
         f'[ducked][n]amix=inputs=2:duration=first:dropout_transition=2[aout]'
     )

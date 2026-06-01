@@ -3,6 +3,7 @@
  */
 
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, Form, Row, Col, Switch, Select, InputNumber, Space, Button, Modal, Input, Radio, message } from 'antd';
 import { AudioOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ModelInfo } from './ModelDownloadCard';
@@ -33,6 +34,7 @@ interface TTSTabProps {
     pitch: number;
   }>) => void;
   models: ModelInfo[];
+  ttsBackends?: any[]; // 新：来自后端的引擎列表，包含 required_models + 安装状态
   modelDownloads: Record<string, { progress: number; message: string }>;
   onDownload: (modelId: string) => void;
   onDelete: (modelId: string, modelName: string) => void;
@@ -44,35 +46,52 @@ interface TTSTabProps {
 }
 
 const engineOptions = [
-  { label: 'Supertonic TTS (本地超快 - 推荐)', value: 'supertonic' },
-  { label: 'StyleTTS 2 (本地艺术级)', value: 'styletts2' },
-  { label: 'Edge TTS (免费云端免Key)', value: 'edge' },
-  { label: 'OpenAI TTS (官方 API)', value: 'openai' },
-  { label: 'CosyVoice / SoulVoice (克隆级)', value: 'soulvoice' },
+  { label: '★ OpenAI 兼容 TTS（云端推荐 - 灵活、高质量、易配置）', value: 'openai_tts' },
+  { label: 'Edge TTS（免费云端，最稳定兜底）', value: 'edge_tts' },
+  { label: 'Qwen3 TTS（阿里 - 强情感控制）', value: 'qwen3_tts' },
+  { label: 'SoulVoice（托管 CosyVoice2）', value: 'soulvoice' },
+  { label: 'Tencent TTS', value: 'tencent_tts' },
+  { label: '── 本地引擎（进阶 / 离线使用）──', value: '', disabled: true },
+  { label: 'CosyVoice 3（Fun-CosyVoice3-0.5B，短剧中文首选）', value: 'cosyvoice' },
+  { label: 'Kokoro（轻量本地）', value: 'kokoro' },
+  { label: 'StyleTTS 2', value: 'styletts2' },
 ];
 
 export const TTSTab: React.FC<TTSTabProps> = ({
   ttsConfig,
   onTTSChange,
   models,
+  ttsBackends = [],
   modelDownloads,
   onDownload,
   onDelete,
   customModels,
   onCustomModelsChange,
 }) => {
+  const navigate = useNavigate();
   const [modalVisible, setModalVisible] = useState(false);
   const [form] = Form.useForm();
   const [mode, setMode] = useState<'Local Path' | 'Online ID'>('Local Path');
 
+  // 从 ttsBackends 找当前引擎的 required_models（中央 catalog 状态）
+  // 兼容旧配置中的 cosyvoice2_local 等历史 ID
+  const currentTtsBackend = ttsBackends.find((b: any) => b.id === ttsConfig.engine || (ttsConfig.engine === 'cosyvoice2_local' && b.id === 'cosyvoice'));
+  const requiredModelsInfo = currentTtsBackend?.required_models || [];
+
   const getVoiceOptions = () => {
     switch (ttsConfig.engine) {
-      case 'supertonic':
+      case 'cosyvoice2':
+      case 'cosyvoice':
         return [
-          { label: 'M1 (稳重男声)', value: 'M1' },
-          { label: 'M2 (磁性男声)', value: 'M2' },
-          { label: 'F1 (温柔女声)', value: 'F1' },
-          { label: 'F2 (甜美女声)', value: 'F2' },
+          { label: '龙阳 (男-影视解说强推)', value: 'longyang' },
+          { label: '小云 (女-自然温柔)', value: 'xiaoyun' },
+          { label: '思琪 (女-情感丰富)', value: 'siqi' },
+          { label: '自定义参考音频克隆', value: 'custom' },
+        ];
+      case 'kokoro':
+        return [
+          { label: 'zf_001 (专业男声-中文)', value: 'zf_001' },
+          { label: 'zf_xiaobei (自然女声)', value: 'zf_xiaobei' },
         ];
       case 'styletts2':
         return [{ label: 'Default (标准单说话人)', value: 'default' }];
@@ -86,6 +105,8 @@ export const TTSTab: React.FC<TTSTabProps> = ({
           { label: 'Aria (英文女声)', value: 'en-US-AriaNeural' },
           { label: 'Guy (英文男声)', value: 'en-US-GuyNeural' },
         ];
+      case 'f5tts':
+        return [{ label: '默认音色', value: 'default' }];
       case 'openai':
         return [
           { label: 'Alloy (自然中性)', value: 'alloy' },
@@ -101,7 +122,7 @@ export const TTSTab: React.FC<TTSTabProps> = ({
           { label: 'CosyVoice Reference (自定义克隆)', value: 'reference' },
         ];
       default:
-        return [{ label: 'Default', value: 'default' }];
+        return [{ label: '默认音色', value: 'default' }];
     }
   };
 
@@ -168,17 +189,40 @@ export const TTSTab: React.FC<TTSTabProps> = ({
           <Col span={8}>
             <Form.Item label="合成引擎">
               <Select
-                value={ttsConfig.engine}
+                value={ttsConfig.engine || 'edge_tts'}
                 onChange={(v) => {
                   let defaultVoice = 'default';
-                  if (v === 'supertonic') defaultVoice = 'M1';
-                  else if (v === 'edge') defaultVoice = 'zh-CN-YunxiNeural';
+                  if (v === 'edge') defaultVoice = 'zh-CN-YunxiNeural';
                   else if (v === 'openai') defaultVoice = 'alloy';
                   onTTSChange({ engine: v, voice: defaultVoice });
                 }}
                 options={allEngineOptions}
                 style={{ width: '100%' }}
               />
+
+              {/* P4/P8: 显示本地引擎所需的中央 catalog 模型状态 + 一键安装入口 */}
+              {requiredModelsInfo.length > 0 && (
+                <div style={{ marginTop: 6, fontSize: 12 }}>
+                  <span style={{ color: '#666' }}>依赖模型：</span>
+                  {requiredModelsInfo.map((m: any, i: number) => (
+                    <span key={i} style={{ marginLeft: 4, color: m.installed ? '#52c41a' : '#faad14', fontWeight: 500 }}>
+                      {m.label || m.repo_id} {m.installed ? '✓' : '(待装)'}
+                    </span>
+                  ))}
+                  {requiredModelsInfo.some((m: any) => !m.installed) && (
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ padding: '0 4px', fontSize: 12, marginLeft: 8 }}
+                      onClick={() => {
+                        navigate('/models');
+                      }}
+                    >
+                      去安装
+                    </Button>
+                  )}
+                </div>
+              )}
             </Form.Item>
           </Col>
           <Col span={8}>
@@ -238,9 +282,9 @@ export const TTSTab: React.FC<TTSTabProps> = ({
           style={{ borderColor: '#722ed144' }}
         >
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            {ttsModels.map((model) => (
+            {ttsModels.map((model, index) => (
               <ModelStatusRow
-                key={model.id}
+                key={`${model.id}-${index}`}
                 model={model}
                 downloadInfo={modelDownloads[model.id]}
                 onDownload={onDownload}
@@ -305,9 +349,9 @@ export const TTSTab: React.FC<TTSTabProps> = ({
               name="onlineId"
               label="线上 HuggingFace/ModelScope Repo ID"
               rules={[{ required: true, message: '请输入线上模型 ID' }]}
-              extra="例如: supertone-inc/supertonic"
+              extra="例如: FunAudioLLM/Fun-CosyVoice3-0.5B-2512"
             >
-              <Input placeholder="supertone-inc/supertonic" />
+              <Input placeholder="FunAudioLLM/Fun-CosyVoice3-0.5B-2512" />
             </Form.Item>
           )}
 

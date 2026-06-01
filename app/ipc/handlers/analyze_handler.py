@@ -14,19 +14,33 @@ from .base import send_progress
 from app.ipc.protocol import RPCError
 
 
-def analyze_start(project_id: str, episode_ids: List[str]) -> Dict:
+def analyze_start(project_id: str, episode_ids: List[str], options: Optional[Dict] = None, **kwargs) -> Dict:
     """开始分析任务
 
     Args:
         project_id: 项目ID
         episode_ids: 要分析的剧集ID列表（空列表表示分析所有视频）
+        options: 可选参数，例如 {"use_pyannote_diarization": true} 用于启用 pyannote 精准分离（需先通过模型管理下载 pyannote 模型）
 
     Returns:
         创建的任务ID列表
     """
-    logger.info(f"[Analyze] Starting analysis: project={project_id}, episodes={episode_ids}")
+    # 兼容前端直接把 options 放在顶层 payload 的情况
+    if options is None and 'options' in kwargs:
+        options = kwargs.get('options')
+
+    logger.info(f"[Analyze] Starting analysis: project={project_id}, episodes={episode_ids}, options={options}")
     if episode_ids is None:
         raise RPCError(-32602, "episode_ids is required")
+
+    options = options or {}
+    use_pyannote = options.get("use_pyannote_diarization")
+
+    # 如果用户没有在 options 中指定，则读取全局配置作为默认值
+    if use_pyannote is None:
+        from app.config.unified_config import get_config
+        diarization_cfg = get_config().get_diarization_config()
+        use_pyannote = diarization_cfg.get("use_pyannote_by_default", False)
 
     mgr = get_manager()
     analysis_mgr = get_analysis_manager()
@@ -54,7 +68,16 @@ def analyze_start(project_id: str, episode_ids: List[str]) -> Dict:
         if not video:
             logger.warning(f"[Analyze] Video {episode_id} not found in project {project_id}, skipping")
             continue
-        task = analysis_mgr.create_task(project_id, video.path, video_id=video.id)
+        task = analysis_mgr.create_task(
+            project_id, 
+            video.path, 
+            video_id=video.id,
+            diarization_options={"use_pyannote": use_pyannote} if use_pyannote else {}
+        )
+        
+        if use_pyannote:
+            logger.info(f"[Analyze] Task {task.task_id} enabled pyannote diarization (catalog-driven, from config or options)")
+        
         task_ids.append(task.task_id)
 
         analysis_mgr.start_task_process(
@@ -68,8 +91,38 @@ def analyze_start(project_id: str, episode_ids: List[str]) -> Dict:
     # 更新项目状态为分析中
     mgr.update_project(project_id, {"status": "analyzing"})
 
-    logger.info(f"[Analyze] Queued {len(task_ids)} tasks inside child processes")
+    logger.info(f"[Analyze] Queued {len(task_ids)} tasks inside child processes (pyannote={use_pyannote})")
     return {"task_ids": task_ids}
+
+
+def get_diarization_config() -> Dict:
+    """获取当前的说话人分离配置（包括是否默认使用 pyannote）"""
+    from app.config.unified_config import get_config
+    return get_config().get_diarization_config()
+
+
+def diarize_with_pyannote(project_id: str, video_path: str, use_pyannote: bool = True) -> Dict:
+    """
+    独立 IPC 示例：直接对单个视频执行说话人分离（pyannote 精准模式）。
+    推荐用于需要高精度说话人分离的场景（需先通过模型管理下载 pyannote 模型）。
+    """
+    from app.services.analyze.speaker_diarization_service import get_speaker_diarization_service
+
+    logger.info(f"[Analyze] Direct pyannote diarization: {video_path}")
+
+    service = get_speaker_diarization_service()
+    result = service.diarize_pyannote(
+        audio_path=video_path,
+        video_id="direct",
+    )
+
+    return {
+        "speaker_count": result.speaker_count,
+        "speakers": [s.to_dict() for s in result.speakers],
+        "segments": [s.to_dict() for s in result.segments],
+        "timeline": result.speaker_timeline,
+        "pyannote_used": True,
+    }
 
 
 def analyze_get_status(task_id: str) -> Dict:
@@ -108,12 +161,18 @@ def analyze_get_status(task_id: str) -> Dict:
                 enriched.append(h)
         highlights = enriched
 
+    # 计算实际使用的 diarization 模式（用于前端展示）
+    diarization_mode = "unknown"
+    if task.diarization_result:
+        diarization_mode = "pyannote" if task.metadata.get("use_pyannote_diarization") else "clustering"
+
     result_dict = {
         "task_id": task.task_id,
         "status": task.status,
         "progress": task.progress,
         "phase": task.phase,
         "message": task.message,
+        "diarization_mode": diarization_mode,  # 新增：pyannote / clustering
         "results": {
             "asr": task.asr_result.to_dict() if task.asr_result else None,
             "emotion": (
@@ -121,6 +180,7 @@ def analyze_get_status(task_id: str) -> Dict:
                 if task.emotion_result and hasattr(task.emotion_result, 'to_dict')
                 else task.emotion_result
             ),
+            "diarization": task.diarization_result.to_dict() if task.diarization_result else None,
             "highlights": highlights,
         } if task.status in ("completed",) else None,
         "error": task.error,
@@ -179,7 +239,7 @@ def analyze_get_completed_results(project_id: str, video_ids: List[str]) -> Dict
     results = {}
 
     for vid in video_ids:
-        output_dir = Path.home() / ".dramaclip" / "analysis" / vid
+        output_dir = Path.home() / ".dramaclip" / "analysis" / project_id / vid
         if not output_dir.exists():
             continue
 

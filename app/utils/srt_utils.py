@@ -95,8 +95,9 @@ def parse_srt_file(srt_path: str) -> List[SrtEntry]:
                 time_line = lines[1]
                 text_content = '\n'.join(lines[2:])
                 
-                new_start = parse_srt_time(time_line.split('--')[0].strip())
-                new_end = parse_srt_time(time_line.split('--')[1].strip())
+                time_parts = time_line.split('-->')
+                new_start = parse_srt_time(time_parts[0].strip())
+                new_end = parse_srt_time(time_parts[1].strip()) if len(time_parts) > 1 else new_start
                 
                 entries.append(SrtEntry(
                     index=len(entries) + 1,
@@ -135,7 +136,7 @@ def concat_srt_files(srt_files: List[str], output_path: str,
             new_entry = SrtEntry(
                 index=idx,
                 start_time=file_start + entry.start_time,
-                end_time=file_start + entry.end_time - entry.start_time,
+                end_time=file_start + entry.end_time,
                 text=entry.text
             )
             all_entries.append(new_entry)
@@ -144,7 +145,7 @@ def concat_srt_files(srt_files: List[str], output_path: str,
         # 更新偏移：使用该文件的最后一个时间点
         if entries:
             last = entries[-1]
-            current_offset = file_start + (last.end_time - last.start_time)
+            current_offset = file_start + last.end_time
     
     if not all_entries:
         return False

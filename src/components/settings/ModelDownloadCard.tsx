@@ -22,7 +22,7 @@ export interface ModelInfo {
   id: string;
   name: string;
   category: 'asr' | 'tts' | 'diarization';
-  type: 'whisper' | 'styletts2' | 'supertonic' | 'sensevoice' | 'pyannote' | 'custom';
+  type: 'whisper' | 'styletts2' | 'sensevoice' | 'pyannote' | 'custom';
   size_mb: number;
   description: string;
   downloaded: boolean;

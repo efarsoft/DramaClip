@@ -1,9 +1,32 @@
 # DramaClip 桌面客户端 — 系统架构设计
 
-**文档版本：** v1.0
-**架构师：** 高见远（Gao）
+**文档版本：** v1.1 (Live Sync)
+**架构师：** 高见远（Gao） / 实测同步
 **创建日期：** 2026年5月11日
-**文档状态：** 评审中
+**最后更新：** 2026-05（与实际代码结构对齐）
+**文档状态：** 已同步最新实现
+
+> **重要说明**：本文档已于 2026-05 针对实际代码库进行同步。早期设计中的部分模块结构已演进（详见下方“当前实现偏差”）。
+
+---
+
+## 0. 当前实现与设计文档偏差（关键）
+
+| 领域              | 设计文档描述                          | 实际代码现状（推荐参考）                          | 备注 |
+|-------------------|---------------------------------------|--------------------------------------------------|------|
+| IPC 入口          | `app/ipc/handlers.py` 单文件          | `app/ipc/handlers/` 目录 + `*_handler.py` 拆分    | 更清晰 |
+| 剪辑流水线        | `direct_cut/pipeline.py`、`narration/pipeline.py` | `app/services/clip/` 下的 **modular** 架构（`modular_pipeline.py` + `stages.py` + `pipelines/{direct_cut,hybrid_narration,full_narration}.py`） | 强烈推荐阅读 `stages.py` 和 `clip_handler.py` |
+| 配置系统          | 简单 config + 旧版                      | `app/config/unified_config.py`（settings.json 优先 + 热更新设计） | 核心特性已落地 |
+| 项目持久化        | 同时存在 JSON/SQLite 两种实现         | 主要使用 `project/manager_sqlite.py` + SQLite     | 更可靠 |
+| LLM 服务          | 较早的封装                            | `app/services/llm/unified_service.py` + `openai_compatible_provider.py` + 迁移适配器 | 支持多后端 |
+| 前端页面          | 5 个独立 Page                         | `WorkspacePage.tsx` + 5 个 Panel（Analyze/Edit/Export 等） + 独立 Tools/ScriptExtractor | 更贴近实际 UX |
+| 去重核心          | 描述在 README                         | `app/utils/ffmpeg.py:get_safe_jittered_times` + `_detect_speech_zones_energy`（无字幕降级） + `generate_dedup_params` + `concat_videos` 强制 `-map_metadata -1` | 2026-05 已增强无字幕保护 |
+
+**建议**：新开发者优先阅读：
+- `app/services/clip/stages.py`（去重闭环实际执行处）
+- `app/ipc/handlers/clip_handler.py` + `analyze_handler.py`
+- `app/config/unified_config.py`
+- `main/backend/manager.ts`（后端生命周期）
 
 ---
 
@@ -163,7 +186,19 @@ graph TB
     style RES fill:#95a5a6,color:#fff
 ```
 
-### 2.2 模块职责划分
+### 2.2 模块职责划分（已与代码同步）
+
+#### 2.2.0 后端 Python 关键真实模块（2026-05 现状）
+
+- `app/ipc/handlers/`：领域拆分 handler（analyze/clip/export/project/settings/system/tools）
+- `app/services/clip/`：**模块化剪辑引擎**（推荐重点）
+  - `modular_pipeline.py` / `stages.py`：统一 Stage 执行（Cut → Dedup → Portrait → Concat）
+  - `pipelines/`：direct_cut / hybrid_narration / full_narration 三种模式
+- `app/services/analyze/`：并行分析管线（parallel_pipeline + async_pipeline）
+- `app/config/unified_config.py`：双源配置 + 优先级合并（settings.json 热更新设计）
+- `app/services/llm/`：统一 LLM 抽象 + OpenAI 兼容提供商
+- `app/services/prompts/`：短剧专用 Prompt 模板注册表（short_drama_editing / short_drama_narration）
+- `app/utils/ffmpeg.py`：Jitter（含无字幕能量降级）+ dedup_params + 所有最终输出强制 metadata 擦除
 
 #### 2.2.1 Electron 主进程
 

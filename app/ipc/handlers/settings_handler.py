@@ -125,8 +125,8 @@ def _default_settings() -> Dict:
         # TTS 配置
         "tts": {
             "enabled": True,
-            "engine": "supertonic",  # 默认使用 Supertonic - 99M参数本地TTS
-            "voice": "M1",  # Supertonic 默认男声
+            "engine": "edge_tts",   # 安全默认（始终可用）。用户可前往“模型管理”下载 Fun-CosyVoice3 / Kokoro 后切换为高质量本地引擎（质量第一，不锁定默认）
+            "voice": "longyang",
             "speed": 1.0,
             "pitch": 1.0,
         },

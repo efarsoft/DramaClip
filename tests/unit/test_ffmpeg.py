@@ -137,36 +137,33 @@ def test_get_safe_jittered_times_conflict_end():
         if os.path.exists(srt_path):
             os.remove(srt_path)
 
-def test_get_safe_jittered_times_fallback():
-    # 当抖动后的时长小于 0.5s 时（由于原始片段极短如 0.1s），退回原始时间以防过短失效
-    srt_content = """1
-00:00:02,000 --> 00:00:02,500
-台词1
-
-2
-00:00:04,000 --> 00:00:04,500
-台词2
-"""
+def test_get_safe_jittered_times_fallback_no_srt():
+    """验证无字幕文件时的降级路径（能量检测失败时走极小抖动，仍然返回合理时长）。"""
+    import os
     with tempfile.NamedTemporaryFile(mode="w", suffix=".mp4", delete=False) as temp_video:
         video_path = temp_video.name
-    
+
     srt_path = video_path.rsplit(".", 1)[0] + ".srt"
-    with open(srt_path, "w", encoding="utf-8") as f:
-        f.write(srt_content)
+    # 故意不创建 srt 文件
 
     try:
-        # 原始片段只有 0.1s 时长，在静音区里抖动。
-        # 即使抖动调整，由于它的安全静音区间在 [2.65, 3.8]
-        # 但因为是随机抖动，如果出来的结果极小，依然能够成功降级。
-        # 我们用一个没有任何台词的空 srt 配合 0.1s 极短片段，必然因为 (new_end - new_start) < 0.5s 触发降级
-        pass
+        # 多次调用，确保不会崩溃且返回接近原始的时长（允许很小的抖动）
+        for _ in range(8):
+            s_j, e_j = get_safe_jittered_times(video_path, 12.0, 18.5)
+            assert 0.4 < (e_j - s_j) < 7.0
+            # 允许 ±0.15 范围的小抖动（新的极小抖动策略）
+            assert abs(s_j - 12.0) <= 0.16
+            assert abs(e_j - 18.5) <= 0.16
+        print("[test] 无字幕降级路径通过（极小抖动）")
     finally:
         if os.path.exists(video_path):
             os.remove(video_path)
         if os.path.exists(srt_path):
             os.remove(srt_path)
 
-    # 验证没有字幕文件时的降级（应直接返回原始时间）
-    s_jitter, e_jitter = get_safe_jittered_times("non_existent_video.mp4", 3.0, 3.2)
-    assert s_jitter == 3.0
-    assert e_jitter == 3.2
+
+def test_get_safe_jittered_times_fallback_short_duration():
+    """极短片段应安全降级。"""
+    s_jitter, e_jitter = get_safe_jittered_times("no_srt_here.mp4", 5.0, 5.1)
+    assert s_jitter == 5.0
+    assert e_jitter == 5.1

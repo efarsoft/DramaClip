@@ -29,6 +29,20 @@ from sklearn.preprocessing import StandardScaler, RobustScaler
 # 过滤 sklearn 警告
 warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 
+# Diarization 服务声明的中央 catalog 模型需求（required_model_repo 风格）
+DIARIZATION_REQUIRED_MODELS = [
+    "pyannote/speaker-diarization-3.1",
+]
+
+def get_pyannote_model_path(model_name: str = "diarization-3.1") -> str:
+    """从中央 catalog 获取 pyannote 模型路径（catalog-first）"""
+    from app.services.model_manager import get_model_by_repo_id, _get_hf_model_dir
+    entry = get_model_by_repo_id(f"pyannote/{model_name}") or get_model_by_repo_id("pyannote/speaker-diarization-3.1")
+    if entry:
+        return str(_get_hf_model_dir(entry["repo_id"]))
+    # fallback
+    return str(_get_hf_model_dir("pyannote/speaker-diarization-3.1"))
+
 
 @dataclass
 class SpeakerSegment:
@@ -93,8 +107,6 @@ class DiarizationResult:
         for seg in self.segments:
             if seg.start <= timestamp <= seg.end:
                 return seg.speaker_id
-        return None
-
 
 class SpeakerDiarizationService:
     """
@@ -141,24 +153,29 @@ class SpeakerDiarizationService:
         video_id: str,
         segment_duration: float = 1.0,
         progress_callback: Optional[Callable[[int, str], None]] = None,
+        use_pyannote: bool = False,
     ) -> DiarizationResult:
         """
-        执行说话人分离
-        
-        Args:
-            audio_path: 音频文件路径
-            video_id: 视频 ID
-            segment_duration: 分段时长（秒）
-            progress_callback: 进度回调
-            
-        Returns:
-            DiarizationResult 说话人分离结果
+        执行说话人分离（支持聚类或 pyannote 精准模式）
         """
         self._cancel_flag = False
         
         if not Path(audio_path).exists():
             logger.error(f"音频文件不存在: {audio_path}")
             return self._create_empty_result(video_id)
+        
+        if use_pyannote:
+            try:
+                if progress_callback:
+                    progress_callback(5, "尝试加载 pyannote 模型（中央 catalog）...")
+                
+                pipeline = self._load_pyannote_model()
+                if pipeline:
+                    return self._diarize_with_pyannote(audio_path, video_id, pipeline, progress_callback)
+                else:
+                    logger.warning("pyannote 模型不可用，回退到聚类模式")
+            except Exception as e:
+                logger.warning(f"pyannote 精准分离失败，回退到聚类: {e}")
         
         try:
             if progress_callback:
@@ -734,6 +751,136 @@ class SpeakerDiarizationService:
             speaker_timeline=[],
         )
     
+    # --- pyannote 可选精准分离路径（catalog-first，细化加载） ---
+    def _load_pyannote_model(self):
+        """可选加载 pyannote（使用中央 catalog 路径，延迟加载 + Phase 3.2 HF 自动登录）"""
+        try:
+            from pyannote.audio import Pipeline
+        except ImportError:
+            logger.warning("pyannote.audio 未安装，无法使用精准分离模式")
+            return None
+
+        # Phase 3.2: 自动登录
+        from app.utils.hf_auth import ensure_hf_login, get_hf_token
+        ensure_hf_login()
+        token = get_hf_token()
+
+        pyannote_path = get_pyannote_model_path()
+        try:
+            if Path(pyannote_path).exists():
+                pipeline = Pipeline.from_pretrained(pyannote_path, use_auth_token=token)
+            else:
+                pipeline = Pipeline.from_pretrained(
+                    "pyannote/speaker-diarization-3.1",
+                    use_auth_token=token
+                )
+            logger.info(f"pyannote 模型加载成功（HF token 已应用）: {pyannote_path}")
+            return pipeline
+        except Exception as e:
+            logger.error(f"加载 pyannote 失败（可能需 HF_TOKEN 或模型未下载）: {e}")
+            return None
+
+    def _diarize_with_pyannote(self, audio_path: str, video_id: str, pipeline, progress_callback=None):
+        """使用 pyannote Pipeline 执行精准分离（返回完整 SpeakerProfile + timeline）"""
+        if progress_callback:
+            progress_callback(10, "pyannote 正在进行说话人分离...")
+        
+        diarization = pipeline(audio_path)
+        
+        # 加载音频用于特征计算
+        y, sr = librosa.load(audio_path, sr=16000, mono=True)
+        sr_int = int(sr)
+        duration = librosa.get_duration(y=y, sr=sr_int)
+        
+        # 构建 segments 和 speakers 映射
+        raw_segments = []
+        speakers = {}
+        speaker_count = 0
+        
+        for turn, _, speaker in diarization.itertracks(yield_label=True):
+            if speaker not in speakers:
+                speakers[speaker] = speaker_count
+                speaker_count += 1
+            
+            raw_segments.append({
+                "start": turn.start,
+                "end": turn.end,
+                "speaker_label": speaker
+            })
+        
+        # 构建完整 SpeakerProfile（计算真实特征）
+        speaker_profiles = []
+        speaker_segments = []
+        
+        for spk_label, spk_id in speakers.items():
+            spk_segments = [s for s in raw_segments if s["speaker_label"] == spk_label]
+            total_dur = sum(s["end"] - s["start"] for s in spk_segments)
+            
+            # 计算该说话人的平均特征（从音频片段）
+            pitches = []
+            energies = []
+            mfccs = []
+            
+            for seg in spk_segments:
+                start_sample = int(seg["start"] * sr_int)
+                end_sample = int(seg["end"] * sr_int)
+                seg_audio = y[start_sample:end_sample]
+                
+                if len(seg_audio) < 512:
+                    continue
+                
+                # Pitch
+                pitch, _ = librosa.piptrack(y=seg_audio, sr=sr_int)
+                pitches.append(np.mean(pitch[pitch > 0]) if np.any(pitch > 0) else 0)
+                
+                # Energy (RMS)
+                energies.append(np.mean(librosa.feature.rms(y=seg_audio)))
+                
+                # MFCC mean
+                mfcc = librosa.feature.mfcc(y=seg_audio, sr=sr_int, n_mfcc=13)
+                mfccs.append(np.mean(mfcc, axis=1))
+            
+            avg_pitch = float(np.mean(pitches)) if pitches else 0.0
+            avg_energy = float(np.mean(energies)) if energies else 0.0
+            mfcc_mean = list(np.mean(mfccs, axis=0)) if mfccs else [0.0] * 13
+            
+            profile = SpeakerProfile(
+                speaker_id=f"speaker_{spk_id}",
+                avg_pitch=avg_pitch,
+                avg_energy=avg_energy,
+                mfcc_mean=mfcc_mean,
+                segment_count=len(spk_segments),
+                total_duration=total_dur
+            )
+            speaker_profiles.append(profile)
+            
+            # 构建 segments
+            for seg in spk_segments:
+                speaker_segments.append(SpeakerSegment(
+                    speaker_id=f"speaker_{spk_id}",
+                    start=seg["start"],
+                    end=seg["end"],
+                    confidence=0.95  # pyannote 通常高置信
+                ))
+        
+        # 生成 timeline
+        timeline = self._generate_timeline(speaker_segments, duration)
+        
+        result = DiarizationResult(
+            video_id=video_id,
+            duration=duration,
+            speaker_count=speaker_count,
+            speakers=speaker_profiles,
+            segments=speaker_segments,
+            speaker_timeline=timeline,
+        )
+        
+        logger.info(f"pyannote 精准分离完成: {speaker_count} speakers")
+        if progress_callback:
+            progress_callback(100, "pyannote 分离完成")
+        
+        return result
+
     def save_result(self, result: DiarizationResult, output_path: Path):
         """保存结果到文件"""
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -742,6 +889,23 @@ class SpeakerDiarizationService:
             encoding="utf-8",
         )
         logger.info(f"说话人分离结果已保存: {output_path}")
+
+    def diarize_pyannote(
+        self,
+        audio_path: str,
+        video_id: str,
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+    ) -> DiarizationResult:
+        """
+        专用方法：强制使用 pyannote 精准分离（catalog 驱动）。
+        如果模型未就绪会抛出清晰错误。
+        """
+        pipeline = self._load_pyannote_model()
+        if not pipeline:
+            raise RuntimeError(
+                "pyannote 模型不可用。请先通过中央模型目录下载 pyannote/speaker-diarization-3.1"
+            )
+        return self._diarize_with_pyannote(audio_path, video_id, pipeline, progress_callback)
     
     def load_result(self, result_path: Path) -> Optional[DiarizationResult]:
         """从文件加载结果"""

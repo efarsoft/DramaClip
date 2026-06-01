@@ -52,9 +52,39 @@ class RPCError(Exception):
 
 
 class JsonRpcProtocol:
-    """JSON-RPC 2.0 协议处理器"""
+    """JSON-RPC 2.0 协议处理器（M4 进阶：支持长度前缀分帧作为未来大 payload 方案的基础）"""
 
     VERSION = "2.0"
+
+    # ====================== M4 进阶：长度前缀分帧工具 ======================
+
+    @staticmethod
+    def encode_framed(data: dict) -> bytes:
+        """
+        将 JSON-RPC 消息编码为长度前缀帧（4字节大端长度 + JSON）。
+        这是 v1.2 完整协议升级的准备。
+        """
+        import struct
+        import json as _json
+        payload = _json.dumps(data, ensure_ascii=False).encode("utf-8")
+        length = len(payload)
+        return struct.pack(">I", length) + payload
+
+    @staticmethod
+    def decode_framed(data: bytes) -> Optional[dict]:
+        """从长度前缀帧中解码 JSON-RPC 消息"""
+        import struct
+        import json as _json
+        if len(data) < 4:
+            return None
+        length = struct.unpack(">I", data[:4])[0]
+        if len(data) < 4 + length:
+            return None
+        payload = data[4:4 + length]
+        try:
+            return _json.loads(payload.decode("utf-8"))
+        except Exception:
+            return None
 
     def parse_request(
         self, request: dict

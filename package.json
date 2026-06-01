@@ -7,6 +7,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "vite",
+    "dev:full": "concurrently -k -n VITE,ELECTRON -c blue,green \"vite\" \"node scripts/dev-electron.js\"",
     "build": "tsc && vite build && electron-builder",
     "build:vite": "tsc && vite build",
     "dev:electron": "npx vite build && npx electron .",

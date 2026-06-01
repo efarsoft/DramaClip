@@ -58,6 +58,7 @@ class ModularDirectCutPipeline:
         crop_mode: str = "smart",
         target_ratio: str = "9:16",
         segments: Optional[List[Dict[str, Any]]] = None,
+        narration_mode: str = "original",  # Phase 1 新增
     ) -> str:
         pipeline = ModularPipeline()
         context = PipelineContext(
@@ -66,6 +67,7 @@ class ModularDirectCutPipeline:
             project_name=project_name,
             output_path=output_path,
             target_ratio=target_ratio,
+            narration_mode=narration_mode,   # Phase 1 新增
         )
 
         if segments:

@@ -156,10 +156,28 @@ class SegmentSortingStage(PipelineStage):
     def execute(self, context: PipelineContext) -> StageResult:
         try:
             from app.services.sorter.scene_sorter import SceneSorter, SortStrategy
-            sorter = SceneSorter(strategy=SortStrategy.CHRONOLOGICAL)
+
+            # 根据 narration_mode 选择最适合的排序策略（Phase 1 核心改动）
+            mode = getattr(context, 'narration_mode', 'original')
+
+            if mode == "original":
+                # 原片解说：高燃为主，结合轻微情绪曲线（避免纯时间顺序导致情绪平铺）
+                strategy = SortStrategy.EMOTION_CURVE
+            elif mode == "hybrid":
+                # 交叉解说：需要较强的情绪递进，让解说和原声更好地交替
+                strategy = SortStrategy.EMOTION_CURVE
+            elif mode == "full":
+                # 全片解说：最需要完整的情绪弧线和故事感
+                strategy = SortStrategy.EMOTION_CURVE
+            else:
+                strategy = SortStrategy.CHRONOLOGICAL
+
+            sorter = SceneSorter(strategy=strategy)
             sorted_segments = sorter.sort(context.selected_segments)
             context.sorted_segments = sorted_segments
-            return StageResult(True, "排序完成")
+
+            logger.info(f"[SegmentSortingStage] 使用策略 {strategy.value} 进行排序（mode={mode}）")
+            return StageResult(True, f"排序完成（策略: {strategy.value}）")
         except Exception as e:
             raise StageError(self.name, str(e), e)
 
@@ -240,13 +258,18 @@ class VideoCuttingStage(PipelineStage):
 
             concat_videos(portrait_paths, context.output_path)
 
-            # 清理临时文件
+            # 强化清理（M3）：使用更健壮的清理 + 记录失败
+            cleanup_errors = []
             for p in cut_paths + portrait_paths:
                 if os.path.exists(p):
                     try:
                         os.remove(p)
-                    except OSError:
-                        pass
+                    except OSError as e:
+                        cleanup_errors.append(str(p))
+                        logger.debug(f"临时文件清理失败（可忽略）: {p} - {e}")
+
+            if cleanup_errors:
+                logger.warning(f"[VideoCuttingStage] 部分临时文件清理失败: {len(cleanup_errors)} 个")
 
             logger.info(f"[VideoCuttingStage] 剪辑完成，使用 {self.crop_mode} 模式，目标比例 {target_ratio}")
             return StageResult(True, f"剪辑完成 ({self.crop_mode} 模式)", {"output_path": context.output_path})

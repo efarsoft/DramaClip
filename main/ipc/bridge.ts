@@ -127,7 +127,7 @@ export function setupIpcHandlers(): void {
     }
 
     try {
-      const result = await backendManager.call('system.getFFmpegInfo', {});
+      const result = await backendManager.call('system.get_ffmpeg_info', {});
       return { success: true, data: result };
     } catch (error) {
       return {

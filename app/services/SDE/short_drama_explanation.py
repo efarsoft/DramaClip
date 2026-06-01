@@ -15,7 +15,7 @@ from typing import Dict, Any, Optional
 from loguru import logger
 from app.config.unified_config import config
 from app.utils.utils import get_uuid, storage_dir
-from app.services.subtitle_text import read_subtitle_text
+from app.services.clip.subtitle_text import read_subtitle_text
 # 导入新的提示词管理系统
 from app.services.prompts import PromptManager
 

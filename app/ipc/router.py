@@ -70,6 +70,10 @@ from app.ipc.handlers.system_handler import (
     model_cancel,
     model_delete,
     model_status,
+    cosyvoice_install_runtime,
+    get_onboarding_recommendations,
+    apply_onboarding_pack,
+    tts_backends_list,
 )
 
 
@@ -123,28 +127,28 @@ def create_router() -> Router:
     router.register("project", "create", project_create)
     router.register("project", "open", project_open)
     router.register("project", "delete", project_delete)
-    router.register("project", "importVideos", project_import_videos)
-    router.register("project", "getVideos", project_get_videos)
-    router.register("project", "updateVideoOrder", project_update_video_order)
+    router.register("project", "import_videos", project_import_videos)
+    router.register("project", "get_videos", project_get_videos)
+    router.register("project", "update_video_order", project_update_video_order)
     router.register("project", "rename", project_rename)
 
     # ==================== 分析 ====================
     router.register("analyze", "start", analyze_start)
-    router.register("analyze", "getStatus", analyze_get_status)
+    router.register("analyze", "get_status", analyze_get_status)
     router.register("analyze", "cancel", analyze_cancel)
-    router.register("analyze", "getCompletedResults", analyze_get_completed_results)
+    router.register("analyze", "get_completed_results", analyze_get_completed_results)
 
     # ==================== 剪辑 ====================
     router.register("clip", "recommend", clip_recommend)
     router.register("clip", "execute", clip_execute)
-    router.register("clip", "getProgress", clip_get_progress)
+    router.register("clip", "get_progress", clip_get_progress)
     router.register("clip", "preview", clip_preview)
     router.register("clip", "stop", clip_stop)
-    router.register("clip", "generateTitle", clip_generate_title)
+    router.register("clip", "generate_title", clip_generate_title)
 
     # ==================== 导出 ====================
     router.register("export", "start", export_start)
-    router.register("export", "getProgress", export_get_progress)
+    router.register("export", "get_progress", export_get_progress)
     router.register("export", "cancel", export_cancel)
 
     # ==================== 设置 ====================
@@ -153,15 +157,15 @@ def create_router() -> Router:
 
     # ==================== 小工具 ====================
     router.register("tools", "transcribe", tools_transcribe)
-    router.register("tools", "getProgress", tools_get_progress)
+    router.register("tools", "get_progress", tools_get_progress)
     router.register("tools", "rewrite", tools_rewrite)
 
     # ==================== 系统 ====================
-    router.register("system", "getVersion", system_get_version)
-    router.register("system", "getFFmpegInfo", system_get_ffmpeg_info)
-    router.register("system", "getStorageInfo", system_get_storage_info)
+    router.register("system", "get_version", system_get_version)
+    router.register("system", "get_ffmpeg_info", system_get_ffmpeg_info)
+    router.register("system", "get_storage_info", system_get_storage_info)
 
-    # 心跳和健康检查（无命名空间）
+    # 心跳和健康检查
     router.register("system", "ping", ping)
     router.register("system", "shutdown", shutdown)
 
@@ -171,5 +175,15 @@ def create_router() -> Router:
     router.register("model", "cancel", model_cancel)
     router.register("model", "delete", model_delete)
     router.register("model", "status", model_status)
+
+    # CosyVoice 隔离运行时安装（Phase 3.1）
+    router.register("cosyvoice", "install_runtime", cosyvoice_install_runtime)
+
+    # Phase 4: Onboarding
+    router.register("system", "get_onboarding_recommendations", get_onboarding_recommendations)
+    router.register("system", "apply_onboarding_pack", apply_onboarding_pack)
+
+    # TTS 引擎列表（新插件化系统）
+    router.register("system", "tts_backends", tts_backends_list)
 
     return router

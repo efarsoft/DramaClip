@@ -88,11 +88,21 @@ npm run dev
 
 ## 🚀 使用
 
-### 开发模式
+### 开发模式（推荐）
 
 ```bash
+# 方式一：仅前端 Vite（需手动启动 Electron）
 npm run dev
+
+# 方式二：一键完整开发栈（推荐，自动构建主进程 + 启动 Electron + 支持 Python 源码后端直跑）
+npm run dev:full
 ```
+
+> **注意**：后端支持两种模式：
+> - 开发时优先使用 `app/backend_main.py` + 项目 `.venv`（无需每次 PyInstaller）
+> - 生产/完整测试时使用 `python scripts/build-backend.py` 打包 `dist-backend/`
+
+启动后修改前端 TSX 热更新，修改 Python 后端代码需重启 Electron（manager 会自动重启后端进程）。
 
 ### 生产构建
 

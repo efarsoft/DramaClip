@@ -193,9 +193,9 @@ export const projectApi = {
   rename: (projectId: string, newName: string) =>
     ipcClient.call<Project>('project.rename', { project_id: projectId, new_name: newName }),
   getVideos: (projectId: string) =>
-    ipcClient.call<Episode[]>('project.getVideos', { project_id: projectId }),
+    ipcClient.call<Episode[]>('project.get_videos', { project_id: projectId }),
   importVideos: (projectId: string, paths: string[]) =>
-    ipcClient.call<Episode[]>('project.importVideos', {
+    ipcClient.call<Episode[]>('project.import_videos', {
       project_id: projectId,
       paths,
     }),
@@ -203,17 +203,18 @@ export const projectApi = {
 
 // 分析相关 API
 export const analyzeApi = {
-  start: (projectId: string, episodeIds: string[]) =>
-    ipcClient.call<{ task_id: string }>('analyze.start', {
+  start: (projectId: string, episodeIds: string[], options?: { use_pyannote_diarization?: boolean }) =>
+    ipcClient.call<{ task_ids?: string[]; task_id?: string }>('analyze.start', {
       project_id: projectId,
       episode_ids: episodeIds,
+      options: options || undefined,
     }),
   getStatus: (taskId: string) =>
-    ipcClient.call<AnalysisStatus>('analyze.getStatus', { task_id: taskId }),
+    ipcClient.call<AnalysisStatus>('analyze.get_status', { task_id: taskId }),
   cancel: (taskId: string) =>
     ipcClient.call<{ success: boolean }>('analyze.cancel', { task_id: taskId }),
   getCompletedResults: (projectId: string, videoIds: string[]) =>
-    ipcClient.call<{ results: Record<string, any> }>('analyze.getCompletedResults', {
+    ipcClient.call<{ results: Record<string, any> }>('analyze.get_completed_results', {
       project_id: projectId,
       video_ids: videoIds,
     }),
@@ -232,7 +233,7 @@ export const clipApi = {
       params,
     }),
   getProgress: (taskId: string) =>
-    ipcClient.call<ClipProgress>('clip.getProgress', { task_id: taskId }),
+    ipcClient.call<ClipProgress>('clip.get_progress', { task_id: taskId }),
   preview: (projectId: string, scheme: string) =>
     ipcClient.call<{ preview_url: string }>('clip.preview', {
       project_id: projectId,
@@ -245,10 +246,10 @@ export const clipApi = {
     }),
   /** 生成AI标题 */
   generateTitle: (projectId: string, count: number = 5) =>
-    ipcClient.call<TitleGenerationResult>('clip.generateTitle', {
+    ipcClient.call<TitleGenerationResult>('clip.generate_title', {
       project_id: projectId,
       count,
-    }),
+    }, { timeout: 180000 }),
 };
 
 // 导出相关 API
@@ -260,7 +261,7 @@ export const exportApi = {
       output_config: outputConfig,
     }),
   getProgress: (taskId: string) =>
-    ipcClient.call<ExportProgress>('export.getProgress', { task_id: taskId }),
+    ipcClient.call<ExportProgress>('export.get_progress', { task_id: taskId }),
   /** 取消正在运行的导出任务 */
   cancel: (taskId: string) =>
     ipcClient.call<{ success: boolean; task_id?: string; message?: string }>('export.cancel', {
@@ -286,13 +287,20 @@ export interface StorageInfo {
 }
 
 export const systemApi = {
-  getVersion: () => ipcClient.call<{ version: string; name: string }>('system.getVersion'),
+  getVersion: () => ipcClient.call<{ version: string; name: string }>('system.get_version'),
   getFFmpegInfo: () =>
     ipcClient.call<{ available: boolean; version: string; hwaccel: string }>(
-      'system.getFFmpegInfo'
+      'system.get_ffmpeg_info'
     ),
-  getStorageInfo: () => ipcClient.call<StorageInfo>('system.getStorageInfo'),
+  getStorageInfo: () => ipcClient.call<StorageInfo>('system.get_storage_info'),
   ping: () => ipcClient.call<{ pong: boolean }>('system.ping', { timestamp: Date.now() }),
+  ttsBackends: () => ipcClient.call<any[]>('system.tts_backends'),
+  getOnboardingRecommendations: () =>
+    ipcClient.call<{ is_first_run: boolean; recommended_pack_id: string; packs: any[] }>(
+      'system.get_onboarding_recommendations'
+    ),
+  applyOnboardingPack: (packId: string) =>
+    ipcClient.call<{ success: boolean }>('system.apply_onboarding_pack', { pack_id: packId }),
 };
 
 // 小工具相关 API
@@ -325,7 +333,7 @@ export const toolsApi = {
       mode,
     }),
   getProgress: (taskId: string) =>
-    ipcClient.call<TranscribeTaskStatus>('tools.getProgress', { task_id: taskId }),
+    ipcClient.call<TranscribeTaskStatus>('tools.get_progress', { task_id: taskId }),
   rewrite: (script: string, promptStyle: 'shocking' | 'suspense' | 'emotional' | 'rewriter') =>
     ipcClient.call<{ rewritten: string }>('tools.rewrite', {
       script,
@@ -339,7 +347,7 @@ export interface ModelInfo {
   id: string;
   name: string;
   category: 'asr' | 'tts' | 'diarization';
-  type: 'whisper' | 'styletts2' | 'supertonic' | 'sensevoice' | 'pyannote' | 'custom';
+  type: 'whisper' | 'styletts2' | 'sensevoice' | 'pyannote' | 'custom';
   size_mb: number;
   description: string;
   downloaded: boolean;
@@ -368,10 +376,6 @@ export const modelApi = {
       model_id: modelId,
     }),
 };
-
-// ============================================================================
-// 类型定义
-// ============================================================================
 
 // ============================================================================
 // 类型定义
@@ -516,7 +520,7 @@ export interface OutputConfig {
 /** TTS（语音合成）配置 */
 export interface TtsConfig {
   enabled: boolean;
-  engine: 'openai' | 'edge' | 'elevenlabs' | 'fishspeech' | 'supertonic' | 'styletts2' | 'soulvoice' | string;
+  engine: 'openai' | 'edge' | 'elevenlabs' | 'fishspeech' | 'styletts2' | 'soulvoice' | 'cosyvoice' | 'kokoro' | string; // 'cosyvoice2_local' 等旧 ID 仍被 voice.py 兼容映射
   voice: string;
   speed: number;
   pitch: number;
@@ -572,6 +576,11 @@ export interface AppSettings {
   // 输出与硬件
   output: OutputConfig;
   hardware: HardwareConfig;
+  // 说话人分离 (Diarization) - P4 新增，支持 pyannote 高精度路径
+  diarization?: {
+    use_pyannote_by_default?: boolean;
+    engine?: 'clustering' | 'pyannote';
+  };
   // 自定义模型
   custom_models?: {
     asr: CustomModelConfig[];

@@ -46,16 +46,3 @@ def normalize_openai_compatible_model_name(
     if normalized.lower().startswith(provider_prefix):
         return normalized[len(provider_prefix):]
     return normalized
-
-
-def get_openai_compatible_ui_values(
-    full_model_name: str,
-    default_model: str,
-    provider: str = DEFAULT_OPENAI_COMPATIBLE_PROVIDER,
-) -> tuple[str, str]:
-    """Keep the UI provider fixed while preserving the full model identifier."""
-    current_model = normalize_openai_compatible_model_name(
-        full_model_name or default_model,
-        provider=provider,
-    )
-    return provider, current_model or default_model

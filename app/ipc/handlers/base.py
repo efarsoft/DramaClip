@@ -59,14 +59,20 @@ def send_progress(
     task_id: str,
     progress: int,
     message: str,
-    phase: Optional[str] = None
+    phase: Optional[str] = None,
+    detail: Optional[dict] = None
 ) -> None:
-    """通过 IPC server 发送进度通知"""
-    if _server:
-        _server.send_progress(task_id, progress, message, phase)
+    """通过 event_bus 发送进度通知（解耦 IPC server 依赖）"""
+    from app.core import event_bus
+    payload = {"task_id": task_id, "progress": progress, "message": message}
+    if phase:
+        payload["phase"] = phase
+    if detail:
+        payload["detail"] = detail
+    event_bus.emit("progress", payload)
 
 
-def update_clip_task(
+def update_task(
     task_id: str,
     status: Optional[str] = None,
     progress: Optional[int] = None,
@@ -75,12 +81,13 @@ def update_clip_task(
     error: Optional[str] = None,
     output_path: Optional[str] = None,
     project_id: Optional[str] = None,
+    task_kind: str = "Task",
     **kwargs
 ) -> None:
     """
-    线程安全地更新剪辑任务状态
+    线程安全地更新任务状态（通用实现）
 
-    P1 重构：使用 TaskManager
+    合并原 update_clip_task / update_export_task，消除重复代码。
     """
     task_mgr = get_task_manager()
 
@@ -123,7 +130,7 @@ def update_clip_task(
                 from app.services.project.manager_sqlite import get_manager
                 mgr = get_manager()
                 mgr.update_project(pid, {"status": "ready"})
-                logger.info(f"[Base] Clip task {task_id} transitioned to {status}. Project {pid} status updated to 'ready'")
+                logger.info(f"[Base] {task_kind} {task_id} transitioned to {status}. Project {pid} status updated to 'ready'")
             except Exception as e:
                 logger.error(f"[Base] Failed to update project status: {e}")
 
@@ -132,11 +139,14 @@ def update_clip_task(
         send_progress(task_id, progress or 0, message, phase)
 
 
-def get_clip_task(task_id: str) -> Optional[dict]:
-    """
-    获取剪辑任务状态（线程安全）
+# 向后兼容别名
+update_clip_task = update_task
+update_export_task = update_task
 
-    P1 重构：使用 TaskManager
+
+def get_task_info(task_id: str) -> Optional[dict]:
+    """
+    获取任务状态（通用实现，线程安全）
     """
     task_mgr = get_task_manager()
     task_info = task_mgr.get_task(task_id)
@@ -147,85 +157,9 @@ def get_clip_task(task_id: str) -> Optional[dict]:
     return task_info.to_dict()
 
 
-def update_export_task(
-    task_id: str,
-    status: Optional[str] = None,
-    progress: Optional[int] = None,
-    phase: Optional[str] = None,
-    message: Optional[str] = None,
-    error: Optional[str] = None,
-    output_path: Optional[str] = None,
-    project_id: Optional[str] = None,
-    **kwargs
-) -> None:
-    """
-    线程安全地更新导出任务状态
-
-    P1 重构：使用 TaskManager
-    """
-    task_mgr = get_task_manager()
-
-    task_info = task_mgr.get_task(task_id)
-    if not task_info:
-        task_mgr.create_task(task_id)
-        task_info = task_mgr.get_task(task_id)
-
-    if project_id:
-        task_info.metadata["project_id"] = project_id
-
-    # 转换状态字符串
-    task_status = None
-    if status:
-        status_map = {
-            "pending": TaskStatus.PENDING,
-            "running": TaskStatus.RUNNING,
-            "completed": TaskStatus.COMPLETED,
-            "failed": TaskStatus.FAILED,
-            "cancelled": TaskStatus.CANCELLED,
-            "timeout": TaskStatus.TIMEOUT,
-        }
-        task_status = status_map.get(status, TaskStatus.RUNNING)
-
-    task_mgr.update_task(
-        task_id,
-        status=task_status,
-        progress=progress,
-        phase=phase,
-        message=message,
-        error=error,
-        output_path=output_path,
-    )
-
-    # 任务结束时自动重置项目状态为 ready
-    if status in ("completed", "failed", "cancelled", "timeout"):
-        pid = project_id or task_info.metadata.get("project_id")
-        if pid:
-            try:
-                from app.services.project.manager_sqlite import get_manager
-                mgr = get_manager()
-                mgr.update_project(pid, {"status": "ready"})
-                logger.info(f"[Base] Export task {task_id} transitioned to {status}. Project {pid} status updated to 'ready'")
-            except Exception as e:
-                logger.error(f"[Base] Failed to update project status: {e}")
-
-    # 发送 IPC 通知
-    if message:
-        send_progress(task_id, progress or 0, message, phase)
-
-
-def get_export_task(task_id: str) -> Optional[dict]:
-    """
-    获取导出任务状态（线程安全）
-
-    P1 重构：使用 TaskManager
-    """
-    task_mgr = get_task_manager()
-    task_info = task_mgr.get_task(task_id)
-
-    if not task_info:
-        return None
-
-    return task_info.to_dict()
+# 向后兼容别名
+get_clip_task = get_task_info
+get_export_task = get_task_info
 
 
 # 保留旧的常量，保持向后兼容

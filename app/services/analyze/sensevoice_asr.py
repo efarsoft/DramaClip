@@ -127,35 +127,53 @@ def _load_sv_model(model_size: str = "SenseVoice-large", device: Optional[str] =
             except Exception:
                 device = "cpu"
         
-        model_map = {
-            "SenseVoice-small": "iic/SenseVoiceSmall",
-            "SenseVoice-large": "iic/SenseVoiceSmall",
-            "iic/SenseVoice-small": "iic/SenseVoiceSmall",
-            "iic/SenseVoice-large": "iic/SenseVoiceSmall",
-            "iic/SenseVoiceLarge": "iic/SenseVoiceSmall",
-            "SenseVoiceSmall": "iic/SenseVoiceSmall",
-            "SenseVoiceLarge": "iic/SenseVoiceSmall",
-        }
-        model_name = model_map.get(model_size, model_size)
-        if model_name in ("iic/SenseVoice-small", "iic/SenseVoice-large"):
-            model_name = "iic/SenseVoiceSmall"
+        # 优先从中央 catalog 获取标准 model repo（required_model_repo 风格）
+        from app.services.model_manager import get_model_by_repo_id, load_model_catalog
+        catalog_entry = get_model_by_repo_id("iic/SenseVoiceSmall")
+        model_name = "iic/SenseVoiceSmall"
+        if catalog_entry:
+            # catalog 优先使用 HF repo 如果有，但 SenseVoice 主要 ModelScope
+            model_name = catalog_entry.get("repo_id", "iic/SenseVoiceSmall")
 
         # 优先使用规整的本地物理直读路径
-        local_sv_dir = os.path.normpath("d:/DramaClip/resources/models/asr/iic/SenseVoiceSmall")
-        if os.path.isdir(local_sv_dir) and (
-            os.path.exists(os.path.join(local_sv_dir, "model.pt")) or
-            os.path.exists(os.path.join(local_sv_dir, "model.onnx"))
+        try:
+            from app.services.model_manager import _get_sensevoice_dir
+            local_sv_dir = _get_sensevoice_dir()
+            local_sv_dir_str = str(local_sv_dir.resolve())
+        except Exception:
+            local_sv_dir_str = os.path.normpath("resources/models/asr/iic/SenseVoiceSmall")
+        
+        if os.path.isdir(local_sv_dir_str) and (
+            os.path.exists(os.path.join(local_sv_dir_str, "model.pt")) or
+            os.path.exists(os.path.join(local_sv_dir_str, "model.onnx"))
         ):
-            logger.info(f"[ASR] 检测到规整的本地内置 SenseVoiceSmall 模型，执行 100% 本地物理绝对路径直读: {local_sv_dir}")
-            model_path = local_sv_dir
+            logger.info(f"[ASR] 检测到规整的本地内置 SenseVoiceSmall 模型，执行 100% 本地物理绝对路径直读: {local_sv_dir_str}")
+            model_path = local_sv_dir_str
         else:
             model_path = model_name
-            logger.warning(f"[ASR] 未在规整物理路径检测到模型 ({local_sv_dir})，降级使用 ModelScope 缓存加载: {model_path}")
+            logger.warning(f"[ASR] 未在规整物理路径检测到模型 ({local_sv_dir_str})，降级使用 ModelScope 缓存加载: {model_path}")
 
-        logger.info(f"Loading SenseVoice: {model_path} on {device}")
+        # VAD 模型的本地物理路径直读支持
+        try:
+            local_vad_dir = Path(local_sv_dir_str).parent / "speech_fsmn_vad_zh-cn-16k-common-pytorch"
+            local_vad_dir_str = str(local_vad_dir.resolve())
+        except Exception:
+            local_vad_dir_str = os.path.normpath("resources/models/asr/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch")
+            
+        if os.path.isdir(local_vad_dir_str) and (
+            os.path.exists(os.path.join(local_vad_dir_str, "model.pt")) or
+            os.path.exists(os.path.join(local_vad_dir_str, "model.yaml")) or
+            os.path.exists(os.path.join(local_vad_dir_str, "config.yaml"))
+        ):
+            logger.info(f"[ASR] 检测到规整的本地内置 VAD 模型，执行 100% 本地物理绝对路径直读: {local_vad_dir_str}")
+            vad_model_path = local_vad_dir_str
+        else:
+            vad_model_path = "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
+
+        logger.info(f"Loading SenseVoice: {model_path} with VAD: {vad_model_path} on {device}")
         _sv_thread_local.model = AutoModel(
             model=model_path,
-            vad_model="iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+            vad_model=vad_model_path,
             device=device,
             trust_remote_code=True
         )

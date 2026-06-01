@@ -2,7 +2,11 @@
 
 ## 概述
 
-DramaClip 使用 `UnifiedConfig` 作为统一的配置管理系统。所有服务模块应该通过 `UnifiedConfig` 读取配置，而不是直接读取 `config.toml` 或 `settings.json`。
+DramaClip 使用 `UnifiedConfig` 作为统一的配置管理系统。**所有服务模块必须通过 `from app.config.unified_config import get_config` 读取配置**，严禁直接读取 `config.toml` 或 `settings.json`。
+
+**优先级（已实现）**：`~/.dramaclip/settings.json`（GUI 修改，高优先） > 项目根 `config.toml` > 内置默认值。
+
+**当前状态**：配置合并与读取已完整落地。热更新 watcher 仍在演进中（修改 settings.json 后建议重启后端进程以完全生效，部分服务已支持运行时重读）。
 
 ## 架构
 

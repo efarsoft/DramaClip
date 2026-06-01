@@ -26,7 +26,6 @@ from app.utils.ffmpeg_utils import (
     is_ffmpeg_hwaccel_available,
     get_ffmpeg_hwaccel_args
 )
-from app.config.ffmpeg_config import FFmpegConfigManager
 
 
 class VideoProcessor:

@@ -12,7 +12,17 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 from loguru import logger
 
-from app.utils.ffmpeg_utils import get_ffmpeg_path
+from app.utils.ffmpeg_utils import (
+    get_ffmpeg_path,
+    get_ffprobe_path,
+    get_null_input,
+    check_ffmpeg_installation,
+    detect_hardware_acceleration,
+    extract_audio,
+)
+
+# Re-export 使此文件成为 ffmpeg 操作的统一入口
+# 新代码应统一从 app.utils.ffmpeg 导入
 
 
 class FFmpegError(Exception):
@@ -134,93 +144,206 @@ def parse_srt(srt_path: str) -> List[tuple]:
     return subtitles
 
 
+def _extract_audio_snippet(video_path: str, start_sec: float, duration_sec: float, output_wav: str) -> bool:
+    """使用 ffmpeg 提取视频中短音频片段（16kHz 单声道 PCM），供能量分析使用。"""
+    cmd = [
+        get_ffmpeg_path(), "-y",
+        "-i", video_path,
+        "-ss", f"{max(0.0, start_sec):.3f}",
+        "-t", f"{max(0.5, duration_sec):.3f}",
+        "-vn",
+        "-acodec", "pcm_s16le",
+        "-ar", "16000",
+        "-ac", "1",
+        output_wav
+    ]
+    try:
+        run_ffmpeg(cmd, check=True)
+        return True
+    except Exception as e:
+        logger.debug(f"音频片段提取失败: {e}")
+        return False
+
+
+def _detect_speech_zones_energy(video_path: str, center_start: float, center_end: float, window_sec: float = 7.0) -> List[tuple]:
+    """
+    能量-based 语音区检测（无字幕时的降级方案）。
+    仅分析目标切点周围小窗口，避免加载整段长视频音频。
+    返回相对于视频时间轴的 [(speech_start, speech_end), ...]
+    """
+    import tempfile
+    import os
+
+    try:
+        from pydub import AudioSegment
+        from pydub.utils import make_chunks
+    except ImportError:
+        logger.warning("pydub 未安装，无法启用无字幕语音区检测降级")
+        return []
+
+    search_start = max(0.0, center_start - window_sec)
+    search_duration = (center_end - center_start) + 2 * window_sec
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+
+    zones: List[tuple] = []
+    try:
+        if not _extract_audio_snippet(video_path, search_start, search_duration, tmp_path):
+            return zones
+
+        if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) < 1024:
+            return zones
+
+        audio = AudioSegment.from_file(tmp_path)
+        if len(audio) < 150:
+            return zones
+
+        # 每 80ms 一个 chunk 计算 RMS（对人声较敏感）
+        chunk_ms = 80
+        chunks = make_chunks(audio, chunk_ms)
+        energies = []
+        for i, chunk in enumerate(chunks):
+            rms = float(chunk.rms or 1)
+            t = search_start + (i * chunk_ms / 1000.0)
+            energies.append((t, rms))
+
+        if len(energies) < 3:
+            return zones
+
+        rms_vals = [e[1] for e in energies]
+        mean_rms = sum(rms_vals) / len(rms_vals)
+        # 自适应阈值：均值之上一定倍数（对短剧对白有效）
+        threshold = max(mean_rms * 1.65, 120)  # 避免极静音视频误判
+
+        in_speech = False
+        speech_start_t = 0.0
+        min_speech_dur = 0.28  # 忽略极短爆音
+
+        for t, rms in energies:
+            if rms > threshold and not in_speech:
+                in_speech = True
+                speech_start_t = t
+            elif rms < threshold * 0.65 and in_speech:
+                in_speech = False
+                dur = t - speech_start_t
+                if dur >= min_speech_dur:
+                    zones.append((speech_start_t, t))
+
+        if in_speech:
+            dur = energies[-1][0] - speech_start_t
+            if dur >= min_speech_dur:
+                zones.append((speech_start_t, energies[-1][0] + 0.1))
+
+        if zones:
+            logger.info(f"[Jitter-Fallback] 能量检测到 {len(zones)} 个语音区（窗口 {search_start:.1f}s ~ {search_start+search_duration:.1f}s）")
+    except Exception as e:
+        logger.warning(f"语音区能量检测失败: {e}")
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except Exception:
+            pass
+
+    return zones
+
+
+def _apply_protection_jitter(
+    cut_time: float,
+    is_start: bool,
+    protection_zones: List[tuple],
+    buffer_before: float = 0.2,
+    buffer_after: float = 0.15,
+    jitter_range: float = 0.3
+) -> float:
+    """对单个切点应用保护区避让 + 安全抖动（同时适用于字幕和能量区）。"""
+    if not protection_zones:
+        # 无保护区时仍给一个很小的随机抖动（保持去重效果）
+        j = random.uniform(0.03, 0.12)
+        if random.random() < 0.5:
+            j = -j
+        return round(cut_time + j, 3)
+
+    jitter = random.uniform(0.08, jitter_range)
+    if random.random() < 0.5:
+        jitter = -jitter
+    new_t = cut_time + jitter
+
+    prev_zone = None
+    next_zone = None
+    in_zone = None
+
+    for z_s, z_e in protection_zones:
+        forbidden_s = z_s - buffer_before
+        forbidden_e = z_e + buffer_after
+        if forbidden_s <= cut_time <= forbidden_e:
+            in_zone = (z_s, z_e)
+            break
+        if z_e + buffer_after <= cut_time:
+            prev_zone = (z_s, z_e)
+        if z_s - buffer_before >= cut_time and next_zone is None:
+            next_zone = (z_s, z_e)
+
+    if in_zone:
+        z_s, z_e = in_zone
+        if is_start:
+            new_t = z_s - buffer_before
+        else:
+            new_t = z_e + buffer_after
+        logger.info(f"[Jitter] {'Start' if is_start else 'End'} {cut_time:.2f}s 命中保护区 [{z_s:.2f},{z_e:.2f}]，snap 至 {new_t:.2f}s")
+    else:
+        min_allowed = (prev_zone[1] + buffer_after) if prev_zone else (cut_time - 3.0)
+        max_allowed = (next_zone[0] - buffer_before) if next_zone else (cut_time + 3.0)
+        new_t = max(min_allowed, min(max_allowed, new_t))
+        logger.debug(f"[Jitter] {'Start' if is_start else 'End'} {cut_time:.2f}s 安全抖动至 {new_t:.2f}s")
+
+    return round(new_t, 3)
+
+
 def get_safe_jittered_times(video_path: str, start: float, end: float) -> tuple:
     """
-    基于静音区避让与台词防吞的智能首尾偏置 (智能 Jitter)
+    基于静音区避让与台词/语音防吞的智能首尾偏置 (智能 Jitter)。
+    优先使用同名字幕 (.srt)，无字幕时自动降级为基于音频能量的语音区检测。
     """
-    # 查找同名的 .srt 文件
+    # 1. 尝试字幕
     srt_path = video_path.rsplit(".", 1)[0] + ".srt"
-    subtitles = parse_srt(srt_path)
-    
-    if not subtitles:
-        logger.info(f"未找到对应字幕文件或字幕为空，跳过时间抖动: {srt_path}")
+    protection_zones = parse_srt(srt_path)
+    source = "srt"
+
+    if not protection_zones:
+        # 2. 无字幕降级：音频能量语音区检测
+        protection_zones = _detect_speech_zones_energy(video_path, start, end)
+        source = "energy" if protection_zones else "none"
+
+    if not protection_zones:
+        logger.info(f"[Jitter] 未找到字幕且能量检测无语音区，使用极小抖动: {os.path.basename(video_path)}")
+        # 极保守的小抖动（仍提供基础去重）
+        j1 = random.uniform(0.02, 0.08)
+        j2 = random.uniform(0.02, 0.08)
+        if random.random() < 0.5:
+            j1 = -j1
+        if random.random() < 0.5:
+            j2 = -j2
+        new_s = round(max(0.0, start + j1), 3)
+        new_e = round(end + j2, 3)
+        return (new_s, new_e) if (new_e - new_s) > 0.4 else (start, end)
+
+    buffer_before = 0.2
+    buffer_after = 0.15
+
+    new_start = _apply_protection_jitter(start, True, protection_zones, buffer_before, buffer_after)
+    new_end = _apply_protection_jitter(end, False, protection_zones, buffer_before, buffer_after)
+
+    if new_start >= new_end or (new_end - new_start) < 0.45:
+        logger.warning(f"[Jitter] 调整后时长过短 ({new_end - new_start:.2f}s)，回退原始: [{start:.2f}, {end:.2f}]")
         return start, end
 
-    # 台词保护缓冲区
-    buffer_before = 0.2  # 说话前留白
-    buffer_after = 0.15  # 说话后留白
+    if source == "energy":
+        logger.info(f"[Jitter-Energy] {start:.2f}s~{end:.2f}s -> {new_start:.2f}s~{new_end:.2f}s (无字幕降级)")
 
-    # 1. 调整 start 时间
-    start_jitter = random.uniform(0.1, 0.3)
-    if random.choice([True, False]):
-        start_jitter = -start_jitter
-    new_start = start + start_jitter
-
-    prev_sub = None
-    next_sub = None
-    in_sub = None
-
-    for sub in subtitles:
-        sub_s, sub_e = sub
-        forbidden_s = sub_s - buffer_before
-        forbidden_e = sub_e + buffer_after
-        if forbidden_s <= start <= forbidden_e:
-            in_sub = sub
-            break
-        if sub_e + buffer_after <= start:
-            prev_sub = sub
-        if sub_s - buffer_before >= start and next_sub is None:
-            next_sub = sub
-
-    if in_sub:
-        # 在说话区间内，强行向外（左）避让
-        new_start = in_sub[0] - buffer_before
-        logger.info(f"[Jitter] Start {start:.2f}s 冲突台词区间 [{in_sub[0]:.2f}s, {in_sub[1]:.2f}s]，避让 snap 至 {new_start:.2f}s")
-    else:
-        # 在静音区，限制抖动不要越界
-        min_allowed = prev_sub[1] + buffer_after if prev_sub else 0.0
-        max_allowed = next_sub[0] - buffer_before if next_sub else start + 2.0
-        new_start = max(min_allowed, min(max_allowed, new_start))
-        logger.info(f"[Jitter] Start {start:.2f}s 处于静音区，安全抖动至 {new_start:.2f}s (可用区间: [{min_allowed:.2f}s, {max_allowed:.2f}s])")
-
-    # 2. 调整 end 时间
-    end_jitter = random.uniform(0.1, 0.3)
-    if random.choice([True, False]):
-        end_jitter = -end_jitter
-    new_end = end + end_jitter
-
-    prev_sub = None
-    next_sub = None
-    in_sub = None
-
-    for sub in subtitles:
-        sub_s, sub_e = sub
-        forbidden_s = sub_s - buffer_before
-        forbidden_e = sub_e + buffer_after
-        if forbidden_s <= end <= forbidden_e:
-            in_sub = sub
-            break
-        if sub_e + buffer_after <= end:
-            prev_sub = sub
-        if sub_s - buffer_before >= end and next_sub is None:
-            next_sub = sub
-
-    if in_sub:
-        # 在说话区间内，强行向外（右）避让
-        new_end = in_sub[1] + buffer_after
-        logger.info(f"[Jitter] End {end:.2f}s 冲突台词区间 [{in_sub[0]:.2f}s, {in_sub[1]:.2f}s]，避让 snap 至 {new_end:.2f}s")
-    else:
-        # 在静音区，限制抖动不要越界
-        min_allowed = prev_sub[1] + buffer_after if prev_sub else end - 2.0
-        max_allowed = next_sub[0] - buffer_before if next_sub else end + 2.0
-        new_end = max(min_allowed, min(max_allowed, new_end))
-        logger.info(f"[Jitter] End {end:.2f}s 处于静音区，安全抖动至 {new_end:.2f}s (可用区间: [{min_allowed:.2f}s, {max_allowed:.2f}s])")
-
-    if new_start >= new_end or (new_end - new_start) < 0.5:
-        logger.info(f"[Jitter] 抖动调整后时长过短或无效 ({new_end - new_start:.2f}s)，降级为原始时间: [{start:.2f}s, {end:.2f}s]")
-        return start, end
-
-    return round(new_start, 3), round(new_end, 3)
+    return new_start, new_end
 
 
 def to_portrait(input_path: str, output_path: str, dedup_params: Optional[Dict[str, Any]] = None) -> None:

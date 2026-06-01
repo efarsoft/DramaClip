@@ -1,5 +1,7 @@
 # DramaClip 项目代码文档
 
+> ⚠️ **注意**：本文档撰写时间较早，部分目录结构与模块划分已演进（例如 `clip/` 模块化重构、`ipc/handlers/` 拆分、`unified_config` 等）。**强烈建议同时参考 `docs/Architecture_DramaClip.md`（已于 2026-05 同步关键偏差说明）**。
+
 ## 一、项目概述
 
 DramaClip 是一款基于人工智能技术的短剧自动高光剪辑工具，能够智能分析视频内容、自动检测高光片段，并生成精彩的短视频作品。该项目采用 Electron 作为桌面应用框架，前端使用 React + TypeScript 构建用户界面，后端采用 Python 实现核心业务逻辑，通过 JSON-RPC 协议进行进程间通信。

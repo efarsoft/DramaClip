@@ -33,36 +33,36 @@ const ALL_MODES = [
   {
     id: 'mode-original',
     name: '原片解说',
-    desc: '提取视频情节和高光，通过截取和合并原视频进行剪辑，全程使用原声',
+    desc: '最还原的原声高燃混剪，情绪最直接，故事最纯粹',
     type: 'original_narration',
-    tags: ['原声拼接', '保留原汁原味', '适合剧情片'],
+    tags: ['原声最燃', '情绪最强'],
     icon: <SoundOutlined style={{ color: CYAN }} />,
     priority: 0,
   },
   {
     id: 'mode-hybrid',
     name: '交叉解说',
-    desc: 'AI 生成解说词，结合原视频高光，形成混合式 AI 解说 + 原声效果',
+    desc: 'AI解说与原声自然交织，故事完整又有质感，推荐大多数情况',
     type: 'hybrid_narration',
-    tags: ['AI 解说', '原声混音', '适合解说类'],
+    tags: ['最均衡', '最推荐'],
     icon: <ThunderboltOutlined style={{ color: '#f59e0b' }} />,
     priority: 1,
   },
   {
     id: 'mode-full',
     name: '全片解说',
-    desc: 'AI 生成全部解说文案并配音，不使用原声，纯 AI 旁白风格',
+    desc: '纯AI旁白快速讲完整个故事，节奏紧凑，适合快速传播',
     type: 'full_narration',
-    tags: ['全 AI 配音', '几分钟看完', '适合速览'],
+    tags: ['最速览', '传播力强'],
     icon: <AudioOutlined style={{ color: '#f472b6' }} />,
     priority: 2,
   },
   {
     id: 'mode-all',
-    name: '全部生成',
-    desc: '一次性生成以上三种模式的剪辑结果，对比择优或同时分发',
+    name: '一键生成三种版本',
+    desc: '系统同时输出以上三种不同风格的高质量成片，随意挑选或多平台分发',
     type: 'all_narrations',
-    tags: ['一键三连', '批量输出', '效率最高'],
+    tags: ['最省心', '强烈推荐'],
     icon: <EllipsisOutlined style={{ color: '#a78bfa' }} />,
     priority: 3,
   },
@@ -82,7 +82,7 @@ const RecommendPanel: React.FC<Props> = ({ onNext }) => {
   const [filteredModes, setFilteredModes] = useState<typeof ALL_MODES>([]);
   // 0 表示不限时长
   const [targetDuration, setTargetDuration] = useState<number>(0);
-  const [activeClipTaskId, setActiveClipTaskId] = useState<string | null>(null);
+  const [activeClipTaskIds, setActiveClipTaskIds] = useState<string[]>([]);
   
   const [preset, setPreset] = useState(() => localStorage.getItem('dramaclip-export-preset') || '1080p');
   const selectedPreset = PRESETS.find(p => p.value === preset) || PRESETS[0];
@@ -91,16 +91,16 @@ const RecommendPanel: React.FC<Props> = ({ onNext }) => {
     localStorage.setItem('dramaclip-export-preset', preset);
   }, [preset]);
 
-  // 获取当前活跃的自动剪辑任务（自适应后端 ID 动态重写）
-  const activeClipTask = useTaskQueueStore(s => {
-    if (!activeClipTaskId) return undefined;
-    const matched = s.tasks.find(t => t.id === activeClipTaskId);
-    if (matched) return matched;
+  // 获取当前活跃的所有自动剪辑任务（支持一键三连多队列展示，并自适应后端 ID 动态重写）
+  const activeClipTasks = useTaskQueueStore(s => {
+    if (activeClipTaskIds.length === 0) return [];
+    
+    // 优先匹配缓存的 Task ID
+    const matched = s.tasks.filter(t => activeClipTaskIds.includes(t.id));
+    if (matched.length > 0) return matched;
 
     // 若本地生成的临时 ID 被后端真实 Task ID 重写，则通过项目ID及类型定位最新的剪辑任务
-    return s.tasks
-      .filter(t => t.type === 'clip' && t.projectId === currentProject?.id)
-      .sort((a, b) => b.createdAt - a.createdAt)[0];
+    return s.tasks.filter(t => t.type === 'clip' && t.projectId === currentProject?.id);
   });
 
   // 加载推荐方案
@@ -143,19 +143,25 @@ const RecommendPanel: React.FC<Props> = ({ onNext }) => {
     loadRecommendation();
   }, [loadRecommendation]);
 
-  // 监听并追踪自动剪辑进度，完成后自动跳转到 Step 4
+  // 监听并追踪自动剪辑队列进度，只有当全部排队任务完成时，才自动跳转到 Step 4
   useEffect(() => {
-    if (!activeClipTask) return;
-    if (activeClipTask.status === 'completed') {
+    if (activeClipTasks.length === 0) return;
+    
+    const allCompleted = activeClipTasks.every(t => t.status === 'completed');
+    const anyFailed = activeClipTasks.some(t => t.status === 'failed');
+    
+    if (allCompleted) {
       setApplying(false);
-      message.success('🎉 AI 智能剪辑已自动合成完成！进入导出发布阶段。');
+      setActiveClipTaskIds([]);
+      message.success('🎉 所有 AI 智能剪辑方案已自动合成完成！进入导出发布阶段。AI 已按最高质量标准完成选片、排序与文案打磨。');
       onNext?.();
-    } else if (activeClipTask.status === 'failed') {
+    } else if (anyFailed) {
+      const failedTask = activeClipTasks.find(t => t.status === 'failed');
       setApplying(false);
-      setActiveClipTaskId(null);
-      message.error(`❌ AI 智能剪辑失败: ${activeClipTask.error || '合成超时，请重新应用方案！'}`);
+      setActiveClipTaskIds([]);
+      message.error(`❌ AI 智能剪辑失败: ${failedTask?.error || '合成超时，请重新应用方案！'}`);
     }
-  }, [activeClipTask?.status, activeClipTask?.error, onNext]);
+  }, [activeClipTasks, onNext]);
 
   const handleApply = async () => {
     if (!selected || !currentProject) return;
@@ -195,17 +201,50 @@ const RecommendPanel: React.FC<Props> = ({ onNext }) => {
       }
 
       // 2. 自动入队剪辑拼接任务，100% 流程自动化，无需任何人工选取
-      const taskId = useTaskQueueStore.getState().enqueue('clip', currentProject.id, {
-        project_id: currentProject.id,
-        scheme: plan.type,
-        params: {
-          segments: aggregatedHighlights,
-          clip_mode: 'highlight',
-          target_duration: targetDuration,
-        },
-      });
+      const enqueuedIds: string[] = [];
+      if (plan.type === 'all_narrations') {
+        const id1 = useTaskQueueStore.getState().enqueue('clip', currentProject.id, {
+          project_id: currentProject.id,
+          scheme: 'original_narration',
+          params: {
+            segments: aggregatedHighlights,
+            clip_mode: 'highlight',
+            target_duration: targetDuration,
+          },
+        });
+        const id2 = useTaskQueueStore.getState().enqueue('clip', currentProject.id, {
+          project_id: currentProject.id,
+          scheme: 'hybrid_narration',
+          params: {
+            segments: aggregatedHighlights,
+            clip_mode: 'highlight',
+            target_duration: targetDuration,
+          },
+        });
+        const id3 = useTaskQueueStore.getState().enqueue('clip', currentProject.id, {
+          project_id: currentProject.id,
+          scheme: 'full_narration',
+          params: {
+            segments: aggregatedHighlights,
+            clip_mode: 'highlight',
+            target_duration: targetDuration,
+          },
+        });
+        enqueuedIds.push(id1, id2, id3);
+      } else {
+        const id = useTaskQueueStore.getState().enqueue('clip', currentProject.id, {
+          project_id: currentProject.id,
+          scheme: plan.type,
+          params: {
+            segments: aggregatedHighlights,
+            clip_mode: 'highlight',
+            target_duration: targetDuration,
+          },
+        });
+        enqueuedIds.push(id);
+      }
 
-      setActiveClipTaskId(taskId);
+      setActiveClipTaskIds(enqueuedIds);
       message.loading({ content: '已自动为您创建 AI 智能剪辑合成任务，正在拼装生成...', duration: 2 });
     } catch (e: any) {
       message.error(e?.message || '自动剪辑方案应用失败');
@@ -408,43 +447,7 @@ const RecommendPanel: React.FC<Props> = ({ onNext }) => {
         )}
       </div>
 
-      {/* ─── 时长配置（可选） ─── */}
-      <Card
-        style={{
-          marginTop: 20, borderRadius: 14,
-          background: 'rgba(255,255,255,0.02)',
-          border: '1px solid rgba(255,255,255,0.06)',
-        }}
-        styles={{ body: { padding: '16px 24px' } }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <ClockCircleOutlined style={{ color: CYAN, fontSize: 18 }} />
-          <Text style={{ color: '#8892a4', fontSize: 14, whiteSpace: 'nowrap' }}>输出时长</Text>
-          <div style={{ flex: 1, minWidth: 180, padding: '0 12px' }}>
-            <Slider
-              min={0}
-              max={300}
-              step={5}
-              value={targetDuration}
-              onChange={setTargetDuration}
-              tooltip={{ formatter: (v: number | undefined) => !v || v === 0 ? '不限' : `${v}秒` }}
-              trackStyle={{ background: `linear-gradient(90deg, ${CYAN}, ${PURPLE})` }}
-              handleStyle={{ borderColor: CYAN }}
-            />
-          </div>
-          <InputNumber
-            min={0}
-            max={300}
-            step={5}
-            value={targetDuration}
-            onChange={v => setTargetDuration(v ?? 0)}
-            style={{ width: 80, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#e8edff' }}
-            formatter={v => v === 0 ? '不限' : `${v}s`}
-            parser={v => parseInt(v?.replace(/[^0-9]/g, '') || '0', 10)}
-          />
-          <Text style={{ color: '#4a5a7a', fontSize: 12 }}>0=不限</Text>
-        </div>
-      </Card>
+      {/* 时长已完全由系统智能控制（成片效果优先，默认不限时长）—— 已移除用户可见配置 */}
 
       {/* ─── 输出预设（横竖屏选择） ─── */}
       <Card
@@ -507,7 +510,7 @@ const RecommendPanel: React.FC<Props> = ({ onNext }) => {
       </div>
 
       {/* ─── 智能剪辑高光自动拼接 glassmorphism 加载遮罩 ─── */}
-      {activeClipTask && (activeClipTask.status === 'running' || activeClipTask.status === 'queued') && (
+      {activeClipTasks.length > 0 && activeClipTasks.some(t => t.status === 'running' || t.status === 'queued') && (
         <div style={{
           position: 'absolute',
           top: 0, left: 0, right: 0, bottom: 0,
@@ -532,39 +535,73 @@ const RecommendPanel: React.FC<Props> = ({ onNext }) => {
             boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
             textAlign: 'center',
           }}
-          styles={{ body: { padding: '40px 32px' } }}
+          styles={{ body: { padding: '32px 24px' } }}
           >
-            <div style={{ position: 'relative', display: 'inline-block', marginBottom: 24 }}>
-              <Spin indicator={<LoadingOutlined style={{ fontSize: 48, color: CYAN }} spin />} />
+            <div style={{ position: 'relative', display: 'inline-block', marginBottom: 20 }}>
+              <Spin indicator={<LoadingOutlined style={{ fontSize: 40, color: CYAN }} spin />} />
               <div style={{
                 position: 'absolute', top: '50%', left: '50%',
                 transform: 'translate(-50%, -50%)',
-                fontSize: 20,
+                fontSize: 18,
               }}>✨</div>
             </div>
             
-            <Title level={4} style={{ color: '#e8edff', margin: '0 0 8px 0', fontWeight: 600 }}>
-              AI 智能剪辑合成中
+            <Title level={4} style={{ color: '#e8edff', margin: '0 0 16px 0', fontWeight: 600 }}>
+              AI 智能剪辑任务排队合成中
             </Title>
-            <Text style={{ color: '#8892a4', fontSize: 13, display: 'block', marginBottom: 24 }}>
-              {activeClipTask.phase === 'clipping' ? '正在拼接和渲染高光视频片段...' : 
-               activeClipTask.phase === 'audio' ? '正在融合背景音乐与人声对白...' :
-               activeClipTask.message || '系统正在自动挑选并合成高光片段，无需人工干预...'}
-            </Text>
-
-            <Progress
-              percent={activeClipTask.progress}
-              strokeColor={{ '0%': CYAN, '100%': PURPLE }}
-              trailColor="rgba(255, 255, 255, 0.05)"
-              showInfo={false}
-              style={{ marginBottom: 12 }}
-            />
             
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ color: '#4a5a7a', fontSize: 12 }}>已跑通 AI 大模型高光打分方案</span>
-              <span style={{ color: CYAN, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 15 }}>
-                {activeClipTask.progress}%
-              </span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, textAlign: 'left', marginBottom: 20 }}>
+              {activeClipTasks.map(t => (
+                <div key={t.id} style={{
+                  padding: '12px 16px', borderRadius: 10,
+                  background: t.status === 'running' ? 'rgba(0, 212, 255, 0.04)' : 'rgba(255, 255, 255, 0.015)',
+                  border: `1px solid ${t.status === 'running' ? `${CYAN}22` : 'rgba(255, 255, 255, 0.04)'}`,
+                  transition: 'all 0.3s ease',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <Text strong style={{ color: t.status === 'running' ? '#fff' : '#8892a4', fontSize: 13 }}>
+                      {t.params?.scheme === 'original_narration' ? '🎬 原片直剪' :
+                       t.params?.scheme === 'hybrid_narration' ? '🎙️ 交叉解说' :
+                       t.params?.scheme === 'full_narration' ? '🗣️ 全片解说' :
+                       '智能剪辑'}
+                    </Text>
+                    <span style={{ 
+                      fontSize: 11, 
+                      color: t.status === 'running' ? CYAN : t.status === 'completed' ? '#10b981' : '#6b7b9d',
+                      fontWeight: 600
+                    }}>
+                      {t.status === 'running' ? `${t.progress}%` :
+                       t.status === 'completed' ? '已完成' :
+                       t.status === 'failed' ? '失败' : '排队中'}
+                    </span>
+                  </div>
+                  {t.status === 'running' && (
+                    <>
+                      <Progress
+                        percent={t.progress}
+                        strokeColor={{ '0%': CYAN, '100%': PURPLE }}
+                        trailColor="rgba(255, 255, 255, 0.05)"
+                        size="small"
+                        showInfo={false}
+                        style={{ margin: 0 }}
+                      />
+                      {t.phase && (
+                        <div style={{ color: '#4a5a7a', fontSize: 11, marginTop: 4 }}>
+                          {t.phase === 'clipping' ? '正在拼接和渲染高光视频片段...' : 
+                           t.phase === 'audio' ? '正在融合背景音乐与人声对白...' :
+                           t.message || '正在挑选并合成高光片段...'}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+            
+            <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.04)', paddingTop: 12, textAlign: 'left' }}>
+              <Text style={{ color: '#4a5a7a', fontSize: 11 }}>
+                💡 剪辑任务已加入后台队列，正按序执行。您可以直观查看每个方案的生成进度。
+              </Text>
             </div>
           </Card>
         </div>

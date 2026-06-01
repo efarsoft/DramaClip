@@ -75,26 +75,27 @@ class PathManager:
         """设置输出根目录"""
         self._output_root = self._resolve_path(path)
 
-    def get_project_output_dir(self, project_name: str) -> Path:
+    def get_project_output_dir(self, project_name: str, project_id: Optional[str] = None) -> Path:
         """
-        获取项目输出目录
+        获取项目输出目录（使用显示名称，便于用户识别；内部工作目录使用安全 ID）
 
         输出结构：
         ~/DramaClip/Outputs/
-          └── 项目名称/
-              └── 2024-01-15_143022/  # 按时间戳分目录
+          └── 我的短剧/                 # 使用友好名称
+              └── 2024-01-15_143022/
                   ├── clip_001.mp4
-                  ├── clip_002.mp4
-                  └── export_001.mp4
+                  ...
 
         Args:
-            project_name: 项目名称
+            project_name: 项目显示名称（推荐）
+            project_id: 可选的项目ID（用于未来隔离）
 
         Returns:
             项目输出目录（已创建）
         """
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        project_dir = self._output_root / self._sanitize_name(project_name)
+        safe_name = self._sanitize_name(project_name or (project_id or "unnamed"))
+        project_dir = self._output_root / safe_name
         project_dir.mkdir(parents=True, exist_ok=True)
 
         session_dir = project_dir / timestamp

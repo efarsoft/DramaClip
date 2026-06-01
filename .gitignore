@@ -26,6 +26,14 @@ dist-electron/
 /resources/models/
 /models/
 *.model
+pretrained_models/
+
+# 参考项目（外部仓库）
+reference/
+
+# Python 虚拟环境
+.venv/
+.venv-tts/
 
 # 资源文件（大文件/媒体）
 resources/*

@@ -2,7 +2,7 @@
  * 应用根组件
  */
 
-import React, { useEffect, lazy, Suspense } from 'react';
+import React, { useEffect, Suspense } from 'react';
 import { App as AntdApp, Spin } from 'antd';
 import Router from './router';
 import { useUiStore } from './stores/uiStore';
@@ -16,7 +16,9 @@ const PageLoader: React.FC = () => (
     height: '100vh',
     background: '#060a17',
   }}>
-    <Spin size="large" tip="加载中..." />
+    <Spin size="large" tip="加载中...">
+      <div />
+    </Spin>
   </div>
 );
 

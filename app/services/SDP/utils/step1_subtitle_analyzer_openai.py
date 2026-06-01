@@ -5,7 +5,7 @@ import traceback
 import json
 from loguru import logger
 
-from app.services.subtitle_text import has_timecodes, normalize_subtitle_text, read_subtitle_text
+from app.services.clip.subtitle_text import has_timecodes, normalize_subtitle_text, read_subtitle_text
 # 导入新的提示词管理系统
 from app.services.prompts import PromptManager
 # 导入统一LLM服务

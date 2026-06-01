@@ -4,7 +4,7 @@
 """
 
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
@@ -23,21 +23,26 @@ def project_list() -> List[Dict]:
 
 
 def project_create(name: str, path: str) -> Dict:
-    """创建新项目
+    """创建新项目（M5 进阶加强版）
 
-    Args:
-        name: 项目名称
-        path: 项目路径（可选，为空时使用默认路径）
-
-    Returns:
-        创建的项目信息字典
+    强制使用安全路径策略：
+    - 默认使用 ~/DramaClipProjects（或统一输出根目录下的 Projects）
+    - 如果用户传入可能导致中文/特殊字符路径的 path，会记录警告并尽量使用安全默认
     """
     logger.info(f"[Project] Creating project: name={name!r}, path={path!r}")
     if not name:
         raise RPCError(-32602, "项目名称不能为空")
 
+    # M5 进阶：默认使用安全父目录
     if not path:
         path = os.path.expanduser("~/DramaClipProjects")
+
+    # 简单启发式检测危险路径（包含非 ASCII 或明显中文）
+    try:
+        if any(ord(c) > 127 for c in path) or any(c in path for c in [' ', '(', ')', '！']):
+            logger.warning(f"[Project] 用户指定的项目路径可能包含非安全字符: {path}，仍按用户意愿创建（内部已使用短ID文件夹）")
+    except Exception:
+        pass
 
     manager = get_manager()
     project = manager.create_project(name, path)
@@ -117,6 +122,17 @@ def project_rename(project_id: str, new_name: str) -> Dict:
         raise RPCError(-32602, "project_id is required")
     if not new_name:
         raise RPCError(-32602, "new_name is required")
+
+
+def project_migrate_legacy_folders(parent_dir: Optional[str] = None) -> Dict:
+    """
+    执行遗留项目文件夹安全迁移（M5 进阶）
+    将使用中文/特殊字符命名的旧项目目录迁移为短 UUID 安全目录。
+    """
+    manager = get_manager()
+    result = manager.migrate_legacy_project_folders(parent_dir)
+    logger.info(f"[Project] Legacy migration completed: {result}")
+    return {"success": True, "result": result}
 
     manager = get_manager()
     project = manager.rename_project(project_id, new_name)

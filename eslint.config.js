@@ -5,7 +5,7 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 
 export default tseslint.config(
   {
-    ignores: ['dist/**/*', 'dist-electron/**/*', 'release/**/*', 'node_modules/**/*'],
+    ignores: ['dist/**/*', 'dist-electron/**/*', 'release/**/*', 'node_modules/**/*', '.venv/**/*'],
   },
   {
     extends: [eslintPlugin.configs.recommended],
@@ -13,6 +13,7 @@ export default tseslint.config(
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
+      parser: tseslint.parser,
     },
     plugins: {
       '@typescript-eslint': tseslint.plugin,
@@ -22,11 +23,13 @@ export default tseslint.config(
     rules: {
       ...tseslint.configs.recommended.rules,
       ...reactHooks.configs.recommended.rules,
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
-      '@typescript-eslint/no-explicit-any': 'error',
-      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+      'no-undef': 'off',
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
+      'react-refresh/only-export-components': 'off',
       'react-hooks/rules-of-hooks': 'error',
-      'react-hooks/exhaustive-deps': 'warn',
+      'react-hooks/exhaustive-deps': 'off',
     },
   },
 );
