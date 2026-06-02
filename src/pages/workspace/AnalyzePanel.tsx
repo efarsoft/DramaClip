@@ -387,8 +387,8 @@ const AnalyzePanel: React.FC<Props> = ({ onNext }) => {
       modelDesc = '正在从本地磁盘载入多国语/中文声学预训练模型至内存。首次加载将由 CPU/GPU 预热缓存，后续分析将极大提速。';
       icon = '🗣️';
     } else if (phase === 'diarization') {
-      modelName = 'PyAnnote 说话人分离与追踪模型';
-      modelDesc = '正在加载离线声纹提取与聚类模型，用于精准计算不同角色说话的时间区间与声轨重叠比例。';
+      modelName = '说话人分离（内置聚类算法）';
+      modelDesc = '正在使用 MFCC 特征提取 + 谱聚类算法，计算不同角色说话的时间区间与声轨重叠比例。';
       icon = '👥';
     } else if (phase === 'emotion') {
       modelName = 'Voice Emotion 声学情绪多维分类模型';

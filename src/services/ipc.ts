@@ -301,6 +301,10 @@ export const systemApi = {
     ),
   applyOnboardingPack: (packId: string) =>
     ipcClient.call<{ success: boolean }>('system.apply_onboarding_pack', { pack_id: packId }),
+  getDownloadChannel: () =>
+    ipcClient.call<{ channel: string }>('system.get_download_channel'),
+  setDownloadChannel: (channel: string) =>
+    ipcClient.call<{ success: boolean; channel: string }>('system.set_download_channel', { channel }),
 };
 
 // 小工具相关 API

@@ -74,6 +74,8 @@ from app.ipc.handlers.system_handler import (
     get_onboarding_recommendations,
     apply_onboarding_pack,
     tts_backends_list,
+    get_download_channel,
+    set_download_channel,
 )
 
 
@@ -185,5 +187,9 @@ def create_router() -> Router:
 
     # TTS 引擎列表（新插件化系统）
     router.register("system", "tts_backends", tts_backends_list)
+
+    # 下载渠道管理
+    router.register("system", "get_download_channel", get_download_channel)
+    router.register("system", "set_download_channel", set_download_channel)
 
     return router

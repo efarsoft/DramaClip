@@ -300,3 +300,16 @@ def apply_onboarding_pack(pack_id: str) -> Dict:
     from app.services.onboarding import apply_recommended_pack
     success = apply_recommended_pack(pack_id)
     return {"success": success}
+
+
+def get_download_channel() -> Dict:
+    """获取当前模型下载渠道"""
+    from app.services.model_manager import get_download_channel as _get
+    return {"channel": _get()}
+
+
+def set_download_channel(channel: str) -> Dict:
+    """设置模型下载渠道: modelscope / huggingface"""
+    from app.services.model_manager import set_download_channel as _set, get_download_channel as _get
+    success = _set(channel)
+    return {"success": success, "channel": _get()}

@@ -52,8 +52,7 @@ const engineOptions = [
   { label: 'SoulVoice（托管 CosyVoice2）', value: 'soulvoice' },
   { label: 'Tencent TTS', value: 'tencent_tts' },
   { label: '── 本地引擎（进阶 / 离线使用）──', value: '', disabled: true },
-  { label: 'CosyVoice 3（Fun-CosyVoice3-0.5B，短剧中文首选）', value: 'cosyvoice' },
-  { label: 'Kokoro（轻量本地）', value: 'kokoro' },
+  { label: 'Kokoro-82M（超轻量本地兜底，仅 150 MB）', value: 'kokoro' },
   { label: 'StyleTTS 2', value: 'styletts2' },
 ];
 
@@ -349,9 +348,9 @@ export const TTSTab: React.FC<TTSTabProps> = ({
               name="onlineId"
               label="线上 HuggingFace/ModelScope Repo ID"
               rules={[{ required: true, message: '请输入线上模型 ID' }]}
-              extra="例如: FunAudioLLM/Fun-CosyVoice3-0.5B-2512"
+              extra="例如: hexgrad/Kokoro-82M-v1.1-zh"
             >
-              <Input placeholder="FunAudioLLM/Fun-CosyVoice3-0.5B-2512" />
+              <Input placeholder="hexgrad/Kokoro-82M-v1.1-zh" />
             </Form.Item>
           )}
 

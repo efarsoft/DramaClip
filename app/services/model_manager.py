@@ -18,6 +18,54 @@ from loguru import logger
 
 import yaml  # for models.yaml catalog (aligned with OmniVoice-Studio reference)
 
+# ---------------------------------------------------------------------------
+# 下载渠道管理（ModelScope 优先，HuggingFace 备选）
+# ---------------------------------------------------------------------------
+_CHANNEL_FILE = Path(__file__).resolve().parent.parent.parent / "storage" / "download_channel.json"
+_VALID_CHANNELS = ("modelscope", "huggingface")
+
+# repo_id → ModelScope 镜像映射（仅需要特殊映射的条目，其余直接用 HF repo_id）
+_MODELSCOPE_MIRROR = {
+    "pyannote/speaker-diarization-3.1": "AI-ModelScope/speaker-diarization-3.1",
+    "pyannote/segmentation-3.0": "AI-ModelScope/segmentation-3.0",
+}
+
+
+def get_download_channel() -> str:
+    """获取当前下载渠道，默认 modelscope"""
+    try:
+        if _CHANNEL_FILE.exists():
+            data = json.loads(_CHANNEL_FILE.read_text(encoding="utf-8"))
+            ch = data.get("channel", "modelscope")
+            if ch in _VALID_CHANNELS:
+                return ch
+    except Exception:
+        pass
+    return "modelscope"
+
+
+def set_download_channel(channel: str) -> bool:
+    """设置下载渠道: 'modelscope' 或 'huggingface'"""
+    if channel not in _VALID_CHANNELS:
+        return False
+    try:
+        _CHANNEL_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _CHANNEL_FILE.write_text(
+            json.dumps({"channel": channel}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        logger.info(f"下载渠道已切换为: {channel}")
+        return True
+    except Exception as e:
+        logger.error(f"保存下载渠道失败: {e}")
+        return False
+
+
+def _resolve_modelscope_id(hf_repo_id: str) -> str:
+    """将 HF repo_id 映射为 ModelScope repo_id（大部分直接复用）"""
+    return _MODELSCOPE_MIRROR.get(hf_repo_id, hf_repo_id)
+
+
 # huggingface_hub 错误导入
 _HF_HUB_AVAILABLE = True
 try:
@@ -231,19 +279,19 @@ def load_model_catalog() -> list[dict]:
 
 
 def _get_fallback_catalog() -> list[dict]:
-    """Fallback catalog (quality-first, no CosyVoice lock)."""
+    """Fallback catalog (minimal set, aligned with models.yaml)."""
     return [
         {
-            "repo_id": "FunAudioLLM/Fun-CosyVoice3-0.5B-2512",
-            "label": "Fun-CosyVoice3 0.5B (high quality Chinese narration)",
-            "role": "TTS",
-            "size_gb": 2.0,
-            "category": "tts",
-            "note": "Strong for Chinese short drama (prosody/emotion). Not hard default.",
+            "repo_id": "iic/SenseVoiceSmall",
+            "label": "SenseVoice Small (中文方言/情感/BGM识别)",
+            "role": "ASR",
+            "size_gb": 0.9,
+            "category": "asr",
+            "required": True,
         },
         {
             "repo_id": "hexgrad/Kokoro-82M-v1.1-zh",
-            "label": "Kokoro-82M Chinese (light, fast, good quality)",
+            "label": "Kokoro-82M v1.1 中文 (超轻量本地兜底)",
             "role": "TTS",
             "size_gb": 0.15,
             "category": "tts",
@@ -266,7 +314,7 @@ def download_hf_model(
     cancel_flag: Optional[threading.Event] = None,
 ) -> bool:
     """
-    统一 HF 下载入口（严格使用 huggingface_hub.snapshot_download）。
+    统一模型下载入口（ModelScope 优先，HuggingFace 备选）。
     自动集成 hf_progress 适配器 → IPC progress.update（前端可消费的结构化进度）。
     """
     from app.utils import hf_progress
@@ -304,7 +352,58 @@ def download_hf_model(
 
     listener_id = hf_progress.register_listener(_ipc_listener)
 
+    channel = get_download_channel()
+    # pyannote 等 gated 模型：先尝试 ModelScope，失败则自动降级 HuggingFace
+
+    if local_dir is None:
+        safe_name = repo_id.replace("/", "--")
+        local_dir = str(_get_project_root() / "pretrained_models" / safe_name)
+
+    target_dir = Path(local_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
     try:
+        # ── ModelScope 渠道（国内首选） ────────────────────────────────
+        if channel == "modelscope":
+            ms_repo_id = _resolve_modelscope_id(repo_id)
+            try:
+                from modelscope.hub.snapshot_download import snapshot_download as ms_snapshot_download
+            except ImportError:
+                logger.warning("modelscope SDK 未安装，回退到 HuggingFace")
+                channel = "huggingface"
+
+        if channel == "modelscope":
+            if progress_callback:
+                progress_callback(0, f"开始从 ModelScope 下载 {model_info.get('label', repo_id)}...")
+
+            hf_progress.emit({"repo_id": repo_id, "phase": "start", "filename": repo_id})
+
+            try:
+                ms_snapshot_download(
+                    model_id=ms_repo_id,
+                    local_dir=str(target_dir),
+                )
+            except Exception as ms_err:
+                logger.warning(f"ModelScope 下载失败 ({ms_repo_id}): {ms_err}，尝试降级到 HuggingFace")
+                if progress_callback:
+                    progress_callback(0, f"ModelScope 下载失败，正在切换 HuggingFace...")
+                channel = "huggingface"
+                # 清理可能的不完整下载
+                if target_dir.exists():
+                    for item in target_dir.iterdir():
+                        if item.is_file():
+                            item.unlink(missing_ok=True)
+
+        if channel == "modelscope":
+            hf_progress.emit({"repo_id": repo_id, "phase": "done", "filename": repo_id, "pct": 1.0})
+
+            if progress_callback:
+                progress_callback(100, f"{model_info.get('label', repo_id)} 下载完成（ModelScope）")
+
+            logger.info(f"Model {repo_id} downloaded via ModelScope ({ms_repo_id}) to {target_dir}")
+            return True
+
+        # ── HuggingFace 渠道（国际备选） ──────────────────────────────
         try:
             import huggingface_hub
         except ImportError:
@@ -314,15 +413,13 @@ def download_hf_model(
             subprocess.check_call([sys.executable, "-m", "pip", "install", "huggingface_hub", "tqdm"])
             import huggingface_hub
 
-        if local_dir is None:
-            safe_name = repo_id.replace("/", "--")
-            local_dir = str(_get_project_root() / "pretrained_models" / safe_name)
-
-        target_dir = Path(local_dir)
-        target_dir.mkdir(parents=True, exist_ok=True)
+        # gated 模型（如 pyannote）需要 token 才能下载
+        from app.utils.hf_auth import ensure_hf_login, get_hf_token
+        ensure_hf_login()
+        hf_token = get_hf_token()
 
         if progress_callback:
-            progress_callback(0, f"开始从 HF 下载 {model_info.get('label', repo_id)}...")
+            progress_callback(0, f"开始从 HuggingFace 下载 {model_info.get('label', repo_id)}...")
 
         hf_progress.emit({"repo_id": repo_id, "phase": "start", "filename": repo_id})
 
@@ -332,14 +429,15 @@ def download_hf_model(
             local_dir=str(target_dir),
             local_dir_use_symlinks=False,
             resume_download=True,
+            token=hf_token,
         )
 
         hf_progress.emit({"repo_id": repo_id, "phase": "done", "filename": repo_id, "pct": 1.0})
 
         if progress_callback:
-            progress_callback(100, f"{model_info.get('label', repo_id)} 下载完成")
+            progress_callback(100, f"{model_info.get('label', repo_id)} 下载完成（HuggingFace）")
 
-        logger.info(f"Model {repo_id} downloaded via unified snapshot_download to {path}")
+        logger.info(f"Model {repo_id} downloaded via HuggingFace snapshot_download to {path}")
         return True
 
     except Exception as e:
@@ -351,7 +449,7 @@ def download_hf_model(
         if "403" in err_str or "Unauthorized" in err_str or "gated" in err_str.lower():
             user_msg = "下载失败：该模型需要 HF_TOKEN（gated model），请先在设置中配置 HuggingFace Token"
         elif "timeout" in err_str.lower() or "connection" in err_str.lower():
-            user_msg = "下载失败：网络超时或连接问题（国内建议配置 HF_ENDPOINT=https://hf-mirror.com 或使用 ModelScope 镜像）"
+            user_msg = f"下载失败：网络超时或连接问题（当前渠道: {channel}，可在模型管理页面切换下载渠道）"
 
         hf_progress.emit({"repo_id": repo_id, "phase": "error", "error": err_str[:200]})
         if progress_callback:
@@ -448,7 +546,23 @@ def check_styletts2_model() -> bool:
 
 
 def check_pyannote_model(model_name: str = "diarization-3.1") -> bool:
-    """检查指定的 Pyannote 模型是否已下载 (优先中央 catalog)"""
+    """检查指定的 Pyannote 模型是否已下载 (优先中央 pretrained_models，再查 HF 缓存)"""
+    # ── 优先检查中央 pretrained_models 路径 ──────────────────────────────
+    safe_name = f"pyannote--{model_name.replace('/', '--')}"
+    # 兼容 speaker-diarization-3.1 和 diarization-3.1 两种命名
+    if "speaker-" not in model_name:
+        safe_name = "pyannote--speaker-diarization-3.1"
+    central_dir = _get_project_root() / "pretrained_models" / safe_name
+    if central_dir.exists():
+        # 检查关键文件（config.yaml 是 pyannote 入口）
+        if (central_dir / "config.yaml").exists():
+            return True
+        # 也检查 snapshots 子目录（snapshot_download 可能保留结构）
+        snapshots = list(central_dir.glob("**/config.yaml"))
+        if snapshots:
+            return True
+
+    # ── 回退检查 HF 缓存路径 ─────────────────────────────────────────────
     catalog_entry = get_model_by_repo_id(f"pyannote/{model_name}") or get_model_by_repo_id("pyannote/speaker-diarization-3.1")
     repo = catalog_entry["repo_id"] if catalog_entry else PYANNOTE_MODELS.get(model_name, {}).get("hf_repo")
     if not repo:

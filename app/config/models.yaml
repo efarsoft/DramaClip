@@ -1,120 +1,39 @@
-# DramaClip — Model Catalog (strictly modeled after OmniVoice-Studio backend/config/models.yaml)
+# DramaClip — Model Catalog (Minimal Set)
 #
 # This is the single source of truth for all downloadable models.
-# Loaded at startup. Models are downloaded uniformly via huggingface_hub.snapshot_download.
+# Loaded at startup by model_manager.load_model_catalog().
 #
-# Goal: Consistent, high-quality local experience. Finished product quality is the #1 priority.
+# Default download channel: ModelScope (国内首选，速度快、免翻墙)
+#   - 用户可在「模型管理」页面切换为 HuggingFace
 #
-# Fields (aligned with reference):
-#   repo_id    (required) — HuggingFace repository ID
+# Minimal set rationale:
+#   - ASR:  SenseVoiceSmall (中文短剧最优，支持方言/情感/BGM，~0.9 GB)
+#   - TTS:  Kokoro-82M (超轻量本地兜底，~150 MB) + edge_tts (云端默认，零开销)
+#   - Diar: 内置聚类算法（无需额外模型），pyannote 作为可选引擎保留代码路径但不在目录中
+#
+# Fields:
+#   repo_id    (required) — HuggingFace / ModelScope repository ID
 #   label      (required) — Human-readable display name (shown in UI)
-#   role       (required) — TTS | ASR | Diarisation | Other
+#   role       (required) — TTS | ASR
 #   size_gb    (required) — Approximate download size in GiB
-#   category   (optional) — tts / asr / diarization
-#   note       (optional) — Important notes for user (e.g. quality characteristics, requirements)
+#   category   (optional) — tts / asr
+#   note       (optional) — Important notes for user
 #   required   (optional) — true if core functionality depends on it
-#   platforms  (optional) — restrict to specific platforms
-#   quality_notes (optional) — For TTS: notes on why this model ranks high for Chinese short drama / narration
-#
-# Default / recommended TTS for high quality Chinese short drama:
-#   - Fun-CosyVoice3-0.5B-2512 is currently one of the strongest open Chinese options for naturalness, prosody, emotion, and dialect.
-#   - It is NOT the only option and is NOT hard-locked as the default.
-#   - Users can choose based on quality needs vs resource cost.
-#   - Other strong options (Kokoro for speed, future additions like better diffusion models) are supported equally.
 
 models:
-  # ── Core High-Quality TTS (Chinese Short Drama / Narration Priority) ─────────────────────────
-  - repo_id: "FunAudioLLM/Fun-CosyVoice3-0.5B-2512"
-    label: "Fun-CosyVoice3 0.5B (2026 Chinese quality leader)"
-    role: TTS
-    size_gb: 2.0
-    category: tts
-    note: "Currently one of the best open-source Chinese TTS for naturalness, rhythm, emotion control and dialect support. Excellent for short drama narration."
-    quality_notes: "Top-tier for Chinese short drama in 2026 evaluations (prosody, emotion, zero-shot cloning). Requires cosyvoice package for inference. Strong candidate for highest output quality."
-    # Not marked "required" — user chooses the engine
-
-  - repo_id: "hexgrad/Kokoro-82M-v1.1-zh"
-    label: "Kokoro-82M (v1.1 Chinese, ultra-light high quality)"
-    role: TTS
-    size_gb: 0.15
-    category: tts
-    note: "Extremely lightweight (82M). Surprisingly good naturalness for size. Great CPU / low-resource fallback with excellent speed."
-    quality_notes: "Best-in-class quality-per-parameter. Very fast inference. Recommended when resources are limited but quality still matters."
-
-  # ── Reference Project Main TTS (for comparison / multi-language) ────────────────────────────
-  - repo_id: "k2-fsa/OmniVoice"
-    label: "OmniVoice (k2-fsa, 600+ languages, strong zero-shot)"
-    role: TTS
-    size_gb: 2.4
-    category: tts
-    note: "Flagship model from the reference project (OmniVoice-Studio). Excellent broad language coverage."
-    quality_notes: "Reference implementation's primary high-quality TTS. Good for multilingual content. Quality on Chinese is solid but Fun-CosyVoice3 often preferred for pure Chinese short drama in current benchmarks."
-
-  # ── ASR (High Quality, full family) ─────────────────────────────────────────────────────────
-  # All faster-whisper variants use the same HF org. We declare the full family so
-  # the central catalog becomes the single source of truth (matching OmniVoice-Studio style).
-  - repo_id: "Systran/faster-whisper-tiny"
-    label: "faster-whisper tiny (fastest, lowest VRAM)"
-    role: ASR
-    size_gb: 0.15
-    category: asr
-    note: "Quick previews and testing."
-
-  - repo_id: "Systran/faster-whisper-base"
-    label: "faster-whisper base (minimal, very fast)"
-    role: ASR
-    size_gb: 0.29
-    category: asr
-    note: "Good for low-resource environments."
-
-  - repo_id: "Systran/faster-whisper-small"
-    label: "faster-whisper small (balanced daily use)"
-    role: ASR
-    size_gb: 0.95
-    category: asr
-    note: "Recommended for most daily video work."
-
-  - repo_id: "Systran/faster-whisper-medium"
-    label: "faster-whisper medium (professional balance)"
-    role: ASR
-    size_gb: 1.5
-    category: asr
-    note: "Good accuracy with reasonable VRAM."
-
-  - repo_id: "Systran/faster-whisper-large-v3"
-    label: "faster-whisper large-v3 (highest accuracy general ASR)"
-    role: ASR
-    size_gb: 2.9
-    category: asr
-    note: "Top general-purpose ASR. Quality-first choice for complex narration."
-
-  - repo_id: "iic/SenseVoiceSmall"   # Primary is ModelScope; we keep HF note for catalog consistency
-    label: "SenseVoice Small (fast + strong Chinese dialect/emotion)"
+  # ── ASR (语音识别) ──────────────────────────────────────────────────────
+  - repo_id: "iic/SenseVoiceSmall"
+    label: "SenseVoice Small (中文方言/情感/BGM识别)"
     role: ASR
     size_gb: 0.9
     category: asr
-    note: "Excellent on Chinese dialects, emotion, and BGM. Heavily used in DramaClip narration pipeline. Prefers ModelScope snapshot for best compatibility."
+    note: "阿里达摩院出品，中文短剧场景首选。支持方言、情绪检测、BGM识别。优先从 ModelScope 下载。"
+    required: true
 
-  # ── Speaker Diarization ────────────────────────────────────────────────────────────────────
-  - repo_id: "pyannote/speaker-diarization-3.1"
-    label: "pyannote speaker-diarization 3.1"
-    role: Diarisation
-    size_gb: 0.8
-    category: diarization
-    note: "High quality speaker separation. Requires accepting the model license on Hugging Face and providing HF token."
-    required: false
-
-  # ── Future / Additional High Quality Options (placeholders for quality-first expansion) ──
-  # Add more here as better Chinese or general high-quality models are validated (e.g. newer diffusion TTS, better zero-shot models).
-  # Example future entry:
-  # - repo_id: "some-new-high-quality-chinese-tts"
-  #   label: "New 2026 SOTA Chinese TTS"
-  #   role: TTS
-  #   size_gb: 3.5
-  #   quality_notes: "If benchmarks show superior naturalness/prosody over CosyVoice3 for short drama, promote this."
-
-# Notes on defaults and quality priority:
-# - No TTS engine is hard-locked as the global default in this catalog.
-# - The application default (in unified_config) should favor stability during transition (e.g. edge_tts) or the currently best-validated local model for the user's content.
-# - Quality ranking and recommendation should come from the TTS registry + user testing / AB testing of output, not from hard-coding one model.
-# - All downloads use huggingface_hub.snapshot_download with resume support, consistent with the reference implementation.
+  # ── TTS (语音合成) ──────────────────────────────────────────────────────
+  - repo_id: "hexgrad/Kokoro-82M-v1.1-zh"
+    label: "Kokoro-82M v1.1 中文 (超轻量本地兜底)"
+    role: TTS
+    size_gb: 0.15
+    category: tts
+    note: "仅 82M 参数，推理极快。本地离线 TTS 兜底方案，默认 TTS 引擎为 edge_tts (云端)。"

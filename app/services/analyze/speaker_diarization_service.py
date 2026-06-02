@@ -35,8 +35,24 @@ DIARIZATION_REQUIRED_MODELS = [
 ]
 
 def get_pyannote_model_path(model_name: str = "diarization-3.1") -> str:
-    """从中央 catalog 获取 pyannote 模型路径（catalog-first）"""
-    from app.services.model_manager import get_model_by_repo_id, _get_hf_model_dir
+    """从中央 pretrained_models 获取 pyannote 模型路径（优先），再查 HF 缓存"""
+    from app.services.model_manager import get_model_by_repo_id, _get_hf_model_dir, _get_project_root
+
+    # ── 优先检查中央 pretrained_models ──────────────────────────────
+    safe_name = "pyannote--speaker-diarization-3.1"
+    if "segmentation" in model_name:
+        safe_name = "pyannote--segmentation-3.0"
+    central_dir = _get_project_root() / "pretrained_models" / safe_name
+    if central_dir.exists():
+        # snapshot_download 可能直接在目录下，也可能在 snapshots/ 子目录
+        if (central_dir / "config.yaml").exists():
+            return str(central_dir)
+        found = list(central_dir.glob("**/config.yaml"))
+        if found:
+            # 返回 config.yaml 所在目录（通常是 snapshot 根）
+            return str(found[0].parent)
+
+    # ── 回退检查 HF 缓存路径 ─────────────────────────────────────────
     entry = get_model_by_repo_id(f"pyannote/{model_name}") or get_model_by_repo_id("pyannote/speaker-diarization-3.1")
     if entry:
         return str(_get_hf_model_dir(entry["repo_id"]))

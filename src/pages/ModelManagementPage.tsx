@@ -5,16 +5,17 @@
  * 与「系统设置」分离：设置只负责“用哪个引擎/参数”，这里负责“把引擎装好”
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Typography, Divider, Button, Space, Tabs, message, Modal } from 'antd';
+import { Typography, Divider, Button, Space, Tabs, message, Modal, Radio, Tooltip } from 'antd';
 import {
   DatabaseOutlined,
   ArrowLeftOutlined,
   SettingOutlined,
   HeartOutlined,
   CloudDownloadOutlined,
+  GlobalOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { modelApi, ipcClient } from '../services/ipc';
+import { modelApi, systemApi, ipcClient } from '../services/ipc';
 import type { ModelInfo } from '../services/ipc';
 import { QualityEnginesPanel } from '../components/settings/QualityEnginesPanel';
 import { CentralModelsTab } from '../components/settings/CentralModelsTab';
@@ -24,6 +25,7 @@ const { Title, Text } = Typography;
 const ModelManagementPage: React.FC = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
+  const [downloadChannel, setDownloadChannel] = useState<'modelscope' | 'huggingface'>('modelscope');
 
   /* ── 模型列表状态 ── */
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -103,7 +105,32 @@ const ModelManagementPage: React.FC = () => {
   /* ── 首次加载 ── */
   useEffect(() => {
     loadModels();
+    // 加载当前下载渠道
+    systemApi.getDownloadChannel()
+      .then((res) => {
+        if (res?.channel === 'huggingface' || res?.channel === 'modelscope') {
+          setDownloadChannel(res.channel);
+        }
+      })
+      .catch(() => {});
   }, [loadModels]);
+
+  /* ── 切换下载渠道 ── */
+  const handleChannelChange = async (channel: 'modelscope' | 'huggingface') => {
+    try {
+      const res = await systemApi.setDownloadChannel(channel);
+      if (res?.success) {
+        setDownloadChannel(channel);
+        message.success(
+          channel === 'modelscope'
+            ? '已切换到 ModelScope（国内推荐，速度快）'
+            : '已切换到 HuggingFace（国际源）'
+        );
+      }
+    } catch {
+      message.error('切换下载渠道失败');
+    }
+  };
 
   /* ── 下载 ── */
   const handleDownload = async (modelId: string) => {
@@ -202,7 +229,7 @@ const ModelManagementPage: React.FC = () => {
     <div style={{ padding: '24px 32px', maxWidth: 1200, margin: '0 auto' }}>
       {/* 页面头部 */}
       <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
         marginBottom: 24,
       }}>
         <div>
@@ -213,6 +240,35 @@ const ModelManagementPage: React.FC = () => {
           <Text type="secondary" style={{ marginTop: 4, display: 'block' }}>
             发现、下载、安装和管理所有高质量本地 AI 模型。安装完成后即可在「系统设置」中选择使用。
           </Text>
+          {/* 下载渠道切换 */}
+          <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <GlobalOutlined style={{ color: '#8b8fa3' }} />
+            <Text type="secondary" style={{ fontSize: 12 }}>下载渠道：</Text>
+            <Radio.Group
+              value={downloadChannel}
+              onChange={(e) => handleChannelChange(e.target.value)}
+              size="small"
+              optionType="button"
+              buttonStyle="solid"
+            >
+              <Tooltip title="国内推荐，速度快，免翻墙，大部分模型与 HF 同源">
+                <Radio.Button value="modelscope" style={{
+                  background: downloadChannel === 'modelscope' ? 'linear-gradient(135deg, #4f46e5, #7c3aed)' : undefined,
+                  borderColor: downloadChannel === 'modelscope' ? '#4f46e5' : undefined,
+                }}>
+                  ModelScope
+                </Radio.Button>
+              </Tooltip>
+              <Tooltip title="国际源，用于部分国内无法访问的模型">
+                <Radio.Button value="huggingface" style={{
+                  background: downloadChannel === 'huggingface' ? 'linear-gradient(135deg, #f59e0b, #ef4444)' : undefined,
+                  borderColor: downloadChannel === 'huggingface' ? '#f59e0b' : undefined,
+                }}>
+                  HuggingFace
+                </Radio.Button>
+              </Tooltip>
+            </Radio.Group>
+          </div>
         </div>
         <Space>
           <Button

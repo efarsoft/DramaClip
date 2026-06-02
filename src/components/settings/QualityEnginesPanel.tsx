@@ -54,8 +54,7 @@ export const QualityEnginesPanel: React.FC = () => {
       const central = modelRes.central_catalog || modelRes || [];
       const highQualityRepos = [
         'iic/SenseVoiceSmall',
-        'Systran/faster-whisper-large-v3',
-        'pyannote/speaker-diarization-3.1',
+        'hexgrad/Kokoro-82M-v1.1-zh',
       ];
 
       central
@@ -79,7 +78,6 @@ export const QualityEnginesPanel: React.FC = () => {
         { id: 'cosyvoice_subprocess', name: 'CosyVoice 3 (进程隔离)', available: false, reason: '需安装运行时', category: 'tts' },
         { id: 'kokoro', name: 'Kokoro-82M', available: true, category: 'tts' },
         { id: 'iic/SenseVoiceSmall', name: 'SenseVoice Small', available: false, reason: '未下载', category: 'asr', repo_id: 'iic/SenseVoiceSmall' },
-        { id: 'pyannote/speaker-diarization-3.1', name: 'pyannote 3.1', available: false, reason: '未下载', category: 'diarization', repo_id: 'pyannote/speaker-diarization-3.1' },
       ]);
     } finally {
       setLoading(false);

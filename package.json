@@ -7,7 +7,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "vite",
-    "dev:full": "concurrently -k -n VITE,ELECTRON -c blue,green \"vite\" \"node scripts/dev-electron.js\"",
+    "dev:full": "node scripts/dev-electron.js",
     "build": "tsc && vite build && electron-builder",
     "build:vite": "tsc && vite build",
     "dev:electron": "npx vite build && npx electron .",
@@ -37,7 +37,6 @@
     "@types/react-dom": "^19.0.0",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.3.0",
-    "concurrently": "^9.0.0",
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0",
     "eslint": "^9.0.0",
@@ -50,7 +49,6 @@
     "vite": "^6.0.0",
     "vite-plugin-electron": "^0.28.0",
     "vite-plugin-electron-renderer": "^0.14.0",
-    "vitest": "^4.1.6",
-    "wait-on": "^8.0.0"
+    "vitest": "^4.1.6"
   }
 }

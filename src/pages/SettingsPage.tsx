@@ -175,7 +175,7 @@ const SettingsPage: React.FC = () => {
       children: (
         <div style={{ maxWidth: 800 }}>
           <Card title="Hugging Face 配置" style={{ marginBottom: 24 }}>
-            <p>用于下载 gated 模型（pyannote 等）。建议在「模型管理」中进行完整下载与安装。</p>
+            <p>用于下载 gated 模型（可选）。建议在「模型管理」中进行完整下载与安装。</p>
             <Button 
               type="primary" 
               icon={<DatabaseOutlined />}

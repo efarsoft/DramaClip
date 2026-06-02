@@ -58,11 +58,10 @@ export const CentralModelsTab: React.FC<CentralModelsTabProps> = ({
       setCatalog(list);
     } catch (e) {
       message.error('加载中央模型目录失败');
-      // 开发回退（展示核心模型）
+      // 开发回退（展示最小集模型）
       setCatalog([
-        { repo_id: 'FunAudioLLM/Fun-CosyVoice3-0.5B-2512', label: 'Fun-CosyVoice3 0.5B', role: 'TTS', size_gb: 2.0, note: '短剧中文高质量首选' },
+        { repo_id: 'iic/SenseVoiceSmall', label: 'SenseVoice Small (中文方言/情感/BGM)', role: 'ASR', size_gb: 0.9, note: '中文短剧首选 ASR' },
         { repo_id: 'hexgrad/Kokoro-82M-v1.1-zh', label: 'Kokoro-82M (中文)', role: 'TTS', size_gb: 0.15 },
-        { repo_id: 'pyannote/speaker-diarization-3.1', label: 'pyannote speaker-diarization 3.1', role: 'Diarisation', size_gb: 0.8, note: '高精度说话人分离（gated，需 HF Token）' },
       ]);
     } finally {
       setLoading(false);
@@ -220,20 +219,6 @@ export const CentralModelsTab: React.FC<CentralModelsTabProps> = ({
             )}
           </div>
         </div>
-
-        {key.toLowerCase().includes('pyannote') && !installed && (
-          <Alert
-            style={{ marginTop: 10, fontSize: 12 }}
-            type="warning"
-            showIcon
-            message="pyannote 3.1 为 gated 模型"
-            description={
-              <span>
-                请先前往 <a href="https://huggingface.co/pyannote/speaker-diarization-3.1" target="_blank" rel="noreferrer">HF 页面同意许可协议</a>，然后配置 HF_TOKEN 环境变量或在设置中填写。
-              </span>
-            }
-          />
-        )}
       </Card>
     );
   };
@@ -256,7 +241,7 @@ export const CentralModelsTab: React.FC<CentralModelsTabProps> = ({
         showIcon
         icon={<ExperimentOutlined />}
         message="安装完成即可用"
-        description="下载任意高品质本地模型后，对应 TTS / ASR / 说话人分离引擎的 is_available() 会立即变为 true。推荐先下载 Kokoro（极小）验证流程，再按需下载 Fun-CosyVoice3。"
+        description="下载任意本地模型后，对应 TTS / ASR 引擎会立即可用。推荐先下载 SenseVoiceSmall（ASR）验证流程，默认 TTS 使用 edge_tts (云端)。说话人分离默认使用内置聚类算法，无需额外模型。"
       />
 
       {/* P8 快速开始推荐包 */}
@@ -303,7 +288,7 @@ export const CentralModelsTab: React.FC<CentralModelsTabProps> = ({
               {grouped.ASR.map(renderModelCard)}
             </>
           )}
-          {grouped.Diarisation.length > 0 && (
+          {grouped.Diarisation && grouped.Diarisation.length > 0 && (
             <>
               <Divider style={{ borderColor: 'rgba(255,255,255,0.06)', margin: '16px 0 8px' }} />
               <div style={{ color: '#f59e0b', fontWeight: 600, margin: '12px 0 8px' }}>Diarization · 说话人分离（精准模式）</div>
@@ -315,7 +300,7 @@ export const CentralModelsTab: React.FC<CentralModelsTabProps> = ({
       )}
 
       <div style={{ marginTop: 16, fontSize: 12, color: '#71717a' }}>
-        提示：下载使用标准 HF 断点续传。pyannote 等 gated 模型需要先在 HuggingFace 同意协议并提供有效 HF_TOKEN。
+        提示：下载使用标准 HF 断点续传。说话人分离默认使用内置聚类算法，无需下载额外模型。
       </div>
     </div>
   );

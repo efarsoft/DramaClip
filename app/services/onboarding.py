@@ -48,33 +48,12 @@ def get_recommended_packs() -> List[Dict]:
             "estimated_size_gb": 1.1,
             "recommended_for": "大多数短剧，资源占用低，效果已很好",
         },
-        {
-            "id": "extreme_quality",
-            "name": "极致成片套装",
-            "description": "Fun-CosyVoice3（顶级中文TTS）+ pyannote 3.1（精准说话人分离）",
-            "models": [
-                "FunAudioLLM/Fun-CosyVoice3-0.5B-2512",
-                "pyannote/speaker-diarization-3.1"
-            ],
-            "estimated_size_gb": 3.0,
-            "recommended_for": "追求最高成片质量的多角色短剧（需较好显卡 + HF_TOKEN）",
-        }
     ]
 
 
 def get_hardware_recommendation() -> str:
-    """简单硬件推荐（基于是否有 CUDA）。"""
-    try:
-        import torch
-        if torch.cuda.is_available():
-            vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-            if vram >= 8:
-                return "extreme_quality"
-            else:
-                return "light_high_quality"
-        return "light_high_quality"
-    except Exception:
-        return "light_high_quality"
+    """简单硬件推荐（当前仅有轻量高质套装）。"""
+    return "light_high_quality"
 
 
 def apply_recommended_pack(pack_id: str) -> bool:
@@ -91,12 +70,6 @@ def apply_recommended_pack(pack_id: str) -> bool:
             if hasattr(cfg, '_settings'):
                 cfg._settings.setdefault("tts", {}).update(tts_cfg)
             logger.info("已切换默认 TTS 为 kokoro（轻量高质套装）")
-            return True
-        elif pack_id == "extreme_quality":
-            tts_cfg["engine"] = "cosyvoice_subprocess"
-            if hasattr(cfg, '_settings'):
-                cfg._settings.setdefault("tts", {}).update(tts_cfg)
-            logger.info("已切换默认 TTS 为 cosyvoice_subprocess（极致成片套装）")
             return True
     except Exception as e:
         logger.warning(f"应用推荐套装时出错（可忽略，后端仍可用）: {e}")
