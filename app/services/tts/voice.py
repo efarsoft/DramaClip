@@ -1160,7 +1160,13 @@ def tts(
             )
 
             # ── DSP post-processing (broadcast-grade mastering) ──────────
-            if audio_tensor is not None and isinstance(audio_tensor, torch.Tensor):
+            _is_tensor = False
+            try:
+                import torch as _torch
+                _is_tensor = isinstance(audio_tensor, _torch.Tensor)
+            except ImportError:
+                _is_tensor = hasattr(audio_tensor, 'numpy')
+            if audio_tensor is not None and _is_tensor:
                 try:
                     from app.utils.audio_dsp import apply_mastering, normalize_audio, apply_effects_chain, get_effect_chain
                     sr = getattr(backend, "sample_rate", 24000)
@@ -1246,7 +1252,9 @@ def tts(
     if tts_engine in ("openai_tts", "openai_compatible_tts", "openai"):
         # Legacy direct call (the function is still defined below)
         logger.info("分发到 OpenAI 兼容 TTS（legacy path）")
-        tts_model = "tts-1-hd"
+        # Read model from config instead of hardcoding tts-1-hd
+        _tts_openai_cfg = config.get("tts", {}).get("openai", {}) or {}
+        tts_model = _tts_openai_cfg.get("model") or "tts-1-hd"
         actual_voice = voice_name
         if ":" in voice_name:
             parts = voice_name.split(":", 1)

@@ -101,6 +101,9 @@ function nextId(type: TaskType): string {
 
 // ── 轮询执行一个任务 ──
 
+// 轮询最大连续失败次数（容忍后端刚启动时的短暂不可用）
+const MAX_POLL_RETRIES = 5;
+
 async function pollTask(
   task: Task,
   onUpdate: (updates: Partial<Task>) => void,
@@ -112,6 +115,8 @@ async function pollTask(
     return;
   }
 
+  let consecutiveErrors = 0;
+
   const poll = async () => {
     try {
       const status = await ipcClient.call<{
@@ -122,6 +127,9 @@ async function pollTask(
         output_path?: string;
         results?: { asr?: unknown; emotion?: unknown; highlights?: unknown };
       }>(method, { task_id: task.id });
+
+      // 成功响应，重置连续错误计数
+      consecutiveErrors = 0;
 
       if (!status) {
         onUpdate({ status: 'failed', message: '获取任务状态失败' });
@@ -164,6 +172,18 @@ async function pollTask(
       setTimeout(poll, 1000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      consecutiveErrors++;
+
+      // 容忍一定次数的瞬时错误（如后端重启时 Task not found）
+      const isTransient = msg.includes('not found') || msg.includes('超时');
+      if (isTransient && consecutiveErrors < MAX_POLL_RETRIES) {
+        console.warn(`[TaskQueue] 轮询 ${task.id} 瞬时错误 (${consecutiveErrors}/${MAX_POLL_RETRIES}): ${msg}`);
+        onUpdate({ phase: '连接中...', message: `重连中 (${consecutiveErrors}/${MAX_POLL_RETRIES})` });
+        setTimeout(poll, 2000 * consecutiveErrors); // 退避重试
+        return;
+      }
+
+      // 超过重试上限或不可恢复错误
       onUpdate({ status: 'failed', error: msg, message: msg, completedAt: Date.now() });
       onDone();
     }

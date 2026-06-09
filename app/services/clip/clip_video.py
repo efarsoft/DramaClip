@@ -764,12 +764,14 @@ def _build_ffmpeg_command_with_ducking(
     elif hwaccel_args:
         cmd.extend(hwaccel_args)
     
-    # 输入文件：视频和解说音频
-    cmd.extend(["-i", video_path])
-    cmd.extend(["-i", narration_audio])
-    
-    # 时间范围（对视频输入）
+    # 输入文件：视频（带时间裁剪）和解说音频（从头播放）
+    # 关键修复：-ss/-to 必须放在 -i 之前，仅作用于视频输入
+    # 如果放在两个 -i 之后，FFmpeg 会把 seek 应用到所有输入（包括 TTS 音频），
+    # 导致 TTS 文件被 seek 到远超其时长后变成空音频
     cmd.extend(["-ss", start_time, "-to", end_time])
+    cmd.extend(["-i", video_path])
+    cmd.extend(["-ss", "0"])  # 重置时间偏移，确保解说音频从头开始
+    cmd.extend(["-i", narration_audio])
     
     # 构建滤镜链：原声 + 解说混合，原声应用sidechaincompress实现声音避让
     # [0:a] = 视频原声, [1:a] = 解说音频

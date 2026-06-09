@@ -18,7 +18,6 @@ import { useTaskQueueStore } from '../stores/taskQueueStore';
 import ImportPanel from './workspace/ImportPanel';
 import AnalyzePanel from './workspace/AnalyzePanel';
 import RecommendPanel from './workspace/RecommendPanel';
-import EditPanel from './workspace/EditPanel';
 import ExportPanel from './workspace/ExportPanel';
 
 /* ─── 颜色常量 ─── */

@@ -66,6 +66,7 @@ class OpenAICompatibleTTSBackend(TTSBackend):
 
         api_key = tts_openai.get("api_key") or openai_protocol.get("api_key")
         base_url = tts_openai.get("base_url") or openai_protocol.get("base_url") or "https://api.openai.com/v1"
+        self._model = tts_openai.get("model") or "tts-1-hd"
 
         self._client = OpenAI(api_key=api_key, base_url=base_url)
         return self._client
@@ -101,6 +102,7 @@ class OpenAICompatibleTTSBackend(TTSBackend):
 
             # Some providers support "instructions" for prosody/emotion.
             # We pass it via extra_body if the SDK supports it; otherwise ignore gracefully.
+            model = getattr(self, '_model', None) or model
             kwargs: dict = {"model": model, "voice": vname, "input": text, "response_format": "wav"}
             if instruct:
                 # Many Chinese OpenAI-compat providers accept "instructions"
@@ -120,7 +122,7 @@ class OpenAICompatibleTTSBackend(TTSBackend):
 
         except Exception as e:
             logger.error(f"OpenAI-compatible TTS failed: {e}")
-            return torch.zeros(1, 24000)
+            raise
 
 
 register_backend(OpenAICompatibleTTSBackend)

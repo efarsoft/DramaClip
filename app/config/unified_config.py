@@ -62,8 +62,8 @@ def _default_settings() -> Dict[str, Any]:
         },
         "tts": {
             "enabled": True,
-            "engine": "edge_tts",
-            "voice": "zh-CN-XiaoxiaoNeural",
+            "engine": "kokoro",
+            "voice": "zf_001",
             "speed": 1.0,
             "pitch": 1.0,
         },

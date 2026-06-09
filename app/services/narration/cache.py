@@ -36,6 +36,9 @@ class NarrationCacheEntry:
 class NarrationCache:
     """Narration 脚本结果缓存管理器"""
 
+    # 缓存版本号：当 prompt 模板或生成逻辑有重大变更时递增，自动使旧缓存失效
+    CACHE_VERSION = "v3"
+
     def __init__(self, cache_dir: Optional[Path] = None):
         if cache_dir is None:
             cache_dir = Path.home() / ".dramaclip" / "cache" / "narration"
@@ -61,7 +64,7 @@ class NarrationCache:
 
     def _make_cache_key(self, segments: List[Dict], mix_mode: str, drama_name: str) -> str:
         fingerprint = self._compute_segments_fingerprint(segments)
-        raw = f"{fingerprint}:{mix_mode}:{drama_name or 'default'}"
+        raw = f"{self.CACHE_VERSION}:{fingerprint}:{mix_mode}:{drama_name or 'default'}"
         return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
     def get(self, segments: List[Dict], mix_mode: str, drama_name: str = "") -> Optional[Dict]:

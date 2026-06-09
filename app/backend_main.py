@@ -81,7 +81,7 @@ def setup_exception_handler():
     def handle_thread_exception(args):
         """处理线程中的异常"""
         logger.error(
-            f"线程异常: {args.threading_excepthook}",
+            f"线程异常: {args.exc_type.__name__}: {args.exc_value}",
             exc_info=(args.exc_type, args.exc_value, args.exc_traceback)
         )
     

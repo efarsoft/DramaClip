@@ -125,8 +125,8 @@ def _default_settings() -> Dict:
         # TTS 配置
         "tts": {
             "enabled": True,
-            "engine": "edge_tts",   # 安全默认（始终可用）。用户可前往“模型管理”下载 Fun-CosyVoice3 / Kokoro 后切换为高质量本地引擎（质量第一，不锁定默认）
-            "voice": "longyang",
+            "engine": "kokoro",       # 本地轻量中文 TTS 首选（82MB，极快）；edge_tts 作为云端兜底
+            "voice": "zf_001",
             "speed": 1.0,
             "pitch": 1.0,
         },

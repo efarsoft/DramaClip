@@ -148,6 +148,50 @@ class NarrationPipeline:
             # 写入段落对白
             seg["transcript"] = joined_text or seg.get("subtitle_text") or "无对白动作画面"
 
+        # ==================== 聚合全量 ASR 为剧情梗概 ====================
+        all_asr_texts = []
+        if project_id and videos:
+            for v in videos:
+                asr_file = Path.home() / ".dramaclip" / "analysis" / project_id / v.id / "asr.json"
+                if asr_file.exists():
+                    try:
+                        asr_data = json.loads(asr_file.read_text(encoding="utf-8"))
+                        for seg_asr in asr_data.get("segments", []):
+                            t = seg_asr.get("text", "").strip()
+                            if t:
+                                all_asr_texts.append(t)
+                    except Exception as e:
+                        logger.warning(f"[Narration] Failed to read full ASR for video {v.id}: {e}")
+
+        plot_synopsis = " ".join(all_asr_texts) if all_asr_texts else ""
+
+        # 超长文本压缩（>20000字符时调用 LLM 摘要，中短剧通常 8000-15000 字直接传原文）
+        if len(plot_synopsis) > 20000:
+            try:
+                progress_callback("asr_synopsis", 20, "正在生成全剧剧情梗概...")
+                summary_prompt = (
+                    "请将以下短剧的全部对白文本压缩为一段 1500 字以内的剧情梗概，"
+                    "保留核心人物关系、关键冲突转折和剧情走向：\n\n"
+                    f"{plot_synopsis[:40000]}"
+                )
+                plot_synopsis = _run_async_safely(
+                    UnifiedLLMService.generate_text,
+                    prompt=summary_prompt,
+                    system_prompt="你是一位短剧剧情分析师，擅长用精炼的语言概括剧情。",
+                    max_tokens=800,
+                    temperature=0.3,
+                )
+                logger.info(f"[Narration] ASR synopsis compressed: {len(plot_synopsis)} chars")
+            except Exception as e:
+                logger.warning(f"[Narration] Synopsis compression failed, using truncated: {e}")
+                plot_synopsis = plot_synopsis[:20000]
+
+        if plot_synopsis:
+            logger.info(f"[Narration] Plot synopsis ready: {len(plot_synopsis)} chars")
+        else:
+            logger.warning("[Narration] No ASR data available, plot_synopsis is empty")
+        # ==================== 剧情梗概聚合结束 ====================
+
         # 3. 大模型解说词脚本生成 (30% - 50%)
         progress_callback("llm_generation", 30, "正在调用大语言模型策划专属解说词...")
         
@@ -184,6 +228,7 @@ class NarrationPipeline:
                 name="highlight_narration",
                 parameters={
                     "drama_name": drama_name,
+                    "plot_synopsis": plot_synopsis or "无可用剧情文本",
                     "mix_mode_description": mix_mode_description,
                     "segments": json.dumps(prompt_segments, ensure_ascii=False, indent=2)
                 }
@@ -237,6 +282,7 @@ class NarrationPipeline:
                         refined_data = self._refine_script_globally(
                             drama_name=drama_name,
                             mix_mode=mix_mode,
+                            plot_synopsis=plot_synopsis,
                             original_segments=prompt_segments,
                             initial_script=script_data
                         )
@@ -315,7 +361,7 @@ class NarrationPipeline:
         # 5. 执行 TTS 配音语音合成 (60% - 70%)
         progress_callback("tts_synthesis", 60, "正在调用高音质TTS语音合成引擎...")
         
-        # 加载项目TTS设置（优先现代嵌套结构 settings["tts"]，兼容旧的扁平 key）
+        # 加载项目级 TTS 设置，若缺失则回退到 config.toml [tts] 全局配置
         tts_section = {}
         if project_id:
             try:
@@ -336,13 +382,27 @@ class NarrationPipeline:
             except Exception as e:
                 logger.warning(f"[Narration] Failed to read project settings for TTS: {e}")
 
-        # 默认引擎改为云端 OpenAI 兼容（用户当前推荐方向）
-        # 用户可以在设置里轻松切换为 Qwen3、豆包、SoulVoice 等高质量云端方案
-        raw_engine = tts_section.get("engine") or "openai_tts"
+        # 若项目设置为空，再回退到 config.toml 全局 [tts] 配置
+        if not tts_section:
+            try:
+                from app.config.unified_config import get_config
+                global_cfg = get_config()
+                global_tts = global_cfg.get("tts", {}) if hasattr(global_cfg, 'get') else {}
+                if global_tts:
+                    tts_section = {
+                        "engine": global_tts.get("engine"),
+                        "voice": global_tts.get("voice"),
+                    }
+                    logger.info(f"[Narration] Fallback to global TTS config: engine={tts_section.get('engine')}")
+            except Exception:
+                pass
+
+        # 默认引擎：本地 Kokoro（轻量快速），用户可在设置中切换为其他方案
+        raw_engine = tts_section.get("engine") or "kokoro"
 
         # 前端有时传 "edge"，后端 voice.py 用 "edge_tts"
         tts_engine = "edge_tts" if raw_engine in ("edge", "edge_tts") else raw_engine
-        voice_name = tts_section.get("voice") or "alloy"
+        voice_name = tts_section.get("voice") or "zf_001"
         voice_rate = float(tts_section.get("speed") or tts_section.get("voice_rate") or 1.0)
         voice_pitch = float(tts_section.get("pitch") or tts_section.get("voice_pitch") or 1.0)
 
@@ -427,6 +487,7 @@ class NarrationPipeline:
         self,
         drama_name: str,
         mix_mode: str,
+        plot_synopsis: str,
         original_segments: list,
         initial_script: dict
     ) -> dict:
@@ -450,6 +511,7 @@ class NarrationPipeline:
                 name="narration_refinement",
                 parameters={
                     "drama_name": drama_name,
+                    "plot_synopsis": plot_synopsis or "无可用剧情文本",
                     "mix_mode": mix_desc,
                     "original_segments": json.dumps(original_segments, ensure_ascii=False, indent=2),
                     "initial_script": json.dumps(initial_script, ensure_ascii=False, indent=2)

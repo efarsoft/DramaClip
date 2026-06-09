@@ -39,7 +39,7 @@ def get_pyinstaller_cmd(
     cmd = [
         pyinstaller_bin,
         "--name", "backend",
-        "--onefile",
+        "--onedir",
         "--console",
         "--noconfirm",
         "--distpath", str(dist_dir),
@@ -78,15 +78,6 @@ def build_backend():
     if result.returncode != 0:
         logger.error("Build failed!")
         return False
-
-    # 复制 FFmpeg（如果有）
-    resources_dir = project_root / "resources"
-    ffmpeg_src = resources_dir / "ffmpeg.exe"
-    if ffmpeg_src.exists():
-        ffmpeg_dst = dist_dir / "resources" / "ffmpeg.exe"
-        ffmpeg_dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(ffmpeg_src, ffmpeg_dst)
-        logger.info(f"Copied FFmpeg to {ffmpeg_dst}")
 
     logger.info("Build completed!")
     return True
