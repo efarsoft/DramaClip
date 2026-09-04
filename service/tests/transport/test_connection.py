@@ -1,8 +1,20 @@
-"""transport.connection：行分帧纯逻辑。"""
+"""transport.connection：行分帧与地址解析（纯逻辑）。"""
 
 from __future__ import annotations
 
-from dramaclip.transport.connection import LineAssembler
+import pytest
+
+from dramaclip.transport.connection import LineAssembler, parse_address
+
+
+def test_parse_address_valid() -> None:
+    assert parse_address("127.0.0.1:51800") == ("127.0.0.1", 51800)
+
+
+def test_parse_address_rejects_invalid() -> None:
+    for bad in ("", "localhost", "127.0.0.1", "host:abc", ":1234"):
+        with pytest.raises(ValueError, match="非法服务地址"):
+            parse_address(bad)
 
 
 def test_single_complete_line() -> None:

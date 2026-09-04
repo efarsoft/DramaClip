@@ -1,20 +1,32 @@
-"""本地套接字客户端：Windows 命名管道 / Unix domain socket，NDJSON 分帧。"""
+"""本地套接字客户端：127.0.0.1 环回 TCP + NDJSON 分帧（ADR-002 修订版）。
+
+为何放弃命名管道：Python CRT 文件句柄在 Windows 管道上并发「阻塞读 + 跨线程写」
+会死锁写方（实测 20 条 0 投递）。环回 TCP 两端实现均成熟、跨平台同码，
+安全由 hello 阶段的 token 认证保证（不经外网栈、环回绑定无防火墙弹窗）。
+"""
 
 from __future__ import annotations
 
 import json
 import socket
-import sys
 import threading
 from collections.abc import Callable
-from typing import IO, Any, cast
+from typing import Any
 
 MAX_LINE_BYTES = 16 * 1024 * 1024
 _READ_CHUNK = 65536
-_PIPE_PREFIX = "\\\\.\\pipe\\"
+_CONNECT_TIMEOUT_S = 10.0
 
 MessageHandler = Callable[[dict[str, Any]], None]
 DisconnectHandler = Callable[[], None]
+
+
+def parse_address(address: str) -> tuple[str, int]:
+    """'127.0.0.1:51800' → ('127.0.0.1', 51800)。"""
+    host, _, port_text = address.rpartition(":")
+    if not host or not port_text.isdigit():
+        raise ValueError(f"非法服务地址: {address}")
+    return host, int(port_text)
 
 
 class LineAssembler:
@@ -40,8 +52,8 @@ class LineAssembler:
 class ServiceConnection:
     """连接 Electron 主进程（服务端），后台线程读取入站消息。
 
-    Windows：命名管道以文件句柄打开（byte 模式，CreateFile 客户端）；
-    其他平台：AF_UNIX socket。EOF/断开 → on_disconnect → 由上层决定退出进程。
+    读/写使用 socket 的两个独立 makefile 对象，天然支持跨线程并发。
+    EOF/断开 → on_disconnect → 由上层决定退出进程。
     """
 
     def __init__(
@@ -55,19 +67,10 @@ class ServiceConnection:
         self._on_disconnect = on_disconnect
         self._write_lock = threading.Lock()
         self._closed = False
-        self._sock: socket.socket | None = None
-        if sys.platform == "win32" and address.startswith(_PIPE_PREFIX):
-            handle: IO[bytes] = open(address, "r+b", buffering=0)  # noqa: SIM115 - 管道生命周期由本类管理
-            self._reader: IO[bytes] = handle
-            self._writer: IO[bytes] = handle
-        else:
-            # Windows 类型存根无 AF_UNIX；运行时此分支仅在非 Windows 走到
-            unix_family = int(getattr(socket, "AF_UNIX"))  # noqa: B009 - 为 mypy 平台兼容保留 getattr
-            sock = socket.socket(unix_family, socket.SOCK_STREAM)
-            sock.connect(address)
-            self._sock = sock
-            self._reader = cast(IO[bytes], sock.makefile("rb", buffering=0))
-            self._writer = cast(IO[bytes], sock.makefile("wb", buffering=0))
+        self._sock = socket.create_connection(parse_address(address), timeout=_CONNECT_TIMEOUT_S)
+        self._sock.settimeout(None)
+        self._reader = self._sock.makefile("rb", buffering=0)
+        self._writer = self._sock.makefile("wb", buffering=0)
 
     @property
     def address(self) -> str:
@@ -97,8 +100,7 @@ class ServiceConnection:
             self._reader.close()
             self._writer.close()
         finally:
-            if self._sock is not None:
-                self._sock.close()
+            self._sock.close()
 
     def _read_loop(self) -> None:
         assembler = LineAssembler()

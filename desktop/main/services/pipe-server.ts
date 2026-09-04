@@ -1,7 +1,8 @@
 /**
- * 本地套接字服务端（ADR-002）：Windows 命名管道 / Unix socket，NDJSON 分帧。
+ * 本地套接字服务端（ADR-002 修订版）：127.0.0.1 环回 TCP，NDJSON 分帧。
  * 单连接；hello(token) 认证；request/response 按 id 关联；notification 上抛。
  * 不 import electron（appVersion 经参数注入）——可在 node 环境单测。
+ * 为何非命名管道：Python CRT 管道句柄并发读写会死锁写方（详见 docs/00 ADR-002）。
  */
 import net from 'node:net';
 import { createLineDecoder } from './ndjson';
@@ -16,7 +17,6 @@ export interface HelloInfo {
 }
 
 export interface PipeServerOptions {
-  readonly pipePath: string;
   readonly token: string;
   readonly appVersion: string;
   readonly onClientReady: (hello: HelloInfo) => void;
@@ -25,7 +25,8 @@ export interface PipeServerOptions {
 }
 
 export interface PipeServer {
-  readonly pipePath: string;
+  /** 监听地址（host:port，listening 解决后有效）。 */
+  readonly address: string;
   /** server 进入 listening 的 promise（失败即 reject）。 */
   readonly listening: Promise<void>;
   call(method: string, params: Record<string, unknown>, timeoutMs?: number): Promise<unknown>;
@@ -40,8 +41,8 @@ interface PendingCall {
 }
 
 class PipeServerImpl implements PipeServer {
-  readonly pipePath: string;
   readonly listening: Promise<void>;
+  private addressValue = '';
   private readonly options: PipeServerOptions;
   private readonly pending = new Map<string, PendingCall>();
   private readonly decode = createLineDecoder();
@@ -53,15 +54,25 @@ class PipeServerImpl implements PipeServer {
 
   constructor(options: PipeServerOptions) {
     this.options = options;
-    this.pipePath = options.pipePath;
-    this.server = net.createServer((client: net.Socket) => { this.acceptClient(client); });
+    this.server = net.createServer((client: net.Socket) => {
+      this.acceptClient(client);
+    });
     this.listening = new Promise<void>((resolveListen, rejectListen) => {
       this.server.once('listening', () => {
+        const bound = this.server.address();
+        if (bound !== null) this.addressValue = formatAddress(bound);
         resolveListen();
       });
-      this.server.once('error', (error: Error) => { rejectListen(error); });
+      this.server.once('error', (error: Error) => {
+        rejectListen(error);
+      });
     });
-    this.server.listen(options.pipePath);
+    // 端口 0 = 系统随机分配；仅环回绑定，不触发防火墙弹窗
+    this.server.listen(0, '127.0.0.1');
+  }
+
+  get address(): string {
+    return this.addressValue;
   }
 
   private acceptClient(client: net.Socket): void {
@@ -213,6 +224,11 @@ class PipeServerImpl implements PipeServer {
 
 function asParams(raw: unknown): Record<string, unknown> {
   return typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+}
+
+function formatAddress(address: net.AddressInfo | string): string {
+  if (typeof address === 'string') return address;
+  return `${address.address}:${String(address.port)}`;
 }
 
 export function createPipeServer(options: PipeServerOptions): PipeServer {

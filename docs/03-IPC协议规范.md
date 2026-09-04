@@ -7,11 +7,11 @@
 
 | 项 | 规格 |
 |----|------|
-| 地址（Windows） | 命名管道 `\\.\pipe\dramaclip-<hex8>`（随机后缀，防多实例冲突与残留管道抢占） |
-| 地址（非 Windows） | Unix domain socket `<tmp>/dramaclip-<hex8>.sock`（CI 与跨平台开发用） |
-| 服务端 | Electron 主进程（Node `net` 原生监听） |
-| 客户端 | Python 服务进程（stdlib：win 下文件句柄 / 其他 AF_UNIX） |
-| 连接数 | 单连接（Python 重启即重连；旧连接出现时主动断开） |
+| 传输 | **127.0.0.1 环回 TCP**（ADR-002 修订版：Windows 命名管道因 Python CRT 句柄并发读写死锁被实测否决） |
+| 地址 | `127.0.0.1:<随机端口>`（Electron 监听端口 0 由系统分配；仅环回绑定，无防火墙弹窗） |
+| 服务端 | Electron 主进程（Node `net`） |
+| 客户端 | Python 服务进程（stdlib `socket.create_connection`；读写为 `makefile` 的两个独立对象） |
+| 连接数 | 单连接（Python 重启即重连同一端口；新连接到达时旧连接销毁） |
 | 消息大小上限 | 单行 ≤ 16MB（超限视为协议错误，断开连接） |
 
 ## 2. 分帧：NDJSON
@@ -24,7 +24,7 @@
 
 ```
 Electron spawn Python:
-  env DRAMACLIP_PIPE_ADDRESS = <地址>
+  env DRAMACLIP_SERVICE_ADDRESS = <127.0.0.1:port>
   env DRAMACLIP_AUTH_TOKEN  = <64 hex 随机 token>
   env DRAMACLIP_DATA_DIR    = <数据目录>
 

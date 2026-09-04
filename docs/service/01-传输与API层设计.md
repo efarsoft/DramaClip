@@ -31,7 +31,8 @@ class Router:
 | 组件 | 职责 |
 |------|------|
 | `LineAssembler` | 字节流 → 完整行（跨 chunk 缓冲，纯函数，单测覆盖半行/多行/空行） |
-| `ServiceConnection(address, on_message)` | 双平台连接：Windows `open(r'\\.\pipe\...', 'r+b', buffering=0)`；其他 AF_UNIX socket |
+| `parse_address` | `'127.0.0.1:port'` → `(host, port)`，非法即抛错 |
+| `ServiceConnection(address, on_message)` | 环回 TCP 客户端（`socket.create_connection`）；读写为 `makefile` 的**两个独立对象**，支持读线程/写线程并发（命名管道方案因此并发死锁被否决，ADR-002） |
 
 行为约定：
 - `send(obj)`：`json.dumps(ensure_ascii=False) + '\n'`，**写锁保证行原子**，底层循环写至完成；
@@ -87,7 +88,7 @@ request: analysis.start {project_id, episode_ids}
 
 | 项 | 约定 |
 |----|------|
-| 参数 | `--address <路径>`（缺省读 env `DRAMACLIP_PIPE_ADDRESS`） |
+| 参数 | `--address <host:port>`（缺省读 env `DRAMACLIP_SERVICE_ADDRESS`） |
 | 环境 | `DRAMACLIP_AUTH_TOKEN`（必填，缺失退出码 2）、`DRAMACLIP_DATA_DIR` |
 | 启动 | 按 `00-服务总体设计` 第 3 节时序 |
 | 退出码 | 0 正常退出；2 配置/环境错误；3 迁移失败 |

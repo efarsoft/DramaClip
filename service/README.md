@@ -24,8 +24,8 @@ cd service
 ## 手动运行（调试）
 
 ```bash
-# 终端 1：起一个回声服务端（模拟 Electron）后运行：
-DRAMACLIP_PIPE_ADDRESS='\\.\pipe\dramaclip-dev' DRAMACLIP_AUTH_TOKEN=dev \
+# 先起一个回声服务端（模拟 Electron，如 nc -l 127.0.0.1 51801），然后：
+DRAMACLIP_SERVICE_ADDRESS=127.0.0.1:51801 DRAMACLIP_AUTH_TOKEN=dev \
   ../.venv/Scripts/python -m dramaclip
 ```
 

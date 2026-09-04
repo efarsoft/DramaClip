@@ -16,15 +16,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--address",
         default=None,
-        help="套接字地址（缺省读环境变量 DRAMACLIP_PIPE_ADDRESS）",
+        help="套接字地址（缺省读环境变量 DRAMACLIP_SERVICE_ADDRESS）",
     )
     args = parser.parse_args(argv)
 
-    address = args.address or os.environ.get("DRAMACLIP_PIPE_ADDRESS", "")
+    address = args.address or os.environ.get("DRAMACLIP_SERVICE_ADDRESS", "")
     token = os.environ.get("DRAMACLIP_AUTH_TOKEN", "")
     if not address or not token:
         print(
-            "缺少 DRAMACLIP_PIPE_ADDRESS / DRAMACLIP_AUTH_TOKEN 环境变量（应由主进程注入）",
+            "缺少 DRAMACLIP_SERVICE_ADDRESS / DRAMACLIP_AUTH_TOKEN 环境变量（应由主进程注入）",
             file=sys.stderr,
         )
         return _EXIT_ENV_MISSING

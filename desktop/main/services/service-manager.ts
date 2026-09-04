@@ -5,7 +5,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type { NotificationName, ServiceEvent, ServiceState } from '@dramaclip/protocol';
 import { createPipeServer, type PipeServer } from './pipe-server';
@@ -43,14 +42,6 @@ export function resolvePythonTarget(options: ServiceManagerOptions): PythonTarge
   return { command: existsSync(venvPython) ? venvPython : 'python', args: ['-m', 'dramaclip'] };
 }
 
-export function generatePipePath(): string {
-  const suffix = randomBytes(4).toString('hex');
-  if (process.platform === 'win32') {
-    return `\\\\.\\pipe\\dramaclip-${suffix}`;
-  }
-  return path.join(os.tmpdir(), `dramaclip-${suffix}.sock`);
-}
-
 export class ServiceManager {
   private readonly options: ServiceManagerOptions;
   private readonly policy = new RestartPolicy();
@@ -73,22 +64,24 @@ export class ServiceManager {
 
   async start(): Promise<void> {
     this.stopping = false;
-    const pipePath = generatePipePath();
     this.token = randomBytes(32).toString('hex');
     this.pipeServer = createPipeServer({
-      pipePath,
       token: this.token,
       appVersion: this.options.appVersion,
-      onClientReady: () => { this.handleReady(); },
+      onClientReady: () => {
+        this.handleReady();
+      },
       onClientDisconnect: () => {
         if (!this.stopping) this.fail('连接断开');
       },
-      onNotification: (method, params) => { this.options.onEvent({
+      onNotification: (method, params) => {
+        this.options.onEvent({
           type: 'notification',
           // 受信对端（认证后的 Python 服务），方法名值域由 protocol 契约保证
           method: method as NotificationName,
           params,
-        }); },
+        });
+      },
     });
     await this.pipeServer.listening;
     this.spawnProcess();
@@ -152,7 +145,7 @@ export class ServiceManager {
     const target = resolvePythonTarget(this.options);
     const env: NodeJS.ProcessEnv = {
       ...process.env,
-      DRAMACLIP_PIPE_ADDRESS: this.pipeServer?.pipePath ?? '',
+      DRAMACLIP_SERVICE_ADDRESS: this.pipeServer?.address ?? '',
       DRAMACLIP_AUTH_TOKEN: this.token,
       DRAMACLIP_DATA_DIR: this.options.dataDir,
       PYTHONUNBUFFERED: '1',

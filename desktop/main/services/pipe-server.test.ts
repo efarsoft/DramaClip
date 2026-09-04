@@ -1,20 +1,10 @@
 // @vitest-environment node
-import { randomBytes } from 'node:crypto';
 import net from 'node:net';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createLineDecoder } from './ndjson';
 import { createPipeServer, type PipeServer } from './pipe-server';
 
 const TOKEN = 't'.repeat(64);
-
-function nextPipePath(): string {
-  const suffix = randomBytes(4).toString('hex');
-  return process.platform === 'win32'
-    ? `\\\\.\\pipe\\dramaclip-test-${suffix}`
-    : path.join(tmpdir(), `dramaclip-test-${suffix}.sock`);
-}
 
 /** 连接 pipe-server 的测试客户端：行收发。 */
 class TestClient {
@@ -22,8 +12,10 @@ class TestClient {
   private readonly decode = createLineDecoder();
   private readonly lines: string[] = [];
 
-  constructor(pipePath: string) {
-    this.socket = net.connect(pipePath);
+  constructor(address: string) {
+    const [host, port] = address.split(':');
+    const portNumber = Number(port ?? '0');
+    this.socket = net.connect(portNumber, host);
     this.socket.setEncoding('utf8');
     this.socket.on('data', (chunk: string) => {
       this.lines.push(...this.decode(chunk));
@@ -62,7 +54,6 @@ afterEach(async () => {
 
 function startServer(token = TOKEN): Promise<PipeServer> {
   const server = createPipeServer({
-    pipePath: nextPipePath(),
     token,
     appVersion: '2.0.0-test',
     onClientReady: vi.fn(),
@@ -77,7 +68,6 @@ describe('createPipeServer', () => {
   it('hello 认证 → call 往返 → 通知上抛', async () => {
     const notifications: [string, Record<string, unknown>][] = [];
     const server = createPipeServer({
-      pipePath: nextPipePath(),
       token: TOKEN,
       appVersion: '2.0.0-test',
       onClientReady: vi.fn(),
@@ -87,7 +77,7 @@ describe('createPipeServer', () => {
     servers.push(server);
     await server.listening;
 
-    const client = new TestClient(server.pipePath);
+    const client = new TestClient(server.address);
     client.send({ type: 'hello', token: TOKEN, service_version: '2.0.0', protocol_version: 1 });
     const ack = await client.waitForLine((message) => message.type === 'hello-ack');
     expect(ack.app_version).toBe('2.0.0-test');
@@ -106,7 +96,7 @@ describe('createPipeServer', () => {
 
   it('错误 token → 连接被销毁，call 不可用', async () => {
     const server = await startServer();
-    const client = new TestClient(server.pipePath);
+    const client = new TestClient(server.address);
     const closed = new Promise<void>((resolve) => client.socket.once('close', () => { resolve(); }));
     client.send({ type: 'hello', token: 'wrong-token', service_version: 'x', protocol_version: 1 });
     await closed;
@@ -116,7 +106,7 @@ describe('createPipeServer', () => {
 
   it('未认证连接不允许 RPC', async () => {
     const server = await startServer();
-    const client = new TestClient(server.pipePath);
+    const client = new TestClient(server.address);
     const closed = new Promise<void>((resolve) => client.socket.once('close', () => { resolve(); }));
     client.send({ jsonrpc: '2.0', id: '1', method: 'system.ping', params: {} }); // 未先 hello
     await closed;
