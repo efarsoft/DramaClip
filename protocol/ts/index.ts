@@ -65,6 +65,17 @@ export type ServiceEvent =
 
 export type ServiceState = 'starting' | 'ready' | 'restarting' | 'unavailable';
 
+/**
+ * preload 暴露给渲染层的桥接 API 形状（window.dramaclip）。
+ * 单一定义：preload 用 satisfies 校验实现，渲染层据此消费。
+ */
+export interface DramaClipBridge {
+  rpc(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  appVersion(): Promise<string>;
+  restartService(): Promise<void>;
+  onServiceEvent(callback: (event: ServiceEvent) => void): () => void;
+}
+
 export const METHOD_NAMES = ['system.ping', 'system.health', 'system.shutdown'] as const;
 
 export const NOTIFICATION_NAMES = ['progress.update', 'log.append', 'models.download_progress'] as const;
