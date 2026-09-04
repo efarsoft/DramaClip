@@ -1,0 +1,38 @@
+# ── 依赖 ──
+node_modules/
+.venv/
+
+# ── 构建产物 ──
+desktop/dist/
+desktop/dist-electron/
+service/build/
+service/dist/
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ── 运行时数据 / 参考资料（永不入库）──
+data/
+backup/
+resources/models/
+resources/cache/
+
+# ── 本地环境 ──
+.env
+.env.local
+
+# ── 临时文件：必须带路径前缀，禁止裸通配（防误伤 __init__.py）──
+/tmp_*
+/_*.md
+
+# ── IDE / OS ──
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

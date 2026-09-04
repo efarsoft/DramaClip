@@ -1,0 +1,20 @@
+{
+  "name": "dramaclip",
+  "private": true,
+  "version": "2.0.0",
+  "description": "本地优先的短剧自动高光剪辑工具",
+  "license": "MIT",
+  "workspaces": [
+    "desktop",
+    "protocol"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "lint": "npm run lint --workspace @dramaclip/desktop --if-present",
+    "typecheck": "npm run typecheck --workspace @dramaclip/desktop --if-present",
+    "test": "npm run test --workspace @dramaclip/desktop --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
