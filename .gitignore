@@ -36,3 +36,6 @@ resources/cache/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 会话工作区
+.zcode/
