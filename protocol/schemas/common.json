@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dramaclip.dev/protocol/common.json",
+  "title": "DramaClip 通用协议定义",
+  "description": "线协议权威定义。规范全文见 docs/03-IPC协议规范.md。",
+  "definitions": {
+    "RpcError": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "integer", "description": "错误码，见 x-error-codes" },
+        "message": { "type": "string" },
+        "data": {}
+      }
+    },
+    "RpcRequest": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "method"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "type": ["string", "integer"] },
+        "method": { "type": "string", "pattern": "^[a-z_]+\\.[a-z_]+$" },
+        "params": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "RpcResponse": {
+      "type": "object",
+      "required": ["jsonrpc", "id"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "type": ["string", "integer", "null"] },
+        "result": {},
+        "error": { "$ref": "#/definitions/RpcError" }
+      }
+    },
+    "RpcNotification": {
+      "type": "object",
+      "required": ["jsonrpc", "method"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "method": { "type": "string" },
+        "params": { "type": "object", "additionalProperties": true }
+      }
+    }
+  },
+  "x-wire": {
+    "transport": "named-pipe (win) / unix-socket (other); Electron 监听，Python 客户端",
+    "framing": "ndjson",
+    "max-line-bytes": 16777216,
+    "handshake": "Python 首条 {type:'hello', token(env DRAMACLIP_AUTH_TOKEN), service_version, protocol_version}；Electron 回 hello-ack；10s 未握手断开"
+  },
+  "x-error-codes": {
+    "-32700": "消息解析失败",
+    "-32600": "无效请求",
+    "-32601": "方法不存在",
+    "-32602": "参数无效",
+    "-32603": "内部错误",
+    "-32000~-32099": "系统级业务错误",
+    "-32100~-32199": "项目域",
+    "-32200~-32299": "分析域",
+    "-32300~-32399": "剪辑域",
+    "-32400~-32499": "导出域"
+  },
+  "x-notifications": [
+    {
+      "name": "progress.update",
+      "params": { "job_id": "string", "percent": "number", "message": "string", "detail": "object?" }
+    },
+    { "name": "log.append", "params": { "level": "info|warn|error", "message": "string" } },
+    {
+      "name": "models.download_progress",
+      "params": { "model_id": "string", "percent": "number", "speed": "string?", "eta": "string?" }
+    }
+  ]
+}

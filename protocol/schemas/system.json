@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dramaclip.dev/protocol/system.json",
+  "title": "system 命名空间",
+  "namespace": "system",
+  "x-methods": [
+    {
+      "name": "system.ping",
+      "summary": "心跳与版本探测",
+      "params": {},
+      "result": {
+        "type": "object",
+        "required": ["service_version", "protocol_version"],
+        "properties": {
+          "service_version": { "type": "string" },
+          "protocol_version": { "type": "integer" }
+        }
+      }
+    },
+    {
+      "name": "system.health",
+      "summary": "健康状态（扩展字段供侧边栏/工作台系统状态）",
+      "params": {},
+      "result": {
+        "type": "object",
+        "required": ["status", "uptime_s"],
+        "properties": {
+          "status": { "type": "string" },
+          "uptime_s": { "type": "number" },
+          "gpu": { "type": "string" },
+          "vram_free_mb": { "type": "integer" },
+          "disk_free_gb": { "type": "number" },
+          "models_ok": { "type": "boolean" }
+        }
+      }
+    },
+    {
+      "name": "system.shutdown",
+      "summary": "优雅退出",
+      "params": {},
+      "result": { "type": "object", "required": ["ok"], "properties": { "ok": { "type": "boolean" } } }
+    }
+  ]
+}

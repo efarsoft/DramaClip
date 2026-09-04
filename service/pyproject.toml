@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dramaclip"
+version = "2.0.0"
+description = "DramaClip 本地服务（分析/解说/字幕/消重/TTS/存储）"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+  "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+# 依赖准入制（docs/04 质量规约）：W1 仅 pydantic；重依赖随阶段逐个登记理由
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.6",
+  "mypy>=1.11",
+]
+
+[project.scripts]
+dramaclip-service = "dramaclip.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["dramaclip"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+# 第三方无类型库按模块登记放宽（docs/04 第 2 节），禁止全局降 strict
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

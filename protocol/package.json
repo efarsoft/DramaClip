@@ -1,0 +1,15 @@
+{
+  "name": "@dramaclip/protocol",
+  "version": "2.0.0",
+  "private": true,
+  "description": "DramaClip 三端契约唯一真相源（schema 权威 + TS 类型）",
+  "license": "MIT",
+  "type": "module",
+  "types": "./ts/index.ts",
+  "exports": {
+    ".": {
+      "types": "./ts/index.ts",
+      "default": "./ts/index.ts"
+    }
+  }
+}

@@ -1,0 +1,113 @@
+"""服务装配：存储初始化、路由、执行池与连接生命周期（docs/service/00 启动时序）。"""
+
+from __future__ import annotations
+
+import signal
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
+
+from dramaclip import PROTOCOL_VERSION, __version__
+from dramaclip.api import build_router
+from dramaclip.infra import config, jobs, paths
+from dramaclip.infra.storage import db
+from dramaclip.transport.connection import ServiceConnection
+from dramaclip.transport.notify import Notifier
+from dramaclip.transport.rpc import (
+    PARSE_ERROR,
+    Router,
+    RpcRequest,
+    error_response,
+)
+
+_STOP_POLL_SECONDS = 1.0
+
+
+class ServiceApp:
+    """单实例服务。run() 阻塞直到 shutdown/EOF/SIGTERM，返回进程退出码。"""
+
+    def __init__(
+        self, address: str, token: str, data_dir_env: dict[str, str] | None = None
+    ) -> None:
+        self._address = address
+        self._token = token
+        self._data_dir_env = data_dir_env
+        self._stop = threading.Event()
+        self._connection: ServiceConnection | None = None
+
+    def run(self) -> int:
+        data_dir = paths.resolve_data_dir(self._data_dir_env)
+        conn = db.connect(paths.db_path(data_dir))
+        db.migrate(conn)
+        settings = config.load(conn)
+        interrupted = jobs.JobStore(conn).sweep_interrupted()
+
+        router = build_router(self._shutdown)
+        executor = ThreadPoolExecutor(
+            max_workers=config.get_int(settings, "hardware.max_parallel_jobs"),
+            thread_name_prefix="rpc",
+        )
+        self._install_signal_handlers()
+        try:
+            self._serve(router, executor)
+            if interrupted:
+                message = f"恢复上次会话：{interrupted} 个中断任务已标记失败"
+                Notifier(self._send).log("warn", message)
+            while not self._stop.is_set():
+                self._stop.wait(_STOP_POLL_SECONDS)
+        finally:
+            executor.shutdown(wait=True)
+            if self._connection is not None:
+                self._connection.close()
+            conn.close()
+        return 0
+
+    def _serve(self, router: Router, executor: ThreadPoolExecutor) -> None:
+        self._connection = ServiceConnection(
+            self._address,
+            on_message=lambda payload: self._on_message(payload, router, executor),
+            on_disconnect=self._shutdown,
+        )
+        self._connection.send(self._hello_payload())
+        self._connection.start_reader()
+
+    def _hello_payload(self) -> dict[str, Any]:
+        return {
+            "type": "hello",
+            "token": self._token,
+            "service_version": __version__,
+            "protocol_version": PROTOCOL_VERSION,
+        }
+
+    def _send(self, payload: dict[str, Any]) -> None:
+        if self._connection is None:
+            return
+        try:
+            self._connection.send(payload)
+        except (OSError, ValueError):
+            self._shutdown()  # 下行失败视为连接已死，退出由主进程重新拉起
+
+    def _on_message(
+        self, payload: dict[str, Any], router: Router, executor: ThreadPoolExecutor
+    ) -> None:
+        if payload.get("type") == "hello-ack":
+            return  # 主进程对握手的确认
+        if not isinstance(payload.get("method"), str):
+            self._send(error_response(None, PARSE_ERROR, "缺少 method 字段").model_dump())
+            return
+        try:
+            request = RpcRequest.model_validate(payload)
+        except ValueError as exc:
+            self._send(error_response(None, PARSE_ERROR, f"请求解析失败: {exc}").model_dump())
+            return
+        executor.submit(self._dispatch_and_reply, router, request)
+
+    def _dispatch_and_reply(self, router: Router, request: RpcRequest) -> None:
+        response = router.dispatch(request)
+        self._send(response.model_dump(exclude_none=True))
+
+    def _shutdown(self) -> None:
+        self._stop.set()
+
+    def _install_signal_handlers(self) -> None:
+        signal.signal(signal.SIGTERM, lambda *_args: self._shutdown())
