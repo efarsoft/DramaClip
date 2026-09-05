@@ -7,18 +7,18 @@ interface ErrorBoundaryState {
 
 /** 渲染层崩溃兜底：防止白屏，提供恢复出口（docs/05 规约"错误边界"项）。 */
 export class ErrorBoundary extends Component<PropsWithChildren, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { error: null };
+  override state: ErrorBoundaryState = { error: null };
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { error };
   }
 
-  componentDidCatch(error: Error): void {
+  override componentDidCatch(error: Error): void {
     // 经渲染层 console 转发链路进入主进程日志
     console.error('[boundary] 渲染崩溃:', error.message, error.stack ?? '');
   }
 
-  render(): ReactNode {
+  override render(): ReactNode {
     if (this.state.error !== null) {
       return (
         <Result

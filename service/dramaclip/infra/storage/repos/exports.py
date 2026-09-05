@@ -61,7 +61,13 @@ def mark_completed(conn: sqlite3.Connection, export_id: str, output_path: str) -
     conn.commit()
 
 
-def set_meta(conn: sqlite3.Connection, export_id: str, *, duration_s: float, size_bytes: int) -> None:
+def set_meta(
+    conn: sqlite3.Connection,
+    export_id: str,
+    *,
+    duration_s: float,
+    size_bytes: int,
+) -> None:
     conn.execute(
         "UPDATE export_jobs SET duration_s = ?, size_bytes = ? WHERE id = ?",
         (duration_s, size_bytes, export_id),

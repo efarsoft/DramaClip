@@ -155,20 +155,24 @@ def results(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     asr_map: dict[str, list[dict[str, Any]]] = {}
     highlights_map: dict[str, list[dict[str, Any]]] = {}
     conflict_map: dict[str, list[dict[str, Any]]] = {}
+    prescreen_map: dict[str, dict[str, Any]] = {}
     for episode in episodes:
-        record = analysis_repo.get(context.conn, str(episode["id"]))
+        episode_id = str(episode["id"])
+        prescreen = prescreen_repo.get(context.conn, episode_id)
+        record = analysis_repo.get(context.conn, episode_id)
         segments = json.loads(record["asr_segments"]) if record else []
         highlights = json.loads(record["highlights"]) if record and record["highlights"] else []
         conflict_scores = (
             json.loads(record["conflict_scores"]) if record and record["conflict_scores"] else []
         )
-        episode_id = str(episode["id"])
         if segments:
             asr_map[episode_id] = segments
         if highlights:
             highlights_map[episode_id] = highlights
         if conflict_scores:
             conflict_map[episode_id] = conflict_scores
+        if prescreen is not None:
+            prescreen_map[episode_id] = prescreen
         summary.append(
             {
                 "episode_id": episode_id,

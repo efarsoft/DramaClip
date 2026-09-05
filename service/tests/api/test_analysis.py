@@ -41,8 +41,10 @@ class Harness:
         self.executor = ThreadPoolExecutor(max_workers=2)
         from types import SimpleNamespace
 
+        prescreen_repo_stub = SimpleNamespace(get=lambda _episode_id: None)
         self.context = SimpleNamespace(
             conn=conn,
+            prescreen_repo=prescreen_repo_stub,
             settings={"asr.language": "zh"},
             notifier=Notifier(self.sent.append),
             executor=self.executor,

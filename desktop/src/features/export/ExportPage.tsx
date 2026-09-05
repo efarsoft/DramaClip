@@ -75,6 +75,14 @@ function CompletedList({
           >
             <Tag color="success">完成</Tag>
             <span style={{ color: tokens.textPrimary, fontSize: 13 }}>{modeName(job.narration_mode)}</span>
+            {job.duration_s !== undefined && (
+              <span style={{ fontSize: 11, color: tokens.textTertiary, fontFamily: tokens.fontFamilyMono }}>
+                {formatDuration(job.duration_s)}
+              </span>
+            )}
+            {job.size_bytes !== undefined && (
+              <span style={{ fontSize: 11, color: tokens.textTertiary }}>{formatSize(job.size_bytes)}</span>
+            )}
             <span style={{ marginLeft: 'auto', fontSize: 11, color: tokens.textTertiary }}>
               {new Date(job.completed_at ?? job.created_at).toLocaleString('zh-CN')}
             </span>
@@ -151,6 +159,17 @@ function AllJobs({ jobs }: { jobs: ExportJob[] }) {
       {jobs.length === 0 && <div style={{ color: tokens.textTertiary, fontSize: 12 }}>暂无任务</div>}
     </Card>
   );
+}
+
+function formatDuration(seconds: number): string {
+  const total = Math.round(seconds);
+  const minutes = Math.floor(total / 60);
+  return `${String(minutes)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function formatSize(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function modeName(mode: string | undefined): string {
