@@ -14,6 +14,8 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
+from dramaclip.engines.analysis.models import SpeechZone
+from dramaclip.engines.dedup import jitter
 from dramaclip.engines.dedup import params as dedup_params
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle.mask import drawbox_filter
@@ -155,12 +157,23 @@ def export_plan(
 
     total = len(segments)
     segment_files: list[Path] = []
+    srt_cache: dict[str, list[SpeechZone]] = {}
     for index, segment in enumerate(segments):
         if cancel is not None and cancel.is_set():
             raise runner.FfmpegError("已取消", cancelled=True)
         source = episode_paths.get(segment.episode_id)
         if source is None or not Path(source).is_file():
             raise EpisodeSourceMissing(f"第 {segment.episode_id} 集源文件缺失")
+        # Smart Jitter：SRT 优先 / 能量降级；切点避让台词保护区（docs/06 §1）
+        if segment.episode_id not in srt_cache:
+            srt = jitter.srt_for_source(Path(source))
+            srt_cache[segment.episode_id] = (
+                jitter.parse_srt(srt) if srt is not None else []
+            )
+        zones = srt_cache[segment.episode_id]
+        safe_start, safe_end = jitter.safe_times(
+            segment.start, segment.end, zones, rng=rng
+        )
         seg_out = work_dir / f"seg_{index:03d}.mp4"
         tts_audio = None
         if tts_audio_by_segment and index in tts_audio_by_segment:
@@ -171,14 +184,14 @@ def export_plan(
                 subtitle_burner(
                     index,
                     segment.subtitle_text,
-                    max(segment.end - segment.start, 0.1),
+                    max(safe_end - safe_start, 0.1),
                 )
             )
         args = cut_segment_args(
             source,
             str(seg_out),
-            start=segment.start,
-            end=segment.end,
+            start=safe_start,
+            end=safe_end,
             audio=segment.audio,
             mask=mask,
             tts_audio=tts_audio,

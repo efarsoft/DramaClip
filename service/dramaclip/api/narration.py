@@ -25,6 +25,7 @@ SUPPORTED_MODES = (
     "cross_narration",
     "ultra_short_hook",
     "dialogue_narration",
+    "full_narration",
 )
 
 
@@ -77,6 +78,9 @@ def _run_generation(
         raise ValueError("项目不存在")
     settings = dict(context.settings)
     settings["_project_name"] = str(project["name"])
+    analysis_record = analysis_repo.get(context.conn, str(episodes[0]["id"]))
+    if analysis_record is not None and analysis_record["genre"]:
+        settings["_genre"] = str(analysis_record["genre"])
     total = len(modes)
     try:
         for index, mode in enumerate(modes):
@@ -121,7 +125,7 @@ def _generate_one(
         audio,
         settings,
     )
-    if mode in ("intro_narration", "cross_narration", "ultra_short_hook"):
+    if mode in ("intro_narration", "cross_narration", "ultra_short_hook", "full_narration"):
         tts_dir = context.work_dir / "tts"
         plan = narration_pipeline.synthesize_narration_texts(plan, settings, tts_dir)
     plans_repo.create(

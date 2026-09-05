@@ -1,12 +1,15 @@
 """切点安全抖动（Smart Jitter）：台词保护区避让 + 静音间隙抖动。
 
-语音区来自第一层分析产出的 audio_features.speech_zones（无字幕时能量法降级，
-W2 已实现；SRT 保护区双路在 W8 补全）。
+保护区双路（W8 完整化）：
+- SRT 优先：源视频同名 .srt 的每行字幕扩展为禁区（docs/06-经验参数表 §1）；
+- 能量降级：无 SRT 时用第一层分析的 speech_zones。
 """
 
 from __future__ import annotations
 
 import random
+import re
+from pathlib import Path
 
 from dramaclip.engines.analysis.models import SpeechZone
 
@@ -16,6 +19,35 @@ _PROTECT_AFTER_S = 0.15
 _JITTER_MIN_S = 0.08
 _JITTER_MAX_S = 0.3
 _MIN_SEGMENT_S = 0.45
+
+_SRT_TIME = re.compile(r"(\d+):(\d+):(\d+)[,.](\d+)")
+
+
+def parse_srt(srt_path: Path) -> list[SpeechZone]:
+    """解析 SRT 为语音区列表；解析失败返回空（降级能量法）。"""
+    try:
+        content = srt_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    zones: list[SpeechZone] = []
+    matches = list(_SRT_TIME.finditer(content))
+    for begin, end in zip(matches[::2], matches[1::2], strict=False):
+        start = _srt_seconds(begin)
+        stop = _srt_seconds(end)
+        if stop > start:
+            zones.append(SpeechZone(start=round(start, 3), end=round(stop, 3)))
+    return zones
+
+
+def srt_for_source(source_path: Path) -> Path | None:
+    """同名 SRT 约定：<视频名>.srt；存在且非空才返回。"""
+    candidate = source_path.with_suffix(".srt")
+    return candidate if candidate.is_file() and candidate.stat().st_size > 0 else None
+
+
+def _srt_seconds(match: re.Match) -> float:  # type: ignore[type-arg]
+    hours, minutes, seconds, millis = (int(group) for group in match.groups())
+    return hours * 3600 + minutes * 60 + seconds + millis / 1000
 
 
 def _protected_spans(zones: list[SpeechZone]) -> list[tuple[float, float]]:
