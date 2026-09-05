@@ -12,6 +12,7 @@ import random
 import subprocess  # noqa: S404 - 参数为受控列表
 import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from dramaclip.engines.analysis.models import SpeechZone
@@ -136,6 +137,10 @@ def _escape_filter_path(path: str) -> str:
     return normalized.replace(":", r"\\:").replace("'", r"\'")
 
 
+def _run_cut(args: list[str]) -> None:
+    runner.run(args, timeout_s=600)
+
+
 def export_plan(
     plan: PlanData,
     episode_paths: dict[str, str],
@@ -147,8 +152,14 @@ def export_plan(
     cancel: threading.Event | None = None,
     on_progress: Callable[[float, str], None] | None = None,
     subtitle_burner: Callable[[int, str, float], str] | None = None,
+    parallel: int = 2,
 ) -> Path:
-    """执行两阶段导出，返回成片路径。"""
+    """执行两阶段导出，返回成片路径。
+
+    Phase A：段级并行切割（竖屏 + 消重 + 遮罩 + 字幕烧录 + 混音）；
+    Phase B：concat 拼接 + `-map_metadata -1` 元数据擦除。
+    段间无依赖，线程池并行（ffmpeg 自身多线程，2 并发已接近 IO/CPU 饱和）。
+    """
     segments = plan.timeline
     if not segments:
         raise ValueError("编排时间轴为空")
@@ -156,25 +167,21 @@ def export_plan(
     rng = random.Random()
 
     total = len(segments)
-    segment_files: list[Path] = []
+    # Phase A：构建每段命令参数（含 SRT/能量安全切点、字幕、混音）
+    job_args: list[list[str]] = []
     srt_cache: dict[str, list[SpeechZone]] = {}
     for index, segment in enumerate(segments):
-        if cancel is not None and cancel.is_set():
-            raise runner.FfmpegError("已取消", cancelled=True)
         source = episode_paths.get(segment.episode_id)
         if source is None or not Path(source).is_file():
             raise EpisodeSourceMissing(f"第 {segment.episode_id} 集源文件缺失")
-        # Smart Jitter：SRT 优先 / 能量降级；切点避让台词保护区（docs/06 §1）
         if segment.episode_id not in srt_cache:
             srt = jitter.srt_for_source(Path(source))
             srt_cache[segment.episode_id] = (
                 jitter.parse_srt(srt) if srt is not None else []
             )
-        zones = srt_cache[segment.episode_id]
         safe_start, safe_end = jitter.safe_times(
-            segment.start, segment.end, zones, rng=rng
+            segment.start, segment.end, srt_cache[segment.episode_id], rng=rng
         )
-        seg_out = work_dir / f"seg_{index:03d}.mp4"
         tts_audio = None
         if tts_audio_by_segment and index in tts_audio_by_segment:
             tts_audio = str(tts_audio_by_segment[index])
@@ -187,26 +194,35 @@ def export_plan(
                     max(safe_end - safe_start, 0.1),
                 )
             )
-        args = cut_segment_args(
-            source,
-            str(seg_out),
-            start=safe_start,
-            end=safe_end,
-            audio=segment.audio,
-            mask=mask,
-            tts_audio=tts_audio,
-            rng=rng,
-            transition=segment.transition,
-            ass_path=ass_path,
+        job_args.append(
+            cut_segment_args(
+                source,
+                str(work_dir / f"seg_{index:03d}.mp4"),
+                start=safe_start,
+                end=safe_end,
+                audio=segment.audio,
+                mask=mask,
+                tts_audio=tts_audio,
+                rng=rng,
+                transition=segment.transition,
+                ass_path=ass_path,
+            )
         )
-        runner.run(args, timeout_s=600)
-        segment_files.append(seg_out)
-        if on_progress is not None:
-            on_progress((index + 1) / total * 90, f"切割 {index + 1}/{total}")
 
     if cancel is not None and cancel.is_set():
         raise runner.FfmpegError("已取消", cancelled=True)
 
+    # Phase A 并行执行（ffmpeg 自身多线程，2 并发已接近 IO/CPU 饱和）
+    with ThreadPoolExecutor(max_workers=parallel) as pool:
+        futures = [pool.submit(_run_cut, args) for args in job_args]
+        for done, future in enumerate(futures, start=1):
+            future.result()
+            if on_progress is not None:
+                on_progress(done / total * 90, f"切割 {done}/{total}")
+            if cancel is not None and cancel.is_set():
+                raise runner.FfmpegError("已取消", cancelled=True)
+
+    segment_files = sorted(work_dir.glob("seg_*.mp4"))
     _concat(segment_files, out_path)
     if on_progress is not None:
         on_progress(100.0, "导出完成")

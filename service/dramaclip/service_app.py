@@ -13,6 +13,7 @@ from dramaclip.api import build_router
 from dramaclip.api.context import AppContext
 from dramaclip.engines.analysis.runtime import AnalysisRuntime
 from dramaclip.infra import config, jobs, paths
+from dramaclip.infra import logging as logging_setup
 from dramaclip.infra.storage import backup, db
 from dramaclip.transport.connection import ServiceConnection
 from dramaclip.transport.notify import Notifier
@@ -50,6 +51,9 @@ class ServiceApp:
         job_store = jobs.JobStore(conn)
         interrupted = job_store.sweep_interrupted()
 
+        log_file = logging_setup.setup_file_logging(data_dir / "logs")
+        if log_file is not None:
+            print(f"[logging] 服务日志: {log_file}")
         notifier = Notifier(self._send)
         work_dir = data_dir / "cache" / "analysis"
         work_dir.mkdir(parents=True, exist_ok=True)
