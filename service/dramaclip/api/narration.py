@@ -26,7 +26,11 @@ SUPPORTED_MODES = (
     "ultra_short_hook",
     "dialogue_narration",
     "full_narration",
+    "subtitle_flow",
 )
+
+# 无 TTS 模式可与 TTS 合成并行（原案 6.12）
+_NO_TTS_MODES = frozenset({"raw_clip", "dialogue_narration", "subtitle_flow"})
 
 
 def register(router: Router, context: AppContext) -> None:
@@ -54,13 +58,82 @@ def generate_plans(context: AppContext, params: dict[str, Any]) -> dict[str, Any
     cancel_event = threading.Event()
     context.cancel_events[job_id] = cancel_event
     context.executor.submit(
-        _run_generation, context, job_id, project_id, done_episodes, modes, cancel_event
+        _run_generation_parallel,
+        context,
+        job_id,
+        project_id,
+        done_episodes,
+        modes,
+        cancel_event,
     )
     return {"job_id": job_id}
 
 
 def list_plans(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:
     return plans_repo.list_by_project(context.conn, str(params.get("project_id", "")))
+
+
+def _run_generation_parallel(
+    context: AppContext,
+    job_id: str,
+    project_id: str,
+    episodes: list[dict[str, Any]],
+    modes: list[str],
+    cancel_event: threading.Event,
+) -> None:
+    """一键全部生成（原案 6.12）：无 TTS 模式与 TTS 模式两组并行，单模式失败不中断。"""
+    context.job_store.mark_running(job_id)
+    project = projects_repo.get(context.conn, project_id)
+    if project is None:
+        raise ValueError("项目不存在")
+    settings = dict(context.settings)
+    settings["_project_name"] = str(project["name"])
+    analysis_record = analysis_repo.get(context.conn, str(episodes[0]["id"]))
+    if analysis_record is not None and analysis_record["genre"]:
+        settings["_genre"] = str(analysis_record["genre"])
+
+    tts_modes = [mode for mode in modes if mode not in _NO_TTS_MODES]
+    fast_modes = [mode for mode in modes if mode in _NO_TTS_MODES]
+    total = len(modes)
+    done_count = 0
+    lock = threading.Lock()
+    failures: list[str] = []
+
+    def run_group(group_modes: list[str]) -> None:
+        nonlocal done_count
+        for mode in group_modes:
+            if cancel_event.is_set():
+                return
+            try:
+                _generate_one(context, mode, episodes, dict(settings))
+            except Exception as exc:
+                failures.append(f"{_mode_label(mode)}: {exc}")
+            with lock:
+                done_count += 1
+                context.job_store.set_progress(job_id, round(done_count / total * 100, 1))
+
+    threads = [
+        threading.Thread(
+            target=run_group,
+            args=(group,),
+            name=f"gen-{'tts' if group is tts_modes else 'fast'}",
+        )
+        for group in (tts_modes, fast_modes)
+        if group
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    if cancel_event.is_set():
+        context.job_store.mark_cancelled(job_id)
+    elif failures:
+        context.job_store.mark_failed(job_id, "; ".join(failures))
+        context.notifier.log("error", f"部分编排失败: {'; '.join(failures)}")
+    else:
+        context.job_store.mark_completed(job_id)
+    context.cancel_events.pop(job_id, None)
 
 
 def _run_generation(

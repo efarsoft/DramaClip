@@ -21,7 +21,7 @@ const MODE_CARDS: ModeCard[] = [
   { mode: 'cross_narration', name: '交叉解说', description: '旁白与原声交替', duration: '60-120s', group: 'AI 解说', enabled: true },
   { mode: 'full_narration', name: '全片解说', description: '全程 AI 配音', duration: '120-300s', group: 'AI 解说', enabled: true },
   { mode: 'dialogue_narration', name: '剧情解说', description: '对白重新编排叙事', duration: '45-120s', group: 'AI 解说', enabled: true },
-  { mode: 'subtitle_flow', name: '字幕金句流', description: '动态字幕双通道', duration: '30-90s', group: '字幕驱动', enabled: false },
+  { mode: 'subtitle_flow', name: '字幕金句流', description: '动态字幕双通道', duration: '30-90s', group: '字幕驱动', enabled: true },
   { mode: 'ultra_short_hook', name: '超短悬念版', description: '信息流钩子', duration: '10-20s', group: '字幕驱动', enabled: true },
   { mode: 'dual_host_chat', name: '双人对谈', description: '双音色聊天体', duration: '60-180s', group: '特殊', enabled: false },
 ];
@@ -72,6 +72,15 @@ export function ModePage() {
         <span style={{ fontSize: 12, color: tokens.textTertiary }}>
           已选 {String(selected.length)} 个模式 · 生成后可导出成片
         </span>
+        <Button
+          size="small"
+          style={{ marginLeft: 16 }}
+          onClick={() => {
+            setSelected(MODE_CARDS.filter((card) => card.enabled).map((card) => card.mode));
+          }}
+        >
+          全选
+        </Button>
         <Button
           type="primary"
           style={{ marginLeft: 'auto' }}

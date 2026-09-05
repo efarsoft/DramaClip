@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.engines.analysis.models import AsrSegment, AudioFeatures
-from dramaclip.engines.narration import dialogue_selector, modes, modes_w5, modes_w8
+from dramaclip.engines.narration import dialogue_selector, modes, modes_w5, modes_w8, modes_w9
 from dramaclip.engines.narration.models import PlanData, StrategySpec
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from dramaclip.engines.tts import base as tts_base
@@ -24,6 +24,7 @@ _MODE_LABELS = {
     "ultra_short_hook": "超短悬念版",
     "dialogue_narration": "剧情解说",
     "full_narration": "全片解说",
+    "subtitle_flow": "字幕金句流",
 }
 
 
@@ -63,6 +64,10 @@ def build_plan(
             strategy,
             settings.get("_project_name", "这部剧"),
             settings.get("_genre"),
+        )
+    if mode == "subtitle_flow":
+        return modes_w9.build_subtitle_flow(
+            episode_id, conflict_scores, asr_segments, strategy
         )
     raise ValueError(f"模式暂未支持: {mode}（{_MODE_LABELS.get(mode, mode)} 将随后续阶段启用）")
 
