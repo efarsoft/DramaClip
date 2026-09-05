@@ -10,7 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.engines.analysis.models import AsrSegment, AudioFeatures
-from dramaclip.engines.narration import dialogue_selector, modes, modes_w5, modes_w8, modes_w9
+from dramaclip.engines.narration import (
+    dialogue_selector,
+    modes,
+    modes_p2,
+    modes_w5,
+    modes_w8,
+    modes_w9,
+)
 from dramaclip.engines.narration.models import PlanData, StrategySpec
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from dramaclip.engines.tts import base as tts_base
@@ -25,6 +32,8 @@ _MODE_LABELS = {
     "dialogue_narration": "剧情解说",
     "full_narration": "全片解说",
     "subtitle_flow": "字幕金句流",
+    "dual_host_chat": "双人对谈",
+    "inner_monologue": "内心独白",
 }
 
 
@@ -69,6 +78,14 @@ def build_plan(
         return modes_w9.build_subtitle_flow(
             episode_id, conflict_scores, asr_segments, strategy
         )
+    if mode == "dual_host_chat":
+        return modes_p2.build_dual_host(
+            episode_id, conflict_scores, strategy, settings.get("_project_name", "这部剧")
+        )
+    if mode == "inner_monologue":
+        return modes_p2.build_monologue(
+            episode_id, conflict_scores, strategy, settings.get("_project_name", "这部剧")
+        )
     raise ValueError(f"模式暂未支持: {mode}（{_MODE_LABELS.get(mode, mode)} 将随后续阶段启用）")
 
 
@@ -111,9 +128,11 @@ def synthesize_narration_texts(
     if not plan.narration_texts:
         return plan
     engine = create_tts(settings.get("tts.engine", "edge"))
-    voice = settings.get("tts.voice", "")
+    default_voice = settings.get("tts.voice", "")
     updated: list[dict[str, Any]] = []
     for item in plan.narration_texts:
+        # 段级 voice 优先（双人对谈的双音色），缺省用全局设置
+        voice = item.voice or default_voice
         try:
             audio_path = engine.synthesize(item.text, voice, work_dir / f"{item.id}.mp3")
             duration: float | None = tts_base.audio_duration_s(audio_path)

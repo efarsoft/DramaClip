@@ -27,6 +27,8 @@ SUPPORTED_MODES = (
     "dialogue_narration",
     "full_narration",
     "subtitle_flow",
+    "dual_host_chat",
+    "inner_monologue",
 )
 
 # 无 TTS 模式可与 TTS 合成并行（原案 6.12）
@@ -198,7 +200,15 @@ def _generate_one(
         audio,
         settings,
     )
-    if mode in ("intro_narration", "cross_narration", "ultra_short_hook", "full_narration"):
+    tts_modes = (
+        "intro_narration",
+        "cross_narration",
+        "ultra_short_hook",
+        "full_narration",
+        "dual_host_chat",
+        "inner_monologue",
+    )
+    if mode in tts_modes:
         tts_dir = context.work_dir / "tts"
         plan = narration_pipeline.synthesize_narration_texts(plan, settings, tts_dir)
     plans_repo.create(
