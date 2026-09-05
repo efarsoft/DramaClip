@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dramaclip.dev/protocol/models.json",
+  "title": "models 命名空间",
+  "namespace": "models",
+  "x-models": {
+    "ModelInfo": {
+      "type": "object",
+      "required": ["model_id", "kind", "engine", "repo_id", "name", "required", "status"],
+      "properties": {
+        "model_id": { "type": "string" },
+        "kind": { "type": "string" },
+        "engine": { "type": "string" },
+        "repo_id": { "type": "string" },
+        "name": { "type": "string" },
+        "required": { "type": "boolean" },
+        "notes": { "type": "string" },
+        "status": { "type": "string" },
+        "path": { "type": "string" }
+      }
+    }
+  },
+  "x-methods": [
+    {
+      "name": "models.list",
+      "summary": "模型清单与安装状态",
+      "params": {},
+      "result": { "type": "array", "items": { "$ref": "#/x-models/ModelInfo" } }
+    },
+    {
+      "name": "models.download",
+      "summary": "后台下载模型（ModelScope 优先 → HF 镜像降级；失败时返回手动下载指引）",
+      "params": { "type": "object", "required": ["model_id"], "properties": { "model_id": { "type": "string" } } },
+      "result": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } }
+    },
+    {
+      "name": "models.scan_local",
+      "summary": "本地导入扫描：手动放置到 models/ 目录的模型即刻生效",
+      "params": {},
+      "result": {
+        "type": "object",
+        "required": ["installed", "total"],
+        "properties": {
+          "installed": { "type": "array", "items": { "$ref": "#/x-models/ModelInfo" } },
+          "total": { "type": "integer" }
+        }
+      }
+    },
+    {
+      "name": "models.delete",
+      "summary": "删除已安装模型",
+      "params": { "type": "object", "required": ["model_id"], "properties": { "model_id": { "type": "string" } } },
+      "result": { "type": "object", "required": ["ok"], "properties": { "ok": { "type": "boolean" } } }
+    }
+  ]
+}

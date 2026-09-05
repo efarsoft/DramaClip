@@ -189,6 +189,18 @@ export interface ExportJob {
   readonly completed_at?: number;
 }
 
+export interface ModelInfo {
+  readonly model_id: string;
+  readonly kind: string;
+  readonly engine: string;
+  readonly repo_id: string;
+  readonly name: string;
+  readonly required: boolean;
+  readonly notes?: string;
+  readonly status: string;
+  readonly path?: string;
+}
+
 export interface SubtitlePresetInfo {
   readonly preset_id: string;
   readonly preset_name: string;
@@ -242,6 +254,7 @@ export const METHOD_NAMES = [
   'project.duplicate',
   'project.scan_episodes',
   'project.dashboard_summary',
+  'analysis.prescreen',
   'analysis.start',
   'analysis.status',
   'analysis.cancel',
@@ -251,6 +264,10 @@ export const METHOD_NAMES = [
   'export.start',
   'export.list',
   'subtitle.list_presets',
+  'models.list',
+  'models.download',
+  'models.scan_local',
+  'models.delete',
   'settings.get',
   'settings.update',
 ] as const;

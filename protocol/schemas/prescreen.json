@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dramaclip.dev/protocol/prescreen.json",
+  "title": "prescreen（analysis 命名空间补充，W10）",
+  "x-methods": [
+    {
+      "name": "analysis.prescreen",
+      "summary": "阶段一轻量预筛（批量；结果落库并推荐，供两阶段分析交互）",
+      "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
+      "result": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } }
+    }
+  ]
+}

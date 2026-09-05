@@ -1,6 +1,7 @@
 /** 渲染层唯一 IPC 出口（docs/desktop/01 §4）。组件禁止直接调 window.dramaclip。 */
 import type {
   AnalysisJobStatus,
+  ModelInfo,
   AnalysisResults,
   DashboardSummary,
   DramaClipBridge,
@@ -103,6 +104,16 @@ export const exportApi = {
     rpc<{ job_id: string }>('export.start', { plan_id: planId }),
   list: (projectId: string): Promise<ExportJob[]> =>
     rpc<ExportJob[]>('export.list', { project_id: projectId }),
+} as const;
+
+export const modelsApi = {
+  list: (): Promise<ModelInfo[]> => rpc<ModelInfo[]>('models.list'),
+  download: (modelId: string): Promise<{ job_id: string }> =>
+    rpc<{ job_id: string }>('models.download', { model_id: modelId }),
+  scanLocal: (): Promise<{ installed: ModelInfo[]; total: number }> =>
+    rpc<{ installed: ModelInfo[]; total: number }>('models.scan_local'),
+  remove: (modelId: string): Promise<{ ok: boolean }> =>
+    rpc<{ ok: boolean }>('models.delete', { model_id: modelId }),
 } as const;
 
 export const settingsApi = {

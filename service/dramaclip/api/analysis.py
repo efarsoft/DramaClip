@@ -9,9 +9,11 @@ from typing import Any
 
 from dramaclip.api.context import AppContext
 from dramaclip.engines.analysis import pipeline, runtime
+from dramaclip.engines.analysis import prescreen as prescreen_engine
 from dramaclip.engines.semantic import pipeline as semantic_pipeline
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
+from dramaclip.infra.storage.repos import prescreen as prescreen_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
 from dramaclip.transport.rpc import Router, RpcDomainError
 
@@ -21,10 +23,74 @@ _ERR_NO_EPISODES = -32202
 
 
 def register(router: Router, context: AppContext) -> None:
+    router.register("analysis.prescreen", lambda params: prescreen(context, params))
     router.register("analysis.start", lambda params: start(context, params))
     router.register("analysis.status", lambda params: status(context, params))
     router.register("analysis.cancel", lambda params: cancel(context, params))
     router.register("analysis.results", lambda params: results(context, params))
+
+
+def prescreen(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """阶段一：批量轻量预筛（原案 3附），结果落 episode_prescreen 并推荐。"""
+    project_id = str(params.get("project_id", ""))
+    if projects_repo.get(context.conn, project_id) is None:
+        raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
+    targets = [
+        episode
+        for episode in episodes_repo.list_by_project(context.conn, project_id)
+        if episode["status"] in ("pending", "prescreened")
+    ]
+    if not targets:
+        raise RpcDomainError(_ERR_NO_EPISODES, "没有待预筛的集")
+    job_id = context.job_store.create("prescreen", ref_id=project_id)
+    cancel_event = threading.Event()
+    context.cancel_events[job_id] = cancel_event
+    context.executor.submit(_run_prescreen, context, job_id, targets, cancel_event)
+    return {"job_id": job_id}
+
+
+def _run_prescreen(
+    context: AppContext,
+    job_id: str,
+    targets: list[dict[str, Any]],
+    cancel_event: threading.Event,
+) -> None:
+    from pathlib import Path
+
+    context.job_store.mark_running(job_id)
+    total = len(targets)
+    try:
+        for index, episode in enumerate(targets):
+            if cancel_event.is_set():
+                context.job_store.mark_cancelled(job_id)
+                return
+            episode_id = str(episode["id"])
+            context.notifier.progress(
+                job_id, round(index / total * 100, 1), f"第{episode['episode_number']}集 预筛中"
+            )
+            result = prescreen_engine.prescreen_episode(
+                Path(str(episode["source_path"])),
+                context.work_dir / "prescreen" / f"{episode_id}.wav",
+            )
+            prescreen_repo.upsert(
+                context.conn,
+                episode_id,
+                audio_peak_density=result["audio_peak_density"],
+                scene_cut_density=result["scene_cut_density"],
+                voice_activity_ratio=result["voice_activity_ratio"],
+                motion_intensity=result["motion_intensity"],
+                prescreen_score=result["prescreen_score"],
+                recommended=bool(result["recommended"]),
+            )
+            episodes_repo.set_status(context.conn, episode_id, "prescreened")
+        context.job_store.set_progress(job_id, 100.0)
+        context.notifier.progress(job_id, 100.0, "预筛完成")
+        context.job_store.mark_completed(job_id)
+    except Exception as exc:
+        context.job_store.mark_failed(job_id, str(exc))
+        context.notifier.log("error", f"预筛失败: {exc}")
+    finally:
+        context.cancel_events.pop(job_id, None)
 
 
 def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:

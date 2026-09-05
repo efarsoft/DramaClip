@@ -57,16 +57,7 @@ export function ModePage() {
     <div style={{ maxWidth: 1080, margin: '0 auto' }}>
       <PageHeader projectId={projectId} onLoaded={setCurrentProjectId} />
       <Card size="small" style={{ marginBottom: 20 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
-          {MODE_CARDS.map((card) => (
-            <ModeTile
-              key={card.mode}
-              card={card}
-              checked={selected.includes(card.mode)}
-              onToggle={() => { toggle(card.mode); }}
-            />
-          ))}
-        </div>
+        <ModeTileGroup selected={selected} onToggle={toggle} />
       </Card>
       <footer style={{ display: 'flex', alignItems: 'center' }}>
         <span style={{ fontSize: 12, color: tokens.textTertiary }}>
@@ -119,6 +110,29 @@ function PageHeader({
         {project?.name ?? '…'} · 选择剪辑模式
       </h1>
     </header>
+  );
+}
+
+function ModeTileGroup({
+  selected,
+  onToggle,
+}: {
+  selected: NarrationMode[];
+  onToggle: (mode: NarrationMode) => void;
+}) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+      {MODE_CARDS.map((card) => (
+        <ModeTile
+          key={card.mode}
+          card={card}
+          checked={selected.includes(card.mode)}
+          onToggle={() => {
+            onToggle(card.mode);
+          }}
+        />
+      ))}
+    </div>
   );
 }
 
