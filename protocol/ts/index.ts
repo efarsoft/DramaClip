@@ -139,6 +139,56 @@ export interface AnalysisResults {
   readonly conflict_scores?: Readonly<Record<string, ConflictScorePoint[]>>;
 }
 
+/** ---- narration / export 命名空间（W4）---- */
+
+export type NarrationMode =
+  | 'raw_clip'
+  | 'intro_narration'
+  | 'cross_narration'
+  | 'full_narration'
+  | 'dialogue_narration'
+  | 'subtitle_flow'
+  | 'ultra_short_hook'
+  | 'dual_host_chat'
+  | 'inner_monologue';
+
+export interface TimelineSegment {
+  readonly episode_id: string;
+  readonly start: number;
+  readonly end: number;
+  readonly audio: 'original' | 'narration' | 'ducked';
+  readonly transition?: 'cut' | 'fade' | 'black' | 'flash';
+}
+
+export interface PlanData {
+  readonly mode: NarrationMode;
+  readonly timeline: TimelineSegment[];
+  readonly narration_texts: ReadonlyArray<{ id: string; text: string; voice?: string; audio_path?: string; duration?: number }>;
+}
+
+export interface NarrationPlan {
+  readonly id: string;
+  readonly project_id: string;
+  readonly narration_mode: NarrationMode;
+  readonly episode_ids: string[];
+  readonly plan_data: PlanData;
+  readonly status: string;
+  readonly created_at: number;
+}
+
+export interface ExportJob {
+  readonly id: string;
+  readonly project_id: string;
+  readonly plan_id?: string;
+  readonly narration_mode?: string;
+  readonly output_path?: string;
+  readonly status: string;
+  readonly progress: number;
+  readonly error?: string;
+  readonly created_at: number;
+  readonly completed_at?: number;
+}
+
 export interface DashboardSummary {
   readonly project_count: number;
   readonly episode_count: number;
@@ -169,6 +219,8 @@ export interface DramaClipBridge {
   pickFolder(): Promise<string | null>;
   /** 原生视频文件选择；用户取消返回 null。 */
   pickVideoFile(): Promise<string | null>;
+  /** 在系统文件管理器中定位文件。 */
+  revealInFolder(path: string): Promise<void>;
   onServiceEvent(callback: (event: ServiceEvent) => void): () => void;
 }
 
@@ -188,6 +240,10 @@ export const METHOD_NAMES = [
   'analysis.status',
   'analysis.cancel',
   'analysis.results',
+  'narration.generate_plans',
+  'narration.list_plans',
+  'export.start',
+  'export.list',
   'settings.get',
   'settings.update',
 ] as const;

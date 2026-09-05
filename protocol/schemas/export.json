@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dramaclip.dev/protocol/export.json",
+  "title": "export 命名空间",
+  "namespace": "export",
+  "x-models": {
+    "ExportJob": {
+      "type": "object",
+      "required": ["id", "project_id", "status", "progress", "created_at"],
+      "properties": {
+        "id": { "type": "string" },
+        "project_id": { "type": "string" },
+        "plan_id": { "type": "string" },
+        "narration_mode": { "type": "string" },
+        "output_path": { "type": "string" },
+        "status": { "type": "string" },
+        "progress": { "type": "number" },
+        "error": { "type": "string" },
+        "created_at": { "type": "integer" },
+        "completed_at": { "type": "integer" }
+      }
+    }
+  },
+  "x-methods": [
+    {
+      "name": "export.start",
+      "summary": "按编排方案导出成片（长任务 job：段切割+消重+遮罩+拼接+编码）",
+      "params": {
+        "type": "object",
+        "required": ["plan_id"],
+        "properties": {
+          "plan_id": { "type": "string" },
+          "bitrate_kbps": { "type": "integer" }
+        }
+      },
+      "result": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } }
+    },
+    {
+      "name": "export.list",
+      "summary": "项目导出记录",
+      "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
+      "result": { "type": "array", "items": { "$ref": "#/x-models/ExportJob" } }
+    }
+  ]
+}

@@ -10,6 +10,8 @@ requires-python = ">=3.12"
 license = { text = "MIT" }
 dependencies = [
   "pydantic>=2.7",
+  # edge-tts：片头解说旁白合成（云端免费，无需本地模型；登记理由见 docs/04 准入制）
+  "edge-tts>=7.0",
 ]
 
 [project.optional-dependencies]

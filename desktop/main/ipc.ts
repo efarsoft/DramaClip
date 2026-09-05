@@ -1,5 +1,5 @@
 /** ipcMain 通道唯一登记处（docs/desktop/00 §3）。 */
-import { BrowserWindow, ipcMain } from 'electron';
+import { BrowserWindow, ipcMain, shell } from 'electron';
 import { METHOD_NAMES, type ServiceEvent } from '@dramaclip/protocol';
 import { pickFolder, pickVideoFile } from './services/dialog';
 
@@ -26,6 +26,12 @@ export function registerIpc(context: IpcContext): void {
   ipcMain.handle('dialog:pickVideoFile', (event) =>
     pickVideoFile(BrowserWindow.fromWebContents(event.sender)),
   );
+  ipcMain.handle('shell:reveal', (_event, targetPath: unknown) => {
+    if (typeof targetPath === 'string' && targetPath.length > 0) {
+      shell.showItemInFolder(targetPath);
+    }
+    return { ok: true };
+  });
   ipcMain.handle('service:restart', () => {
     context.restartService();
     return { ok: true };

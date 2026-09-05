@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dramaclip.dev/protocol/narration.json",
+  "title": "narration 命名空间（W4：intro / raw_clip；其余模式随阶段启用）",
+  "namespace": "narration",
+  "x-models": {
+    "NarrationPlan": {
+      "type": "object",
+      "required": ["id", "project_id", "narration_mode", "status", "created_at"],
+      "properties": {
+        "id": { "type": "string" },
+        "project_id": { "type": "string" },
+        "narration_mode": { "type": "string" },
+        "episode_ids": { "type": "array", "items": { "type": "string" } },
+        "plan_data": { "type": "object" },
+        "status": { "type": "string" },
+        "created_at": { "type": "integer" }
+      }
+    },
+    "PlanMode": {
+      "type": "string",
+      "enum": [
+        "raw_clip",
+        "intro_narration",
+        "cross_narration",
+        "full_narration",
+        "dialogue_narration",
+        "subtitle_flow",
+        "ultra_short_hook",
+        "dual_host_chat",
+        "inner_monologue"
+      ]
+    }
+  },
+  "x-methods": [
+    {
+      "name": "narration.generate_plans",
+      "summary": "为选中模式生成编排方案（长任务 job：编排 + TTS 合成；raw_clip 无 TTS）",
+      "params": {
+        "type": "object",
+        "required": ["project_id", "modes"],
+        "properties": {
+          "project_id": { "type": "string" },
+          "modes": { "type": "array", "items": { "$ref": "#/x-models/PlanMode" } },
+          "episode_ids": { "type": "array", "items": { "type": "string" } },
+          "target_duration_s": { "type": "number" }
+        }
+      },
+      "result": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } }
+    },
+    {
+      "name": "narration.list_plans",
+      "summary": "项目编排方案列表",
+      "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
+      "result": { "type": "array", "items": { "$ref": "#/x-models/NarrationPlan" } }
+    }
+  ]
+}

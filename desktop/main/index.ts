@@ -1,5 +1,6 @@
 /** Electron 主进程入口（docs/desktop/00 §2 启动时序）。 */
-import { app, BrowserWindow, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, nativeTheme, protocol, shell } from 'electron';
+import { promises as fsPromises } from 'node:fs';
 import path from 'node:path';
 import { registerIpc, broadcastEvent, type IpcContext } from './ipc';
 import { ServiceManager, type ServiceManagerOptions } from './services/service-manager';
@@ -10,6 +11,21 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 
 let mainWindow: BrowserWindow | null = null;
 let manager: ServiceManager | null = null;
+
+// 必须在 app.ready 前注册（stream: 支持视频流；bypassCSP: 允许 media 加载）
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'dramaclip',
+    privileges: {
+      stream: true,
+      standard: true,
+      bypassCSP: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      secure: true,
+    },
+  },
+]);
 
 function createMainWindow(): void {
   mainWindow = new BrowserWindow({
@@ -87,6 +103,43 @@ async function bootstrap(): Promise<void> {
 }
 
 void app.whenReady().then(() => {
+  // 本地媒体预览协议：dramaclip://local/<encodeURIComponent(绝对路径)>
+  // video 元素要求 Range/206 分段响应，故手动实现字节范围（net.fetch 全量 200 不可播）
+  protocol.handle('dramaclip', async (request) => {
+    try {
+      const raw = decodeURIComponent(new URL(request.url).pathname.replace(/^\/+/, ''));
+      const filePath = raw.replaceAll('\\', '/');
+      const stat = await fsPromises.stat(filePath).catch(() => null);
+      if (!stat?.isFile()) {
+        console.error(`[dramaclip] not found: ${filePath}`);
+        return new Response('not found', { status: 404 });
+      }
+      // 预览文件（≤百 MB）整读切片：Node Buffer 流的块类型不被 Chromium media 接受
+      const buffer = new Uint8Array(await fsPromises.readFile(filePath));
+      const baseHeaders: Record<string, string> = {
+        'content-type': 'video/mp4',
+        'accept-ranges': 'bytes',
+      };
+      const rangeHeader = request.headers.get('range');
+      const match = rangeHeader === null ? null : /bytes=(\d+)-(\d*)/.exec(rangeHeader);
+      if (match === null) {
+        return new Response(buffer, { headers: { ...baseHeaders, 'content-length': String(buffer.length) } });
+      }
+      const start = Number(match[1]);
+      const end = match[2] === '' ? buffer.length - 1 : Math.min(Number(match[2]), buffer.length - 1);
+      return new Response(buffer.subarray(start, end + 1), {
+        status: 206,
+        headers: {
+          ...baseHeaders,
+          'content-length': String(end - start + 1),
+          'content-range': `bytes ${String(start)}-${String(end)}/${String(buffer.length)}`,
+        },
+      });
+    } catch (error) {
+      console.error(`[dramaclip] handler 异常: ${String(error)}`);
+      return new Response('error', { status: 500 });
+    }
+  });
   void bootstrap();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();

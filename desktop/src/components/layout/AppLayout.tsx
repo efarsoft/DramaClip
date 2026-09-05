@@ -20,9 +20,9 @@ const STATE_COLORS: Record<string, string> = {
 /** 应用壳：深色双层导航（docs/desktop/03-UI设计方案 §2.3）。 */
 export function AppLayout() {
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: tokens.bgLayout }}>
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: tokens.bgLayout }}>
       <Sidebar />
-      <main style={{ flex: 1, padding: '24px 32px', overflowY: 'auto' }}>
+      <main style={{ flex: 1, minWidth: 0, padding: '24px 32px', overflowY: 'auto' }}>
         <Outlet />
       </main>
     </div>
@@ -90,18 +90,28 @@ function ProjectNav() {
   const navigate = useNavigate();
   const currentProjectId = useUiStore((state) => state.currentProjectId);
   if (currentProjectId === null || !location.pathname.startsWith('/projects')) return null;
+  const base = `/projects/${currentProjectId}`;
+  const items = [
+    { path: `${base}/analysis`, label: '智能分析' },
+    { path: `${base}/modes`, label: '模式选择' },
+    { path: `${base}/generate`, label: '生成导出' },
+    { path: `${base}/export`, label: '导出管理' },
+  ];
   return (
     <>
       <SectionDivider title="当前项目" />
       <nav style={{ padding: '4px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <NavButton
-          label="智能分析"
-          indent
-          active={location.pathname.includes('/analysis')}
-          onClick={() => {
-            void navigate(`/projects/${currentProjectId}/analysis`);
-          }}
-        />
+        {items.map((item) => (
+          <NavButton
+            key={item.path}
+            label={item.label}
+            indent
+            active={location.pathname === item.path}
+            onClick={() => {
+              void navigate(item.path);
+            }}
+          />
+        ))}
       </nav>
     </>
   );

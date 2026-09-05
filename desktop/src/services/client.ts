@@ -4,7 +4,10 @@ import type {
   AnalysisResults,
   DashboardSummary,
   DramaClipBridge,
+  ExportJob,
   HealthResult,
+  NarrationMode,
+  NarrationPlan,
   PingResult,
   Project,
   ProjectGetResult,
@@ -30,6 +33,15 @@ export function restartService(): Promise<void> {
 
 export function pickFolder(): Promise<string | null> {
   return bridge().pickFolder();
+}
+
+export function revealInFolder(path: string): Promise<void> {
+  return bridge().revealInFolder(path);
+}
+
+/** 本地媒体预览 URL（dramaclip:// 协议，主进程注册）。 */
+export function mediaUrl(path: string): string {
+  return `dramaclip://local/${encodeURIComponent(path)}`;
 }
 
 export function onServiceEvent(callback: (event: ServiceEvent) => void): () => void {
@@ -70,6 +82,27 @@ export const analysisApi = {
     rpc<{ ok: boolean }>('analysis.cancel', { job_id: jobId }),
   results: (projectId: string): Promise<AnalysisResults> =>
     rpc<AnalysisResults>('analysis.results', { project_id: projectId }),
+} as const;
+
+export const narrationApi = {
+  generatePlans: (
+    projectId: string,
+    modes: NarrationMode[],
+    episodeIds?: string[],
+  ): Promise<{ job_id: string }> =>
+    rpc<{ job_id: string }>(
+      'narration.generate_plans',
+      episodeIds ? { project_id: projectId, modes, episode_ids: episodeIds } : { project_id: projectId, modes },
+    ),
+  listPlans: (projectId: string): Promise<NarrationPlan[]> =>
+    rpc<NarrationPlan[]>('narration.list_plans', { project_id: projectId }),
+} as const;
+
+export const exportApi = {
+  start: (planId: string): Promise<{ job_id: string }> =>
+    rpc<{ job_id: string }>('export.start', { plan_id: planId }),
+  list: (projectId: string): Promise<ExportJob[]> =>
+    rpc<ExportJob[]>('export.list', { project_id: projectId }),
 } as const;
 
 export const settingsApi = {
