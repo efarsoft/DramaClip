@@ -210,7 +210,8 @@ def _generate_one(
     )
     if mode in tts_modes:
         tts_dir = context.work_dir / "tts"
-        plan = narration_pipeline.synthesize_narration_texts(plan, settings, tts_dir)
+        models_dir = context.work_dir.parent.parent / "models"
+        plan = narration_pipeline.synthesize_narration_texts(plan, settings, tts_dir, models_dir)
     plans_repo.create(
         context.conn,
         str(episode["project_id"]),

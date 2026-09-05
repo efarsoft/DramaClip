@@ -123,11 +123,12 @@ def synthesize_narration_texts(
     plan: PlanData,
     settings: dict[str, str],
     work_dir: Path,
+    models_dir: Path | None = None,
 ) -> PlanData:
     """逐段合成旁白音频并回填 audio_path/duration；narration 段时长随 TTS 回填。"""
     if not plan.narration_texts:
         return plan
-    engine = create_tts(settings.get("tts.engine", "edge"))
+    engine = create_tts(settings.get("tts.engine", "edge"), models_dir)
     default_voice = settings.get("tts.voice", "")
     updated: list[dict[str, Any]] = []
     for item in plan.narration_texts:
