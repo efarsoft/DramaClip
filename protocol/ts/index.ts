@@ -189,6 +189,12 @@ export interface ExportJob {
   readonly completed_at?: number;
 }
 
+export interface SubtitlePresetInfo {
+  readonly preset_id: string;
+  readonly preset_name: string;
+  readonly description: string;
+}
+
 export interface DashboardSummary {
   readonly project_count: number;
   readonly episode_count: number;
@@ -244,6 +250,7 @@ export const METHOD_NAMES = [
   'narration.list_plans',
   'export.start',
   'export.list',
+  'subtitle.list_presets',
   'settings.get',
   'settings.update',
 ] as const;

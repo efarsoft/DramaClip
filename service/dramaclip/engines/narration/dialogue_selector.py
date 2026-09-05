@@ -85,6 +85,7 @@ def build_dialogue(
                 end=round(segment.end, 3),
                 audio="original",
                 transition="fade" if index > 0 else "cut",
+                subtitle_text=segment.text,
             )
         )
         used += duration

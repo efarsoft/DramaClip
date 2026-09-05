@@ -10,13 +10,15 @@ AudioRole = Literal["original", "narration", "ducked"]
 
 
 class TimelineSegment(BaseModel):
-    """时间轴段：源集 + 起止 + 音频角色 + 转场。"""
+    """时间轴段：源集 + 起止 + 音频角色 + 转场 + 字幕指令（W7）。"""
 
     episode_id: str
     start: float
     end: float
     audio: AudioRole = "original"
     transition: Literal["cut", "fade", "black", "flash"] = "cut"
+    subtitle_text: str | None = None
+    emotion_label: str | None = None
 
 
 class NarrationText(BaseModel):

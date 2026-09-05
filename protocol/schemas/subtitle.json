@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dramaclip.dev/protocol/subtitle.json",
+  "title": "subtitle 命名空间",
+  "namespace": "subtitle",
+  "x-methods": [
+    {
+      "name": "subtitle.list_presets",
+      "summary": "内置字幕风格预设列表（含四维度定义，供前端选择器渲染）",
+      "params": {},
+      "result": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["preset_id", "preset_name", "description"],
+          "properties": {
+            "preset_id": { "type": "string" },
+            "preset_name": { "type": "string" },
+            "description": { "type": "string" }
+          }
+        }
+      }
+    }
+  ]
+}

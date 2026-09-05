@@ -112,11 +112,14 @@ def synthesize_narration_texts(
     for segment in timeline:
         if segment["audio"] != "narration" or narration_order >= len(updated):
             continue
-        duration = updated[narration_order]["duration"]
+        text = updated[narration_order]
+        duration = text["duration"]
         if duration is not None and duration > 0:
             segment["end"] = round(segment["start"] + duration, 3)
+            segment["subtitle_text"] = str(text["text"])
         else:
-            segment["audio"] = "original"  # 无旁白音频 → 回退原声段
+            segment["audio"] = "original"  # 无旁白音频 → 回退原声段（字幕一并取消）
+            segment["subtitle_text"] = None
         narration_order += 1
     kept_texts = [text for text in updated if text["duration"] is not None]
     return plan.model_copy(update={"narration_texts": kept_texts, "timeline": timeline})

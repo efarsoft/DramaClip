@@ -1,0 +1,22 @@
+{
+  "preset_id": "calm-narrative",
+  "preset_name": "沉稳叙事",
+  "description": "适合家庭伦理、都市情感类短剧。克制、专业、不抢画面。",
+  "dimensions": {
+    "rhythm": { "type": "whole_line" },
+    "animation": { "entrance": "fade", "fade_ms": 300 },
+    "layout": { "default": "bottom_bar" },
+    "emotion_style": {
+      "default": { "primary": "&H00FFFFFF", "outline": "&H00000000", "effect": "none" },
+      "anger": { "primary": "&H00FFFFFF", "outline": "&H00000000", "effect": "none" }
+    }
+  },
+  "font": {
+    "name": "Microsoft YaHei",
+    "size": 64,
+    "bold": false,
+    "outline_width": 2,
+    "shadow": 1,
+    "margin_v": 80
+  }
+}

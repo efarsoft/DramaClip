@@ -48,10 +48,9 @@ class ServiceApp:
         notifier = Notifier(self._send)
         work_dir = data_dir / "cache" / "analysis"
         work_dir.mkdir(parents=True, exist_ok=True)
-        executor = ThreadPoolExecutor(
-            max_workers=config.get_int(settings, "hardware.max_parallel_jobs"),
-            thread_name_prefix="rpc",
-        )
+        # +2 余量：长任务占满并发额度时，status/ping 类查询仍可执行
+        workers = config.get_int(settings, "hardware.max_parallel_jobs") + 2
+        executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="rpc")
         context = AppContext(
             conn=conn,
             settings=settings,
@@ -113,6 +112,11 @@ class ServiceApp:
             request = RpcRequest.model_validate(payload)
         except ValueError as exc:
             self._send(error_response(None, PARSE_ERROR, f"请求解析失败: {exc}").model_dump())
+            return
+        if request.method == "system.ping":
+            # 心跳快路径：读线程内联执行。执行池被长任务占满时若 ping 也排队，
+            # Electron 会因心跳饿死判失联并 kill 本进程（真实事故）。
+            self._send(router.dispatch(request).model_dump(exclude_none=True))
             return
         executor.submit(self._dispatch_and_reply, router, request)
 

@@ -64,20 +64,17 @@ def build_cross(
         # 场景间插入旁白段（画面延续到下一场景开头；末尾场景后用本场景尾部）
         anchor = picked[index + 1] if index + 1 < len(picked) else scene
         narration_seconds = _HOOK_TTS_FALLBACK_S
+        narration_text = _CROSS_NARRATIONS[index % len(_CROSS_NARRATIONS)]
         segments.append(
             TimelineSegment(
                 episode_id=episode_id,
                 start=round(anchor.start, 3),
                 end=round(anchor.start + narration_seconds, 3),
                 audio="narration",
+                subtitle_text=narration_text,
             )
         )
-        texts.append(
-            NarrationText(
-                id=f"cross-{index + 1}",
-                text=_CROSS_NARRATIONS[index % len(_CROSS_NARRATIONS)],
-            )
-        )
+        texts.append(NarrationText(id=f"cross-{index + 1}", text=narration_text))
         used += narration_seconds
     return PlanData(
         mode="cross_narration", timeline=segments, narration_texts=texts, strategy=strategy
@@ -107,6 +104,7 @@ def build_ultra_short(
             start=round(best.start, 3),
             end=round(best.start + _HOOK_TTS_FALLBACK_S, 3),
             audio="narration",
+            subtitle_text=hook_text,
         ),
         TimelineSegment(
             episode_id=episode_id,
@@ -119,6 +117,7 @@ def build_ultra_short(
             start=round(best.end - _HOOK_TTS_FALLBACK_S, 3),
             end=round(best.end, 3),
             audio="narration",
+            subtitle_text=cta_text,
         ),
     ]
     texts = [

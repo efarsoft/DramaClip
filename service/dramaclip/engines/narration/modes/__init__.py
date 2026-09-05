@@ -93,6 +93,7 @@ def _fit_duration(
         )
         for index, scene in enumerate(kept)
     ]
+    _ = intro_first  # 引子字幕文本由 synthesize 回填（时长确定后写 timeline[0]）
     if intro_first and segments:
         first = segments[0]
         segments[0] = first.model_copy(

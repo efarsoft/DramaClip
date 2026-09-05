@@ -39,6 +39,7 @@ def cut_segment_args(
     tts_audio: str | None,
     rng: random.Random,
     transition: str = "cut",
+    ass_path: str | None = None,
 ) -> list[str]:
     """构建单段切割命令（Phase A）。audio: original | narration | ducked。"""
     dedup = dedup_params.generate(rng)
@@ -58,6 +59,8 @@ def cut_segment_args(
         filters.append(box)
     if transition == "fade":
         filters.append("fade=t=in:st=0:d=0.25")
+    if ass_path:
+        filters.append(f"ass={_escape_filter_path(ass_path)}")
 
     args = [
         "-hide_banner",
@@ -115,6 +118,22 @@ def cut_segment_args(
     return args
 
 
+def _escape_filter_path(path: str) -> str:
+    """ass 滤镜路径处理：优先相对路径（规避盘符冒号的转义地狱），绝对路径双转义保底。"""
+    import os
+
+    normalized = path.replace("\\", "/")
+    if ":" not in normalized:
+        return normalized.replace("'", r"\'")
+    try:
+        relative = os.path.relpath(normalized).replace("\\", "/")
+    except ValueError:
+        relative = normalized
+    if not relative.startswith(".."):
+        return relative.replace("'", r"\'")
+    return normalized.replace(":", r"\\:").replace("'", r"\'")
+
+
 def export_plan(
     plan: PlanData,
     episode_paths: dict[str, str],
@@ -125,6 +144,7 @@ def export_plan(
     mask: bool = True,
     cancel: threading.Event | None = None,
     on_progress: Callable[[float, str], None] | None = None,
+    subtitle_burner: Callable[[int, str, float], str] | None = None,
 ) -> Path:
     """执行两阶段导出，返回成片路径。"""
     segments = plan.timeline
@@ -145,6 +165,15 @@ def export_plan(
         tts_audio = None
         if tts_audio_by_segment and index in tts_audio_by_segment:
             tts_audio = str(tts_audio_by_segment[index])
+        ass_path: str | None = None
+        if subtitle_burner is not None and segment.subtitle_text:
+            ass_path = str(
+                subtitle_burner(
+                    index,
+                    segment.subtitle_text,
+                    max(segment.end - segment.start, 0.1),
+                )
+            )
         args = cut_segment_args(
             source,
             str(seg_out),
@@ -155,6 +184,7 @@ def export_plan(
             tts_audio=tts_audio,
             rng=rng,
             transition=segment.transition,
+            ass_path=ass_path,
         )
         runner.run(args, timeout_s=600)
         segment_files.append(seg_out)

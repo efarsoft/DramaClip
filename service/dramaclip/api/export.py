@@ -9,6 +9,8 @@ from typing import Any
 from dramaclip.api.context import AppContext
 from dramaclip.engines.exporter import encoder
 from dramaclip.engines.narration.models import PlanData
+from dramaclip.engines.subtitle import presets as subtitle_presets
+from dramaclip.engines.subtitle.ass_generator import build_ass
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import exports as exports_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
@@ -83,6 +85,19 @@ def _run_export(
         if text.audio_path is not None
     }
     mask = plan_row["narration_mode"] not in _NO_MASK_MODES
+    preset = subtitle_presets.get_preset(plan_row.get("subtitle_preset"))
+
+    def burn_subtitle(segment_index: int, text: str, duration_s: float) -> str:
+        """生成段级 ass 文件并返回路径（相对时间轴 0→duration）。"""
+        ass_dir = context.work_dir / "export" / export_id
+        ass_dir.mkdir(parents=True, exist_ok=True)
+        ass_path = ass_dir / f"seg_{segment_index:03d}.ass"
+        ass_path.write_text(
+            build_ass([{"start": 0.0, "end": duration_s, "text": text}], preset),
+            encoding="utf-8",
+        )
+        return str(ass_path)
+
     try:
         encoder.export_plan(
             plan_data,
@@ -93,6 +108,7 @@ def _run_export(
             mask=mask,
             cancel=cancel_event,
             on_progress=report,
+            subtitle_burner=burn_subtitle if plan_data.mode != "raw_clip" else None,
         )
     except Exception as exc:
         exports_repo.mark_failed(context.conn, export_id, str(exc))
