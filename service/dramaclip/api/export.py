@@ -14,12 +14,20 @@ from dramaclip.engines.subtitle.ass_generator import build_ass
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import exports as exports_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
+from dramaclip.infra.storage.repos import projects as projects_repo
 from dramaclip.transport.rpc import Router, RpcDomainError
 
 _ERR_PLAN_NOT_FOUND = -32401
 
 # 纯原片模式零加工：不遮罩（原案 6B）
 _NO_MASK_MODES = {"raw_clip"}
+
+
+def _safe_filename(name: str) -> str:
+    """项目名 → 安全文件名段（去除路径/非法字符）。"""
+    forbidden = "\\/:*?\"<>|"
+    cleaned = "".join(ch for ch in name.strip() if ch not in forbidden)
+    return cleaned.replace(" ", "_")[:40] or "project"
 
 
 def register(router: Router, context: AppContext) -> None:
@@ -68,7 +76,10 @@ def _run_export(
     context.job_store.mark_running(job_id)
     output_root = context.work_dir.parent / "outputs" / project_id
     output_root.mkdir(parents=True, exist_ok=True)
-    out_path = output_root / f"{plan_row['narration_mode']}_{export_id[:8]}.mp4"
+    project = projects_repo.get(context.conn, project_id)
+    project_name = str(project["name"]) if project else project_id[:8]
+    safe_name = _safe_filename(project_name)
+    out_path = output_root / f"{safe_name}_{plan_row['narration_mode']}_{export_id[:6]}.mp4"
 
     def report(percent: float, message: str) -> None:
         context.job_store.set_progress(job_id, round(percent, 1))

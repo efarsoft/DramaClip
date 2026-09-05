@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import signal
+import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -12,7 +13,7 @@ from dramaclip.api import build_router
 from dramaclip.api.context import AppContext
 from dramaclip.engines.analysis.runtime import AnalysisRuntime
 from dramaclip.infra import config, jobs, paths
-from dramaclip.infra.storage import db
+from dramaclip.infra.storage import backup, db
 from dramaclip.transport.connection import ServiceConnection
 from dramaclip.transport.notify import Notifier
 from dramaclip.transport.rpc import (
@@ -39,6 +40,10 @@ class ServiceApp:
 
     def run(self) -> int:
         data_dir = paths.resolve_data_dir(self._data_dir_env)
+        try:
+            backup.backup_database(paths.db_path(data_dir))
+        except sqlite3.Error as exc:  # 备份失败不阻塞启动
+            print(f"[backup] 备份失败: {exc}")
         conn = db.connect(paths.db_path(data_dir))
         db.migrate(conn)
         settings = config.load(conn)
