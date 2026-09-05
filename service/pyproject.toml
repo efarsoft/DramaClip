@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "dramaclip"
 version = "2.0.0"
 description = "DramaClip 本地服务（分析/解说/字幕/消重/TTS/存储）"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 dependencies = [
   "pydantic>=2.7",
@@ -28,13 +28,13 @@ packages = ["dramaclip"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 strict = true
 # 第三方无类型库按模块登记放宽（docs/04 第 2 节），禁止全局降 strict
 ignore_missing_imports = true

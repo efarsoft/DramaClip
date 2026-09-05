@@ -1,0 +1,125 @@
+"""ASR 双引擎：faster-whisper（默认，已实测）/ SenseVoice（funasr，懒加载）。
+
+引擎依赖属 ml extras（pyproject [project.optional-dependencies]），
+import 一律发生在引擎方法内部——未装依赖时仅在真正调用才报错，不影响其余功能。
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
+
+from dramaclip.engines.analysis.models import AsrSegment
+
+if TYPE_CHECKING:
+    # 仅类型检查期导入（运行时懒加载；缺依赖时经 ignore_missing_imports 兜底）
+    from faster_whisper import WhisperModel
+    from funasr import AutoModel
+
+
+class AsrEngine(Protocol):
+    """ASR 引擎接口：输入 16k 单声道 wav，输出带时间戳的转写段。"""
+
+    @property
+    def name(self) -> str: ...
+
+    def transcribe(self, wav_path: Path, language: str = "zh") -> list[AsrSegment]: ...
+
+
+class FasterWhisperEngine:
+    """faster-whisper（CTranslate2，CPU 可用，模型自动下载到 models_dir）。"""
+
+    def __init__(
+        self,
+        model_size: str = "base",
+        *,
+        device: str = "auto",
+        models_dir: Path | None = None,
+    ) -> None:
+        self._model_size = model_size
+        self._device = device
+        self._models_dir = models_dir
+        self._model: WhisperModel | None = None
+
+    @property
+    def name(self) -> str:
+        return f"faster_whisper:{self._model_size}"
+
+    def transcribe(self, wav_path: Path, language: str = "zh") -> list[AsrSegment]:
+        model = self._ensure_model()
+        segments, _info = model.transcribe(str(wav_path), language=language, vad_filter=True)
+        return [
+            AsrSegment(start=seg.start, end=seg.end, text=seg.text.strip())
+            for seg in segments
+            if seg.text.strip()
+        ]
+
+    def _ensure_model(self) -> WhisperModel:
+        if self._model is None:
+            from faster_whisper import WhisperModel  # ml extras 懒加载
+
+            self._model = WhisperModel(
+                self._model_size,
+                device=self._device,
+                download_root=str(self._models_dir) if self._models_dir else None,
+            )
+        return self._model
+
+
+class SenseVoiceEngine:
+    """SenseVoice（funasr，含 VAD 与情绪标签）。依赖较重（torch），按需安装。"""
+
+    def __init__(self, model_dir: Path | None = None, *, models_dir: Path | None = None) -> None:
+        resolved = model_dir if model_dir is not None else (
+            models_dir / "asr" / "iic" / "SenseVoiceSmall" if models_dir is not None else None
+        )
+        self._model_dir = resolved
+        self._model: AutoModel | None = None
+
+    @property
+    def name(self) -> str:
+        return "sensevoice"
+
+    def transcribe(self, wav_path: Path, language: str = "zh") -> list[AsrSegment]:
+        model = self._ensure_model()
+        raw = model.generate(
+            input=str(wav_path),
+            cache={},
+            language=language,
+            output_timestamp=True,
+        )
+        return _parse_sensevoice(raw)
+
+    def _ensure_model(self) -> AutoModel:
+        if self._model is None:
+            from funasr import AutoModel  # ml extras 懒加载
+
+            if self._model_dir is not None and self._model_dir.is_dir():
+                self._model = AutoModel(model=str(self._model_dir))
+            else:
+                self._model = AutoModel(model="iic/SenseVoiceSmall")
+        return self._model
+
+
+def _parse_sensevoice(raw: list) -> list[AsrSegment]:  # type: ignore[type-arg]
+    """funasr 输出 [{text, timestamp:[[beg_ms,end_ms], ...]}]（时间戳按字/词分组）。"""
+    segments: list[AsrSegment] = []
+    for item in raw:
+        timestamps = item.get("timestamp") or []
+        text_chunks = str(item.get("text", "")).split()
+        if not timestamps:
+            continue
+        for cursor, span in enumerate(timestamps):
+            beg_ms, end_ms = span
+            chunk = text_chunks[cursor] if cursor < len(text_chunks) else ""
+            if chunk:
+                segments.append(AsrSegment(start=beg_ms / 1000, end=end_ms / 1000, text=chunk))
+    # 合并为句级（简单拼接为整段，句级切分由 W3 语义层细化）
+    if segments:
+        merged = AsrSegment(
+            start=segments[0].start,
+            end=segments[-1].end,
+            text="".join(seg.text for seg in segments),
+        )
+        return [merged]
+    return []

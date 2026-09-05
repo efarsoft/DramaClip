@@ -18,6 +18,18 @@ APP_ERROR_BASE = -32000  # 业务错误段起点（分段见 docs/03-IPC协议�
 Handler = Callable[[dict[str, Any]], Any]
 
 
+class RpcDomainError(Exception):
+    """业务域错误：携带分段错误码（docs/03-IPC协议规范.md §5）。
+
+    api 层抛出，Router.dispatch 转为对应错误响应（未捕获的其他异常仍兜底 -32603）。
+    """
+
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
 class RpcRequest(BaseModel):
     """入站请求信封。"""
 
@@ -69,6 +81,8 @@ class Router:
             return error_response(request.id, METHOD_NOT_FOUND, f"方法不存在: {request.method}")
         try:
             result = handler(request.params)
+        except RpcDomainError as exc:
+            return error_response(request.id, exc.code, exc.message)
         except Exception as exc:  # 边界兜底：任何异常都转为错误响应而非断连
             return error_response(request.id, INTERNAL_ERROR, str(exc))
         return RpcResponse(id=request.id, result=result)

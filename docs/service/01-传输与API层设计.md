@@ -56,10 +56,10 @@ engines 不直接持有 Notifier——api 层包装为 `ProgressReporter` 注入
 **文件 = 命名空间**（04 规约：单文件红线，禁止 routes.py 大杂烩）：
 
 ```
-api/__init__.py     build_router() 组装全部命名空间（唯一 import 点）
-api/system.py       ping / health / shutdown        （W1）
-api/project.py      create/open/list/delete/scan_episodes   （W3）
-api/analysis.py     prescreen/start/status/cancel/results   （W2-W10 逐步）
+api/__init__.py     build_router(context, shutdown) 组装全部命名空间（唯一 import 点）
+api/system.py       ping / health / shutdown        （W1 ✅）
+api/project.py      create/get/list/delete/scan_episodes   （W2 ✅）
+api/analysis.py     start/status/cancel/results（prescreen W10）  （W2 ✅）
 api/narration.py    generate_plans/synthesize_tts/get_plan  （W4-W9）
 api/export.py       start/cancel/status/list                （W4）
 api/subtitle.py     list_presets/preview                    （W7）

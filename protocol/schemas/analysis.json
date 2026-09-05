@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dramaclip.dev/protocol/analysis.json",
+  "title": "analysis 命名空间（W2：阶段二精准分析；prescreen 见 W10）",
+  "namespace": "analysis",
+  "x-models": {
+    "AsrSegment": {
+      "type": "object",
+      "required": ["start", "end", "text"],
+      "properties": {
+        "start": { "type": "number" },
+        "end": { "type": "number" },
+        "text": { "type": "string" },
+        "speaker": { "type": "string" },
+        "emotion": { "type": "string" }
+      }
+    },
+    "EpisodeAnalysisResult": {
+      "type": "object",
+      "required": ["episode_id", "episode_number", "status", "asr_segment_count", "scene_count"],
+      "properties": {
+        "episode_id": { "type": "string" },
+        "episode_number": { "type": "integer" },
+        "status": { "type": "string" },
+        "asr_segment_count": { "type": "integer" },
+        "scene_count": { "type": "integer" },
+        "error": { "type": "string" }
+      }
+    },
+    "AnalysisJobStatus": {
+      "type": "object",
+      "required": ["job_id", "status", "progress"],
+      "properties": {
+        "job_id": { "type": "string" },
+        "status": { "type": "string" },
+        "progress": { "type": "number" },
+        "message": { "type": "string" },
+        "error": { "type": "string" },
+        "episodes": {
+          "type": "array",
+          "items": { "type": "object", "required": ["episode_id", "status"], "properties": { "episode_id": { "type": "string" }, "status": { "type": "string" } } }
+        }
+      }
+    }
+  },
+  "x-methods": [
+    {
+      "name": "analysis.start",
+      "summary": "启动精准分析（长任务 job 模式；episode_ids 缺省=全部未完成集）",
+      "params": {
+        "type": "object",
+        "required": ["project_id"],
+        "properties": {
+          "project_id": { "type": "string" },
+          "episode_ids": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "result": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } }
+    },
+    {
+      "name": "analysis.status",
+      "summary": "任务状态与逐集进度",
+      "params": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } },
+      "result": { "$ref": "#/x-models/AnalysisJobStatus" }
+    },
+    {
+      "name": "analysis.cancel",
+      "summary": "取消任务",
+      "params": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } },
+      "result": { "type": "object", "required": ["ok"], "properties": { "ok": { "type": "boolean" } } }
+    },
+    {
+      "name": "analysis.results",
+      "summary": "项目分析结果摘要（含 ASR 全文段，供 W3 语义层与前端看板）",
+      "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
+      "result": {
+        "type": "object",
+        "required": ["episodes"],
+        "properties": {
+          "episodes": { "type": "array", "items": { "$ref": "#/x-models/EpisodeAnalysisResult" } },
+          "asr_segments": {
+            "type": "object",
+            "additionalProperties": { "type": "array", "items": { "$ref": "#/x-models/AsrSegment" } }
+          }
+        }
+      }
+    }
+  ]
+}

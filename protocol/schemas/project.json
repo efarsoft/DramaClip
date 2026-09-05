@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dramaclip.dev/protocol/project.json",
+  "title": "project 命名空间",
+  "namespace": "project",
+  "x-models": {
+    "Project": {
+      "type": "object",
+      "required": ["id", "name", "source_path", "status", "created_at", "episode_count"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "source_path": { "type": "string" },
+        "status": { "type": "string" },
+        "created_at": { "type": "integer" },
+        "episode_count": { "type": "integer" }
+      }
+    },
+    "Episode": {
+      "type": "object",
+      "required": ["id", "episode_number", "name", "source_path", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "episode_number": { "type": "integer" },
+        "name": { "type": "string" },
+        "source_path": { "type": "string" },
+        "duration": { "type": "number" },
+        "status": { "type": "string" }
+      }
+    },
+    "ScannedEpisode": {
+      "type": "object",
+      "required": ["episode_number", "name", "source_path", "duration", "size_bytes"],
+      "properties": {
+        "episode_number": { "type": "integer" },
+        "name": { "type": "string" },
+        "source_path": { "type": "string" },
+        "duration": { "type": "number" },
+        "size_bytes": { "type": "integer" }
+      }
+    }
+  },
+  "x-methods": [
+    {
+      "name": "project.create",
+      "summary": "创建项目（source_path 为剧集目录）",
+      "params": {
+        "type": "object",
+        "required": ["name", "source_path"],
+        "properties": { "name": { "type": "string" }, "source_path": { "type": "string" } }
+      },
+      "result": { "$ref": "#/x-models/Project" }
+    },
+    {
+      "name": "project.list",
+      "summary": "项目列表（含集数统计）",
+      "params": {},
+      "result": { "type": "array", "items": { "$ref": "#/x-models/Project" } }
+    },
+    {
+      "name": "project.get",
+      "summary": "项目详情 + 集列表",
+      "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
+      "result": {
+        "type": "object",
+        "required": ["project", "episodes"],
+        "properties": {
+          "project": { "$ref": "#/x-models/Project" },
+          "episodes": { "type": "array", "items": { "$ref": "#/x-models/Episode" } }
+        }
+      }
+    },
+    {
+      "name": "project.delete",
+      "summary": "删除项目（级联删集与分析结果）",
+      "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
+      "result": { "type": "object", "required": ["ok"], "properties": { "ok": { "type": "boolean" } } }
+    },
+    {
+      "name": "project.scan_episodes",
+      "summary": "扫描项目目录登记集（ffprobe 逐文件时长/大小，返回登记结果）",
+      "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
+      "result": { "type": "array", "items": { "$ref": "#/x-models/ScannedEpisode" } }
+    }
+  ]
+}

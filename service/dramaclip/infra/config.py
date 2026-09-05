@@ -12,6 +12,10 @@ from dramaclip.infra.storage.repos import settings as settings_repo
 DEFAULTS: dict[str, str] = {
     "analysis.full_threshold": "15",
     "analysis.prescreen_threshold": "70",
+    "asr.engine": "faster_whisper",
+    "asr.model": "base",
+    "asr.device": "cpu",
+    "asr.language": "zh",
     "subtitle.default_preset": "conflict-impact",
     "subtitle.smart_match": "true",
     "llm.base_url": "",

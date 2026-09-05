@@ -8,6 +8,7 @@ from dramaclip.transport.rpc import (
     INTERNAL_ERROR,
     METHOD_NOT_FOUND,
     Router,
+    RpcDomainError,
     RpcRequest,
     parse_request,
 )
@@ -45,6 +46,18 @@ def test_dispatch_handler_exception_returns_internal_error() -> None:
     assert response.error is not None
     assert response.error.code == INTERNAL_ERROR
     assert "炸了" in response.error.message
+
+
+def test_dispatch_domain_error_keeps_code() -> None:
+    def not_found(_params: dict[str, object]) -> object:
+        raise RpcDomainError(-32101, "项目不存在")
+
+    router = Router()
+    router.register("system.ping", not_found)
+    response = router.dispatch(RpcRequest(id=4, method="system.ping"))
+    assert response.error is not None
+    assert response.error.code == -32101
+    assert response.error.message == "项目不存在"
 
 
 def test_register_duplicate_rejected() -> None:

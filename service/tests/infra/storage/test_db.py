@@ -30,7 +30,7 @@ def test_migrate_creates_all_tables(memory_db: sqlite3.Connection) -> None:
 def test_migrate_idempotent() -> None:
     conn = sqlite3.connect(":memory:")
     try:
-        assert db.migrate(conn) == ["001_init.sql"]
+        assert db.migrate(conn) == ["001_init.sql", "002_add_audio_features.sql"]
         assert db.migrate(conn) == []  # 第二次全量跳过
     finally:
         conn.close()

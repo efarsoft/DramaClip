@@ -9,6 +9,8 @@ from typing import Any
 
 from dramaclip import PROTOCOL_VERSION, __version__
 from dramaclip.api import build_router
+from dramaclip.api.context import AppContext
+from dramaclip.engines.analysis.runtime import AnalysisRuntime
 from dramaclip.infra import config, jobs, paths
 from dramaclip.infra.storage import db
 from dramaclip.transport.connection import ServiceConnection
@@ -40,19 +42,31 @@ class ServiceApp:
         conn = db.connect(paths.db_path(data_dir))
         db.migrate(conn)
         settings = config.load(conn)
-        interrupted = jobs.JobStore(conn).sweep_interrupted()
+        job_store = jobs.JobStore(conn)
+        interrupted = job_store.sweep_interrupted()
 
-        router = build_router(self._shutdown)
+        notifier = Notifier(self._send)
+        work_dir = data_dir / "cache" / "analysis"
+        work_dir.mkdir(parents=True, exist_ok=True)
         executor = ThreadPoolExecutor(
             max_workers=config.get_int(settings, "hardware.max_parallel_jobs"),
             thread_name_prefix="rpc",
         )
+        context = AppContext(
+            conn=conn,
+            settings=settings,
+            notifier=notifier,
+            executor=executor,
+            job_store=job_store,
+            analysis_runtime=AnalysisRuntime(settings, data_dir / "models"),
+            work_dir=work_dir,
+        )
+        router = build_router(context, self._shutdown)
         self._install_signal_handlers()
         try:
             self._serve(router, executor)
             if interrupted:
-                message = f"恢复上次会话：{interrupted} 个中断任务已标记失败"
-                Notifier(self._send).log("warn", message)
+                notifier.log("warn", f"恢复上次会话：{interrupted} 个中断任务已标记失败")
             while not self._stop.is_set():
                 self._stop.wait(_STOP_POLL_SECONDS)
         finally:

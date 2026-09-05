@@ -9,8 +9,12 @@ MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 
 def connect(db_file: Path) -> sqlite3.Connection:
-    """打开连接：WAL + 外键 + 忙等待 5s。"""
-    conn = sqlite3.connect(db_file)
+    """打开连接：WAL + 外键 + 忙等待 5s。
+
+    check_same_thread=False：api 层执行池线程会写库；CPython 3.12+ 的 sqlite3
+    为 serialized 线程安全模式（sqlite3.threadsafety == 3），跨线程共享安全。
+    """
+    conn = sqlite3.connect(db_file, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=5000")

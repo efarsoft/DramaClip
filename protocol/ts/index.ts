@@ -54,6 +54,72 @@ export interface HealthResult {
   readonly models_ok?: boolean;
 }
 
+/** ---- project 命名空间 ---- */
+
+export interface Project {
+  readonly id: string;
+  readonly name: string;
+  readonly source_path: string;
+  readonly status: string;
+  readonly created_at: number;
+  readonly episode_count: number;
+}
+
+export interface Episode {
+  readonly id: string;
+  readonly episode_number: number;
+  readonly name: string;
+  readonly source_path: string;
+  readonly duration?: number;
+  readonly status: string;
+}
+
+export interface ScannedEpisode {
+  readonly episode_number: number;
+  readonly name: string;
+  readonly source_path: string;
+  readonly duration: number;
+  readonly size_bytes: number;
+}
+
+export interface ProjectGetResult {
+  readonly project: Project;
+  readonly episodes: Episode[];
+}
+
+/** ---- analysis 命名空间（W2）---- */
+
+export interface AsrSegment {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+  readonly speaker?: string;
+  readonly emotion?: string;
+}
+
+export interface EpisodeAnalysisResult {
+  readonly episode_id: string;
+  readonly episode_number: number;
+  readonly status: string;
+  readonly asr_segment_count: number;
+  readonly scene_count: number;
+  readonly error?: string;
+}
+
+export interface AnalysisJobStatus {
+  readonly job_id: string;
+  readonly status: string;
+  readonly progress: number;
+  readonly message?: string;
+  readonly error?: string;
+  readonly episodes?: ReadonlyArray<{ episode_id: string; status: string }>;
+}
+
+export interface AnalysisResults {
+  readonly episodes: EpisodeAnalysisResult[];
+  readonly asr_segments?: Readonly<Record<string, AsrSegment[]>>;
+}
+
 /** 主进程 → 渲染层事件（service:event 通道） */
 export type ServiceEvent =
   | { readonly type: 'service-state'; readonly state: ServiceState }
@@ -76,7 +142,20 @@ export interface DramaClipBridge {
   onServiceEvent(callback: (event: ServiceEvent) => void): () => void;
 }
 
-export const METHOD_NAMES = ['system.ping', 'system.health', 'system.shutdown'] as const;
+export const METHOD_NAMES = [
+  'system.ping',
+  'system.health',
+  'system.shutdown',
+  'project.create',
+  'project.list',
+  'project.get',
+  'project.delete',
+  'project.scan_episodes',
+  'analysis.start',
+  'analysis.status',
+  'analysis.cancel',
+  'analysis.results',
+] as const;
 
 export const NOTIFICATION_NAMES = ['progress.update', 'log.append', 'models.download_progress'] as const;
 
