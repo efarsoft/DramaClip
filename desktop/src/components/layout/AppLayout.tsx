@@ -6,8 +6,8 @@ import { tokens } from '../../styles/theme';
 const NAV_ITEMS = [
   { path: '/', label: '工作台', enabled: true },
   { path: '/projects', label: '项目管理', enabled: true },
-  { path: '/models', label: '模型管理', enabled: false },
-  { path: '/settings', label: '系统设置', enabled: false },
+  { path: '/models', label: '模型管理', enabled: true },
+  { path: '/settings', label: '系统设置', enabled: true },
 ] as const;
 
 const STATE_COLORS: Record<string, string> = {

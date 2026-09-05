@@ -1,10 +1,12 @@
 import { App as AntdApp, Button, Card, Statistic } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { DashboardSummary, HealthResult, Project } from '@dramaclip/protocol';
-import { pickFolder, projectApi, systemApi } from '../../services/client';
+import type { DashboardSummary, HealthResult, ModelInfo, Project } from '@dramaclip/protocol';
+import { pickFolder, projectApi, rpc, systemApi } from '../../services/client';
 import { useUiStore } from '../../stores/ui';
 import { tokens } from '../../styles/theme';
+import { TodoCard } from './TodoCard';
+import { useTodos } from './useTodos';
 
 /** 工作台（docs/desktop/03 §7.1 W3 子集）：统计概览 + 最近项目 + 快捷导入 + 服务状态。 */
 export function HomePage() {
@@ -17,18 +19,24 @@ function HomeContent() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [health, setHealth] = useState<HealthResult | null>(null);
+  const [models, setModels] = useState<ModelInfo[] | null>(null);
+  const [llmBaseUrl, setLlmBaseUrl] = useState<string>('');
   const [creating, setCreating] = useState(false);
   const serviceState = useUiStore((state) => state.serviceState);
 
   const load = useCallback(async () => {
-    const [summaryData, projectList, healthData] = await Promise.all([
+    const [summaryData, projectList, healthData, modelList, settings] = await Promise.all([
       projectApi.dashboardSummary(),
       projectApi.list(),
       systemApi.health(),
+      rpc<ModelInfo[]>('models.list').catch(() => null),
+      rpc<Record<string, string>>('settings.get').catch(() => null),
     ]);
     setSummary(summaryData);
     setProjects(projectList.slice(0, 6));
     setHealth(healthData);
+    setModels(modelList);
+    setLlmBaseUrl(settings?.['llm.base_url'] ?? '');
   }, []);
 
   // 服务就绪前发起的 RPC 会失败；ready 后重载一次（修复启动时序竞争）
@@ -51,9 +59,12 @@ function HomeContent() {
     }
   }, [message, navigate]);
 
+  const todos = useTodos(models, llmBaseUrl !== '', serviceState === 'unavailable');
+
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 32 }}>
       <HomeHeader creating={creating} onCreate={() => void onCreate()} />
+      <TodoCard items={todos} />
       <SummaryCards
         summary={summary}
         onProjects={() => {
