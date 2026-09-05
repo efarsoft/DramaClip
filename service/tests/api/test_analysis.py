@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import sqlite3
 import time
@@ -15,6 +16,8 @@ from dramaclip.api import analysis as analysis_api
 from dramaclip.api import project as project_api
 from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.infra import jobs
+from dramaclip.infra.storage.repos import analysis as analysis_repo
+from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.transport.notify import Notifier
 from dramaclip.transport.rpc import Router, RpcRequest
 
@@ -144,3 +147,80 @@ def test_start_rejects_unknown_project(harness: Harness) -> None:
         RpcRequest(id=1, method="analysis.start", params={"project_id": "nope"})
     )
     assert response.error is not None and response.error.code == -32101
+
+
+def _analyzed_project(
+    harness: Harness, tmp_path: Path, sample_video: Path
+) -> tuple[str, str]:
+    project_id = _make_project(harness, tmp_path, sample_video, copies=1)
+    result = harness.rpc("analysis.start", {"project_id": project_id})
+    status = harness.wait_done(str(result["job_id"]))
+    assert status["status"] == "completed"
+    results = harness.rpc("analysis.results", {"project_id": project_id})
+    episode_id = str(results["episodes"][0]["episode_id"])
+    return project_id, episode_id
+
+
+def test_update_asr_replaces_and_keeps_semantics(
+    harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    project_id, episode_id = _analyzed_project(harness, tmp_path, sample_video)
+    before = analysis_repo.get(memory_db, episode_id)
+    assert before is not None
+
+    result = harness.rpc(
+        "analysis.update_asr",
+        {
+            "project_id": project_id,
+            "episode_id": episode_id,
+            "segments": [
+                {"start": 0.5, "end": 2.5, "text": " 修正后的台词 ", "speaker": "主角"},
+                {"start": 5.0, "end": 3.0, "text": "时间倒置应被过滤"},
+                {"start": 6.0, "end": 7.0, "text": "   "},
+            ],
+        },
+    )
+    assert result == {"ok": True, "count": 1}
+
+    after = analysis_repo.get(memory_db, episode_id)
+    assert after is not None
+    segments = json.loads(after["asr_segments"])
+    assert [(seg["start"], seg["text"], seg["speaker"]) for seg in segments] == [
+        (0.5, "修正后的台词", "主角")
+    ]
+    assert after["scene_data"] == before["scene_data"], "语义/场景结果必须保留"
+    assert after["highlights"] == before["highlights"]
+
+
+def test_update_asr_rejects_missing_analysis(
+    harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    project_id = _make_project(harness, tmp_path, sample_video, copies=1)
+    episode_id = str(episodes_repo.list_by_project(memory_db, project_id)[0]["id"])
+    response = harness.router.dispatch(
+        RpcRequest(
+            id=1,
+            method="analysis.update_asr",
+            params={
+                "project_id": project_id,
+                "episode_id": episode_id,
+                "segments": [],
+            },
+        )
+    )
+    assert response.error is not None and response.error.code == -32203
+
+
+def test_update_asr_rejects_foreign_episode(
+    harness: Harness, tmp_path: Path, sample_video: Path
+) -> None:
+    project_id, episode_id = _analyzed_project(harness, tmp_path, sample_video)
+    response = harness.router.dispatch(
+        RpcRequest(
+            id=1,
+            method="analysis.update_asr",
+            params={"project_id": project_id, "episode_id": "nope", "segments": []},
+        )
+    )
+    assert response.error is not None and response.error.code == -32101
+    assert project_id and episode_id

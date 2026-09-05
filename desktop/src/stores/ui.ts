@@ -34,6 +34,11 @@ export const useUiStore = create<UiState>((set) => ({
   },
 }));
 
+/** 供路由页面以函数形式设置当前项目（避免各页直接持有 store setter）。 */
+export function setCurrentProjectIdInStore(id: string | null): void {
+  useUiStore.getState().setCurrentProjectId(id);
+}
+
 /** 订阅 progress.update → analysisProgress（在 App 装配一次，返回取消函数）。 */
 export function subscribeAnalysisProgress(): () => void {
   return onServiceEvent((event) => {

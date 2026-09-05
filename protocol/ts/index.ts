@@ -258,6 +258,7 @@ export const METHOD_NAMES = [
   'project.scan_episodes',
   'project.dashboard_summary',
   'analysis.prescreen',
+  'analysis.update_asr',
   'analysis.start',
   'analysis.status',
   'analysis.cancel',

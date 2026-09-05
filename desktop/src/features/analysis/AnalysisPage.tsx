@@ -2,7 +2,7 @@ import { App as AntdApp, Button, Card, Checkbox, Progress, Tag } from 'antd';
 import { useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import type { Episode } from '@dramaclip/protocol';
-import { useUiStore } from '../../stores/ui';
+import { setCurrentProjectIdInStore, useUiStore } from '../../stores/ui';
 import { tokens } from '../../styles/theme';
 import { EpisodeResultPanel } from './EpisodeResultPanel';
 import { useAnalysisWorkspace } from './useAnalysisWorkspace';
@@ -10,17 +10,16 @@ import { useAnalysisWorkspace } from './useAnalysisWorkspace';
 /** 智能分析页（docs/desktop/01 §6 W3 版）：选集 → 分析进度 → 结果看板。 */
 export function AnalysisPage() {
   const { projectId = '' } = useParams();
-  const { message } = AntdApp.useApp();
-  const setCurrentProjectId = useUiStore((state) => state.setCurrentProjectId);
+  const message = AntdApp.useApp().message;
   const analysisProgress = useUiStore((state) => state.analysisProgress);
   const workspace = useAnalysisWorkspace(projectId);
 
   useEffect(() => {
-    setCurrentProjectId(projectId === '' ? null : projectId);
+    setCurrentProjectIdInStore(projectId === '' ? null : projectId);
     return () => {
-      setCurrentProjectId(null);
+      setCurrentProjectIdInStore(null);
     };
-  }, [projectId, setCurrentProjectId]);
+  }, [projectId]);
 
   const running = workspace.job?.status === 'running' || workspace.job?.status === 'pending';
   const percent =
@@ -29,7 +28,7 @@ export function AnalysisPage() {
       : (workspace.job?.progress ?? 0);
   const statusMessage = running ? (analysisProgress?.message ?? '准备中') : '';
 
-  const onStart = async () => {
+  const onStart = async (): Promise<void> => {
     try {
       await workspace.start();
     } catch (error) {
@@ -44,22 +43,12 @@ export function AnalysisPage() {
         running={running}
         count={workspace.selectedIds.length}
         disabled={!workspace.canStart}
-        onStart={() => void onStart()}
+        onStart={() => {
+          void onStart();
+        }}
       />
-
       <Card size="small" title="剧集选择">
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-          {workspace.episodes.map((episode) => (
-            <EpisodeChip
-              key={episode.id}
-              episode={episode}
-              checked={workspace.selectedIds.includes(episode.id)}
-              active={workspace.activeEpisodeId === episode.id}
-              onToggle={(checked) => { workspace.toggleSelected(episode.id, checked); }}
-              onSelect={() => { workspace.setActiveEpisodeId(episode.id); }}
-            />
-          ))}
-        </div>
+        <SegmentChooser workspace={workspace} />
         {running && (
           <div style={{ marginTop: 16 }}>
             <Progress percent={Math.round(percent)} status="active" />
@@ -67,9 +56,12 @@ export function AnalysisPage() {
           </div>
         )}
       </Card>
-
       {workspace.activeEpisodeId !== null && (
-        <EpisodeResultPanel episodeId={workspace.activeEpisodeId} results={workspace.results} />
+        <EpisodeResultPanel
+          episodeId={workspace.activeEpisodeId}
+          projectId={projectId}
+          results={workspace.results}
+        />
       )}
     </div>
   );
@@ -95,6 +87,30 @@ function PageHeader({
         {running ? '分析中…' : `开始分析（${String(count)} 集）`}
       </Button>
     </header>
+  );
+}
+
+function SegmentChooser({ workspace }: { workspace: ReturnType<typeof useAnalysisWorkspace> }) {
+  const {
+    episodes,
+    selectedIds,
+    activeEpisodeId,
+    toggleSelected,
+    setActiveEpisodeId,
+  } = workspace;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+      {episodes.map((episode) => (
+        <EpisodeChip
+          key={episode.id}
+          episode={episode}
+          checked={selectedIds.includes(episode.id)}
+          active={activeEpisodeId === episode.id}
+          onToggle={(checked) => { toggleSelected(episode.id, checked); }}
+          onSelect={() => { setActiveEpisodeId(episode.id); }}
+        />
+      ))}
+    </div>
   );
 }
 

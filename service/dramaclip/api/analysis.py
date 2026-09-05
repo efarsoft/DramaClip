@@ -20,10 +20,13 @@ from dramaclip.transport.rpc import Router, RpcDomainError
 _ERR_PROJECT_NOT_FOUND = -32101
 _ERR_JOB_NOT_FOUND = -32201
 _ERR_NO_EPISODES = -32202
+_ERR_NO_ANALYSIS = -32203
+_ERR_SEGMENT_INVALID = -32204
 
 
 def register(router: Router, context: AppContext) -> None:
     router.register("analysis.prescreen", lambda params: prescreen(context, params))
+    router.register("analysis.update_asr", lambda params: update_asr(context, params))
     router.register("analysis.start", lambda params: start(context, params))
     router.register("analysis.status", lambda params: status(context, params))
     router.register("analysis.cancel", lambda params: cancel(context, params))
@@ -146,6 +149,49 @@ def cancel(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True}
 
 
+def update_asr(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """整列表替换 ASR 段（用户修正转写错误/删幻觉段）；保留下游已生成的语义结果。"""
+    project_id = str(params.get("project_id", ""))
+    episode_id = str(params.get("episode_id", ""))
+    if projects_repo.get(context.conn, project_id) is None:
+        raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
+    episode = episodes_repo.get(context.conn, episode_id)
+    if episode is None or str(episode["project_id"]) != project_id:
+        raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"集不存在: {episode_id}")
+    record = analysis_repo.get(context.conn, episode_id)
+    if record is None:
+        raise RpcDomainError(_ERR_NO_ANALYSIS, "该集尚无分析结果")
+
+    raw_segments = params.get("segments")
+    if not isinstance(raw_segments, list):
+        raise RpcDomainError(_ERR_SEGMENT_INVALID, "segments 必须为数组")
+    cleaned: list[dict[str, Any]] = []
+    for item in raw_segments:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text", "")).strip()
+        try:
+            start = float(item.get("start", 0))
+            end = float(item.get("end", 0))
+        except (TypeError, ValueError):
+            continue
+        if end <= start or not text:
+            continue
+        cleaned.append(
+            {
+                "start": start,
+                "end": end,
+                "text": text,
+                "speaker": item.get("speaker"),
+                "emotion": item.get("emotion"),
+            }
+        )
+    analysis_repo.update_asr_segments(
+        context.conn, episode_id, json.dumps(cleaned, ensure_ascii=False)
+    )
+    return {"ok": True, "count": len(cleaned)}
+
+
 def results(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     project_id = str(params.get("project_id", ""))
     if projects_repo.get(context.conn, project_id) is None:
@@ -173,19 +219,20 @@ def results(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
             conflict_map[episode_id] = conflict_scores
         if prescreen is not None:
             prescreen_map[episode_id] = prescreen
-        summary.append(
-            {
-                "episode_id": episode_id,
-                "episode_number": episode["episode_number"],
-                "status": episode["status"],
-                "asr_segment_count": len(segments),
-                "scene_count": _scene_count(record),
-                "highlight_count": len(highlights),
-                "prescreen_score": prescreen["prescreen_score"] if prescreen else None,
-                "recommended": bool(prescreen["recommended"]) if prescreen else None,
-                "genre": (record or {}).get("genre") if record else None,
-            }
-        )
+        entry: dict[str, Any] = {
+            "episode_id": episode_id,
+            "episode_number": episode["episode_number"],
+            "status": episode["status"],
+            "asr_segment_count": len(segments),
+            "scene_count": _scene_count(record),
+            "highlight_count": len(highlights),
+            "prescreen_score": prescreen["prescreen_score"] if prescreen else None,
+            "recommended": bool(prescreen["recommended"]) if prescreen else None,
+        }
+        genre = record["genre"] if record else None
+        if genre:
+            entry["genre"] = str(genre)
+        summary.append(entry)
     return {
         "episodes": summary,
         "asr_segments": asr_map,

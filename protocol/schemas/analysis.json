@@ -47,6 +47,37 @@
   },
   "x-methods": [
     {
+      "name": "analysis.update_asr",
+      "summary": "整列表替换 ASR 段（用户修正转写错误/删幻觉段）；下游语义结果保留",
+      "params": {
+        "type": "object",
+        "required": ["project_id", "episode_id", "segments"],
+        "properties": {
+          "project_id": { "type": "string" },
+          "episode_id": { "type": "string" },
+          "segments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["start", "end", "text"],
+              "properties": {
+                "start": { "type": "number" },
+                "end": { "type": "number" },
+                "text": { "type": "string" },
+                "speaker": { "type": "string" },
+                "emotion": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["ok", "count"],
+        "properties": { "ok": { "type": "boolean" }, "count": { "type": "integer" } }
+      }
+    },
+    {
       "name": "analysis.start",
       "summary": "启动精准分析（长任务 job 模式；episode_ids 缺省=全部未完成集）",
       "params": {

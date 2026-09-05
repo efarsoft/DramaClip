@@ -45,6 +45,16 @@ def upsert(
     conn.commit()
 
 
+def update_asr_segments(conn: sqlite3.Connection, episode_id: str, segments_json: str) -> bool:
+    """仅覆盖 asr_segments（用户修正转写），其余语义列保留。"""
+    cursor = conn.execute(
+        "UPDATE episode_analysis SET asr_segments = ?, analyzed_at = ? WHERE episode_id = ?",
+        (segments_json, int(time.time() * 1000), episode_id),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
 def get(conn: sqlite3.Connection, episode_id: str) -> dict[str, Any] | None:
     row = conn.execute(
         "SELECT id, episode_id, asr_segments, scene_data, audio_features, conflict_scores,"
