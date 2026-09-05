@@ -49,6 +49,38 @@
       "result": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } }
     },
     {
+      "name": "narration.replace_timeline",
+      "summary": "整轴替换编排时间轴（前端时间线编辑器保存）",
+      "params": {
+        "type": "object",
+        "required": ["plan_id", "segments"],
+        "properties": {
+          "plan_id": { "type": "string" },
+          "segments": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["episode_id", "start", "end"],
+              "properties": {
+                "episode_id": { "type": "string" },
+                "start": { "type": "number" },
+                "end": { "type": "number" },
+                "audio": { "type": "string" },
+                "transition": { "type": "string" },
+                "subtitle_text": { "type": ["string", "null"] }
+              }
+            }
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["ok", "count"],
+        "properties": { "ok": { "type": "boolean" }, "count": { "type": "integer" } }
+      }
+    },
+    {
       "name": "narration.list_plans",
       "summary": "项目编排方案列表",
       "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },

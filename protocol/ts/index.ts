@@ -158,6 +158,7 @@ export interface TimelineSegment {
   readonly end: number;
   readonly audio: 'original' | 'narration' | 'ducked';
   readonly transition?: 'cut' | 'fade' | 'black' | 'flash';
+  readonly subtitle_text?: string | null;
 }
 
 export interface PlanData {
@@ -263,6 +264,7 @@ export const METHOD_NAMES = [
   'analysis.results',
   'narration.generate_plans',
   'narration.list_plans',
+  'narration.replace_timeline',
   'export.start',
   'export.list',
   'subtitle.list_presets',

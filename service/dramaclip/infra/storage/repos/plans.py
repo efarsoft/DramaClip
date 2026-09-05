@@ -62,6 +62,16 @@ def list_by_project(conn: sqlite3.Connection, project_id: str) -> list[dict[str,
     return [_row_to_dict(row) for row in rows]
 
 
+def update_plan_data(conn: sqlite3.Connection, plan_id: str, plan_data_json: str) -> bool:
+    if conn.execute("SELECT 1 FROM narration_plans WHERE id = ?", (plan_id,)).fetchone() is None:
+        return False
+    conn.execute(
+        "UPDATE narration_plans SET plan_data = ? WHERE id = ?", (plan_data_json, plan_id)
+    )
+    conn.commit()
+    return True
+
+
 def get(conn: sqlite3.Connection, plan_id: str) -> dict[str, Any] | None:
     row = conn.execute(
         f"SELECT {', '.join(_COLUMNS)} FROM narration_plans WHERE id = ?", (plan_id,)

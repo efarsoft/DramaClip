@@ -88,6 +88,8 @@ def _event_line(line: dict[str, Any], preset: dict[str, Any]) -> str | None:
     bottom_bar = str(layout_map.get(layout_key, "bottom_bar")) == "bottom_bar"
     margin_v = int(preset.get("font", {}).get("margin_v", 80)) if bottom_bar else 10
 
+    rhythm = str(dimensions.get("rhythm", {}).get("type", "whole_line"))
+    duration_s = float(line["end"]) - float(line["start"])
     tags = [f"\\fad({fade_ms},{fade_ms})"]
     if entrance == "bounce":
         tags.append("\\t(0,180,\\fscx115\\fscy115)\\t(180,320,\\fscx100\\fscy100)")
@@ -97,9 +99,26 @@ def _event_line(line: dict[str, Any], preset: dict[str, Any]) -> str | None:
 
     start = _ass_time(float(line["start"]))
     end = _ass_time(float(line["end"]))
-    body = _escape(text)
     overrides = "".join(tags)
-    return f"Dialogue: 0,{start},{end},DC,,0,0,{margin_v},,,{{{overrides}}}{body}"
+    if rhythm == "karaoke":
+        body = _karaoke_body(text, duration_s, overrides, primary)
+        return f"Dialogue: 0,{start},{end},DC,,0,0,{margin_v},,,{body}"
+    return f"Dialogue: 0,{start},{end},DC,,0,0,{margin_v},,,{{{overrides}}}{_escape(text)}"
+
+
+def _karaoke_body(text: str, duration_s: float, overrides: str, primary: str) -> str:
+    """卡拉OK逐字高亮：ASS \\k 标签（厘秒），每字均分时长。
+
+    行内覆盖 \1c(已唱=情绪主色) 与 \2c(未唱=暗灰)，\\k 逐字推进填充。
+    """
+    chars = [ch for ch in text if not ch.isspace()]
+    if not chars:
+        return "{" + overrides + "}" + _escape(text)
+    per_cs = max(1, int(duration_s * 100 / len(chars)))
+    parts = ["{" + overrides + f"\\1c{primary}\\2c&H5A5A5A}}"]
+    for ch in chars:
+        parts.append(f"{{\\k{per_cs}}}{_escape(ch)}")
+    return "".join(parts)
 
 
 def build_ass(lines: list[dict[str, Any]], preset: dict[str, Any]) -> str:
