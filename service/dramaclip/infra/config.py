@@ -13,7 +13,7 @@ DEFAULTS: dict[str, str] = {
     "analysis.full_threshold": "15",
     "analysis.prescreen_threshold": "70",
     "asr.engine": "faster_whisper",
-    "asr.model": "base",
+    "asr.model": "small",
     "asr.device": "cpu",
     "asr.language": "zh",
     "subtitle.default_preset": "conflict-impact",

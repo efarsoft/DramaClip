@@ -79,8 +79,10 @@ def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
     resolved: Path | None = None
     if base.is_dir():
         if spec.engine == "faster_whisper":
-            # HF 缓存布局：placement/models--Systran--faster-whisper-base/snapshots/<hash>
-            for cache_dir in base.glob("models--*"):
+            # HF 缓存布局，模型级精确探测：
+            # placement/models--Systran--faster-whisper-<size>/snapshots/<hash>/model.bin
+            short = spec.model_id.removeprefix("faster-whisper-")
+            for cache_dir in sorted(base.glob(f"models--*faster-whisper-{short}")):
                 for snapshot in sorted((cache_dir / "snapshots").glob("*"), reverse=True):
                     if (snapshot / "model.bin").is_file():
                         installed, resolved = True, snapshot
@@ -88,8 +90,12 @@ def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
                 if installed:
                     break
         else:
-            has_files = any(item.is_file() for item in base.iterdir())
-            installed, resolved = has_files, base
+            # 通用：目录树内（含子目录）任一模型权重文件即已安装
+            for pattern in ("*.pth", "*.pt", "*.bin", "*.onnx", "*.safetensors"):
+                hit = next(base.rglob(pattern), None)
+                if hit is not None:
+                    installed, resolved = True, base
+                    break
     return {
         "model_id": spec.model_id,
         "kind": spec.kind,
