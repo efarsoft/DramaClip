@@ -12,7 +12,9 @@
     "dev": "node scripts/dev.mjs",
     "lint": "npm run lint --workspace @dramaclip/desktop --if-present",
     "typecheck": "npm run typecheck --workspace @dramaclip/desktop --if-present",
-    "test": "npm run test --workspace @dramaclip/desktop --if-present"
+    "test": "npm run test --workspace @dramaclip/desktop --if-present",
+    "dist:service": ".venv/Scripts/python.exe scripts/build-service.py",
+    "dist": "npm run dist:service && npm run dist --workspace @dramaclip/desktop"
   },
   "engines": {
     "node": ">=20"

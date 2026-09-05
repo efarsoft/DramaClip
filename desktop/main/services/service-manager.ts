@@ -17,6 +17,10 @@ const SHUTDOWN_GRACE_MS = 3_000;
 
 export interface ServiceManagerOptions {
   readonly repoRoot: string;
+  /** 随应用分发的只读资源根（ffmpeg/sidecar），经环境变量注入 Python 服务。 */
+  readonly resourcesDir: string;
+  /** 服务进程工作目录。 */
+  readonly cwd: string;
   readonly dataDir: string;
   readonly appVersion: string;
   readonly isPackaged: boolean;
@@ -31,8 +35,11 @@ interface PythonTarget {
 
 export function resolvePythonTarget(options: ServiceManagerOptions): PythonTarget {
   if (options.isPackaged) {
-    // PyInstaller sidecar（P2 打包落地，docs/desktop/02 §6）
-    return { command: path.join(options.repoRoot, 'resources', 'dramaclip-service.exe'), args: [] };
+    // PyInstaller onedir sidecar（scripts/build-service.py 产物）
+    return {
+      command: path.join(options.resourcesDir, 'dramaclip-service', 'dramaclip-service.exe'),
+      args: [],
+    };
   }
   const venvPython = path.join(
     options.repoRoot,
@@ -148,13 +155,17 @@ export class ServiceManager {
       DRAMACLIP_SERVICE_ADDRESS: this.pipeServer?.address ?? '',
       DRAMACLIP_AUTH_TOKEN: this.token,
       DRAMACLIP_DATA_DIR: this.options.dataDir,
+      DRAMACLIP_RESOURCES_DIR: this.options.resourcesDir,
       PYTHONUNBUFFERED: '1',
     };
     this.child = spawn(target.command, [...target.args], {
-      cwd: this.options.repoRoot,
+      cwd: this.options.cwd,
       env,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    this.child.on('error', (error: Error) => {
+      console.error(`[ServiceManager] 进程启动失败: ${error.message}`);
     });
     this.child.stdout?.on('data', (chunk: Buffer) => { this.logLines('info', chunk); });
     this.child.stderr?.on('data', (chunk: Buffer) => { this.logLines('error', chunk); });

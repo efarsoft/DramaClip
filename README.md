@@ -28,6 +28,18 @@ python -m venv .venv                   # Python 环境（首次）
 .venv/Scripts/python -m pytest service/tests  # Python 测试
 ```
 
+## 打包发布（W14）
+
+```bash
+npm run dist:service                   # PyInstaller sidecar → resources/dramaclip-service/（onedir，含 ML 依赖）
+node scripts/verify_sidecar.mjs        # sidecar 冒烟：握手/资源注入/预设/预筛/优雅退出
+npm run dist                           # sidecar + vite build + electron-builder（NSIS + zip → desktop/release/）
+```
+
+sidecar 产物约 1 GB（torch/ctranslate2/faster-whisper 等全量随包），gitignored，
+由 electron-builder `extraResources` 随安装包分发至 `resources/app-resources/`；
+主进程经 `process.resourcesPath` 定位并以 `DRAMACLIP_RESOURCES_DIR` 注入服务。
+
 ## 恢复 ffmpeg
 
 ```bash

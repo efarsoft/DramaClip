@@ -23,3 +23,14 @@ def test_blank_env_falls_back_to_appdata(tmp_path: Path) -> None:
 
 def test_db_path(tmp_path: Path) -> None:
     assert paths.db_path(tmp_path) == tmp_path / "data.db"
+
+
+def test_resources_env_override(tmp_path: Path) -> None:
+    result = paths.resolve_resources_dir(env={"DRAMACLIP_RESOURCES_DIR": str(tmp_path)})
+    assert result == tmp_path
+
+
+def test_resources_blank_env_falls_back_to_repo_root() -> None:
+    result = paths.resolve_resources_dir(env={"DRAMACLIP_RESOURCES_DIR": "  "})
+    assert result.name == "resources"
+    assert (result / "ffmpeg").is_dir(), "开发模式回退应指向仓库根 resources/"

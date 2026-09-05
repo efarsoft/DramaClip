@@ -83,8 +83,15 @@ function buildIpcContext(managerInstance: ServiceManager): IpcContext {
 
 async function bootstrap(): Promise<void> {
   nativeTheme.themeSource = 'dark';
+  // 打包模式：extraResources 落在 process.resourcesPath/app-resources；
+  // 开发模式：仓库根 resources/
+  const resourcesDir = app.isPackaged
+    ? path.join(process.resourcesPath, 'app-resources')
+    : path.join(REPO_ROOT, 'resources');
   const options: ServiceManagerOptions = {
     repoRoot: REPO_ROOT,
+    resourcesDir,
+    cwd: app.isPackaged ? process.resourcesPath : REPO_ROOT,
     dataDir: app.isPackaged
       ? path.join(app.getPath('userData'), 'data')
       : path.join(REPO_ROOT, 'data'),

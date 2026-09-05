@@ -6,10 +6,11 @@ import shutil
 import sys
 from pathlib import Path
 
+from dramaclip.infra.paths import resolve_resources_dir
+
 
 def _resource_bin(name: str) -> Path | None:
-    # infra/ffmpeg/binaries.py → 上四级为仓库根
-    candidate = Path(__file__).resolve().parents[3] / "resources" / "ffmpeg" / name
+    candidate = resolve_resources_dir() / "ffmpeg" / name
     return candidate if candidate.is_file() else None
 
 

@@ -2,17 +2,18 @@
   "name": "@dramaclip/desktop",
   "private": true,
   "version": "2.0.0",
+  "productName": "DramaClip",
   "description": "DramaClip 桌面应用（Electron + React）",
   "main": "dist-electron/main/index.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "dist": "npm run build && electron-builder --win",
     "lint": "eslint src main",
     "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run"
   },
   "dependencies": {
-    "@dramaclip/protocol": "*",
     "antd": "^6.6.2",
     "dayjs": "^1.11.13",
     "react": "^19.2.8",
@@ -22,13 +23,15 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@dramaclip/protocol": "*",
     "@eslint/js": "^10.0.1",
     "@testing-library/react": "^16.3.0",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.1.1",
-    "electron": "^44.2.0",
+    "electron": "44.2.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^10.10.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.6",

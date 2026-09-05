@@ -42,3 +42,9 @@ Thumbs.db
 
 # 本地测试素材
 tmp_w2_media/
+
+# ── sidecar 构建产物（随安装包分发，不入库）──
+resources/dramaclip-service/
+build/
+desktop/release/
+desktop/release2/

@@ -7,19 +7,20 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
-_PRESETS_DIR = Path(__file__).resolve().parents[4] / "resources" / "subtitle-presets"
+from dramaclip.infra.paths import resolve_resources_dir
+
 FALLBACK_PRESET_ID = "conflict-impact"
 
 
 @lru_cache(maxsize=1)
 def _load_builtin() -> dict[str, dict[str, Any]]:
     presets: dict[str, dict[str, Any]] = {}
-    if not _PRESETS_DIR.is_dir():
+    presets_dir = resolve_resources_dir() / "subtitle-presets"
+    if not presets_dir.is_dir():
         return presets
-    for file in sorted(_PRESETS_DIR.glob("*.json")):
+    for file in sorted(presets_dir.glob("*.json")):
         try:
             data = json.loads(file.read_text(encoding="utf-8"))
         except json.JSONDecodeError:

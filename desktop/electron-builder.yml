@@ -1,0 +1,37 @@
+# electron-builder 打包配置（W14）：
+# - asar 内：渲染层 dist/ + 主进程/preload dist-electron/
+# - asar 外（extraResources → resources/app-resources/）：
+#   resources/ 全部（ffmpeg/fonts/subtitle-presets + PyInstaller sidecar dramaclip-service/）
+#   主进程经 process.resourcesPath/app-resources 定位，并注入 DRAMACLIP_RESOURCES_DIR
+appId: com.dramaclip.desktop
+productName: DramaClip
+directories:
+  output: release
+  buildResources: build
+asar: true
+# 复用 npm 已下载的 electron 二进制：跳过 zip 解压——新解压文件常被杀软
+# 实时扫描持锁，staging 目录 rename 稳定 EPERM（真实事故 ×2）
+electronDist: ../node_modules/electron/dist
+files:
+  - dist/**
+  - dist-electron/**
+extraResources:
+  - from: ../resources
+    to: app-resources
+    filter:
+      - "**/*"
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: zip
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  shortcutName: DramaClip
+  artifactName: ${productName}-${version}-${arch}-setup.${ext}
