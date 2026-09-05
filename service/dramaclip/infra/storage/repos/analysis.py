@@ -55,6 +55,24 @@ def update_asr_segments(conn: sqlite3.Connection, episode_id: str, segments_json
     return cursor.rowcount > 0
 
 
+def update_semantic(
+    conn: sqlite3.Connection,
+    episode_id: str,
+    *,
+    conflict_scores: str,
+    highlights: str,
+    genre: str | None,
+) -> bool:
+    """仅覆盖语义结果列（修正 ASR 后重跑语义），转写/场景/音频保留。"""
+    cursor = conn.execute(
+        "UPDATE episode_analysis SET conflict_scores = ?, highlights = ?, genre = ?,"
+        " analyzed_at = ? WHERE episode_id = ?",
+        (conflict_scores, highlights, genre, int(time.time() * 1000), episode_id),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
 def get(conn: sqlite3.Connection, episode_id: str) -> dict[str, Any] | None:
     row = conn.execute(
         "SELECT id, episode_id, asr_segments, scene_data, audio_features, conflict_scores,"

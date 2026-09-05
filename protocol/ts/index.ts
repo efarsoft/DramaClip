@@ -259,6 +259,7 @@ export const METHOD_NAMES = [
   'project.dashboard_summary',
   'analysis.prescreen',
   'analysis.update_asr',
+  'analysis.resync_semantic',
   'analysis.start',
   'analysis.status',
   'analysis.cancel',

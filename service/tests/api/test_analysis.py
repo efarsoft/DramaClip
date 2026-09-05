@@ -224,3 +224,44 @@ def test_update_asr_rejects_foreign_episode(
     )
     assert response.error is not None and response.error.code == -32101
     assert project_id and episode_id
+
+
+def test_resync_semantic_refreshes_without_touching_asr(
+    harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    project_id, episode_id = _analyzed_project(harness, tmp_path, sample_video)
+    harness.rpc(
+        "analysis.update_asr",
+        {
+            "project_id": project_id,
+            "episode_id": episode_id,
+            "segments": [{"start": 0.2, "end": 1.0, "text": "修正后的台词"}],
+        },
+    )
+    result = harness.rpc(
+        "analysis.resync_semantic", {"project_id": project_id, "episode_id": episode_id}
+    )
+    status = harness.wait_done(str(result["job_id"]))
+    assert status["status"] == "completed"
+
+    record = analysis_repo.get(memory_db, episode_id)
+    assert record is not None
+    assert json.loads(record["asr_segments"])[0]["text"] == "修正后的台词"
+    assert isinstance(json.loads(record["conflict_scores"]), list)
+    progresses = [m for m in harness.sent if m["method"] == "progress.update"]
+    assert progresses[-1]["params"]["percent"] == 100.0
+
+
+def test_resync_semantic_rejects_missing_analysis(
+    harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    project_id = _make_project(harness, tmp_path, sample_video, copies=1)
+    episode_id = str(episodes_repo.list_by_project(memory_db, project_id)[0]["id"])
+    response = harness.router.dispatch(
+        RpcRequest(
+            id=1,
+            method="analysis.resync_semantic",
+            params={"project_id": project_id, "episode_id": episode_id},
+        )
+    )
+    assert response.error is not None and response.error.code == -32203

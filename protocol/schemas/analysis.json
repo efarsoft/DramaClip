@@ -78,6 +78,19 @@
       }
     },
     {
+      "name": "analysis.resync_semantic",
+      "summary": "仅重跑语义层（修正 ASR 后刷新冲突/高光/题材），不重转写（job 模式）",
+      "params": {
+        "type": "object",
+        "required": ["project_id", "episode_id"],
+        "properties": {
+          "project_id": { "type": "string" },
+          "episode_id": { "type": "string" }
+        }
+      },
+      "result": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } }
+    },
+    {
       "name": "analysis.start",
       "summary": "启动精准分析（长任务 job 模式；episode_ids 缺省=全部未完成集）",
       "params": {

@@ -118,9 +118,18 @@ async function main() {
     if (prescreen !== null) await waitJob(prescreen.job_id, 300000);
   }
 
-  const { job_id } = await rpc('analysis.start', { project_id: project.id });
-  const analysis = await waitJob(job_id, 900000);
-  console.log(`[e2e] 分析: ${analysis.status}`);
+  let analysis = null;
+  try {
+    const { job_id } = await rpc('analysis.start', { project_id: project.id });
+    analysis = await waitJob(job_id, 900000);
+  } catch (error) {
+    if (String(error.message).includes('-32202')) {
+      console.log('[e2e] 全部集已完成分析，跳过（增量回归）');
+    } else {
+      throw error;
+    }
+  }
+  if (analysis !== null) console.log(`[e2e] 分析: ${analysis.status}`);
 
   const { job_id: genJob } = await rpc('narration.generate_plans', {
     project_id: project.id,

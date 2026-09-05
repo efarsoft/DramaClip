@@ -1,24 +1,67 @@
-import { App as AntdApp, Card, Empty, Input, Table, Tag } from 'antd';
-import { useMemo, useRef, useState } from 'react';
+import { App as AntdApp, Button, Card, Empty, Input, Table, Tag } from 'antd';
+import { useMemo, useRef, useState, type ReactElement } from 'react';
 import type {
   AnalysisResults,
   AsrSegment,
   ConflictScorePoint,
+  EpisodeAnalysisResult,
   HighlightSegment,
 } from '@dramaclip/protocol';
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { rpc } from '../../services/client';
 import { tokens } from '../../styles/theme';
+import { useResyncSemantic } from './useResyncSemantic';
 
 interface PanelProps {
   episodeId: string;
   projectId: string;
   results: AnalysisResults | null;
+  onReload: () => void;
+}
+
+/** 保存 ASR 修正后刷新看板；失败弹错。 */
+function saveAsr(
+  projectId: string,
+  episodeId: string,
+  segments: readonly AsrSegment[],
+  onReload: () => void,
+  onError: (message: string) => void,
+): void {
+  rpc('analysis.update_asr', {
+    project_id: projectId,
+    episode_id: episodeId,
+    segments: segments.map((segment) => ({
+      start: segment.start,
+      end: segment.end,
+      text: segment.text,
+      speaker: segment.speaker ?? null,
+      emotion: segment.emotion ?? null,
+    })),
+  })
+    .then(() => {
+      onReload();
+    })
+    .catch((error: unknown) => {
+      onError(error instanceof Error ? error.message : String(error));
+    });
+}
+
+function runSemantic(
+  run: () => Promise<void>,
+  onError: (message: string) => void,
+): void {
+  run().catch((error: unknown) => {
+    onError(error instanceof Error ? error.message : String(error));
+  });
 }
 
 /** 单集结果看板：冲突曲线（recharts）+ 高光列表 + 可编辑对白流。 */
-export function EpisodeResultPanel({ episodeId, projectId, results }: PanelProps) {
+export function EpisodeResultPanel({ episodeId, projectId, results, onReload }: PanelProps) {
   const message = AntdApp.useApp().message;
+  const showError = (text: string): void => {
+    message.error(text);
+  };
+  const resync = useResyncSemantic(projectId, episodeId, onReload);
   const summary = results?.episodes.find((episode) => episode.episode_id === episodeId);
   const asr = results?.asr_segments?.[episodeId] ?? [];
   const highlights = results?.highlights?.[episodeId] ?? [];
@@ -32,33 +75,24 @@ export function EpisodeResultPanel({ episodeId, projectId, results }: PanelProps
     );
   }
 
-  const saveAsr = (segments: AsrSegment[]): void => {
-    rpc('analysis.update_asr', {
-      project_id: projectId,
-      episode_id: episodeId,
-      segments: segments.map((segment) => ({
-        start: segment.start,
-        end: segment.end,
-        text: segment.text,
-        speaker: segment.speaker ?? null,
-        emotion: segment.emotion ?? null,
-      })),
-    }).catch((error: unknown) => {
-      message.error(error instanceof Error ? error.message : String(error));
-    });
-  };
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <Card size="small" title={`第${String(summary.episode_number)}集 · 分析结果`}>
-        <div style={{ display: 'flex', gap: 16, fontSize: 13, color: tokens.textSecondary }}>
-          <span>对白 {String(summary.asr_segment_count)} 段</span>
-          <span>场景 {String(summary.scene_count)} 个</span>
-          <span>高光 {String(summary.highlight_count)} 个</span>
-          {summary.genre !== undefined && (
-            <Tag color="blue">{summary.genre}</Tag>
-          )}
-        </div>
+      <Card
+        size="small"
+        title={`第${String(summary.episode_number)}集 · 分析结果`}
+        extra={
+          <Button
+            size="small"
+            loading={resync.running}
+            onClick={() => {
+              runSemantic(resync.run, showError);
+            }}
+          >
+            重跑语义
+          </Button>
+        }
+      >
+        <StatsRow summary={summary} />
       </Card>
 
       {conflicts.length > 0 && <ConflictCurve conflicts={conflicts} />}
@@ -66,8 +100,24 @@ export function EpisodeResultPanel({ episodeId, projectId, results }: PanelProps
       {highlights.length > 0 && <HighlightTable highlights={highlights} />}
 
       {asr.length > 0 && (
-        <DialogueStream segments={asr} onSave={saveAsr} />
+        <DialogueStream
+          segments={asr}
+          onSave={(next) => {
+            saveAsr(projectId, episodeId, next, onReload, showError);
+          }}
+        />
       )}
+    </div>
+  );
+}
+
+function StatsRow({ summary }: { summary: EpisodeAnalysisResult }): ReactElement {
+  return (
+    <div style={{ display: 'flex', gap: 16, fontSize: 13, color: tokens.textSecondary }}>
+      <span>对白 {String(summary.asr_segment_count)} 段</span>
+      <span>场景 {String(summary.scene_count)} 个</span>
+      <span>高光 {String(summary.highlight_count)} 个</span>
+      {summary.genre !== undefined && <Tag color="blue">{summary.genre}</Tag>}
     </div>
   );
 }

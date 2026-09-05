@@ -10,6 +10,12 @@ from typing import Any
 from dramaclip.api.context import AppContext
 from dramaclip.engines.analysis import pipeline, runtime
 from dramaclip.engines.analysis import prescreen as prescreen_engine
+from dramaclip.engines.analysis.models import (
+    AsrSegment,
+    AudioFeatures,
+    EpisodeRawAnalysis,
+    SceneInfo,
+)
 from dramaclip.engines.semantic import pipeline as semantic_pipeline
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -27,6 +33,7 @@ _ERR_SEGMENT_INVALID = -32204
 def register(router: Router, context: AppContext) -> None:
     router.register("analysis.prescreen", lambda params: prescreen(context, params))
     router.register("analysis.update_asr", lambda params: update_asr(context, params))
+    router.register("analysis.resync_semantic", lambda params: resync_semantic(context, params))
     router.register("analysis.start", lambda params: start(context, params))
     router.register("analysis.status", lambda params: status(context, params))
     router.register("analysis.cancel", lambda params: cancel(context, params))
@@ -190,6 +197,68 @@ def update_asr(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         context.conn, episode_id, json.dumps(cleaned, ensure_ascii=False)
     )
     return {"ok": True, "count": len(cleaned)}
+
+
+def resync_semantic(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """仅重跑语义层（修正 ASR 后刷新冲突/高光/题材），不重转写。"""
+    project_id = str(params.get("project_id", ""))
+    episode_id = str(params.get("episode_id", ""))
+    if projects_repo.get(context.conn, project_id) is None:
+        raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
+    episode = episodes_repo.get(context.conn, episode_id)
+    if episode is None or str(episode["project_id"]) != project_id:
+        raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"集不存在: {episode_id}")
+    if analysis_repo.get(context.conn, episode_id) is None:
+        raise RpcDomainError(_ERR_NO_ANALYSIS, "该集尚无分析结果")
+    job_id = context.job_store.create("semantic", ref_id=episode_id)
+    cancel_event = threading.Event()
+    context.cancel_events[job_id] = cancel_event
+    context.executor.submit(_run_resync, context, job_id, episode_id, cancel_event)
+    return {"job_id": job_id}
+
+
+def _run_resync(
+    context: AppContext,
+    job_id: str,
+    episode_id: str,
+    cancel_event: threading.Event,
+) -> None:
+    context.job_store.mark_running(job_id)
+    try:
+        record = analysis_repo.get(context.conn, episode_id)
+        if record is None:
+            raise ValueError("分析记录已被删除")
+        context.notifier.progress(job_id, 10.0, "重建第一层结果")
+        raw = EpisodeRawAnalysis(
+            asr_segments=[
+                AsrSegment.model_validate(item) for item in json.loads(record["asr_segments"])
+            ],
+            scenes=[
+                SceneInfo.model_validate(item)
+                for item in json.loads(record["scene_data"] or "[]")
+            ],
+            audio=AudioFeatures.model_validate(json.loads(record["audio_features"] or "{}")),
+        )
+        if cancel_event.is_set():
+            context.job_store.mark_cancelled(job_id)
+            return
+        context.notifier.progress(job_id, 40.0, "语义分析中")
+        semantic_result = semantic_pipeline.enhance(raw, context.settings)
+        analysis_repo.update_semantic(
+            context.conn,
+            episode_id,
+            conflict_scores=json.dumps([s.model_dump() for s in semantic_result.conflict_scores]),
+            highlights=json.dumps([h.model_dump() for h in semantic_result.highlights]),
+            genre=semantic_result.genre or None,
+        )
+        context.job_store.set_progress(job_id, 100.0)
+        context.notifier.progress(job_id, 100.0, "语义结果已刷新")
+        context.job_store.mark_completed(job_id)
+    except Exception as exc:
+        context.job_store.mark_failed(job_id, str(exc))
+        context.notifier.log("error", f"语义重算失败: {exc}")
+    finally:
+        context.cancel_events.pop(job_id, None)
 
 
 def results(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:

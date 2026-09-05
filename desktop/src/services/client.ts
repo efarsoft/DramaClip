@@ -81,6 +81,11 @@ export const analysisApi = {
     rpc<AnalysisJobStatus>('analysis.status', { job_id: jobId }),
   cancel: (jobId: string): Promise<{ ok: boolean }> =>
     rpc<{ ok: boolean }>('analysis.cancel', { job_id: jobId }),
+  resyncSemantic: (projectId: string, episodeId: string): Promise<{ job_id: string }> =>
+    rpc<{ job_id: string }>('analysis.resync_semantic', {
+      project_id: projectId,
+      episode_id: episodeId,
+    }),
   results: (projectId: string): Promise<AnalysisResults> =>
     rpc<AnalysisResults>('analysis.results', { project_id: projectId }),
 } as const;

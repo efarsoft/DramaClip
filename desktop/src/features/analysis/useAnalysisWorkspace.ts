@@ -13,6 +13,8 @@ export interface AnalysisWorkspace {
   results: AnalysisResults | null;
   job: AnalysisJobStatus | null;
   start: () => Promise<void>;
+  /** 重拉结果看板（ASR 修正/语义重算后调用）。 */
+  reload: () => Promise<void>;
   canStart: boolean;
 }
 
@@ -80,6 +82,7 @@ export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
     results,
     job,
     start,
+    reload: loadResults,
     canStart: selectedIds.length > 0 && !(job?.status === 'running' || job?.status === 'pending'),
   };
 }

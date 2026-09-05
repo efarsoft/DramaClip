@@ -61,6 +61,9 @@ export function AnalysisPage() {
           episodeId={workspace.activeEpisodeId}
           projectId={projectId}
           results={workspace.results}
+          onReload={() => {
+            void workspace.reload();
+          }}
         />
       )}
     </div>
