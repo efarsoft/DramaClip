@@ -177,6 +177,8 @@ def results(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
                 "asr_segment_count": len(segments),
                 "scene_count": _scene_count(record),
                 "highlight_count": len(highlights),
+                "prescreen_score": prescreen["prescreen_score"] if prescreen else None,
+                "recommended": bool(prescreen["recommended"]) if prescreen else None,
                 "genre": (record or {}).get("genre") if record else None,
             }
         )
@@ -185,6 +187,7 @@ def results(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         "asr_segments": asr_map,
         "highlights": highlights_map,
         "conflict_scores": conflict_map,
+        "prescreen": prescreen_map,
     }
 
 

@@ -184,6 +184,8 @@ export interface ExportJob {
   readonly output_path?: string;
   readonly status: string;
   readonly progress: number;
+  readonly duration_s?: number;
+  readonly size_bytes?: number;
   readonly error?: string;
   readonly created_at: number;
   readonly completed_at?: number;

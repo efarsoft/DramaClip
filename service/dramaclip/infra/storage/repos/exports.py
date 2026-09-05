@@ -15,6 +15,8 @@ _COLUMNS = (
     "output_path",
     "status",
     "progress",
+    "duration_s",
+    "size_bytes",
     "created_at",
     "completed_at",
 )
@@ -55,6 +57,14 @@ def mark_completed(conn: sqlite3.Connection, export_id: str, output_path: str) -
         "UPDATE export_jobs SET status = 'completed', progress = 100, output_path = ?,"
         " completed_at = ? WHERE id = ?",
         (output_path, _now_ms(), export_id),
+    )
+    conn.commit()
+
+
+def set_meta(conn: sqlite3.Connection, export_id: str, *, duration_s: float, size_bytes: int) -> None:
+    conn.execute(
+        "UPDATE export_jobs SET duration_s = ?, size_bytes = ? WHERE id = ?",
+        (duration_s, size_bytes, export_id),
     )
     conn.commit()
 

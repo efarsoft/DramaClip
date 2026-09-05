@@ -9,6 +9,7 @@ from typing import Any
 from dramaclip.api.context import AppContext
 from dramaclip.engines.exporter import encoder
 from dramaclip.engines.narration.models import PlanData
+from dramaclip.infra.ffmpeg import probe
 from dramaclip.engines.subtitle import presets as subtitle_presets
 from dramaclip.engines.subtitle.ass_generator import build_ass
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -127,5 +128,12 @@ def _run_export(
         context.notifier.log("error", f"导出失败: {exc}")
         return
     exports_repo.mark_completed(context.conn, export_id, str(out_path))
+    try:
+        media = probe.probe(out_path)
+        exports_repo.set_meta(
+            context.conn, export_id, duration_s=media.duration_s, size_bytes=out_path.stat().st_size
+        )
+    except (ValueError, OSError):
+        pass  # 元信息回填失败不影响导出成功
     context.job_store.mark_completed(job_id)
     context.notifier.log("info", f"导出完成: {out_path.name}")
