@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from dramaclip.engines.narration import modes
+from dramaclip.engines.narration import modes, modes_w5
 from dramaclip.engines.narration.models import PlanData, StrategySpec
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from dramaclip.engines.tts import base as tts_base
@@ -37,6 +37,12 @@ def build_plan(
     if mode == "intro_narration":
         text = intro_text(conflict_scores, settings)
         return modes.build_intro(episode_id, conflict_scores, strategy, text)
+    if mode == "cross_narration":
+        return modes_w5.build_cross(episode_id, conflict_scores, strategy)
+    if mode == "ultra_short_hook":
+        return modes_w5.build_ultra_short(
+            episode_id, conflict_scores, strategy, settings.get("_project_name", "这部剧")
+        )
     raise ValueError(f"模式暂未支持: {mode}（{_MODE_LABELS.get(mode, mode)} 将随后续阶段启用）")
 
 
@@ -72,6 +78,34 @@ def synthesize_intro_tts(
     return plan.model_copy(
         update={"narration_texts": updated_texts, "timeline": timeline},
     )
+
+
+def synthesize_narration_texts(
+    plan: PlanData,
+    settings: dict[str, str],
+    work_dir: Path,
+) -> PlanData:
+    """逐段合成旁白音频并回填 audio_path/duration；narration 段时长随 TTS 回填。"""
+    if not plan.narration_texts:
+        return plan
+    engine = create_tts(settings.get("tts.engine", "edge"))
+    voice = settings.get("tts.voice", "")
+    updated: list[dict[str, Any]] = []
+    for order, item in enumerate(plan.narration_texts):
+        audio_path = engine.synthesize(item.text, voice, work_dir / f"{item.id}.mp3")
+        duration = tts_base.audio_duration_s(audio_path)
+        updated.append(dict(item.model_dump(), audio_path=str(audio_path), duration=duration))
+        _ = order
+    timeline = [segment.model_dump() for segment in plan.timeline]
+    narration_order = 0
+    for segment in timeline:
+        if segment["audio"] != "narration" or narration_order >= len(updated):
+            continue
+        duration = float(updated[narration_order]["duration"] or 0)
+        if duration > 0:
+            segment["end"] = round(segment["start"] + duration, 3)
+        narration_order += 1
+    return plan.model_copy(update={"narration_texts": updated, "timeline": timeline})
 
 
 def segment_source_map(episodes: list[dict[str, Any]]) -> dict[str, str]:

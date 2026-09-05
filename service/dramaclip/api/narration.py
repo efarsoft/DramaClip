@@ -19,7 +19,7 @@ _ERR_PROJECT_NOT_FOUND = -32101
 _ERR_NO_ANALYSIS = -32301
 _ERR_MODE_UNSUPPORTED = -32302
 
-SUPPORTED_MODES = ("raw_clip", "intro_narration")
+SUPPORTED_MODES = ("raw_clip", "intro_narration", "cross_narration", "ultra_short_hook")
 
 
 def register(router: Router, context: AppContext) -> None:
@@ -112,8 +112,9 @@ def _generate_one(
         record["audio_features"],
         settings,
     )
-    if mode == "intro_narration":
-        plan = narration_pipeline.synthesize_intro_tts(plan, settings, context.work_dir / "tts")
+    if mode in ("intro_narration", "cross_narration", "ultra_short_hook"):
+        tts_dir = context.work_dir / "tts"
+        plan = narration_pipeline.synthesize_narration_texts(plan, settings, tts_dir)
     plans_repo.create(
         context.conn,
         str(episode["project_id"]),
