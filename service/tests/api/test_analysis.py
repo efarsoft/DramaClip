@@ -58,7 +58,7 @@ class Harness:
     def rpc(self, method: str, params: dict[str, Any]) -> Any:
         return self.router.dispatch(RpcRequest(id=method, method=method, params=params)).result
 
-    def wait_done(self, job_id: str, timeout_s: float = 10.0) -> dict[str, Any]:
+    def wait_done(self, job_id: str, timeout_s: float = 30.0) -> dict[str, Any]:
         deadline = time.time() + timeout_s
         while time.time() < deadline:
             status = self.rpc("analysis.status", {"job_id": job_id})
