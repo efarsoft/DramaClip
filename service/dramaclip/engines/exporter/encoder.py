@@ -38,6 +38,7 @@ def cut_segment_args(
     mask: bool,
     tts_audio: str | None,
     rng: random.Random,
+    transition: str = "cut",
 ) -> list[str]:
     """构建单段切割命令（Phase A）。audio: original | narration | ducked。"""
     dedup = dedup_params.generate(rng)
@@ -55,6 +56,8 @@ def cut_segment_args(
     box = drawbox_filter(mask)
     if box:
         filters.append(box)
+    if transition == "fade":
+        filters.append("fade=t=in:st=0:d=0.25")
 
     args = [
         "-hide_banner",
@@ -151,6 +154,7 @@ def export_plan(
             mask=mask,
             tts_audio=tts_audio,
             rng=rng,
+            transition=segment.transition,
         )
         runner.run(args, timeout_s=600)
         segment_files.append(seg_out)

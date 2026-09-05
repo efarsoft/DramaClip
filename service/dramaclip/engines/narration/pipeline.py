@@ -1,21 +1,29 @@
-"""解说管线：分析结果 → 编排方案（raw_clip/intro）+ intro 的 TTS 引子合成。
+"""解说管线：分析结果 → 编排方案（raw_clip/intro/cross/ultra_short/dialogue）+ TTS 合成。
 
 LLM 文案未配置时用模板降级（W3 同策略）；TTS 用 edge（云端免费，无需本地模型）。
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
-from dramaclip.engines.narration import modes, modes_w5
+from dramaclip.engines.analysis.models import AsrSegment, AudioFeatures
+from dramaclip.engines.narration import dialogue_selector, modes, modes_w5
 from dramaclip.engines.narration.models import PlanData, StrategySpec
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from dramaclip.engines.tts import base as tts_base
 from dramaclip.engines.tts.factory import create as create_tts
 from dramaclip.infra.ffmpeg import probe
 
-_MODE_LABELS = {"raw_clip": "纯原片剪辑", "intro_narration": "片头解说"}
+_MODE_LABELS = {
+    "raw_clip": "纯原片剪辑",
+    "intro_narration": "片头解说",
+    "cross_narration": "交叉解说",
+    "ultra_short_hook": "超短悬念版",
+    "dialogue_narration": "剧情解说",
+}
 
 
 def build_plan(
@@ -23,7 +31,8 @@ def build_plan(
     episode_id: str,
     conflict_scores: list[ConflictScore],
     highlights: list[HighlightSegment],
-    audio_features_json: str | None,
+    asr_segments: list[AsrSegment],
+    audio: AudioFeatures,
     settings: dict[str, str],
 ) -> PlanData:
     """按模式生成编排方案（纯计算，不触 IO）。"""
@@ -43,7 +52,20 @@ def build_plan(
         return modes_w5.build_ultra_short(
             episode_id, conflict_scores, strategy, settings.get("_project_name", "这部剧")
         )
+    if mode == "dialogue_narration":
+        lines = dialogue_selector.select_dialogue_lines(asr_segments, audio)
+        return dialogue_selector.build_dialogue(episode_id, lines, strategy)
     raise ValueError(f"模式暂未支持: {mode}（{_MODE_LABELS.get(mode, mode)} 将随后续阶段启用）")
+
+
+def parse_audio_features(audio_json: str | None) -> AudioFeatures:
+    if not audio_json:
+        return AudioFeatures()
+    return AudioFeatures.model_validate_json(audio_json)
+
+
+def parse_asr_segments(asr_json: str) -> list[AsrSegment]:
+    return [AsrSegment.model_validate(item) for item in json.loads(asr_json)]
 
 
 def intro_text(conflict_scores: list[ConflictScore], settings: dict[str, str]) -> str:
@@ -62,22 +84,8 @@ def synthesize_intro_tts(
     settings: dict[str, str],
     work_dir: Path,
 ) -> PlanData:
-    """合成片头旁白音频并回填时长与首段结束时间（TTS 时长决定片头长度）。"""
-    if not plan.narration_texts:
-        return plan
-    engine = create_tts(settings.get("tts.engine", "edge"))
-    voice = settings.get("tts.voice", "")
-    text_item = plan.narration_texts[0]
-    audio_path = engine.synthesize(text_item.text, voice, work_dir / "intro_tts.mp3")
-    duration = tts_base.audio_duration_s(audio_path)
-    updated_texts = [dict(text_item.model_dump(), audio_path=str(audio_path), duration=duration)]
-    timeline = [seg.model_dump() for seg in plan.timeline]
-    if timeline:
-        first = timeline[0]
-        timeline[0]["end"] = round(min(first["end"], first["start"] + duration), 3)
-    return plan.model_copy(
-        update={"narration_texts": updated_texts, "timeline": timeline},
-    )
+    """合成片头旁白并回填时长；TTS 失败时首段降级原声（不阻塞）。"""
+    return synthesize_narration_texts(plan, settings, work_dir)
 
 
 def synthesize_narration_texts(
@@ -91,21 +99,27 @@ def synthesize_narration_texts(
     engine = create_tts(settings.get("tts.engine", "edge"))
     voice = settings.get("tts.voice", "")
     updated: list[dict[str, Any]] = []
-    for order, item in enumerate(plan.narration_texts):
-        audio_path = engine.synthesize(item.text, voice, work_dir / f"{item.id}.mp3")
-        duration = tts_base.audio_duration_s(audio_path)
+    for item in plan.narration_texts:
+        try:
+            audio_path = engine.synthesize(item.text, voice, work_dir / f"{item.id}.mp3")
+            duration: float | None = tts_base.audio_duration_s(audio_path)
+        except Exception:  # 云端不可达等：该段降级为原声，不阻塞编排
+            audio_path = work_dir / f"{item.id}.mp3"
+            duration = None
         updated.append(dict(item.model_dump(), audio_path=str(audio_path), duration=duration))
-        _ = order
     timeline = [segment.model_dump() for segment in plan.timeline]
     narration_order = 0
     for segment in timeline:
         if segment["audio"] != "narration" or narration_order >= len(updated):
             continue
-        duration = float(updated[narration_order]["duration"] or 0)
-        if duration > 0:
+        duration = updated[narration_order]["duration"]
+        if duration is not None and duration > 0:
             segment["end"] = round(segment["start"] + duration, 3)
+        else:
+            segment["audio"] = "original"  # 无旁白音频 → 回退原声段
         narration_order += 1
-    return plan.model_copy(update={"narration_texts": updated, "timeline": timeline})
+    kept_texts = [text for text in updated if text["duration"] is not None]
+    return plan.model_copy(update={"narration_texts": kept_texts, "timeline": timeline})
 
 
 def segment_source_map(episodes: list[dict[str, Any]]) -> dict[str, str]:

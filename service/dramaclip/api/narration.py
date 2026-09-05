@@ -19,7 +19,13 @@ _ERR_PROJECT_NOT_FOUND = -32101
 _ERR_NO_ANALYSIS = -32301
 _ERR_MODE_UNSUPPORTED = -32302
 
-SUPPORTED_MODES = ("raw_clip", "intro_narration", "cross_narration", "ultra_short_hook")
+SUPPORTED_MODES = (
+    "raw_clip",
+    "intro_narration",
+    "cross_narration",
+    "ultra_short_hook",
+    "dialogue_narration",
+)
 
 
 def register(router: Router, context: AppContext) -> None:
@@ -103,13 +109,16 @@ def _generate_one(
         raise ValueError("分析记录缺失")
     conflicts = _parse_conflicts(record["conflict_scores"])
     highlights = _parse_highlights(record["highlights"])
+    asr_segments = narration_pipeline.parse_asr_segments(record["asr_segments"])
+    audio = narration_pipeline.parse_audio_features(record["audio_features"])
 
     plan = narration_pipeline.build_plan(
         mode,
         episode_id,
         conflicts,
         highlights,
-        record["audio_features"],
+        asr_segments,
+        audio,
         settings,
     )
     if mode in ("intro_narration", "cross_narration", "ultra_short_hook"):
