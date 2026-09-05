@@ -7,6 +7,10 @@ const api = {
     ipcRenderer.invoke('rpc', method, params),
   appVersion: (): Promise<string> => ipcRenderer.invoke('app:version') as Promise<string>,
   restartService: (): Promise<void> => ipcRenderer.invoke('service:restart') as Promise<void>,
+  pickFolder: (): Promise<string | null> =>
+    ipcRenderer.invoke('dialog:pickFolder') as Promise<string | null>,
+  pickVideoFile: (): Promise<string | null> =>
+    ipcRenderer.invoke('dialog:pickVideoFile') as Promise<string | null>,
   onServiceEvent: (callback: (event: ServiceEvent) => void): (() => void) => {
     const listener = (_event: IpcRendererEvent, payload: ServiceEvent): void => {
       callback(payload);

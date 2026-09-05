@@ -1,6 +1,7 @@
 /** ipcMain 通道唯一登记处（docs/desktop/00 §3）。 */
-import { ipcMain, type BrowserWindow } from 'electron';
+import { BrowserWindow, ipcMain } from 'electron';
 import { METHOD_NAMES, type ServiceEvent } from '@dramaclip/protocol';
+import { pickFolder, pickVideoFile } from './services/dialog';
 
 export interface IpcContext {
   /** RPC 转发目标（ServiceManager.rpc）。 */
@@ -21,6 +22,10 @@ export function registerIpc(context: IpcContext): void {
     return context.rpc(method, safeParams);
   });
   ipcMain.handle('app:version', () => context.appVersion());
+  ipcMain.handle('dialog:pickFolder', (event) => pickFolder(BrowserWindow.fromWebContents(event.sender)));
+  ipcMain.handle('dialog:pickVideoFile', (event) =>
+    pickVideoFile(BrowserWindow.fromWebContents(event.sender)),
+  );
   ipcMain.handle('service:restart', () => {
     context.restartService();
     return { ok: true };

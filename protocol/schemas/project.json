@@ -77,6 +77,37 @@
       "result": { "type": "object", "required": ["ok"], "properties": { "ok": { "type": "boolean" } } }
     },
     {
+      "name": "project.rename",
+      "summary": "重命名项目",
+      "params": {
+        "type": "object",
+        "required": ["project_id", "name"],
+        "properties": { "project_id": { "type": "string" }, "name": { "type": "string" } }
+      },
+      "result": { "$ref": "#/x-models/Project" }
+    },
+    {
+      "name": "project.duplicate",
+      "summary": "复制项目元数据与集列表（分析结果不复制）",
+      "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
+      "result": { "$ref": "#/x-models/Project" }
+    },
+    {
+      "name": "project.dashboard_summary",
+      "summary": "工作台统计（项目数/集数/已分析集数/导出数）",
+      "params": {},
+      "result": {
+        "type": "object",
+        "required": ["project_count", "episode_count", "analyzed_episodes", "export_count"],
+        "properties": {
+          "project_count": { "type": "integer" },
+          "episode_count": { "type": "integer" },
+          "analyzed_episodes": { "type": "integer" },
+          "export_count": { "type": "integer" }
+        }
+      }
+    },
+    {
       "name": "project.scan_episodes",
       "summary": "扫描项目目录登记集（ffprobe 逐文件时长/大小，返回登记结果）",
       "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },

@@ -9,6 +9,7 @@ from typing import Any
 
 from dramaclip.api.context import AppContext
 from dramaclip.engines.analysis import pipeline, runtime
+from dramaclip.engines.semantic import pipeline as semantic_pipeline
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
@@ -86,21 +87,39 @@ def results(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     episodes = episodes_repo.list_by_project(context.conn, project_id)
     summary: list[dict[str, Any]] = []
     asr_map: dict[str, list[dict[str, Any]]] = {}
+    highlights_map: dict[str, list[dict[str, Any]]] = {}
+    conflict_map: dict[str, list[dict[str, Any]]] = {}
     for episode in episodes:
         record = analysis_repo.get(context.conn, str(episode["id"]))
         segments = json.loads(record["asr_segments"]) if record else []
-        if record is not None and segments:
-            asr_map[str(episode["id"])] = segments
+        highlights = json.loads(record["highlights"]) if record and record["highlights"] else []
+        conflict_scores = (
+            json.loads(record["conflict_scores"]) if record and record["conflict_scores"] else []
+        )
+        episode_id = str(episode["id"])
+        if segments:
+            asr_map[episode_id] = segments
+        if highlights:
+            highlights_map[episode_id] = highlights
+        if conflict_scores:
+            conflict_map[episode_id] = conflict_scores
         summary.append(
             {
-                "episode_id": episode["id"],
+                "episode_id": episode_id,
                 "episode_number": episode["episode_number"],
                 "status": episode["status"],
                 "asr_segment_count": len(segments),
                 "scene_count": _scene_count(record),
+                "highlight_count": len(highlights),
+                "genre": (record or {}).get("genre") if record else None,
             }
         )
-    return {"episodes": summary, "asr_segments": asr_map}
+    return {
+        "episodes": summary,
+        "asr_segments": asr_map,
+        "highlights": highlights_map,
+        "conflict_scores": conflict_map,
+    }
 
 
 def _scene_count(record: dict[str, Any] | None) -> int:
@@ -168,6 +187,7 @@ def _analyze_one(
             cancel=cancel_event,
             report=report,
         )
+        semantic_result = semantic_pipeline.enhance(raw, context.settings)
     except Exception as exc:
         episodes_repo.set_status(context.conn, episode_id, "failed")
         context.notifier.log("error", f"{label} 分析失败: {exc}")
@@ -178,6 +198,9 @@ def _analyze_one(
         asr_segments=json.dumps([seg.model_dump() for seg in raw.asr_segments]),
         scene_data=json.dumps([scene.model_dump() for scene in raw.scenes]),
         audio_features=raw.audio.model_dump_json(),
+        conflict_scores=json.dumps([s.model_dump() for s in semantic_result.conflict_scores]),
+        highlights=json.dumps([h.model_dump() for h in semantic_result.highlights]),
+        genre=semantic_result.genre or None,
     )
     episodes_repo.set_status(context.conn, episode_id, "done")
     return True

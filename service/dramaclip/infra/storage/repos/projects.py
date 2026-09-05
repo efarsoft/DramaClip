@@ -67,6 +67,48 @@ def set_status(conn: sqlite3.Connection, project_id: str, status: str) -> None:
     conn.commit()
 
 
+def rename(conn: sqlite3.Connection, project_id: str, name: str) -> bool:
+    cursor = conn.execute(
+        "UPDATE projects SET name = ?, updated_at = ? WHERE id = ?",
+        (name, _now_ms(), project_id),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def duplicate(conn: sqlite3.Connection, project_id: str, new_name: str) -> dict[str, Any] | None:
+    """复制项目元数据与集列表（分析结果不复制，副本需重新分析）。"""
+    source = get(conn, project_id)
+    if source is None:
+        return None
+    created = create(conn, new_name, f"{source['source_path']}#copy-{_now_ms()}")
+    conn.execute(
+        "INSERT INTO episodes"
+        " (id, project_id, episode_number, source_path, duration, status, created_at)"
+        " SELECT hex(randomblob(16)), ?, episode_number, source_path, duration, 'pending', ?"
+        " FROM episodes WHERE project_id = ?",
+        (created["id"], _now_ms(), project_id),
+    )
+    conn.commit()
+    return get(conn, str(created["id"]))
+
+
+def summary(conn: sqlite3.Connection) -> dict[str, int]:
+    """工作台统计卡数据。"""
+    project_count = int(conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0])
+    episode_count = int(conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0])
+    analyzed = int(
+        conn.execute("SELECT COUNT(*) FROM episodes WHERE status = 'done'").fetchone()[0]
+    )
+    exports = int(conn.execute("SELECT COUNT(*) FROM export_jobs").fetchone()[0])
+    return {
+        "project_count": project_count,
+        "episode_count": episode_count,
+        "analyzed_episodes": analyzed,
+        "export_count": exports,
+    }
+
+
 def delete(conn: sqlite3.Connection, project_id: str) -> bool:
     cursor = conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
     conn.commit()

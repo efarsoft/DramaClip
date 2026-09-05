@@ -39,3 +39,6 @@ Thumbs.db
 
 # 会话工作区
 .zcode/
+
+# 本地测试素材
+tmp_w2_media/

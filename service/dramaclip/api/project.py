@@ -26,7 +26,10 @@ def register(router: Router, context: AppContext) -> None:
     router.register("project.list", lambda _params: list_all(context))
     router.register("project.get", lambda params: get(context, params))
     router.register("project.delete", lambda params: delete(context, params))
+    router.register("project.rename", lambda params: rename(context, params))
+    router.register("project.duplicate", lambda params: duplicate(context, params))
     router.register("project.scan_episodes", lambda params: scan_episodes(context, params))
+    router.register("project.dashboard_summary", lambda _params: dashboard_summary(context))
 
 
 def create(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -57,6 +60,29 @@ def delete(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     if not projects_repo.delete(context.conn, project_id):
         raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
     return {"ok": True}
+
+
+def rename(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    project_id = str(params.get("project_id", ""))
+    name = str(params.get("name", "")).strip()
+    if not name:
+        raise RpcDomainError(_ERR_SOURCE_INVALID, "项目名不能为空")
+    if not projects_repo.rename(context.conn, project_id, name):
+        raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
+    return projects_repo.get(context.conn, project_id) or {}
+
+
+def duplicate(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    project_id = str(params.get("project_id", ""))
+    source = projects_repo.get(context.conn, project_id)
+    if source is None:
+        raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
+    created = projects_repo.duplicate(context.conn, project_id, f"{source['name']}（副本）")
+    return created or {}
+
+
+def dashboard_summary(context: AppContext) -> dict[str, int]:
+    return projects_repo.summary(context.conn)
 
 
 def scan_episodes(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:

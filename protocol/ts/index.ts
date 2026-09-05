@@ -103,7 +103,24 @@ export interface EpisodeAnalysisResult {
   readonly status: string;
   readonly asr_segment_count: number;
   readonly scene_count: number;
+  readonly highlight_count: number;
+  readonly genre?: string;
   readonly error?: string;
+}
+
+export interface HighlightSegment {
+  readonly start: number;
+  readonly end: number;
+  readonly score: number;
+  readonly reason?: string;
+}
+
+export interface ConflictScorePoint {
+  readonly scene_index: number;
+  readonly start: number;
+  readonly end: number;
+  readonly score: number;
+  readonly reason?: string;
 }
 
 export interface AnalysisJobStatus {
@@ -118,6 +135,15 @@ export interface AnalysisJobStatus {
 export interface AnalysisResults {
   readonly episodes: EpisodeAnalysisResult[];
   readonly asr_segments?: Readonly<Record<string, AsrSegment[]>>;
+  readonly highlights?: Readonly<Record<string, HighlightSegment[]>>;
+  readonly conflict_scores?: Readonly<Record<string, ConflictScorePoint[]>>;
+}
+
+export interface DashboardSummary {
+  readonly project_count: number;
+  readonly episode_count: number;
+  readonly analyzed_episodes: number;
+  readonly export_count: number;
 }
 
 /** 主进程 → 渲染层事件（service:event 通道） */
@@ -139,6 +165,10 @@ export interface DramaClipBridge {
   rpc(method: string, params?: Record<string, unknown>): Promise<unknown>;
   appVersion(): Promise<string>;
   restartService(): Promise<void>;
+  /** 原生目录选择；用户取消返回 null。 */
+  pickFolder(): Promise<string | null>;
+  /** 原生视频文件选择；用户取消返回 null。 */
+  pickVideoFile(): Promise<string | null>;
   onServiceEvent(callback: (event: ServiceEvent) => void): () => void;
 }
 
@@ -150,11 +180,16 @@ export const METHOD_NAMES = [
   'project.list',
   'project.get',
   'project.delete',
+  'project.rename',
+  'project.duplicate',
   'project.scan_episodes',
+  'project.dashboard_summary',
   'analysis.start',
   'analysis.status',
   'analysis.cancel',
   'analysis.results',
+  'settings.get',
+  'settings.update',
 ] as const;
 
 export const NOTIFICATION_NAMES = ['progress.update', 'log.append', 'models.download_progress'] as const;

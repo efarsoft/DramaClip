@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dramaclip.dev/protocol/settings.json",
+  "title": "settings 命名空间",
+  "namespace": "settings",
+  "x-methods": [
+    {
+      "name": "settings.get",
+      "summary": "全部设置（键值对，值字符串）",
+      "params": {},
+      "result": { "type": "object", "additionalProperties": { "type": "string" } }
+    },
+    {
+      "name": "settings.update",
+      "summary": "批量更新（未知键拒绝；写后热生效）",
+      "params": {
+        "type": "object",
+        "required": ["values"],
+        "properties": {
+          "values": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["ok"],
+        "properties": { "ok": { "type": "boolean" }, "updated": { "type": "integer" } }
+      }
+    }
+  ]
+}

@@ -15,24 +15,40 @@ def upsert(
     asr_segments: str,
     scene_data: str | None,
     audio_features: str | None,
+    conflict_scores: str | None = None,
+    highlights: str | None = None,
+    genre: str | None = None,
 ) -> None:
     now = int(time.time() * 1000)
     conn.execute(
         "INSERT INTO episode_analysis"
-        " (id, episode_id, asr_segments, scene_data, audio_features, analyzed_at)"
-        " VALUES (?, ?, ?, ?, ?, ?)"
+        " (id, episode_id, asr_segments, scene_data, audio_features,"
+        "  conflict_scores, highlights, genre, analyzed_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         " ON CONFLICT(episode_id) DO UPDATE SET"
         " asr_segments = excluded.asr_segments, scene_data = excluded.scene_data,"
-        " audio_features = excluded.audio_features, analyzed_at = excluded.analyzed_at",
-        (uuid4().hex, episode_id, asr_segments, scene_data, audio_features, now),
+        " audio_features = excluded.audio_features, conflict_scores = excluded.conflict_scores,"
+        " highlights = excluded.highlights, genre = excluded.genre,"
+        " analyzed_at = excluded.analyzed_at",
+        (
+            uuid4().hex,
+            episode_id,
+            asr_segments,
+            scene_data,
+            audio_features,
+            conflict_scores,
+            highlights,
+            genre,
+            now,
+        ),
     )
     conn.commit()
 
 
 def get(conn: sqlite3.Connection, episode_id: str) -> dict[str, Any] | None:
     row = conn.execute(
-        "SELECT id, episode_id, asr_segments, scene_data, audio_features, genre,"
-        " characters, analyzed_at FROM episode_analysis WHERE episode_id = ?",
+        "SELECT id, episode_id, asr_segments, scene_data, audio_features, conflict_scores,"
+        " highlights, genre, characters, analyzed_at FROM episode_analysis WHERE episode_id = ?",
         (episode_id,),
     ).fetchone()
     if row is None:
@@ -43,6 +59,8 @@ def get(conn: sqlite3.Connection, episode_id: str) -> dict[str, Any] | None:
         "asr_segments",
         "scene_data",
         "audio_features",
+        "conflict_scores",
+        "highlights",
         "genre",
         "characters",
         "analyzed_at",

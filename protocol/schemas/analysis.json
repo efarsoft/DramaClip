@@ -17,13 +17,15 @@
     },
     "EpisodeAnalysisResult": {
       "type": "object",
-      "required": ["episode_id", "episode_number", "status", "asr_segment_count", "scene_count"],
+      "required": ["episode_id", "episode_number", "status", "asr_segment_count", "scene_count", "highlight_count"],
       "properties": {
         "episode_id": { "type": "string" },
         "episode_number": { "type": "integer" },
         "status": { "type": "string" },
         "asr_segment_count": { "type": "integer" },
         "scene_count": { "type": "integer" },
+        "highlight_count": { "type": "integer" },
+        "genre": { "type": "string" },
         "error": { "type": "string" }
       }
     },
@@ -71,7 +73,7 @@
     },
     {
       "name": "analysis.results",
-      "summary": "项目分析结果摘要（含 ASR 全文段，供 W3 语义层与前端看板）",
+      "summary": "项目分析结果（含 ASR 全文/冲突曲线/高光，供语义看板与 W4 编排）",
       "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
       "result": {
         "type": "object",
@@ -81,6 +83,39 @@
           "asr_segments": {
             "type": "object",
             "additionalProperties": { "type": "array", "items": { "$ref": "#/x-models/AsrSegment" } }
+          },
+          "highlights": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["start", "end", "score"],
+                "properties": {
+                  "start": { "type": "number" },
+                  "end": { "type": "number" },
+                  "score": { "type": "number" },
+                  "reason": { "type": "string" }
+                }
+              }
+            }
+          },
+          "conflict_scores": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["scene_index", "start", "end", "score"],
+                "properties": {
+                  "scene_index": { "type": "integer" },
+                  "start": { "type": "number" },
+                  "end": { "type": "number" },
+                  "score": { "type": "integer" },
+                  "reason": { "type": "string" }
+                }
+              }
+            }
           }
         }
       }

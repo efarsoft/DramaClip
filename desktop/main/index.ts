@@ -20,13 +20,27 @@ function createMainWindow(): void {
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'index.js'),
+      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
     },
   });
   mainWindow.once('ready-to-show', () => mainWindow?.show());
+  // 渲染层日志转发到主进程控制台（错误可追踪）
+  mainWindow.webContents.on('console-message', (event) => {
+    const source = `${event.sourceId}:${String(event.lineNumber)}`;
+    console.log(`[renderer] ${event.level}: ${event.message} (${source})`);
+  });
+  // 补发当前服务状态（ready 广播可能早于渲染层订阅）
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (manager !== null) {
+      broadcastEvent(buildIpcContext(manager), {
+        type: 'service-state',
+        state: manager.currentState,
+      });
+    }
+  });
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
