@@ -36,6 +36,16 @@ export function registerIpc(context: IpcContext): void {
     context.restartService();
     return { ok: true };
   });
+  ipcMain.handle('window:control', (event, action: unknown) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win === null || typeof action !== 'string') return { ok: false };
+    if (action === 'minimize') win.minimize();
+    else if (action === 'maximize-toggle') {
+      if (win.isMaximized()) win.unmaximize();
+      else win.maximize();
+    } else if (action === 'close') win.close();
+    return { ok: true };
+  });
 }
 
 /** 主进程 → 渲染层事件下发（service:event）。 */

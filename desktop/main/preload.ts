@@ -13,6 +13,8 @@ const api = {
     ipcRenderer.invoke('dialog:pickVideoFile') as Promise<string | null>,
   revealInFolder: (path: string): Promise<void> =>
     ipcRenderer.invoke('shell:reveal', path) as Promise<void>,
+  windowControl: (action: 'minimize' | 'maximize-toggle' | 'close'): Promise<void> =>
+    ipcRenderer.invoke('window:control', action) as Promise<void>,
   onServiceEvent: (callback: (event: ServiceEvent) => void): (() => void) => {
     const listener = (_event: IpcRendererEvent, payload: ServiceEvent): void => {
       callback(payload);

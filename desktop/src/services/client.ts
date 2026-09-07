@@ -40,6 +40,10 @@ export function revealInFolder(path: string): Promise<void> {
   return bridge().revealInFolder(path);
 }
 
+export function windowControl(action: 'minimize' | 'maximize-toggle' | 'close'): Promise<void> {
+  return bridge().windowControl(action);
+}
+
 /** 本地媒体预览 URL（dramaclip:// 协议，主进程注册）。 */
 export function mediaUrl(path: string): string {
   return `dramaclip://local/${encodeURIComponent(path)}`;

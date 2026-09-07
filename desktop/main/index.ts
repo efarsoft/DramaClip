@@ -34,6 +34,7 @@ function createMainWindow(): void {
     minWidth: 1024,
     minHeight: 680,
     show: false,
+    frame: false,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),

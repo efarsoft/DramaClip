@@ -1,51 +1,41 @@
-import { App as AntdApp, Button, Card, Statistic } from 'antd';
-import {
-  FolderOutlined,
-  PlayCircleOutlined,
-  ThunderboltOutlined,
-  VideoCameraOutlined,
-} from '@ant-design/icons';
-import type { ReactNode } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { DashboardSummary, HealthResult, ModelInfo, Project } from '@dramaclip/protocol';
-import { pickFolder, projectApi, rpc, systemApi } from '../../services/client';
+import type { DashboardSummary, ModelInfo, Project } from '@dramaclip/protocol';
+import { projectApi, rpc } from '../../services/client';
 import { useUiStore } from '../../stores/ui';
 import { tokens } from '../../styles/theme';
+import { EnvPanel, TipsPanel, ToolboxPanel } from './EnvPanel';
 import { RecentProjects } from './RecentProjects';
-import { SectionTitle } from './SectionTitle';
+import { StartCards } from './StartCards';
 import { TodoCard } from './TodoCard';
 import { useTodos } from './useTodos';
 
-/** 工作台（docs/desktop/03 §7.1）：待办 + 统计概览 + 最近项目 + 系统状态。 */
+/** 工作台：问候 + 开始创作 + 最近项目（左）｜环境/工具/上手（右）。 */
 export function HomePage() {
   return <HomeContent />;
 }
 
 function HomeContent() {
   const navigate = useNavigate();
-  const { message } = AntdApp.useApp();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [health, setHealth] = useState<HealthResult | null>(null);
   const [models, setModels] = useState<ModelInfo[] | null>(null);
-  const [llmBaseUrl, setLlmBaseUrl] = useState<string>('');
-  const [creating, setCreating] = useState(false);
+  const [llmBaseUrl, setLlmBaseUrl] = useState('');
+  const [ttsEngine, setTtsEngine] = useState('edge');
   const serviceState = useUiStore((state) => state.serviceState);
 
   const load = useCallback(async () => {
-    const [summaryData, projectList, healthData, modelList, settings] = await Promise.all([
+    const [summaryData, projectList, modelList, settings] = await Promise.all([
       projectApi.dashboardSummary(),
       projectApi.list(),
-      systemApi.health(),
       rpc<ModelInfo[]>('models.list').catch(() => null),
       rpc<Record<string, string>>('settings.get').catch(() => null),
     ]);
     setSummary(summaryData);
     setProjects(projectList.slice(0, 6));
-    setHealth(healthData);
     setModels(modelList);
     setLlmBaseUrl(settings?.['llm.base_url'] ?? '');
+    setTtsEngine(settings?.['tts.engine'] ?? 'edge');
   }, []);
 
   // 服务就绪前发起的 RPC 会失败；ready 后重载一次（修复启动时序竞争）
@@ -53,183 +43,85 @@ function HomeContent() {
     if (serviceState === 'ready') void load();
   }, [load, serviceState]);
 
-  const onCreate = useCallback(async () => {
-    const folder = await pickFolder();
-    if (folder === null) return;
-    setCreating(true);
-    try {
-      const name = folder.replaceAll('\\', '/').split('/').pop() ?? '新项目';
-      const project = await projectApi.create(name, folder);
-      await projectApi.scanEpisodes(project.id);
-      message.success(`已创建「${name}」`);
-      await navigate(`/projects/${project.id}/analysis`);
-    } finally {
-      setCreating(false);
-    }
-  }, [message, navigate]);
-
   const todos = useTodos(models, llmBaseUrl !== '', serviceState === 'unavailable');
+  const needsModel = (models ?? []).some((m) => m.required && m.status !== 'installed');
 
   return (
-    <div style={{ maxWidth: 1040, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 28 }}>
-      <HomeHeader creating={creating} onCreate={() => void onCreate()} />
-      <TodoCard items={todos} />
-      <SummaryCards
-        summary={summary}
-        onProjects={() => {
-          void navigate('/projects');
-        }}
-      />
-      <RecentProjects projects={projects} />
-      <SystemStatus health={health} />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <GreetingHeader summary={summary} />
+      {todos.length > 0 && <TodoCard items={todos} />}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 330px', gap: 16, alignItems: 'start' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
+          <StartCards
+            needsAsrModel={needsModel}
+            needsLlm={llmBaseUrl === ''}
+            onCreated={(projectId) => {
+              void navigate(`/projects/${projectId}/analysis`);
+            }}
+          />
+          <RecentProjects projects={projects} />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <EnvPanel models={models} llmBaseUrl={llmBaseUrl} ttsEngine={ttsEngine} />
+          <ToolboxPanel />
+          <TipsPanel />
+        </div>
+      </div>
     </div>
   );
 }
 
-function HomeHeader({ creating, onCreate }: { creating: boolean; onCreate: () => void }) {
+function greetingText(): string {
+  const hour = new Date().getHours();
+  if (hour < 6) return '夜深了';
+  if (hour < 12) return '上午好';
+  if (hour < 14) return '中午好';
+  if (hour < 18) return '下午好';
+  return '晚上好';
+}
+
+function GreetingHeader({ summary }: { summary: DashboardSummary | null }) {
+  const now = new Date();
+  const week = ['日', '一', '二', '三', '四', '五', '六'][now.getDay()] ?? '';
+  const chips = [
+    { label: '项目', value: summary?.project_count },
+    { label: '剧集', value: summary?.episode_count },
+    { label: '已分析', value: summary?.analyzed_episodes },
+    { label: '已导出', value: summary?.export_count },
+  ];
   return (
     <header style={{ display: 'flex', alignItems: 'flex-end' }}>
       <div>
         <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: tokens.textPrimary }}>
-          创作工作台
+          {greetingText()}
         </h1>
         <div style={{ fontSize: 13, color: tokens.textTertiary, marginTop: 6 }}>
-          本地优先 · 导入剧集 → AI 分析 → 生成推广短视频
+          {String(now.getMonth() + 1)}月{String(now.getDate())}日 星期{week} ·
+          选择一个方式开始，短剧素材也可以拖进来
         </div>
       </div>
-      <Button
-        type="primary"
-        loading={creating}
-        style={{ marginLeft: 'auto', height: 38, paddingInline: 20 }}
-        onClick={onCreate}
-      >
-        新建项目
-      </Button>
-    </header>
-  );
-}
-
-function StatCard({
-  icon,
-  tint,
-  title,
-  value,
-  onClick,
-}: {
-  icon: ReactNode;
-  tint: string;
-  title: string;
-  value: number | string | undefined;
-  onClick?: () => void;
-}) {
-  return (
-    <Card hoverable={onClick !== undefined} onClick={onClick} styles={{ body: { padding: 18 } }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-        <span
-          style={{
-            width: 42,
-            height: 42,
-            borderRadius: 11,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 19,
-            color: tint,
-            background: `${tint}1F`,
-          }}
-        >
-          {icon}
-        </span>
-        <Statistic
-          title={<span style={{ fontSize: 12, color: tokens.textTertiary }}>{title}</span>}
-          value={value ?? '…'}
-          styles={{ content: { fontSize: 26, fontWeight: 700, color: tokens.textPrimary } }}
-        />
-      </div>
-    </Card>
-  );
-}
-
-function SummaryCards({
-  summary,
-  onProjects,
-}: {
-  summary: DashboardSummary | null;
-  onProjects: () => void;
-}) {
-  return (
-    <section style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
-      <StatCard
-        icon={<FolderOutlined />}
-        tint={tokens.colorPrimary}
-        title="项目"
-        value={summary?.project_count}
-        onClick={onProjects}
-      />
-      <StatCard
-        icon={<VideoCameraOutlined />}
-        tint={tokens.colorAccent}
-        title="剧集总数"
-        value={summary?.episode_count}
-      />
-      <StatCard
-        icon={<ThunderboltOutlined />}
-        tint={tokens.colorWarning}
-        title="已分析集数"
-        value={summary?.analyzed_episodes}
-      />
-      <StatCard
-        icon={<PlayCircleOutlined />}
-        tint={tokens.colorSuccess}
-        title="已导出视频"
-        value={summary?.export_count}
-      />
-    </section>
-  );
-}
-
-function SystemStatus({ health }: { health: HealthResult | null }) {
-  const items = [
-    { label: '服务', value: health?.status ?? '…' },
-    { label: '运行时长', value: `${String(Math.round(health?.uptime_s ?? 0))}s` },
-    ...(health?.gpu === undefined ? [] : [{ label: 'GPU', value: health.gpu }]),
-  ];
-  return (
-    <section>
-      <SectionTitle>系统状态</SectionTitle>
-      <Card styles={{ body: { padding: '14px 18px' } }}>
-        <div style={{ display: 'flex', gap: 28, alignItems: 'center' }}>
-          {items.map((item) => (
-            <div key={item.label} style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ fontSize: 12, color: tokens.textTertiary }}>{item.label}</span>
-              <span style={{ fontSize: 14, fontWeight: 600, color: tokens.textSecondary }}>
-                {item.value}
-              </span>
-            </div>
-          ))}
+      <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
+        {chips.map((chip) => (
           <span
+            key={chip.label}
             style={{
-              marginLeft: 'auto',
               display: 'flex',
+              flexDirection: 'column',
               alignItems: 'center',
-              gap: 6,
-              fontSize: 12,
-              color: tokens.colorSuccess,
+              gap: 2,
+              padding: '6px 14px',
+              borderRadius: 9,
+              background: tokens.bgContainer,
+              border: `1px solid ${tokens.borderSecondary}`,
             }}
           >
-            <span
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: 4,
-                background: tokens.colorSuccess,
-                boxShadow: `0 0 6px ${tokens.colorSuccess}`,
-              }}
-            />
-            在线
+            <span style={{ fontSize: 16, fontWeight: 700, color: tokens.textPrimary }}>
+              {chip.value ?? '…'}
+            </span>
+            <span style={{ fontSize: 10, color: tokens.textTertiary }}>{chip.label}</span>
           </span>
-        </div>
-      </Card>
-    </section>
+        ))}
+      </div>
+    </header>
   );
 }

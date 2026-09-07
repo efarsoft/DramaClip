@@ -242,6 +242,8 @@ export interface DramaClipBridge {
   pickVideoFile(): Promise<string | null>;
   /** 在系统文件管理器中定位文件。 */
   revealInFolder(path: string): Promise<void>;
+  /** 自定义标题栏窗口控制（frame:false）。 */
+  windowControl(action: 'minimize' | 'maximize-toggle' | 'close'): Promise<void>;
   onServiceEvent(callback: (event: ServiceEvent) => void): () => void;
 }
 
