@@ -1,14 +1,23 @@
 import { App as AntdApp, Button, Card, Statistic } from 'antd';
+import {
+  FolderOutlined,
+  PlayCircleOutlined,
+  ThunderboltOutlined,
+  VideoCameraOutlined,
+} from '@ant-design/icons';
+import type { ReactNode } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { DashboardSummary, HealthResult, ModelInfo, Project } from '@dramaclip/protocol';
 import { pickFolder, projectApi, rpc, systemApi } from '../../services/client';
 import { useUiStore } from '../../stores/ui';
 import { tokens } from '../../styles/theme';
+import { RecentProjects } from './RecentProjects';
+import { SectionTitle } from './SectionTitle';
 import { TodoCard } from './TodoCard';
 import { useTodos } from './useTodos';
 
-/** 工作台（docs/desktop/03 §7.1 W3 子集）：统计概览 + 最近项目 + 快捷导入 + 服务状态。 */
+/** 工作台（docs/desktop/03 §7.1）：待办 + 统计概览 + 最近项目 + 系统状态。 */
 export function HomePage() {
   return <HomeContent />;
 }
@@ -62,7 +71,7 @@ function HomeContent() {
   const todos = useTodos(models, llmBaseUrl !== '', serviceState === 'unavailable');
 
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 32 }}>
+    <div style={{ maxWidth: 1040, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 28 }}>
       <HomeHeader creating={creating} onCreate={() => void onCreate()} />
       <TodoCard items={todos} />
       <SummaryCards
@@ -79,17 +88,65 @@ function HomeContent() {
 
 function HomeHeader({ creating, onCreate }: { creating: boolean; onCreate: () => void }) {
   return (
-    <header style={{ display: 'flex', alignItems: 'center' }}>
+    <header style={{ display: 'flex', alignItems: 'flex-end' }}>
       <div>
-        <h1 style={{ margin: 0, fontSize: 24, color: tokens.textPrimary }}>创作工作台</h1>
-        <div style={{ fontSize: 12, color: tokens.textTertiary, marginTop: 4 }}>
+        <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: tokens.textPrimary }}>
+          创作工作台
+        </h1>
+        <div style={{ fontSize: 13, color: tokens.textTertiary, marginTop: 6 }}>
           本地优先 · 导入剧集 → AI 分析 → 生成推广短视频
         </div>
       </div>
-      <Button type="primary" loading={creating} style={{ marginLeft: 'auto' }} onClick={onCreate}>
+      <Button
+        type="primary"
+        loading={creating}
+        style={{ marginLeft: 'auto', height: 38, paddingInline: 20 }}
+        onClick={onCreate}
+      >
         新建项目
       </Button>
     </header>
+  );
+}
+
+function StatCard({
+  icon,
+  tint,
+  title,
+  value,
+  onClick,
+}: {
+  icon: ReactNode;
+  tint: string;
+  title: string;
+  value: number | string | undefined;
+  onClick?: () => void;
+}) {
+  return (
+    <Card hoverable={onClick !== undefined} onClick={onClick} styles={{ body: { padding: 18 } }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <span
+          style={{
+            width: 42,
+            height: 42,
+            borderRadius: 11,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 19,
+            color: tint,
+            background: `${tint}1F`,
+          }}
+        >
+          {icon}
+        </span>
+        <Statistic
+          title={<span style={{ fontSize: 12, color: tokens.textTertiary }}>{title}</span>}
+          value={value ?? '…'}
+          styles={{ content: { fontSize: 26, fontWeight: 700, color: tokens.textPrimary } }}
+        />
+      </div>
+    </Card>
   );
 }
 
@@ -100,80 +157,79 @@ function SummaryCards({
   summary: DashboardSummary | null;
   onProjects: () => void;
 }) {
-  const cards = [
-    { title: '项目', value: summary?.project_count, onClick: onProjects },
-    { title: '剧集总数', value: summary?.episode_count },
-    { title: '已分析集数', value: summary?.analyzed_episodes },
-    { title: '已导出视频', value: summary?.export_count },
-  ];
   return (
-    <section style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-      {cards.map((card) => (
-        <Card key={card.title} hoverable onClick={card.onClick}>
-          <Statistic title={card.title} value={card.value ?? '…'} />
-        </Card>
-      ))}
-    </section>
-  );
-}
-
-function RecentProjects({ projects }: { projects: Project[] }) {
-  const navigate = useNavigate();
-  return (
-    <section>
-      <SectionTitle>最近项目</SectionTitle>
-      {projects.length === 0 ? (
-        <Card variant="outlined">
-          <div style={{ textAlign: 'center', color: tokens.textSecondary, padding: 24 }}>
-            还没有项目——点击右上角「新建项目」，选择剧集文件夹开始
-          </div>
-        </Card>
-      ) : (
-        projects.map((project) => (
-          <Card
-            key={project.id}
-            size="small"
-            hoverable
-            style={{ marginBottom: 8 }}
-            onClick={() => {
-              void navigate(`/projects/${project.id}/analysis`);
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <strong style={{ color: tokens.textPrimary }}>{project.name}</strong>
-              <span style={{ fontSize: 12, color: tokens.textSecondary }}>
-                {String(project.episode_count)} 集
-              </span>
-              <span style={{ marginLeft: 'auto', fontSize: 12, color: tokens.textTertiary }}>
-                {project.status}
-              </span>
-            </div>
-          </Card>
-        ))
-      )}
+    <section style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+      <StatCard
+        icon={<FolderOutlined />}
+        tint={tokens.colorPrimary}
+        title="项目"
+        value={summary?.project_count}
+        onClick={onProjects}
+      />
+      <StatCard
+        icon={<VideoCameraOutlined />}
+        tint={tokens.colorAccent}
+        title="剧集总数"
+        value={summary?.episode_count}
+      />
+      <StatCard
+        icon={<ThunderboltOutlined />}
+        tint={tokens.colorWarning}
+        title="已分析集数"
+        value={summary?.analyzed_episodes}
+      />
+      <StatCard
+        icon={<PlayCircleOutlined />}
+        tint={tokens.colorSuccess}
+        title="已导出视频"
+        value={summary?.export_count}
+      />
     </section>
   );
 }
 
 function SystemStatus({ health }: { health: HealthResult | null }) {
+  const items = [
+    { label: '服务', value: health?.status ?? '…' },
+    { label: '运行时长', value: `${String(Math.round(health?.uptime_s ?? 0))}s` },
+    ...(health?.gpu === undefined ? [] : [{ label: 'GPU', value: health.gpu }]),
+  ];
   return (
     <section>
       <SectionTitle>系统状态</SectionTitle>
-      <Card size="small">
-        <div style={{ display: 'flex', gap: 24, fontSize: 13, color: tokens.textSecondary }}>
-          <span>服务：{health?.status ?? '…'}</span>
-          <span>运行 {String(Math.round(health?.uptime_s ?? 0))}s</span>
-          {health?.gpu !== undefined && <span>GPU：{health.gpu}</span>}
+      <Card styles={{ body: { padding: '14px 18px' } }}>
+        <div style={{ display: 'flex', gap: 28, alignItems: 'center' }}>
+          {items.map((item) => (
+            <div key={item.label} style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ fontSize: 12, color: tokens.textTertiary }}>{item.label}</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: tokens.textSecondary }}>
+                {item.value}
+              </span>
+            </div>
+          ))}
+          <span
+            style={{
+              marginLeft: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 12,
+              color: tokens.colorSuccess,
+            }}
+          >
+            <span
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: 4,
+                background: tokens.colorSuccess,
+                boxShadow: `0 0 6px ${tokens.colorSuccess}`,
+              }}
+            />
+            在线
+          </span>
         </div>
       </Card>
     </section>
-  );
-}
-
-function SectionTitle({ children }: { children: string }) {
-  return (
-    <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 600, color: tokens.textPrimary }}>
-      {children}
-    </h3>
   );
 }

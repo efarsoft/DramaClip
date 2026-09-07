@@ -6,7 +6,7 @@ body,
 }
 
 body {
-  background: #161920;
+  background: #10141C;
   color: #e8eaed;
   font-family:
     'Segoe UI',
@@ -24,7 +24,7 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #333740;
+  background: #2A3140;
   border-radius: 3px;
 }
 
