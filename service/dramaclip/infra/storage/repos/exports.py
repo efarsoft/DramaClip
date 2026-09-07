@@ -15,6 +15,7 @@ _COLUMNS = (
     "output_path",
     "status",
     "progress",
+    "error",
     "duration_s",
     "size_bytes",
     "created_at",
@@ -89,6 +90,29 @@ def list_by_project(conn: sqlite3.Connection, project_id: str) -> list[dict[str,
         (project_id,),
     ).fetchall()
     return [dict(zip(_COLUMNS, row, strict=True)) for row in rows]
+
+
+def list_completed_works(conn: sqlite3.Connection, limit: int = 60) -> list[dict[str, Any]]:
+    """跨项目已完成成片（作品库），按完成时间倒序并附带项目名。"""
+    rows = conn.execute(
+        "SELECT e.id, e.project_id, p.name AS project_name, e.narration_mode, e.output_path,"
+        " e.duration_s, e.size_bytes, e.completed_at"
+        " FROM export_jobs e JOIN projects p ON p.id = e.project_id"
+        " WHERE e.status = 'completed' AND e.output_path IS NOT NULL"
+        " ORDER BY COALESCE(e.completed_at, e.created_at) DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    keys = (
+        "id",
+        "project_id",
+        "project_name",
+        "narration_mode",
+        "output_path",
+        "duration_s",
+        "size_bytes",
+        "completed_at",
+    )
+    return [dict(zip(keys, row, strict=True)) for row in rows]
 
 
 def get(conn: sqlite3.Connection, export_id: str) -> dict[str, Any] | None:

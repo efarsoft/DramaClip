@@ -3,6 +3,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import {
   AppstoreOutlined,
+  PlaySquareOutlined,
   CloudServerOutlined,
   DashboardOutlined,
   ExportOutlined,
@@ -19,6 +20,7 @@ import { TitleBar } from './TitleBar';
 const NAV_ITEMS = [
   { path: '/', label: '工作台', icon: DashboardOutlined },
   { path: '/projects', label: '项目', icon: FolderOutlined },
+  { path: '/works', label: '作品', icon: PlaySquareOutlined },
   { path: '/models', label: '模型', icon: CloudServerOutlined },
   { path: '/settings', label: '设置', icon: SettingOutlined },
 ] as const;

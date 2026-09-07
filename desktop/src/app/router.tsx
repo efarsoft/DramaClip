@@ -8,6 +8,7 @@ import { GeneratePage } from '../features/narration/GeneratePage';
 import { ExportPage } from '../features/export/ExportPage';
 import { ModelsPage } from '../features/models/ModelsPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
+import { WorksPage } from '../features/works/WorksPage';
 
 /** 路由表（docs/desktop/01 §1）。W4：全流程 项目→分析→模式→生成→导出。 */
 export function Router() {
@@ -17,6 +18,7 @@ export function Router() {
         <Route element={<App />}>
           <Route path="/" element={<HomePage />} />
           <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/works" element={<WorksPage />} />
           <Route path="/models" element={<ModelsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/projects/:projectId/analysis" element={<AnalysisPage />} />

@@ -1,6 +1,7 @@
 /** 渲染层唯一 IPC 出口（docs/desktop/01 §4）。组件禁止直接调 window.dramaclip。 */
 import type {
   AnalysisJobStatus,
+  WorkItem as WorksItem,
   ModelInfo,
   AnalysisResults,
   DashboardSummary,
@@ -93,6 +94,11 @@ export const analysisApi = {
   results: (projectId: string): Promise<AnalysisResults> =>
     rpc<AnalysisResults>('analysis.results', { project_id: projectId }),
 } as const;
+
+/** 作品库：跨项目已完成成片。 */
+export function listWorks(limit = 60): Promise<WorksItem[]> {
+  return rpc<WorksItem[]>('export.list_works', { limit });
+}
 
 export const narrationApi = {
   generatePlans: (

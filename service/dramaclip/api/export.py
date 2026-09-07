@@ -34,6 +34,7 @@ def _safe_filename(name: str) -> str:
 def register(router: Router, context: AppContext) -> None:
     router.register("export.start", lambda params: start(context, params))
     router.register("export.list", lambda params: list_exports(context, params))
+    router.register("export.list_works", lambda params: list_works(context, params))
 
 
 def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -63,6 +64,12 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
 
 def list_exports(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:
     return exports_repo.list_by_project(context.conn, str(params.get("project_id", "")))
+
+
+def list_works(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:
+    """作品库：跨项目已完成成片（附项目名），limit 可调。"""
+    limit = int(params.get("limit", 60))
+    return exports_repo.list_completed_works(context.conn, limit=limit)
 
 
 def _run_export(

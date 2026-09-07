@@ -1,0 +1,203 @@
+/** 作品库：跨项目已完成的成片（卡片网格 + 预览 + 定位文件）。 */
+import { useCallback, useEffect, useState } from 'react';
+import { App as AntdApp, Card, Empty, Modal, Tag } from 'antd';
+import { FolderOpenOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import type { WorkItem } from '@dramaclip/protocol';
+import { listWorks, mediaUrl, revealInFolder } from '../../services/client';
+import { tokens } from '../../styles/theme';
+import { MODE_INFO } from '../../components/modeMeta';
+
+const MODE_COLORS = ['#4D9FFF', '#7C5CFF', '#34D399', '#FBBF24', '#F87171', '#60A5FA'];
+
+function modeLabel(mode: string | undefined): string {
+  if (mode === undefined) return '成片';
+  return MODE_INFO.find((item) => item.mode === mode)?.label ?? mode;
+}
+
+function modeColor(mode: string | undefined): string {
+  if (mode === undefined) return tokens.textTertiary;
+  const index = MODE_INFO.findIndex((item) => item.mode === mode);
+  return MODE_COLORS[index % MODE_COLORS.length] ?? tokens.colorPrimary;
+}
+
+function formatSize(bytes: number | undefined): string {
+  if (bytes === undefined || bytes <= 0) return '—';
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatDuration(seconds: number | undefined): string {
+  if (seconds === undefined || seconds <= 0) return '—';
+  const total = Math.round(seconds);
+  return `${String(Math.floor(total / 60))}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function formatDate(ms: number | undefined): string {
+  if (ms === undefined) return '';
+  const date = new Date(ms);
+  return `${String(date.getMonth() + 1)}/${String(date.getDate())} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+/** 作品库页（导航「作品」）。 */
+export function WorksPage() {
+  const [works, setWorks] = useState<WorkItem[] | null>(null);
+  const [preview, setPreview] = useState<WorkItem | null>(null);
+
+  const load = useCallback(async () => {
+    setWorks(await listWorks());
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <header style={{ display: 'flex', alignItems: 'flex-end' }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: tokens.textPrimary }}>
+            作品库
+          </h1>
+          <div style={{ fontSize: 13, color: tokens.textTertiary, marginTop: 6 }}>
+            全部项目制作完成的成片 · 共 {String(works?.length ?? 0)} 个
+          </div>
+        </div>
+      </header>
+
+      {works === null ? (
+        <Card loading />
+      ) : works.length === 0 ? (
+        <Card>
+          <Empty description="还没有完成的成片——去项目里生成并导出第一个作品吧" />
+        </Card>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
+          {works.map((work) => (
+            <WorkCard
+              key={work.id}
+              work={work}
+              onPreview={() => {
+                setPreview(work);
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      <PreviewModal work={preview} onClose={() => { setPreview(null); }} />
+    </div>
+  );
+}
+
+function PreviewModal({ work, onClose }: { work: WorkItem | null; onClose: () => void }) {
+  return (
+    <Modal
+      open={work !== null}
+      onCancel={onClose}
+      footer={null}
+      width={520}
+      title={work === null ? '' : `${work.project_name} · ${modeLabel(work.narration_mode)}`}
+    >
+      {work !== null && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <video
+            src={mediaUrl(work.output_path)}
+            controls
+            autoPlay
+            style={{ width: '100%', borderRadius: 8, background: '#000' }}
+          />
+          <div style={{ fontSize: 12, color: tokens.textTertiary }}>
+            {formatDuration(work.duration_s)} · {formatSize(work.size_bytes)} ·{' '}
+            {formatDate(work.completed_at)}
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function WorkMeta({ work }: { work: WorkItem }): React.ReactElement {
+  const { message } = AntdApp.useApp();
+  return (
+    <div
+      style={{
+        marginTop: 'auto',
+        display: 'flex',
+        alignItems: 'center',
+        fontSize: 12,
+        color: tokens.textTertiary,
+      }}
+    >
+      <span>
+        {formatDuration(work.duration_s)} · {formatSize(work.size_bytes)}
+      </span>
+      <button
+        type="button"
+        title="打开所在文件夹"
+        onClick={() => {
+          revealInFolder(work.output_path).catch((error: unknown) => {
+            message.error(error instanceof Error ? error.message : String(error));
+          });
+        }}
+        style={{
+          marginLeft: 'auto',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          background: 'none',
+          border: 'none',
+          color: tokens.colorPrimary,
+          fontSize: 12,
+          cursor: 'pointer',
+          padding: 0,
+        }}
+      >
+        <FolderOpenOutlined />
+        文件夹
+      </button>
+    </div>
+  );
+}
+
+function WorkCard({ work, onPreview }: { work: WorkItem; onPreview: () => void }): React.ReactElement {
+  const tint = modeColor(work.narration_mode);
+  return (
+    <Card hoverable styles={{ body: { padding: 0, height: '100%' } }}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div
+          onClick={onPreview}
+          style={{
+            height: 120,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            cursor: 'pointer',
+            background: `linear-gradient(135deg, ${tint}26 0%, ${tokens.bgElevated} 100%)`,
+            borderTopLeftRadius: 8,
+            borderTopRightRadius: 8,
+          }}
+        >
+          <PlayCircleOutlined style={{ fontSize: 34, color: tint }} />
+          <span style={{ fontSize: 12, color: tokens.textSecondary }}>点击预览</span>
+        </div>
+        <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Tag
+              color={tint}
+              style={{ marginInlineEnd: 0, fontSize: 11, borderRadius: 999 }}
+            >
+              {modeLabel(work.narration_mode)}
+            </Tag>
+            <span style={{ marginLeft: 'auto', fontSize: 11, color: tokens.textTertiary }}>
+              {formatDate(work.completed_at)}
+            </span>
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: tokens.textPrimary }}>
+            {work.project_name}
+          </div>
+          <WorkMeta work={work} />
+        </div>
+      </div>
+    </Card>
+  );
+}

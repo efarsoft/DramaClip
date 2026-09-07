@@ -6,18 +6,79 @@
   "x-models": {
     "ExportJob": {
       "type": "object",
-      "required": ["id", "project_id", "status", "progress", "created_at"],
+      "required": [
+        "id",
+        "project_id",
+        "status",
+        "progress",
+        "created_at"
+      ],
       "properties": {
-        "id": { "type": "string" },
-        "project_id": { "type": "string" },
-        "plan_id": { "type": "string" },
-        "narration_mode": { "type": "string" },
-        "output_path": { "type": "string" },
-        "status": { "type": "string" },
-        "progress": { "type": "number" },
-        "error": { "type": "string" },
-        "created_at": { "type": "integer" },
-        "completed_at": { "type": "integer" }
+        "id": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "plan_id": {
+          "type": "string"
+        },
+        "narration_mode": {
+          "type": "string"
+        },
+        "output_path": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "error": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "completed_at": {
+          "type": "integer"
+        }
+      }
+    },
+    "WorkItem": {
+      "type": "object",
+      "required": [
+        "id",
+        "project_id",
+        "project_name",
+        "output_path"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "project_name": {
+          "type": "string"
+        },
+        "narration_mode": {
+          "type": "string"
+        },
+        "output_path": {
+          "type": "string"
+        },
+        "duration_s": {
+          "type": "number"
+        },
+        "size_bytes": {
+          "type": "integer"
+        },
+        "completed_at": {
+          "type": "integer"
+        }
       }
     }
   },
@@ -27,19 +88,68 @@
       "summary": "按编排方案导出成片（长任务 job：段切割+消重+遮罩+拼接+编码）",
       "params": {
         "type": "object",
-        "required": ["plan_id"],
+        "required": [
+          "plan_id"
+        ],
         "properties": {
-          "plan_id": { "type": "string" },
-          "bitrate_kbps": { "type": "integer" }
+          "plan_id": {
+            "type": "string"
+          },
+          "bitrate_kbps": {
+            "type": "integer"
+          }
         }
       },
-      "result": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } }
+      "result": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        }
+      }
     },
     {
       "name": "export.list",
       "summary": "项目导出记录",
-      "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
-      "result": { "type": "array", "items": { "$ref": "#/x-models/ExportJob" } }
+      "params": {
+        "type": "object",
+        "required": [
+          "project_id"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "type": "array",
+        "items": {
+          "$ref": "#/x-models/ExportJob"
+        }
+      }
+    },
+    {
+      "name": "export.list_works",
+      "summary": "作品库：跨项目已完成成片（附项目名，按完成时间倒序）",
+      "params": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          }
+        }
+      },
+      "result": {
+        "type": "array",
+        "items": {
+          "$ref": "#/x-models/WorkItem"
+        }
+      }
     }
   ]
 }

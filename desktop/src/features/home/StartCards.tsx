@@ -10,7 +10,7 @@ import {
 } from '@ant-design/icons';
 import { pickFolder, projectApi } from '../../services/client';
 import { tokens } from '../../styles/theme';
-import { MODE_INFO } from './modeInfo';
+import { MODE_INFO } from '../../components/modeMeta';
 
 interface CardSpec {
   readonly key: string;

@@ -192,6 +192,18 @@ export interface ExportJob {
   readonly completed_at?: number;
 }
 
+/** 作品库条目（跨项目已完成成片，export.list_works）。 */
+export interface WorkItem {
+  readonly id: string;
+  readonly project_id: string;
+  readonly project_name: string;
+  readonly narration_mode?: string;
+  readonly output_path: string;
+  readonly duration_s?: number;
+  readonly size_bytes?: number;
+  readonly completed_at?: number;
+}
+
 export interface ModelInfo {
   readonly model_id: string;
   readonly kind: string;
@@ -271,6 +283,7 @@ export const METHOD_NAMES = [
   'narration.replace_timeline',
   'export.start',
   'export.list',
+  'export.list_works',
   'subtitle.list_presets',
   'models.list',
   'models.download',
