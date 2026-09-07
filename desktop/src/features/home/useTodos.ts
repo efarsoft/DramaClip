@@ -22,7 +22,7 @@ export function useTodos(
     if (missing.length > 0) {
       items.push({
         key: 'models',
-        text: `推荐模型未安装：${missing.map((m) => m.name).join('、')}（模型管理页可下载或手动导入）`,
+        text: `推荐模型未安装：${missing.map((m) => m.name).join('、')}（引擎中心可下载或导入）`,
         severity: 'warning',
       });
     }

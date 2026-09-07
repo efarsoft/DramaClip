@@ -41,11 +41,11 @@ export function EnvPanel({
       ? { name: 'ASR 语音识别', ok: null, status: '…' }
       : asr.status === 'installed'
         ? { name: 'ASR 语音识别', ok: true, status: `已安装 · ${asr.name}` }
-        : { name: 'ASR 语音识别', ok: false, status: '未安装', action: { label: '去下载', path: '/models' } },
+        : { name: 'ASR 语音识别', ok: false, status: '未安装', action: { label: '去下载', path: '/models/tts' } },
     ttsEngine === 'kokoro'
       ? kokoro?.status === 'installed'
         ? { name: 'TTS 配音', ok: true, status: 'Kokoro 本地 · 已就绪' }
-        : { name: 'TTS 配音', ok: false, status: 'Kokoro 缺模型', action: { label: '去下载', path: '/models' } }
+        : { name: 'TTS 配音', ok: false, status: 'Kokoro 缺模型', action: { label: '去下载', path: '/models/tts' } }
       : { name: 'TTS 配音', ok: true, status: 'Edge 云端 · 已就绪' },
     { name: 'FFmpeg 编码', ok: true, status: '内置 · 就绪' },
   ];

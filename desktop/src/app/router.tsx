@@ -4,7 +4,7 @@ import { HomePage } from '../features/home/HomePage';
 import { ProjectsPage } from '../features/project/ProjectsPage';
 import { AnalysisPage } from '../features/analysis/AnalysisPage';
 import { ProductionPage } from '../features/narration/ProductionPage';
-import { ModelsPage } from '../features/models/ModelsPage';
+import { EnginesPage } from '../features/engines/EnginesPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
 import { WorksPage } from '../features/works/WorksPage';
 
@@ -17,7 +17,8 @@ export function Router() {
           <Route path="/" element={<HomePage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/works" element={<WorksPage />} />
-          <Route path="/models" element={<ModelsPage />} />
+          <Route path="/models" element={<EnginesPage />} />
+          <Route path="/models/:tab" element={<EnginesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/projects/:projectId/analysis" element={<AnalysisPage />} />
           <Route path="/projects/:projectId/produce" element={<ProductionPage />} />

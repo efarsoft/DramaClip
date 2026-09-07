@@ -50,8 +50,8 @@ const CARDS: readonly CardSpec[] = [
     key: 'settings',
     icon: <SettingOutlined />,
     tint: tokens.colorWarning,
-    title: '模型与设置',
-    desc: '下载语音模型、配置 LLM 端点与默认参数',
+    title: '引擎与设置',
+    desc: '下载模型、配置 LLM 端点与导出参数',
   },
 ];
 
@@ -99,7 +99,7 @@ export function StartCards({
       setModesOpen(true);
     },
     settings: () => {
-      void navigate('/settings');
+      void navigate('/models');
     },
   };
   const tags: Record<string, string | undefined> = {

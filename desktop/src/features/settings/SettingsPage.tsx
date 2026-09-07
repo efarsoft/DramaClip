@@ -1,9 +1,8 @@
 import { App as AntdApp, Button, Card, Input, InputNumber, Select, Switch } from 'antd';
-import { useCallback, useEffect, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { rpc } from '../../services/client';
 import { tokens } from '../../styles/theme';
-import { LlmTestButton } from './LlmTestButton';
-import { buildSections, type FieldSpec, type Option, type SettingsMap, type SectionSpec } from './sections';
+import { buildSections, type FieldSpec, type Option, type SettingsMap } from './sections';
 
 /** 系统设置页：settings.get 全量载入 → 分区编辑 → 差异保存（settings.update）。 */
 export function SettingsPage() {
@@ -75,12 +74,6 @@ function patchIn(map: SettingsMap, key: string, value: string): SettingsMap {
   return { ...map, [key]: value };
 }
 
-/** 分区 id → 卡片右上角动作。 */
-function sectionExtra(section: SectionSpec): ReactElement | undefined {
-  if (section.id === 'llm') return <LlmTestButton />;
-  return undefined;
-}
-
 function SettingsBody({
   draft,
   presetOptions,
@@ -93,7 +86,7 @@ function SettingsBody({
   return (
     <>
       {buildSections(presetOptions).map((section) => (
-        <Card key={section.title} size="small" title={section.title} extra={sectionExtra(section)}>
+        <Card key={section.title} size="small" title={section.title}>
           {section.fields.map((field) => (
             <FieldRow
               key={field.key}
@@ -124,7 +117,7 @@ function SaveActions({
 }) {
   return (
     <header style={{ display: 'flex', alignItems: 'center' }}>
-      <h1 style={{ margin: 0, fontSize: 20, color: tokens.textPrimary }}>系统设置</h1>
+      <h1 style={{ margin: 0, fontSize: 20, color: tokens.textPrimary }}>偏好设置</h1>
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
         <Button onClick={onRevert} disabled={changedCount === 0}>
           还原

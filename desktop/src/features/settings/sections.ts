@@ -1,4 +1,4 @@
-/** 设置项声明（键与默认值权威源：service/dramaclip/infra/config.py DEFAULTS）。 */
+/** 系统偏好设置项（引擎类配置在「引擎中心」；键权威源：service config.DEFAULTS）。 */
 
 export type SettingsMap = Record<string, string>;
 
@@ -27,95 +27,6 @@ export interface SectionSpec {
   readonly title: string;
   readonly fields: readonly FieldSpec[];
 }
-
-const EDGE_VOICES: readonly Option[] = [
-  { label: '云希 · 男声', value: 'zh-CN-YunxiNeural' },
-  { label: '晓伊 · 女声', value: 'zh-CN-XiaoyiNeural' },
-  { label: '云扬 · 男声（播音）', value: 'zh-CN-YunyangNeural' },
-];
-
-const KOKORO_VOICES: readonly Option[] = [
-  { label: 'zf_001 · 女声', value: 'zf_001' },
-  { label: 'zf_003 · 女声', value: 'zf_003' },
-  { label: 'zm_001 · 男声', value: 'zm_001' },
-  { label: 'zm_003 · 男声', value: 'zm_003' },
-];
-
-const LLM_SECTION: SectionSpec = {
-  id: 'llm',
-  title: 'LLM 语义引擎',
-  fields: [
-    {
-      key: 'llm.base_url',
-      label: 'API 地址',
-      type: 'text',
-      placeholder: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      help: 'OpenAI 兼容端点；本地引擎可填 http://127.0.0.1:11434/v1（Ollama）',
-    },
-    { key: 'llm.api_key', label: 'API Key', type: 'password', placeholder: 'sk-…' },
-    {
-      key: 'llm.model',
-      label: '模型名',
-      type: 'text',
-      placeholder: 'qwen-plus',
-      help: '未配置时剧情/文案生成自动降级为关键词模式',
-    },
-  ],
-};
-
-const TTS_SECTION: SectionSpec = {
-  title: '配音（TTS）',
-  fields: [
-    {
-      key: 'tts.engine',
-      label: '引擎',
-      type: 'select',
-      help: 'edge=微软云端（质量佳、需联网）；kokoro=本地离线（模型管理页下载后可用）',
-      options: () => [
-        { label: 'Edge · 云端', value: 'edge' },
-        { label: 'Kokoro · 本地', value: 'kokoro' },
-      ],
-    },
-    {
-      key: 'tts.voice',
-      label: '默认音色',
-      type: 'select',
-      options: (values) => (values['tts.engine'] === 'kokoro' ? KOKORO_VOICES : EDGE_VOICES),
-    },
-  ],
-};
-
-const ASR_SECTION: SectionSpec = {
-  title: '语音识别（ASR）',
-  fields: [
-    {
-      key: 'asr.model',
-      label: '模型',
-      type: 'select',
-      help: 'small 精度更高（默认）；base 更快',
-      options: () => [
-        { label: 'small', value: 'small' },
-        { label: 'base', value: 'base' },
-      ],
-    },
-    {
-      key: 'asr.device',
-      label: '设备',
-      type: 'select',
-      help: 'GPU 需 CUDA 环境，当前默认 CPU',
-      options: () => [{ label: 'CPU', value: 'cpu' }],
-    },
-    {
-      key: 'asr.language',
-      label: '语言',
-      type: 'select',
-      options: () => [
-        { label: '中文', value: 'zh' },
-        { label: '英文', value: 'en' },
-      ],
-    },
-  ],
-};
 
 const ANALYSIS_SECTION: SectionSpec = {
   title: '智能分析',
@@ -183,13 +94,5 @@ function subtitleSection(presetOptions: readonly Option[]): SectionSpec {
 }
 
 export function buildSections(presetOptions: readonly Option[]): readonly SectionSpec[] {
-  return [
-    LLM_SECTION,
-    TTS_SECTION,
-    ASR_SECTION,
-    ANALYSIS_SECTION,
-    subtitleSection(presetOptions),
-    EXPORT_SECTION,
-    HARDWARE_SECTION,
-  ];
+  return [ANALYSIS_SECTION, subtitleSection(presetOptions), EXPORT_SECTION, HARDWARE_SECTION];
 }
