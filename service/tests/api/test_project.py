@@ -51,7 +51,7 @@ def test_scan_episodes_registers_videos(
     for number in (2, 10, 1):
         shutil.copy(sample_video, tmp_path / f"ep{number}.mp4")
     (tmp_path / "readme.txt").write_text("not video", encoding="utf-8")
-    router = _router(memory_db)
+    router = _scan_router(memory_db, tmp_path / "cache")
     project = router.dispatch(
         _request(1, "project.create", {"name": "p", "source_path": str(tmp_path)})
     ).result
@@ -98,3 +98,41 @@ def _request(request_id: int, method: str, params: dict[str, Any]) -> Any:
     from dramaclip.transport.rpc import RpcRequest
 
     return RpcRequest(id=request_id, method=method, params=params)
+
+
+def _scan_router(conn: sqlite3.Connection, work_dir: Path) -> Router:
+    from types import SimpleNamespace
+
+    context = SimpleNamespace(conn=conn, work_dir=work_dir)
+    router = Router()
+    project_api.register(router, context)  # type: ignore[arg-type]
+    return router
+
+
+def test_scan_generates_cover(
+    memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    router = _scan_router(memory_db, tmp_path / "cache")
+    shutil.copy(sample_video, tmp_path / "ep1.mp4")
+    created = router.dispatch(
+        _request(1, "project.create", {"name": "封面", "source_path": str(tmp_path)})
+    )
+    project_id = created.result["id"]
+    router.dispatch(_request(2, "project.scan_episodes", {"project_id": project_id}))
+    detail = router.dispatch(_request(3, "project.get", {"project_id": project_id}))
+    cover = detail.result["project"].get("cover_path")
+    assert cover is not None and Path(cover).is_file()
+
+
+def test_ensure_covers_idempotent(
+    memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    router = _scan_router(memory_db, tmp_path / "cache")
+    shutil.copy(sample_video, tmp_path / "ep1.mp4")
+    created = router.dispatch(
+        _request(1, "project.create", {"name": "补封面", "source_path": str(tmp_path)})
+    )
+    project_id = created.result["id"]
+    router.dispatch(_request(2, "project.scan_episodes", {"project_id": project_id}))
+    result = router.dispatch(_request(3, "project.ensure_covers", {}))
+    assert result.result == {"ok": True, "generated": 0}

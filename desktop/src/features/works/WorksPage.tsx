@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { App as AntdApp, Card, Empty, Modal, Tag } from 'antd';
 import { FolderOpenOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import type { WorkItem } from '@dramaclip/protocol';
-import { listWorks, mediaUrl, revealInFolder } from '../../services/client';
+import { listWorks, mediaUrl, projectApi, revealInFolder } from '../../services/client';
 import { tokens } from '../../styles/theme';
 import { MODE_INFO } from '../../components/modeMeta';
 
@@ -41,9 +41,15 @@ function formatDate(ms: number | undefined): string {
 export function WorksPage() {
   const [works, setWorks] = useState<WorkItem[] | null>(null);
   const [preview, setPreview] = useState<WorkItem | null>(null);
+  const [covers, setCovers] = useState<Map<string, string>>(new Map());
 
   const load = useCallback(async () => {
-    setWorks(await listWorks());
+    const [items, projects] = await Promise.all([
+      listWorks(),
+      projectApi.list().catch(() => []),
+    ]);
+    setWorks(items);
+    setCovers(new Map(projects.map((p) => [p.id, p.cover_path ?? ''])));
   }, []);
 
   useEffect(() => {
@@ -75,6 +81,7 @@ export function WorksPage() {
             <WorkCard
               key={work.id}
               work={work}
+              cover={covers.get(work.project_id) ?? undefined}
               onPreview={() => {
                 setPreview(work);
               }}
@@ -158,28 +165,21 @@ function WorkMeta({ work }: { work: WorkItem }): React.ReactElement {
   );
 }
 
-function WorkCard({ work, onPreview }: { work: WorkItem; onPreview: () => void }): React.ReactElement {
+function WorkCard({
+  work,
+  cover,
+  onPreview,
+}: {
+  work: WorkItem;
+  cover?: string;
+  onPreview: () => void;
+}): React.ReactElement {
   const tint = modeColor(work.narration_mode);
+
   return (
     <Card hoverable styles={{ body: { padding: 0, height: '100%' } }}>
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div
-          onClick={onPreview}
-          style={{
-            height: 120,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            cursor: 'pointer',
-            background: `linear-gradient(135deg, ${tint}26 0%, ${tokens.bgElevated} 100%)`,
-            borderTopLeftRadius: 8,
-            borderTopRightRadius: 8,
-          }}
-        >
-          <PlayCircleOutlined style={{ fontSize: 34, color: tint }} />
-          <span style={{ fontSize: 12, color: tokens.textSecondary }}>点击预览</span>
-        </div>
+        <Poster cover={cover} tint={tint} onPreview={onPreview} />
         <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Tag
@@ -199,5 +199,56 @@ function WorkCard({ work, onPreview }: { work: WorkItem; onPreview: () => void }
         </div>
       </div>
     </Card>
+  );
+}
+
+
+function Poster({
+  cover,
+  tint,
+  onPreview,
+}: {
+  cover?: string;
+  tint: string;
+  onPreview: () => void;
+}): React.ReactElement {
+  return (
+    <div
+      onClick={onPreview}
+      style={{
+        height: 120,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        cursor: 'pointer',
+        background: `linear-gradient(135deg, ${tint}26 0%, ${tokens.bgElevated} 100%)`,
+        borderTopLeftRadius: 8,
+        borderTopRightRadius: 8,
+        overflow: 'hidden',
+        position: 'relative',
+      }}
+    >
+      {cover !== undefined && (
+        <img
+          src={mediaUrl(cover)}
+          alt=""
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            opacity: 0.8,
+          }}
+        />
+      )}
+      <PlayCircleOutlined
+        style={{ fontSize: 34, color: cover === undefined ? tint : '#FFFFFF', zIndex: 1 }}
+      />
+      <span style={{ fontSize: 12, color: '#FFFFFF', zIndex: 1, textShadow: '0 1px 4px rgba(0,0,0,0.6)' }}>
+        点击预览
+      </span>
+    </div>
   );
 }

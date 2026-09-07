@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext
+from dramaclip.infra.ffmpeg import cover as cover_engine
 from dramaclip.infra.ffmpeg import probe
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
@@ -30,6 +31,7 @@ def register(router: Router, context: AppContext) -> None:
     router.register("project.duplicate", lambda params: duplicate(context, params))
     router.register("project.scan_episodes", lambda params: scan_episodes(context, params))
     router.register("project.dashboard_summary", lambda _params: dashboard_summary(context))
+    router.register("project.ensure_covers", lambda params: ensure_covers(context, params))
 
 
 def create(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -111,7 +113,35 @@ def scan_episodes(context: AppContext, params: dict[str, Any]) -> list[dict[str,
             }
         )
     episodes_repo.replace_all(context.conn, project_id, scanned)
+    _ensure_cover(context, project)
     return scanned
+
+
+def ensure_covers(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """为缺封面的项目补截帧（幂等；已有封面的项目跳过）。"""
+    generated = 0
+    for project in projects_repo.list_all(context.conn):
+        if project["cover_path"] is not None and Path(str(project["cover_path"])).is_file():
+            continue
+        if _ensure_cover(context, project):
+            generated += 1
+    return {"ok": True, "generated": generated}
+
+
+def _ensure_cover(context: AppContext, project: dict[str, Any]) -> bool:
+    """从第一集视频截帧生成封面；无集/截帧失败返回 False。"""
+    project_id = str(project["id"])
+    episodes = episodes_repo.list_by_project(context.conn, project_id)
+    if not episodes:
+        return False
+    first = min(episodes, key=lambda ep: int(ep["episode_number"]))
+    cover_dir = context.work_dir.parent / "covers"
+    cover_dir.mkdir(parents=True, exist_ok=True)
+    out_path = cover_dir / f"{project_id}.jpg"
+    if not cover_engine.extract_cover(Path(str(first["source_path"])), out_path):
+        return False
+    projects_repo.set_cover(context.conn, project_id, str(out_path))
+    return True
 
 
 def _is_video(path: Path) -> bool:

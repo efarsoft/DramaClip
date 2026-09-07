@@ -63,6 +63,8 @@ export const projectApi = {
   create: (name: string, sourcePath: string): Promise<Project> =>
     rpc<Project>('project.create', { name, source_path: sourcePath }),
   list: (): Promise<Project[]> => rpc<Project[]>('project.list'),
+  ensureCovers: (): Promise<{ ok: boolean; generated: number }> =>
+    rpc<{ ok: boolean; generated: number }>('project.ensure_covers', {}),
   get: (projectId: string): Promise<ProjectGetResult> =>
     rpc<ProjectGetResult>('project.get', { project_id: projectId }),
   remove: (projectId: string): Promise<{ ok: boolean }> =>

@@ -7,7 +7,7 @@ import time
 from typing import Any
 from uuid import uuid4
 
-_COLUMNS = ("id", "name", "source_path", "status", "created_at", "updated_at")
+_COLUMNS = ("id", "name", "source_path", "status", "created_at", "updated_at", "cover_path")
 
 
 def _now_ms() -> int:
@@ -40,7 +40,7 @@ def create(conn: sqlite3.Connection, name: str, source_path: str) -> dict[str, A
 def list_all(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = conn.execute(
         "SELECT p.id, p.name, p.source_path, p.status, p.created_at, p.updated_at,"
-        " COUNT(e.id) AS episode_count"
+        " p.cover_path, COUNT(e.id) AS episode_count"
         " FROM projects p LEFT JOIN episodes e ON e.project_id = p.id"
         " GROUP BY p.id ORDER BY p.created_at DESC"
     ).fetchall()
@@ -113,3 +113,8 @@ def delete(conn: sqlite3.Connection, project_id: str) -> bool:
     cursor = conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
     conn.commit()
     return cursor.rowcount > 0
+
+
+def set_cover(conn: sqlite3.Connection, project_id: str, cover_path: str) -> None:
+    conn.execute("UPDATE projects SET cover_path = ? WHERE id = ?", (cover_path, project_id))
+    conn.commit()

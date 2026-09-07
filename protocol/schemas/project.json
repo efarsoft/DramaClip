@@ -6,37 +6,93 @@
   "x-models": {
     "Project": {
       "type": "object",
-      "required": ["id", "name", "source_path", "status", "created_at", "episode_count"],
+      "required": [
+        "id",
+        "name",
+        "source_path",
+        "status",
+        "created_at",
+        "episode_count"
+      ],
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "source_path": { "type": "string" },
-        "status": { "type": "string" },
-        "created_at": { "type": "integer" },
-        "episode_count": { "type": "integer" }
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source_path": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "episode_count": {
+          "type": "integer"
+        },
+        "cover_path": {
+          "type": "string"
+        }
       }
     },
     "Episode": {
       "type": "object",
-      "required": ["id", "episode_number", "name", "source_path", "status"],
+      "required": [
+        "id",
+        "episode_number",
+        "name",
+        "source_path",
+        "status"
+      ],
       "properties": {
-        "id": { "type": "string" },
-        "episode_number": { "type": "integer" },
-        "name": { "type": "string" },
-        "source_path": { "type": "string" },
-        "duration": { "type": "number" },
-        "status": { "type": "string" }
+        "id": {
+          "type": "string"
+        },
+        "episode_number": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source_path": {
+          "type": "string"
+        },
+        "duration": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string"
+        }
       }
     },
     "ScannedEpisode": {
       "type": "object",
-      "required": ["episode_number", "name", "source_path", "duration", "size_bytes"],
+      "required": [
+        "episode_number",
+        "name",
+        "source_path",
+        "duration",
+        "size_bytes"
+      ],
       "properties": {
-        "episode_number": { "type": "integer" },
-        "name": { "type": "string" },
-        "source_path": { "type": "string" },
-        "duration": { "type": "number" },
-        "size_bytes": { "type": "integer" }
+        "episode_number": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source_path": {
+          "type": "string"
+        },
+        "duration": {
+          "type": "number"
+        },
+        "size_bytes": {
+          "type": "integer"
+        }
       }
     }
   },
@@ -46,51 +102,132 @@
       "summary": "创建项目（source_path 为剧集目录）",
       "params": {
         "type": "object",
-        "required": ["name", "source_path"],
-        "properties": { "name": { "type": "string" }, "source_path": { "type": "string" } }
+        "required": [
+          "name",
+          "source_path"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "source_path": {
+            "type": "string"
+          }
+        }
       },
-      "result": { "$ref": "#/x-models/Project" }
+      "result": {
+        "$ref": "#/x-models/Project"
+      }
     },
     {
       "name": "project.list",
       "summary": "项目列表（含集数统计）",
       "params": {},
-      "result": { "type": "array", "items": { "$ref": "#/x-models/Project" } }
+      "result": {
+        "type": "array",
+        "items": {
+          "$ref": "#/x-models/Project"
+        }
+      }
     },
     {
       "name": "project.get",
       "summary": "项目详情 + 集列表",
-      "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
+      "params": {
+        "type": "object",
+        "required": [
+          "project_id"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        }
+      },
       "result": {
         "type": "object",
-        "required": ["project", "episodes"],
+        "required": [
+          "project",
+          "episodes"
+        ],
         "properties": {
-          "project": { "$ref": "#/x-models/Project" },
-          "episodes": { "type": "array", "items": { "$ref": "#/x-models/Episode" } }
+          "project": {
+            "$ref": "#/x-models/Project"
+          },
+          "episodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/x-models/Episode"
+            }
+          }
         }
       }
     },
     {
       "name": "project.delete",
       "summary": "删除项目（级联删集与分析结果）",
-      "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
-      "result": { "type": "object", "required": ["ok"], "properties": { "ok": { "type": "boolean" } } }
+      "params": {
+        "type": "object",
+        "required": [
+          "project_id"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
     },
     {
       "name": "project.rename",
       "summary": "重命名项目",
       "params": {
         "type": "object",
-        "required": ["project_id", "name"],
-        "properties": { "project_id": { "type": "string" }, "name": { "type": "string" } }
+        "required": [
+          "project_id",
+          "name"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
       },
-      "result": { "$ref": "#/x-models/Project" }
+      "result": {
+        "$ref": "#/x-models/Project"
+      }
     },
     {
       "name": "project.duplicate",
       "summary": "复制项目元数据与集列表（分析结果不复制）",
-      "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
-      "result": { "$ref": "#/x-models/Project" }
+      "params": {
+        "type": "object",
+        "required": [
+          "project_id"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/x-models/Project"
+      }
     },
     {
       "name": "project.dashboard_summary",
@@ -98,20 +235,71 @@
       "params": {},
       "result": {
         "type": "object",
-        "required": ["project_count", "episode_count", "analyzed_episodes", "export_count"],
+        "required": [
+          "project_count",
+          "episode_count",
+          "analyzed_episodes",
+          "export_count"
+        ],
         "properties": {
-          "project_count": { "type": "integer" },
-          "episode_count": { "type": "integer" },
-          "analyzed_episodes": { "type": "integer" },
-          "export_count": { "type": "integer" }
+          "project_count": {
+            "type": "integer"
+          },
+          "episode_count": {
+            "type": "integer"
+          },
+          "analyzed_episodes": {
+            "type": "integer"
+          },
+          "export_count": {
+            "type": "integer"
+          }
         }
       }
     },
     {
       "name": "project.scan_episodes",
       "summary": "扫描项目目录登记集（ffprobe 逐文件时长/大小，返回登记结果）",
-      "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
-      "result": { "type": "array", "items": { "$ref": "#/x-models/ScannedEpisode" } }
+      "params": {
+        "type": "object",
+        "required": [
+          "project_id"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "type": "array",
+        "items": {
+          "$ref": "#/x-models/ScannedEpisode"
+        }
+      }
+    },
+    {
+      "name": "project.ensure_covers",
+      "summary": "为缺封面的项目补截帧（幂等）",
+      "params": {
+        "type": "object",
+        "properties": {}
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "ok",
+          "generated"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "generated": {
+            "type": "integer"
+          }
+        }
+      }
     }
   ]
 }

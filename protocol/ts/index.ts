@@ -63,6 +63,7 @@ export interface Project {
   readonly status: string;
   readonly created_at: number;
   readonly episode_count: number;
+  readonly cover_path?: string;
 }
 
 export interface Episode {
@@ -271,6 +272,7 @@ export const METHOD_NAMES = [
   'project.duplicate',
   'project.scan_episodes',
   'project.dashboard_summary',
+  'project.ensure_covers',
   'analysis.prescreen',
   'analysis.update_asr',
   'analysis.resync_semantic',

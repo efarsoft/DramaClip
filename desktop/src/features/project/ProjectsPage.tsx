@@ -1,10 +1,12 @@
-import { App as AntdApp, Button, Card, Dropdown, Input, Modal } from 'antd';
+import { App as AntdApp, Button, Card, Input, Modal } from 'antd';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Project } from '@dramaclip/protocol';
-import { pickFolder } from '../../services/client';
+import { pickFolder, projectApi } from '../../services/client';
 import { tokens } from '../../styles/theme';
 import { useProjects } from './useProjects';
+import { ProjectCard } from './ProjectCard';
+import { useEffect } from 'react';
 
 /** 项目管理页（docs/desktop/03 §7.2）：卡片网格 + 新建 + 重命名/复制/删除。 */
 export function ProjectsPage() {
@@ -12,6 +14,12 @@ export function ProjectsPage() {
   const { modal } = AntdApp.useApp();
   const controller = useProjects();
   const [createOpen, setCreateOpen] = useState(false);
+
+  useEffect(() => {
+    void projectApi.ensureCovers().then(() => controller.reload()).catch(() => undefined);
+    // 仅挂载时补一次封面
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [renameTarget, setRenameTarget] = useState<Project | null>(null);
 
   const confirmDelete = (project: Project) => {
@@ -129,78 +137,19 @@ function ProjectGrid({
 }) {
   if (projects === null) return <Card loading />;
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(236px, 1fr))', gap: 16 }}>
       {projects.map((project) => (
-        <Card
+        <ProjectCard
           key={project.id}
-          hoverable
-          onClick={() => {
-            onOpen(project);
-          }}
-          title={project.name}
-          extra={
-            <span
-              onClick={(event) => {
-                event.stopPropagation();
-              }}
-            >
-              <Dropdown menu={{ items: menuFor(project, { onRename, onDuplicate, onDelete }) }}>
-                <Button type="text" size="small">
-                  ⋯
-                </Button>
-              </Dropdown>
-            </span>
-          }
-        >
-          <div
-            style={{ fontSize: 13, color: tokens.textSecondary, display: 'flex', flexDirection: 'column', gap: 4 }}
-          >
-            <span>{String(project.episode_count)} 集</span>
-            <span style={{ fontSize: 12, color: tokens.textTertiary }}>{project.source_path}</span>
-          </div>
-        </Card>
+          project={project}
+          onOpen={onOpen}
+          onRename={onRename}
+          onDuplicate={onDuplicate}
+          onDelete={onDelete}
+        />
       ))}
     </div>
   );
-}
-
-function menuFor(
-  project: Project,
-  {
-    onRename,
-    onDuplicate,
-    onDelete,
-  }: {
-    onRename: (project: Project) => void;
-    onDuplicate: (project: Project) => void;
-    onDelete: (project: Project) => void;
-  },
-): NonNullable<React.ComponentProps<typeof Dropdown>['menu']>['items'] {
-  return [
-    {
-      key: 'rename',
-      label: '重命名',
-      onClick: () => {
-        onRename(project);
-      },
-    },
-    {
-      key: 'duplicate',
-      label: '复制',
-      onClick: () => {
-        onDuplicate(project);
-      },
-    },
-    { type: 'divider' as const },
-    {
-      key: 'delete',
-      label: '删除',
-      danger: true,
-      onClick: () => {
-        onDelete(project);
-      },
-    },
-  ];
 }
 
 function CreateProjectForm({

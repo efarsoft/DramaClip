@@ -6,6 +6,17 @@ import { registerIpc, broadcastEvent, type IpcContext } from './ipc';
 import { ServiceManager, type ServiceManagerOptions } from './services/service-manager';
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
+
+// dramaclip:// 本地文件的响应类型（视频预览 + 图片封面）
+const CONTENT_TYPES: Record<string, string> = {
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  mkv: 'video/x-matroska',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+};
 // dist-electron/main/index.js → 上三级即仓库根
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 
@@ -124,8 +135,10 @@ void app.whenReady().then(() => {
       }
       // 预览文件（≤百 MB）整读切片：Node Buffer 流的块类型不被 Chromium media 接受
       const buffer = new Uint8Array(await fsPromises.readFile(filePath));
+      const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+      const contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream';
       const baseHeaders: Record<string, string> = {
-        'content-type': 'video/mp4',
+        'content-type': contentType,
         'accept-ranges': 'bytes',
       };
       const rangeHeader = request.headers.get('range');

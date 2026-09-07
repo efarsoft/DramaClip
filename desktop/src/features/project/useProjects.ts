@@ -7,6 +7,7 @@ import { projectApi } from '../../services/client';
 
 export interface ProjectsController {
   projects: Project[] | null;
+  reload: () => Promise<void>;
   create: (name: string, folder: string) => Promise<void>;
   remove: (project: Project) => Promise<void>;
   rename: (project: Project, name: string) => Promise<void>;
@@ -45,6 +46,10 @@ export function useProjects(): ProjectsController {
     [load, message],
   );
 
+  const reload = useCallback(async () => {
+    await load();
+  }, [load]);
+
   const rename = useCallback(
     async (project: Project, name: string) => {
       await projectApi.rename(project.id, name);
@@ -63,5 +68,5 @@ export function useProjects(): ProjectsController {
     [load, message],
   );
 
-  return { projects, create, remove, rename, duplicate };
+  return { projects, reload, create, remove, rename, duplicate };
 }

@@ -35,6 +35,7 @@ def test_migrate_idempotent() -> None:
             "002_add_audio_features.sql",
             "003_export_meta.sql",
                 "004_export_error.sql",
+                "005_project_cover.sql",
         ]
         assert db.migrate(conn) == expected_migrations
         assert db.migrate(conn) == []  # 第二次全量跳过
