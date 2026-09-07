@@ -22,6 +22,8 @@ export interface FieldSpec {
 }
 
 export interface SectionSpec {
+  /** 稳定标识：页面据此挂接分区级行为（如 llm 的连接测试）。 */
+  readonly id?: string;
   readonly title: string;
   readonly fields: readonly FieldSpec[];
 }
@@ -40,6 +42,7 @@ const KOKORO_VOICES: readonly Option[] = [
 ];
 
 const LLM_SECTION: SectionSpec = {
+  id: 'llm',
   title: 'LLM 语义引擎',
   fields: [
     {

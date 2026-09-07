@@ -276,6 +276,7 @@ export const METHOD_NAMES = [
   'models.delete',
   'settings.get',
   'settings.update',
+  'settings.test_llm',
 ] as const;
 
 export const NOTIFICATION_NAMES = ['progress.update', 'log.append', 'models.download_progress'] as const;

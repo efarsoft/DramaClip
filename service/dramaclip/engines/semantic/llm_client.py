@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -65,6 +66,18 @@ class LlmClient:
         }
         content = self._post(payload)
         return parse_json_blob(content)
+
+    def ping(self) -> float:
+        """连通性探测：max_tokens=1 最小往返，返回耗时秒；异常抛 LlmUnavailable。"""
+        start = time.monotonic()
+        self._post(
+            {
+                "model": self._config.model,
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 1,
+            }
+        )
+        return time.monotonic() - start
 
     def _post(self, payload: dict) -> str:  # type: ignore[type-arg]
         headers: dict[str, str] = {"Content-Type": "application/json"}
