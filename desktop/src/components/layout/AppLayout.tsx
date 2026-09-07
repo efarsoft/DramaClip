@@ -2,11 +2,9 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import {
-  AppstoreOutlined,
   PlaySquareOutlined,
   CloudServerOutlined,
   DashboardOutlined,
-  ExportOutlined,
   FolderOutlined,
   RocketOutlined,
   SettingOutlined,
@@ -27,9 +25,7 @@ const NAV_ITEMS = [
 
 const PROJECT_NAV = [
   { suffix: '/analysis', label: '分析', icon: ThunderboltOutlined },
-  { suffix: '/modes', label: '模式', icon: AppstoreOutlined },
-  { suffix: '/generate', label: '生成', icon: RocketOutlined },
-  { suffix: '/export', label: '导出', icon: ExportOutlined },
+  { suffix: '/produce', label: '出片', icon: RocketOutlined },
 ] as const;
 
 export function AppLayout() {
