@@ -1,0 +1,55 @@
+/** 工作台顶部：返回/项目信息/批量操作 + 横向步骤导航。 */
+import { Button, Tag } from 'antd';
+import { LeftOutlined } from '@ant-design/icons';
+import type { Project } from '@dramaclip/protocol';
+import { tokens } from '../../styles/theme';
+import { StepsNav } from './StepsNav';
+
+export function WorkbenchHeader({
+  project,
+  total,
+  doneCount,
+  running,
+  progressPercent,
+  onBack,
+  onBatchAnalyze,
+}: {
+  project: Project | null;
+  total: number;
+  doneCount: number;
+  running: boolean;
+  progressPercent: number;
+  onBack: () => void;
+  onBatchAnalyze: () => void;
+}): React.ReactElement {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Button size="small" icon={<LeftOutlined />} onClick={onBack}>
+          项目
+        </Button>
+        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: tokens.textPrimary }}>
+          {project?.name ?? '…'}
+        </h1>
+        <Tag color="blue">共 {String(total)} 集</Tag>
+        <Tag color={doneCount === total && total > 0 ? 'success' : 'processing'}>
+          已分析 {String(doneCount)}/{String(total)}
+        </Tag>
+        {running && (
+          <span style={{ fontSize: 12, color: tokens.colorInfo }}>
+            分析中 {String(Math.round(progressPercent))}%
+          </span>
+        )}
+        <Button
+          size="small"
+          style={{ marginLeft: 'auto' }}
+          disabled={running || total === 0}
+          onClick={onBatchAnalyze}
+        >
+          批量分析所选
+        </Button>
+      </div>
+      <StepsNav stepReady={doneCount > 0} />
+    </div>
+  );
+}

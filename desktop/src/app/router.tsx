@@ -2,7 +2,7 @@ import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { App } from './App';
 import { HomePage } from '../features/home/HomePage';
 import { ProjectsPage } from '../features/project/ProjectsPage';
-import { AnalysisPage } from '../features/analysis/AnalysisPage';
+import { WorkbenchPage } from '../features/analysis/WorkbenchPage';
 import { ProductionPage } from '../features/narration/ProductionPage';
 import { EnginesPage } from '../features/engines/EnginesPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
@@ -20,7 +20,7 @@ export function Router() {
           <Route path="/models" element={<EnginesPage />} />
           <Route path="/models/:tab" element={<EnginesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/projects/:projectId/analysis" element={<AnalysisPage />} />
+          <Route path="/projects/:projectId/analysis" element={<WorkbenchPage />} />
           <Route path="/projects/:projectId/produce" element={<ProductionPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
