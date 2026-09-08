@@ -1,8 +1,6 @@
 /** 项目详情工作台：步骤导航 + 左素材列表 + 右复合面板（分割线可拖拽）。 */
-import { useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { App as AntdApp } from 'antd';
-import { useUiStore } from '../../stores/ui';
 import { tokens } from '../../styles/theme';
 import { useAnalysisWorkspace } from './useAnalysisWorkspace';
 import { useEpisodeOrder } from './useEpisodeOrder';
@@ -18,26 +16,12 @@ export function WorkbenchPage() {
   const { projectId = '' } = useParams();
   const { message } = AntdApp.useApp();
   const navigate = useNavigate();
-  const setCurrentProjectId = useUiStore((state) => state.setCurrentProjectId);
   const workspace = useAnalysisWorkspace(projectId);
   const { project, reloadProject } = useProjectDetail(projectId);
   const onReorder = useEpisodeReorder(projectId, reloadProject);
 
-  useEffect(() => {
-    setCurrentProjectId(projectId === '' ? null : projectId);
-    return () => {
-      setCurrentProjectId(null);
-    };
-  }, [projectId, setCurrentProjectId]);
-
   const running = workspace.job?.status === 'running' || workspace.job?.status === 'pending';
   const doneCount = workspace.episodes.filter((episode) => episode.status === 'done').length;
-  const onBatchAnalyze = (): void => {
-    workspace.start().catch((error: unknown) => {
-      message.error(error instanceof Error ? error.message : String(error));
-    });
-  };
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, height: '100%' }}>
       <WorkbenchHeader
@@ -49,7 +33,9 @@ export function WorkbenchPage() {
         onBack={() => {
           window.history.back();
         }}
-        onBatchAnalyze={onBatchAnalyze}
+        onBatchAnalyze={() => {
+          startAnalysis(workspace.start, message);
+        }}
       />
       <TwoColumns
         projectId={projectId}
@@ -84,6 +70,15 @@ export function WorkbenchPage() {
       />
     </div>
   );
+}
+
+function startAnalysis(
+  start: () => Promise<void>,
+  message: { error: (text: string) => void },
+): void {
+  start().catch((error: unknown) => {
+    message.error(error instanceof Error ? error.message : String(error));
+  });
 }
 
 interface TwoColumnsProps {

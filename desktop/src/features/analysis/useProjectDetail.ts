@@ -2,12 +2,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Project } from '@dramaclip/protocol';
 import { projectApi } from '../../services/client';
+import { useUiStore } from '../../stores/ui';
 
 export function useProjectDetail(projectId: string): {
   project: Project | null;
   reloadProject: () => Promise<void>;
 } {
   const [project, setProject] = useState<Project | null>(null);
+  const setCurrentProjectId = useUiStore((state) => state.setCurrentProjectId);
+
+  useEffect(() => {
+    setCurrentProjectId(projectId === '' ? null : projectId);
+    return () => {
+      setCurrentProjectId(null);
+    };
+  }, [projectId, setCurrentProjectId]);
 
   const loadProject = useCallback(async (): Promise<void> => {
     const detail = await projectApi.get(projectId);
