@@ -1,16 +1,10 @@
-/** 开始创作卡片区 + 九模式介绍弹窗（工作台主列）。 */
+/** 开始创作卡片区（工作台主列）：全部为真实动作入口。 */
 import { useState, type ReactElement, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Modal } from 'antd';
-import {
-  AppstoreOutlined,
-  FolderAddOutlined,
-  PlayCircleOutlined,
-  SettingOutlined,
-} from '@ant-design/icons';
+import { Card } from 'antd';
+import { FolderAddOutlined, PlayCircleOutlined, SettingOutlined } from '@ant-design/icons';
 import { pickFolder, projectApi } from '../../services/client';
 import { tokens } from '../../styles/theme';
-import { MODE_INFO } from '../../components/modeMeta';
 
 interface CardSpec {
   readonly key: string;
@@ -39,14 +33,6 @@ const CARDS: readonly CardSpec[] = [
     desc: '回到最近的项目，从上次的进度继续',
   },
   {
-    key: 'modes',
-    icon: <AppstoreOutlined />,
-    tint: tokens.colorAccent,
-    title: '九种出片模式',
-    desc: '高光混剪、剧情解说、双人对谈……按推广场景选择',
-    tag: 'llm',
-  },
-  {
     key: 'settings',
     icon: <SettingOutlined />,
     tint: tokens.colorWarning,
@@ -54,6 +40,50 @@ const CARDS: readonly CardSpec[] = [
     desc: '下载模型、配置 LLM 端点与出片参数',
   },
 ];
+
+export function StartCards({
+  onCreated,
+  needsAsrModel,
+}: {
+  onCreated: (projectId: string) => void;
+  needsAsrModel: boolean;
+}): ReactElement {
+  const navigate = useNavigate();
+  const [creating, setCreating] = useState(false);
+  const create = (): void => {
+    void createThroughFolder(setCreating, onCreated);
+  };
+
+  const handlers: Record<string, () => void> = {
+    create: create,
+    resume: () => {
+      void navigate('/projects');
+    },
+    settings: () => {
+      void navigate('/models');
+    },
+  };
+  const tags: Record<string, string | undefined> = {
+    create: needsAsrModel ? '需要模型' : undefined,
+  };
+
+  return (
+    <section>
+      <PanelTitle>开始创作</PanelTitle>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+        {CARDS.map((card) => (
+          <WorkflowCard
+            key={card.key}
+            spec={card}
+            tag={tags[card.key]}
+            busy={creating && card.key === 'create'}
+            onClick={handlers[card.key] ?? NOOP}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
 
 async function createThroughFolder(
   setCreating: (busy: boolean) => void,
@@ -73,58 +103,6 @@ async function createThroughFolder(
 }
 
 const NOOP = (): void => undefined;
-
-export function StartCards({
-  onCreated,
-  needsAsrModel,
-  needsLlm,
-}: {
-  onCreated: (projectId: string) => void;
-  needsAsrModel: boolean;
-  needsLlm: boolean;
-}): ReactElement {
-  const navigate = useNavigate();
-  const [modesOpen, setModesOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const create = (): void => {
-    void createThroughFolder(setCreating, onCreated);
-  };
-
-  const handlers: Record<string, () => void> = {
-    create: create,
-    resume: () => {
-      void navigate('/projects');
-    },
-    modes: () => {
-      setModesOpen(true);
-    },
-    settings: () => {
-      void navigate('/models');
-    },
-  };
-  const tags: Record<string, string | undefined> = {
-    create: needsAsrModel ? '需要模型' : undefined,
-    modes: needsLlm ? '建议配置 LLM' : undefined,
-  };
-
-  return (
-    <section>
-      <PanelTitle>开始创作</PanelTitle>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        {CARDS.map((card) => (
-          <WorkflowCard
-            key={card.key}
-            spec={card}
-            tag={tags[card.key]}
-            busy={creating && card.key === 'create'}
-            onClick={handlers[card.key] ?? NOOP}
-          />
-        ))}
-      </div>
-      <ModesModal open={modesOpen} onClose={() => { setModesOpen(false); }} />
-    </section>
-  );
-}
 
 function WorkflowCard({
   spec,
@@ -176,39 +154,6 @@ function WorkflowCard({
         <div style={{ fontSize: 12.5, lineHeight: '20px', color: tokens.textTertiary }}>{spec.desc}</div>
       </div>
     </Card>
-  );
-}
-
-function ModesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  return (
-    <Modal open={open} onCancel={onClose} footer={null} title="九种出片模式" width={560}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 8 }}>
-        {MODE_INFO.map((item, index) => (
-          <div key={item.mode} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-            <span
-              style={{
-                width: 22,
-                height: 22,
-                flexShrink: 0,
-                borderRadius: 6,
-                background: tokens.accentSoft,
-                color: tokens.colorPrimary,
-                fontSize: 12,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              {index + 1}
-            </span>
-            <div>
-              <div style={{ fontSize: 13.5, fontWeight: 600, color: tokens.textPrimary }}>{item.label}</div>
-              <div style={{ fontSize: 12.5, color: tokens.textTertiary }}>{item.desc}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </Modal>
   );
 }
 
