@@ -10,6 +10,7 @@ export function useProjectDetail(projectId: string): {
 } {
   const [project, setProject] = useState<Project | null>(null);
   const setCurrentProjectId = useUiStore((state) => state.setCurrentProjectId);
+  const serviceState = useUiStore((state) => state.serviceState);
 
   useEffect(() => {
     setCurrentProjectId(projectId === '' ? null : projectId);
@@ -23,16 +24,15 @@ export function useProjectDetail(projectId: string): {
     setProject(detail.project);
   }, [projectId]);
 
+  // 服务就绪前 ensureCovers/get 会失败；ready 后再执行一次
   useEffect(() => {
-    void loadProject().catch(() => {
-      setProject(null);
-    });
-    // 挂载即补齐缺失封面（项目 + 各集），完成后刷新一次
+    if (serviceState !== 'ready') return;
+    void loadProject().catch(() => undefined);
     void projectApi
       .ensureCovers()
       .then(loadProject)
       .catch(() => undefined);
-  }, [loadProject]);
+  }, [loadProject, serviceState]);
 
   const reloadProject = useCallback(async (): Promise<void> => {
     await loadProject();

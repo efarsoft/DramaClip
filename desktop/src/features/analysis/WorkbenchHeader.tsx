@@ -7,20 +7,20 @@ import { tokens } from '../../styles/theme';
 import { StepsNav } from './StepsNav';
 
 export function WorkbenchHeader({
+  projectId,
   project,
   total,
   doneCount,
   running,
   progressPercent,
-  onBack,
   onBatchAnalyze,
 }: {
+  projectId: string;
   project: Project | null;
   total: number;
   doneCount: number;
   running: boolean;
   progressPercent: number;
-  onBack: () => void;
   onBatchAnalyze: () => void;
 }): React.ReactElement {
   const navigate = useNavigate();
@@ -51,7 +51,7 @@ export function WorkbenchHeader({
           批量分析所选
         </Button>
       </div>
-      <StepsNav projectId={project?.id ?? ''} stepReady={doneCount > 0} />
+      <StepsNav projectId={projectId} stepReady={doneCount > 0} />
     </div>
   );
 }

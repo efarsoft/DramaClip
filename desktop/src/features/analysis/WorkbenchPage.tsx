@@ -25,14 +25,12 @@ export function WorkbenchPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, height: '100%' }}>
       <WorkbenchHeader
+        projectId={projectId}
         project={project}
         total={workspace.episodes.length}
         doneCount={doneCount}
         running={running}
         progressPercent={running && workspace.job !== null ? workspace.job.progress : 0}
-        onBack={() => {
-          window.history.back();
-        }}
         onBatchAnalyze={() => {
           startAnalysis(workspace.start, message);
         }}

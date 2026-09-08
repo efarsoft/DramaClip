@@ -62,7 +62,7 @@ export function StepsNav({ projectId, stepReady }: { projectId: string; stepRead
             )}
             {unlocked && step.path !== undefined ? (
               <Link
-                to={step.path.startsWith('/') ? step.path : `/projects/${projectId}/${step.path}`}
+                to={step.path.startsWith('/') ? step.path : `/projects/${projectId}/produce`}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
