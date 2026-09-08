@@ -10,9 +10,9 @@ interface StepSpec {
 
 const STEPS: readonly StepSpec[] = [
   { key: 'analyze', label: '素材导入 & AI 分析' },
-  { key: 'mode', label: '选择出片模式', path: '../produce' },
-  { key: 'render', label: 'AI 编排 & 渲染', path: '../produce' },
-  { key: 'export', label: '成片查看 / 导出', path: '../../works' },
+  { key: 'mode', label: '选择出片模式', path: 'produce' },
+  { key: 'render', label: 'AI 编排 & 渲染', path: 'produce' },
+  { key: 'export', label: '成片查看 / 导出', path: '/works' },
 ];
 
 function StepDot({ index }: { index: number }): React.ReactElement {
@@ -36,7 +36,7 @@ function StepDot({ index }: { index: number }): React.ReactElement {
   );
 }
 
-export function StepsNav({ stepReady }: { stepReady: boolean }): React.ReactElement {
+export function StepsNav({ projectId, stepReady }: { projectId: string; stepReady: boolean }): React.ReactElement {
   return (
     <div style={{ display: 'flex', alignItems: 'center' }}>
       {STEPS.map((step, index) => {
@@ -62,7 +62,7 @@ export function StepsNav({ stepReady }: { stepReady: boolean }): React.ReactElem
             )}
             {unlocked && step.path !== undefined ? (
               <Link
-                to={step.path}
+                to={step.path.startsWith('/') ? step.path : `/projects/${projectId}/${step.path}`}
                 style={{
                   display: 'flex',
                   alignItems: 'center',

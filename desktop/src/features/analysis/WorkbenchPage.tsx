@@ -65,7 +65,7 @@ export function WorkbenchPage() {
           void navigate('/projects');
         }}
         onNext={() => {
-          void navigate('../produce');
+          void navigate(`/projects/${projectId}/produce`);
         }}
       />
     </div>

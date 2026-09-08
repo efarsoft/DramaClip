@@ -1,6 +1,7 @@
 /** 工作台顶部：返回/项目信息/批量操作 + 横向步骤导航。 */
 import { Button, Tag } from 'antd';
 import { LeftOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 import type { Project } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
 import { StepsNav } from './StepsNav';
@@ -22,6 +23,7 @@ export function WorkbenchHeader({
   onBack: () => void;
   onBatchAnalyze: () => void;
 }): React.ReactElement {
+  const navigate = useNavigate();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -49,7 +51,7 @@ export function WorkbenchHeader({
           批量分析所选
         </Button>
       </div>
-      <StepsNav stepReady={doneCount > 0} />
+      <StepsNav projectId={project?.id ?? ''} stepReady={doneCount > 0} />
     </div>
   );
 }
