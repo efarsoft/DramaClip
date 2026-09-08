@@ -1,7 +1,7 @@
 /** 分栏拖拽 hook：返回 [宽度百分比, 拖拽把手事件]。 */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-export function useSplitDrag(initialPct = 32): {
+export function useSplitDrag(initialPct = 24): {
   pct: number;
   containerRef: React.RefObject<HTMLDivElement | null>;
   onHandleDown: () => void;
@@ -19,7 +19,7 @@ export function useSplitDrag(initialPct = 32): {
       if (!draggingRef.current || containerRef.current === null) return;
       const rect = containerRef.current.getBoundingClientRect();
       const next = ((event.clientX - rect.left) / rect.width) * 100;
-      setPct(Math.min(60, Math.max(20, next)));
+      setPct(Math.min(40, Math.max(20, next)));
     };
     const up = (): void => {
       draggingRef.current = false;

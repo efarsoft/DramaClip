@@ -47,7 +47,7 @@ export function EpisodeDetail({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
-        <div style={{ flex: '1 1 55%', minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <PlayerCard
             videoPath={episode.source_path}
             title={`第${String(episode.episode_number)}集 · ${episode.name}`}
@@ -57,7 +57,7 @@ export function EpisodeDetail({
             onSeek={seek}
           />
         </div>
-        <div style={{ flex: '1 1 45%', minWidth: 0, display: 'flex' }}>
+        <div style={{ flex: '0 0 300px', display: 'flex' }}>
           <HighlightsCard highlights={highlights} onSeek={seek} />
         </div>
       </div>
