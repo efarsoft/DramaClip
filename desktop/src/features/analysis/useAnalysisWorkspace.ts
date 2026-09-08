@@ -17,33 +17,27 @@ export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
   const [job, setJob] = useState<AnalysisJobStatus | null>(null);
   const serviceState = useUiStore((state) => state.serviceState);
 
-  const loadProject = useCallback(async () => {
+  const loadAll = useCallback(async (): Promise<void> => {
     const detail = await projectApi.get(projectId);
     setProject(detail.project);
     setEpisodes(detail.episodes);
     setSelectedIds(defaultSelection(detail.episodes));
     setActiveEpisodeId(detail.episodes[0]?.id ?? null);
-  }, [projectId]);
-
-  const loadResults = useCallback(async () => {
     setResults(await analysisApi.results(projectId));
   }, [projectId]);
 
   // 服务就绪前 RPC 会失败；ready 后（重）加载一次
   useEffect(() => {
-    if (serviceState !== 'ready') return;
-    void loadProject().then(() => loadResults());
-  }, [loadProject, loadResults, serviceState]);
+    if (serviceState === 'ready') void loadAll();
+  }, [loadAll, serviceState]);
 
   const refreshJob = useCallback(
     async (jobId: string) => {
       const status = await analysisApi.status(jobId);
       setJob(status);
-      if (status.status === 'completed' || status.status === 'failed') {
-        await Promise.all([loadResults(), loadProject()]);
-      }
+      if (status.status === 'completed' || status.status === 'failed') await loadAll();
     },
-    [loadProject, loadResults],
+    [loadAll],
   );
 
   // status 轮询兜底（progress 通知仅驱动进度条，不依赖其可靠性）
@@ -76,7 +70,7 @@ export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
     results,
     job,
     start,
-    reload: loadResults,
+    reload: loadAll,
     canStart: selectedIds.length > 0 && !(job?.status === 'running' || job?.status === 'pending'),
   };
 }

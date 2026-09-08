@@ -2,15 +2,12 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import {
-  PlaySquareOutlined,
   CloudServerOutlined,
   DashboardOutlined,
   FolderOutlined,
-  RocketOutlined,
+  PlaySquareOutlined,
   SettingOutlined,
-  ThunderboltOutlined,
 } from '@ant-design/icons';
-import { useUiStore } from '../../stores/ui';
 import { tokens } from '../../styles/theme';
 import { StatusBar } from './StatusBar';
 import { TitleBar } from './TitleBar';
@@ -21,11 +18,6 @@ const NAV_ITEMS = [
   { path: '/works', label: '作品', icon: PlaySquareOutlined },
   { path: '/models', label: '引擎', icon: CloudServerOutlined },
   { path: '/settings', label: '设置', icon: SettingOutlined },
-] as const;
-
-const PROJECT_NAV = [
-  { suffix: '/analysis', label: '分析', icon: ThunderboltOutlined },
-  { suffix: '/produce', label: '出片', icon: RocketOutlined },
 ] as const;
 
 export function AppLayout() {
@@ -46,9 +38,6 @@ export function AppLayout() {
 function Rail() {
   const location = useLocation();
   const navigate = useNavigate();
-  const currentProjectId = useUiStore((state) => state.currentProjectId);
-  const inProject = location.pathname.startsWith('/projects') && currentProjectId !== null;
-  const base = currentProjectId === null ? '' : `/projects/${currentProjectId}`;
   return (
     <nav
       style={{
@@ -74,23 +63,6 @@ function Rail() {
           }}
         />
       ))}
-      {inProject && (
-        <>
-          <div style={{ width: 28, height: 1, background: tokens.border, margin: '6px 0' }} />
-          {PROJECT_NAV.map((item) => (
-            <RailButton
-              key={item.suffix}
-              label={item.label}
-              icon={<item.icon style={{ fontSize: 16 }} />}
-              compact
-              active={location.pathname === base + item.suffix}
-              onClick={() => {
-                void navigate(base + item.suffix);
-              }}
-            />
-          ))}
-        </>
-      )}
     </nav>
   );
 }
@@ -99,22 +71,20 @@ function RailButton({
   label,
   icon,
   active,
-  compact = false,
   onClick,
 }: {
   label: string;
   icon: ReactNode;
   active: boolean;
-  compact?: boolean;
   onClick: () => void;
-}) {
+}): React.ReactElement {
   return (
     <button
       type="button"
       onClick={onClick}
       style={{
         width: 54,
-        height: compact ? 44 : 52,
+        height: 52,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
