@@ -51,7 +51,7 @@ const CARDS: readonly CardSpec[] = [
     icon: <SettingOutlined />,
     tint: tokens.colorWarning,
     title: '引擎与设置',
-    desc: '下载模型、配置 LLM 端点与导出参数',
+    desc: '下载模型、配置 LLM 端点与出片参数',
   },
 ];
 

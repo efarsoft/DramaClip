@@ -105,8 +105,8 @@ function EnvItem({ row, onAction }: { row: EnvRow; onAction: (path: string) => v
 
 const TOOLS = [
   { key: 'models', icon: <CloudServerOutlined />, tint: tokens.colorPrimary, title: '模型管理', desc: '下载或导入语音/转写模型' },
-  { key: 'settings', icon: <SettingOutlined />, tint: tokens.colorWarning, title: '系统设置', desc: 'LLM 端点、TTS 音色与导出参数' },
-  { key: 'projects', icon: <FolderOutlined />, tint: tokens.colorAccent, title: '项目管理', desc: '全部项目、剧集与导出记录' },
+  { key: 'settings', icon: <SettingOutlined />, tint: tokens.colorWarning, title: '系统设置', desc: 'LLM 端点、TTS 音色与出片参数' },
+  { key: 'projects', icon: <FolderOutlined />, tint: tokens.colorAccent, title: '项目管理', desc: '全部项目、剧集与出片记录' },
 ] as const;
 
 export function ToolboxPanel(): ReactElement {

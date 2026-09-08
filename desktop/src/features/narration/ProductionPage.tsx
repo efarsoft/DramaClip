@@ -249,9 +249,9 @@ function ModeSelectCard({
 
 function ExportsCard({ exports }: { exports: ExportJob[] | null }) {
   return (
-    <Card size="small" title="本项目导出记录">
+    <Card size="small" title="出片记录">
       {exports === null ? null : exports.length === 0 ? (
-        <Empty description="还没有导出记录" styles={{ image: { height: 60 } }} />
+        <Empty description="还没有出片记录——选择模式开始出片" styles={{ image: { height: 60 } }} />
       ) : (
         exports.slice(0, 8).map((job) => <ExportRow key={job.id} job={job} />)
       )}
