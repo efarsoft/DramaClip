@@ -104,11 +104,14 @@ function CoverArea({
   );
 }
 
-function MoreButton(): ReactElement {
+function MoreButton(props: React.ComponentProps<typeof Button>): ReactElement {
   return (
-    <Button type="text" size="small" style={{ background: 'rgba(0,0,0,0.45)', color: '#FFFFFF' }}>
-      ⋯
-    </Button>
+    <Button
+      type="text"
+      size="small"
+      style={{ background: 'rgba(0,0,0,0.45)', color: '#FFFFFF' }}
+      {...props}
+    />
   );
 }
 
