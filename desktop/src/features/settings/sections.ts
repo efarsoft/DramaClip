@@ -22,13 +22,15 @@ export interface FieldSpec {
 }
 
 export interface SectionSpec {
-  /** 稳定标识：页面据此挂接分区级行为（如 llm 的连接测试）。 */
-  readonly id?: string;
+  readonly id: string;
+  readonly icon: string;
   readonly title: string;
   readonly fields: readonly FieldSpec[];
 }
 
 const ANALYSIS_SECTION: SectionSpec = {
+  id: 'analysis',
+  icon: '🎯',
   title: '智能分析',
   fields: [
     {
@@ -50,21 +52,17 @@ const ANALYSIS_SECTION: SectionSpec = {
 };
 
 const EXPORT_SECTION: SectionSpec = {
-  title: '导出',
+  id: 'export',
+  icon: '🎬',
+  title: '出片',
   fields: [
-    {
-      key: 'export.encoder',
-      label: '编码器',
-      type: 'select',
-      options: () => [{ label: 'H.264', value: 'h264' }],
-    },
     {
       key: 'strategy.max_duration_s',
       label: '成片目标时长上限 (秒)',
       type: 'number',
       min: 30,
       max: 1200,
-      help: '编排按此预算挑选场景；影响完播率，短剧推广建议 60-180，解说涨粉建议 180-300',
+      help: '编排按此预算挑选场景；推广建议 60-180，解说涨粉建议 180-300',
     },
     {
       key: 'strategy.min_duration_s',
@@ -73,28 +71,22 @@ const EXPORT_SECTION: SectionSpec = {
       min: 10,
       max: 120,
     },
+    {
+      key: 'export.encoder',
+      label: '编码器',
+      type: 'select',
+      options: () => [{ label: 'H.264', value: 'h264' }],
+    },
     { key: 'export.bitrate_kbps', label: '码率 (kbps)', type: 'number', min: 1000, max: 50000 },
     { key: 'export.width', label: '宽度', type: 'number', min: 480, max: 2160 },
     { key: 'export.height', label: '高度', type: 'number', min: 480, max: 3840 },
   ],
 };
 
-const HARDWARE_SECTION: SectionSpec = {
-  title: '硬件',
-  fields: [
-    {
-      key: 'hardware.max_parallel_jobs',
-      label: '最大并行任务数',
-      type: 'number',
-      min: 1,
-      max: 8,
-      help: '重启服务后完全生效',
-    },
-  ],
-};
-
 function subtitleSection(presetOptions: readonly Option[]): SectionSpec {
   return {
+    id: 'subtitle',
+    icon: '💬',
     title: '字幕',
     fields: [
       { key: 'subtitle.default_preset', label: '默认预设', type: 'select', options: () => presetOptions },
@@ -108,6 +100,23 @@ function subtitleSection(presetOptions: readonly Option[]): SectionSpec {
   };
 }
 
+const HARDWARE_SECTION: SectionSpec = {
+  id: 'hardware',
+  icon: '⚙️',
+  title: '硬件',
+  fields: [
+    {
+      key: 'hardware.max_parallel_jobs',
+      label: '最大并行任务数',
+      type: 'number',
+      min: 1,
+      max: 8,
+      help: '重启服务后完全生效',
+    },
+  ],
+};
+
+/** 分区按使用频率排序：出片 → 分析 → 字幕 → 硬件（DSS §4.1）。 */
 export function buildSections(presetOptions: readonly Option[]): readonly SectionSpec[] {
-  return [ANALYSIS_SECTION, subtitleSection(presetOptions), EXPORT_SECTION, HARDWARE_SECTION];
+  return [EXPORT_SECTION, ANALYSIS_SECTION, subtitleSection(presetOptions), HARDWARE_SECTION];
 }

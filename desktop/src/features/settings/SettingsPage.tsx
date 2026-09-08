@@ -1,11 +1,37 @@
 /** 偏好设置页：settings.get 全量载入 → 分区编辑 → 差异保存（settings.update）。 */
-import { App as AntdApp, Button, Card, Input, InputNumber, Select, Switch } from 'antd';
+import { App as AntdApp, Button, Input, InputNumber, Select, Switch } from 'antd';
+import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useState } from 'react';
+import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import { rpc } from '../../services/client';
+import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 import { buildSections, type FieldSpec, type Option, type SettingsMap } from './sections';
 
 const PAGE_DESC = '分析阈值、字幕与出片参数；LLM/ASR/TTS 引擎配置在「引擎中心」管理。';
+
+interface Notify {
+  error: (text: string) => void;
+  success: (text: string) => void;
+}
+
+async function saveSettings(
+  entries: [string, string][],
+  message: Notify,
+  reload: () => Promise<void>,
+  setSaving: (saving: boolean) => void,
+): Promise<void> {
+  setSaving(true);
+  try {
+    await rpc('settings.update', { values: Object.fromEntries(entries) });
+    message.success('设置已保存');
+    await reload();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : String(error));
+  } finally {
+    setSaving(false);
+  }
+}
 
 /** 偏好设置页。 */
 export function SettingsPage() {
@@ -31,71 +57,74 @@ export function SettingsPage() {
 
   if (draft === null || original === null) {
     return (
-      <div style={{ maxWidth: 860, margin: '0 auto' }}>
-        <Card loading />
-      </div>
+      <PageShell>
+        <PageSection>加载中…</PageSection>
+      </PageShell>
     );
   }
 
   const changedKeys = Object.keys(draft).filter((key) => draft[key] !== original[key]);
-  const patchDraft = (key: string, value: string): void => {
-    setDraft(patchIn(draft, key, value));
-  };
   const save = async (): Promise<void> => {
     await saveSettings(changedKeys.map((key) => [key, draft[key] ?? '']), message, load, setSaving);
   };
 
   return (
-    <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <header style={{ display: 'flex', alignItems: 'flex-end' }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: tokens.textPrimary }}>偏好设置</h1>
-          <div style={{ fontSize: 13, color: tokens.textTertiary, marginTop: 6 }}>{PAGE_DESC}</div>
-        </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <Button
-            onClick={() => {
-              setDraft({ ...original });
-            }}
-            disabled={changedKeys.length === 0}
-          >
-            还原
-          </Button>
-          <Button type="primary" loading={saving} disabled={changedKeys.length === 0} onClick={() => void save()}>
-            保存{changedKeys.length > 0 ? `（${String(changedKeys.length)} 项）` : ''}
-          </Button>
-        </div>
-      </header>
-      <SettingsBody draft={draft} presetOptions={presetOptions} onPatch={patchDraft} />
-    </div>
+    <SettingsView
+      original={original}
+      draft={draft}
+      presetOptions={presetOptions}
+      saving={saving}
+      onDraft={setDraft}
+      onSave={() => {
+        void save();
+      }}
+    />
   );
 }
 
-interface Notify {
-  error: (text: string) => void;
-  success: (text: string) => void;
-}
-
-async function saveSettings(
-  entries: [string, string][],
-  message: Notify,
-  reload: () => Promise<void>,
-  setSaving: (saving: boolean) => void,
-): Promise<void> {
-  setSaving(true);
-  try {
-    await rpc('settings.update', { values: Object.fromEntries(entries) });
-    message.success('设置已保存');
-    await reload();
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : String(error));
-  } finally {
-    setSaving(false);
-  }
-}
-
-function patchIn(map: SettingsMap, key: string, value: string): SettingsMap {
-  return { ...map, [key]: value };
+function SettingsView(props: {
+  original: SettingsMap;
+  draft: SettingsMap;
+  presetOptions: readonly Option[];
+  saving: boolean;
+  onDraft: (next: SettingsMap) => void;
+  onSave: () => void;
+}): React.ReactElement {
+  const changedKeys = Object.keys(props.draft).filter(
+    (key) => props.draft[key] !== props.original[key],
+  );
+  const patchDraft = (key: string, value: string): void => {
+    props.onDraft({ ...props.draft, [key]: value });
+  };
+  return (
+    <PageShell>
+      <PageHeader
+        title="偏好设置"
+        desc={PAGE_DESC}
+        actions={
+          <>
+            <Button
+              disabled={changedKeys.length === 0}
+              onClick={() => {
+                props.onDraft({ ...props.original });
+              }}
+            >
+              还原
+            </Button>
+            <Button
+              type="primary"
+              loading={props.saving}
+              disabled={changedKeys.length === 0}
+              onClick={props.onSave}
+            >
+              保存{changedKeys.length > 0 ? `（${String(changedKeys.length)} 项）` : ''}
+            </Button>
+          </>
+        }
+      />
+      <SettingsBody draft={props.draft} presetOptions={props.presetOptions} onPatch={patchDraft} />
+    </PageShell>
+  );
 }
 
 function SettingsBody({
@@ -110,60 +139,37 @@ function SettingsBody({
   return (
     <>
       {buildSections(presetOptions).map((section) => (
-        <Card key={section.title} size="small" title={<SectionTitle text={section.title} />}>
-          {section.fields.map((field) => (
+        <PageSection key={section.id} title={`${section.icon} ${section.title}`}>
+          {section.fields.map((field, index, all) => (
             <FieldRow
               key={field.key}
               spec={field}
               value={draft[field.key] ?? ''}
               values={draft}
+              last={index === all.length - 1}
               onChange={(next) => {
                 onPatch(field.key, next);
               }}
             />
           ))}
-        </Card>
+        </PageSection>
       ))}
     </>
   );
 }
 
-function SectionTitle({ text }: { text: string }): React.ReactElement {
-  return (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ width: 3, height: 13, borderRadius: 2, background: tokens.gradientAccent }} />
-      <span style={{ fontSize: 13.5, fontWeight: 600, color: tokens.textPrimary }}>{text}</span>
-    </span>
-  );
-}
-
-function FieldControl({
-  spec,
-  value,
-  values,
-  onChange,
-}: {
+function FieldControl(props: {
   spec: FieldSpec;
   value: string;
   values: SettingsMap;
   onChange: (next: string) => void;
-}) {
-  const wide = { width: 280 } as const;
+}): React.ReactElement {
+  const { spec, value, values, onChange } = props;
   switch (spec.type) {
-    case 'password':
-      return (
-        <Input.Password
-          value={value}
-          placeholder={spec.placeholder}
-          onChange={(event) => {
-            onChange(event.target.value);
-          }}
-        />
-      );
     case 'number':
       return (
         <InputNumber
-          style={wide}
+          style={{ width: '100%' }}
           value={Number(value)}
           min={spec.min}
           max={spec.max}
@@ -173,47 +179,60 @@ function FieldControl({
         />
       );
     case 'select':
-      return <SelectField spec={spec} value={value} values={values} onChange={onChange} />;
-    case 'switch':
       return (
-        <Switch
-          checked={value === 'true'}
-          onChange={(checked) => {
-            onChange(String(checked));
-          }}
-        />
-      );
-    default:
-      return (
-        <Input
-          style={wide}
+        <Select
+          style={{ width: '100%' }}
           value={value}
-          placeholder={spec.placeholder}
-          onChange={(event) => {
-            onChange(event.target.value);
-          }}
+          options={spec.options?.(values).map((option) => ({ ...option }))}
+          onChange={onChange}
         />
       );
+    case 'switch':
+      return <SwitchControl value={value} onChange={onChange} />;
+    case 'password':
+      return <TextField password spec={spec} value={value} onChange={onChange} />;
+    default:
+      return <TextField spec={spec} value={value} onChange={onChange} />;
   }
 }
 
-function SelectField({
-  spec,
+function SwitchControl({
   value,
-  values,
   onChange,
 }: {
-  spec: FieldSpec;
   value: string;
-  values: SettingsMap;
   onChange: (next: string) => void;
 }) {
   return (
-    <Select
-      style={{ width: 280 }}
+    <Switch
+      checked={value === 'true'}
+      onChange={(checked) => {
+        onChange(String(checked));
+      }}
+    />
+  );
+}
+
+function TextField({
+  spec,
+  value,
+  onChange,
+  password = false,
+}: {
+  spec: FieldSpec;
+  value: string;
+  onChange: (next: string) => void;
+  password?: boolean;
+}): React.ReactElement {
+  const Control = password ? Input.Password : Input;
+  return (
+    <Control
+      style={{ width: '100%' }}
       value={value}
-      options={spec.options?.(values).map((option) => ({ ...option }))}
-      onChange={onChange}
+      placeholder={spec.placeholder}
+      onChange={(event) => {
+        onChange(event.target.value);
+      }}
     />
   );
 }
@@ -222,32 +241,38 @@ function FieldRow({
   spec,
   value,
   values,
+  last,
   onChange,
 }: {
   spec: FieldSpec;
   value: string;
   values: SettingsMap;
+  last: boolean;
   onChange: (next: string) => void;
 }) {
+  const rowStyle: CSSProperties = last
+    ? { ...mixins.fieldRow(), borderBottom: 'none' }
+    : mixins.fieldRow();
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 18,
-        padding: '10px 0',
-        borderBottom: `1px solid ${tokens.borderSecondary}`,
-      }}
-    >
-      <div style={{ width: 200, flexShrink: 0 }}>
-        <div style={{ fontSize: 13, color: tokens.textPrimary }}>{spec.label}</div>
+    <div style={{ ...rowStyle, padding: `0 ${String(tokens.spaceLg)}` }}>
+      <div style={mixins.fieldLabelCol()}>
+        <div style={{ fontSize: tokens.fontBody, color: tokens.textPrimary }}>{spec.label}</div>
         {spec.help !== undefined && (
-          <div style={{ fontSize: 11.5, color: tokens.textTertiary, marginTop: 3, lineHeight: '17px' }}>
+          <div
+            style={{
+              fontSize: tokens.fontCaption,
+              color: tokens.textTertiary,
+              marginTop: 3,
+              lineHeight: '17px',
+            }}
+          >
             {spec.help}
           </div>
         )}
       </div>
-      <FieldControl spec={spec} value={value} values={values} onChange={onChange} />
+      <div style={mixins.fieldControlCol()}>
+        <FieldControl spec={spec} value={value} values={values} onChange={onChange} />
+      </div>
     </div>
   );
 }

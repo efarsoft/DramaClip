@@ -1,16 +1,11 @@
 /** 引擎中心：按能力域（ASR/TTS/LLM）组织本地与云端引擎。 */
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { App as AntdApp, Card } from 'antd';
-import {
-  ApiOutlined,
-  AudioOutlined,
-  CloudServerOutlined,
-  DashboardOutlined,
-  ThunderboltOutlined,
-} from '@ant-design/icons';
+import { App as AntdApp } from 'antd';
+import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { modelsApi, rpc } from '../../services/client';
+import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 import { OverviewTab } from './OverviewTab';
 import { AsrTab } from './AsrTab';
@@ -20,12 +15,21 @@ import { LlmTab } from './LlmTab';
 export type SettingsMap = Record<string, string>;
 export type EngineTab = 'overview' | 'asr' | 'tts' | 'llm';
 
-const TABS = [
-  { key: 'overview', label: '总览', icon: DashboardOutlined },
-  { key: 'asr', label: '语音识别 ASR', icon: AudioOutlined },
-  { key: 'tts', label: '配音 TTS', icon: ThunderboltOutlined },
-  { key: 'llm', label: '文案 LLM', icon: ApiOutlined },
-] as const;
+const TAB_ICONS: Record<EngineTab, string> = {
+  overview: '🏠',
+  asr: '🎙️',
+  tts: '🔊',
+  llm: '✍️',
+};
+
+const TAB_LABELS: Record<EngineTab, string> = {
+  overview: '总览',
+  asr: '语音识别 ASR',
+  tts: '配音 TTS',
+  llm: '文案 LLM',
+};
+
+const TAB_ORDER: readonly EngineTab[] = ['overview', 'asr', 'tts', 'llm'];
 
 interface EnginesData {
   readonly models: ModelInfo[];
@@ -62,17 +66,15 @@ export function EnginesPage() {
   );
 
   return (
-    <div style={{ maxWidth: 1160, margin: '0 auto' }}>
-      <header style={{ marginBottom: 18 }}>
-        <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: tokens.textPrimary }}>引擎中心</h1>
-        <div style={{ fontSize: 13, color: tokens.textTertiary, marginTop: 6 }}>
-          语音识别、配音、文案三类引擎——本地引擎免费离线，云端引擎即开即用
-        </div>
-      </header>
-      <div style={{ display: 'grid', gridTemplateColumns: '216px minmax(0,1fr)', gap: 16, alignItems: 'start' }}>
+    <PageShell>
+      <PageHeader
+        title="引擎中心"
+        desc="语音识别、配音、文案三类引擎——本地引擎免费离线，云端引擎即开即用"
+      />
+      <div style={{ display: 'grid', gridTemplateColumns: '216px minmax(0,1fr)', gap: tokens.spaceLg, alignItems: 'start' }}>
         <TabNav tab={tab} onPick={(key) => { void navigate(`/models/${key}`); }} />
         {data === null ? (
-          <Card loading />
+          <PageSection>加载中…</PageSection>
         ) : tab === 'asr' ? (
           <AsrTab models={data.models} settings={data.settings} onSave={(values) => { void saveSettings(values); }} onChanged={() => { void load(); }} />
         ) : tab === 'tts' ? (
@@ -83,50 +85,63 @@ export function EnginesPage() {
           <OverviewTab models={data.models} settings={data.settings} />
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }
 
-function tabFromPath(hash: string): EngineTab {
-  const match = /\/models\/(asr|tts|llm)/.exec(hash);
+function tabFromPath(pathname: string): EngineTab {
+  const match = /\/models\/(asr|tts|llm)/.exec(pathname);
   return (match?.[1] as EngineTab | undefined) ?? 'overview';
 }
 
-function TabNav({ tab, onPick }: { tab: EngineTab; onPick: (key: EngineTab) => void }) {
+/** 左侧 tab：与素材列表行同构（主色左条 + 选中底色，DSS §4.2）。 */
+function TabNav({ tab, onPick }: { tab: EngineTab; onPick: (key: EngineTab) => void }): React.ReactElement {
   return (
-    <Card styles={{ body: { padding: 8 } }}>
-      {TABS.map((item) => (
-        <button
-          key={item.key}
-          type="button"
-          onClick={() => {
-            onPick(item.key);
-          }}
-          style={{
-            width: '100%',
-            height: 38,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            paddingLeft: 12,
-            marginBottom: 2,
-            borderRadius: 8,
-            border: 'none',
-            background: tab === item.key ? tokens.accentSoft : 'transparent',
-            color: tab === item.key ? tokens.colorPrimary : tokens.textSecondary,
-            fontSize: 13,
-            fontWeight: tab === item.key ? 600 : 400,
-            cursor: 'pointer',
-          }}
-        >
-          <item.icon style={{ fontSize: 14 }} />
-          {item.label}
-        </button>
-      ))}
-      <div style={{ padding: '10px 12px 4px', fontSize: 11, color: tokens.textTertiary }}>
-        <CloudServerOutlined style={{ marginRight: 6 }} />
+    <nav
+      style={{
+        background: tokens.bgContainer,
+        border: `1px solid ${tokens.borderSecondary}`,
+        borderRadius: tokens.radiusCard,
+        padding: tokens.spaceSm,
+      }}
+    >
+      {TAB_ORDER.map((key) => {
+        const active = tab === key;
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => {
+              onPick(key);
+            }}
+            style={{
+              ...mixins.listRow(active),
+              height: 38,
+              width: '100%',
+              border: 'none',
+              borderLeft: `3px solid ${active ? tokens.colorPrimary : 'transparent'}`,
+              borderRadius: tokens.radiusControl,
+              color: active ? tokens.colorPrimary : tokens.textSecondary,
+              fontSize: tokens.fontBody,
+              fontWeight: active ? 600 : 400,
+              cursor: 'pointer',
+              marginBottom: 2,
+            }}
+          >
+            <span style={{ fontSize: 14 }}>{TAB_ICONS[key]}</span>
+            {TAB_LABELS[key]}
+          </button>
+        );
+      })}
+      <div
+        style={{
+          padding: `${String(tokens.spaceSm)} ${String(tokens.spaceMd)}`,
+          fontSize: tokens.fontMicro,
+          color: tokens.textTertiary,
+        }}
+      >
         云端与本地引擎随时切换
       </div>
-    </Card>
+    </nav>
   );
 }

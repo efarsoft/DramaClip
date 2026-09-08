@@ -35,7 +35,7 @@ export function ProjectsPage() {
   };
 
   return (
-    <div style={{ maxWidth: 1080, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1080, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
       <PageHeader
         onOpenCreate={() => {
           setCreateOpen(true);

@@ -1,5 +1,6 @@
 /** ASR 引擎：本地 faster-whisper（模型管理 + 参数）；云端暂未接入。 */
-import { Card, Select } from 'antd';
+import { Select } from 'antd';
+import { PageSection } from '../../components/layout/PageKit';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
 import { ModelRow } from './ModelRow';
@@ -40,12 +41,12 @@ export function AsrTab({
   const asrModels = models.filter((m) => m.kind === 'asr');
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <Card size="small" title="云端识别">
+      <PageSection title="云端识别">
         <div style={{ fontSize: 12.5, color: tokens.textTertiary }}>
           暂未接入云端 ASR——本地 faster-whisper 已覆盖转写需求，云端引擎规划在后续版本。
         </div>
-      </Card>
-      <Card size="small" title="引擎参数（即改即存）">
+      </PageSection>
+      <PageSection title="引擎参数（即改即存）">
         <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
           {Object.entries(OPTIONS).map(([key, spec]) => (
             <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -61,12 +62,12 @@ export function AsrTab({
             </div>
           ))}
         </div>
-      </Card>
-      <Card size="small" title="本地模型">
+      </PageSection>
+      <PageSection title="本地模型">
         {asrModels.map((model) => (
           <ModelRow key={model.model_id} model={model} recommended={model.required} onChanged={onChanged} />
         ))}
-      </Card>
+      </PageSection>
     </div>
   );
 }

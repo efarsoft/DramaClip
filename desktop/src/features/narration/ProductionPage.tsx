@@ -52,7 +52,7 @@ export function ProductionPage() {
   };
 
   return (
-    <div style={{ maxWidth: 1080, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div style={{ maxWidth: 1080, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
       <PageHeader projectName={project?.name} />
 
       <StyleSelectCard />

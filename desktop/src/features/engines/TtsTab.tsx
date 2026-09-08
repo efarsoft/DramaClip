@@ -1,5 +1,6 @@
 /** TTS 引擎：本地 Kokoro / 云端 Edge 二选一，音色与模型就近配置。 */
-import { Card, Select, Tag } from 'antd';
+import { Card as StyledCard, Select, Tag } from 'antd';
+import { PageSection } from '../../components/layout/PageKit';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
 import { ModelRow } from './ModelRow';
@@ -54,7 +55,7 @@ export function TtsTab({
           }}
         />
       </div>
-      <Card size="small" title="默认音色">
+      <PageSection title="默认音色">
         <Select
           style={{ width: 240 }}
           value={settings['tts.voice'] ?? ''}
@@ -63,11 +64,11 @@ export function TtsTab({
             onSave({ 'tts.voice': value });
           }}
         />
-      </Card>
+      </PageSection>
       {engine === 'kokoro' && kokoro !== undefined && (
-        <Card size="small" title="本地模型">
+        <PageSection title="本地模型">
           <ModelRow model={kokoro} recommended onChanged={onChanged} />
-        </Card>
+        </PageSection>
       )}
     </div>
   );
@@ -87,7 +88,7 @@ function EngineCard({
   onClick: () => void;
 }): React.ReactElement {
   return (
-    <Card
+    <StyledCard
       size="small"
       hoverable
       onClick={onClick}
@@ -110,6 +111,6 @@ function EngineCard({
       <div style={{ marginTop: 8, fontSize: 12.5, lineHeight: '19px', color: tokens.textTertiary }}>
         {desc}
       </div>
-    </Card>
+    </StyledCard>
   );
 }

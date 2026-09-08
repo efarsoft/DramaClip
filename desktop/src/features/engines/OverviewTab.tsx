@@ -1,9 +1,31 @@
 /** 引擎中心·总览：三类能力卡片 + 本地/云端起步路线。 */
 import { Card } from 'antd';
+import { tokens } from '../../styles/theme';
+
+function SectionCard({
+  onClick,
+  children,
+}: {
+  onClick: () => void;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <Card
+      size="small"
+      hoverable
+      onClick={onClick}
+      styles={{
+        body: { padding: `${String(tokens.spaceMd)} ${String(tokens.spaceLg)}`, height: '100%' },
+      }}
+    >
+      {children}
+    </Card>
+  );
+}
+
 import { RightOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { ModelInfo } from '@dramaclip/protocol';
-import { tokens } from '../../styles/theme';
 import type { SettingsMap } from './EnginesPage';
 
 interface Capability {
@@ -97,12 +119,7 @@ export function OverviewTab({
 function CapabilityCard({ item, onGo }: { item: Capability; onGo: () => void }): React.ReactElement {
   const tint = item.ok ? tokens.colorSuccess : tokens.colorWarning;
   return (
-    <Card
-      size="small"
-      hoverable
-      onClick={onGo}
-      styles={{ body: { padding: '14px 16px', height: '100%' } }}
-    >
+    <SectionCard onClick={onGo}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 13.5, fontWeight: 600, color: tokens.textPrimary }}>{item.name}</span>
@@ -132,7 +149,7 @@ function CapabilityCard({ item, onGo }: { item: Capability; onGo: () => void }):
           <RightOutlined style={{ fontSize: 9 }} />
         </div>
       </div>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -148,12 +165,7 @@ function PathCard({
   onClick: () => void;
 }): React.ReactElement {
   return (
-    <Card
-      size="small"
-      hoverable
-      onClick={onClick}
-      styles={{ body: { padding: '14px 16px', height: '100%' } }}
-    >
+    <SectionCard onClick={onClick}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, color: tokens.textPrimary }}>{title}</div>
@@ -179,6 +191,6 @@ function PathCard({
           <RightOutlined style={{ fontSize: 9 }} />
         </span>
       </div>
-    </Card>
+    </SectionCard>
   );
 }

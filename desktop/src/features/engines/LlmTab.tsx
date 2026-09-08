@@ -1,5 +1,6 @@
 /** LLM 引擎：OpenAI 兼容端点（云端服务或本地 Ollama/LM Studio 同协议）。 */
-import { App as AntdApp, Button, Card, Input } from 'antd';
+import { App as AntdApp, Button, Input } from 'antd';
+import { PageSection } from '../../components/layout/PageKit';
 import { useEffect, useState } from 'react';
 import { tokens } from '../../styles/theme';
 import { LlmTestButton } from './LlmTestButton';
@@ -41,7 +42,7 @@ export function LlmTab({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <Card size="small" title="云端 / 本地端点（OpenAI 兼容）">
+      <PageSection title="云端 / 本地端点（OpenAI 兼容）">
         <div style={{ fontSize: 12.5, color: tokens.textTertiary, marginBottom: 14 }}>
           云端：填 DashScope 等兼容服务；本地：Ollama 填 http://127.0.0.1:11434/v1、LM Studio 填其服务地址。
           未配置时剧情与文案生成自动降级为关键词模式。
@@ -56,12 +57,12 @@ export function LlmTab({
             <LlmTestButton />
           </span>
         </div>
-      </Card>
-      <Card size="small" title="本地大模型">
+      </PageSection>
+      <PageSection title="本地大模型">
         <div style={{ fontSize: 12.5, color: tokens.textTertiary }}>
           本地 LLM 引擎（如内置 Qwen 之类）规划在后续版本；当前可经 Ollama / LM Studio 的 OpenAI 兼容端点接入本地模型。
         </div>
-      </Card>
+      </PageSection>
     </div>
   );
 }

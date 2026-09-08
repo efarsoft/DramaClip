@@ -5,6 +5,7 @@ import { FolderOpenOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import type { WorkItem } from '@dramaclip/protocol';
 import { listWorks, mediaUrl, projectApi, revealInFolder } from '../../services/client';
 import { tokens } from '../../styles/theme';
+import { PageHeader, PageShell } from '../../components/layout/PageKit';
 import { MODE_INFO } from '../../components/modeMeta';
 
 const MODE_COLORS = ['#4D9FFF', '#7C5CFF', '#34D399', '#FBBF24', '#F87171', '#60A5FA'];
@@ -57,17 +58,12 @@ export function WorksPage() {
   }, [load]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <header style={{ display: 'flex', alignItems: 'flex-end' }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: tokens.textPrimary }}>
-            作品库
-          </h1>
-          <div style={{ fontSize: 13, color: tokens.textTertiary, marginTop: 6 }}>
-            全部项目制作完成的成片 · 共 {String(works?.length ?? 0)} 个
-          </div>
-        </div>
-      </header>
+    <PageShell>
+      <PageHeader
+        title="作品库"
+        chip={`共 ${String(works?.length ?? 0)} 个`}
+        desc="全部项目制作完成的成片；点击卡片可预览"
+      />
 
       {works === null ? (
         <Card loading />
@@ -91,7 +87,7 @@ export function WorksPage() {
       )}
 
       <PreviewModal work={preview} onClose={() => { setPreview(null); }} />
-    </div>
+    </PageShell>
   );
 }
 
