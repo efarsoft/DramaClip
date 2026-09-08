@@ -1,4 +1,4 @@
-/** 引擎中心·总览：三类能力就绪状态 + 本地/云端路线。 */
+/** 引擎中心·总览：三类能力卡片 + 本地/云端起步路线。 */
 import { Card } from 'antd';
 import { RightOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -9,52 +9,9 @@ import type { SettingsMap } from './EnginesPage';
 interface Capability {
   readonly name: string;
   readonly tab: 'asr' | 'tts' | 'llm';
+  readonly icon: string;
   readonly current: string;
   readonly ok: boolean;
-}
-
-export function OverviewTab({
-  models,
-  settings,
-}: {
-  models: ModelInfo[];
-  settings: SettingsMap;
-}): React.ReactElement {
-  const navigate = useNavigate();
-  const capabilities = buildCapabilities(models, settings);
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <Card size="small" styles={{ body: { padding: '8px 16px' } }}>
-        {capabilities.map((item) => (
-          <CapabilityRow
-            key={item.name}
-            item={item}
-            onGo={() => {
-              void navigate(`/models/${item.tab}`);
-            }}
-          />
-        ))}
-      </Card>
-      <Card size="small" title="两条起步路线（任选其一）">
-        <PathRow
-          title="本地优先 · 免费离线"
-          desc="下载语音识别与配音模型，数据不出本机，速度取决于电脑性能"
-          action="去下载"
-          onClick={() => {
-            void navigate('/models/asr');
-          }}
-        />
-        <PathRow
-          title="云端即开 · 免下载"
-          desc="配置 LLM API Key 即可开始，配音默认走微软 Edge（免费）"
-          action="去配置"
-          onClick={() => {
-            void navigate('/models/llm');
-          }}
-        />
-      </Card>
-    </div>
-  );
 }
 
 function buildCapabilities(models: ModelInfo[], settings: SettingsMap): Capability[] {
@@ -67,6 +24,7 @@ function buildCapabilities(models: ModelInfo[], settings: SettingsMap): Capabili
     {
       name: '语音识别 ASR',
       tab: 'asr',
+      icon: '🎙️',
       current:
         asr === undefined
           ? '未安装模型'
@@ -78,6 +36,7 @@ function buildCapabilities(models: ModelInfo[], settings: SettingsMap): Capabili
     {
       name: '配音 TTS',
       tab: 'tts',
+      icon: '🔊',
       current:
         ttsEngine === 'kokoro'
           ? kokoroReady
@@ -89,61 +48,95 @@ function buildCapabilities(models: ModelInfo[], settings: SettingsMap): Capabili
     {
       name: '文案 LLM',
       tab: 'llm',
-      current:
-        llmReady ? `云端 · ${settings['llm.model'] ?? ''}` : '未配置（关键词降级）',
+      icon: '✍️',
+      current: llmReady ? `云端 · ${settings['llm.model'] ?? ''}` : '未配置（关键词降级）',
       ok: llmReady,
     },
   ];
 }
 
-function CapabilityRow({ item, onGo }: { item: Capability; onGo: () => void }): React.ReactElement {
+/** 总览 tab。 */
+export function OverviewTab({
+  models,
+  settings,
+}: {
+  models: ModelInfo[];
+  settings: SettingsMap;
+}): React.ReactElement {
+  const navigate = useNavigate();
+  const capabilities = buildCapabilities(models, settings);
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '11px 0',
-        borderBottom: `1px solid ${tokens.borderSecondary}`,
-        fontSize: 13,
-      }}
-    >
-      <span style={{ width: 120, color: tokens.textSecondary }}>{item.name}</span>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        <span
-          style={{
-            width: 7,
-            height: 7,
-            borderRadius: 4,
-            background: item.ok ? tokens.colorSuccess : tokens.colorWarning,
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+        {capabilities.map((item) => (
+          <CapabilityCard key={item.name} item={item} onGo={() => void navigate(`/models/${item.tab}`)} />
+        ))}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <PathCard
+          title="本地优先 · 免费离线"
+          desc="下载语音识别与配音模型，数据不出本机，速度取决于电脑性能"
+          action="去下载"
+          onClick={() => {
+            void navigate('/models/asr');
           }}
         />
-        <span style={{ color: item.ok ? tokens.textSecondary : tokens.colorWarning }}>{item.current}</span>
-      </span>
-      <button
-        type="button"
-        onClick={onGo}
-        style={{
-          marginLeft: 'auto',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 3,
-          background: 'none',
-          border: 'none',
-          color: tokens.colorPrimary,
-          fontSize: 12.5,
-          cursor: 'pointer',
-          padding: 0,
-        }}
-      >
-        去调整
-        <RightOutlined style={{ fontSize: 9 }} />
-      </button>
+        <PathCard
+          title="云端即开 · 免下载"
+          desc="配置 LLM API Key 即可开始，配音默认走微软 Edge（免费）"
+          action="去配置"
+          onClick={() => {
+            void navigate('/models/llm');
+          }}
+        />
+      </div>
     </div>
   );
 }
 
-function PathRow({
+function CapabilityCard({ item, onGo }: { item: Capability; onGo: () => void }): React.ReactElement {
+  const tint = item.ok ? tokens.colorSuccess : tokens.colorWarning;
+  return (
+    <Card
+      size="small"
+      hoverable
+      onClick={onGo}
+      styles={{ body: { padding: '14px 16px', height: '100%' } }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 600, color: tokens.textPrimary }}>{item.name}</span>
+          <span
+            style={{
+              marginLeft: 'auto',
+              width: 8,
+              height: 8,
+              borderRadius: 4,
+              background: tint,
+              boxShadow: `0 0 6px ${tint}`,
+            }}
+          />
+        </div>
+        <div style={{ fontSize: 12.5, color: tint }}>{item.current}</div>
+        <div
+          style={{
+            marginTop: 'auto',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            fontSize: 12,
+            color: tokens.colorPrimary,
+          }}
+        >
+          去调整
+          <RightOutlined style={{ fontSize: 9 }} />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function PathCard({
   title,
   desc,
   action,
@@ -155,39 +148,37 @@ function PathRow({
   onClick: () => void;
 }): React.ReactElement {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 14,
-        padding: '13px 0',
-        borderBottom: `1px solid ${tokens.borderSecondary}`,
-      }}
+    <Card
+      size="small"
+      hoverable
+      onClick={onClick}
+      styles={{ body: { padding: '14px 16px', height: '100%' } }}
     >
-      <div>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: tokens.textPrimary }}>{title}</div>
-        <div style={{ fontSize: 12.5, color: tokens.textTertiary, marginTop: 3 }}>{desc}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: tokens.textPrimary }}>{title}</div>
+          <div style={{ fontSize: 12.5, color: tokens.textTertiary, marginTop: 3 }}>{desc}</div>
+        </div>
+        <span
+          style={{
+            marginLeft: 'auto',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: '6px 14px',
+            borderRadius: 8,
+            border: `1px solid ${tokens.border}`,
+            background: tokens.bgElevated,
+            color: tokens.textPrimary,
+            fontSize: 12.5,
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          {action}
+          <RightOutlined style={{ fontSize: 9 }} />
+        </span>
       </div>
-      <button
-        type="button"
-        onClick={onClick}
-        style={{
-          marginLeft: 'auto',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          padding: '6px 14px',
-          borderRadius: 8,
-          border: `1px solid ${tokens.border}`,
-          background: tokens.bgElevated,
-          color: tokens.textPrimary,
-          fontSize: 12.5,
-          cursor: 'pointer',
-        }}
-      >
-        {action}
-        <RightOutlined style={{ fontSize: 9 }} />
-      </button>
-    </div>
+    </Card>
   );
 }
