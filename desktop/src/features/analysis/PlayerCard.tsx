@@ -21,12 +21,12 @@ export function PlayerCard({
 }): React.ReactElement {
   const total = Math.max(duration, 1);
   return (
-    <Card size="small" title={title}>
+    <Card size="small" title={title} style={{ height: '100%' }}>
       <video
         ref={videoRef}
         src={mediaUrl(videoPath)}
         controls
-        style={{ width: '100%', maxHeight: 320, borderRadius: 8, background: '#000' }}
+        style={{ width: '100%', maxHeight: 380, borderRadius: 8, background: '#000' }}
       />
       <div
         style={{

@@ -1,7 +1,7 @@
 /** 右栏·复合面板：播放器(高光标记) → 高光列表 → 转写编辑 → 操作。 */
 import { App as AntdApp, Card, Empty } from 'antd';
 import { useMemo } from 'react';
-import type { AnalysisResults, Episode } from '@dramaclip/protocol';
+import type { AnalysisResults, AsrSegment, Episode, HighlightSegment } from '@dramaclip/protocol';
 import { ActionsCard, HighlightsCard } from './DetailCards';
 import { reanalyzeEpisode } from './reanalyze';
 import { PlayerCard } from './PlayerCard';
@@ -27,6 +27,12 @@ export function EpisodeDetail({
   onReload,
 }: DetailProps): React.ReactElement {
   const { message } = AntdApp.useApp();
+  const notifyError = (text: string): void => {
+    message.error(text);
+  };
+  const notifyOk = (text: string): void => {
+    message.success(text);
+  };
   const { videoRef, seek } = useEpisodeSeek(activeEpisodeId);
   const resync = useResyncSemantic(projectId, activeEpisodeId ?? '', onReload);
   const transcript = transcriptOf(results, activeEpisodeId);
@@ -40,42 +46,61 @@ export function EpisodeDetail({
     if (episode === null) return <EmptyDetail />;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <PlayerCard
-        videoPath={episode.source_path}
-        title={`第${String(episode.episode_number)}集 · ${episode.name}`}
+      <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
+        <div style={{ flex: '1 1 55%', minWidth: 0 }}>
+          <PlayerCard
+            videoPath={episode.source_path}
+            title={`第${String(episode.episode_number)}集 · ${episode.name}`}
+            highlights={highlights}
+            duration={episode.duration ?? 0}
+            videoRef={videoRef}
+            onSeek={seek}
+          />
+        </div>
+        <div style={{ flex: '1 1 45%', minWidth: 0, display: 'flex' }}>
+          <HighlightsCard highlights={highlights} onSeek={seek} />
+        </div>
+      </div>
+      <BottomCards
         highlights={highlights}
-        duration={episode.duration ?? 0}
-        videoRef={videoRef}
-        onSeek={seek}
-      />
-      <HighlightsCard highlights={highlights} onSeek={seek} />
-      <TranscriptCard
-        segments={transcript}
+        transcript={transcript}
         resyncing={resync.running}
         onSeek={seek}
         onSaveEdit={saveEdit}
-        onResync={() => {
-          resync.run().catch((error: unknown) => {
-            message.error(error instanceof Error ? error.message : String(error));
-          });
+        onRerun={() => {
+          runResync(resync, notifyError);
         }}
-      />
-      <ActionsCard
         onReanalyze={() => {
-          reanalyzeEpisode(
-            projectId,
-            episode.id,
-            episode.episode_number,
-            (text) => {
-              message.success(text);
-            },
-            (text) => {
-              message.error(text);
-            },
-          );
+          reanalyzeEpisode(projectId, episode.id, episode.episode_number, notifyOk, notifyError);
         }}
       />
     </div>
+  );
+}
+
+interface BottomProps {
+  highlights: readonly HighlightSegment[];
+  transcript: readonly AsrSegment[];
+  resyncing: boolean;
+  onSeek: (seconds: number) => void;
+  onSaveEdit: (index: number, text: string) => void;
+  onRerun: () => void;
+  onReanalyze: () => void;
+}
+
+function BottomCards(props: BottomProps): React.ReactElement {
+  return (
+    <>
+      <HighlightsCard highlights={props.highlights} onSeek={props.onSeek} />
+      <TranscriptCard
+        segments={props.transcript}
+        resyncing={props.resyncing}
+        onSeek={props.onSeek}
+        onSaveEdit={props.onSaveEdit}
+        onResync={props.onRerun}
+      />
+      <ActionsCard onReanalyze={props.onReanalyze} />
+    </>
   );
 }
 
@@ -85,6 +110,15 @@ function EmptyDetail(): React.ReactElement {
       <Empty description="从左侧选择一集查看详情" />
     </Card>
   );
+}
+
+function runResync(
+  resync: { run: () => Promise<void> },
+  onError: (text: string) => void,
+): void {
+  resync.run().catch((error: unknown) => {
+    onError(error instanceof Error ? error.message : String(error));
+  });
 }
 
 function transcriptOf(
