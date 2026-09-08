@@ -1,7 +1,7 @@
 /** 右栏·复合面板：播放器(高光标记) → 高光列表 → 转写编辑 → 操作。 */
 import { App as AntdApp, Card, Empty } from 'antd';
 import { useMemo } from 'react';
-import type { AnalysisResults, AsrSegment, Episode, HighlightSegment } from '@dramaclip/protocol';
+import type { AnalysisResults, AsrSegment, Episode } from '@dramaclip/protocol';
 import { ActionsCard, HighlightsCard } from './DetailCards';
 import { reanalyzeEpisode } from './reanalyze';
 import { PlayerCard } from './PlayerCard';
@@ -62,7 +62,6 @@ export function EpisodeDetail({
         </div>
       </div>
       <BottomCards
-        highlights={highlights}
         transcript={transcript}
         resyncing={resync.running}
         onSeek={seek}
@@ -79,7 +78,6 @@ export function EpisodeDetail({
 }
 
 interface BottomProps {
-  highlights: readonly HighlightSegment[];
   transcript: readonly AsrSegment[];
   resyncing: boolean;
   onSeek: (seconds: number) => void;
@@ -91,7 +89,6 @@ interface BottomProps {
 function BottomCards(props: BottomProps): React.ReactElement {
   return (
     <>
-      <HighlightsCard highlights={props.highlights} onSeek={props.onSeek} />
       <TranscriptCard
         segments={props.transcript}
         resyncing={props.resyncing}
