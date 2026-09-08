@@ -46,3 +46,5 @@ class PlanData(BaseModel):
     timeline: list[TimelineSegment] = Field(default_factory=list)
     narration_texts: list[NarrationText] = Field(default_factory=list)
     strategy: StrategySpec = Field(default_factory=StrategySpec)
+    # 编排来源：rule=规则预算（默认）；llm_script=LLM 剧本驱动
+    planner: str = "rule"
