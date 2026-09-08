@@ -6,15 +6,38 @@
   "x-models": {
     "NarrationPlan": {
       "type": "object",
-      "required": ["id", "project_id", "narration_mode", "status", "created_at"],
+      "required": [
+        "id",
+        "project_id",
+        "narration_mode",
+        "status",
+        "created_at"
+      ],
       "properties": {
-        "id": { "type": "string" },
-        "project_id": { "type": "string" },
-        "narration_mode": { "type": "string" },
-        "episode_ids": { "type": "array", "items": { "type": "string" } },
-        "plan_data": { "type": "object" },
-        "status": { "type": "string" },
-        "created_at": { "type": "integer" }
+        "id": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "narration_mode": {
+          "type": "string"
+        },
+        "episode_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "plan_data": {
+          "type": "object"
+        },
+        "status": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "integer"
+        }
       }
     },
     "PlanMode": {
@@ -38,37 +61,88 @@
       "summary": "为选中模式生成编排方案（长任务 job：编排 + TTS 合成；raw_clip 无 TTS）",
       "params": {
         "type": "object",
-        "required": ["project_id", "modes"],
+        "required": [
+          "project_id",
+          "modes"
+        ],
         "properties": {
-          "project_id": { "type": "string" },
-          "modes": { "type": "array", "items": { "$ref": "#/x-models/PlanMode" } },
-          "episode_ids": { "type": "array", "items": { "type": "string" } },
-          "target_duration_s": { "type": "number" }
+          "project_id": {
+            "type": "string"
+          },
+          "modes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/x-models/PlanMode"
+            }
+          },
+          "episode_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "target_duration_s": {
+            "type": "number"
+          }
         }
       },
-      "result": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } }
+      "result": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        }
+      }
     },
     {
       "name": "narration.replace_timeline",
       "summary": "整轴替换编排时间轴（前端时间线编辑器保存）",
       "params": {
         "type": "object",
-        "required": ["plan_id", "segments"],
+        "required": [
+          "plan_id",
+          "segments"
+        ],
         "properties": {
-          "plan_id": { "type": "string" },
+          "plan_id": {
+            "type": "string"
+          },
           "segments": {
             "type": "array",
             "minItems": 1,
             "items": {
               "type": "object",
-              "required": ["episode_id", "start", "end"],
+              "required": [
+                "episode_id",
+                "start",
+                "end"
+              ],
               "properties": {
-                "episode_id": { "type": "string" },
-                "start": { "type": "number" },
-                "end": { "type": "number" },
-                "audio": { "type": "string" },
-                "transition": { "type": "string" },
-                "subtitle_text": { "type": ["string", "null"] }
+                "episode_id": {
+                  "type": "string"
+                },
+                "start": {
+                  "type": "number"
+                },
+                "end": {
+                  "type": "number"
+                },
+                "audio": {
+                  "type": "string"
+                },
+                "transition": {
+                  "type": "string"
+                },
+                "subtitle_text": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
               }
             }
           }
@@ -76,15 +150,73 @@
       },
       "result": {
         "type": "object",
-        "required": ["ok", "count"],
-        "properties": { "ok": { "type": "boolean" }, "count": { "type": "integer" } }
+        "required": [
+          "ok",
+          "count"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "count": {
+            "type": "integer"
+          }
+        }
       }
     },
     {
       "name": "narration.list_plans",
       "summary": "项目编排方案列表",
-      "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
-      "result": { "type": "array", "items": { "$ref": "#/x-models/NarrationPlan" } }
+      "params": {
+        "type": "object",
+        "required": [
+          "project_id"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "type": "array",
+        "items": {
+          "$ref": "#/x-models/NarrationPlan"
+        }
+      }
+    },
+    {
+      "name": "narration.produce",
+      "summary": "组合出片：逐模式 编排(文案/配音)→自动渲染成片；出片记录随产随记（job）",
+      "params": {
+        "type": "object",
+        "required": [
+          "project_id",
+          "modes"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "modes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        }
+      }
     }
   ]
 }

@@ -284,6 +284,7 @@ export const METHOD_NAMES = [
   'analysis.results',
   'narration.generate_plans',
   'narration.list_plans',
+  'narration.produce',
   'narration.replace_timeline',
   'export.start',
   'export.list',

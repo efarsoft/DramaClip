@@ -72,27 +72,23 @@ def list_works(context: AppContext, params: dict[str, Any]) -> list[dict[str, An
     return exports_repo.list_completed_works(context.conn, limit=limit)
 
 
-def _run_export(
+def render_export(
     context: AppContext,
-    job_id: str,
     export_id: str,
     project_id: str,
     plan_row: dict[str, Any],
     plan_data: PlanData,
+    *,
     cancel_event: threading.Event,
-) -> None:
-    context.job_store.mark_running(job_id)
+    report: Any,
+) -> Path:
+    """渲染核心：剪辑→遮罩→字幕→编码→写成品记录（失败抛异常，不管理 job）。"""
     output_root = context.work_dir.parent / "outputs" / project_id
     output_root.mkdir(parents=True, exist_ok=True)
     project = projects_repo.get(context.conn, project_id)
     project_name = str(project["name"]) if project else project_id[:8]
     safe_name = _safe_filename(project_name)
     out_path = output_root / f"{safe_name}_{plan_row['narration_mode']}_{export_id[:6]}.mp4"
-
-    def report(percent: float, message: str) -> None:
-        context.job_store.set_progress(job_id, round(percent, 1))
-        context.notifier.progress(job_id, round(percent, 1), message)
-        exports_repo.set_progress(context.conn, export_id, round(percent, 1))
 
     episode_paths = {
         str(ep["id"]): str(ep["source_path"])
@@ -117,23 +113,17 @@ def _run_export(
         )
         return str(ass_path)
 
-    try:
-        encoder.export_plan(
-            plan_data,
-            episode_paths,
-            out_path,
-            context.work_dir / "export" / export_id,
-            tts_audio_by_segment=tts_segments or None,
-            mask=mask,
-            cancel=cancel_event,
-            on_progress=report,
-            subtitle_burner=burn_subtitle if plan_data.mode != "raw_clip" else None,
-        )
-    except Exception as exc:
-        exports_repo.mark_failed(context.conn, export_id, str(exc))
-        context.job_store.mark_failed(job_id, str(exc))
-        context.notifier.log("error", f"导出失败: {exc}")
-        return
+    encoder.export_plan(
+        plan_data,
+        episode_paths,
+        out_path,
+        context.work_dir / "export" / export_id,
+        tts_audio_by_segment=tts_segments or None,
+        mask=mask,
+        cancel=cancel_event,
+        on_progress=report,
+        subtitle_burner=burn_subtitle if plan_data.mode != "raw_clip" else None,
+    )
     exports_repo.mark_completed(context.conn, export_id, str(out_path))
     try:
         media = probe.probe(out_path)
@@ -142,5 +132,38 @@ def _run_export(
         )
     except (ValueError, OSError):
         pass  # 元信息回填失败不影响导出成功
-    context.job_store.mark_completed(job_id)
-    context.notifier.log("info", f"导出完成: {out_path.name}")
+    return out_path
+
+
+def _run_export(
+    context: AppContext,
+    job_id: str,
+    export_id: str,
+    project_id: str,
+    plan_row: dict[str, Any],
+    plan_data: PlanData,
+    cancel_event: threading.Event,
+) -> None:
+    context.job_store.mark_running(job_id)
+
+    def report(percent: float, message: str) -> None:
+        context.job_store.set_progress(job_id, round(percent, 1))
+        context.notifier.progress(job_id, round(percent, 1), message)
+        exports_repo.set_progress(context.conn, export_id, round(percent, 1))
+
+    try:
+        out_path = render_export(
+            context,
+            export_id,
+            project_id,
+            plan_row,
+            plan_data,
+            cancel_event=cancel_event,
+            report=report,
+        )
+        context.job_store.mark_completed(job_id)
+        context.notifier.log("info", f"导出完成: {out_path.name}")
+    except Exception as exc:
+        exports_repo.mark_failed(context.conn, export_id, str(exc))
+        context.job_store.mark_failed(job_id, str(exc))
+        context.notifier.log("error", f"导出失败: {exc}")

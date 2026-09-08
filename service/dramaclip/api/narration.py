@@ -7,10 +7,13 @@ import threading
 from typing import Any
 
 from dramaclip.api.context import AppContext
+from dramaclip.api.export import render_export
 from dramaclip.engines.narration import pipeline as narration_pipeline
+from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
+from dramaclip.infra.storage.repos import exports as exports_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
 from dramaclip.transport.rpc import Router, RpcDomainError
@@ -38,6 +41,7 @@ _NO_TTS_MODES = frozenset({"raw_clip", "dialogue_narration", "subtitle_flow"})
 def register(router: Router, context: AppContext) -> None:
     router.register("narration.generate_plans", lambda params: generate_plans(context, params))
     router.register("narration.list_plans", lambda params: list_plans(context, params))
+    router.register("narration.produce", lambda params: produce(context, params))
 
 
 def generate_plans(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -232,3 +236,105 @@ def _parse_highlights(raw: str | None) -> list[HighlightSegment]:
 def _mode_label(mode: str) -> str:
     return {"raw_clip": "纯原片剪辑", "intro_narration": "片头解说"}.get(mode, mode)
 
+
+
+def produce(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """组合任务：逐模式 编排(文案/配音) → 自动渲染成片；出片记录随产随记。"""
+    project_id = str(params.get("project_id", ""))
+    if projects_repo.get(context.conn, project_id) is None:
+        raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
+    modes = [str(mode) for mode in params.get("modes", [])]
+    invalid = [mode for mode in modes if mode not in SUPPORTED_MODES]
+    if invalid:
+        raise RpcDomainError(_ERR_MODE_UNSUPPORTED, f"模式暂未支持: {', '.join(invalid)}")
+    done_episodes = [
+        episode
+        for episode in episodes_repo.list_by_project(context.conn, project_id)
+        if episode["status"] == "done"
+    ]
+    if not done_episodes:
+        raise RpcDomainError(_ERR_NO_ANALYSIS, "没有已完成分析的集，请先运行智能分析")
+
+    job_id = context.job_store.create("produce", ref_id=project_id)
+    cancel_event = threading.Event()
+    context.cancel_events[job_id] = cancel_event
+    context.executor.submit(
+        _run_produce, context, job_id, project_id, done_episodes, modes, cancel_event
+    )
+    return {"job_id": job_id}
+
+
+def _run_produce(
+    context: AppContext,
+    job_id: str,
+    project_id: str,
+    episodes: list[dict[str, Any]],
+    modes: list[str],
+    cancel_event: threading.Event,
+) -> None:
+    """逐模式：编排(文案/配音) → 渲染成片；单模式失败不中断其余。"""
+    context.job_store.mark_running(job_id)
+    project = projects_repo.get(context.conn, project_id)
+    settings = dict(context.settings)
+    if project is not None:
+        settings["_project_name"] = str(project["name"])
+    analysis_record = analysis_repo.get(context.conn, str(episodes[0]["id"]))
+    if analysis_record is not None and analysis_record["genre"]:
+        settings["_genre"] = str(analysis_record["genre"])
+
+    total = len(modes)
+    failures: list[str] = []
+    for index, mode in enumerate(modes):
+        if cancel_event.is_set():
+            context.job_store.mark_cancelled(job_id)
+            context.cancel_events.pop(job_id, None)
+            return
+        base = index / total * 100
+        label = _mode_label(mode)
+
+        def report(percent: float, message: str, _base: float = base) -> None:
+            context.job_store.set_progress(job_id, round(_base + percent / total, 1))
+            context.notifier.progress(job_id, round(_base + percent / total, 1), message)
+
+        context.notifier.progress(job_id, round(base, 1), f"({index + 1}/{total}) 生成{label}编排")
+        try:
+            _generate_one(context, mode, episodes, dict(settings))
+            plan_row = _newest_ready_plan(context, project_id, mode)
+            if plan_row is None:
+                raise ValueError("编排结果缺失")
+            plan_data = PlanData.model_validate(plan_row["plan_data"])
+            export_id = exports_repo.create(
+                context.conn, project_id, str(plan_row["id"]), mode
+            )
+            report(30, f"渲染{label}成片")
+            render_export(
+                context,
+                export_id,
+                project_id,
+                plan_row,
+                plan_data,
+                cancel_event=cancel_event,
+                report=lambda p, m, _r=report, _b=base: _r(30 + p * 0.7, m),
+            )
+        except Exception as exc:
+            failures.append(f"{label}: {exc}")
+            context.notifier.log("error", f"{label} 出片失败: {exc}")
+
+    if cancel_event.is_set():
+        context.job_store.mark_cancelled(job_id)
+    elif failures:
+        context.job_store.mark_failed(job_id, "; ".join(failures))
+    else:
+        context.job_store.set_progress(job_id, 100.0)
+        context.job_store.mark_completed(job_id)
+    context.cancel_events.pop(job_id, None)
+
+
+def _newest_ready_plan(context: AppContext, project_id: str, mode: str) -> dict[str, Any] | None:
+    plans = [
+        plan
+        for plan in plans_repo.list_by_project(context.conn, project_id)
+        if plan["narration_mode"] == mode and plan["status"] == "ready"
+    ]
+    plans.sort(key=lambda plan: plan["created_at"], reverse=True)
+    return plans[0] if plans else None

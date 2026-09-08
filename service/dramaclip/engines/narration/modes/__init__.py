@@ -24,6 +24,8 @@ def build_raw_clip(
     strategy: StrategySpec,
 ) -> PlanData:
     """纯原片剪辑编排（原案 6.7）：开场最高冲突 → 时间线 → 截断。零加工（不遮罩）。"""
+    if not scenes:
+        return PlanData(mode="raw_clip", strategy=strategy)
     candidates = [
         scene
         for scene in scenes

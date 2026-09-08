@@ -105,6 +105,8 @@ export function listWorks(limit = 60): Promise<WorksItem[]> {
 }
 
 export const narrationApi = {
+  produce: (projectId: string, modes: string[]): Promise<{ job_id: string }> =>
+    rpc<{ job_id: string }>('narration.produce', { project_id: projectId, modes }),
   generatePlans: (
     projectId: string,
     modes: NarrationMode[],
