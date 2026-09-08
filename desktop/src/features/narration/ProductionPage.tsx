@@ -91,11 +91,13 @@ export function ProductionPage() {
 function ModeTile({
   label,
   desc,
+  needs,
   checked,
   onToggle,
 }: {
   label: string;
   desc: string;
+  needs: ('copy' | 'voice')[];
   checked: boolean;
   onToggle: () => void;
 }) {
@@ -119,8 +121,37 @@ function ModeTile({
           )}
         </div>
         <span style={{ fontSize: 12, color: tokens.textTertiary }}>{desc}</span>
+        <span style={{ display: 'flex', gap: 6, marginTop: 'auto' }}>
+          {needs.includes('copy') ? (
+            <NeedBadge text="含 AI 文案" />
+          ) : (
+            <NeedBadge text="无需文案" muted />
+          )}
+          {needs.includes('voice') ? (
+            <NeedBadge text="含 AI 配音" />
+          ) : (
+            <NeedBadge text="原声" muted />
+          )}
+        </span>
       </div>
     </Card>
+  );
+}
+
+function NeedBadge({ text, muted = false }: { text: string; muted?: boolean }): React.ReactElement {
+  return (
+    <span
+      style={{
+        fontSize: 10.5,
+        padding: '1px 7px',
+        borderRadius: 999,
+        color: muted ? tokens.textTertiary : tokens.colorSuccess,
+        border: `1px solid ${muted ? tokens.border : `${tokens.colorSuccess}55`}`,
+        background: muted ? 'transparent' : `${tokens.colorSuccess}12`,
+      }}
+    >
+      {text}
+    </span>
   );
 }
 
@@ -187,6 +218,7 @@ function ModeSelectCard({
             key={item.mode}
             label={item.label}
             desc={item.desc}
+            needs={item.needs}
             checked={selected.includes(item.mode as NarrationMode)}
             onToggle={() => {
               onToggle(item.mode as NarrationMode);

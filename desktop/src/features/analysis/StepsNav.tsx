@@ -10,9 +10,9 @@ interface StepSpec {
 
 const STEPS: readonly StepSpec[] = [
   { key: 'analyze', label: '素材导入 & AI 分析' },
-  { key: 'produce', label: '生成解说文案', path: '../produce' },
-  { key: 'adjust', label: '剪辑渲染调整', path: '../produce' },
-  { key: 'export', label: '导出成片', path: '../../works' },
+  { key: 'mode', label: '选择出片模式', path: '../produce' },
+  { key: 'render', label: 'AI 编排 & 渲染', path: '../produce' },
+  { key: 'export', label: '成片查看 / 导出', path: '../../works' },
 ];
 
 function StepDot({ index }: { index: number }): React.ReactElement {

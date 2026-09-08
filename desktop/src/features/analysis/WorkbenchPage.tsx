@@ -58,9 +58,9 @@ export function WorkbenchPage() {
         proceedHint={
           doneCount === 0
             ? '完成至少一集分析后进入出片'
-            : `已完成 ${String(doneCount)} 集 · 修正转写后进入出片`
+            : `已完成 ${String(doneCount)} 集 · 到出片中心选择模式`
         }
-        nextLabel="生成解说文案"
+        nextLabel="选择出片模式"
         onPrev={() => {
           void navigate('/projects');
         }}
