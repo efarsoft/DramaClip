@@ -23,6 +23,8 @@ DEFAULTS: dict[str, str] = {
     "llm.model": "",
     "tts.engine": "kokoro",
     "tts.voice": "zf_001",
+    "strategy.min_duration_s": "30",
+    "strategy.max_duration_s": "300",
     "export.encoder": "h264",
     "export.bitrate_kbps": "8000",
     "export.width": "1080",
