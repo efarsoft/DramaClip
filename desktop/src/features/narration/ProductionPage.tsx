@@ -7,6 +7,7 @@ import { exportApi, projectApi } from '../../services/client';
 import { useUiStore } from '../../stores/ui';
 import { tokens } from '../../styles/theme';
 import { MODE_INFO } from '../../components/modeMeta';
+import { StyleSelectCard } from './StyleSelectCard';
 import { useProduceJob } from './useProduceJob';
 
 const ALL_MODES = MODE_INFO.map((item) => item.mode) as NarrationMode[];
@@ -38,7 +39,7 @@ export function ProductionPage() {
     setExports(await exportApi.list(projectId));
   }, [projectId]);
 
-  // 服务就绪即加载本项目出片记录
+  // 服务就绪即加载出片记录与风格库
   useEffect(() => {
     if (serviceState !== 'ready') return;
     void loadExports();
@@ -53,6 +54,8 @@ export function ProductionPage() {
   return (
     <div style={{ maxWidth: 1080, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 18 }}>
       <PageHeader projectName={project?.name} />
+
+      <StyleSelectCard />
 
       <ModeSelectCard
         selected={selected}

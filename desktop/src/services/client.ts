@@ -1,6 +1,7 @@
 /** 渲染层唯一 IPC 出口（docs/desktop/01 §4）。组件禁止直接调 window.dramaclip。 */
 import type {
   AnalysisJobStatus,
+  StyleInfo,
   WorkItem as WorksItem,
   ModelInfo,
   AnalysisResults,
@@ -107,6 +108,7 @@ export function listWorks(limit = 60): Promise<WorksItem[]> {
 export const narrationApi = {
   produce: (projectId: string, modes: string[]): Promise<{ job_id: string }> =>
     rpc<{ job_id: string }>('narration.produce', { project_id: projectId, modes }),
+  listStyles: (): Promise<StyleInfo[]> => rpc<StyleInfo[]>('narration.list_styles', {}),
   generatePlans: (
     projectId: string,
     modes: NarrationMode[],

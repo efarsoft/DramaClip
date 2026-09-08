@@ -9,6 +9,7 @@ from typing import Any
 from dramaclip.api.context import AppContext
 from dramaclip.api.export import render_export
 from dramaclip.engines.narration import pipeline as narration_pipeline
+from dramaclip.engines.narration import styles as styles_lib
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from dramaclip.infra.storage.repos import analysis as analysis_repo
@@ -42,6 +43,7 @@ def register(router: Router, context: AppContext) -> None:
     router.register("narration.generate_plans", lambda params: generate_plans(context, params))
     router.register("narration.list_plans", lambda params: list_plans(context, params))
     router.register("narration.produce", lambda params: produce(context, params))
+    router.register("narration.list_styles", lambda _params: list_styles(context))
 
 
 def generate_plans(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -77,6 +79,10 @@ def generate_plans(context: AppContext, params: dict[str, Any]) -> dict[str, Any
 
 def list_plans(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:
     return plans_repo.list_by_project(context.conn, str(params.get("project_id", "")))
+
+
+def list_styles(context: AppContext, _params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    return styles_lib.list_styles()
 
 
 def _run_generation_parallel(

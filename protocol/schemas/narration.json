@@ -53,6 +53,28 @@
         "dual_host_chat",
         "inner_monologue"
       ]
+    },
+    "StyleInfo": {
+      "type": "object",
+      "required": [
+        "style_id",
+        "name",
+        "directives"
+      ],
+      "properties": {
+        "style_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "desc": {
+          "type": "string"
+        },
+        "directives": {
+          "type": "string"
+        }
+      }
     }
   },
   "x-methods": [
@@ -215,6 +237,17 @@
           "job_id": {
             "type": "string"
           }
+        }
+      }
+    },
+    {
+      "name": "narration.list_styles",
+      "summary": "解说风格库清单（内置只读）",
+      "params": {},
+      "result": {
+        "type": "array",
+        "items": {
+          "$ref": "#/x-models/StyleInfo"
         }
       }
     }

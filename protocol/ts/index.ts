@@ -218,6 +218,14 @@ export interface ModelInfo {
   readonly path?: string;
 }
 
+/** 解说风格库条目（narration.list_styles）。 */
+export interface StyleInfo {
+  readonly style_id: string;
+  readonly name: string;
+  readonly desc?: string;
+  readonly directives: string;
+}
+
 export interface SubtitlePresetInfo {
   readonly preset_id: string;
   readonly preset_name: string;
@@ -285,6 +293,7 @@ export const METHOD_NAMES = [
   'narration.generate_plans',
   'narration.list_plans',
   'narration.produce',
+  'narration.list_styles',
   'narration.replace_timeline',
   'export.start',
   'export.list',

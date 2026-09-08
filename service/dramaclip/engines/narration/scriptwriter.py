@@ -58,17 +58,20 @@ def write_script(
     target_max_s: float,
     project_name: str,
     episode_duration_s: float,
+    style_directives: str = "",
 ) -> Script | None:
     """生成剧本；LLM 失败/输出非法返回 None（调用方降级规则编排）。"""
     transcript_text = _format_transcript(transcript)
     if transcript_text == "":
         return None
+    style_block = f"\n解说风格要求：{style_directives}" if style_directives != "" else ""
     user_prompt = (
         f"项目：{project_name}\n"
         f"目标时长：{target_min_s:.0f}-{target_max_s:.0f} 秒"
         f"（按剧情需要可略长，但不要超过 {target_max_s:.0f} 秒）\n"
         f"视频总长：{episode_duration_s:.0f} 秒\n"
         f"台词转写（秒）：\n{transcript_text}"
+        f"{style_block}"
     )
     for _ in range(2):  # 失败重试一次
         try:
