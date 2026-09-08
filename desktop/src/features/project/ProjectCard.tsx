@@ -111,7 +111,9 @@ function MoreButton(props: React.ComponentProps<typeof Button>): ReactElement {
       size="small"
       style={{ background: 'rgba(0,0,0,0.45)', color: '#FFFFFF' }}
       {...props}
-    />
+    >
+      ⋯
+    </Button>
   );
 }
 
