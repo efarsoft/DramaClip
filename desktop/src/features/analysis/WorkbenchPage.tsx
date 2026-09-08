@@ -1,6 +1,6 @@
 /** 项目详情工作台：步骤导航 + 左素材列表 + 右复合面板（分割线可拖拽）。 */
 import { useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { App as AntdApp } from 'antd';
 import { useUiStore } from '../../stores/ui';
 import { tokens } from '../../styles/theme';
@@ -9,6 +9,7 @@ import { useEpisodeOrder } from './useEpisodeOrder';
 import { useEpisodeReorder, useProjectDetail } from './useProjectDetail';
 import { useSplitDrag } from './useSplit';
 import { WorkbenchHeader } from './WorkbenchHeader';
+import { StepFooter } from './StepFooter';
 import { EpisodeListPanel } from './EpisodeListPanel';
 import { EpisodeDetail } from './EpisodeDetail';
 
@@ -16,6 +17,7 @@ import { EpisodeDetail } from './EpisodeDetail';
 export function WorkbenchPage() {
   const { projectId = '' } = useParams();
   const { message } = AntdApp.useApp();
+  const navigate = useNavigate();
   const setCurrentProjectId = useUiStore((state) => state.setCurrentProjectId);
   const workspace = useAnalysisWorkspace(projectId);
   const { project, reloadProject } = useProjectDetail(projectId);
@@ -63,6 +65,23 @@ export function WorkbenchPage() {
           void workspace.reload();
         }}
       />
+      <StepFooter
+        step={1}
+        total={4}
+        canProceed={doneCount > 0}
+        proceedHint={
+          doneCount === 0
+            ? '完成至少一集分析后进入出片'
+            : `已完成 ${String(doneCount)} 集 · 修正转写后进入出片`
+        }
+        nextLabel="生成解说文案"
+        onPrev={() => {
+          void navigate('/projects');
+        }}
+        onNext={() => {
+          void navigate('../produce');
+        }}
+      />
     </div>
   );
 }
@@ -81,7 +100,7 @@ interface TwoColumnsProps {
 }
 
 function TwoColumns(props: TwoColumnsProps): React.ReactElement {
-  const { pct, containerRef, onHandleDown } = useSplitDrag(32);
+  const { pct, containerRef, onHandleDown } = useSplitDrag(24);
   const order = useEpisodeOrder(props.episodes, props.onReorder);
   return (
     <div
