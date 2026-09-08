@@ -27,7 +27,7 @@ export function WorkbenchHeader({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <Button size="small" icon={<LeftOutlined />} onClick={onBack}>
+        <Button size="small" icon={<LeftOutlined />} onClick={() => { void navigate('/projects'); }}>
           项目
         </Button>
         <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: tokens.textPrimary }}>
