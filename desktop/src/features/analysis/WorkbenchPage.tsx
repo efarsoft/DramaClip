@@ -1,12 +1,12 @@
 /** 项目详情工作台：步骤导航 + 左素材列表 + 右复合面板（分割线可拖拽）。 */
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { App as AntdApp } from 'antd';
-import type { Project } from '@dramaclip/protocol';
-import { projectApi } from '../../services/client';
 import { useUiStore } from '../../stores/ui';
 import { tokens } from '../../styles/theme';
 import { useAnalysisWorkspace } from './useAnalysisWorkspace';
+import { useEpisodeOrder } from './useEpisodeOrder';
+import { useEpisodeReorder, useProjectDetail } from './useProjectDetail';
 import { useSplitDrag } from './useSplit';
 import { WorkbenchHeader } from './WorkbenchHeader';
 import { EpisodeListPanel } from './EpisodeListPanel';
@@ -18,18 +18,11 @@ export function WorkbenchPage() {
   const { message } = AntdApp.useApp();
   const setCurrentProjectId = useUiStore((state) => state.setCurrentProjectId);
   const workspace = useAnalysisWorkspace(projectId);
-  const [project, setProject] = useState<Project | null>(null);
+  const { project, reloadProject } = useProjectDetail(projectId);
+  const onReorder = useEpisodeReorder(projectId, reloadProject);
 
   useEffect(() => {
     setCurrentProjectId(projectId === '' ? null : projectId);
-    void projectApi
-      .get(projectId)
-      .then((detail) => {
-        setProject(detail.project);
-      })
-      .catch(() => {
-        setProject(null);
-      });
     return () => {
       setCurrentProjectId(null);
     };
@@ -56,45 +49,61 @@ export function WorkbenchPage() {
         }}
         onBatchAnalyze={onBatchAnalyze}
       />
-      <WorkbenchBody projectId={projectId} workspace={workspace} running={running} />
+      <TwoColumns
+        projectId={projectId}
+        episodes={workspace.episodes}
+        results={workspace.results}
+        activeEpisodeId={workspace.activeEpisodeId}
+        selectedIds={workspace.selectedIds}
+        running={running}
+        onActivate={workspace.setActiveEpisodeId}
+        onToggle={workspace.toggleSelected}
+        onReorder={onReorder}
+        onReload={() => {
+          void workspace.reload();
+        }}
+      />
     </div>
   );
 }
 
-interface WorkspaceLike {
+interface TwoColumnsProps {
+  projectId: string;
   episodes: ReturnType<typeof useAnalysisWorkspace>['episodes'];
   results: ReturnType<typeof useAnalysisWorkspace>['results'];
   activeEpisodeId: string | null;
   selectedIds: string[];
-  setActiveEpisodeId: (id: string) => void;
-  toggleSelected: (id: string, checked: boolean) => void;
-  reload: () => Promise<void>;
+  running: boolean;
+  onActivate: (id: string) => void;
+  onToggle: (id: string, checked: boolean) => void;
+  onReorder: (orderedIds: string[]) => void;
+  onReload: () => void;
 }
 
-function WorkbenchBody({
-  projectId,
-  workspace,
-  running,
-}: {
-  projectId: string;
-  workspace: WorkspaceLike;
-  running: boolean;
-}): React.ReactElement {
+function TwoColumns(props: TwoColumnsProps): React.ReactElement {
   const { pct, containerRef, onHandleDown } = useSplitDrag(32);
+  const order = useEpisodeOrder(props.episodes, props.onReorder);
   return (
     <div
       ref={containerRef}
       style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'stretch' }}
     >
-      <div style={{ width: `${String(pct)}%`, minWidth: 240, overflowY: 'auto' }}>
+      <div style={{ width: `${String(pct)}%`, minWidth: 250, overflowY: 'auto' }}>
         <EpisodeListPanel
-          episodes={workspace.episodes}
-          results={workspace.results}
-          activeEpisodeId={workspace.activeEpisodeId}
-          selectedIds={workspace.selectedIds}
-          running={running}
-          onActivate={workspace.setActiveEpisodeId}
-          onToggle={workspace.toggleSelected}
+          orderedIds={order.orderedIds}
+          byId={order.byId}
+          highlights={props.results?.highlights ?? {}}
+          activeEpisodeId={props.activeEpisodeId}
+          selectedIds={props.selectedIds}
+          running={props.running}
+          onActivate={props.onActivate}
+          onToggle={props.onToggle}
+          dragIndex={order.dragIndex}
+          overIndex={order.overIndex}
+          setOverIndex={order.setOverIndex}
+          onDragStart={order.onDragStart}
+          onDrop={order.drop}
+          onMove={order.move}
         />
       </div>
       <div
@@ -103,13 +112,11 @@ function WorkbenchBody({
       />
       <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', paddingLeft: 14 }}>
         <EpisodeDetail
-          projectId={projectId}
-          episodes={workspace.episodes}
-          activeEpisodeId={workspace.activeEpisodeId}
-          results={workspace.results}
-          onReload={() => {
-            void workspace.reload();
-          }}
+          projectId={props.projectId}
+          episodes={props.episodes}
+          activeEpisodeId={props.activeEpisodeId}
+          results={props.results}
+          onReload={props.onReload}
         />
       </div>
     </div>

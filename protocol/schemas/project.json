@@ -65,6 +65,9 @@
         },
         "status": {
           "type": "string"
+        },
+        "cover_path": {
+          "type": "string"
         }
       }
     },
@@ -297,6 +300,39 @@
           },
           "generated": {
             "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "name": "project.reorder_episodes",
+      "summary": "手动排序：按给定 episode_ids 顺序重编号（1..N）",
+      "params": {
+        "type": "object",
+        "required": [
+          "project_id",
+          "episode_ids"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "episode_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
           }
         }
       }

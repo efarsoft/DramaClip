@@ -32,6 +32,7 @@ def register(router: Router, context: AppContext) -> None:
     router.register("project.scan_episodes", lambda params: scan_episodes(context, params))
     router.register("project.dashboard_summary", lambda _params: dashboard_summary(context))
     router.register("project.ensure_covers", lambda params: ensure_covers(context, params))
+    router.register("project.reorder_episodes", lambda params: reorder_episodes(context, params))
 
 
 def create(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -114,18 +115,49 @@ def scan_episodes(context: AppContext, params: dict[str, Any]) -> list[dict[str,
         )
     episodes_repo.replace_all(context.conn, project_id, scanned)
     _ensure_cover(context, project)
+    for episode in episodes_repo.list_by_project(context.conn, project_id):
+        _ensure_episode_cover(context, episode)
     return scanned
 
 
 def ensure_covers(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
-    """为缺封面的项目补截帧（幂等；已有封面的项目跳过）。"""
+    """为缺封面的项目与各集补截帧（幂等；已有封面的跳过）。"""
     generated = 0
     for project in projects_repo.list_all(context.conn):
-        if project["cover_path"] is not None and Path(str(project["cover_path"])).is_file():
-            continue
-        if _ensure_cover(context, project):
+        if _cover_missing(project["cover_path"]) and _ensure_cover(context, project):
             generated += 1
+        for episode in episodes_repo.list_by_project(context.conn, str(project["id"])):
+            if _cover_missing(episode["cover_path"]) and _ensure_episode_cover(context, episode):
+                generated += 1
     return {"ok": True, "generated": generated}
+
+
+def reorder_episodes(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """手动排序：按给定 episode_ids 顺序重编号。"""
+    project_id = str(params.get("project_id", ""))
+    if projects_repo.get(context.conn, project_id) is None:
+        raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
+    ordered = params.get("episode_ids")
+    if not isinstance(ordered, list):
+        raise RpcDomainError(_ERR_SOURCE_INVALID, "episode_ids 必须为数组")
+    ok = episodes_repo.reorder(context.conn, project_id, [str(item) for item in ordered])
+    if not ok:
+        raise RpcDomainError(_ERR_NO_EPISODES, "episode_ids 与项目剧集不一致")
+    return {"ok": True}
+
+
+def _ensure_episode_cover(context: AppContext, episode: dict[str, Any]) -> bool:
+    cover_dir = context.work_dir.parent / "covers"
+    cover_dir.mkdir(parents=True, exist_ok=True)
+    out_path = cover_dir / f"ep_{episode['id']}.jpg"
+    if not cover_engine.extract_cover(Path(str(episode["source_path"])), out_path):
+        return False
+    episodes_repo.set_cover(context.conn, str(episode["id"]), str(out_path))
+    return True
+
+
+def _cover_missing(cover_path: Any) -> bool:
+    return cover_path is None or not Path(str(cover_path)).is_file()
 
 
 def _ensure_cover(context: AppContext, project: dict[str, Any]) -> bool:

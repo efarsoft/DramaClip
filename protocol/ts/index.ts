@@ -73,6 +73,7 @@ export interface Episode {
   readonly source_path: string;
   readonly duration?: number;
   readonly status: string;
+  readonly cover_path?: string;
 }
 
 export interface ScannedEpisode {
@@ -273,6 +274,7 @@ export const METHOD_NAMES = [
   'project.scan_episodes',
   'project.dashboard_summary',
   'project.ensure_covers',
+  'project.reorder_episodes',
   'analysis.prescreen',
   'analysis.update_asr',
   'analysis.resync_semantic',

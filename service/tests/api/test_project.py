@@ -136,3 +136,63 @@ def test_ensure_covers_idempotent(
     router.dispatch(_request(2, "project.scan_episodes", {"project_id": project_id}))
     result = router.dispatch(_request(3, "project.ensure_covers", {}))
     assert result.result == {"ok": True, "generated": 0}
+
+
+def test_reorder_episodes(
+    memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    router = _scan_router(memory_db, tmp_path / "cache")
+    for number in (1, 2, 3):
+        shutil.copy(sample_video, tmp_path / f"ep{number}.mp4")
+    created = router.dispatch(
+        _request(1, "project.create", {"name": "排序", "source_path": str(tmp_path)})
+    )
+    project_id = created.result["id"]
+    router.dispatch(_request(2, "project.scan_episodes", {"project_id": project_id}))
+    detail = router.dispatch(_request(3, "project.get", {"project_id": project_id}))
+    episodes = detail.result["episodes"]
+    ordered = [episodes[2]["id"], episodes[0]["id"], episodes[1]["id"]]
+    result = router.dispatch(
+        _request(4, "project.reorder_episodes", {"project_id": project_id, "episode_ids": ordered})
+    )
+    assert result.result == {"ok": True}
+    detail = router.dispatch(_request(5, "project.get", {"project_id": project_id}))
+    numbers = [ep["episode_number"] for ep in detail.result["episodes"]]
+    assert numbers == [1, 2, 3], "重排后编号连续"
+    names = [ep["name"] for ep in detail.result["episodes"]]
+    assert names == ["ep3", "ep1", "ep2"], "手动顺序生效"
+
+
+def test_reorder_rejects_mismatched_ids(
+    memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    router = _scan_router(memory_db, tmp_path / "cache")
+    shutil.copy(sample_video, tmp_path / "ep1.mp4")
+    created = router.dispatch(
+        _request(1, "project.create", {"name": "校验", "source_path": str(tmp_path)})
+    )
+    project_id = created.result["id"]
+    router.dispatch(_request(2, "project.scan_episodes", {"project_id": project_id}))
+    response = router.dispatch(
+        _request(
+            3,
+            "project.reorder_episodes",
+            {"project_id": project_id, "episode_ids": ["bad-id"]},
+        )
+    )
+    assert response.error is not None
+
+
+def test_scan_generates_episode_covers(
+    memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    router = _scan_router(memory_db, tmp_path / "cache")
+    shutil.copy(sample_video, tmp_path / "ep1.mp4")
+    created = router.dispatch(
+        _request(1, "project.create", {"name": "集封面", "source_path": str(tmp_path)})
+    )
+    project_id = created.result["id"]
+    router.dispatch(_request(2, "project.scan_episodes", {"project_id": project_id}))
+    detail = router.dispatch(_request(3, "project.get", {"project_id": project_id}))
+    covers = [ep.get("cover_path") for ep in detail.result["episodes"]]
+    assert all(cover is not None and Path(str(cover)).is_file() for cover in covers)

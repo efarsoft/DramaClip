@@ -65,6 +65,8 @@ export const projectApi = {
   list: (): Promise<Project[]> => rpc<Project[]>('project.list'),
   ensureCovers: (): Promise<{ ok: boolean; generated: number }> =>
     rpc<{ ok: boolean; generated: number }>('project.ensure_covers', {}),
+  reorderEpisodes: (projectId: string, episodeIds: string[]): Promise<{ ok: boolean }> =>
+    rpc<{ ok: boolean }>('project.reorder_episodes', { project_id: projectId, episode_ids: episodeIds }),
   get: (projectId: string): Promise<ProjectGetResult> =>
     rpc<ProjectGetResult>('project.get', { project_id: projectId }),
   remove: (projectId: string): Promise<{ ok: boolean }> =>

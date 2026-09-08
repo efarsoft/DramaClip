@@ -7,7 +7,17 @@ import time
 from typing import Any
 from uuid import uuid4
 
-_COLUMNS = ("id", "project_id", "episode_number", "source_path", "duration", "status", "created_at")
+_COLUMNS = (
+    "id",
+    "project_id",
+    "episode_number",
+    "source_path",
+    "duration",
+    "status",
+    "created_at",
+    "name",
+    "cover_path",
+)
 
 
 def _now_ms() -> int:
@@ -25,7 +35,7 @@ def replace_all(
     for episode in episodes:
         conn.execute(
             "INSERT INTO episodes (id, project_id, episode_number, source_path, duration,"
-            " status, created_at) VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+            " status, created_at, name) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
             (
                 uuid4().hex,
                 project_id,
@@ -33,6 +43,7 @@ def replace_all(
                 str(episode["source_path"]),
                 float(episode["duration"]),
                 now,
+                str(episode.get("name", "")),
             ),
         )
     conn.commit()
@@ -72,3 +83,36 @@ def list_by_ids(conn: sqlite3.Connection, episode_ids: list[str]) -> list[dict[s
 def set_status(conn: sqlite3.Connection, episode_id: str, status: str) -> None:
     conn.execute("UPDATE episodes SET status = ? WHERE id = ?", (status, episode_id))
     conn.commit()
+
+
+def set_cover(conn: sqlite3.Connection, episode_id: str, cover_path: str) -> None:
+    conn.execute("UPDATE episodes SET cover_path = ? WHERE id = ?", (cover_path, episode_id))
+    conn.commit()
+
+
+def reorder(
+    conn: sqlite3.Connection,
+    project_id: str,
+    ordered_ids: list[str],
+) -> bool:
+    """手动排序：按给定 id 顺序重编 episode_number（1..N）。"""
+    existing = {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT id FROM episodes WHERE project_id = ?", (project_id,)
+        ).fetchall()
+    }
+    if len(ordered_ids) != len(existing) or set(ordered_ids) != existing:
+        return False
+    # UNIQUE(project_id, episode_number)：先落负数暂存位，再写最终 1..N
+    for index, episode_id in enumerate(ordered_ids):
+        conn.execute(
+            "UPDATE episodes SET episode_number = ? WHERE id = ?",
+            (-index - 1, episode_id),
+        )
+    for index, episode_id in enumerate(ordered_ids, start=1):
+        conn.execute(
+            "UPDATE episodes SET episode_number = ? WHERE id = ?", (index, episode_id)
+        )
+    conn.commit()
+    return True
