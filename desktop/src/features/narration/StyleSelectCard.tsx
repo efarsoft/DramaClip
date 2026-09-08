@@ -7,6 +7,26 @@ import { tokens } from '../../styles/theme';
 
 const DEFAULT_ID = 'general';
 
+function persistStyle(
+  next: string,
+  message: { error: (text: string) => void },
+  setStyleId: (id: string) => void,
+  setSaving: (saving: boolean) => void,
+): void {
+  setSaving(true);
+  settingsApi
+    .update({ 'narration.style_id': next })
+    .then(() => {
+      setStyleId(next);
+    })
+    .catch((error: unknown) => {
+      message.error(error instanceof Error ? error.message : String(error));
+    })
+    .finally(() => {
+      setSaving(false);
+    });
+}
+
 export function StyleSelectCard(): React.ReactElement {
   const { message } = AntdApp.useApp();
   const [styles, setStyles] = useState<StyleInfo[]>([]);
@@ -17,7 +37,9 @@ export function StyleSelectCard(): React.ReactElement {
     void narrationApi
       .listStyles()
       .then(setStyles)
-      .catch(() => setStyles([]));
+      .catch(() => {
+        setStyles([]);
+      });
     void settingsApi
       .get()
       .then((values) => {
@@ -26,32 +48,21 @@ export function StyleSelectCard(): React.ReactElement {
       .catch(() => undefined);
   }, []);
 
-  const current = styles.find((style) => style.style_id === styleId);
-
   const change = useCallback(
     (next: string): void => {
-      setSaving(true);
-      settingsApi
-        .update({ 'narration.style_id': next })
-        .then(() => {
-          setStyleId(next);
-        })
-        .catch((error: unknown) => {
-          message.error(error instanceof Error ? error.message : String(error));
-        })
-        .finally(() => {
-          setSaving(false);
-        });
+      persistStyle(next, message, setStyleId, setSaving);
     },
     [message],
   );
+
+  const current = styles.find((style) => style.style_id === styleId);
 
   return (
     <Card
       size="small"
       title="解说风格"
       styles={{ body: { padding: '10px 14px' } }}
-      loading={styles.length === 0 && saving === false}
+      loading={styles.length === 0 && !saving}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <Select
