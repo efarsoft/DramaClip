@@ -30,6 +30,7 @@ export function ProductionPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [selected, setSelected] = useState<NarrationMode[]>([]);
   const [exports, setExports] = useState<ExportJob[] | null>(null);
+  const serviceState = useUiStore((state) => state.serviceState);
   const { tasks, running, run } = useProduction(projectId);
 
   useEffect(() => {
@@ -46,9 +47,15 @@ export function ProductionPage() {
     setExports(await exportApi.list(projectId));
   }, [projectId]);
 
+  // 服务就绪即加载本项目出片记录；出片完成后再刷新
   useEffect(() => {
-    if (running || tasks.some((task) => task.stage === 'done')) void loadExports();
-  }, [loadExports, running, tasks]);
+    if (serviceState !== 'ready') return;
+    void loadExports();
+  }, [loadExports, serviceState]);
+
+  useEffect(() => {
+    if (tasks.some((task) => task.stage === 'done')) void loadExports();
+  }, [loadExports, tasks]);
 
   const start = (): void => {
     if (selected.length === 0) return;
