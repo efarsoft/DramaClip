@@ -76,7 +76,12 @@ function CoverArea({
           ▶
         </div>
       )}
-      <span style={{ position: 'absolute', top: 10, right: 10 }}>
+      <span
+        style={{ position: 'absolute', top: 10, right: 10 }}
+        onClick={(event) => {
+          event.stopPropagation();
+        }}
+      >
         <Dropdown menu={{ items: menuFor(project, handlers) }} trigger={['click']}>
           <MoreButton />
         </Dropdown>
@@ -101,14 +106,7 @@ function CoverArea({
 
 function MoreButton(): ReactElement {
   return (
-    <Button
-      type="text"
-      size="small"
-      onClick={(event) => {
-        event.stopPropagation();
-      }}
-      style={{ background: 'rgba(0,0,0,0.45)', color: '#FFFFFF' }}
-    >
+    <Button type="text" size="small" style={{ background: 'rgba(0,0,0,0.45)', color: '#FFFFFF' }}>
       ⋯
     </Button>
   );
