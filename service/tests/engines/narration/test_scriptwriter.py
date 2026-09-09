@@ -1,4 +1,4 @@
-"""scriptwriter：LLM 编剧输出校验、清洗与降级。"""
+"""跨集编剧：LLM 输出清洗、逐集裁剪与重试降级。"""
 
 from __future__ import annotations
 
@@ -6,21 +6,32 @@ from typing import Any
 
 import pytest
 
-from dramaclip.engines.narration.scriptwriter import Script, write_script
+from dramaclip.engines.narration.scriptwriter import Script, write_script_episodes
 
 _VALID_PAYLOAD: dict[str, Any] = {
     "hook": "开场钩子",
     "segments": [
-        {"start": 1.0, "end": 10.0, "text": "第一段解说"},
-        {"start": 10.0, "end": 20.0, "text": "第二段解说"},
-        {"start": 20.0, "end": 30.0, "text": "第三段解说"},
+        {"episode": 1, "start": 1.0, "end": 10.0, "text": "第一段解说"},
+        {"episode": 1, "start": 10.0, "end": 20.0, "text": "第二段解说"},
+        {"episode": 2, "start": 5.0, "end": 15.0, "text": "第三段解说"},
     ],
     "cta": "点我看完结",
 }
 
-_TRANSCRIPT = [
-    {"start": 1.0, "end": 10.0, "text": "台词一"},
-    {"start": 10.0, "end": 30.0, "text": "台词二"},
+_EPISODES: list[dict[str, Any]] = [
+    {
+        "number": 1,
+        "duration": 40.0,
+        "segments": [
+            {"start": 1.0, "end": 10.0, "text": "台词一"},
+            {"start": 10.0, "end": 40.0, "text": "台词二"},
+        ],
+    },
+    {
+        "number": 2,
+        "duration": 60.0,
+        "segments": [{"start": 5.0, "end": 20.0, "text": "台词三"}],
+    },
 ]
 
 
@@ -32,7 +43,7 @@ class FakeLLM:
         self.calls = 0
 
     def chat_json(self, _system: str, _user: str) -> dict[str, Any]:
-        # 单元素脚本视为"每次都返回该结果"（write_script 内部会重试一次）
+        # 单元素脚本视为"每次都返回该结果"（write_script_episodes 内部会重试一次）
         self.calls += 1
         item = self.script.pop(0) if len(self.script) > 1 else self.script[0]
         if isinstance(item, Exception):
@@ -41,13 +52,12 @@ class FakeLLM:
 
 
 def _run(llm: FakeLLM) -> Script | None:
-    return write_script(
+    return write_script_episodes(
         llm,
-        _TRANSCRIPT,
+        _EPISODES,
         target_min_s=30,
         target_max_s=300,
         project_name="测试剧",
-        episode_duration_s=40.0,
     )
 
 
@@ -60,34 +70,38 @@ def test_valid_payload_returns_sanitized_script() -> None:
         "第二段解说",
         "第三段解说",
     ]
+    assert [segment.episode for segment in script.segments] == [1, 1, 2]
     assert script.hook == "开场钩子" and script.cta == "点我看完结"
     assert llm.calls == 1
 
 
-def test_segments_sorted_and_overlaps_trimmed() -> None:
+def test_segments_sorted_and_overlaps_trimmed_per_episode() -> None:
     payload = dict(
         _VALID_PAYLOAD,
         segments=[
-            {"start": 20.0, "end": 30.0, "text": "乱序段"},
-            {"start": 1.0, "end": 22.0, "text": "覆盖段"},
-            {"start": 25.0, "end": 30.0, "text": "重叠裁剪"},
+            {"episode": 1, "start": 20.0, "end": 30.0, "text": "乱序段"},
+            {"episode": 1, "start": 1.0, "end": 22.0, "text": "覆盖段"},
+            {"episode": 1, "start": 25.0, "end": 30.0, "text": "重叠裁剪"},
+            {"episode": 2, "start": 8.0, "end": 15.0, "text": "另一集不受第一集游标影响"},
         ],
     )
     script = _run(FakeLLM([payload]))
     assert script is not None
-    starts = [segment.start for segment in script.segments]
-    assert starts == sorted(starts), "乱序段被排序"
-    for first, second in zip(script.segments, script.segments[1:], strict=False):
-        assert first.end <= second.start + 0.01, "重叠被游标裁剪"
+    ep1 = [segment for segment in script.segments if segment.episode == 1]
+    starts = [segment.start for segment in ep1]
+    assert starts == sorted(starts), "同集内乱序段被排序"
+    for first, second in zip(ep1, ep1[1:], strict=False):
+        assert first.end <= second.start + 0.01, "重叠被逐集游标裁剪"
+    assert script.segments[-1].episode == 2
 
 
 def test_out_of_bounds_clamped_to_episode_duration() -> None:
     payload = dict(
         _VALID_PAYLOAD,
         segments=[
-            {"start": 1.0, "end": 10.0, "text": "正文一"},
-            {"start": 10.0, "end": 20.0, "text": "正文二"},
-            {"start": 30.0, "end": 99.0, "text": "越界段（尾部被裁到 40s）"},
+            {"episode": 1, "start": 1.0, "end": 10.0, "text": "正文一"},
+            {"episode": 1, "start": 10.0, "end": 20.0, "text": "正文二"},
+            {"episode": 1, "start": 30.0, "end": 99.0, "text": "越界段（尾部被裁到 40s）"},
         ],
     )
     script = _run(FakeLLM([payload]))
@@ -103,7 +117,7 @@ def test_invalid_json_degrades_to_none() -> None:
 def test_too_few_segments_degrades_to_none() -> None:
     payload = dict(
         _VALID_PAYLOAD,
-        segments=[{"start": 1.0, "end": 10.0, "text": "只有一段"}],
+        segments=[{"episode": 1, "start": 1.0, "end": 10.0, "text": "只有一段"}],
     )
     assert _run(FakeLLM([payload])) is None
 
@@ -118,8 +132,8 @@ def test_retries_once_before_degrading() -> None:
     "payload",
     [
         {"hook": "", "segments": _VALID_PAYLOAD["segments"]},
-        {"hook": "x", "segments": [{"start": "abc", "end": 2, "text": "t"}] * 3},
-        {"segments": [{"start": 1.0, "end": 2.0, "text": "无钩子"}]},
+        {"hook": "x", "segments": [{"episode": 1, "start": "abc", "end": 2, "text": "t"}] * 3},
+        {"segments": [{"episode": 1, "start": 1.0, "end": 2.0, "text": "无钩子"}]},
     ],
 )
 def test_malformed_payloads_degrade_to_none(payload: dict[str, Any]) -> None:

@@ -134,3 +134,4 @@ def test_prompt_keeps_raw_segments_by_episode() -> None:
     assert "第1集：" in user
     assert "00:00-00:01 據最新消息" in user
     assert "00:01-00:02 昨日發生在" in user
+    assert "00:02-00:04 京海大道的實車連撞" in user

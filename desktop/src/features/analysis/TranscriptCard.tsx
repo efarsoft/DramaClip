@@ -83,6 +83,9 @@ function SegmentRow({
     return (
       <div style={{ display: 'flex', gap: 10, fontSize: 12.5, alignItems: 'baseline' }}>
         <SeekButton seconds={segment.start} onSeek={onSeek} />
+        <span style={{ fontFamily: tokens.fontFamilyMono, fontSize: 11, color: tokens.textTertiary, flexShrink: 0 }}>
+          -{formatClock(segment.end)}
+        </span>
         <span
           style={{ color: tokens.textPrimary, cursor: 'text' }}
           onClick={() => {
@@ -117,6 +120,12 @@ function SegmentRow({
   );
 }
 
+function formatClock(seconds: number): string {
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(
+    Math.floor(seconds % 60),
+  ).padStart(2, '0')}`;
+}
+
 function SeekButton({
   seconds,
   onSeek,
@@ -124,9 +133,7 @@ function SeekButton({
   seconds: number;
   onSeek: (seconds: number) => void;
 }): React.ReactElement {
-  const text = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(
-    Math.floor(seconds % 60),
-  ).padStart(2, '0')}`;
+  const text = formatClock(seconds);
   return (
     <button
       type="button"

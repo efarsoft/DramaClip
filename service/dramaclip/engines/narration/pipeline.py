@@ -252,15 +252,6 @@ def intro_text(conflict_scores: list[ConflictScore], settings: dict[str, str]) -
     return f"{hook}。三分钟带你看完全过程，看到最后你绝对想不到。"
 
 
-def synthesize_intro_tts(
-    plan: PlanData,
-    settings: dict[str, str],
-    work_dir: Path,
-) -> PlanData:
-    """合成片头旁白并回填时长；TTS 失败时首段降级原声（不阻塞）。"""
-    return synthesize_narration_texts(plan, settings, work_dir)
-
-
 def synthesize_narration_texts(
     plan: PlanData,
     settings: dict[str, str],
