@@ -19,8 +19,8 @@ _CHARS_PER_SECOND = 4.2  # 中文 TTS 语速估算（约 250 字/分钟）
 _MIN_SEGMENTS = 2
 _MAX_SEGMENTS = 10
 _MAX_TRANSCRIPT_LINES = 150
-_EPISODE_LINE_CAP = 40
-_TOTAL_LINE_CAP = 300
+_EPISODE_LINE_CAP = 80
+_TOTAL_LINE_CAP = 500
 
 # 基本功层（永远注入，不交给模型发挥）：平台验证过的解说手艺底线。
 # 题材口味由口味层（风格 directives）差异化，与此处不重叠。
@@ -132,6 +132,12 @@ def _sanitize_episodes(raw: Any, durations: dict[int, float]) -> Script | None:
     return script.model_copy(update={"segments": kept})
 
 
+def _clock(seconds: float) -> str:
+    """秒 → MM:SS（转写展示用）。"""
+    minutes, secs = divmod(max(int(seconds), 0), 60)
+    return f"{minutes:02d}:{secs:02d}"
+
+
 def write_script_episodes(
     llm: LlmClient,
     episode_inputs: list[dict[str, Any]],
@@ -152,21 +158,22 @@ def write_script_episodes(
     for episode in episode_inputs:
         number = int(episode["number"])
         durations[number] = float(episode.get("duration") or 0.0)
-        count = 0
-        for seg in episode["segments"]:
+        lines.append(f"第{number}集：")
+        for count, seg in enumerate(episode["segments"]):
             if count >= _EPISODE_LINE_CAP or len(lines) >= _TOTAL_LINE_CAP:
                 break
             text = str(seg.get("text", "")).strip()
             if text == "":
                 continue
-            span = f"{float(seg.get('start', 0)):.0f}-{float(seg.get('end', 0)):.0f}s"
-            lines.append(f"【第{number}集】{span} {text}")
-            count += 1
+            span = f"{_clock(float(seg.get('start', 0)))}-{_clock(float(seg.get('end', 0)))}"
+            lines.append(f"{span} {text}")
     if not lines:
         return None
     cross_block = (
-        "跨集叙事要求：转写来自多集（行首标注集号）。"
-        "1) 每个片段必须带 episode 字段（集号整数），start/end 为该集内的相对秒；"
+        "跨集叙事要求：转写按集分组（每组以「第N集：」开头），"
+        "每行一条台词，格式为「开始-结束 台词」，时间为该集内的相对时间。"
+        "1) 每个片段必须带 episode 字段（集号整数），start/end 为该集内的相对秒，"
+        "且必须落在某一行转写的时间区间内或其邻近处；"
         "2) 按剧情逻辑排序：铺垫在前、冲突升级居中、反转/高潮在后，可在不同集之间选取；"
         "3) 同一片段的画面必须取自同一集，同一集内按时间顺序。"
     )
