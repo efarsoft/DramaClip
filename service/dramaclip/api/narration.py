@@ -13,8 +13,7 @@ from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration import scriptwriter as scriptwriter_lib
 from dramaclip.engines.narration import styles as styles_lib
 from dramaclip.engines.narration.models import PlanData, StrategySpec
-from dramaclip.engines.semantic.llm_client import LlmConfig
-from dramaclip.engines.semantic.llm_client import from_settings as llm_from_settings
+from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -26,6 +25,9 @@ from dramaclip.transport.rpc import Router, RpcDomainError
 _ERR_PROJECT_NOT_FOUND = -32101
 _ERR_NO_ANALYSIS = -32301
 _ERR_MODE_UNSUPPORTED = -32302
+
+# 剧本生成实测可达 100s+（qwen3.7-plus），远超 LLM 客户端默认 60s 超时
+_SCRIPT_LLM_TIMEOUT_S = 240.0
 
 SUPPORTED_MODES = (
     "raw_clip",
@@ -262,7 +264,7 @@ def _script_dialogue_plan(
     preferred = settings.get("narration.style_id")
     style_id = styles_lib.resolve_style_id(preferred, genre)
     style = styles_lib.get_style(style_id)
-    llm = llm_from_settings(settings)
+    llm = LlmClient(LlmConfig.from_settings(settings), timeout_s=_SCRIPT_LLM_TIMEOUT_S)
     script = scriptwriter_lib.write_script(
         llm,
         [
@@ -276,6 +278,7 @@ def _script_dialogue_plan(
         style_directives=str(style.get("directives", "")),
     )
     if script is None:
+        context.notifier.log("warn", "AI 编剧未产出剧本，剧情解说降级规则编排")
         return None
     context.notifier.log("info", _style_log_line(preferred, style, genre))
     return narration_pipeline.build_from_script_dialogue(
