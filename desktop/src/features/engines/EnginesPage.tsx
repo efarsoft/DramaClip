@@ -5,6 +5,12 @@ import { App as AntdApp } from 'antd';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { modelsApi, rpc } from '../../services/client';
+import {
+  ApiOutlined,
+  AudioOutlined,
+  CustomerServiceOutlined,
+  DashboardOutlined,
+} from '@ant-design/icons';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 import { OverviewTab } from './OverviewTab';
@@ -15,11 +21,11 @@ import { LlmTab } from './LlmTab';
 export type SettingsMap = Record<string, string>;
 export type EngineTab = 'overview' | 'asr' | 'tts' | 'llm';
 
-const TAB_ICONS: Record<EngineTab, string> = {
-  overview: '🏠',
-  asr: '🎙️',
-  tts: '🔊',
-  llm: '✍️',
+const TAB_ICONS: Record<EngineTab, typeof DashboardOutlined> = {
+  overview: DashboardOutlined,
+  asr: AudioOutlined,
+  tts: CustomerServiceOutlined,
+  llm: ApiOutlined,
 };
 
 const TAB_LABELS: Record<EngineTab, string> = {
@@ -107,6 +113,7 @@ function TabNav({ tab, onPick }: { tab: EngineTab; onPick: (key: EngineTab) => v
     >
       {TAB_ORDER.map((key) => {
         const active = tab === key;
+        const Icon = TAB_ICONS[key];
         return (
           <button
             key={key}
@@ -128,7 +135,7 @@ function TabNav({ tab, onPick }: { tab: EngineTab; onPick: (key: EngineTab) => v
               marginBottom: 2,
             }}
           >
-            <span style={{ fontSize: 14 }}>{TAB_ICONS[key]}</span>
+            <Icon style={{ fontSize: 14 }} />
             {TAB_LABELS[key]}
           </button>
         );

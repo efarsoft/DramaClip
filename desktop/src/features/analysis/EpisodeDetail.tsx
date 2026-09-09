@@ -2,9 +2,9 @@
 import { App as AntdApp, Card, Empty } from 'antd';
 import { useMemo } from 'react';
 import type { AnalysisResults, AsrSegment, Episode } from '@dramaclip/protocol';
-import { ActionsCard, HighlightsCard } from './DetailCards';
+import { ActionsCard, PlayerHighlightsRow } from './DetailCards';
 import { reanalyzeEpisode } from './reanalyze';
-import { PlayerCard } from './PlayerCard';
+import { CurveCard } from './CurveCard';
 import { TranscriptCard } from './TranscriptCard';
 import { useEpisodeSeek } from './useEpisodeSeek';
 import { useResyncSemantic } from './useResyncSemantic';
@@ -42,25 +42,21 @@ export function EpisodeDetail({
     () => (activeEpisodeId === null ? [] : (results?.highlights?.[activeEpisodeId] ?? [])),
     [activeEpisodeId, results],
   );
+  const conflicts = useMemo(
+    () => (activeEpisodeId === null ? [] : (results?.conflict_scores?.[activeEpisodeId] ?? [])),
+    [activeEpisodeId, results],
+  );
 
     if (episode === null) return <EmptyDetail />;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <PlayerCard
-            videoPath={episode.source_path}
-            title={`第${String(episode.episode_number)}集 · ${episode.name}`}
-            highlights={highlights}
-            duration={episode.duration ?? 0}
-            videoRef={videoRef}
-            onSeek={seek}
-          />
-        </div>
-        <div style={{ flex: '0 0 300px', display: 'flex' }}>
-          <HighlightsCard highlights={highlights} onSeek={seek} />
-        </div>
-      </div>
+      <PlayerHighlightsRow
+        episode={episode}
+        highlights={highlights}
+        videoRef={videoRef}
+        onSeek={seek}
+      />
+      <CurveCard points={conflicts} onSeek={seek} />
       <BottomCards
         transcript={transcript}
         resyncing={resync.running}

@@ -1,6 +1,7 @@
 /** 详情面板卡片：高光列表 + 操作。 */
 import { Button, Card } from 'antd';
-import type { HighlightSegment } from '@dramaclip/protocol';
+import { PlayerCard } from './PlayerCard';
+import type { Episode, HighlightSegment } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
 
 export function HighlightsCard({
@@ -49,3 +50,33 @@ export function ActionsCard({ onReanalyze }: { onReanalyze: () => void }): React
   );
 }
 
+
+export function PlayerHighlightsRow({
+  episode,
+  highlights,
+  videoRef,
+  onSeek,
+}: {
+  episode: Episode;
+  highlights: readonly HighlightSegment[];
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+  onSeek: (seconds: number) => void;
+}): React.ReactElement {
+  return (
+    <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <PlayerCard
+          videoPath={episode.source_path}
+          title={`第${String(episode.episode_number)}集 · ${episode.name}`}
+          highlights={highlights}
+          duration={episode.duration ?? 0}
+          videoRef={videoRef}
+          onSeek={onSeek}
+        />
+      </div>
+      <div style={{ flex: '0 0 300px', display: 'flex' }}>
+        <HighlightsCard highlights={highlights} onSeek={onSeek} />
+      </div>
+    </div>
+  );
+}

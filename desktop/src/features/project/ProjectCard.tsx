@@ -54,7 +54,7 @@ function CoverArea({
   handlers: MenuHandlers;
 }): ReactElement {
   return (
-    <div style={{ position: 'relative' }}>
+    <div className="project-cover" style={{ position: 'relative' }}>
       {project.cover_path !== undefined ? (
         <img
           src={mediaUrl(project.cover_path)}

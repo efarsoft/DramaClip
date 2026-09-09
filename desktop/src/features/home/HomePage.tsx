@@ -119,7 +119,15 @@ function GreetingHeader({ summary }: { summary: DashboardSummary | null }) {
               border: `1px solid ${tokens.borderSecondary}`,
             }}
           >
-            <span style={{ fontSize: 16, fontWeight: 700, color: tokens.textPrimary }}>
+            <span
+              style={{
+                fontSize: 16,
+                fontWeight: 700,
+                color: tokens.textPrimary,
+                fontFamily: tokens.fontFamilyMono,
+                textShadow: '0 0 12px rgba(77, 159, 255, 0.35)',
+              }}
+            >
               {chip.value ?? '…'}
             </span>
             <span style={{ fontSize: 10, color: tokens.textTertiary }}>{chip.label}</span>
