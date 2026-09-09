@@ -23,7 +23,7 @@ DEFAULTS: dict[str, str] = {
     "llm.model": "",
     "tts.engine": "kokoro",
     "tts.voice": "zf_001",
-    "narration.style_id": "general",
+    "narration.style_id": "auto",
     "strategy.min_duration_s": "30",
     "strategy.max_duration_s": "300",
     "download.hf_mirror": "https://hf-mirror.com",

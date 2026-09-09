@@ -1,11 +1,18 @@
-/** 解说风格选择卡：读取风格库 + 当前偏好，切换即保存。 */
+/** 解说风格选择卡：自动匹配（默认）+ 风格库，切换即保存。 */
 import { App as AntdApp, Card, Select } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import type { StyleInfo } from '@dramaclip/protocol';
 import { narrationApi, settingsApi } from '../../services/client';
 import { tokens } from '../../styles/theme';
 
-const DEFAULT_ID = 'general';
+const AUTO_ID = 'auto';
+const DEFAULT_ID = AUTO_ID;
+const AUTO_STYLE: StyleInfo = {
+  style_id: AUTO_ID,
+  name: '自动匹配（推荐）',
+  desc: '按剧情题材自动选择最合适的风格',
+  directives: '',
+};
 
 function persistStyle(
   next: string,
@@ -55,7 +62,10 @@ export function StyleSelectCard(): React.ReactElement {
     [message],
   );
 
-  const current = styles.find((style) => style.style_id === styleId);
+  const current =
+    styleId === AUTO_ID
+      ? AUTO_STYLE
+      : styles.find((style) => style.style_id === styleId);
 
   return (
     <Card
@@ -71,7 +81,7 @@ export function StyleSelectCard(): React.ReactElement {
           loading={saving}
           disabled={saving}
           onChange={change}
-          options={styles.map((style) => ({
+          options={[AUTO_STYLE, ...styles].map((style) => ({
             label: style.name,
             value: style.style_id,
           }))}
@@ -83,7 +93,7 @@ export function StyleSelectCard(): React.ReactElement {
         )}
       </div>
       <div style={{ marginTop: 8, fontSize: 11.5, color: tokens.textTertiary }}>
-        风格注入 AI 编剧（解说类模式生效）；纯剪辑模式不受影响。仅 LLM 已配置时可用。
+        自动匹配按分析阶段的题材判定（如 悬疑→悬疑反转、逆袭→爽感逆袭）；风格注入 AI 编剧，对话解说模式生效，仅 LLM 已配置时可用。
       </div>
     </Card>
   );

@@ -8,9 +8,13 @@ from typing import Any
 
 from dramaclip.api.context import AppContext
 from dramaclip.api.export import render_export
+from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import pipeline as narration_pipeline
+from dramaclip.engines.narration import scriptwriter as scriptwriter_lib
 from dramaclip.engines.narration import styles as styles_lib
-from dramaclip.engines.narration.models import PlanData
+from dramaclip.engines.narration.models import PlanData, StrategySpec
+from dramaclip.engines.semantic.llm_client import LlmConfig
+from dramaclip.engines.semantic.llm_client import from_settings as llm_from_settings
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -201,15 +205,24 @@ def _generate_one(
     asr_segments = narration_pipeline.parse_asr_segments(record["asr_segments"])
     audio = narration_pipeline.parse_audio_features(record["audio_features"])
 
-    plan = narration_pipeline.build_plan(
-        mode,
-        episode_id,
-        conflicts,
-        highlights,
-        asr_segments,
-        audio,
-        settings,
-    )
+    # 对话解说试点：LLM 已配置时走剧本驱动（风格自动/手动注入），失败降级规则编排
+    plan = None
+    if mode == "dialogue_narration":
+        plan = _script_dialogue_plan(context, episode, asr_segments, settings)
+    if plan is None:
+        plan = narration_pipeline.build_plan(
+            mode,
+            episode_id,
+            conflicts,
+            highlights,
+            asr_segments,
+            audio,
+            settings,
+        )
+    elif plan.narration_texts:
+        tts_dir = context.work_dir / "tts"
+        models_dir = context.work_dir.parent.parent / "models"
+        plan = narration_pipeline.synthesize_narration_texts(plan, settings, tts_dir, models_dir)
     tts_modes = (
         "intro_narration",
         "cross_narration",
@@ -229,6 +242,60 @@ def _generate_one(
         [episode_id],
         plan.model_dump(),
     )
+
+
+def _script_dialogue_plan(
+    context: AppContext,
+    episode: dict[str, Any],
+    asr_segments: list[AsrSegment],
+    settings: dict[str, str],
+) -> PlanData | None:
+    """LLM 剧本驱动的对话解说（风格自动/手动注入）；未配置 LLM 或编写失败返回 None。"""
+    if not LlmConfig.from_settings(settings).configured:
+        return None
+    strategy = StrategySpec(
+        platform="douyin",
+        min_duration_s=float(settings.get("strategy.min_duration_s", "30")),
+        max_duration_s=float(settings.get("strategy.max_duration_s", "300")),
+    )
+    genre = settings.get("_genre")
+    preferred = settings.get("narration.style_id")
+    style_id = styles_lib.resolve_style_id(preferred, genre)
+    style = styles_lib.get_style(style_id)
+    llm = llm_from_settings(settings)
+    script = scriptwriter_lib.write_script(
+        llm,
+        [
+            {"start": seg.start, "end": seg.end, "text": seg.text}
+            for seg in asr_segments
+        ],
+        target_min_s=strategy.min_duration_s,
+        target_max_s=strategy.max_duration_s,
+        project_name=settings.get("_project_name", "这部剧"),
+        episode_duration_s=float(episode.get("duration") or 0.0),
+        style_directives=str(style.get("directives", "")),
+    )
+    if script is None:
+        return None
+    context.notifier.log("info", _style_log_line(preferred, style, genre))
+    return narration_pipeline.build_from_script_dialogue(
+        str(episode["id"]),
+        script,
+        asr_segments,
+        strategy,
+    )
+
+
+def _style_log_line(
+    preferred: str | None,
+    style: dict[str, Any],
+    genre: str | None,
+) -> str:
+    name = str(style.get("name", style.get("style_id", "")))
+    if preferred == styles_lib.AUTO_STYLE_ID or not preferred:
+        origin = f"按题材「{genre}」自动匹配" if genre else "自动匹配"
+        return f"解说风格：{origin} → {name}"
+    return f"解说风格：{name}（手动选择）"
 
 
 def _parse_conflicts(raw: str | None) -> list[ConflictScore]:

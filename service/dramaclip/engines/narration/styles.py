@@ -13,6 +13,19 @@ from typing import Any
 from dramaclip.infra.paths import resolve_resources_dir
 
 FALLBACK_STYLE_ID = "general"
+AUTO_STYLE_ID = "auto"
+
+# 题材 → 风格映射（auto 匹配用；genre 来自语义层 classify，见 genre.GENRES）
+_GENRE_STYLE_MAP: dict[str, str] = {
+    "悬疑": "suspense",
+    "复仇": "shuanggan",
+    "逆袭": "shuanggan",
+    "甜宠": "emotional",
+    "家庭伦理": "emotional",
+    "古装": "immersive",
+    "都市": FALLBACK_STYLE_ID,
+    "其他": FALLBACK_STYLE_ID,
+}
 
 
 @lru_cache(maxsize=1)
@@ -45,3 +58,19 @@ def get_style(style_id: str | None) -> dict[str, Any]:
         FALLBACK_STYLE_ID,
         {"style_id": FALLBACK_STYLE_ID, "name": "通用", "directives": ""},
     )
+
+
+def resolve_style_id(preferred: str | None, genre: str | None = None) -> str:
+    """解析最终风格 id。
+
+    用户显式选择的风格优先；auto（或未选/未知值）按分析题材映射：
+    悬疑→悬疑反转、复仇/逆袭→爽感逆袭、甜宠/家庭伦理→情感催泪、
+    古装→沉浸叙事、其余→通用爽感。
+    """
+    styles = _load_builtin()
+    if preferred is not None and preferred != AUTO_STYLE_ID and preferred in styles:
+        return preferred
+    mapped = _GENRE_STYLE_MAP.get(genre or "", FALLBACK_STYLE_ID)
+    if mapped in styles:
+        return mapped
+    return FALLBACK_STYLE_ID
