@@ -10,6 +10,7 @@ import json
 from functools import lru_cache
 from typing import Any
 
+from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable
 from dramaclip.infra.paths import resolve_resources_dir
 
 FALLBACK_STYLE_ID = "general"
@@ -20,7 +21,7 @@ _GENRE_STYLE_MAP: dict[str, str] = {
     "悬疑": "suspense",
     "复仇": "shuanggan",
     "逆袭": "shuanggan",
-    "甜宠": "emotional",
+    "甜宠": "sweet",
     "家庭伦理": "emotional",
     "古装": "immersive",
     "都市": FALLBACK_STYLE_ID,
@@ -64,7 +65,7 @@ def resolve_style_id(preferred: str | None, genre: str | None = None) -> str:
     """解析最终风格 id。
 
     用户显式选择的风格优先；auto（或未选/未知值）按分析题材映射：
-    悬疑→悬疑反转、复仇/逆袭→爽感逆袭、甜宠/家庭伦理→情感催泪、
+    悬疑→悬疑反转、复仇/逆袭→爽感逆袭、甜宠→甜宠撒糖、家庭伦理→情感催泪、
     古装→沉浸叙事、其余→通用爽感。
     """
     styles = _load_builtin()
@@ -74,3 +75,48 @@ def resolve_style_id(preferred: str | None, genre: str | None = None) -> str:
     if mapped in styles:
         return mapped
     return FALLBACK_STYLE_ID
+
+
+_SELECT_SYSTEM_PROMPT = (
+    "你是短剧推广策略师。根据台词转写判断剧情题材与爽点，"
+    "从风格库中选出最适合的解说风格。只输出 JSON："
+    '{"style_id":"风格id","reason":"一句话理由"}，不要其他内容。'
+)
+
+
+def select_style_with_reason(
+    llm: LlmClient,
+    transcript: list[dict[str, Any]],
+    *,
+    max_lines: int = 40,
+) -> tuple[str, str] | None:
+    """口味层：LLM 读转写从风格库自选风格，返回 (style_id, reason)。
+
+    失败（LLM 不可用/输出非法/选了库外风格/转写为空）返回 None，由调用方降级。
+    """
+    styles = _load_builtin()
+    if not styles:
+        return None
+    menu = "\n".join(
+        f"- {sid} {data.get('name', '')}：{data.get('desc', '')}"
+        for sid, data in sorted(styles.items())
+    )
+    lines = [
+        f"{float(item.get('start', 0)):.0f}s {str(item.get('text', '')).strip()}"
+        for item in transcript
+        if str(item.get('text', '')).strip()
+    ][:max_lines]
+    if not lines:
+        return None
+    user_prompt = f"风格库：\n{menu}\n\n台词转写节选：\n" + "\n".join(lines)
+    try:
+        raw = llm.chat_json(_SELECT_SYSTEM_PROMPT, user_prompt)
+    except LlmUnavailable:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    style_id = str(raw.get("style_id", "")).strip()
+    reason = str(raw.get("reason", "")).strip()
+    if style_id not in styles:
+        return None
+    return style_id, reason or "剧情匹配"
