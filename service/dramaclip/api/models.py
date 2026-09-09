@@ -13,6 +13,22 @@ from dramaclip.transport.rpc import Router, RpcDomainError
 _ERR_MODEL_NOT_FOUND = -32010
 _ERR_MODEL_STATE = -32011
 
+_ENDPOINT_DEFAULTS: dict[str, str] = {
+    "hf_mirror": "https://hf-mirror.com",
+    "modelscope": "https://modelscope.cn",
+    "huggingface": "https://huggingface.co",
+}
+
+
+def endpoints(context: AppContext) -> dict[str, str]:
+    """下载端点：settings 可覆盖镜像站（键 download.hf_mirror / download.ms_base）。"""
+    out = dict(_ENDPOINT_DEFAULTS)
+    for key, setting in (("hf_mirror", "download.hf_mirror"), ("modelscope", "download.ms_base")):
+        value = (context.settings.get(setting) or "").strip()
+        if value:
+            out[key] = value
+    return out
+
 
 def register(router: Router, context: AppContext) -> None:
     router.register("models.list", lambda _params: list_models(context))
@@ -22,16 +38,26 @@ def register(router: Router, context: AppContext) -> None:
 
 
 def list_models(context: AppContext) -> list[dict[str, Any]]:
-    """清单 + 状态（内置清单 ∪ models/ 目录手动放置的发现项）。"""
+    """清单 + 状态（内置清单 ∪ models/ 目录手动放置的发现项），附各源仓库主页。"""
     models_dir = context.work_dir.parent.parent / "models"
-    return registry.list_models(models_dir)
+    eps = endpoints(context)
+    items = registry.list_models(models_dir)
+    for item in items:
+        item["sources"] = [
+            {**source, "web_url": downloader.web_url(str(source["kind"]), str(source["repo"]), eps)}
+            for source in item["sources"]
+        ]
+    return items
 
 
 def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     model_id = str(params.get("model_id", ""))
+    source = str(params.get("source") or "auto")
     spec = downloader.spec_by_id(model_id)
     if spec is None:
         raise RpcDomainError(_ERR_MODEL_NOT_FOUND, f"未知模型: {model_id}")
+    if source != "auto" and source not in dict(spec.sources()):
+        raise RpcDomainError(_ERR_MODEL_STATE, f"{spec.name} 不支持来源 {source}")
     models_dir = context.work_dir.parent.parent / "models"
     if registry.find(spec, models_dir) is not None:
         raise RpcDomainError(_ERR_MODEL_STATE, f"{spec.name} 已安装")
@@ -40,17 +66,12 @@ def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     context.cancel_events[job_id] = cancel_event
     done_event = threading.Event()
 
-    def _finalize() -> None:
-        context.cancel_events.pop(job_id, None)
-        status = context.job_store.get(job_id)
-        if status is not None and status["status"] == "running":
-            context.job_store.mark_completed(job_id)
-
     def _watch() -> None:
         done_event.wait()
         job = context.job_store.get(job_id)
         if job is not None and job["status"] == "running":
             context.job_store.mark_completed(job_id)
+        context.cancel_events.pop(job_id, None)
 
     downloader.download_in_background(
         spec,
@@ -58,6 +79,8 @@ def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         context.notifier,
         cancel_event,
         done_event,
+        endpoints=endpoints(context),
+        source=source,
     )
     threading.Thread(target=_watch, daemon=True, name=f"dl-watch-{model_id}").start()
     return {"job_id": job_id}

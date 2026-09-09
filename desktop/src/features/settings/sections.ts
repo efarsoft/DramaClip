@@ -116,7 +116,34 @@ const HARDWARE_SECTION: SectionSpec = {
   ],
 };
 
-/** 分区按使用频率排序：出片 → 分析 → 字幕 → 硬件（DSS §4.1）。 */
+const DOWNLOAD_SECTION: SectionSpec = {
+  id: 'download',
+  icon: '⬇️',
+  title: '下载加速',
+  fields: [
+    {
+      key: 'download.hf_mirror',
+      label: 'HuggingFace 镜像站',
+      type: 'text',
+      placeholder: 'https://hf-mirror.com',
+      help: '模型下载的国内镜像；镜像站失效时可自行替换',
+    },
+    {
+      key: 'download.ms_base',
+      label: 'ModelScope 站点',
+      type: 'text',
+      placeholder: 'https://modelscope.cn',
+    },
+  ],
+};
+
+/** 分区按使用频率排序：出片 → 分析 → 字幕 → 下载 → 硬件（DSS §4.1）。 */
 export function buildSections(presetOptions: readonly Option[]): readonly SectionSpec[] {
-  return [EXPORT_SECTION, ANALYSIS_SECTION, subtitleSection(presetOptions), HARDWARE_SECTION];
+  return [
+    EXPORT_SECTION,
+    ANALYSIS_SECTION,
+    subtitleSection(presetOptions),
+    DOWNLOAD_SECTION,
+    HARDWARE_SECTION,
+  ];
 }

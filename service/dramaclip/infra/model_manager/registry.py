@@ -18,17 +18,27 @@ class ModelSpec:
     model_id: str          # 如 faster-whisper-base
     kind: str              # asr | tts | diarization
     engine: str            # 归属引擎（faster_whisper / sensevoice / kokoro）
-    repo_id: str           # ModelScope/HF 仓库 id
+    repo_id: str           # HuggingFace 仓库 id
     placement: str         # 相对 models_dir 的目录（手动放置位置）
     name: str              # 展示名
     required: bool = False
     notes: str = ""
+    ms_repo: str = ""      # ModelScope 仓库 id（空 = 该模型无 ModelScope 源）
     # ---- v2 展示元数据 ----
     size_label: str = ""   # 体积说明（如 "~480MB"）
     tier: str = ""         # fast | balanced | accurate（档位分组）
     speed: int = 0         # 速度评级 1-5（5 最快）
     quality: int = 0       # 精度评级 1-5（5 最准）
     desc: str = ""         # 一句话定位
+
+    def sources(self) -> list[tuple[str, str]]:
+        """可用下载源（国内优先排序）：[(kind, repo)]，kind ∈ modelscope/hf_mirror/huggingface。"""
+        out: list[tuple[str, str]] = []
+        if self.ms_repo:
+            out.append(("modelscope", self.ms_repo))
+        out.append(("hf_mirror", self.repo_id))
+        out.append(("huggingface", self.repo_id))
+        return out
 
 
 def builtin_specs() -> list[ModelSpec]:
@@ -93,6 +103,7 @@ def builtin_specs() -> list[ModelSpec]:
             kind="asr",
             engine="sensevoice",
             repo_id="iic/SenseVoiceSmall",
+            ms_repo="iic/SenseVoiceSmall",
             placement="asr/iic/SenseVoiceSmall",
             name="SenseVoice Small（含情绪标签）",
             notes="约 900MB；需安装 ml 依赖组（torch/funasr）",
@@ -161,6 +172,7 @@ def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
         "speed": spec.speed,
         "quality": spec.quality,
         "desc": spec.desc,
+        "sources": [{"kind": kind, "repo": repo} for kind, repo in spec.sources()],
         "status": "installed" if installed else "not_installed",
         "path": str(resolved) if resolved is not None else None,
     }

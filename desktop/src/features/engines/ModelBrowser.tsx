@@ -5,7 +5,8 @@ import { ReloadOutlined, SearchOutlined, StarFilled } from '@ant-design/icons';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { modelsApi } from '../../services/client';
 import { tokens } from '../../styles/theme';
-import { DownloadButton, ModelList } from './ModelList';
+import { ModelList } from './ModelList';
+import { DownloadSourceButton } from './ModelDownloadPopover';
 
 /** 完整浏览器：推荐卡 + 工具栏 + 分组列表。 */
 export function ModelBrowser({
@@ -73,7 +74,7 @@ function RecommendCard({ model, onChanged }: { model: ModelInfo; onChanged: () =
           已就绪
         </Tag>
       ) : (
-        <DownloadButton model={model} onChanged={onChanged} />
+        <DownloadSourceButton model={model} onChanged={onChanged} />
       )}
     </div>
   );

@@ -28,6 +28,17 @@
           "status": { "type": "string" },
           "uptime_s": { "type": "number" },
           "gpu": { "type": "string" },
+          "gpu_info": {
+            "type": "object",
+            "required": ["ready", "vendor", "name", "driver_version", "max_cuda_version"],
+            "properties": {
+              "ready": { "type": "boolean" },
+              "vendor": { "type": "string" },
+              "name": { "type": "string" },
+              "driver_version": { "type": "string" },
+              "max_cuda_version": { "type": "string" }
+            }
+          },
           "vram_free_mb": { "type": "integer" },
           "disk_free_gb": { "type": "number" },
           "models_ok": { "type": "boolean" }

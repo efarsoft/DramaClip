@@ -12,7 +12,7 @@ from dramaclip import PROTOCOL_VERSION, __version__
 from dramaclip.api import build_router
 from dramaclip.api.context import AppContext
 from dramaclip.engines.analysis.runtime import AnalysisRuntime
-from dramaclip.infra import config, jobs, paths
+from dramaclip.infra import config, gpu, jobs, paths
 from dramaclip.infra import logging as logging_setup
 from dramaclip.infra.storage import backup, db
 from dramaclip.transport.connection import ServiceConnection
@@ -50,6 +50,7 @@ class ServiceApp:
         settings = config.load(conn)
         job_store = jobs.JobStore(conn)
         interrupted = job_store.sweep_interrupted()
+        gpu.prefetch()  # GPU 探测慢（nvidia-smi），启动即后台预热，health 不阻塞
 
         log_file = logging_setup.setup_file_logging(data_dir / "logs")
         if log_file is not None:

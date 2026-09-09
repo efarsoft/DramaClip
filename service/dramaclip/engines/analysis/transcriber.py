@@ -6,10 +6,15 @@ import 一律发生在引擎方法内部——未装依赖时仅在真正调用�
 
 from __future__ import annotations
 
+import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from dramaclip.engines.analysis.models import AsrSegment
+
+_LOGGER = logging.getLogger(__name__)
+_CUDA_PROBLEM = re.compile(r"cublas|cudnn|cudart|cuda|gpu", re.I)
 
 if TYPE_CHECKING:
     # 仅类型检查期导入（运行时懒加载；缺依赖时经 ignore_missing_imports 兜底）
@@ -58,12 +63,26 @@ class FasterWhisperEngine:
         if self._model is None:
             from faster_whisper import WhisperModel  # ml extras 懒加载
 
-            self._model = WhisperModel(
+            self._model = self._create(WhisperModel, self._device)
+        return self._model
+
+    def _create(self, cls: type[WhisperModel], device: str) -> WhisperModel:
+        try:
+            return cls(
                 self._model_size,
-                device=self._device,
+                device=device,
                 download_root=str(self._models_dir) if self._models_dir else None,
             )
-        return self._model
+        except Exception as exc:  # noqa: BLE001 - CUDA 运行库问题统一按关键字识别
+            if device != "cpu" and _CUDA_PROBLEM.search(str(exc)):
+                # GPU 不可用（缺 cuBLAS/cuDNN、驱动不兼容等）：诚实降级 CPU 并留痕
+                _LOGGER.warning("CUDA 初始化失败，自动回退 CPU：%s", exc)
+                return cls(
+                    self._model_size,
+                    device="cpu",
+                    download_root=str(self._models_dir) if self._models_dir else None,
+                )
+            raise
 
 
 class SenseVoiceEngine:

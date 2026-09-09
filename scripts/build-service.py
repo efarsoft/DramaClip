@@ -59,7 +59,12 @@ raise SystemExit(main())
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="构建 DramaClip Python sidecar")
-    parser.parse_args()
+    parser.add_argument(
+        "--cuda",
+        action="store_true",
+        help="收集 NVIDIA CUDA 运行库（nvidia-cublas-cu12 / nvidia-cudnn-cu12，需先在 venv 安装；体积 +~700MB）",
+    )
+    args = parser.parse_args()
 
     entry = BUILD_DIR / "sidecar_entry.py"
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
@@ -91,6 +96,10 @@ def main() -> int:
     cmd += ["--collect-data", "dramaclip"]
     for module in ("misaki", "kokoro", "jieba", "num2words"):
         cmd += ["--collect-data", module]
+    if args.cuda:
+        # CUDA 变体：运行库随包（用户只需 NVIDIA 驱动）；ctranslate2 自动启用 GPU
+        for module in ("nvidia.cublas", "nvidia.cudnn"):
+            cmd += ["--collect-all", module]
     cmd.append(str(entry))
 
     print("[build-service] PyInstaller 开始（含 torch，需数分钟）…")

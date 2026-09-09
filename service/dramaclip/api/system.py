@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from dramaclip.infra import gpu
 from dramaclip.transport.rpc import Router
 
 _STARTED_AT = time.monotonic()
@@ -24,7 +25,11 @@ def register(
         return {"service_version": service_version, "protocol_version": protocol_version}
 
     def health(_params: dict[str, Any]) -> dict[str, Any]:
-        return {"status": "ok", "uptime_s": round(time.monotonic() - _STARTED_AT, 1)}
+        return {
+            "status": "ok",
+            "uptime_s": round(time.monotonic() - _STARTED_AT, 1),
+            "gpu_info": gpu.snapshot(),
+        }
 
     def _shutdown(_params: dict[str, Any]) -> dict[str, Any]:
         shutdown()

@@ -1,11 +1,13 @@
-/** 模型分组列表：档位分组 + 模型行（速度/精度评级、下载/目录/删除）。 */
-import type { ReactElement } from 'react';
+/** 模型分组列表：档位分组 + 模型行（速度/精度评级、下载源气泡/目录/删除）。 */
+import { useEffect, useRef, type ReactElement } from 'react';
 import { App as AntdApp, Button, Empty, Popconfirm } from 'antd';
-import { DeleteOutlined, DownloadOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { DeleteOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { modelsApi, revealInFolder } from '../../services/client';
+import { useUiStore } from '../../stores/ui';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
+import { DownloadSourceButton } from './ModelDownloadPopover';
 
 interface TierSpec {
   readonly key: string;
@@ -27,6 +29,7 @@ export function ModelList({
   models: readonly ModelInfo[];
   onChanged: () => void;
 }): ReactElement {
+  useDownloadSettled(onChanged);
   if (models.length === 0) {
     return <Empty description="没有符合条件的模型" style={{ padding: tokens.spaceLg }} />;
   }
@@ -144,33 +147,26 @@ function RatingDots({ label, level }: { label: string; level: number }): ReactEl
   );
 }
 
-/** 下载按钮（推荐卡与模型行共用）。 */
-export function DownloadButton({
-  model,
-  onChanged,
-}: {
-  model: ModelInfo;
-  onChanged: () => void;
-}): ReactElement {
+function DownloadButton({ model, onChanged }: { model: ModelInfo; onChanged: () => void }): ReactElement {
+  return <DownloadSourceButton model={model} onChanged={onChanged} />;
+}
+
+/** 下载结束（完成/失败）时提示并刷新列表（进度事件只到达一次）。 */function useDownloadSettled(onChanged: () => void): void {
   const { message } = AntdApp.useApp();
-  return (
-    <Button
-      size="small"
-      type="primary"
-      icon={<DownloadOutlined />}
-      onClick={() => {
-        message.success(`开始下载 ${model.name}，完成后自动检测`);
-        modelsApi
-          .download(model.model_id)
-          .then(onChanged)
-          .catch(() => {
-            message.error('下载任务创建失败');
-          });
-      }}
-    >
-      下载
-    </Button>
-  );
+  const downloads = useUiStore((state) => state.modelDownloads);
+  const seen = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const [modelId, state] of Object.entries(downloads)) {
+      if (state.status === 'downloading' || seen.current.has(modelId)) continue;
+      seen.current.add(modelId);
+      if (state.status === 'done') {
+        message.success('模型下载完成');
+      } else {
+        message.error('模型下载失败，可重试或手动导入');
+      }
+      onChanged();
+    }
+  }, [downloads, message, onChanged]);
 }
 
 function RowActions({

@@ -57,6 +57,17 @@
         },
         "desc": {
           "type": "string"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "web_url"],
+            "properties": {
+              "kind": { "type": "string" },
+              "web_url": { "type": "string" }
+            }
+          }
         }
       }
     }
@@ -75,7 +86,7 @@
     },
     {
       "name": "models.download",
-      "summary": "后台下载模型（ModelScope 优先 → HF 镜像降级；失败时返回手动下载指引）",
+      "summary": "后台下载模型（可选指定来源，失败自动按国内优先降级其余来源）",
       "params": {
         "type": "object",
         "required": [
@@ -84,6 +95,10 @@
         "properties": {
           "model_id": {
             "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "description": "modelscope | hf_mirror | huggingface；缺省 auto=国内优先"
           }
         }
       },

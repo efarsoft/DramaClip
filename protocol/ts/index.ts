@@ -44,11 +44,21 @@ export interface PingResult {
   readonly protocol_version: number;
 }
 
+/** 健康检查扩展：GPU 探测结果（未就绪时 ready=false，服务端后台补测）。 */
+export interface GpuInfo {
+  readonly ready: boolean;
+  readonly vendor: string;
+  readonly name: string;
+  readonly driver_version: string;
+  readonly max_cuda_version: string;
+}
+
 /** system.health 返回体（扩展字段按需出现） */
 export interface HealthResult {
   readonly status: string;
   readonly uptime_s: number;
   readonly gpu?: string;
+  readonly gpu_info?: GpuInfo;
   readonly vram_free_mb?: number;
   readonly disk_free_gb?: number;
   readonly models_ok?: boolean;
@@ -206,6 +216,12 @@ export interface WorkItem {
   readonly completed_at?: number;
 }
 
+/** 模型下载源（kind ∈ modelscope | hf_mirror | huggingface）。 */
+export interface ModelSource {
+  readonly kind: string;
+  readonly web_url: string;
+}
+
 export interface ModelInfo {
   readonly model_id: string;
   readonly kind: string;
@@ -221,6 +237,7 @@ export interface ModelInfo {
   readonly speed?: number;
   readonly quality?: number;
   readonly desc?: string;
+  readonly sources?: ReadonlyArray<ModelSource>;
 }
 
 /** 解说风格库条目（narration.list_styles）。 */

@@ -131,8 +131,11 @@ export const exportApi = {
 
 export const modelsApi = {
   list: (): Promise<ModelInfo[]> => rpc<ModelInfo[]>('models.list'),
-  download: (modelId: string): Promise<{ job_id: string }> =>
-    rpc<{ job_id: string }>('models.download', { model_id: modelId }),
+  download: (modelId: string, source?: string): Promise<{ job_id: string }> =>
+    rpc<{ job_id: string }>(
+      'models.download',
+      source === undefined ? { model_id: modelId } : { model_id: modelId, source },
+    ),
   scanLocal: (): Promise<{ installed: ModelInfo[]; total: number }> =>
     rpc<{ installed: ModelInfo[]; total: number }>('models.scan_local'),
   remove: (modelId: string): Promise<{ ok: boolean }> =>
