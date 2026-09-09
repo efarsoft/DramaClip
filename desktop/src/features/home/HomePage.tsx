@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { DashboardSummary, ModelInfo, Project } from '@dramaclip/protocol';
-import { projectApi, rpc } from '../../services/client';
+import type { DashboardSummary, ModelInfo, Project, WorkItem } from '@dramaclip/protocol';
+import { listWorks, projectApi, rpc } from '../../services/client';
 import { useUiStore } from '../../stores/ui';
 import { tokens } from '../../styles/theme';
 import { EnvPanel, TipsPanel, ToolboxPanel } from './EnvPanel';
 import { RecentProjects } from './RecentProjects';
+import { RecentWorks } from './RecentWorks';
 import { StartCards } from './StartCards';
 import { TodoCard } from './TodoCard';
 import { useTodos } from './useTodos';
@@ -22,20 +23,23 @@ function HomeContent() {
   const [models, setModels] = useState<ModelInfo[] | null>(null);
   const [llmBaseUrl, setLlmBaseUrl] = useState('');
   const [ttsEngine, setTtsEngine] = useState('edge');
+  const [works, setWorks] = useState<WorkItem[]>([]);
   const serviceState = useUiStore((state) => state.serviceState);
 
   const load = useCallback(async () => {
-    const [summaryData, projectList, modelList, settings] = await Promise.all([
+    const [summaryData, projectList, modelList, settings, workItems] = await Promise.all([
       projectApi.dashboardSummary(),
       projectApi.list(),
       rpc<ModelInfo[]>('models.list').catch(() => null),
       rpc<Record<string, string>>('settings.get').catch(() => null),
+      listWorks(6).catch((): WorkItem[] => []),
     ]);
     setSummary(summaryData);
     setProjects(projectList.slice(0, 6));
     setModels(modelList);
     setLlmBaseUrl(settings?.['llm.base_url'] ?? '');
     setTtsEngine(settings?.['tts.engine'] ?? 'edge');
+    setWorks(workItems);
   }, []);
 
   // 服务就绪前发起的 RPC 会失败；ready 后重载一次（修复启动时序竞争）
@@ -56,7 +60,10 @@ function HomeContent() {
               void navigate(`/projects/${projectId}/analysis`);
             }}
           />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
           <RecentProjects projects={projects} />
+          <RecentWorks works={works} />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <EnvPanel models={models} llmBaseUrl={llmBaseUrl} ttsEngine={ttsEngine} />
