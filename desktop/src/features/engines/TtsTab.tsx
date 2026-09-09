@@ -3,7 +3,7 @@ import { Card as StyledCard, Select, Tag } from 'antd';
 import { PageSection } from '../../components/layout/PageKit';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
-import { ModelRow } from './ModelRow';
+import { ModelList } from './ModelList';
 import type { SettingsMap } from './EnginesPage';
 
 const EDGE_VOICES = [
@@ -67,7 +67,7 @@ export function TtsTab({
       </PageSection>
       {engine === 'kokoro' && kokoro !== undefined && (
         <PageSection title="本地模型">
-          <ModelRow model={kokoro} recommended onChanged={onChanged} />
+          <ModelList models={[kokoro]} onChanged={onChanged} />
         </PageSection>
       )}
     </div>

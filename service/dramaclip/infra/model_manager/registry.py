@@ -1,6 +1,6 @@
-"""模型清单与状态解析（registry）。
+"""模型清单与状态解析（registry v2）。
 
-清单 = 引擎所需的已知模型（id/kind/repo/放置目录）；
+清单 = 引擎所需的已知模型（id/kind/repo/放置目录/档位与评级元数据）；
 状态 = placement 目录探测（installed / not_installed），手动放置即生效。
 """
 
@@ -23,6 +23,12 @@ class ModelSpec:
     name: str              # 展示名
     required: bool = False
     notes: str = ""
+    # ---- v2 展示元数据 ----
+    size_label: str = ""   # 体积说明（如 "~480MB"）
+    tier: str = ""         # fast | balanced | accurate（档位分组）
+    speed: int = 0         # 速度评级 1-5（5 最快）
+    quality: int = 0       # 精度评级 1-5（5 最准）
+    desc: str = ""         # 一句话定位
 
 
 def builtin_specs() -> list[ModelSpec]:
@@ -35,7 +41,12 @@ def builtin_specs() -> list[ModelSpec]:
             placement="asr/faster-whisper",
             name="Whisper Base（CPU 快速转写）",
             required=True,
-            notes="约 145MB；目录形如 models--Systran--faster-whisper-base/snapshots/<hash>",
+            notes="目录形如 models--Systran--faster-whisper-base/snapshots/<hash>",
+            size_label="~145MB",
+            tier="fast",
+            speed=4,
+            quality=3,
+            desc="快速转写，日常够用",
         ),
         ModelSpec(
             model_id="faster-whisper-small",
@@ -45,6 +56,37 @@ def builtin_specs() -> list[ModelSpec]:
             placement="asr/faster-whisper",
             name="Whisper Small（更准，稍慢）",
             notes="约 480MB",
+            size_label="~480MB",
+            tier="balanced",
+            speed=3,
+            quality=4,
+            desc="速度与准确度的平衡点",
+        ),
+        ModelSpec(
+            model_id="faster-whisper-medium",
+            kind="asr",
+            engine="faster_whisper",
+            repo_id="Systran/faster-whisper-medium",
+            placement="asr/faster-whisper",
+            name="Whisper Medium（高准确度）",
+            size_label="~1.5GB",
+            tier="accurate",
+            speed=2,
+            quality=4,
+            desc="更准，CPU 上较慢",
+        ),
+        ModelSpec(
+            model_id="faster-whisper-large-v3",
+            kind="asr",
+            engine="faster_whisper",
+            repo_id="Systran/faster-whisper-large-v3",
+            placement="asr/faster-whisper",
+            name="Whisper Large-v3（最高精度）",
+            size_label="~3GB",
+            tier="accurate",
+            speed=1,
+            quality=5,
+            desc="精度天花板，建议 GPU",
         ),
         ModelSpec(
             model_id="sensevoice-small",
@@ -54,6 +96,11 @@ def builtin_specs() -> list[ModelSpec]:
             placement="asr/iic/SenseVoiceSmall",
             name="SenseVoice Small（含情绪标签）",
             notes="约 900MB；需安装 ml 依赖组（torch/funasr）",
+            size_label="~900MB",
+            tier="balanced",
+            speed=4,
+            quality=4,
+            desc="含情绪标签，需 ml 依赖组",
         ),
         ModelSpec(
             model_id="kokoro-82m",
@@ -63,6 +110,11 @@ def builtin_specs() -> list[ModelSpec]:
             placement="tts/kokoro",
             name="Kokoro 82M 中文（本地 TTS）",
             notes="约 350MB；需安装 kokoro 依赖组（含 espeak-ng）",
+            size_label="~350MB",
+            tier="balanced",
+            speed=3,
+            quality=4,
+            desc="中文离线配音",
         ),
     ]
 
@@ -104,6 +156,11 @@ def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
         "name": spec.name,
         "required": spec.required,
         "notes": spec.notes,
+        "size_label": spec.size_label,
+        "tier": spec.tier,
+        "speed": spec.speed,
+        "quality": spec.quality,
+        "desc": spec.desc,
         "status": "installed" if installed else "not_installed",
         "path": str(resolved) if resolved is not None else None,
     }

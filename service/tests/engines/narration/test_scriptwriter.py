@@ -77,7 +77,7 @@ def test_segments_sorted_and_overlaps_trimmed() -> None:
     assert script is not None
     starts = [segment.start for segment in script.segments]
     assert starts == sorted(starts), "乱序段被排序"
-    for first, second in zip(script.segments, script.segments[1:]):
+    for first, second in zip(script.segments, script.segments[1:], strict=False):
         assert first.end <= second.start + 0.01, "重叠被游标裁剪"
 
 

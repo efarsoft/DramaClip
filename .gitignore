@@ -5,6 +5,7 @@ node_modules/
 # ── 构建产物 ──
 desktop/dist/
 desktop/dist-electron/
+*.tsbuildinfo
 service/build/
 service/dist/
 

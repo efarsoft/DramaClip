@@ -216,6 +216,11 @@ export interface ModelInfo {
   readonly notes?: string;
   readonly status: string;
   readonly path?: string;
+  readonly size_label?: string;
+  readonly tier?: string;
+  readonly speed?: number;
+  readonly quality?: number;
+  readonly desc?: string;
 }
 
 /** 解说风格库条目（narration.list_styles）。 */

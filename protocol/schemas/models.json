@@ -6,17 +6,58 @@
   "x-models": {
     "ModelInfo": {
       "type": "object",
-      "required": ["model_id", "kind", "engine", "repo_id", "name", "required", "status"],
+      "required": [
+        "model_id",
+        "kind",
+        "engine",
+        "repo_id",
+        "name",
+        "required",
+        "status"
+      ],
       "properties": {
-        "model_id": { "type": "string" },
-        "kind": { "type": "string" },
-        "engine": { "type": "string" },
-        "repo_id": { "type": "string" },
-        "name": { "type": "string" },
-        "required": { "type": "boolean" },
-        "notes": { "type": "string" },
-        "status": { "type": "string" },
-        "path": { "type": "string" }
+        "model_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "engine": {
+          "type": "string"
+        },
+        "repo_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "size_label": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "string"
+        },
+        "speed": {
+          "type": "integer"
+        },
+        "quality": {
+          "type": "integer"
+        },
+        "desc": {
+          "type": "string"
+        }
       }
     }
   },
@@ -25,13 +66,38 @@
       "name": "models.list",
       "summary": "模型清单与安装状态",
       "params": {},
-      "result": { "type": "array", "items": { "$ref": "#/x-models/ModelInfo" } }
+      "result": {
+        "type": "array",
+        "items": {
+          "$ref": "#/x-models/ModelInfo"
+        }
+      }
     },
     {
       "name": "models.download",
       "summary": "后台下载模型（ModelScope 优先 → HF 镜像降级；失败时返回手动下载指引）",
-      "params": { "type": "object", "required": ["model_id"], "properties": { "model_id": { "type": "string" } } },
-      "result": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } }
+      "params": {
+        "type": "object",
+        "required": [
+          "model_id"
+        ],
+        "properties": {
+          "model_id": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        }
+      }
     },
     {
       "name": "models.scan_local",
@@ -39,18 +105,48 @@
       "params": {},
       "result": {
         "type": "object",
-        "required": ["installed", "total"],
+        "required": [
+          "installed",
+          "total"
+        ],
         "properties": {
-          "installed": { "type": "array", "items": { "$ref": "#/x-models/ModelInfo" } },
-          "total": { "type": "integer" }
+          "installed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/x-models/ModelInfo"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
         }
       }
     },
     {
       "name": "models.delete",
       "summary": "删除已安装模型",
-      "params": { "type": "object", "required": ["model_id"], "properties": { "model_id": { "type": "string" } } },
-      "result": { "type": "object", "required": ["ok"], "properties": { "ok": { "type": "boolean" } } }
+      "params": {
+        "type": "object",
+        "required": [
+          "model_id"
+        ],
+        "properties": {
+          "model_id": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
     }
   ]
 }
