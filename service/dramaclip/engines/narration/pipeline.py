@@ -157,6 +157,80 @@ def build_from_script_dialogue(
                     strategy=strategy, planner="llm_script")
 
 
+def build_from_script_episodes(
+    episode_map: dict[int, tuple[str, list[AsrSegment]]],
+    durations: dict[int, float],
+    script: Script,
+    strategy: StrategySpec,
+) -> PlanData:
+    """跨集剧本驱动编排：每个剧本片段按集号取对应集的素材画面。
+
+    episode_map：集号 → (episode_id, 该集 asr_segments)；durations：集号 → 集时长。
+    钩子挂在首个剧本片段所在集的画面开头；正文逐段吸附台词边界；CTA 接在末段之后。
+    """
+    bounds_by_ep = {
+        number: sorted({round(b, 2) for seg in asr for b in (seg.start, seg.end)})
+        for number, (_episode_id, asr) in episode_map.items()
+    }
+
+    def snap(number: int, value: float) -> float:
+        candidates = bounds_by_ep.get(number, [])
+        near = [b for b in candidates if abs(b - value) <= 1.5]
+        return min(near, key=lambda b: abs(b - value)) if near else value
+
+    def narration_span(number: int, text: str, start: float) -> TimelineSegment:
+        limit = durations.get(number, 0.0) + 5
+        return TimelineSegment(
+            episode_id=episode_map[number][0],
+            start=round(start, 2),
+            end=round(min(start + estimate_duration(text), limit), 2),
+            audio="narration",
+            subtitle_text=text,
+        )
+
+    timeline: list[TimelineSegment] = []
+    texts: list[NarrationText] = []
+    cursors: dict[int, float] = {}
+
+    first = script.segments[0]
+    hook_start = snap(first.episode, first.start)
+    timeline.append(narration_span(first.episode, script.hook, hook_start))
+    texts.append(NarrationText(id="n0", text=script.hook))
+    cursors[first.episode] = hook_start + estimate_duration(script.hook)
+
+    for order, segment in enumerate(script.segments, start=1):
+        ep = segment.episode
+        limit = durations.get(ep, 0.0) + 5
+        start = max(snap(ep, segment.start), cursors.get(ep, 0.0))
+        end = min(max(snap(ep, segment.end), start + 0.5), limit)
+        if end <= start:
+            continue
+        timeline.append(
+            TimelineSegment(
+                episode_id=episode_map[ep][0],
+                start=round(start, 2),
+                end=round(end, 2),
+                audio="narration",
+                subtitle_text=segment.text,
+            )
+        )
+        texts.append(NarrationText(id=f"n{order}", text=segment.text))
+        cursors[ep] = end
+
+    if script.cta != "":
+        last_ep = script.segments[-1].episode
+        timeline.append(narration_span(last_ep, script.cta, cursors.get(last_ep, 0.0)))
+        texts.append(NarrationText(id=f"n{len(script.segments) + 1}", text=script.cta))
+
+    return PlanData(
+        mode="dialogue_narration",
+        timeline=timeline,
+        narration_texts=texts,
+        strategy=strategy,
+        planner="llm_script",
+    )
+
+
 def parse_audio_features(audio_json: str | None) -> AudioFeatures:
     if not audio_json:
         return AudioFeatures()

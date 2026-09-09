@@ -191,24 +191,34 @@ def _generate_one(
     episodes: list[dict[str, Any]],
     settings: dict[str, str],
 ) -> None:
-    """对首个已完成集生成编排（跨集编排随 P1 扩展）。"""
-    episode = episodes[0]
-    episode_id = str(episode["id"])
-    record = analysis_repo.get(context.conn, episode_id)
-    if record is None:
-        raise ValueError("分析记录缺失")
-    conflicts = _parse_conflicts(record["conflict_scores"])
-    highlights = _parse_highlights(record["highlights"])
-    asr_segments = narration_pipeline.parse_asr_segments(record["asr_segments"])
-    audio = narration_pipeline.parse_audio_features(record["audio_features"])
+    """生成单模式编排。对话解说：跨集 LLM 剧本（全部完成集），失败降级规则编排。"""
+    project_id = str(episodes[0]["project_id"])
+    plan: PlanData | None = None
+    used_ids = [str(episodes[0]["id"])]
 
-    # 对话解说试点：LLM 已配置时走剧本驱动（风格自动/手动注入），失败降级规则编排
-    plan = None
     if mode == "dialogue_narration":
-        plan = script_dialogue_plan(
-            episode, asr_segments, settings, log=context.notifier.log
-        )
+        episode_inputs = _collect_episode_inputs(context, episodes)
+        if episode_inputs:
+            result = script_dialogue_plan(
+                episode_inputs,
+                settings,
+                log=context.notifier.log,
+                trace_dir=context.work_dir.parent.parent / "logs" / "llm",
+            )
+            if result is not None:
+                plan, used_ids = result
+
     if plan is None:
+        episode = episodes[0]
+        episode_id = str(episode["id"])
+        used_ids = [episode_id]
+        record = analysis_repo.get(context.conn, episode_id)
+        if record is None:
+            raise ValueError("分析记录缺失")
+        conflicts = _parse_conflicts(record["conflict_scores"])
+        highlights = _parse_highlights(record["highlights"])
+        asr_segments = narration_pipeline.parse_asr_segments(record["asr_segments"])
+        audio = narration_pipeline.parse_audio_features(record["audio_features"])
         plan = narration_pipeline.build_plan(
             mode,
             episode_id,
@@ -218,29 +228,45 @@ def _generate_one(
             audio,
             settings,
         )
-    elif plan.narration_texts:
-        tts_dir = context.work_dir / "tts"
-        models_dir = context.work_dir.parent.parent / "models"
-        plan = narration_pipeline.synthesize_narration_texts(plan, settings, tts_dir, models_dir)
-    tts_modes = (
-        "intro_narration",
-        "cross_narration",
-        "ultra_short_hook",
-        "full_narration",
-        "dual_host_chat",
-        "inner_monologue",
-    )
-    if mode in tts_modes:
+
+    if plan.narration_texts:
         tts_dir = context.work_dir / "tts"
         models_dir = context.work_dir.parent.parent / "models"
         plan = narration_pipeline.synthesize_narration_texts(plan, settings, tts_dir, models_dir)
     plans_repo.create(
         context.conn,
-        str(episode["project_id"]),
+        project_id,
         mode,
-        [episode_id],
+        used_ids,
         plan.model_dump(),
     )
+
+
+def _collect_episode_inputs(
+    context: AppContext,
+    episodes: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """收集全部完成集的转写输入（跨集剧本原料），按集号升序。"""
+    inputs: list[dict[str, Any]] = []
+    for episode in sorted(episodes, key=lambda ep: int(ep["episode_number"])):
+        record = analysis_repo.get(context.conn, str(episode["id"]))
+        if record is None:
+            continue
+        segments = narration_pipeline.parse_asr_segments(record["asr_segments"])
+        if not segments:
+            continue
+        inputs.append(
+            {
+                "number": int(episode["episode_number"]),
+                "episode_id": str(episode["id"]),
+                "duration": float(episode.get("duration") or 0.0),
+                "segments": [
+                    {"start": seg.start, "end": seg.end, "text": seg.text}
+                    for seg in segments
+                ],
+            }
+        )
+    return inputs
 
 
 def _parse_conflicts(raw: str | None) -> list[ConflictScore]:
