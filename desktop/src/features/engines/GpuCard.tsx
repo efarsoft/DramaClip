@@ -1,0 +1,93 @@
+/** GPU 加速状态卡：显卡 / 驱动 / CUDA 上限 + 加速方式说明（ASR 转写用）。 */
+import type { ReactElement } from 'react';
+import { Button, Tooltip } from 'antd';
+import { ReloadOutlined } from '@ant-design/icons';
+import type { GpuInfo } from '@dramaclip/protocol';
+import { mixins } from '../../styles/mixins';
+import { tokens } from '../../styles/theme';
+
+function statusOf(info: GpuInfo | null, device: string): { text: string; color: string } {
+  if (!info?.ready) {
+    return { text: '检测中…', color: tokens.textTertiary };
+  }
+  if (info.vendor !== 'nvidia') {
+    return { text: '未检测到 NVIDIA 显卡 · 转写将以 CPU 运行', color: tokens.textSecondary };
+  }
+  if (device === 'cpu') {
+    return {
+      text: '已就绪 · 当前运行设备为 CPU，将运行设备切换为「自动」即可启用 GPU 加速',
+      color: tokens.colorWarning,
+    };
+  }
+  return {
+    text: '已就绪 · 首次转写时将自动启用 GPU 加速（CUDA 运行库缺失时自动回退 CPU）',
+    color: tokens.colorSuccess,
+  };
+}
+
+function metaOf(info: GpuInfo | null): string {
+  if (!info?.ready) return '';
+  if (info.vendor !== 'nvidia') return 'GPU 加速当前仅支持 NVIDIA（CUDA）';
+  const parts: string[] = [];
+  if (info.name !== '') parts.push(info.name);
+  if (info.driver_version !== '') parts.push(`驱动版本 ${info.driver_version}`);
+  if (info.max_cuda_version !== '') parts.push(`CUDA 上限 ${info.max_cuda_version}`);
+  return parts.join(' · ');
+}
+
+export function GpuCard({
+  info,
+  device,
+  onRefresh,
+}: {
+  info: GpuInfo | null;
+  device: string;
+  onRefresh: () => void;
+}): ReactElement {
+  const status = statusOf(info, device);
+  const meta = metaOf(info);
+  return (
+    <div
+      style={{
+        padding: `${String(tokens.spaceMd)} ${String(tokens.spaceLg)}`,
+        borderRadius: tokens.radiusCard,
+        border: `1px solid ${tokens.borderSecondary}`,
+        background: tokens.bgContainer,
+      }}
+    >
+      <div style={{ ...mixins.sectionTitleRow(), marginBottom: tokens.spaceSm }}>
+        <span style={{ ...mixins.sectionBar(), marginRight: tokens.spaceSm }} />
+        <span style={{ fontSize: tokens.fontBody, fontWeight: 600, color: tokens.textPrimary }}>
+          GPU 加速
+        </span>
+        <Tooltip title="重新检测显卡与驱动" placement="top">
+          <Button
+            size="small"
+            type="text"
+            icon={<ReloadOutlined />}
+            style={{ marginLeft: 'auto', color: tokens.textTertiary }}
+            onClick={onRefresh}
+          />
+        </Tooltip>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
+        <span style={mixins.statusDot(status.color)} />
+        <span style={{ fontSize: tokens.fontCaption, fontWeight: 600, color: status.color }}>
+          {status.text}
+        </span>
+      </div>
+      {meta !== '' && (
+        <div
+          style={{
+            marginTop: 4,
+            marginLeft: tokens.spaceLg,
+            fontSize: tokens.fontMicro,
+            color: tokens.textTertiary,
+          }}
+        >
+          {meta}
+        </div>
+      )}
+    </div>
+  );
+}

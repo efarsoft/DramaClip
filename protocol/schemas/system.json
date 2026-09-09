@@ -20,7 +20,12 @@
     {
       "name": "system.health",
       "summary": "健康状态（扩展字段供侧边栏/工作台系统状态）",
-      "params": {},
+      "params": {
+        "type": "object",
+        "properties": {
+          "refresh": { "type": "boolean", "description": "强制重新探测 GPU 信息" }
+        }
+      },
       "result": {
         "type": "object",
         "required": ["status", "uptime_s"],

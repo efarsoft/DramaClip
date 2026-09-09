@@ -57,7 +57,8 @@ export function onServiceEvent(callback: (event: ServiceEvent) => void): () => v
 
 export const systemApi = {
   ping: (): Promise<PingResult> => rpc<PingResult>('system.ping'),
-  health: (): Promise<HealthResult> => rpc<HealthResult>('system.health'),
+  health: (refresh = false): Promise<HealthResult> =>
+    rpc<HealthResult>('system.health', refresh ? { refresh: true } : {}),
 } as const;
 
 export const projectApi = {

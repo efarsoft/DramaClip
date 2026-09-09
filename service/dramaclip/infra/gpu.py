@@ -76,10 +76,12 @@ def detect() -> dict[str, object]:
     }
 
 
-def snapshot() -> dict[str, object]:
-    """非阻塞取缓存；未就绪则触发后台补测并返回待定态。"""
+def snapshot(force: bool = False) -> dict[str, object]:
+    """非阻塞取缓存；force=True 丢弃缓存重新探测。未就绪则后台补测并返回待定态。"""
     global _CACHE
     with _LOCK:
+        if force:
+            _CACHE = None
         if _CACHE is not None:
             return dict(_CACHE)
     prefetch()

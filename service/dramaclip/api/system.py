@@ -24,11 +24,12 @@ def register(
     def ping(_params: dict[str, Any]) -> dict[str, Any]:
         return {"service_version": service_version, "protocol_version": protocol_version}
 
-    def health(_params: dict[str, Any]) -> dict[str, Any]:
+    def health(params: dict[str, Any]) -> dict[str, Any]:
+        force_refresh = bool(params.get("refresh"))
         return {
             "status": "ok",
             "uptime_s": round(time.monotonic() - _STARTED_AT, 1),
-            "gpu_info": gpu.snapshot(),
+            "gpu_info": gpu.snapshot(force=force_refresh),
         }
 
     def _shutdown(_params: dict[str, Any]) -> dict[str, Any]:

@@ -1,38 +1,50 @@
-/** GPU 探测状态（system.health.gpu_info；未就绪时短轮询补拉，就绪即停）。 */
-import { useEffect, useState } from 'react';
+/** GPU 探测状态（system.health.gpu_info；5s 轮询，就绪即停；支持强制重测）。 */
+import { useCallback, useEffect, useState } from 'react';
 import type { GpuInfo } from '@dramaclip/protocol';
 import { systemApi } from '../../services/client';
 import { useUiStore } from '../../stores/ui';
 
-export function useGpuInfo(): GpuInfo | null {
+export interface GpuView {
+  readonly info: GpuInfo | null;
+  readonly refresh: () => void;
+}
+
+export function useGpuInfo(): GpuView {
   const serviceState = useUiStore((state) => state.serviceState);
-  const [gpu, setGpu] = useState<GpuInfo | null>(null);
+  const [info, setInfo] = useState<GpuInfo | null>(null);
+  const [tick, setTick] = useState(0);
+
   useEffect(() => {
     if (serviceState !== 'ready') return undefined;
     let alive = true;
-    let timer: number | undefined;
     const load = (): void => {
       void systemApi
         .health()
         .then((health) => {
-          if (!alive) return;
-          const info = health.gpu_info ?? null;
-          setGpu(info);
-          if (info?.ready === true && timer !== undefined) {
-            clearInterval(timer);
-            timer = undefined;
-          }
+          if (alive) setInfo(health.gpu_info ?? null);
         })
         .catch(() => undefined);
     };
     load();
-    timer = window.setInterval(load, 5000);
+    const timer = window.setInterval(load, 5000);
     return () => {
       alive = false;
-      if (timer !== undefined) clearInterval(timer);
+      clearInterval(timer);
     };
-  }, [serviceState]);
-  return gpu;
+  }, [serviceState, tick]);
+
+  const refresh = useCallback((): void => {
+    setInfo((prev) => (prev === null ? prev : { ...prev, ready: false }));
+    void systemApi
+      .health(true)
+      .then((health) => {
+        setInfo(health.gpu_info ?? null);
+        setTick((t) => t + 1);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  return { info, refresh };
 }
 
 /** 一行式 GPU 描述（引擎卡/参数区共用）。 */

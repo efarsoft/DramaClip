@@ -1,10 +1,11 @@
-/** ASR 引擎：识别参数（即改即存）+ GPU 运行环境 + 本地模型库（推荐 / 档位 / 搜索）。 */
+/** ASR 引擎：GPU 加速状态 + 识别参数（即改即存）+ 本地模型库（推荐 / 档位 / 搜索）。 */
 import { Select } from 'antd';
 import { PageSection } from '../../components/layout/PageKit';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
+import { GpuCard } from './GpuCard';
 import { ModelBrowser } from './ModelBrowser';
-import { gpuSummary, useGpuInfo } from './useGpuInfo';
+import { useGpuInfo } from './useGpuInfo';
 import type { SettingsMap } from './EnginesPage';
 
 const OPTIONS: Record<string, { label: string; options: { label: string; value: string }[] }> = {
@@ -46,10 +47,12 @@ export function AsrTab({
   onChanged: () => void;
 }): React.ReactElement {
   const asrModels = models.filter((m) => m.kind === 'asr');
-  const gpu = useGpuInfo();
+  const { info: gpu, refresh } = useGpuInfo();
   const device = settings['asr.device'] ?? 'auto';
+  const nvidiaAbsent = gpu?.ready === true && gpu.vendor !== 'nvidia';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
+      <GpuCard info={gpu} device={device} onRefresh={refresh} />
       <PageSection title="识别参数（即改即存）">
         <div style={{ display: 'flex', gap: tokens.space2xl, flexWrap: 'wrap' }}>
           {Object.entries(OPTIONS).map(([key, spec]) => (
@@ -63,7 +66,7 @@ export function AsrTab({
                   onSave({ [key]: value });
                 }}
               />
-              {key === 'asr.device' && <DeviceHint device={device} gpuSummary={gpuSummary(gpu)} gpuReady={gpu?.ready === true} />}
+              {key === 'asr.device' && <DeviceHint device={device} nvidiaAbsent={nvidiaAbsent} />}
             </div>
           ))}
         </div>
@@ -77,14 +80,21 @@ export function AsrTab({
 
 function DeviceHint({
   device,
-  gpuSummary: summary,
-  gpuReady,
+  nvidiaAbsent,
 }: {
   device: string;
-  gpuSummary: string;
-  gpuReady: boolean;
-}): React.ReactElement {
-  const warning = device === 'cuda' && gpuReady && summary.startsWith('未检测到');
+  nvidiaAbsent: boolean;
+}): React.ReactElement | null {
+  if (device === 'auto') {
+    return <Hint>自动 = 检测到可用 GPU 时启用，否则回退 CPU</Hint>;
+  }
+  if (device === 'cuda' && nvidiaAbsent) {
+    return <Hint warning>未检测到 NVIDIA 显卡，将自动回退 CPU</Hint>;
+  }
+  return null;
+}
+
+function Hint({ children, warning = false }: { children: string; warning?: boolean }): React.ReactElement {
   return (
     <span
       style={{
@@ -94,9 +104,7 @@ function DeviceHint({
         lineHeight: '16px',
       }}
     >
-      {summary}
-      {device === 'auto' ? '；自动=有可用 GPU 时启用，否则回退 CPU' : ''}
-      {warning ? '；当前运行时可能不支持 CUDA，将自动回退 CPU' : ''}
+      {children}
     </span>
   );
 }
