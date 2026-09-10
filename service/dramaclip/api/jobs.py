@@ -8,7 +8,7 @@ from typing import Any
 from dramaclip.api.context import AppContext
 from dramaclip.transport.rpc import Router, RpcDomainError
 
-_ERR_JOB_NOT_FOUND = -32404  # 落在 x-error-codes 的 -32400~-32499 导出域段（Task 4 复用同值）
+_ERR_JOB_NOT_FOUND = -32501  # 任务域 -32500~-32599（见 common.json x-error-codes）
 
 _LIMIT_MAX = 200  # 与 protocol/schemas/jobs.json 的 params.limit.maximum 一致
 

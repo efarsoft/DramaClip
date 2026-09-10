@@ -19,7 +19,7 @@
         "type": "object",
         "required": ["jobs", "server_time_ms"],
         "properties": {
-          "jobs": { "type": "array", "items": { "$ref": "#/$defs/JobInfo" } },
+          "jobs": { "type": "array", "items": { "$ref": "#/x-models/JobInfo" } },
           "server_time_ms": { "type": "integer" }
         }
       }
@@ -36,11 +36,11 @@
       "result": {
         "type": "object",
         "required": ["job"],
-        "properties": { "job": { "$ref": "#/$defs/JobInfo" } }
+        "properties": { "job": { "$ref": "#/x-models/JobInfo" } }
       }
     }
   ],
-  "$defs": {
+  "x-models": {
     "JobInfo": {
       "type": "object",
       "required": ["id", "type", "status", "progress", "created_at", "updated_at"],

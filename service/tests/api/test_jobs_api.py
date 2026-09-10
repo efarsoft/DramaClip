@@ -78,4 +78,4 @@ def test_get_missing_job_is_domain_error(memory_db: sqlite3.Connection) -> None:
     router = _router(memory_db, jobs_mod.JobStore(memory_db))
     response = router.dispatch(RpcRequest(id=1, method="jobs.get", params={"job_id": "nope"}))
     assert response.error is not None
-    assert response.error.code == -32404
+    assert response.error.code == -32501
