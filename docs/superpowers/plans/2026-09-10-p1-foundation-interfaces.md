@@ -299,7 +299,7 @@ def test_get_missing_job_is_domain_error(memory_db: sqlite3.Connection) -> None:
     router = _router(memory_db, jobs_mod.JobStore(memory_db))
     response = router.dispatch(RpcRequest(id=1, method="jobs.get", params={"job_id": "nope"}))
     assert response.error is not None
-    assert response.error.code == -32404
+    assert response.error.code == -32501
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -321,7 +321,7 @@ from typing import Any
 from dramaclip.api.context import AppContext
 from dramaclip.transport.rpc import Router, RpcDomainError
 
-_ERR_JOB_NOT_FOUND = -32404
+_ERR_JOB_NOT_FOUND = -32501
 
 
 def register(router: Router, context: AppContext) -> None:
@@ -478,18 +478,33 @@ git commit -m "feat(api): 新增 jobs.list / jobs.get（队列页地基）"
 
 ---
 
-# Task 3: 导出失败必须落 `export_jobs`（先补记录，再谈重试）
+# Task 3: 崩溃残留的 `export_jobs` 启动清扫（retry 的真前置）
 
 **Files:**
-- Modify: `service/dramaclip/api/export.py:40-62,138-169`
+- Modify: `service/dramaclip/infra/storage/repos/exports.py`（新增 `reset_stale_pending`）
+- Modify: `service/dramaclip/service_app.py:53-59`
 - Test: `service/tests/api/test_export_retry.py`
 
-**为什么这一条在 retry 之前：** 实测 `jobs` 表有 44 条导出记录、`export_jobs` 只有 13 行，且 3 次失败只留了"服务中断"却没进 `export_jobs`——**失败路径与记录路径不同源**。retry 要"绑定原 export_id 覆盖写"，前提是失败时那个 id 存在。先补记录。
+**为什么原方案作废（实测推翻）：** 计划原先要"给 `render_export` 包一层 try/except 落库"，但 `_run_export:205-207` **已经**在 `except` 里同时写 `exports_repo.mark_failed` 与 `job_store.mark_failed` —— 照原方案做等于把同一件事写两遍，还会让错误来源变得含糊。该写法作废。
 
-- [ ] **Step 1: 写失败测试**（自包含，不依赖未确认的仓储签名）
+**真缺口在崩溃路径**：进程被杀时 `_run_export` 的 `except` 根本不会执行。启动时三张表里——
+
+| 表 | 崩溃后由谁复位 | 现状 |
+|---|---|---|
+| `jobs` | `job_store.sweep_interrupted()`（`service_app.py:53`） | ✅ 标 failed「服务中断」 |
+| `episodes` | `episodes_repo.reset_stale_analyzing()`（`service_app.py:54`，`74f19d0` 新增） | ✅ 回退 prescreened |
+| `export_jobs` | **无人清扫**（全库无 `UPDATE export_jobs SET status='failed' WHERE status='pending'`） | ❌ **永久停在 `pending`** |
+
+后果是两个视图互相矛盾：任务表说"服务中断失败"，导出表说"还在排队"；作品库因 `list_completed_works` 只取 `completed` 而看不见它，`export.list` 却会一直显示一条卡住的记录。历史 DB 里那 3 条"服务中断"失败任务没有对应的 `export_jobs` 失败行，就是这个机制留下的（现数据已被后续运行覆盖，机制未变）。
+
+**它仍是 retry 的前置**：Task 4 的 `export.retry` 要求记录存在且 `status='failed'`；卡 in `pending` 的记录既不能重试也永远不会失败，必须先被清扫成 failed。
+
+- [ ] **Step 1: 写失败测试**
+
+新建 `service/tests/api/test_export_retry.py`（Task 4 会往同一文件追加，故此处建立夹具）：
 
 ```python
-"""导出失败必须在 export_jobs 留下带原因的记录，否则队列页与重试都无从谈起。"""
+"""export_jobs 的崩溃残留必须被启动清扫复位；进程内失败路径不得回归。"""
 
 from __future__ import annotations
 
@@ -522,9 +537,9 @@ def _context(memory_db: sqlite3.Connection, tmp_path: Path) -> SimpleNamespace:
     )
 
 
-def _seed(memory_db: sqlite3.Connection, tmp_path: Path) -> tuple[str, str, str, PlanData]:
-    """项目 + 一条引用不存在集的编排。项目下没有任何 episode，
-    渲染时 encoder 必抛 EpisodeSourceMissing —— 确定失败，不需要真素材。"""
+def _seed_export(memory_db: sqlite3.Connection, tmp_path: Path) -> tuple[str, str, str, PlanData]:
+    """项目 + 一条引用不存在集的编排 + 一条 pending 导出记录。
+    项目下没有任何 episode，渲染时 encoder 必抛 EpisodeSourceMissing —— 确定失败，不需真素材。"""
     project_id = str(projects_repo.create(memory_db, "重试剧", str(tmp_path))["id"])
     plan_data = PlanData(
         mode="raw_clip",
@@ -539,11 +554,39 @@ def _seed(memory_db: sqlite3.Connection, tmp_path: Path) -> tuple[str, str, str,
     return project_id, plan_id, export_id, plan_data
 
 
-def test_render_failure_writes_export_job_with_error(
+def test_reset_stale_pending_marks_crash_leftovers_failed(memory_db: sqlite3.Connection) -> None:
+    """崩溃后 _run_export 的 except 不会执行，记录停在 pending —— 必须被复位成 failed。"""
+    exports_repo.create(memory_db, "p1", "plan1", "raw_clip")
+    exports_repo.create(memory_db, "p1", "plan2", "raw_clip")
+
+    assert exports_repo.reset_stale_pending(memory_db) == 2
+
+    rows = exports_repo.list_by_project(memory_db, "p1")
+    assert {row["status"] for row in rows} == {"failed"}
+    assert {row["error"] for row in rows} == {"服务中断"}
+
+
+def test_reset_stale_pending_leaves_terminal_rows_alone(
     memory_db: sqlite3.Connection, tmp_path: Path
 ) -> None:
+    """已完成/已失败的记录不能被清扫改写——否则历史成品会凭空消失。"""
+    project_id, plan_id, export_id, _data = _seed_export(memory_db, tmp_path)
+    exports_repo.mark_failed(memory_db, export_id, "编码失败")
+    done_id = exports_repo.create(memory_db, project_id, plan_id, "raw_clip")
+    exports_repo.mark_completed(memory_db, done_id, str(tmp_path / "ok.mp4"))
+
+    assert exports_repo.reset_stale_pending(memory_db) == 0
+
+    assert exports_repo.get(memory_db, export_id)["error"] == "编码失败"
+    assert exports_repo.get(memory_db, done_id)["status"] == "completed"
+
+
+def test_inprocess_failure_still_records_error(
+    memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """回归守卫：进程内抛错时 _run_export 的 except 必须继续把原因写进 export_jobs。"""
     context = _context(memory_db, tmp_path)
-    project_id, plan_id, export_id, plan_data = _seed(memory_db, tmp_path)
+    project_id, plan_id, export_id, plan_data = _seed_export(memory_db, tmp_path)
     plan_row = plans_repo.get(memory_db, plan_id)
     assert plan_row is not None
 
@@ -553,69 +596,64 @@ def test_render_failure_writes_export_job_with_error(
             cancel_event=threading.Event(), report=lambda _p, _m: None,
         )
 
-    record = exports_repo.get(memory_db, export_id)
-    assert record is not None, "失败必须已在 export_jobs 留下该 id 的记录"
-    assert record["status"] == "failed"
-    assert record["error"], "失败原因必须落库，不能只进日志"
+    # render_export 本身不落库；落库由调用方 _run_export 的 except 负责（Task 4 的 retry 依赖此契约）
+    assert exports_repo.get(memory_db, export_id)["status"] == "pending"
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `cd service && ../.venv/Scripts/python -m pytest tests/api/test_export_retry.py -v`
-Expected: FAIL —— `assert record is not None`（现在失败记录由 `_run_export` 的 `except` 写，而 `render_export` 自身不落库；本测试直接调 render 证明记录不随渲染产生）。
+Run: `cd service && ../.venv/Scripts/python -m pytest tests/api/test_export_retry.py -o addopts="" -v`
+Expected: 前两条 FAIL —— `AttributeError: module ... has no attribute 'reset_stale_pending'`。第三条应 **PASS**（它守卫的是既有正确行为，不是新功能）。
 
-- [ ] **Step 3: 让 render 自己负责失败记录**
+- [ ] **Step 3: 实现清扫，形态对齐既有的 `reset_stale_analyzing`**
 
-`api/export.py` 的 `render_export`（`:75-135`）整体包一层失败落库。把函数体改为"内层实现 + 外层记录"，最小改动形式：
-
-```python
-def render_export(
-    context: AppContext,
-    export_id: str,
-    project_id: str,
-    plan_row: dict[str, Any],
-    plan_data: PlanData,
-    *,
-    cancel_event: threading.Event,
-    report: Any,
-) -> Path:
-    """渲染核心：剪辑→遮罩→字幕→编码→写成品记录；失败就地落 failed 后原样抛出。"""
-    try:
-        return _render(
-            context, export_id, project_id, plan_row, plan_data,
-            cancel_event=cancel_event, report=report,
-        )
-    except Exception as exc:
-        exports_repo.mark_failed(context.conn, export_id, str(exc))
-        raise
-```
-
-把原 `render_export` 函数体整段改名为 `_render(...)`（参数不变，去掉最外层 `try` 的语义变化），并在 `_run_export` 的 `except` 里**去掉重复的 `mark_failed`**（`:166-169`），避免二次覆盖与错误来源不清：
+`infra/storage/repos/exports.py`，放在 `mark_failed` 之后：
 
 ```python
-    except Exception as exc:
-        context.job_store.mark_failed(job_id, str(exc))
-        context.notifier.log("error", f"导出失败: {exc}")
+def reset_stale_pending(conn: sqlite3.Connection) -> int:
+    """启动清扫：崩溃残留的 pending 导出记为失败。
+
+    无服务运行即无导出在跑，故恒安全；已完成/已失败记录不动。
+    """
+    cursor = conn.execute(
+        "UPDATE export_jobs SET status = 'failed', error = '服务中断'"
+        " WHERE status = 'pending'"
+    )
+    conn.commit()
+    return cursor.rowcount or 0
 ```
 
-- [ ] **Step 4: 让 `export.start` 在提交前就建好记录**
+- [ ] **Step 4: 接进启动流程**
 
-`api/export.py:40-62` 已经是 `exports_repo.create(...)` 先建记录再 submit（现状正确），**无需改动**——本步只做确认：
+`service_app.py:52-59`，与既有两条清扫并列，并把计数打进同一行输出：
 
-Run: `cd service && ../.venv/Scripts/python -c "import inspect;from dramaclip.api import export;print(inspect.getsource(export.start))"`
-Expected: 打印出的 `start()` 里 `exports_repo.create` 出现在 `context.executor.submit` 之前。若不是（说明对方已重构），把 `create` 提到 submit 之前再进 Step 5。
+```python
+        interrupted = job_store.sweep_interrupted()
+        stale_episodes = episodes_repo.reset_stale_analyzing(conn)
+        stale_exports = exports_repo.reset_stale_pending(conn)
+        if interrupted or stale_episodes or stale_exports:
+            print(
+                f"[startup] 清扫上次会话残留：中断任务 {interrupted} 个，"
+                f"分析中集 {stale_episodes} 个，未完成导出 {stale_exports} 个"
+            )
+```
+（`exports_repo` 若未在 `service_app.py` 导入，按该文件既有 repo 导入风格补一行。）
 
-- [ ] **Step 5: 跑测试确认通过**
+- [ ] **Step 5: 跑测试确认通过 + 全量门禁**
 
-Run: `cd service && ../.venv/Scripts/python -m pytest tests/api -q`
-Expected: 全绿；`test_produce` 端到端不回归（它走成功路径）。
+Run: `cd service && ../.venv/Scripts/python -m pytest tests/api -o addopts="" -q --tb=line`
+Expected: 全绿。
+Run: `cd service && ../.venv/Scripts/python -m pytest tests -o addopts="" -q --tb=line -rf`
+Expected: ≥ 208 passed；唯一许可失败是已记录的 `test_resync_semantic...` 隔离问题。
 
 - [ ] **Step 6: 提交**
 
 ```bash
-git add service/dramaclip/api/export.py service/tests/api/test_export_retry.py
-git commit -m "fix(export): 渲染失败就地落 export_jobs 并记原因，不再只进日志"
+git add service/dramaclip/infra/storage/repos/exports.py service/dramaclip/service_app.py \
+        service/tests/api/test_export_retry.py
+git commit -m "fix(export): 启动清扫崩溃残留的 pending 导出，消除任务表与导出表互相矛盾"
 ```
+
 
 ---
 
@@ -652,7 +690,7 @@ def test_retry_reuses_same_export_id_and_adds_no_row(
 
     不断言 status：重跑是异步的，读到时可能已再次失败——那正是失败记录该有的样子。
     """
-    project_id, plan_id, export_id, _plan_data = _seed(memory_db, tmp_path)
+    project_id, plan_id, export_id, _plan_data = _seed_export(memory_db, tmp_path)
     exports_repo.mark_failed(memory_db, export_id, "编码失败")
     router, _context = _export_router(memory_db, tmp_path)
 
@@ -666,7 +704,7 @@ def test_retry_reuses_same_export_id_and_adds_no_row(
 
 
 def test_retry_rejects_completed_export(memory_db: sqlite3.Connection, tmp_path: Path) -> None:
-    project_id, plan_id, export_id, _plan_data = _seed(memory_db, tmp_path)
+    project_id, plan_id, export_id, _plan_data = _seed_export(memory_db, tmp_path)
     exports_repo.mark_completed(memory_db, export_id, str(tmp_path / "done.mp4"))
     router, _context = _export_router(memory_db, tmp_path)
     response = router.dispatch(
@@ -687,7 +725,7 @@ def test_retry_rejects_unknown_export(memory_db: sqlite3.Connection, tmp_path: P
 
 def test_reset_for_retry_clears_error_and_output(memory_db: sqlite3.Connection, tmp_path: Path) -> None:
     """纯仓储层：复位必须清 error / output_path / completed_at 并回到 pending。"""
-    project_id, plan_id, export_id, _plan_data = _seed(memory_db, tmp_path)
+    project_id, plan_id, export_id, _plan_data = _seed_export(memory_db, tmp_path)
     exports_repo.mark_failed(memory_db, export_id, "编码失败")
     exports_repo.set_meta(memory_db, export_id, duration_s=61.0, size_bytes=1024)
 
@@ -743,7 +781,7 @@ def test_jobs_cancel_unknown_job_is_domain_error(memory_db: sqlite3.Connection) 
     jobs_api.register(router, context)  # type: ignore[arg-type]
     response = router.dispatch(RpcRequest(id=1, method="jobs.cancel", params={"job_id": "x"}))
     assert response.error is not None
-    assert response.error.code == -32404
+    assert response.error.code == -32501
 ```
 
 同文件顶部补 import（Task 3 已建立的之外还需要的）：
