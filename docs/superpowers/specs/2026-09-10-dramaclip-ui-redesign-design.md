@@ -53,7 +53,8 @@
 | `/projects/:id/analysis` | **废弃 → redirect `/drama/:id/analysis`** | 与出片页合并进剧空间。今天两页各持不同 store、分析页勾选的集传不到出片页，是批量断裂的根因 |
 | `/projects/:id/produce` | **废弃 → redirect `/drama/:id/produce`** | 同上 |
 | `/projects` | 改名 `/dramas`，保留旧路径 redirect | |
-| `/models`、`/models/:tab` | **更名 `/engines`、`/engines/:tab`**，保留旧路径 redirect | 实测触点 **10 处 / 6 文件**：`app/router.tsx:20,21`、`components/layout/AppLayout.tsx:19`（label）、`features/engines/EnginesPage.tsx:81`、`features/engines/OverviewTab.tsx:94,103,111`、`features/home/EnvPanel.tsx:44,48`、`features/home/StartCards.tsx:63`。**改名必须一次扫全 10 处**（见 [[feedback-cleanup-on-pivot]]）|
+| `/models`、`/models/:tab` | **更名 `/engines`、`/engines/:tab`**，保留旧路径 redirect（含 `:tab` 深链保住 tab） | 实测触点 **12 处 / 6 文件**：`app/router.tsx:20,21`、`components/layout/AppLayout.tsx:19`（path+label）、`features/engines/EnginesPage.tsx:81,99`（**99 是 pathname 正则，漏则静默失去 tab 高亮**）、`features/engines/OverviewTab.tsx:94,103,111`、`features/home/EnvPanel.tsx:44,48,107`（**107 是工具箱卡的 `key`，被拼成 URL**）、`features/home/StartCards.tsx:63`。**已提前并入批次 0 的 Phase C（实施计划 Task C1），不再等 P-3**（见 [[feedback-cleanup-on-pivot]]）|
+| **不得连带改动的同名物** | Python `api/models.py`、`engines/*/models.py`、RPC `models.*` 命名空间、`modelsApi`、数据目录 `data/models/` | 更名只作用于**前端路由与界面文案**；`useTodos.ts:24` 的 `key:'models'` 是 React identity key，不参与导航，保持原样 |
 | **词义分工（不是全局替换）** | 「引擎」= 能力（ASR 引擎 / TTS 引擎 / 引擎中心），「模型」= 可下载的文件资产（模型库 / 下载模型 / 缺模型） | 现状 `引擎` 出现在 11 个文件、`模型` 出现在 9 个——**页面本就按能力域组织，「引擎」才是准确词**；页内的模型库区块仍称模型，不做无差别替换 |
 | `TimelineEditor.tsx` | **删除** | W13 交付但全库无 import、`narration.replace_timeline` 随之失联。按「废弃须扫清全部触点」纪律删除，不长期挂着看起来做了其实没做的东西 |
 | 步骤条相对路径 `../../works` | 已修（绝对路径），本项关闭 | |

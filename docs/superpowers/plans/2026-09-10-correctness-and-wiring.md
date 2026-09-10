@@ -1183,31 +1183,96 @@ git commit -m "fix(narration): 跨集输入改按集分配额取样，修复 500
 
 # Phase C · 客户端止血（假文案与不可见失败）
 
-> 共同原则（用户定案，三档）：**① 指向错误页面的路由必修；② 本方案会接通的功能（字幕预设、预筛阈值）保持原样不动；③ 本方案不接通却仍在设置里摆着的死控件，标注「当前未生效」——不用"即将支持"，以免变成长期谎言；④ 纯虚构的能力（拖放导入）删除或改口。** 不为凑文案去临时实现功能。
+> 共同原则（用户定案，四档）：**① 指向错误页面的路由必修；② 本方案会接通的功能（字幕预设、预筛阈值）保持原样不动；③ 本方案不接通却仍在设置里摆着的死控件，标注「当前未生效」——不用"即将支持"，以免变成长期谎言；④ 纯虚构的能力（拖放导入）删除或改口。** 不为凑文案去临时实现功能。**另：既定更名（`/models` → `/engines`）在本阶段一次做完，不留双语状态。**
 
-## Task C1: EnvPanel 两处错路由 + 三条假提示
+## Task C1: `/models` → `/engines` 全量更名 + 两处错目标 + 三条假提示
 
-**Files:**
-- Modify: `desktop/src/features/home/EnvPanel.tsx:38,44,157`
-- Modify: `desktop/src/features/home/HomePage.tsx:104`、`StartCards.tsx:25`
+**Files（更名 12 处 / 6 文件，全部实测于当前 HEAD）:**
+- Modify: `desktop/src/app/router.tsx:20-21`
+- Modify: `desktop/src/components/layout/AppLayout.tsx:19`
+- Modify: `desktop/src/features/engines/EnginesPage.tsx:81,99`
+- Modify: `desktop/src/features/engines/OverviewTab.tsx:94,103,111`
+- Modify: `desktop/src/features/home/EnvPanel.tsx:44,48,107`
+- Modify: `desktop/src/features/home/StartCards.tsx:63`
+- Modify: `desktop/src/features/home/HomePage.tsx:104`、`StartCards.tsx:25`（假文案）
 
-- [ ] **Step 1: 先取证现状**（这三处文案都是用户会照做的指引，改错方向代价高）
+> **⚠️ 不得改动的同名物**（改了会真炸）：Python 侧 `service/dramaclip/api/models.py`、`engines/*/models.py`（Pydantic 模型定义）、RPC 命名空间 `models.list/download/scan_local/delete`、`client.ts` 的 `modelsApi`、数据目录 `data/models/`（A1 的 `context.data_dir / "models"` 属此类）。**本任务只动前端路由与界面文案。**
+>
+> **`useTodos.ts:24` 的 `key: 'models'` 保持原样**——它是待办项的 React identity key，不参与导航，改了无收益还增加噪音。
 
-Run: `cd desktop && npx tsc --noEmit -p tsconfig.app.json && grep -n "models/" src/app/router.tsx`
-Expected: 确认引擎中心路由形态为 `/models` + `/models/:tab`，tab 取值含 `asr`/`llm`/`tts`。
+- [ ] **Step 1: 取证**（确认 12 处触点齐全，多一处少一处都要先弄清）
 
-- [ ] **Step 2: 修两处错路由**（LLM 配置在 `/models/llm`，不在 `/settings`——`sections.ts` 里没有任何 llm 字段；ASR 模型在 `/models/asr`）
+Run: `cd desktop && grep -rn "'/models\|\"/models\|/models/\|key: 'models'" src --include=*.ts --include=*.tsx | grep -v "modelsApi\|models.list"`
+Expected: 命中上述 12 处（`router.tsx` 2、`AppLayout.tsx` 1、`EnginesPage.tsx` 2、`OverviewTab.tsx` 3、`EnvPanel.tsx` 3、`StartCards.tsx` 1）。若出现第 13 处，一并纳入并在提交信息里记明。
 
-> **给后续改名的提示**：本步改完，这两处路径变成 `/models/llm` 与 `/models/asr`。UI 规格已定案把 `/models` 整体更名为 `/engines`（触点共 10 处），届时**这两处随批量改名一起走**，不要当成回归修回去。
+- [ ] **Step 2: 改路由与 redirect**（`Navigate` 已在 `router.tsx:1` 导入，无需新增 import）
 
+`app/router.tsx:20-21` 替换为：
 ```tsx
-      ? { name: 'LLM 文案引擎', ok: false, status: '未配置', action: { label: '去配置', path: '/models/llm' } }
+          <Route path="/engines" element={<EnginesPage />} />
+          <Route path="/engines/:tab" element={<EnginesPage />} />
+          <Route path="/models" element={<Navigate to="/engines" replace />} />
+          <Route path="/models/:tab" element={<LegacyModelTabRedirect />} />
+```
+并在文件末尾追加（旧深链 `/models/asr` 之类要保住 tab，不能一律跳总览）：
+```tsx
+/** 旧 `/models/:tab` 深链保住 tab 语义后转新路由。 */
+function LegacyModelTabRedirect() {
+  const { tab } = useParams();
+  return <Navigate to={tab ? `/engines/${tab}` : '/engines'} replace />;
+}
+```
+同时把 `react-router-dom` 的 import 行补上 `useParams`。
+
+- [ ] **Step 3: 改导航与路径解析**
+
+`components/layout/AppLayout.tsx:19`：
+```tsx
+  { path: '/engines', label: '引擎', icon: CloudServerOutlined },
+```
+`features/engines/EnginesPage.tsx:81`：
+```tsx
+        <TabNav tab={tab} onPick={(key) => { void navigate(`/engines/${key}`); }} />
+```
+`features/engines/EnginesPage.tsx:99`（**这处是 pathname 正则，漏了会静默失去 tab 高亮**）：
+```tsx
+  const match = /\/engines\/(asr|tts|llm)/.exec(pathname);
+```
+`features/engines/OverviewTab.tsx:94`：
+```tsx
+          <CapabilityCard key={item.name} item={item} onGo={() => void navigate(`/engines/${item.tab}`)} />
+```
+`features/engines/OverviewTab.tsx:103` / `:111`：
+```tsx
+            void navigate('/engines/asr');
 ```
 ```tsx
-        : { name: 'ASR 语音识别', ok: false, status: '未安装', action: { label: '去下载', path: '/models/asr' } },
+            void navigate('/engines/llm');
+```
+`features/home/StartCards.tsx:63`：
+```tsx
+      void navigate('/engines');
 ```
 
-- [ ] **Step 3: 删除三条不存在的功能承诺**
+- [ ] **Step 4: 改 EnvPanel 三处（含两处错目标——这是本任务原本的止血点）**
+
+`:107` 工具箱卡的 `key` 会被拼成 URL（`navigate(\`/${tool.key}\`)`），必须一起改；标题按词义分工改指页面，`desc` 里的"模型"指文件资产、保留：
+```tsx
+  { key: 'engines', icon: <CloudServerOutlined />, tint: tokens.colorPrimary, title: '引擎中心', desc: '下载或导入语音/转写模型' },
+```
+`:44` ASR 未安装原本错指 `/models/tts`（配音页），且 LLM 未配置原本错指 `/settings`（那里没有任何 llm 字段）——两处一起纠正：
+```tsx
+        : { name: 'ASR 语音识别', ok: false, status: '未安装', action: { label: '去下载', path: '/engines/asr' } },
+```
+```tsx
+      ? { name: 'LLM 文案引擎', ok: false, status: '未配置', action: { label: '去配置', path: '/engines/llm' } }
+```
+`:48` TTS 缺模型的目标本就是配音页，只换前缀：
+```tsx
+        : { name: 'TTS 配音', ok: false, status: 'Kokoro 缺模型', action: { label: '去下载', path: '/engines/tts' } }
+```
+
+- [ ] **Step 5: 删除三条不存在的功能承诺**
 
 `EnvPanel.tsx` 的 `TIPS` 第一条整条移除（客户端无预筛入口）：
 ```tsx
@@ -1219,21 +1284,32 @@ const TIPS = [
 同时移除 `RocketOutlined` 的 import（现已无使用者，留着会触发 lint）。
 再按同一纪律改口 `HomePage.tsx:104` 的「短剧素材也可以拖进来」→「选择素材所在文件夹」（全库无外部 `dataTransfer`，拖放不存在），以及 `StartCards.tsx:25` 的「AI 自动预筛与全量分析」→「逐集转写与冲突分析」。
 
-- [ ] **Step 4: 门禁**
+- [ ] **Step 6: 门禁 + 残留检查**
 
+Run: `cd desktop && grep -rn "'/models\|/models/" src --include=*.ts --include=*.tsx | grep -v "Navigate to=\"?/models\|path=\"/models"`
+Expected: **无输出**（除 Step 2 刻意保留的两条 redirect 路由）。
 Run: `npm run typecheck && npm test`
 Expected: typecheck 干净；vitest 13 passed（`RocketOutlined` 未用若被判 lint 错误，必须删而不是加 ignore）。
 
-- [ ] **Step 5: 手测（不可省略——这是路由正确性的唯一证明）**
+- [ ] **Step 7: 手测（不可省略——这是路由正确性的唯一证明）**
 
 Run: `npm run dev`
-Expected: 在引擎中心清空 LLM 的 Base URL 并保存 → 回工作台 → 点「LLM 文案引擎 · 去配置」→ **必须落在引擎中心 LLM 页并看到 Base URL / API Key / 模型三字段**；同理 ASR 未装时点「去下载」落在 ASR 页的模型库。**若落地页看不到对应字段，说明路由仍错，回到 Step 2。**
+Expected：
+1. 侧栏第 5 项显示「引擎」，点进去 URL 是 `#/engines`，切 tab 时 URL 变 `#/engines/asr` 等且 **tab 高亮跟随**（验 Step 3 的正则）；
+2. 引擎中心清空 LLM 的 Base URL 并保存 → 回工作台 → 点「LLM 文案引擎 · 去配置」→ **落在 `#/engines/llm` 并看到 Base URL / API Key / 模型三字段**；
+3. ASR 未装时点「去下载」落在 `#/engines/asr` 的模型库（不是配音页）；
+4. 地址栏手敲旧 `#/models/llm` → **仍落到引擎中心 LLM 页**（验 redirect 保住 tab）；
+5. 工作台右栏工具箱点「引擎中心」卡可达（验 Step 4 的 `key`）。
+**任一不符，回到对应 Step，别往下走。**
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 8: 提交**
 
 ```bash
-git add desktop/src/features/home/
-git commit -m "fix(home): 环境就绪度跳转指向真实配置页，移除预筛/拖放等未实现文案"
+git add desktop/src/app/router.tsx desktop/src/components/layout/AppLayout.tsx \
+        desktop/src/features/engines/EnginesPage.tsx desktop/src/features/engines/OverviewTab.tsx \
+        desktop/src/features/home/EnvPanel.tsx desktop/src/features/home/StartCards.tsx \
+        desktop/src/features/home/HomePage.tsx
+git commit -m "refactor(ui): /models 更名 /engines 并统一称「引擎」，修正 LLM/ASR 两处错目标与未实现文案"
 ```
 
 ## Task C2: 失败集必须与未分析集可辨
@@ -1594,6 +1670,7 @@ git commit -m "test(modes): 真机九模式回归脚本，断言音轨存在/时
 - [ ] `scripts/verify_modes.py` 在真实素材上 9/9 通过，`report/summary.json` 留档，并与基线并列比对
 - [ ] 九模式成片**逐个听过一遍**：无静音片、无错音段、CTA 旁白存在
 - [ ] 界面不再出现"自动预筛""可以拖进来"等未实现承诺
+- [ ] `/models` 已全量更名为 `/engines`（12 处触点清零，旧深链 redirect 保住 tab），侧栏与页内不再双语
 - [ ] 无同名 `.srt` 时，切点仍避开台词（B4 的双路取区生效）
 
 ## 已知遗留（明确不做，批次 1 处理）
