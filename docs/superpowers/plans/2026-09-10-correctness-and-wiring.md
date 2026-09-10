@@ -1198,6 +1198,8 @@ Expected: 确认引擎中心路由形态为 `/models` + `/models/:tab`，tab 取
 
 - [ ] **Step 2: 修两处错路由**（LLM 配置在 `/models/llm`，不在 `/settings`——`sections.ts` 里没有任何 llm 字段；ASR 模型在 `/models/asr`）
 
+> **给后续改名的提示**：本步改完，这两处路径变成 `/models/llm` 与 `/models/asr`。UI 规格已定案把 `/models` 整体更名为 `/engines`（触点共 10 处），届时**这两处随批量改名一起走**，不要当成回归修回去。
+
 ```tsx
       ? { name: 'LLM 文案引擎', ok: false, status: '未配置', action: { label: '去配置', path: '/models/llm' } }
 ```
