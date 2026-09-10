@@ -1,5 +1,5 @@
 /** 出片中心：选模式 → 一键出片（后端组合任务异步执行），成品入作品库。 */
-import { Button, Card, Empty, Progress, Tag } from 'antd';
+import { Button, Card, Empty, Progress, Tag, Tooltip } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { ExportJob, NarrationMode, Project } from '@dramaclip/protocol';
@@ -224,7 +224,9 @@ function ExportsCard({ exports }: { exports: ExportJob[] | null }) {
       {exports === null ? null : exports.length === 0 ? (
         <Empty description="还没有出片记录——选择模式开始出片" styles={{ image: { height: 60 } }} />
       ) : (
-        exports.slice(0, 8).map((job) => <ExportRow key={job.id} job={job} />)
+        <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {exports.map((job) => <ExportRow key={job.id} job={job} />)}
+        </div>
       )}
     </Card>
   );
@@ -245,6 +247,11 @@ function ExportRow({ job }: { job: ExportJob }) {
       }}
     >
       <Tag color={color}>{label}</Tag>
+      {job.status === 'failed' && job.error !== undefined ? (
+        <Tooltip title={job.error}>
+          <span style={{ color: tokens.colorWarning, fontSize: tokens.fontMicro, marginLeft: 6 }}>原因</span>
+        </Tooltip>
+      ) : null}
       <span style={{ color: tokens.textPrimary }}>{modeLabel(job.narration_mode ?? '')}</span>
       <span style={{ marginLeft: 'auto', fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
         {job.duration_s !== undefined ? `${String(Math.round(job.duration_s))}s` : ''}
