@@ -84,8 +84,13 @@ class ServiceApp:
         self._install_signal_handlers()
         try:
             self._serve(router, executor)
-            if interrupted:
-                notifier.log("warn", f"恢复上次会话：{interrupted} 个中断任务已标记失败")
+            if interrupted or stale_episodes or stale_exports:
+                notifier.log(
+                    "warn",
+                    "恢复上次会话："
+                    f"{interrupted} 个中断任务、{stale_episodes} 个分析中集、"
+                    f"{stale_exports} 个未完成导出已复位",
+                )
             while not self._stop.is_set():
                 self._stop.wait(_STOP_POLL_SECONDS)
         finally:

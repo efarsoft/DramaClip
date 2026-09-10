@@ -31,6 +31,16 @@
 - 代价：套件从 ~15 秒涨到 ~45 秒（它在等 30 秒 job 超时），且让"全绿"判据不可信。
 - **纪律**：跑计数一律带 `-o addopts=""`（绕开 `addopts=-q`）；**不得为它放宽断言、不得加 sleep 掩盖、不要在 Task 2-6 里顺手"修好"它**——它是独立的测试隔离缺陷，混进功能提交里只会让两边都说不清。要修就单独立一条。
 
+## Task 3 落地后的实测修正（Task 4-6 必须遵守）
+
+Task 3 已完成（`bab5106`）。三条约束是实测出来的，不是风格偏好：
+
+1. **测试夹具必须真建 `project` 与 `plan`，不能用假 id。** `tests/conftest.py` 的 `memory_db` 开了 `PRAGMA foreign_keys=ON`，而 `export_jobs.project_id` 与 `narration_plan_id` 都是外键 —— 计划原稿里 `exports_repo.create(memory_db, "p1", "plan1", ...)` 会直接 `IntegrityError`，在 Step 2 里"因为错误的原因"失败。**Task 4 追加到同一测试文件时一律复用 `_seed_export`**（它已建真项目与真编排）。
+2. **`reset_stale_pending` 谓词是 `status = 'pending'`，前提已核实**：`export_jobs` 全库只有 `mark_completed` 与 `mark_failed` 两处写状态，从不产生 `running`/`cancelled`（`migrations/001_init.sql:66` 的列注释写了那两种，但无代码路径产出，属注释超前）。**若 Task 4 的 `export.retry` 或后续引入真实 running 状态，必须把谓词放宽为 `status NOT IN ('completed','failed','cancelled')`**，否则崩溃残留又漏网。
+3. **清扫故意不清 `progress`、不写 `completed_at`**：`JobStore.sweep_interrupted` 同样只改 status+error 而保留 `jobs.progress`。只把导出侧清零会重新制造"两张表说法不一"——正是本任务要消灭的症状。该决定由一条断言钉住。
+
+另顺手修一处相邻遗漏：`service_app.py` 的**用户可见**恢复通知原先只报中断任务数，与刚扩成三项的 stdout 行不一致 —— 崩溃重启后用户看得到"3 个中断任务"，却看不到"2 个未完成导出也被复位"。已改为三项齐报。
+
 ## Task 2 落地后的实测修正（Task 3-6 必须遵守）
 
 Task 2 已完成（`ddb76a5`）。它抓到并修掉**计划自身的两个错**，另有一条 Task 1 遗留限制：
