@@ -256,3 +256,12 @@ def test_jobs_cancel_unknown_job_is_domain_error(memory_db: sqlite3.Connection) 
     response = router.dispatch(RpcRequest(id=1, method="jobs.cancel", params={"job_id": "x"}))
     assert response.error is not None
     assert response.error.code == -32501
+
+
+def test_reset_for_retry_is_cas(memory_db: sqlite3.Connection, tmp_path: Path) -> None:
+    """并发重试收口：第二次复位必须失败，否则两个任务会渲染进同一产物路径。"""
+    _project_id, _plan_id, export_id, _data = _seed_export(memory_db, tmp_path)
+    exports_repo.mark_failed(memory_db, export_id, "编码失败")
+
+    assert exports_repo.reset_for_retry(memory_db, export_id) is True
+    assert exports_repo.reset_for_retry(memory_db, export_id) is False, "已非 failed 不得再次复位"

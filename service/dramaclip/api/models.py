@@ -62,6 +62,9 @@ def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     if registry.find(spec, models_dir) is not None:
         raise RpcDomainError(_ERR_MODEL_STATE, f"{spec.name} 已安装")
     job_id = context.job_store.create("model_download", ref_id=model_id)
+    # 必须置 running：看门狗的回写条件是 status=="running"，而启动清扫只扫 running——
+    # 不置位则下载成功后记录永远停在 pending，且重启也清不掉（队列页永久假"下载中"）。
+    context.job_store.mark_running(job_id)
     cancel_event = threading.Event()
     context.cancel_events[job_id] = cancel_event
     done_event = threading.Event()

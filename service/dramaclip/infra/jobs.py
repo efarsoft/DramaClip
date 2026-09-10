@@ -10,6 +10,11 @@ from uuid import uuid4
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
+def is_terminal(status: str) -> bool:
+    """是否终态：终态任务不可再迁移，也不可再取消。上层据此判断，勿各写字面量。"""
+    return status in _TERMINAL_STATUSES
+
+
 def _now_ms() -> int:
     return int(time.time() * 1000)
 

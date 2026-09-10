@@ -97,18 +97,21 @@ def reset_stale_pending(conn: sqlite3.Connection) -> int:
     return cursor.rowcount or 0
 
 
-def reset_for_retry(conn: sqlite3.Connection, export_id: str) -> None:
-    """重试前复位：清 error 与产物路径、进度归零、状态回 pending。
+def reset_for_retry(conn: sqlite3.Connection, export_id: str) -> bool:
+    """重试前复位（CAS）：仅当仍为 failed 才清 error/产物路径、进度归零、回 pending。
 
     回到 'pending' 而非引入 'running'：启动清扫 reset_stale_pending 正是按
     pending 认崩溃残留，重试中途再次崩溃时该记录仍会被正确复位。
+    带 status 条件是为并发重试：两个 export.retry 同时通过"是否 failed"的检查时，
+    只有一个能复位成功，另一个据返回值被判为不可重试，避免双双渲染进同一文件。
     """
-    conn.execute(
+    cursor = conn.execute(
         "UPDATE export_jobs SET status = 'pending', error = NULL, output_path = NULL,"
-        " progress = 0, completed_at = NULL WHERE id = ?",
+        " progress = 0, completed_at = NULL WHERE id = ? AND status = 'failed'",
         (export_id,),
     )
     conn.commit()
+    return (cursor.rowcount or 0) > 0
 
 
 def list_by_project(conn: sqlite3.Connection, project_id: str) -> list[dict[str, Any]]:

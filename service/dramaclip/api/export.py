@@ -83,11 +83,10 @@ def retry(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     if plan_row is None:
         raise RpcDomainError(_ERR_PLAN_NOT_FOUND, f"编排方案不存在: {plan_id}")
     plan_data = PlanData.model_validate(plan_row["plan_data"])
-    # 已知窗口：状态判定与复位是两条语句，而 handler 跑在线程池上（service_app 用
-    # executor.submit 分发），同一 export_id 被同时点两次重试可能都通过上面的校验、
-    # 各自渲染同一个产物路径。收口只需把复位改成 WHERE status='failed' 的 CAS 并
-    # 把 rowcount=0 当不可重试——留作后续，本次不预先加锁。
-    exports_repo.reset_for_retry(context.conn, export_id)
+    # 复位是 CAS（仅当仍为 failed 才生效）：并发点两次重试时只有一个能复位成功，
+    # 另一个在此被判不可重试，避免双双渲染进同一产物路径。
+    if not exports_repo.reset_for_retry(context.conn, export_id):
+        raise RpcDomainError(_ERR_EXPORT_NOT_RETRYABLE, "该导出已被其他请求抢先重试")
     job_id = context.job_store.create("export", ref_id=export_id)
     cancel_event = threading.Event()
     context.cancel_events[job_id] = cancel_event
@@ -239,3 +238,6 @@ def _run_export(
         exports_repo.mark_failed(context.conn, export_id, str(exc))
         context.job_store.mark_failed(job_id, str(exc))
         context.notifier.log("error", f"导出失败: {exc}")
+    finally:
+        # 与 analysis/narration/models 一致：注册的取消事件必须回收，否则字典无界增长
+        context.cancel_events.pop(job_id, None)

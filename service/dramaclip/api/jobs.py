@@ -6,7 +6,7 @@ import time
 from typing import Any
 
 from dramaclip.api.context import AppContext
-from dramaclip.infra.jobs import _TERMINAL_STATUSES
+from dramaclip.infra.jobs import is_terminal
 from dramaclip.transport.rpc import Router, RpcDomainError
 
 _ERR_JOB_NOT_FOUND = -32501  # 任务域 -32500~-32599（见 common.json x-error-codes）
@@ -46,9 +46,9 @@ def cancel(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     job = context.job_store.get(job_id)
     if job is None:
         raise RpcDomainError(_ERR_JOB_NOT_FOUND, f"任务不存在: {job_id}")
-    # 终态集直接复用 infra/jobs 的 _TERMINAL_STATUSES：本文件另写一份字面量会与
+    # 终态判定复用 infra.jobs.is_terminal：本文件另写一份字面量会与
     # JobStore._transition 的校验各跑各的，将来加一个状态就漏一处。
-    if job["status"] in _TERMINAL_STATUSES:
+    if is_terminal(job["status"]):
         return {"job_id": job_id, "cancelling": False, "reason": "任务已终态"}
     event = context.cancel_events.get(job_id)
     if event is None:
