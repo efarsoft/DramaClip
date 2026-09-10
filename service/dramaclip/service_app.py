@@ -16,6 +16,7 @@ from dramaclip.infra import config, gpu, jobs, paths
 from dramaclip.infra import logging as logging_setup
 from dramaclip.infra.storage import backup, db
 from dramaclip.infra.storage.repos import episodes as episodes_repo
+from dramaclip.infra.storage.repos import exports as exports_repo
 from dramaclip.transport.connection import ServiceConnection
 from dramaclip.transport.notify import Notifier
 from dramaclip.transport.rpc import (
@@ -52,10 +53,11 @@ class ServiceApp:
         job_store = jobs.JobStore(conn)
         interrupted = job_store.sweep_interrupted()
         stale_episodes = episodes_repo.reset_stale_analyzing(conn)
-        if interrupted or stale_episodes:
+        stale_exports = exports_repo.reset_stale_pending(conn)
+        if interrupted or stale_episodes or stale_exports:
             print(
                 f"[startup] 清扫上次会话残留：中断任务 {interrupted} 个，"
-                f"分析中集 {stale_episodes} 个"
+                f"分析中集 {stale_episodes} 个，未完成导出 {stale_exports} 个"
             )
         gpu.prefetch()  # GPU 探测慢（nvidia-smi），启动即后台预热，health 不阻塞
 

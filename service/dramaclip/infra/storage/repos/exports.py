@@ -83,6 +83,20 @@ def mark_failed(conn: sqlite3.Connection, export_id: str, error: str) -> None:
     conn.commit()
 
 
+def reset_stale_pending(conn: sqlite3.Connection) -> int:
+    """启动清扫：崩溃残留的 pending 导出记为失败。
+
+    无服务运行即无导出在跑，故恒安全；已完成/已失败记录不动。
+    进度保留原值——与 JobStore.sweep_interrupted 对 jobs 的处理一致，两表不得互相矛盾。
+    """
+    cursor = conn.execute(
+        "UPDATE export_jobs SET status = 'failed', error = '服务中断'"
+        " WHERE status = 'pending'"
+    )
+    conn.commit()
+    return cursor.rowcount or 0
+
+
 def list_by_project(conn: sqlite3.Connection, project_id: str) -> list[dict[str, Any]]:
     rows = conn.execute(
         f"SELECT {', '.join(_COLUMNS)} FROM export_jobs WHERE project_id = ?"
