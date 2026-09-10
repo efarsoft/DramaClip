@@ -76,12 +76,22 @@ class JobStore:
     )
 
     def list_recent(self, *, limit: int = 50, active_only: bool = False) -> list[dict[str, Any]]:
-        """队列页数据源：按最近变更倒序取任务，可只要未终态。"""
-        where = " WHERE status IN ('pending', 'running')" if active_only else ""
+        """队列页数据源：按最近变更倒序取任务，可只要未终态。
+
+        排序补 `created_at, id` 兜底：`updated_at` 为毫秒精度，同毫秒内变更的任务
+        否则顺序随机，队列页每次刷新可能跳行。
+        过滤用 NOT IN(终态集) 而非 IN(活跃集)：将来新增非终态状态时不会静默消失。
+        """
+        where = ""
+        params: tuple[Any, ...] = (limit,)
+        if active_only:
+            placeholders = ", ".join("?" for _ in _TERMINAL_STATUSES)
+            where = f" WHERE status NOT IN ({placeholders})"
+            params = (*sorted(_TERMINAL_STATUSES), limit)
         rows = self._conn.execute(
             f"SELECT {', '.join(self._LIST_COLUMNS)} FROM jobs{where}"
-            " ORDER BY updated_at DESC LIMIT ?",
-            (limit,),
+            " ORDER BY updated_at DESC, created_at DESC, id LIMIT ?",
+            params,
         ).fetchall()
         return [dict(zip(self._LIST_COLUMNS, row, strict=True)) for row in rows]
 

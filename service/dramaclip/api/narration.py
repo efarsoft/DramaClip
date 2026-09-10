@@ -174,7 +174,7 @@ def _run_generation(
                 context.job_store.mark_cancelled(job_id)
                 return
             percent = index / total * 100
-            context.job_store.set_progress(job_id, percent)
+            context.job_store.set_progress(job_id, percent, f"生成{_mode_label(mode)}编排")
             context.notifier.progress(job_id, percent, f"生成{_mode_label(mode)}编排")
             _generate_one(context, mode, episodes, settings)
         context.job_store.mark_completed(job_id)
@@ -337,7 +337,7 @@ def _run_produce(
         label = _mode_label(mode)
 
         def report(percent: float, message: str, _base: float = base) -> None:
-            context.job_store.set_progress(job_id, round(_base + percent / total, 1))
+            context.job_store.set_progress(job_id, round(_base + percent / total, 1), message)
             context.notifier.progress(job_id, round(_base + percent / total, 1), message)
 
         context.notifier.progress(job_id, round(base, 1), f"({index + 1}/{total}) 生成{label}编排")

@@ -42,3 +42,27 @@ def test_list_recent_filters_out_terminal_when_asked(memory_db: sqlite3.Connecti
     store.mark_completed(done)
     active = store.list_recent(limit=10, active_only=True)
     assert [row["id"] for row in active] == [live]
+
+
+def test_list_recent_order_is_stable_within_same_millisecond(memory_db: sqlite3.Connection) -> None:
+    """updated_at 毫秒精度：同毫秒写入不得让队列页每次刷新跳行。"""
+    store = jobs_mod.JobStore(memory_db)
+    for index in range(12):
+        store.create("export", ref_id=f"e{index}")  # 不 sleep，制造同毫秒
+    first = [row["id"] for row in store.list_recent(limit=12)]
+    again = [row["id"] for row in store.list_recent(limit=12)]
+    assert first == again
+    assert len(set(first)) == 12
+
+
+def test_active_only_keeps_unknown_non_terminal_status(memory_db: sqlite3.Connection) -> None:
+    """过滤按「不在终态集」，不是「在已知活跃集」——将来加新状态不会静默消失。"""
+    store = jobs_mod.JobStore(memory_db)
+    known = store.create("export", ref_id="known")
+    memory_db.execute(
+        "INSERT INTO jobs (id, type, ref_id, status, progress, created_at, updated_at)"
+        " VALUES ('weird-id', 'export', 'future', 'queueing', 0, 1, 1)"
+    )
+    memory_db.commit()
+    active = {row["id"] for row in store.list_recent(limit=10, active_only=True)}
+    assert active == {known, "weird-id"}

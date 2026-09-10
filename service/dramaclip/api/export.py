@@ -186,7 +186,7 @@ def _run_export(
     context.job_store.mark_running(job_id)
 
     def report(percent: float, message: str) -> None:
-        context.job_store.set_progress(job_id, round(percent, 1))
+        context.job_store.set_progress(job_id, round(percent, 1), message)
         context.notifier.progress(job_id, round(percent, 1), message)
         exports_repo.set_progress(context.conn, export_id, round(percent, 1))
 
