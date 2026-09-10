@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sys
 import types
+from collections.abc import Generator
+from pathlib import Path
 
 from dramaclip.engines.analysis.transcriber import FasterWhisperEngine
 from dramaclip.infra import gpu
@@ -64,3 +66,36 @@ def test_cpu_errors_are_not_swallowed(monkeypatch) -> None:
         assert "disk full" in str(exc)
     else:  # pragma: no cover - 断言失败
         raise AssertionError("CPU 构建错误不应被吞掉")
+
+
+class _FakeLazyWhisper:
+    """构造成功、首次推理才抛 CUDA 缺库（CTranslate2 惰性计算的真实行为）。"""
+
+    created: list[str] = []
+
+    def __init__(self, _size: str, device: str = "cpu", download_root: str | None = None) -> None:
+        self.device = device
+        _FakeLazyWhisper.created.append(device)
+
+    def transcribe(self, _wav: object, language: str = "zh", vad_filter: bool = False):  # type: ignore[no-untyped-def]
+        if self.device == "cuda":
+            def _boom() -> Generator[None, None, None]:
+                raise RuntimeError("Library cublas64_12.dll is not found or cannot be loaded")
+                yield  # pragma: no cover
+
+            return _boom(), None
+        seg = types.SimpleNamespace(start=0.0, end=1.0, text=" 你好 ")
+        return iter([seg]), None
+
+
+def test_cuda_failure_during_inference_falls_back(monkeypatch) -> None:
+    fake = types.SimpleNamespace(WhisperModel=_FakeLazyWhisper)
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake)
+    _FakeLazyWhisper.created.clear()
+    engine = FasterWhisperEngine("base", device="cuda")
+    segments = engine.transcribe(Path("x.wav"))
+    assert [s.text for s in segments] == ["你好"]
+    assert _FakeLazyWhisper.created == ["cuda", "cpu"]
+    # CPU 模型已缓存：第二集直接复用，不再重复走失败的 CUDA 路径
+    engine.transcribe(Path("x.wav"))
+    assert _FakeLazyWhisper.created == ["cuda", "cpu"]

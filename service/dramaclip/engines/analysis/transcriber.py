@@ -51,7 +51,20 @@ class FasterWhisperEngine:
         return f"faster_whisper:{self._model_size}"
 
     def transcribe(self, wav_path: Path, language: str = "zh") -> list[AsrSegment]:
-        model = self._ensure_model()
+        try:
+            return self._run(self._ensure_model(), wav_path, language)
+        except Exception as exc:  # noqa: BLE001 - CUDA 运行库问题统一按关键字识别
+            # cuBLAS/cuDNN 缺失往往在首次推理（惰性计算）时才暴露，构造期兜不住
+            if self._device == "cpu" or not _CUDA_PROBLEM.search(str(exc)):
+                raise
+            _LOGGER.warning("CUDA 推理失败，自动回退 CPU：%s", exc)
+            from faster_whisper import WhisperModel  # ml extras 懒加载
+
+            cpu_model = self._create(WhisperModel, "cpu")
+            self._model = cpu_model  # 缓存 CPU 模型，后续集不再重复走失败的 CUDA 路径
+            return self._run(cpu_model, wav_path, language)
+
+    def _run(self, model: WhisperModel, wav_path: Path, language: str) -> list[AsrSegment]:
         segments, _info = model.transcribe(str(wav_path), language=language, vad_filter=True)
         return [
             AsrSegment(start=seg.start, end=seg.end, text=seg.text.strip())
