@@ -8,7 +8,6 @@ import {
   EditOutlined,
   FolderOutlined,
   RightOutlined,
-  RocketOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
 import type { ModelInfo } from '@dramaclip/protocol';
@@ -35,17 +34,17 @@ export function EnvPanel({
   const kokoro = (models ?? []).find((m) => m.model_id.includes('kokoro'));
   const rows: EnvRow[] = [
     llmBaseUrl === ''
-      ? { name: 'LLM 文案引擎', ok: false, status: '未配置', action: { label: '去配置', path: '/settings' } }
+      ? { name: 'LLM 文案引擎', ok: false, status: '未配置', action: { label: '去配置', path: '/engines/llm' } }
       : { name: 'LLM 文案引擎', ok: true, status: '已配置' },
     asr === undefined
       ? { name: 'ASR 语音识别', ok: null, status: '…' }
       : asr.status === 'installed'
         ? { name: 'ASR 语音识别', ok: true, status: `已安装 · ${asr.name}` }
-        : { name: 'ASR 语音识别', ok: false, status: '未安装', action: { label: '去下载', path: '/models/tts' } },
+        : { name: 'ASR 语音识别', ok: false, status: '未安装', action: { label: '去下载', path: '/engines/asr' } },
     ttsEngine === 'kokoro'
       ? kokoro?.status === 'installed'
         ? { name: 'TTS 配音', ok: true, status: 'Kokoro 本地 · 已就绪' }
-        : { name: 'TTS 配音', ok: false, status: 'Kokoro 缺模型', action: { label: '去下载', path: '/models/tts' } }
+        : { name: 'TTS 配音', ok: false, status: 'Kokoro 缺模型', action: { label: '去下载', path: '/engines/tts' } }
       : { name: 'TTS 配音', ok: true, status: 'Edge 云端 · 已就绪' },
     { name: 'FFmpeg 编码', ok: true, status: '内置 · 就绪' },
   ];
@@ -104,8 +103,8 @@ function EnvItem({ row, onAction }: { row: EnvRow; onAction: (path: string) => v
 }
 
 const TOOLS = [
-  { key: 'models', icon: <CloudServerOutlined />, tint: tokens.colorPrimary, title: '模型管理', desc: '下载或导入语音/转写模型' },
-  { key: 'settings', icon: <SettingOutlined />, tint: tokens.colorWarning, title: '系统设置', desc: 'LLM 端点、TTS 音色与出片参数' },
+  { key: 'engines', icon: <CloudServerOutlined />, tint: tokens.colorPrimary, title: '引擎中心', desc: '下载或导入语音/转写模型' },
+  { key: 'settings', icon: <SettingOutlined />, tint: tokens.colorWarning, title: '系统设置', desc: '预筛阈值、出片时长与下载镜像' },
   { key: 'projects', icon: <FolderOutlined />, tint: tokens.colorAccent, title: '项目管理', desc: '全部项目、剧集与出片记录' },
 ] as const;
 
@@ -154,7 +153,6 @@ export function ToolboxPanel(): ReactElement {
 }
 
 const TIPS = [
-  { icon: <RocketOutlined />, text: '导入短剧后自动预筛，推荐集才做全量分析' },
   { icon: <EditOutlined />, text: '转写有误？分析页点对白流直接改，改完重跑语义' },
   { icon: <BookOutlined />, text: '九种模式支持一键全部生成，横向对比效果' },
 ] as const;

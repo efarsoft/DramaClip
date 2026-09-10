@@ -91,7 +91,7 @@ export function OverviewTab({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
         {capabilities.map((item) => (
-          <CapabilityCard key={item.name} item={item} onGo={() => void navigate(`/models/${item.tab}`)} />
+          <CapabilityCard key={item.name} item={item} onGo={() => void navigate(`/engines/${item.tab}`)} />
         ))}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
@@ -100,7 +100,7 @@ export function OverviewTab({
           desc="下载语音识别与配音模型，数据不出本机，速度取决于电脑性能"
           action="去下载"
           onClick={() => {
-            void navigate('/models/asr');
+            void navigate('/engines/asr');
           }}
         />
         <PathCard
@@ -108,7 +108,7 @@ export function OverviewTab({
           desc="配置 LLM API Key 即可开始，配音默认走微软 Edge（免费）"
           action="去配置"
           onClick={() => {
-            void navigate('/models/llm');
+            void navigate('/engines/llm');
           }}
         />
       </div>

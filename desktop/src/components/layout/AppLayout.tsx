@@ -16,7 +16,7 @@ const NAV_ITEMS = [
   { path: '/', label: '工作台', icon: DashboardOutlined },
   { path: '/projects', label: '项目', icon: FolderOutlined },
   { path: '/works', label: '作品', icon: PlaySquareOutlined },
-  { path: '/models', label: '模型', icon: CloudServerOutlined },
+  { path: '/engines', label: '引擎', icon: CloudServerOutlined },
   { path: '/settings', label: '设置', icon: SettingOutlined },
 ] as const;
 

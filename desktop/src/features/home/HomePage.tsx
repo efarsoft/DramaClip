@@ -101,7 +101,7 @@ function GreetingHeader({ summary }: { summary: DashboardSummary | null }) {
         </h1>
         <div style={{ fontSize: tokens.fontBody, color: tokens.textTertiary, marginTop: 6 }}>
           {String(now.getMonth() + 1)}月{String(now.getDate())}日 星期{week} ·
-          选择一个方式开始，短剧素材也可以拖进来
+          选择一个方式开始，或选择素材所在文件夹
         </div>
       </div>
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>

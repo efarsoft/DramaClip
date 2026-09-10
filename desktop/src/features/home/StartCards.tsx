@@ -22,7 +22,7 @@ const CARDS: readonly CardSpec[] = [
     icon: <FolderAddOutlined />,
     tint: tokens.colorPrimary,
     title: '新建项目',
-    desc: '导入本地短剧文件夹，AI 自动预筛与全量分析',
+    desc: '导入本地短剧文件夹，逐集转写与冲突分析',
     tag: 'asr',
   },
   {
@@ -36,8 +36,8 @@ const CARDS: readonly CardSpec[] = [
     key: 'settings',
     icon: <SettingOutlined />,
     tint: tokens.colorWarning,
-    title: '引擎与设置',
-    desc: '下载模型、配置 LLM 端点与出片参数',
+    title: '引擎中心',
+    desc: '下载模型、配置 LLM 端点',
   },
 ];
 
@@ -60,7 +60,7 @@ export function StartCards({
       void navigate('/projects');
     },
     settings: () => {
-      void navigate('/models');
+      void navigate('/engines');
     },
   };
   const tags: Record<string, string | undefined> = {

@@ -78,7 +78,7 @@ export function EnginesPage() {
         desc="语音识别、配音、文案三类引擎——本地引擎免费离线，云端引擎即开即用"
       />
       <div style={{ display: 'grid', gridTemplateColumns: '216px minmax(0,1fr)', gap: tokens.spaceLg, alignItems: 'start' }}>
-        <TabNav tab={tab} onPick={(key) => { void navigate(`/models/${key}`); }} />
+        <TabNav tab={tab} onPick={(key) => { void navigate(`/engines/${key}`); }} />
         {data === null ? (
           <PageSection>加载中…</PageSection>
         ) : tab === 'asr' ? (
@@ -96,7 +96,7 @@ export function EnginesPage() {
 }
 
 function tabFromPath(pathname: string): EngineTab {
-  const match = /\/models\/(asr|tts|llm)/.exec(pathname);
+  const match = /\/engines\/(asr|tts|llm)/.exec(pathname);
   return (match?.[1] as EngineTab | undefined) ?? 'overview';
 }
 

@@ -29,7 +29,7 @@ export function useTodos(
     if (!llmConfigured) {
       items.push({
         key: 'llm',
-        text: 'LLM 未配置：文案将使用关键词降级（系统设置可填写端点）',
+        text: 'LLM 未配置：文案将使用关键词降级（引擎中心可配置端点）',
         severity: 'info',
       });
     }
