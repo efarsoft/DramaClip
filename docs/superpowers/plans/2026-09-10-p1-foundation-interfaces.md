@@ -25,7 +25,11 @@
 
 **基线（2026-09-10 实测）**：`cd service && ../.venv/Scripts/python -m pytest tests` → **190 passed, 8 warnings in ~19s**。本计划全程**只增不减**。
 `.venv` 在仓库根，不在 `service/` 下。`pyproject.toml` 有 `addopts = "-q"`，所以 `pytest -q` 等于 `-qq`，**不打印通过摘要行**——要计数就别加 `-q`。
-已知 flaky（非本计划引入）：`tests/api/test_analysis.py::test_resync_semantic_refreshes_without_touching_asr` 偶发 30 秒超时；**别把它误判成自己的回归，也不得为它放宽断言**。
+**已知失败（非本计划引入，Task 2-6 都会撞上）**：`tests/api/test_analysis.py::test_resync_semantic_refreshes_without_touching_asr`
+- **不是随机 flaky，是确定性的测试隔离污染**：`cd service && ../.venv/Scripts/python -m pytest tests/engines tests/api -o addopts="" -q` **每次都挂**；单独跑该测试 0.97 秒通过；`tests/transport+api`、`tests/api` 自身均绿。
+- 已排除 `tests/engines/exporter` 与 `tests/engines/analysis`；污染源在 `tests/engines/{dedup|narration|semantic|subtitle}` 四者之一，**尚未定位**。
+- 代价：套件从 ~15 秒涨到 ~45 秒（它在等 30 秒 job 超时），且让"全绿"判据不可信。
+- **纪律**：跑计数一律带 `-o addopts=""`（绕开 `addopts=-q`）；**不得为它放宽断言、不得加 sleep 掩盖、不要在 Task 2-6 里顺手"修好"它**——它是独立的测试隔离缺陷，混进功能提交里只会让两边都说不清。要修就单独立一条。
 
 ## Task 1 落地后的实测修正（Task 2-6 必须遵守）
 
