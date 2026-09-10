@@ -57,16 +57,36 @@ engines 不直接持有 Notifier——api 层包装为 `ProgressReporter` 注入
 
 ```
 api/__init__.py     build_router(context, shutdown) 组装全部命名空间（唯一 import 点）
-api/system.py       ping / health / shutdown        （W1 ✅）
-api/project.py      create/get/list/delete/scan_episodes   （W2 ✅）
-api/analysis.py     start/status/cancel/results（prescreen W10）  （W2 ✅）
-api/narration.py    generate_plans/synthesize_tts/get_plan  （W4-W9）
-api/export.py       start/cancel/status/list                （W4）
-api/subtitle.py     list_presets/preview                    （W7）
-api/tts.py          list_voices/preview                     （W5）
-api/models.py       list/download/cancel/delete/import_local（W10）
-api/settings.py     get/update                              （W3）
+api/system.py       ping / health / shutdown                              （3）
+api/project.py      create / list / get / delete / rename / duplicate /
+                    scan_episodes / dashboard_summary / ensure_covers /
+                    reorder_episodes / update_settings                   （11）
+api/analysis.py     prescreen / start / status / cancel / results /
+                    resync_semantic / update_asr                          （7）
+api/narration.py    generate_plans / list_plans / produce / list_styles   （4）
+api/timeline.py     narration.replace_timeline                            （1）
+api/export.py       start / retry / list / list_works                     （4）
+api/subtitle.py     list_presets                                          （1）
+api/models.py       list / download / scan_local / delete                 （4）
+api/settings.py     get / update / test_llm                               （3）
+api/engine_configs.py  create / list / update / delete / enable / test    （6）
+api/jobs.py         list / get / cancel                                   （3）
 ```
+
+**实测合计 47 个方法**（P-1 收口时以 `Router.method_names` 数出，非估算）。
+命名空间分布：`project` 11、`analysis` 7、`engine_configs` 6、`narration` 5、`export` 4、
+`models` 4、`jobs` 3、`settings` 3、`system` 3、`subtitle` 1。
+
+「文件 = 命名空间」有且只有一处例外：`api/timeline.py` 是时间线整轴回写的实现文件，
+但它注册的是 `narration.replace_timeline`（归属 narration 命名空间，见 `protocol/schemas/narration.json`）。
+方法名集合由 `tests/transport/test_contract_sync.py` 与 `protocol/schemas/*.json` 的 `x-methods`
+做**集合相等**校验（桌面侧 `desktop/src/__tests__/contract.test.ts` 同校验），
+新增/删除方法漏登记 schema 即 CI 红——上面的 47 因此不是手工统计。
+
+**尚无 api 文件的既定命名空间**：`tts.*`（原案 list_voices / preview）从未实现，且**没有任何音色枚举
+RPC**——音色只有 `tts.voice` 这一设置键可用；`prescreen` 也不是独立命名空间：方法名是
+`analysis.prescreen`，但其 schema 条目单独放在 `protocol/schemas/prescreen.json`（按阶段分文件，
+命名空间仍属 analysis，故 analysis 的 7 个方法分布在 analysis.json 6 条 + prescreen.json 1 条）。
 
 **handler 签名约定**：`(params: dict[str, Any]) -> JSON 可序列化对象`；参数校验用 Pydantic 模型（每命名空间一个 `models.py` 或就近定义）。
 
@@ -75,13 +95,23 @@ api/settings.py     get/update                              （W3）
 ```
 request: analysis.start {project_id, episode_ids}
   1. 校验参数与项目状态
-  2. jobs.create(type='analysis', ref=...) → job_id
-  3. executor.submit(执行函数, job_id, ...)   # 执行函数内经 ProgressReporter 推进度
-  4. return {job_id}                          # 立即返回，绝不同步等待
+  2. context.job_store.create(type, ref_id) → job_id     # jobs 表一行，status=pending
+  3. cancel_events[job_id] = threading.Event()           # 注册才可中断
+  4. executor.submit(执行函数, job_id, ...)
+  5. return {job_id}                                     # 立即返回，绝不同步等待
+
+执行函数（线程池内）：
+  job_store.mark_running(job_id)                          # 【必须】漏掉则崩溃后清扫不到（只扫 running）
+  ... 分段 job_store.set_progress(job_id, pct, label)     # label = 队列页显示的人读阶段
+  try/except → mark_completed / mark_failed(error)
+  finally → cancel_events.pop(job_id, None)               # 【必须】否则字典无界增长
 
 后续：progress.update 事件推送；
-查询：analysis.status {job_id} / analysis.results {project_id}
-取消：analysis.cancel {job_id} → 取消执行池 future + 状态 cancelled
+查询：jobs.list {limit, active_only} / jobs.get {job_id}（队列页统一数据源）
+      analysis.status {job_id} / analysis.results {project_id}（域内详情仍走各自方法）
+取消：jobs.cancel {job_id} → 置已注册的取消事件，任务自己在下个检查点退出并标 cancelled；
+      已终态回 {cancelling:false, reason:"任务已终态"}，无注册事件回 reason:"任务不可中断"
+      （绝不谎报已取消；各域自己的 *.cancel 仍在，但只翻事件、不改状态）
 ```
 
 ## 5. `__main__.py` —— 入口
@@ -91,5 +121,21 @@ request: analysis.start {project_id, episode_ids}
 | 参数 | `--address <host:port>`（缺省读 env `DRAMACLIP_SERVICE_ADDRESS`） |
 | 环境 | `DRAMACLIP_AUTH_TOKEN`（必填，缺失退出码 2）、`DRAMACLIP_DATA_DIR` |
 | 启动 | 按 `00-服务总体设计` 第 3 节时序 |
-| 退出码 | 0 正常退出；2 配置/环境错误；3 迁移失败 |
+| 退出码 | 0 正常退出；2 缺 `DRAMACLIP_SERVICE_ADDRESS` / `DRAMACLIP_AUTH_TOKEN`（`__main__._EXIT_ENV_MISSING`）。<br>原案设想的「3 迁移失败」**未实现**：`db.migrate()` 抛错时异常直穿，解释器以 1 退出 |
 | 打包 | PyInstaller 入口（`dramaclip.__main__:main`），P2 |
+
+## 6. P-1 收口已知限制（读代码前先看这条，别把接口当成已完成功能）
+
+- **5 个新方法在桌面端零调用者**：`jobs.list` / `jobs.get` / `jobs.cancel` / `export.retry` /
+  `project.update_settings` 只在 `protocol/ts/index.ts` 的 `METHOD_NAMES` 里登记，`desktop/src` 里
+  没有一处调用——队列页、失败记录上的「重试」按钮、项目参数面板**都还没做**。P-1 兑现的是服务端地基。
+- **`projects.settings` 尚无消费端**：写入与合并（键级、`null` 删键）已就绪并有测试，
+  但 `projects_repo.get_settings()` **零调用者**，渲染/分析读的是全局 `context.settings`；
+  现在写覆盖值不会改变任何行为。接线的同时要把实际使用的覆盖键名登记进 `04-数据模型` §3。
+- **`api/models.py` 零测试覆盖**：P-1 修掉了 `models.download` 的真 bug（漏 `mark_running`
+  → 记录永停 `pending` 且重启清不掉），但**修复本身没有自动化守卫**——`tests/` 下没有任何打到
+  `api/models.py` 的用例。回归风险敞口在「下载/删除/本地扫描」四条方法上，补测试前别改动该文件。
+- **启动清扫的三条计数是齐的**（`service_app.run()` 实测）：`job_store.sweep_interrupted()`（jobs 的
+  running）、`episodes_repo.reset_stale_analyzing()`（分析中集）、`exports_repo.reset_stale_pending()`
+  （pending 导出）三者任一非零即打 stdout 并 `log.append` 一条 warn，文案含全部三项计数。
+  注意 `sweep_interrupted` 只扫 `running`——这正是上面那条 `mark_running` 纪律必须守住的原因。
