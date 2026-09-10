@@ -14,17 +14,18 @@
 
 ## ⚠️ 并行工作区须知（开工前必读）
 
-本仓库同时有另一个执行者在改这些文件。**开工第一步必须 `git status --short` 复核，若下列文件仍为脏，停下来等它干净或与其协调，不得在其上继续改：**
+**2026-09-10 实测更新**：另一执行者已合入 `engine_configs` 全栈（提交 `299db8e`）与随后的 ASR 回退、e2e 改动。核对结果：
 
-| 文件 | 冲突点 |
-|---|---|
-| `service/dramaclip/api/__init__.py` | 已含 `engine_configs` 命名空间；本计划要在此注册 `jobs` |
-| `protocol/ts/index.ts` | `METHOD_NAMES` 常量要加新条目 |
-| `service/dramaclip/infra/storage/migrations/` | 已有 **007_engine_configs.sql**；本计划用 **008** |
-| `desktop/src/features/engines/*`、`desktop/src/services/client.ts` | 对方在做云端配置 UI，本计划不碰前端 |
+- **冲突已解除**：`api/__init__.py`（已含 `engine_configs` 注册）、`protocol/ts/index.ts`（已含其方法名）、`protocol/schemas/engine_configs.json` 均已落库，工作区干净。
+- **P-1 的五个核心目标文件对方未动**：`api/export.py`、`infra/jobs.py`、`api/project.py`、`repos/projects.py`、`repos/exports.py` —— 本计划里的行号锚点**仍然有效**。
+- **migrations 仍到 007**，本计划用 **008** 不变。
+- **`settings.test_tts/test_asr/test_vlm` 的归属要重新看一眼**：`engine_configs` 已经建了"云端服务端点多实例"的配置面，这三条连通自检很可能该挂在它下面而不是 `settings`。本计划已把它们**排除在 P-1 之外**，正是为此。
 
-**基线（本计划起点）**：`cd service && ../.venv/Scripts/python -m pytest tests` → **177 passed**（若对方已合入更多，以实际数为准，**只增不减**）。
+**开工第一步仍然必须** `git status --short`：对方在持续推进，若上面五个文件出现脏状态，停下协调，不要在其上继续改。
+
+**基线（2026-09-10 实测）**：`cd service && ../.venv/Scripts/python -m pytest tests` → **190 passed, 8 warnings in ~19s**。本计划全程**只增不减**。
 `.venv` 在仓库根，不在 `service/` 下。`pyproject.toml` 有 `addopts = "-q"`，所以 `pytest -q` 等于 `-qq`，**不打印通过摘要行**——要计数就别加 `-q`。
+已知 flaky（非本计划引入）：`tests/api/test_analysis.py::test_resync_semantic_refreshes_without_touching_asr` 偶发 30 秒超时；**别把它误判成自己的回归，也不得为它放宽断言**。
 
 ---
 
