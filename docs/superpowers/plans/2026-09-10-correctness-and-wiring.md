@@ -1735,3 +1735,17 @@ git commit -m "test(modes): 真机九模式回归脚本，断言音轨存在/时
 ### 范围外发现（记录，不在本批次动）
 
 `engine_configs`（另一执行者的 6 方法 + 迁移 007）占了剪辑域错误码 `-32310/11`；`analysis.cancel` 的"任务不存在"用 `-32201` 而 `jobs.*` 用 `-32501`；`common.json` 的 `x-wire.transport` 仍写 named-pipe、`x-notifications` 仍宣称 `speed/eta`。
+
+### 修改进度
+
+**已完成 · 阻断链 B1 + B3 + B4 优先级（`747b4d1`，226 → 250 passed，+24 测试）**
+
+- `TimelineSegment.narration_id` 落地；回填认 `("narration","ducked")`；导出侧改为按 id 的纯函数 `tts_audio_by_segment`，位置推断整段删除；`.srt` 优先于库内 ASR 已调回。
+- **可达性证明**（这条最关键）：新测试直接驱动生产入口 `render_export`，逐段断言 `-filter_complex` 存在、**第二路 `-i` 就是该段自己的 `{narration_id}.mp3`**、`amix=inputs=2` + `volume=0.12`。修复前该测试失败；且把回填条件退回 `!= "narration"` 也会失败。旧那种"只测 encoder"的写法永远抓不到这个 bug。
+- **它纠正了我对失配机理的描述**：纯交替（cross / ultra_short 的 CTA 在 index 2）本身**不会**失配，因为导出侧的 `narration_order` 与编排侧同步跳过了非旁白段；真正的第二重失配是 **TTS 失败后 `kept_texts` 过滤**——导出侧列表比编排侧的 `updated` 短，索引整体前移。`ducked` 完全取不到音才是 `full_narration` 的主因。修法不变（按 id 取用两类都覆盖），测试两种都钉住了。
+- 一处必要偏离：`synthesize_narration_texts` 改为返回 `model_validate` 而非 `model_copy(update=…)`——后者会在 `.timeline` 里留下裸 dict，任何 `segment.audio` 都会炸（实测 `'dict' object has no attribute 'narration_id'` + 每次 dump 16 条 pydantic 告警）。**这也解释了今天 16:03 那次 `'dict' object has no attribute 'start'` 报错的根因**：同一类 dict/对象混淆，只是当时被别的路径掩盖了。
+
+**新发现的潜伏洞（不在出厂路径上，清理波处理）**：`api/timeline.py` 的 `SegmentInput` 没有 `narration_id` 字段，所以 `narration.replace_timeline` 任何一次保存都会**抹掉配对**，该 plan 之后导出零旁白音（已实测：`model_dump()` 只剩 6 个键）。已核实 `TimelineEditor.tsx` 全库无引用、`replace_timeline` 前端零调用者，**因此不是出厂缺陷**。
+→ **决定：不给 `SegmentInput` 补字段**，而是在清理波**整条删除** `TimelineEditor.tsx` + `api/timeline.py` + `narration.replace_timeline`（含 schema 与 `METHOD_NAMES`）。理由：该能力与"阶段条只读、不做方案手动调整"的既定非目标直接冲突，留着就是既养着一个死端点又埋着脚枪。
+
+**待办**：B6（按集分配额）→ C1/C2/C3 → 清理波（含上面删除项 + Standards 七项）→ D1 门禁。
