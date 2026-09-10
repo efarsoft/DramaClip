@@ -27,6 +27,16 @@
 `.venv` 在仓库根，不在 `service/` 下。`pyproject.toml` 有 `addopts = "-q"`，所以 `pytest -q` 等于 `-qq`，**不打印通过摘要行**——要计数就别加 `-q`。
 已知 flaky（非本计划引入）：`tests/api/test_analysis.py::test_resync_semantic_refreshes_without_touching_asr` 偶发 30 秒超时；**别把它误判成自己的回归，也不得为它放宽断言**。
 
+## Task 1 落地后的实测修正（Task 2-6 必须遵守）
+
+Task 1 已完成（`74f19d0` 部分 + `aa3b84c` + `bdb6e6f`），过程中撞到三件计划没写的事：
+
+1. **新增迁移必须同步 `tests/infra/storage/test_db.py::test_migrate_idempotent` 的白名单。** 该测试硬编码了迁移文件名的完整有序列表，任何新迁移都会让它红。对方提交 008 时漏了它，**HEAD 一度是红的**，由 `aa3b84c` 修回。**Task 5 若再加列请沿用同一处**。
+2. **`list_recent` 已按实测加固，Task 2-4 直接依赖这个形状**：排序为 `ORDER BY updated_at DESC, created_at DESC, id`（`updated_at` 毫秒精度，同毫秒写入否则顺序随机，队列页会跳行）；`active_only` 用 `NOT IN (终态集)` 而非 `IN ('pending','running')`（将来新增非终态状态不会静默从队列页消失）。两条行为各有测试锁定。
+3. **`model_download` 任务从不 `set_progress`、也从不 `mark_running`**——进度在 `downloader.download_in_background` 内部走 notifier，任务创建后一直停在 `pending` 直到被翻成 `completed`。**Task 4 的 `jobs.cancel` 必须预期这种情况**（`cancel_events` 里没有它 → 返回 `cancelling:false, reason:"任务不可中断"`），Task 6 文档里要写明这个已知限制，不要假装队列页对四类任务一视同仁。
+
+另外：`set_progress` 的 label 贯通已覆盖 `analysis`(3 处) / `export`(1) / `narration`(2)；**prescreen 逐集循环、semantic 中间阶段、`_run_generation_parallel` 的线程计数处没有配对消息，未强接**——留待有真实需要时再说，别为凑齐而新增调用。
+
 ---
 
 ## 文件结构
