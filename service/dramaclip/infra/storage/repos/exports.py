@@ -97,6 +97,20 @@ def reset_stale_pending(conn: sqlite3.Connection) -> int:
     return cursor.rowcount or 0
 
 
+def reset_for_retry(conn: sqlite3.Connection, export_id: str) -> None:
+    """重试前复位：清 error 与产物路径、进度归零、状态回 pending。
+
+    回到 'pending' 而非引入 'running'：启动清扫 reset_stale_pending 正是按
+    pending 认崩溃残留，重试中途再次崩溃时该记录仍会被正确复位。
+    """
+    conn.execute(
+        "UPDATE export_jobs SET status = 'pending', error = NULL, output_path = NULL,"
+        " progress = 0, completed_at = NULL WHERE id = ?",
+        (export_id,),
+    )
+    conn.commit()
+
+
 def list_by_project(conn: sqlite3.Connection, project_id: str) -> list[dict[str, Any]]:
     rows = conn.execute(
         f"SELECT {', '.join(_COLUMNS)} FROM export_jobs WHERE project_id = ?"

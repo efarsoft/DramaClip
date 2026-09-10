@@ -38,6 +38,25 @@
         "required": ["job"],
         "properties": { "job": { "$ref": "#/x-models/JobInfo" } }
       }
+    },
+    {
+      "name": "jobs.cancel",
+      "summary": "按 job_id 请求取消；已终态或不可中断时返回 cancelling=false 并给原因",
+      "params": {
+        "type": "object",
+        "required": ["job_id"],
+        "properties": { "job_id": { "type": "string" } },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": ["job_id", "cancelling"],
+        "properties": {
+          "job_id": { "type": "string" },
+          "cancelling": { "type": "boolean" },
+          "reason": { "type": "string" }
+        }
+      }
     }
   ],
   "x-models": {

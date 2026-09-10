@@ -113,6 +113,21 @@
       }
     },
     {
+      "name": "export.retry",
+      "summary": "重试失败导出：复用原 export_id 覆盖写，不新建记录",
+      "params": {
+        "type": "object",
+        "required": ["export_id"],
+        "properties": { "export_id": { "type": "string" } },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": ["job_id", "export_id"],
+        "properties": { "job_id": { "type": "string" }, "export_id": { "type": "string" } }
+      }
+    },
+    {
       "name": "export.list",
       "summary": "项目导出记录",
       "params": {

@@ -1,4 +1,4 @@
-"""export 命名空间：start（job）/ list。"""
+"""export 命名空间：start / retry（均为 job）/ list / list_works。"""
 
 from __future__ import annotations
 
@@ -22,6 +22,8 @@ from dramaclip.infra.storage.repos import projects as projects_repo
 from dramaclip.transport.rpc import Router, RpcDomainError
 
 _ERR_PLAN_NOT_FOUND = -32401
+_ERR_EXPORT_NOT_FOUND = -32404
+_ERR_EXPORT_NOT_RETRYABLE = -32405  # 导出域 -32400~-32499（见 common.json x-error-codes）
 
 # 纯原片模式零加工：不遮罩（原案 6B）
 _NO_MASK_MODES = {"raw_clip"}
@@ -36,6 +38,7 @@ def _safe_filename(name: str) -> str:
 
 def register(router: Router, context: AppContext) -> None:
     router.register("export.start", lambda params: start(context, params))
+    router.register("export.retry", lambda params: retry(context, params))
     router.register("export.list", lambda params: list_exports(context, params))
     router.register("export.list_works", lambda params: list_works(context, params))
 
@@ -61,6 +64,36 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     context.cancel_events[job_id] = cancel_event
     context.executor.submit(
         _run_export, context, job_id, export_id, project_id, plan_row, plan_data, cancel_event
+    )
+    return {"job_id": job_id, "export_id": export_id}
+
+
+def retry(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """重试一条失败导出：**复用原 export_id 覆盖写**，不新建记录。"""
+    export_id = str(params.get("export_id", ""))
+    record = exports_repo.get(context.conn, export_id)
+    if record is None:
+        raise RpcDomainError(_ERR_EXPORT_NOT_FOUND, f"导出记录不存在: {export_id}")
+    if record["status"] != "failed":
+        raise RpcDomainError(
+            _ERR_EXPORT_NOT_RETRYABLE, f"仅失败记录可重试，当前 {record['status']}"
+        )
+    plan_id = str(record["narration_plan_id"])
+    plan_row = plans_repo.get(context.conn, plan_id)
+    if plan_row is None:
+        raise RpcDomainError(_ERR_PLAN_NOT_FOUND, f"编排方案不存在: {plan_id}")
+    plan_data = PlanData.model_validate(plan_row["plan_data"])
+    # 已知窗口：状态判定与复位是两条语句，而 handler 跑在线程池上（service_app 用
+    # executor.submit 分发），同一 export_id 被同时点两次重试可能都通过上面的校验、
+    # 各自渲染同一个产物路径。收口只需把复位改成 WHERE status='failed' 的 CAS 并
+    # 把 rowcount=0 当不可重试——留作后续，本次不预先加锁。
+    exports_repo.reset_for_retry(context.conn, export_id)
+    job_id = context.job_store.create("export", ref_id=export_id)
+    cancel_event = threading.Event()
+    context.cancel_events[job_id] = cancel_event
+    context.executor.submit(
+        _run_export, context, job_id, export_id, str(record["project_id"]),
+        plan_row, plan_data, cancel_event,
     )
     return {"job_id": job_id, "export_id": export_id}
 
