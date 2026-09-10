@@ -14,7 +14,7 @@ export function HighlightsCard({
   return (
     <Card size="small" title="高光片段（点击定位）">
       {highlights.length === 0 ? (
-        <span style={{ fontSize: 12.5, color: tokens.textTertiary }}>暂无高光</span>
+        <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>暂无高光</span>
       ) : (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {highlights.map((highlight, index) => (
@@ -42,7 +42,7 @@ export function ActionsCard({ onReanalyze }: { onReanalyze: () => void }): React
         <Button size="small" onClick={onReanalyze}>
           重新分析本集（重转写）
         </Button>
-        <span style={{ fontSize: 12, color: tokens.textTertiary }}>
+        <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
           修正转写后先「重跑语义」刷新高光；重分析会覆盖本集转写。
         </span>
       </div>

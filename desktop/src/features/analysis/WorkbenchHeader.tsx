@@ -30,7 +30,7 @@ export function WorkbenchHeader({
         <Button size="small" icon={<LeftOutlined />} onClick={() => { void navigate('/projects'); }}>
           项目
         </Button>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: tokens.textPrimary }}>
+        <h1 style={{ margin: 0, fontSize: tokens.fontHeading, fontWeight: 700, color: tokens.textPrimary }}>
           {project?.name ?? '…'}
         </h1>
         <Tag color="blue">共 {String(total)} 集</Tag>
@@ -38,7 +38,7 @@ export function WorkbenchHeader({
           已分析 {String(doneCount)}/{String(total)}
         </Tag>
         {running && (
-          <span style={{ fontSize: 12, color: tokens.colorInfo }}>
+          <span style={{ fontSize: tokens.fontCaption, color: tokens.colorInfo }}>
             分析中 {String(Math.round(progressPercent))}%
           </span>
         )}

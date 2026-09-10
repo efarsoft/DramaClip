@@ -56,7 +56,7 @@ function Rail() {
         <RailButton
           key={item.path}
           label={item.label}
-          icon={<item.icon style={{ fontSize: 17 }} />}
+          icon={<item.icon style={{ fontSize: tokens.fontHeading }} />}
           active={location.pathname === item.path}
           onClick={() => {
             void navigate(item.path);
@@ -90,7 +90,7 @@ function RailButton({
         alignItems: 'center',
         justifyContent: 'center',
         gap: 3,
-        borderRadius: 9,
+        borderRadius: tokens.fontIcon,
         border: 'none',
         background: active ? tokens.accentSoft : 'transparent',
         color: active ? tokens.colorPrimary : tokens.textSecondary,
@@ -105,7 +105,7 @@ function RailButton({
       }}
     >
       {icon}
-      <span style={{ fontSize: 10, fontWeight: active ? 600 : 400 }}>{label}</span>
+      <span style={{ fontSize: tokens.fontIcon, fontWeight: active ? 600 : 400 }}>{label}</span>
     </button>
   );
 }

@@ -54,7 +54,7 @@ export function StatusBar(): React.ReactElement {
         padding: '0 14px',
         background: tokens.bgSidebar,
         borderTop: `1px solid ${tokens.borderSecondary}`,
-        fontSize: 11,
+        fontSize: tokens.fontMicro,
         color: tokens.textTertiary,
       }}
     >
@@ -63,7 +63,7 @@ export function StatusBar(): React.ReactElement {
           style={{
             width: 6,
             height: 6,
-            borderRadius: 3,
+            borderRadius: tokens.radiusDot,
             background: meta.color,
             boxShadow: `0 0 6px ${meta.color}`,
           }}

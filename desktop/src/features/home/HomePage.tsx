@@ -96,10 +96,10 @@ function GreetingHeader({ summary }: { summary: DashboardSummary | null }) {
   return (
     <header style={{ display: 'flex', alignItems: 'flex-end' }}>
       <div>
-        <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: tokens.textPrimary }}>
+        <h1 style={{ margin: 0, fontSize: tokens.fontDisplay, fontWeight: 700, color: tokens.textPrimary }}>
           {greetingText()}
         </h1>
-        <div style={{ fontSize: 13, color: tokens.textTertiary, marginTop: 6 }}>
+        <div style={{ fontSize: tokens.fontBody, color: tokens.textTertiary, marginTop: 6 }}>
           {String(now.getMonth() + 1)}月{String(now.getDate())}日 星期{week} ·
           选择一个方式开始，短剧素材也可以拖进来
         </div>
@@ -114,14 +114,14 @@ function GreetingHeader({ summary }: { summary: DashboardSummary | null }) {
               alignItems: 'center',
               gap: 2,
               padding: '6px 14px',
-              borderRadius: 9,
+              borderRadius: tokens.fontIcon,
               background: tokens.bgContainer,
               border: `1px solid ${tokens.borderSecondary}`,
             }}
           >
             <span
               style={{
-                fontSize: 16,
+                fontSize: tokens.fontTitle,
                 fontWeight: 700,
                 color: tokens.textPrimary,
                 fontFamily: tokens.fontFamilyMono,
@@ -130,7 +130,7 @@ function GreetingHeader({ summary }: { summary: DashboardSummary | null }) {
             >
               {chip.value ?? '…'}
             </span>
-            <span style={{ fontSize: 10, color: tokens.textTertiary }}>{chip.label}</span>
+            <span style={{ fontSize: tokens.fontIcon, color: tokens.textTertiary }}>{chip.label}</span>
           </span>
         ))}
       </div>

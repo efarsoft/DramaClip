@@ -94,11 +94,18 @@ def render_export(
         str(ep["id"]): str(ep["source_path"])
         for ep in episodes_repo.list_by_project(context.conn, project_id)
     }
-    tts_segments = {
-        index: Path(text.audio_path)
-        for index, text in enumerate(plan_data.narration_texts)
-        if text.audio_path is not None
-    }
+    # TTS 音频按「时间轴内第 N 条 narration 段」对应第 N 条解说词——
+    # 按时间轴全量索引会在原声/旁白交替的模式（交叉/超短）下错位或丢音
+    tts_segments: dict[int, Path] = {}
+    narration_order = 0
+    for index, segment in enumerate(plan_data.timeline):
+        if segment.audio != "narration":
+            continue
+        if narration_order < len(plan_data.narration_texts):
+            text = plan_data.narration_texts[narration_order]
+            if text.audio_path is not None:
+                tts_segments[index] = Path(text.audio_path)
+        narration_order += 1
     mask = plan_row["narration_mode"] not in _NO_MASK_MODES
     preset = subtitle_presets.get_preset(plan_row.get("subtitle_preset"))
 

@@ -78,7 +78,7 @@ export function ProjectsPage() {
 function PageHeader({ onOpenCreate }: { onOpenCreate: () => void }) {
   return (
     <header style={{ display: 'flex', alignItems: 'center', marginBottom: 20 }}>
-      <h1 style={{ margin: 0, fontSize: 20, color: tokens.textPrimary }}>项目管理</h1>
+      <h1 style={{ margin: 0, fontSize: tokens.fontHeading, color: tokens.textPrimary }}>项目管理</h1>
       <Button
         type="primary"
         style={{ marginLeft: 'auto' }}
@@ -166,7 +166,7 @@ function CreateProjectForm({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={{ fontSize: 13, color: tokens.textSecondary }}>项目名称</span>
+        <span style={{ fontSize: tokens.fontBody, color: tokens.textSecondary }}>项目名称</span>
         <Input
           value={name}
           onChange={(event) => {
@@ -176,7 +176,7 @@ function CreateProjectForm({
         />
       </label>
       <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={{ fontSize: 13, color: tokens.textSecondary }}>剧集文件夹</span>
+        <span style={{ fontSize: tokens.fontBody, color: tokens.textSecondary }}>剧集文件夹</span>
         <div style={{ display: 'flex', gap: 8 }}>
           <Input value={folder} readOnly placeholder="选择包含视频文件的文件夹" />
           <Button onClick={onPick}>选择文件夹</Button>

@@ -98,17 +98,17 @@ function EngineCard({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <strong style={{ fontSize: 13.5, color: tokens.textPrimary }}>{title}</strong>
+        <strong style={{ fontSize: tokens.fontBody, color: tokens.textPrimary }}>{title}</strong>
         {active && (
           <Tag color="blue" style={{ marginRight: 0 }}>
             使用中
           </Tag>
         )}
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: ok ? tokens.colorSuccess : tokens.colorWarning }}>
+        <span style={{ marginLeft: 'auto', fontSize: tokens.fontCaption, color: ok ? tokens.colorSuccess : tokens.colorWarning }}>
           ● {ok ? '就绪' : '缺模型'}
         </span>
       </div>
-      <div style={{ marginTop: 8, fontSize: 12.5, lineHeight: '19px', color: tokens.textTertiary }}>
+      <div style={{ marginTop: 8, fontSize: tokens.fontCaption, lineHeight: '19px', color: tokens.textTertiary }}>
         {desc}
       </div>
     </StyledCard>

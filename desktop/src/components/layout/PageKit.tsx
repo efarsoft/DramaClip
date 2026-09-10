@@ -164,7 +164,7 @@ export function PageFooter({
       </span>
       <Button type="primary" style={{ marginLeft: 'auto' }} disabled={!canProceed} onClick={onNext}>
         下一步：{nextLabel}
-        <RightOutlined style={{ fontSize: 11 }} />
+        <RightOutlined style={{ fontSize: tokens.fontMicro }} />
       </Button>
     </div>
   );

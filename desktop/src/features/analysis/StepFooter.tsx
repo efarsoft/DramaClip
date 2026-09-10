@@ -36,7 +36,7 @@ export function StepFooter({
       <Button icon={<RightOutlined style={{ transform: 'rotate(180deg)' }} />} disabled={step <= 1} onClick={onPrev}>
         上一步
       </Button>
-      <span style={{ fontSize: 12, color: tokens.textTertiary }}>
+      <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
         步骤 {String(step)} / {String(total)} · {proceedHint}
       </span>
       <Tooltip title={canProceed ? '' : '完成至少一集分析后解锁'}>
@@ -47,7 +47,7 @@ export function StepFooter({
           onClick={onNext}
         >
           下一步：{nextLabel}
-          <RightOutlined style={{ fontSize: 11 }} />
+          <RightOutlined style={{ fontSize: tokens.fontMicro }} />
         </Button>
       </Tooltip>
     </div>

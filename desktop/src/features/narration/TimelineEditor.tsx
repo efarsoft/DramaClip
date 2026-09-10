@@ -56,7 +56,7 @@ export function TimelineEditor({ plan, onChanged }: EditorProps) {
       }
     >
       {current.length === 0 ? (
-        <div style={{ color: tokens.textTertiary, fontSize: 12 }}>无段</div>
+        <div style={{ color: tokens.textTertiary, fontSize: tokens.fontCaption }}>无段</div>
       ) : (
         <SegmentRows
           segments={current}
@@ -146,11 +146,11 @@ function SegmentEditRow({
         alignItems: 'center',
         gap: 8,
         padding: '4px 8px',
-        borderRadius: 4,
+        borderRadius: tokens.radiusThumb,
         cursor: 'pointer',
         background: bg,
         border: `1px solid ${border}`,
-        fontSize: 13,
+        fontSize: tokens.fontBody,
       }}
     >
       <span style={{ color: tokens.textTertiary, width: 24, fontFamily: tokens.fontFamilyMono }}>
@@ -167,9 +167,9 @@ function SegmentEditRow({
         step={0.5}
         onChange={(v) => { onPatch({ end: v }); }}
       />
-      <span style={{ fontSize: 11, color: audioColor(segment.audio) }}>{audioLabel(segment.audio)}</span>
+      <span style={{ fontSize: tokens.fontMicro, color: audioColor(segment.audio) }}>{audioLabel(segment.audio)}</span>
       {segment.subtitle_text !== null && segment.subtitle_text !== undefined && (
-        <span style={{ fontSize: 11, color: tokens.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>
+        <span style={{ fontSize: tokens.fontMicro, color: tokens.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>
           {segment.subtitle_text}
         </span>
       )}

@@ -45,12 +45,17 @@ export const tokens = {
   fontBody: '13px',
   fontCaption: '12px',
   fontMicro: '11px',
+  fontIcon: '10px',     // 小图标/角标
+  fontHeading: '20px',  // 页面级标题
+  fontDisplay: '24px',  // 问候语等大号展示
+  fontPoster: '34px',   // 封面占位图标
 
   // ---- 圆角 / 层级 ----
   radiusCard: 10,
   radiusControl: 8,
   radiusChip: 999,
   radiusThumb: 6,
+  radiusDot: 3,         // 圆点/竖条装饰
   shadowPop: '0 8px 24px rgba(0,0,0,0.45)',
 
   // ---- 布局 ----

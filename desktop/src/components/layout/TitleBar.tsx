@@ -27,23 +27,23 @@ export function TitleBar(): React.ReactElement {
           style={{
             width: 22,
             height: 22,
-            borderRadius: 7,
+            borderRadius: tokens.radiusControl,
             background: tokens.gradientAccent,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: 10,
+            fontSize: tokens.fontIcon,
             color: '#FFFFFF',
           }}
         >
           ▶
         </span>
-        <span style={{ fontWeight: 700, fontSize: 13, color: tokens.textPrimary }}>DramaClip</span>
+        <span style={{ fontWeight: 700, fontSize: tokens.fontBody, color: tokens.textPrimary }}>DramaClip</span>
       </div>
       {onProjectArea ? (
         <ProjectSearch />
       ) : (
-        <span style={{ fontSize: 11, color: tokens.textTertiary }}>
+        <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>
           左侧选择工作区，进入项目后可在此快速跳转
         </span>
       )}
@@ -54,7 +54,7 @@ export function TitleBar(): React.ReactElement {
 
 const SEARCH_ICON = (
   <SearchOutlined
-    style={{ position: 'absolute', left: 9, top: 7, fontSize: 13, color: tokens.textTertiary }}
+    style={{ position: 'absolute', left: 9, top: 7, fontSize: tokens.fontBody, color: tokens.textTertiary }}
   />
 );
 
@@ -64,9 +64,9 @@ const SEARCH_BADGE = (
       position: 'absolute',
       right: 8,
       top: 5,
-      fontSize: 10,
+      fontSize: tokens.fontIcon,
       padding: '1px 6px',
-      borderRadius: 4,
+      borderRadius: tokens.radiusThumb,
       border: `1px solid ${tokens.border}`,
       color: tokens.textTertiary,
     }}
@@ -80,11 +80,11 @@ const SEARCH_INPUT_STYLE: CSSProperties = {
   height: 28,
   paddingLeft: 28,
   paddingRight: 44,
-  borderRadius: 7,
+  borderRadius: tokens.radiusControl,
   border: `1px solid ${tokens.border}`,
   background: tokens.bgInput,
   color: tokens.textPrimary,
-  fontSize: 12,
+  fontSize: tokens.fontCaption,
   outline: 'none',
 };
 
@@ -161,7 +161,7 @@ function SearchResults({
         left: 0,
         right: 0,
         zIndex: 30,
-        borderRadius: 8,
+        borderRadius: tokens.radiusControl,
         border: `1px solid ${tokens.border}`,
         background: tokens.bgElevated,
         boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
@@ -176,7 +176,7 @@ function SearchResults({
           }}
           style={{
             padding: '8px 12px',
-            fontSize: 12.5,
+            fontSize: tokens.fontCaption,
             color: tokens.textSecondary,
             cursor: 'pointer',
           }}
@@ -214,7 +214,7 @@ function WindowButtons() {
         background: 'transparent',
         border: 'none',
         color: tokens.textSecondary,
-        fontSize: 11,
+        fontSize: tokens.fontMicro,
         cursor: 'pointer',
         WebkitAppRegion: 'no-drag',
       } as CSSProperties}
@@ -231,7 +231,7 @@ function WindowButtons() {
   return (
     <div style={{ marginLeft: 'auto', display: 'flex', height: '100%' }}>
       {make(<MinusOutlined />, 'minimize', tokens.bgElevated)}
-      {make(<BorderOutlined style={{ fontSize: 9 }} />, 'maximize-toggle', tokens.bgElevated)}
+      {make(<BorderOutlined style={{ fontSize: tokens.fontIcon }} />, 'maximize-toggle', tokens.bgElevated)}
       {make(<CloseOutlined />, 'close', '#C43A3A')}
     </div>
   );

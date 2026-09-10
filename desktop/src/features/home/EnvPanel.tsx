@@ -68,12 +68,12 @@ function EnvItem({ row, onAction }: { row: EnvRow; onAction: (path: string) => v
         gap: 8,
         padding: '9px 0',
         borderBottom: `1px solid ${tokens.borderSecondary}`,
-        fontSize: 12.5,
+        fontSize: tokens.fontCaption,
       }}
     >
       <span style={{ width: 110, flexShrink: 0, color: tokens.textSecondary }}>{row.name}</span>
       <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: tokens.textTertiary }}>
-        <span style={{ width: 6, height: 6, borderRadius: 3, background: dot }} />
+        <span style={{ width: 6, height: 6, borderRadius: tokens.radiusDot, background: dot }} />
         {row.status}
       </span>
       {row.action !== undefined && (
@@ -87,7 +87,7 @@ function EnvItem({ row, onAction }: { row: EnvRow; onAction: (path: string) => v
             background: 'none',
             border: 'none',
             color: tokens.colorPrimary,
-            fontSize: 12,
+            fontSize: tokens.fontCaption,
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
@@ -96,7 +96,7 @@ function EnvItem({ row, onAction }: { row: EnvRow; onAction: (path: string) => v
           }}
         >
           {row.action.label}
-          <RightOutlined style={{ fontSize: 9 }} />
+          <RightOutlined style={{ fontSize: tokens.fontIcon }} />
         </button>
       )}
     </div>
@@ -131,11 +131,11 @@ export function ToolboxPanel(): ReactElement {
             style={{
               width: 32,
               height: 32,
-              borderRadius: 8,
+              borderRadius: tokens.radiusControl,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: 15,
+              fontSize: tokens.fontTitle,
               color: tool.tint,
               background: `${tool.tint}1A`,
             }}
@@ -143,10 +143,10 @@ export function ToolboxPanel(): ReactElement {
             {tool.icon}
           </span>
           <span style={{ display: 'flex', flexDirection: 'column' }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: tokens.textPrimary }}>{tool.title}</span>
-            <span style={{ fontSize: 11.5, color: tokens.textTertiary }}>{tool.desc}</span>
+            <span style={{ fontSize: tokens.fontBody, fontWeight: 600, color: tokens.textPrimary }}>{tool.title}</span>
+            <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>{tool.desc}</span>
           </span>
-          <RightOutlined style={{ marginLeft: 'auto', fontSize: 10, color: tokens.textTertiary }} />
+          <RightOutlined style={{ marginLeft: 'auto', fontSize: tokens.fontIcon, color: tokens.textTertiary }} />
         </div>
       ))}
     </RightPanel>
@@ -164,8 +164,8 @@ export function TipsPanel(): ReactElement {
     <RightPanel title="快速上手">
       {TIPS.map((tip) => (
         <div key={tip.text} style={{ display: 'flex', gap: 10, padding: '7px 0', alignItems: 'flex-start' }}>
-          <span style={{ color: tokens.colorPrimary, fontSize: 14, marginTop: 1 }}>{tip.icon}</span>
-          <span style={{ fontSize: 12, lineHeight: '19px', color: tokens.textTertiary }}>{tip.text}</span>
+          <span style={{ color: tokens.colorPrimary, fontSize: tokens.fontBodyLg, marginTop: 1 }}>{tip.icon}</span>
+          <span style={{ fontSize: tokens.fontCaption, lineHeight: '19px', color: tokens.textTertiary }}>{tip.text}</span>
         </div>
       ))}
     </RightPanel>
@@ -177,7 +177,7 @@ function RightPanel({ title, children }: { title: string; children: ReactNode })
     <Card size="small" styles={{ body: { padding: '6px 16px 10px' } }}>
       <div
         style={{
-          fontSize: 13.5,
+          fontSize: tokens.fontBody,
           fontWeight: 600,
           color: tokens.textPrimary,
           padding: '10px 0 4px',

@@ -122,31 +122,31 @@ function CapabilityCard({ item, onGo }: { item: Capability; onGo: () => void }):
     <SectionCard onClick={onGo}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 13.5, fontWeight: 600, color: tokens.textPrimary }}>{item.name}</span>
+          <span style={{ fontSize: tokens.fontBody, fontWeight: 600, color: tokens.textPrimary }}>{item.name}</span>
           <span
             style={{
               marginLeft: 'auto',
               width: 8,
               height: 8,
-              borderRadius: 4,
+              borderRadius: tokens.radiusThumb,
               background: tint,
               boxShadow: `0 0 6px ${tint}`,
             }}
           />
         </div>
-        <div style={{ fontSize: 12.5, color: tint }}>{item.current}</div>
+        <div style={{ fontSize: tokens.fontCaption, color: tint }}>{item.current}</div>
         <div
           style={{
             marginTop: 'auto',
             display: 'flex',
             alignItems: 'center',
             gap: 4,
-            fontSize: 12,
+            fontSize: tokens.fontCaption,
             color: tokens.colorPrimary,
           }}
         >
           去调整
-          <RightOutlined style={{ fontSize: 9 }} />
+          <RightOutlined style={{ fontSize: tokens.fontIcon }} />
         </div>
       </div>
     </SectionCard>
@@ -168,8 +168,8 @@ function PathCard({
     <SectionCard onClick={onClick}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: tokens.textPrimary }}>{title}</div>
-          <div style={{ fontSize: 12.5, color: tokens.textTertiary, marginTop: 3 }}>{desc}</div>
+          <div style={{ fontSize: tokens.fontBody, fontWeight: 600, color: tokens.textPrimary }}>{title}</div>
+          <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginTop: 3 }}>{desc}</div>
         </div>
         <span
           style={{
@@ -178,17 +178,17 @@ function PathCard({
             alignItems: 'center',
             gap: 4,
             padding: '6px 14px',
-            borderRadius: 8,
+            borderRadius: tokens.radiusControl,
             border: `1px solid ${tokens.border}`,
             background: tokens.bgElevated,
             color: tokens.textPrimary,
-            fontSize: 12.5,
+            fontSize: tokens.fontCaption,
             cursor: 'pointer',
             flexShrink: 0,
           }}
         >
           {action}
-          <RightOutlined style={{ fontSize: 9 }} />
+          <RightOutlined style={{ fontSize: tokens.fontIcon }} />
         </span>
       </div>
     </SectionCard>

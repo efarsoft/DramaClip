@@ -21,11 +21,11 @@ function StepDot({ index }: { index: number }): React.ReactElement {
       style={{
         width: 18,
         height: 18,
-        borderRadius: 9,
+        borderRadius: tokens.fontIcon,
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontSize: 11,
+        fontSize: tokens.fontMicro,
         marginRight: 7,
         background: index === 0 ? tokens.colorPrimary : tokens.bgElevated,
         color: index === 0 ? '#FFFFFF' : tokens.textTertiary,
@@ -66,7 +66,7 @@ export function StepsNav({ projectId, stepReady }: { projectId: string; stepRead
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  fontSize: 13,
+                  fontSize: tokens.fontBody,
                   color,
                   textDecoration: 'none',
                 }}
@@ -74,7 +74,7 @@ export function StepsNav({ projectId, stepReady }: { projectId: string; stepRead
                 {body}
               </Link>
             ) : (
-              <span style={{ display: 'flex', alignItems: 'center', fontSize: 13, color }}>{body}</span>
+              <span style={{ display: 'flex', alignItems: 'center', fontSize: tokens.fontBody, color }}>{body}</span>
             )}
           </span>
         );

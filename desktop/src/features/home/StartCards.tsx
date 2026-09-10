@@ -123,11 +123,11 @@ function WorkflowCard({
             style={{
               width: 40,
               height: 40,
-              borderRadius: 10,
+              borderRadius: tokens.radiusCard,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: 18,
+              fontSize: tokens.fontHeading,
               color: spec.tint,
               background: `${spec.tint}1A`,
             }}
@@ -138,9 +138,9 @@ function WorkflowCard({
             <span
               style={{
                 marginLeft: 'auto',
-                fontSize: 11,
+                fontSize: tokens.fontMicro,
                 padding: '2px 9px',
-                borderRadius: 999,
+                borderRadius: tokens.radiusChip,
                 color: tokens.colorWarning,
                 border: `1px solid ${tokens.colorWarning}66`,
                 background: `${tokens.colorWarning}14`,
@@ -150,8 +150,8 @@ function WorkflowCard({
             </span>
           )}
         </div>
-        <div style={{ fontSize: 15, fontWeight: 600, color: tokens.textPrimary }}>{spec.title}</div>
-        <div style={{ fontSize: 12.5, lineHeight: '20px', color: tokens.textTertiary }}>{spec.desc}</div>
+        <div style={{ fontSize: tokens.fontTitle, fontWeight: 600, color: tokens.textPrimary }}>{spec.title}</div>
+        <div style={{ fontSize: tokens.fontCaption, lineHeight: '20px', color: tokens.textTertiary }}>{spec.desc}</div>
       </div>
     </Card>
   );
@@ -162,7 +162,7 @@ function PanelTitle({ children }: { children: string }) {
     <h3
       style={{
         margin: '0 0 12px',
-        fontSize: 15,
+        fontSize: tokens.fontTitle,
         fontWeight: 600,
         color: tokens.textPrimary,
         display: 'flex',
@@ -170,7 +170,7 @@ function PanelTitle({ children }: { children: string }) {
         gap: 8,
       }}
     >
-      <span style={{ width: 3, height: 14, borderRadius: 2, background: tokens.gradientAccent }} />
+      <span style={{ width: 3, height: 14, borderRadius: tokens.radiusDot, background: tokens.gradientAccent }} />
       {children}
     </h3>
   );

@@ -72,7 +72,7 @@ export function ProductionPage() {
       {producing && (
         <Card size="small" title="出片进度">
           <Progress percent={Math.round(percent)} status="active" />
-          <div style={{ fontSize: 12, color: tokens.textTertiary }}>
+          <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
             {stageText === '' ? '排队中' : stageText} · 可离开本页面，任务在后台继续
           </div>
         </Card>
@@ -87,14 +87,14 @@ function PageHeader({ projectName }: { projectName?: string }): React.ReactEleme
   return (
     <header style={{ display: 'flex', alignItems: 'flex-end' }}>
       <div>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: tokens.textPrimary }}>
+        <h1 style={{ margin: 0, fontSize: tokens.fontTitleLg, fontWeight: 700, color: tokens.textPrimary }}>
           {projectName ?? '…'} · 出片中心
         </h1>
-        <div style={{ fontSize: 13, color: tokens.textTertiary, marginTop: 6 }}>
+        <div style={{ fontSize: tokens.fontBody, color: tokens.textTertiary, marginTop: 6 }}>
           选择模式一键出片：AI 编排、配音、渲染自动完成，成品在「作品库」查看
         </div>
       </div>
-      <Link to="/works" style={{ marginLeft: 'auto', fontSize: 13, color: tokens.colorPrimary }}>
+      <Link to="/works" style={{ marginLeft: 'auto', fontSize: tokens.fontBody, color: tokens.colorPrimary }}>
         前往作品库 →
       </Link>
     </header>
@@ -131,7 +131,7 @@ function ModeSelectCard({
         ))}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', marginTop: 16 }}>
-        <span style={{ fontSize: 12, color: tokens.textTertiary }}>
+        <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
           已选 {String(selected.length)} / {String(MODE_INFO.length)} 个模式
         </span>
         <Button size="small" style={{ marginLeft: 12 }} disabled={running} onClick={onSelectAll}>
@@ -176,14 +176,14 @@ function ModeTile({
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <strong style={{ color: tokens.textPrimary, fontSize: 13.5 }}>{label}</strong>
+          <strong style={{ color: tokens.textPrimary, fontSize: tokens.fontBody }}>{label}</strong>
           {checked && (
             <Tag color="blue" style={{ marginRight: 0 }}>
               已选
             </Tag>
           )}
         </div>
-        <span style={{ fontSize: 12, color: tokens.textTertiary }}>{desc}</span>
+        <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>{desc}</span>
         <span style={{ display: 'flex', gap: 6, marginTop: 'auto' }}>
           {needs.includes('copy') ? (
             <NeedBadge text="含 AI 文案" />
@@ -205,9 +205,9 @@ function NeedBadge({ text, muted = false }: { text: string; muted?: boolean }): 
   return (
     <span
       style={{
-        fontSize: 10.5,
+        fontSize: tokens.fontIcon,
         padding: '1px 7px',
-        borderRadius: 999,
+        borderRadius: tokens.radiusChip,
         color: muted ? tokens.textTertiary : tokens.colorSuccess,
         border: `1px solid ${muted ? tokens.border : `${tokens.colorSuccess}55`}`,
         background: muted ? 'transparent' : `${tokens.colorSuccess}12`,
@@ -241,12 +241,12 @@ function ExportRow({ job }: { job: ExportJob }) {
         gap: 12,
         padding: '8px 0',
         borderBottom: `1px solid ${tokens.borderSecondary}`,
-        fontSize: 13,
+        fontSize: tokens.fontBody,
       }}
     >
       <Tag color={color}>{label}</Tag>
       <span style={{ color: tokens.textPrimary }}>{modeLabel(job.narration_mode ?? '')}</span>
-      <span style={{ marginLeft: 'auto', fontSize: 12, color: tokens.textTertiary }}>
+      <span style={{ marginLeft: 'auto', fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
         {job.duration_s !== undefined ? `${String(Math.round(job.duration_s))}s` : ''}
       </span>
     </div>

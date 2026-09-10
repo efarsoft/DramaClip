@@ -107,7 +107,7 @@ function RowName({ episode, active }: { episode: Episode; active: boolean }): Re
     <span
       title={episode.name}
       style={{
-        fontSize: 12.5,
+        fontSize: tokens.fontCaption,
         fontWeight: 600,
         color: active ? tokens.colorPrimary : tokens.textPrimary,
         whiteSpace: 'nowrap',
@@ -143,19 +143,19 @@ function RowThumb({ episode }: { episode: Episode }): React.ReactElement {
     <img
       src={mediaUrl(episode.cover_path)}
       alt=""
-      style={{ width: 34, height: 46, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }}
+      style={{ width: 34, height: 46, objectFit: 'cover', borderRadius: tokens.radiusThumb, flexShrink: 0 }}
     />
   ) : (
     <span
       style={{
         width: 34,
         height: 46,
-        borderRadius: 4,
+        borderRadius: tokens.radiusThumb,
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontSize: 13,
+        fontSize: tokens.fontBody,
         color: tokens.textTertiary,
         background: `${tokens.colorPrimary}1A`,
       }}
@@ -187,9 +187,9 @@ function MoveButton({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontSize: 8,
+        fontSize: tokens.fontIcon,
         lineHeight: 1,
-        borderRadius: 3,
+        borderRadius: tokens.radiusDot,
         border: `1px solid ${tokens.border}`,
         background: 'transparent',
         color: tokens.textTertiary,
@@ -232,7 +232,7 @@ function RowMeta({
   highlightCount: number;
 }): React.ReactElement {
   return (
-    <span style={{ fontSize: 11, color: tokens.textTertiary, display: 'flex', gap: 8 }}>
+    <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary, display: 'flex', gap: 8 }}>
       <span>{Math.round(duration)}s</span>
       <span style={{ color: asrOk ? tokens.colorSuccess : tokens.textTertiary }}>
         ● {asrOk ? '已转写' : '待分析'}

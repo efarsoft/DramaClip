@@ -23,7 +23,7 @@ export function RecentWorks({ works }: { works: readonly WorkItem[] }): React.Re
       <SectionHeader>最近成品</SectionHeader>
       <Card size="small" styles={{ body: { padding: '4px 0' } }}>
         {works.length === 0 ? (
-          <div style={{ padding: 16, fontSize: 12.5, color: tokens.textTertiary, textAlign: 'center' }}>
+          <div style={{ padding: 16, fontSize: tokens.fontCaption, color: tokens.textTertiary, textAlign: 'center' }}>
             还没有成品——出片完成后会出现在这里
           </div>
         ) : (
@@ -47,10 +47,10 @@ export function RecentWorks({ works }: { works: readonly WorkItem[] }): React.Re
                 event.currentTarget.style.background = 'transparent';
               }}
             >
-              <span style={{ fontSize: 12.5, color: tokens.textPrimary, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: tokens.fontCaption, color: tokens.textPrimary, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {work.project_name} · {modeLabel(work.narration_mode)}
               </span>
-              <span style={{ marginLeft: 'auto', fontSize: 11, color: tokens.textTertiary, flexShrink: 0 }}>
+              <span style={{ marginLeft: 'auto', fontSize: tokens.fontMicro, color: tokens.textTertiary, flexShrink: 0 }}>
                 {formatDate(work.completed_at)}
               </span>
             </div>
@@ -61,7 +61,7 @@ export function RecentWorks({ works }: { works: readonly WorkItem[] }): React.Re
             onClick={() => {
               void navigate('/works');
             }}
-            style={{ padding: '8px 12px', fontSize: 12, color: tokens.colorPrimary, cursor: 'pointer' }}
+            style={{ padding: '8px 12px', fontSize: tokens.fontCaption, color: tokens.colorPrimary, cursor: 'pointer' }}
           >
             查看全部 →
           </div>
@@ -76,7 +76,7 @@ function SectionHeader({ children }: { children: string }): React.ReactElement {
     <h3
       style={{
         margin: '0 0 12px',
-        fontSize: 15,
+        fontSize: tokens.fontTitle,
         fontWeight: 600,
         color: tokens.textPrimary,
         display: 'flex',
@@ -84,7 +84,7 @@ function SectionHeader({ children }: { children: string }): React.ReactElement {
         gap: 8,
       }}
     >
-      <span style={{ width: 3, height: 14, borderRadius: 2, background: tokens.gradientAccent }} />
+      <span style={{ width: 3, height: 14, borderRadius: tokens.radiusDot, background: tokens.gradientAccent }} />
       {children}
     </h3>
   );

@@ -60,12 +60,12 @@ function ProjectRow({ project, onOpen }: { project: Project; onOpen: () => void 
         event.currentTarget.style.background = 'transparent';
       }}
     >
-      <strong style={{ fontSize: 14, color: tokens.textPrimary }}>{project.name}</strong>
+      <strong style={{ fontSize: tokens.fontBodyLg, color: tokens.textPrimary }}>{project.name}</strong>
       <span
         style={{
-          fontSize: 11,
+          fontSize: tokens.fontMicro,
           padding: '1px 8px',
-          borderRadius: 10,
+          borderRadius: tokens.radiusCard,
           background: tokens.bgElevated,
           color: tokens.textSecondary,
         }}
@@ -78,12 +78,12 @@ function ProjectRow({ project, onOpen }: { project: Project; onOpen: () => void 
           display: 'flex',
           alignItems: 'center',
           gap: 12,
-          fontSize: 12,
+          fontSize: tokens.fontCaption,
           color: tokens.textTertiary,
         }}
       >
         <span style={{ color: meta.color }}>● {meta.label}</span>
-        <RightOutlined style={{ fontSize: 10 }} />
+        <RightOutlined style={{ fontSize: tokens.fontIcon }} />
       </span>
     </div>
   );

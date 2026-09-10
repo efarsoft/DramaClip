@@ -43,7 +43,7 @@ export function LlmTab({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <PageSection title="云端 / 本地端点（OpenAI 兼容）">
-        <div style={{ fontSize: 12.5, color: tokens.textTertiary, marginBottom: 14 }}>
+        <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginBottom: 14 }}>
           云端：填 DashScope 等兼容服务；本地：Ollama 填 http://127.0.0.1:11434/v1、LM Studio 填其服务地址。
           未配置时剧情与文案生成自动降级为关键词模式。
         </div>
@@ -52,14 +52,14 @@ export function LlmTab({
           <Button type="primary" disabled={!dirty} onClick={save}>
             保存
           </Button>
-          <span style={{ fontSize: 12, color: tokens.textTertiary }}>测试连接按已保存配置执行</span>
+          <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>测试连接按已保存配置执行</span>
           <span style={{ marginLeft: 'auto' }}>
             <LlmTestButton />
           </span>
         </div>
       </PageSection>
       <PageSection title="本地大模型">
-        <div style={{ fontSize: 12.5, color: tokens.textTertiary }}>
+        <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
           本地 LLM 引擎（如内置 Qwen 之类）规划在后续版本；当前可经 Ollama / LM Studio 的 OpenAI 兼容端点接入本地模型。
         </div>
       </PageSection>
@@ -78,7 +78,7 @@ function FieldRows({
     <>
       {FIELDS.map((field) => (
         <div key={field.key} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '7px 0' }}>
-          <span style={{ width: 90, flexShrink: 0, fontSize: 13, color: tokens.textSecondary }}>
+          <span style={{ width: 90, flexShrink: 0, fontSize: tokens.fontBody, color: tokens.textSecondary }}>
             {field.label}
           </span>
           <Input

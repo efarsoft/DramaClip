@@ -44,6 +44,24 @@ export default tseslint.config(
     },
   },
   {
+    // B3 守护：业务代码禁裸写字号/圆角数值，一律引用 styles/theme tokens（DSS §2）
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/styles/**'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "Property[key.name='fontSize'] > Literal",
+          message: '禁止裸写字号数值——引用 styles/theme 的 tokens.font*（docs/desktop/04 §2）',
+        },
+        {
+          selector: "Property[key.name='borderRadius'] > Literal",
+          message: '禁止裸写圆角数值——引用 styles/theme 的 tokens.radius*（docs/desktop/04 §2）',
+        },
+      ],
+    },
+  },
+  {
     // 通用组件不得依赖 features（docs/04 §1）
     files: ['src/components/**/*.{ts,tsx}'],
     rules: {

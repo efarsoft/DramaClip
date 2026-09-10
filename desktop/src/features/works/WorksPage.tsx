@@ -106,9 +106,9 @@ function PreviewModal({ work, onClose }: { work: WorkItem | null; onClose: () =>
             src={mediaUrl(work.output_path)}
             controls
             autoPlay
-            style={{ width: '100%', borderRadius: 8, background: '#000' }}
+            style={{ width: '100%', borderRadius: tokens.radiusControl, background: '#000' }}
           />
-          <div style={{ fontSize: 12, color: tokens.textTertiary }}>
+          <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
             {formatDuration(work.duration_s)} · {formatSize(work.size_bytes)} ·{' '}
             {formatDate(work.completed_at)}
           </div>
@@ -126,7 +126,7 @@ function WorkMeta({ work }: { work: WorkItem }): React.ReactElement {
         marginTop: 'auto',
         display: 'flex',
         alignItems: 'center',
-        fontSize: 12,
+        fontSize: tokens.fontCaption,
         color: tokens.textTertiary,
       }}
     >
@@ -149,7 +149,7 @@ function WorkMeta({ work }: { work: WorkItem }): React.ReactElement {
           background: 'none',
           border: 'none',
           color: tokens.colorPrimary,
-          fontSize: 12,
+          fontSize: tokens.fontCaption,
           cursor: 'pointer',
           padding: 0,
         }}
@@ -180,15 +180,15 @@ function WorkCard({
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Tag
               color={tint}
-              style={{ marginInlineEnd: 0, fontSize: 11, borderRadius: 999 }}
+              style={{ marginInlineEnd: 0, fontSize: tokens.fontMicro, borderRadius: tokens.radiusChip }}
             >
               {modeLabel(work.narration_mode)}
             </Tag>
-            <span style={{ marginLeft: 'auto', fontSize: 11, color: tokens.textTertiary }}>
+            <span style={{ marginLeft: 'auto', fontSize: tokens.fontMicro, color: tokens.textTertiary }}>
               {formatDate(work.completed_at)}
             </span>
           </div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: tokens.textPrimary }}>
+          <div style={{ fontSize: tokens.fontBodyLg, fontWeight: 600, color: tokens.textPrimary }}>
             {work.project_name}
           </div>
           <WorkMeta work={work} />
@@ -240,9 +240,9 @@ function Poster({
         />
       )}
       <PlayCircleOutlined
-        style={{ fontSize: 34, color: cover === undefined ? tint : '#FFFFFF', zIndex: 1 }}
+        style={{ fontSize: tokens.fontPoster, color: cover === undefined ? tint : '#FFFFFF', zIndex: 1 }}
       />
-      <span style={{ fontSize: 12, color: '#FFFFFF', zIndex: 1, textShadow: '0 1px 4px rgba(0,0,0,0.6)' }}>
+      <span style={{ fontSize: tokens.fontCaption, color: '#FFFFFF', zIndex: 1, textShadow: '0 1px 4px rgba(0,0,0,0.6)' }}>
         点击预览
       </span>
     </div>

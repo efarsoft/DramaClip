@@ -28,11 +28,11 @@ export function ProjectCard({
     >
       <CoverArea project={project} handlers={{ onRename, onDuplicate, onDelete }} />
       <div style={{ padding: '12px 14px 14px' }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: tokens.textPrimary }}>{project.name}</div>
+        <div style={{ fontSize: tokens.fontBodyLg, fontWeight: 600, color: tokens.textPrimary }}>{project.name}</div>
         <div
           style={{
             marginTop: 4,
-            fontSize: 11.5,
+            fontSize: tokens.fontMicro,
             color: tokens.textTertiary,
             whiteSpace: 'nowrap',
             overflow: 'hidden',
@@ -68,7 +68,7 @@ function CoverArea({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: 30,
+            fontSize: tokens.fontPoster,
             color: tokens.textTertiary,
             background: `linear-gradient(135deg, ${tokens.bgElevated}, ${tokens.bgContainer})`,
           }}
@@ -91,9 +91,9 @@ function CoverArea({
           position: 'absolute',
           left: 10,
           bottom: 10,
-          fontSize: 11,
+          fontSize: tokens.fontMicro,
           padding: '2px 8px',
-          borderRadius: 999,
+          borderRadius: tokens.radiusChip,
           background: 'rgba(0,0,0,0.55)',
           color: '#FFFFFF',
         }}

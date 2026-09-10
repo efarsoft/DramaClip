@@ -7,7 +7,7 @@ export function SectionTitle({ children }: { children: string }): ReactElement {
     <h3
       style={{
         margin: '0 0 12px',
-        fontSize: 15,
+        fontSize: tokens.fontTitle,
         fontWeight: 600,
         color: tokens.textPrimary,
         display: 'flex',
@@ -15,7 +15,7 @@ export function SectionTitle({ children }: { children: string }): ReactElement {
         gap: 8,
       }}
     >
-      <span style={{ width: 3, height: 14, borderRadius: 2, background: tokens.gradientAccent }} />
+      <span style={{ width: 3, height: 14, borderRadius: tokens.radiusDot, background: tokens.gradientAccent }} />
       {children}
     </h3>
   );

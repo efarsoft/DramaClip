@@ -135,7 +135,7 @@ function TabNav({ tab, onPick }: { tab: EngineTab; onPick: (key: EngineTab) => v
               marginBottom: 2,
             }}
           >
-            <Icon style={{ fontSize: 14 }} />
+            <Icon style={{ fontSize: tokens.fontBodyLg }} />
             {TAB_LABELS[key]}
           </button>
         );

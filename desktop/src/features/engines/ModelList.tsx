@@ -138,7 +138,7 @@ function RatingDots({ label, level }: { label: string; level: number }): ReactEl
           style={{
             width: 5,
             height: 5,
-            borderRadius: 3,
+            borderRadius: tokens.radiusDot,
             background: i <= level ? tokens.colorPrimary : tokens.border,
           }}
         />

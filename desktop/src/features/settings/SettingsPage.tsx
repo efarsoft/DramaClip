@@ -6,7 +6,7 @@ import { PageHeader, PageSection, PageShell } from '../../components/layout/Page
 import { rpc } from '../../services/client';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
-import { buildSections, type FieldSpec, type Option, type SettingsMap } from './sections';
+import { buildSections, type FieldSpec, type SettingsMap } from './sections';
 
 const PAGE_DESC = '分析阈值、字幕与出片参数；LLM/ASR/TTS 引擎配置在「引擎中心」管理。';
 
@@ -38,17 +38,12 @@ export function SettingsPage() {
   const { message } = AntdApp.useApp();
   const [original, setOriginal] = useState<SettingsMap | null>(null);
   const [draft, setDraft] = useState<SettingsMap | null>(null);
-  const [presetOptions, setPresetOptions] = useState<readonly Option[]>([]);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
-    const [values, presets] = await Promise.all([
-      rpc<SettingsMap>('settings.get'),
-      rpc<{ preset_id: string; preset_name: string }[]>('subtitle.list_presets'),
-    ]);
+    const values = await rpc<SettingsMap>('settings.get');
     setOriginal(values);
     setDraft({ ...values });
-    setPresetOptions(presets.map((p) => ({ label: p.preset_name, value: p.preset_id })));
   }, []);
 
   useEffect(() => {
@@ -72,7 +67,6 @@ export function SettingsPage() {
     <SettingsView
       original={original}
       draft={draft}
-      presetOptions={presetOptions}
       saving={saving}
       onDraft={setDraft}
       onSave={() => {
@@ -85,7 +79,6 @@ export function SettingsPage() {
 function SettingsView(props: {
   original: SettingsMap;
   draft: SettingsMap;
-  presetOptions: readonly Option[];
   saving: boolean;
   onDraft: (next: SettingsMap) => void;
   onSave: () => void;
@@ -122,23 +115,21 @@ function SettingsView(props: {
           </>
         }
       />
-      <SettingsBody draft={props.draft} presetOptions={props.presetOptions} onPatch={patchDraft} />
+      <SettingsBody draft={props.draft} onPatch={patchDraft} />
     </PageShell>
   );
 }
 
 function SettingsBody({
   draft,
-  presetOptions,
   onPatch,
 }: {
   draft: SettingsMap;
-  presetOptions: readonly Option[];
   onPatch: (key: string, value: string) => void;
 }) {
   return (
     <>
-      {buildSections(presetOptions).map((section) => (
+      {buildSections().map((section) => (
         <PageSection key={section.id} title={`${section.icon} ${section.title}`}>
           {section.fields.map((field, index, all) => (
             <FieldRow

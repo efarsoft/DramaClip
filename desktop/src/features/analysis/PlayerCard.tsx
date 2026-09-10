@@ -26,14 +26,14 @@ export function PlayerCard({
         ref={videoRef}
         src={mediaUrl(videoPath)}
         controls
-        style={{ width: '100%', maxHeight: 380, borderRadius: 8, background: '#000' }}
+        style={{ width: '100%', maxHeight: 380, borderRadius: tokens.radiusControl, background: '#000' }}
       />
       <div
         style={{
           position: 'relative',
           height: 16,
           marginTop: 10,
-          borderRadius: 4,
+          borderRadius: tokens.radiusThumb,
           background: tokens.bgInput,
           overflow: 'hidden',
         }}

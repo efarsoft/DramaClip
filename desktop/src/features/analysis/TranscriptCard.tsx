@@ -28,7 +28,7 @@ export function TranscriptCard({
       }
     >
       {segments.length === 0 ? (
-        <span style={{ fontSize: 12.5, color: tokens.textTertiary }}>尚未转写</span>
+        <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>尚未转写</span>
       ) : (
         <div
           style={{
@@ -56,11 +56,11 @@ export function TranscriptCard({
 
 const INPUT_STYLE = {
   flex: 1,
-  borderRadius: 6,
+  borderRadius: tokens.radiusThumb,
   border: `1px solid ${tokens.colorPrimary}`,
   background: tokens.bgInput,
   color: tokens.textPrimary,
-  fontSize: 12.5,
+  fontSize: tokens.fontCaption,
   padding: '3px 8px',
   outline: 'none',
 } as const;
@@ -81,9 +81,9 @@ function SegmentRow({
 
   if (!editing) {
     return (
-      <div style={{ display: 'flex', gap: 10, fontSize: 12.5, alignItems: 'baseline' }}>
+      <div style={{ display: 'flex', gap: 10, fontSize: tokens.fontCaption, alignItems: 'baseline' }}>
         <SeekButton seconds={segment.start} onSeek={onSeek} />
-        <span style={{ fontFamily: tokens.fontFamilyMono, fontSize: 11, color: tokens.textTertiary, flexShrink: 0 }}>
+        <span style={{ fontFamily: tokens.fontFamilyMono, fontSize: tokens.fontMicro, color: tokens.textTertiary, flexShrink: 0 }}>
           -{formatClock(segment.end)}
         </span>
         <span
@@ -145,7 +145,7 @@ function SeekButton({
         border: 'none',
         color: tokens.textTertiary,
         fontFamily: tokens.fontFamilyMono,
-        fontSize: 11,
+        fontSize: tokens.fontMicro,
         cursor: 'pointer',
         padding: 0,
         flexShrink: 0,
