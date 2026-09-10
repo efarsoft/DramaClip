@@ -81,6 +81,7 @@ def _run_prescreen(
             result = prescreen_engine.prescreen_episode(
                 Path(str(episode["source_path"])),
                 context.work_dir / "prescreen" / f"{episode_id}.wav",
+                threshold=float(context.settings.get("analysis.prescreen_threshold", "70")),
             )
             prescreen_repo.upsert(
                 context.conn,

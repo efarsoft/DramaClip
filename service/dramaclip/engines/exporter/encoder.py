@@ -43,18 +43,20 @@ def cut_segment_args(
     rng: random.Random,
     transition: str = "cut",
     ass_path: str | None = None,
+    out_size: tuple[int, int] = (OutWidth, OutHeight),
 ) -> list[str]:
     """构建单段切割命令（Phase A）。audio: original | narration | ducked。"""
+    out_w, out_h = out_size
     dedup = dedup_params.generate(rng)
     speed = dedup.speed_factor
-    scaled_w = int(OutWidth * dedup.scale_factor) // 2 * 2
-    scaled_h = int(OutHeight * dedup.scale_factor) // 2 * 2
+    scaled_w = int(out_w * dedup.scale_factor) // 2 * 2
+    scaled_h = int(out_h * dedup.scale_factor) // 2 * 2
 
     filters = [
         f"scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=increase",
         f"crop={scaled_w}:{scaled_h}",
         f"eq=contrast={dedup.contrast}:brightness={dedup.brightness}",
-        f"scale={OutWidth}:{OutHeight}",
+        f"scale={out_w}:{out_h}",
         f"setpts=PTS/{speed}",
     ]
     box = drawbox_filter(mask)
@@ -77,13 +79,14 @@ def cut_segment_args(
         "-i",
         source,
     ]
-    if audio == "narration" and tts_audio:
-        # 旁白段：TTS 主音 + 原声压低 20%（原案 6.4 混音规则）
+    if audio in ("narration", "ducked") and tts_audio:
+        # 旁白/压底段：TTS 主音 + 原声压低（旁白 20%，全片衬底 12%）
+        bg_volume = "0.2" if audio == "narration" else "0.12"
         args += ["-i", tts_audio]
         args += [
             "-filter_complex",
             f"[0:v]{','.join(filters)}[v];"
-            f"[0:a]volume=0.2,atempo={speed}[bg];[1:a]atempo={speed}[tts];"
+            f"[0:a]volume={bg_volume},atempo={speed}[bg];[1:a]atempo={speed}[tts];"
             "[bg][tts]amix=inputs=2:duration=first[a]",
             "-map",
             "[v]",
@@ -153,6 +156,8 @@ def export_plan(
     on_progress: Callable[[float, str], None] | None = None,
     subtitle_burner: Callable[[int, str, float], str] | None = None,
     parallel: int = 2,
+    dialogue_zones: dict[str, list[SpeechZone]] | None = None,
+    out_size: tuple[int, int] = (OutWidth, OutHeight),
 ) -> Path:
     """执行两阶段导出，返回成片路径。
 
@@ -175,10 +180,14 @@ def export_plan(
         if source is None or not Path(source).is_file():
             raise EpisodeSourceMissing(f"第 {segment.episode_id} 集源文件缺失")
         if segment.episode_id not in srt_cache:
-            srt = jitter.srt_for_source(Path(source))
-            srt_cache[segment.episode_id] = (
-                jitter.parse_srt(srt) if srt is not None else []
-            )
+            asr_zones = (dialogue_zones or {}).get(segment.episode_id)
+            if asr_zones:
+                srt_cache[segment.episode_id] = list(asr_zones)
+            else:
+                srt = jitter.srt_for_source(Path(source))
+                srt_cache[segment.episode_id] = (
+                    jitter.parse_srt(srt) if srt is not None else []
+                )
         safe_start, safe_end = jitter.safe_times(
             segment.start, segment.end, srt_cache[segment.episode_id], rng=rng
         )
@@ -206,6 +215,7 @@ def export_plan(
                 rng=rng,
                 transition=segment.transition,
                 ass_path=ass_path,
+                out_size=out_size,
             )
         )
 

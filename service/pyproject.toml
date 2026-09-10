@@ -15,11 +15,24 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# 依赖准入制（docs/04 质量规约）：W1 仅 pydantic；重依赖随阶段逐个登记理由
+# 依赖准入制（docs/04 质量规约）：重依赖随阶段逐个登记理由
 dev = [
   "pytest>=8.0",
   "ruff>=0.6",
   "mypy>=1.11",
+]
+# ML 运行时（分析/解说/TTS 全功能；torch 默认 CPU 轮子，GPU 见 build-service --cuda）
+ml = [
+  "numpy>=2.0",
+  "faster-whisper>=1.2",
+  "ctranslate2>=4.5",
+  "scenedetect>=0.7",
+  "librosa>=0.10",
+  "soundfile>=0.13",
+  "torch>=2.2",
+  "transformers>=4.40",
+  "kokoro>=0.7",
+  "misaki>=0.7",
 ]
 
 [project.scripts]

@@ -53,7 +53,10 @@ def script_dialogue_plan(
     reason = ""
     if preferred == styles.AUTO_STYLE_ID or not preferred:
         selector = LlmClient(LlmConfig.from_settings(settings), timeout_s=_SELECT_TIMEOUT_S)
-        selection = styles.select_style_with_reason(selector, _excerpt(episode_inputs))
+        try:
+            selection = styles.select_style_with_reason(selector, _excerpt(episode_inputs))
+        except Exception:  # noqa: BLE001 - 选题失败必须降级而非中断出片
+            selection = None
         if selection is None:
             log("warn", "AI 风格选题失败，按题材静态映射兜底")
         else:

@@ -60,6 +60,8 @@ def motion_intensity(video_path: Path) -> float:
 def prescreen_episode(
     video_path: Path,
     wav_path: Path,
+    *,
+    threshold: float = 70.0,
 ) -> dict[str, float]:
     """预筛单集，返回四项信号 + prescreen_score + recommended。调用方负责落库。"""
     from dramaclip.engines.analysis import pipeline as analysis_pipeline
@@ -92,7 +94,7 @@ def prescreen_episode(
         "voice_activity_ratio": round(speech_ratio, 4),
         "motion_intensity": round(motion, 4),
         "prescreen_score": round(score, 1),
-        "recommended": score >= 70.0,
+        "recommended": score >= threshold,
     }
 
 

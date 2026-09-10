@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import threading
 from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext
+from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.exporter import encoder
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle import presets as subtitle_presets
 from dramaclip.engines.subtitle.ass_generator import build_ass
 from dramaclip.infra.ffmpeg import probe
+from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import exports as exports_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
@@ -72,6 +75,14 @@ def list_works(context: AppContext, params: dict[str, Any]) -> list[dict[str, An
     return exports_repo.list_completed_works(context.conn, limit=limit)
 
 
+
+def _output_size(settings: dict[str, str]) -> tuple[int, int]:
+    """输出分辨率：设置键 export.width/height，偶数化并钳制最小 480。"""
+    width = max(int(settings.get("export.width", "1080")), 480)
+    height = max(int(settings.get("export.height", "1920")), 480)
+    return width - width % 2, height - height % 2
+
+
 def render_export(
     context: AppContext,
     export_id: str,
@@ -94,6 +105,24 @@ def render_export(
         str(ep["id"]): str(ep["source_path"])
         for ep in episodes_repo.list_by_project(context.conn, project_id)
     }
+    # 台词保护区（批次 0.5 接线）：直接消费分析层 asr_segments，
+    # 不再依赖从未产出的同名 .srt；SRT 路径保留为手动放置时的兼容来源
+    dialogue_zones: dict[str, list[SpeechZone]] = {}
+    for segment in plan_data.timeline:
+        episode_id = segment.episode_id
+        if episode_id in dialogue_zones:
+            continue
+        record = analysis_repo.get(context.conn, episode_id)
+        if record is None or not record["asr_segments"]:
+            continue
+        zones = [
+            SpeechZone(start=float(item["start"]), end=float(item["end"]))
+            for item in json.loads(record["asr_segments"])
+            if float(item.get("end", 0)) > float(item.get("start", 0))
+        ]
+        if zones:
+            dialogue_zones[episode_id] = zones
+
     # TTS 音频按「时间轴内第 N 条 narration 段」对应第 N 条解说词——
     # 按时间轴全量索引会在原声/旁白交替的模式（交叉/超短）下错位或丢音
     tts_segments: dict[int, Path] = {}
@@ -107,7 +136,8 @@ def render_export(
                 tts_segments[index] = Path(text.audio_path)
         narration_order += 1
     mask = plan_row["narration_mode"] not in _NO_MASK_MODES
-    preset = subtitle_presets.get_preset(plan_row.get("subtitle_preset"))
+    preset = subtitle_presets.get_preset(context.settings.get("subtitle.default_preset"))
+    out_size = _output_size(context.settings)
 
     def burn_subtitle(segment_index: int, text: str, duration_s: float) -> str:
         """生成段级 ass 文件并返回路径（相对时间轴 0→duration）。"""
@@ -130,6 +160,8 @@ def render_export(
         cancel=cancel_event,
         on_progress=report,
         subtitle_burner=burn_subtitle if plan_data.mode != "raw_clip" else None,
+        dialogue_zones=dialogue_zones,
+        out_size=out_size,
     )
     exports_repo.mark_completed(context.conn, export_id, str(out_path))
     try:

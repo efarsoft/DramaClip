@@ -105,11 +105,17 @@ async function main() {
   console.log('[e2e] ping:', ping.service_version);
 
   const projects = await rpc('project.list');
-  const project = projects.find((p) => p.name.includes('矿场'));
+  const wanted =
+    process.argv.find((arg) => arg.startsWith('--project='))?.split('=')[1] ?? '';
+  const candidates = projects.filter((p) => p.episode_count > 0);
+  const project =
+    candidates.find((p) => wanted !== '' && p.name.includes(wanted)) ??
+    candidates.sort((a, b) => b.created_at - a.created_at)[0];
   if (project === undefined) {
-    console.log('[e2e] 未找到矿场测试项目（需要真实短剧素材目录）');
+    console.log('[e2e] 未找到含已完成剧集的项目');
     process.exit(1);
   }
+  console.log(`[e2e] 项目: ${project.name}`);
 
   // 预筛 + 全量分析（跳过已完成集）
   const episodes = (await rpc('project.get', { project_id: project.id })).episodes;
