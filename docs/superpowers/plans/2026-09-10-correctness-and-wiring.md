@@ -1685,3 +1685,53 @@ git commit -m "test(modes): 真机九模式回归脚本，断言音轨存在/时
 7. 繁简归一化缺失（转写为繁体，污染字幕与编剧输入）→ 批次 2。
 8. 安装包落后 HEAD 46 个提交 → 本方案合入后重出包（`npm run dist`）。
 9. `narration_plans.tts_segments`、`tts_cache`、`subtitle_presets` 三处表/列无读写者；`_run_generation`、`build_from_script_dialogue` 等死代码未清 → 按「迁移须扫清全部触点」纪律安排**独立的清理提交**，不夹带在功能改动里。
+
+---
+
+## 两轴审查结论与修复批次（2026-09-10，`ed45bd9...eddd670`）
+
+对 40 个提交、94 文件做 Standards + Spec 两轴审查后的结论。**用户定案：修复完善 + 代码清理，不考虑向后兼容。**
+
+### 必须先修的阻断项（Spec (c)：看似修了，其实够不着）
+
+**B1 缺失 → B2 成为死代码 → `full_narration` 仍然零解说音出厂。** 已逐行复核：
+- `encoder.py:82` 确实写了 `if audio in ("narration", "ducked") and tts_audio:` ✅
+- `export.py:162` 取音循环却是 `if segment.audio != "narration": continue` → `ducked` 段永远拿不到 `tts_audio`
+- `modes_w8.py:63` 把 `full_narration` 每一段都标成 `ducked`
+- `pipeline.py:277` 的时长/字幕回填同样只认 `"narration"`
+
+三处任缺其一都不响。**这正是整份计划立项的头号理由，目前仍是原样。**
+
+### 审查判定表（14 任务）
+
+| 任务 | 判定 | 处置 |
+|---|---|---|
+| A1 | done | — |
+| A2 | done-differently | 落地走全局 `context.settings`，但**字幕分区被从设置 UI 删掉了** → DoD「改预设→样式变」当前为假。**恢复 UI 即成立，不再引入 `plan_data.subtitle_preset`**；同时把实际用的预设落到 `export_jobs.subtitle_preset`（列已存在，仅 `_COLUMNS` 未读写）供追溯 |
+| A3 | done-differently | 阈值已读设置，但无 `recommend()` 纯函数、无测试 → 补测试即可，不强求抽函数 |
+| A4 | partial | `README.md:27` 仍写 `service[dev]` → 修 |
+| **B1** | **missing** | 做 `TimelineSegment.narration_id` + 回填覆盖 `ducked` |
+| B2 | partial | 等 B1/B3 落地后才生效，本身不改 |
+| B3 | done-differently | 位置重算违反「禁止位置索引推断」→ 改为按 `narration_id` 取音 |
+| B4 | done-differently | **优先级做反**：`encoder.py:190-198` 让 ASR 胜出，计划要求「同名 .srt 优先，缺失回退库内 ASR」→ 调回 |
+| B5 | partial | 4 条测试（计划 ≥6、五态矩阵）→ 补齐 |
+| **B6** | **missing** | `scriptwriter.py:126-128` 仍 500 行头部截断 → 按集分配额 |
+| **C1** | **missing** | `/models`→`/engines` 12 处 + 假文案，按计划原文执行 |
+| **C2** | **missing** | `EpisodeListRow.tsx:32,237` 布尔未改三态 |
+| **C3** | **missing** | `ProductionPage.tsx:227` 仍 `slice(0,8)`；`job.error` 服务端已返回但 UI 不读 |
+| C4 | **作废** | `export.width/height` 已被 `_output_size` 接线，"标注未生效"不再适用；`export.encoder`/`bitrate_kbps` 仍死 → **不考虑向后兼容，直接从 `config.DEFAULTS` 删除**（连带 `engine_configs._DOMAINS` 里无人消费的 `tts_cloud/asr_cloud/image/video`） |
+| **D1** | **missing** | `scripts/verify_modes.py` 不存在 → 建，作为出口门禁 |
+
+### Standards 待清项（独立提交，不夹带在功能修复里）
+
+1. **默认值三处拷贝**（`docs/04 §5.2`）：`export.width/height` 同时存在于 `config.py:33-34`、`encoder.py:26-27`、`api/export.py:113-114`；`prescreen_threshold` 三处；`_LIMIT_MAX` 与 schema 双定义（注释自认）。→ 各留一个真相源。
+2. **`borderRadius: tokens.fontIcon`** 三处（`AppLayout.tsx:93`、`StepsNav.tsx:24`、`HomePage.tsx:117`）—— 排版令牌塞进几何槽位，机械替换产物。
+3. ESLint 守护只覆盖 `fontSize`/`borderRadius`，**间距仍裸值**（`CloudConfigSection.tsx`、`LlmTab.tsx`）→ 扩规则并清零。
+4. 缺 docstring：`api/jobs.get_job`、`api/engine_configs.{create,update,delete,enable}`、`repos/engine_configs.{list_by_domain,get,update,delete}`。
+5. Duplicated Code：`export.retry` 与 `start` 的提交块、进度三件套（`export/analysis/narration`）、手写 SELECT 复制 `_COLUMNS`、四个测试文件重复的 fake context 与 `_call`。
+6. Primitive Obsession：状态字面量散落，`is_terminal` 已存在却只有 `jobs.cancel` 用。
+7. `api/models.py` 零测试覆盖（Task 4 的 `mark_running` 修复无守卫）。
+
+### 范围外发现（记录，不在本批次动）
+
+`engine_configs`（另一执行者的 6 方法 + 迁移 007）占了剪辑域错误码 `-32310/11`；`analysis.cancel` 的"任务不存在"用 `-32201` 而 `jobs.*` 用 `-32501`；`common.json` 的 `x-wire.transport` 仍写 named-pipe、`x-notifications` 仍宣称 `speed/eta`。
