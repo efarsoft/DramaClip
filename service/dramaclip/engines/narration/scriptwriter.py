@@ -20,6 +20,7 @@ _MIN_SEGMENTS = 2
 _MAX_SEGMENTS = 10
 _EPISODE_LINE_CAP = 80
 _TOTAL_LINE_CAP = 500
+_MIN_LINES_PER_EPISODE = 3  # 集数再多，每集也至少露面的保底线
 
 # 基本功层（永远注入，不交给模型发挥）：平台验证过的解说手艺底线。
 # 题材口味由口味层（风格 directives）差异化，与此处不重叠。
@@ -103,6 +104,105 @@ def _clock(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
+def transcript_sampling_quota(
+    episode_count: int,
+    *,
+    total_cap: int = _TOTAL_LINE_CAP,
+    episode_cap: int = _EPISODE_LINE_CAP,
+) -> int:
+    """跨集转写的每集摘录配额。
+
+    总预算在「有转写的集」之间均分：下限 `_MIN_LINES_PER_EPISODE`（集数再多也集集露面），
+    上限 `episode_cap`（集数再少也不无限堆量）。公开给调用方打日志复用，
+    避免 api 层另抄一遍常量后与真实取样口径漂移。
+    """
+    if episode_count <= 0:
+        return 0
+    return min(max(total_cap // episode_count, _MIN_LINES_PER_EPISODE), episode_cap)
+
+
+def _pick_across(segments: list[dict[str, Any]], quota: int) -> list[dict[str, Any]]:
+    """单集内跨头尾均匀取 quota 段（必含首段与尾段）。
+
+    短剧的钩子与反转多落在集尾，只取开头等于把每集的卖点丢掉；
+    等距索引天然覆盖 0 与末位，重复索引去重后保持时间升序。
+    """
+    if quota <= 0 or not segments:
+        return []
+    last = len(segments) - 1
+    if last < quota:  # 配额够整集：一段不丢
+        return list(segments)
+    if quota == 1:
+        return [segments[last]]  # 只能留一段时留集尾（钩子）
+    indices = sorted({round(i * last / (quota - 1)) for i in range(quota)})
+    return [segments[i] for i in indices]
+
+
+def _transcript_note(
+    *,
+    episode_count: int,
+    total_segments: int,
+    quota: int,
+    kept: int,
+) -> str:
+    """向模型交代看到的是配额摘录还是全量逐字；静默取样等于骗模型。"""
+    dropped = max(total_segments - kept, 0)
+    if dropped == 0:
+        return f"\n（共 {episode_count} 集、{total_segments} 段转写，以下即全量逐字。）"
+    return (
+        f"\n（共 {episode_count} 集、{total_segments} 段转写；受上下文预算限制，"
+        f"以下为每集跨头尾均匀摘录约 {quota} 段、合计 {kept} 段，另有约 {dropped} 段未列出。"
+        "每集首尾台词均已保留，中间为等距抽样——"
+        "请据此判断全剧故事线、以及各集在高潮曲线上的位置。）"
+    )
+
+
+def _format_transcript_episodes(
+    episode_inputs: list[dict[str, Any]],
+    *,
+    total_cap: int = _TOTAL_LINE_CAP,
+    episode_cap: int = _EPISODE_LINE_CAP,
+) -> str:
+    """把多集转写拼成带集号与时间戳的输入块：预算内每集都有代表，绝不按集号头部截断。
+
+    块结构：每集一行 `【第N集】` 标题 + 该集被选中的 `MM:SS-MM:SS 台词` 行，
+    末尾附取样说明。只保留真正有转写的集；一集最终一行都没进就不留孤立标题。
+
+    诚实的能力边界：配额取样是**过渡方案，不是终点**。80 集时每集只剩约 6 段，
+    模型看得见每集的「形状」，但不足以挖出各集差异化的卖点角度；
+    真正的解法是批次一规划的逐集摘要层（此处不建）。
+    """
+    usable = [ep for ep in episode_inputs if ep.get("segments")]
+    if not usable:
+        return ""
+    quota = transcript_sampling_quota(len(usable), total_cap=total_cap, episode_cap=episode_cap)
+    lines: list[str] = []
+    kept = 0
+    for episode in usable:
+        rendered: list[str] = []
+        for seg in _pick_across(list(episode["segments"]), quota):
+            text = str(seg.get("text", "")).strip()
+            if text == "":
+                continue
+            span = f"{_clock(float(seg.get('start', 0)))}-{_clock(float(seg.get('end', 0)))}"
+            rendered.append(f"{span} {text}")
+        if not rendered:  # 一行没进就不留孤立集标题
+            continue
+        lines.append(f"【第{int(episode['number'])}集】")
+        lines.extend(rendered)
+        kept += len(rendered)
+    total_segments = sum(len(ep["segments"]) for ep in usable)
+    lines.append(
+        _transcript_note(
+            episode_count=len(usable),
+            total_segments=total_segments,
+            quota=quota,
+            kept=kept,
+        )
+    )
+    return "\n".join(lines)
+
+
 def write_script_episodes(
     llm: LlmClient,
     episode_inputs: list[dict[str, Any]],
@@ -113,30 +213,25 @@ def write_script_episodes(
     style_directives: str = "",
     trace_path: Path | None = None,
 ) -> Script | None:
-    """跨集剧本：读多集转写（行首带集号），产出带集号的跨集故事剧本。
+    """跨集剧本：读多集转写（每集一个「【第N集】」分组），产出带集号的跨集故事剧本。
 
     episode_inputs 每项：{"number": 集号, "duration": 集时长秒,
     "segments": [{"start", "end", "text"}]}。失败返回 None，调用方降级规则编排。
+    喂给模型的转写由 `_format_transcript_episodes` 按集分配额取样（超预算时
+    每集等距摘录并在块尾标注），不再按集号头部截断。
     """
-    durations: dict[int, float] = {}
-    lines: list[str] = []
-    for episode in episode_inputs:
-        number = int(episode["number"])
-        durations[number] = float(episode.get("duration") or 0.0)
-        lines.append(f"第{number}集：")
-        for count, seg in enumerate(episode["segments"]):
-            if count >= _EPISODE_LINE_CAP or len(lines) >= _TOTAL_LINE_CAP:
-                break
-            text = str(seg.get("text", "")).strip()
-            if text == "":
-                continue
-            span = f"{_clock(float(seg.get('start', 0)))}-{_clock(float(seg.get('end', 0)))}"
-            lines.append(f"{span} {text}")
-    if not lines:
+    durations = {
+        int(episode["number"]): float(episode.get("duration") or 0.0)
+        for episode in episode_inputs
+    }
+    transcript_block = _format_transcript_episodes(episode_inputs)
+    if not transcript_block:
         return None
     cross_block = (
-        "跨集叙事要求：转写按集分组（每组以「第N集：」开头），"
-        "每行一条台词，格式为「开始-结束 台词」，时间为该集内的相对时间。"
+        "跨集叙事要求：转写按集分组（每组以「【第N集】」单独一行开头），"
+        "其后每行一条台词，格式为「开始-结束 台词」，时间为该集内的相对时间。"
+        "受上下文预算限制，每组是该集跨头尾的均匀摘录（集首与集尾台词必定保留），"
+        "不是该集全量逐字。"
         "1) 每个片段必须带 episode 字段（集号整数），start/end 为该集内的相对秒，"
         "且必须落在某一行转写的时间区间内或其邻近处；"
         "2) 按剧情逻辑排序：铺垫在前、冲突升级居中、反转/高潮在后，可在不同集之间选取；"
@@ -149,7 +244,7 @@ def write_script_episodes(
         f"最高优先级是剧情完整与吸引力：铺垫果断压缩，冲突和反转给足戏份；"
         f"宁可略长，也不要为凑时长删掉关键冲突。\n"
         f"{cross_block}\n"
-        f"台词转写：\n" + "\n".join(lines)
+        f"台词转写：\n" + transcript_block
         + f"{style_block}"
     )
     attempts: list[dict[str, Any]] = []

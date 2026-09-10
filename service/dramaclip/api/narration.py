@@ -9,6 +9,7 @@ from typing import Any
 from dramaclip.api.context import AppContext
 from dramaclip.api.export import render_export
 from dramaclip.engines.narration import pipeline as narration_pipeline
+from dramaclip.engines.narration import scriptwriter
 from dramaclip.engines.narration import styles as styles_lib
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.narration.script_driver import script_dialogue_plan
@@ -199,6 +200,11 @@ def _generate_one(
     if mode == "dialogue_narration":
         episode_inputs = _collect_episode_inputs(context, episodes)
         if episode_inputs:
+            context.notifier.log(
+                "info",
+                f"跨集输入：{len(episode_inputs)} 集 → "
+                f"每集约 {scriptwriter.transcript_sampling_quota(len(episode_inputs))} 段摘录",
+            )
             result = script_dialogue_plan(
                 episode_inputs,
                 settings,

@@ -56,7 +56,7 @@ def test_write_script_episodes_multi() -> None:
     assert script is not None
     episodes = [segment.episode for segment in script.segments]
     assert episodes == [1, 2]  # 未知集号（9）被丢弃
-    assert "第1集：" in fake.prompts[0] and "第2集：" in fake.prompts[0]
+    assert "【第1集】" in fake.prompts[0] and "【第2集】" in fake.prompts[0]
     assert "跨集叙事要求" in fake.prompts[0]
 
 
@@ -131,7 +131,7 @@ def test_prompt_keeps_raw_segments_by_episode() -> None:
         fake, inputs, target_min_s=30, target_max_s=60, project_name="剧"
     )
     user = fake.prompts[0]
-    assert "第1集：" in user
+    assert "【第1集】" in user
     assert "00:00-00:01 據最新消息" in user
     assert "00:01-00:02 昨日發生在" in user
     assert "00:02-00:04 京海大道的實車連撞" in user
