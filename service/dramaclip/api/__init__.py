@@ -15,6 +15,7 @@ def build_router(context: AppContext, shutdown: Callable[[], None]) -> Router:
         analysis,
         engine_configs,
         export,
+        jobs,
         models,
         narration,
         project,
@@ -40,4 +41,5 @@ def build_router(context: AppContext, shutdown: Callable[[], None]) -> Router:
     subtitle.register(router)
     models.register(router, context)
     timeline.register(router, context)
+    jobs.register(router, context)
     return router

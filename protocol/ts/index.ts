@@ -333,6 +333,8 @@ export const METHOD_NAMES = [
   'export.start',
   'export.list',
   'export.list_works',
+  'jobs.list',
+  'jobs.get',
   'subtitle.list_presets',
   'models.list',
   'models.download',

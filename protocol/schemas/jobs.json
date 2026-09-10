@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dramaclip.dev/protocol/jobs.json",
+  "title": "jobs 命名空间（P-1 地基：任务查询与取消）",
+  "namespace": "jobs",
+  "x-methods": [
+    {
+      "name": "jobs.list",
+      "summary": "跨类型任务列表，按最近变更倒序；active_only 只要未终态",
+      "params": {
+        "type": "object",
+        "properties": {
+          "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 },
+          "active_only": { "type": "boolean", "default": false }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": ["jobs", "server_time_ms"],
+        "properties": {
+          "jobs": { "type": "array", "items": { "$ref": "#/$defs/JobInfo" } },
+          "server_time_ms": { "type": "integer" }
+        }
+      }
+    },
+    {
+      "name": "jobs.get",
+      "summary": "单任务详情（含 error，供队列页显示失败原因）",
+      "params": {
+        "type": "object",
+        "required": ["job_id"],
+        "properties": { "job_id": { "type": "string" } },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": ["job"],
+        "properties": { "job": { "$ref": "#/$defs/JobInfo" } }
+      }
+    }
+  ],
+  "$defs": {
+    "JobInfo": {
+      "type": "object",
+      "required": ["id", "type", "status", "progress", "created_at", "updated_at"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "description": "prescreen|analysis|narration|export|produce|model_download" },
+        "ref_id": { "type": ["string", "null"] },
+        "status": { "type": "string", "enum": ["pending", "running", "completed", "failed", "cancelled"] },
+        "progress": { "type": "number" },
+        "label": { "type": ["string", "null"], "description": "人读阶段，队列页显示" },
+        "error": { "type": ["string", "null"] },
+        "created_at": { "type": "integer" },
+        "updated_at": { "type": "integer" }
+      }
+    }
+  }
+}
