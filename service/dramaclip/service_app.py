@@ -69,6 +69,7 @@ class ServiceApp:
             job_store=job_store,
             analysis_runtime=AnalysisRuntime(settings, data_dir / "models"),
             work_dir=work_dir,
+            data_dir=data_dir,
         )
         router = build_router(context, self._shutdown)
         self._install_signal_handlers()

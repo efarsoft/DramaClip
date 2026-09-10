@@ -51,7 +51,7 @@ def test_scan_episodes_registers_videos(
     for number in (2, 10, 1):
         shutil.copy(sample_video, tmp_path / f"ep{number}.mp4")
     (tmp_path / "readme.txt").write_text("not video", encoding="utf-8")
-    router = _scan_router(memory_db, tmp_path / "cache")
+    router = _scan_router(memory_db, tmp_path / "cache", data_dir=tmp_path)
     project = router.dispatch(
         _request(1, "project.create", {"name": "p", "source_path": str(tmp_path)})
     ).result
@@ -100,10 +100,10 @@ def _request(request_id: int, method: str, params: dict[str, Any]) -> Any:
     return RpcRequest(id=request_id, method=method, params=params)
 
 
-def _scan_router(conn: sqlite3.Connection, work_dir: Path) -> Router:
+def _scan_router(conn: sqlite3.Connection, work_dir: Path, *, data_dir: Path) -> Router:
     from types import SimpleNamespace
 
-    context = SimpleNamespace(conn=conn, work_dir=work_dir)
+    context = SimpleNamespace(conn=conn, work_dir=work_dir, data_dir=data_dir)
     router = Router()
     project_api.register(router, context)  # type: ignore[arg-type]
     return router
@@ -112,7 +112,7 @@ def _scan_router(conn: sqlite3.Connection, work_dir: Path) -> Router:
 def test_scan_generates_cover(
     memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
 ) -> None:
-    router = _scan_router(memory_db, tmp_path / "cache")
+    router = _scan_router(memory_db, tmp_path / "cache", data_dir=tmp_path)
     shutil.copy(sample_video, tmp_path / "ep1.mp4")
     created = router.dispatch(
         _request(1, "project.create", {"name": "封面", "source_path": str(tmp_path)})
@@ -127,7 +127,7 @@ def test_scan_generates_cover(
 def test_ensure_covers_idempotent(
     memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
 ) -> None:
-    router = _scan_router(memory_db, tmp_path / "cache")
+    router = _scan_router(memory_db, tmp_path / "cache", data_dir=tmp_path)
     shutil.copy(sample_video, tmp_path / "ep1.mp4")
     created = router.dispatch(
         _request(1, "project.create", {"name": "补封面", "source_path": str(tmp_path)})
@@ -141,7 +141,7 @@ def test_ensure_covers_idempotent(
 def test_reorder_episodes(
     memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
 ) -> None:
-    router = _scan_router(memory_db, tmp_path / "cache")
+    router = _scan_router(memory_db, tmp_path / "cache", data_dir=tmp_path)
     for number in (1, 2, 3):
         shutil.copy(sample_video, tmp_path / f"ep{number}.mp4")
     created = router.dispatch(
@@ -166,7 +166,7 @@ def test_reorder_episodes(
 def test_reorder_rejects_mismatched_ids(
     memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
 ) -> None:
-    router = _scan_router(memory_db, tmp_path / "cache")
+    router = _scan_router(memory_db, tmp_path / "cache", data_dir=tmp_path)
     shutil.copy(sample_video, tmp_path / "ep1.mp4")
     created = router.dispatch(
         _request(1, "project.create", {"name": "校验", "source_path": str(tmp_path)})
@@ -186,7 +186,7 @@ def test_reorder_rejects_mismatched_ids(
 def test_scan_generates_episode_covers(
     memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
 ) -> None:
-    router = _scan_router(memory_db, tmp_path / "cache")
+    router = _scan_router(memory_db, tmp_path / "cache", data_dir=tmp_path)
     shutil.copy(sample_video, tmp_path / "ep1.mp4")
     created = router.dispatch(
         _request(1, "project.create", {"name": "集封面", "source_path": str(tmp_path)})

@@ -203,7 +203,7 @@ def _generate_one(
                 episode_inputs,
                 settings,
                 log=context.notifier.log,
-                trace_dir=context.work_dir.parent.parent / "logs" / "llm",
+                trace_dir=context.data_dir / "logs" / "llm",
             )
             if result is not None:
                 plan, used_ids = result
@@ -231,7 +231,7 @@ def _generate_one(
 
     if plan.narration_texts:
         tts_dir = context.work_dir / "tts"
-        models_dir = context.work_dir.parent.parent / "models"
+        models_dir = context.data_dir / "models"
         plan = narration_pipeline.synthesize_narration_texts(plan, settings, tts_dir, models_dir)
     plans_repo.create(
         context.conn,

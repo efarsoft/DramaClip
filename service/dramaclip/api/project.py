@@ -147,7 +147,7 @@ def reorder_episodes(context: AppContext, params: dict[str, Any]) -> dict[str, A
 
 
 def _ensure_episode_cover(context: AppContext, episode: dict[str, Any]) -> bool:
-    cover_dir = context.work_dir.parent / "covers"
+    cover_dir = context.data_dir / "covers"
     cover_dir.mkdir(parents=True, exist_ok=True)
     out_path = cover_dir / f"ep_{episode['id']}.jpg"
     if not cover_engine.extract_cover(Path(str(episode["source_path"])), out_path):
@@ -167,7 +167,7 @@ def _ensure_cover(context: AppContext, project: dict[str, Any]) -> bool:
     if not episodes:
         return False
     first = min(episodes, key=lambda ep: int(ep["episode_number"]))
-    cover_dir = context.work_dir.parent / "covers"
+    cover_dir = context.data_dir / "covers"
     cover_dir.mkdir(parents=True, exist_ok=True)
     out_path = cover_dir / f"{project_id}.jpg"
     if not cover_engine.extract_cover(Path(str(first["source_path"])), out_path):

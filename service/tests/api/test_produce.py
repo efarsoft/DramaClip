@@ -24,12 +24,13 @@ from dramaclip.transport.rpc import Router, RpcRequest
 
 
 class Harness:
-    def __init__(self, conn: sqlite3.Connection, work_dir: Path) -> None:
+    def __init__(self, conn: sqlite3.Connection, work_dir: Path, *, data_dir: Path) -> None:
         self.sent: list[dict[str, Any]] = []
         self.executor = ThreadPoolExecutor(max_workers=4)
         self.context = SimpleNamespace(
             conn=conn,
             work_dir=work_dir,
+            data_dir=data_dir,
             settings={"asr.language": "zh"},
             notifier=Notifier(self.sent.append),
             executor=self.executor,
@@ -67,7 +68,7 @@ def _seed_project_with_analysis(
 ) -> str:
     """建项目 + 扫描 + 直种确定性分析数据（单集标记 done），返回 project_id。"""
     shutil.copy(sample_video, tmp_path / "ep1.mp4")
-    harness = Harness(memory_db, tmp_path / "cache")
+    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     project = harness.rpc("project.create", {"name": "出片", "source_path": str(tmp_path)})
     harness.rpc("project.scan_episodes", {"project_id": project["id"]})
     project_id = str(project["id"])
@@ -100,7 +101,7 @@ def test_produce_renders_work_end_to_end(
     memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
 ) -> None:
     project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
-    harness = Harness(memory_db, tmp_path / "cache")
+    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     produce = harness.rpc(
         "narration.produce", {"project_id": project_id, "modes": ["raw_clip"]}
     )
@@ -116,7 +117,7 @@ def test_produce_renders_work_end_to_end(
 
 
 def test_produce_invalid_mode(memory_db: sqlite3.Connection, tmp_path: Path) -> None:
-    harness = Harness(memory_db, tmp_path / "cache")
+    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     project = harness.rpc("project.create", {"name": "x", "source_path": str(tmp_path)})
     response = harness.router.dispatch(
         RpcRequest(

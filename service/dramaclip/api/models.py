@@ -39,7 +39,7 @@ def register(router: Router, context: AppContext) -> None:
 
 def list_models(context: AppContext) -> list[dict[str, Any]]:
     """清单 + 状态（内置清单 ∪ models/ 目录手动放置的发现项），附各源仓库主页。"""
-    models_dir = context.work_dir.parent.parent / "models"
+    models_dir = context.data_dir / "models"
     eps = endpoints(context)
     items = registry.list_models(models_dir)
     for item in items:
@@ -58,7 +58,7 @@ def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         raise RpcDomainError(_ERR_MODEL_NOT_FOUND, f"未知模型: {model_id}")
     if source != "auto" and source not in dict(spec.sources()):
         raise RpcDomainError(_ERR_MODEL_STATE, f"{spec.name} 不支持来源 {source}")
-    models_dir = context.work_dir.parent.parent / "models"
+    models_dir = context.data_dir / "models"
     if registry.find(spec, models_dir) is not None:
         raise RpcDomainError(_ERR_MODEL_STATE, f"{spec.name} 已安装")
     job_id = context.job_store.create("model_download", ref_id=model_id)
@@ -88,7 +88,7 @@ def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
 
 def scan_local(context: AppContext) -> dict[str, Any]:
     """本地导入扫描：重新探测 models/ 目录（手动放置的模型即刻生效）。"""
-    models_dir = context.work_dir.parent.parent / "models"
+    models_dir = context.data_dir / "models"
     found = [
         item
         for item in registry.list_models(models_dir)
@@ -103,7 +103,7 @@ def delete(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     spec = downloader.spec_by_id(model_id)
     if spec is None:
         raise RpcDomainError(_ERR_MODEL_NOT_FOUND, f"未知模型: {model_id}")
-    models_dir = context.work_dir.parent.parent / "models"
+    models_dir = context.data_dir / "models"
     resolved = registry.find(spec, models_dir)
     if resolved is None:
         raise RpcDomainError(_ERR_MODEL_STATE, f"{spec.name} 未安装")

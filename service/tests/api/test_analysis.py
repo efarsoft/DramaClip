@@ -38,7 +38,12 @@ class FakeTranscriber:
 
 class Harness:
     def __init__(
-        self, conn: sqlite3.Connection, work_dir: Path, transcriber: FakeTranscriber
+        self,
+        conn: sqlite3.Connection,
+        work_dir: Path,
+        transcriber: FakeTranscriber,
+        *,
+        data_dir: Path,
     ) -> None:
         self.sent: list[dict[str, Any]] = []
         self.executor = ThreadPoolExecutor(max_workers=2)
@@ -54,6 +59,7 @@ class Harness:
             job_store=jobs.JobStore(conn),
             analysis_runtime=SimpleNamespace(transcriber=lambda: transcriber),
             work_dir=work_dir,
+            data_dir=data_dir,
             cancel_events={},
         )
         self.router = Router()
@@ -78,7 +84,7 @@ class Harness:
 
 @pytest.fixture
 def harness(memory_db: sqlite3.Connection, tmp_path: Path) -> Harness:
-    instance = Harness(memory_db, tmp_path / "work", FakeTranscriber())
+    instance = Harness(memory_db, tmp_path / "work", FakeTranscriber(), data_dir=tmp_path)
     yield instance
     instance.close()
 
@@ -130,7 +136,9 @@ def test_failed_engine_marks_episode_only(
 def test_cancel_between_episodes(
     memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
 ) -> None:
-    instance = Harness(memory_db, tmp_path / "work", FakeTranscriber(delay_s=0.8))
+    instance = Harness(
+        memory_db, tmp_path / "work", FakeTranscriber(delay_s=0.8), data_dir=tmp_path
+    )
     try:
         project_id = _make_project(instance, tmp_path, sample_video, copies=3)
         result = instance.rpc("analysis.start", {"project_id": project_id})

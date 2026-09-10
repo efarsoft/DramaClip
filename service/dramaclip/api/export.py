@@ -83,7 +83,7 @@ def render_export(
     report: Any,
 ) -> Path:
     """渲染核心：剪辑→遮罩→字幕→编码→写成品记录（失败抛异常，不管理 job）。"""
-    output_root = context.work_dir.parent / "outputs" / project_id
+    output_root = context.data_dir / "outputs" / project_id
     output_root.mkdir(parents=True, exist_ok=True)
     project = projects_repo.get(context.conn, project_id)
     project_name = str(project["name"]) if project else project_id[:8]
