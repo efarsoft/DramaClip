@@ -1,6 +1,7 @@
 /** 渲染层唯一 IPC 出口（docs/desktop/01 §4）。组件禁止直接调 window.dramaclip。 */
 import type {
   AnalysisJobStatus,
+  EngineConfig,
   StyleInfo,
   WorkItem as WorksItem,
   ModelInfo,
@@ -147,4 +148,35 @@ export const settingsApi = {
   get: (): Promise<Record<string, string>> => rpc<Record<string, string>>('settings.get'),
   update: (values: Record<string, string>): Promise<{ ok: boolean }> =>
     rpc<{ ok: boolean }>('settings.update', { values }),
+} as const;
+
+/** 引擎配置（云端/服务端点多实例，单启用）。 */
+export const engineConfigsApi = {
+  list: (domain: string): Promise<{ configs: EngineConfig[] }> =>
+    rpc<{ configs: EngineConfig[] }>('engine_configs.list', { domain }),
+  create: (input: {
+    domain: string;
+    name: string;
+    base_url: string;
+    api_key: string;
+    model: string;
+    enable?: boolean;
+  }): Promise<EngineConfig> => rpc<EngineConfig>('engine_configs.create', input),
+  update: (input: {
+    id: string;
+    name: string;
+    base_url: string;
+    api_key: string;
+    model: string;
+  }): Promise<EngineConfig> => rpc<EngineConfig>('engine_configs.update', input),
+  remove: (id: string): Promise<{ ok: boolean }> =>
+    rpc<{ ok: boolean }>('engine_configs.delete', { id }),
+  enable: (id: string): Promise<EngineConfig> =>
+    rpc<EngineConfig>('engine_configs.enable', { id }),
+  test: (input: {
+    base_url: string;
+    api_key: string;
+    model: string;
+  }): Promise<{ ok: boolean; latency_s?: number; error?: string }> =>
+    rpc('engine_configs.test', input),
 } as const;

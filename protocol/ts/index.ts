@@ -240,6 +240,19 @@ export interface ModelInfo {
   readonly sources?: ReadonlyArray<ModelSource>;
 }
 
+/** 引擎配置（云端/服务端点多实例，单启用）。 */
+export interface EngineConfig {
+  readonly id: string;
+  readonly domain: string;
+  readonly name: string;
+  readonly base_url: string;
+  readonly api_key: string;
+  readonly model: string;
+  readonly enabled: number;
+  readonly api_key_masked: string;
+  readonly created_at?: number;
+}
+
 /** 解说风格库条目（narration.list_styles）。 */
 export interface StyleInfo {
   readonly style_id: string;
@@ -325,6 +338,12 @@ export const METHOD_NAMES = [
   'models.download',
   'models.scan_local',
   'models.delete',
+  'engine_configs.list',
+  'engine_configs.create',
+  'engine_configs.update',
+  'engine_configs.delete',
+  'engine_configs.enable',
+  'engine_configs.test',
   'settings.get',
   'settings.update',
   'settings.test_llm',

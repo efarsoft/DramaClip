@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dramaclip.dev/protocol/engine_configs.json",
+  "title": "engine_configs 命名空间",
+  "namespace": "engine_configs",
+  "x-models": {
+    "EngineConfig": {
+      "type": "object",
+      "required": ["id", "domain", "name", "base_url", "api_key", "model", "enabled", "api_key_masked"],
+      "properties": {
+        "id": { "type": "string" },
+        "domain": { "type": "string" },
+        "name": { "type": "string" },
+        "base_url": { "type": "string" },
+        "api_key": { "type": "string" },
+        "model": { "type": "string" },
+        "enabled": { "type": "integer" },
+        "api_key_masked": { "type": "string" },
+        "created_at": { "type": "integer" }
+      }
+    }
+  },
+  "x-methods": [
+    {
+      "name": "engine_configs.list",
+      "summary": "按能力域列出配置",
+      "params": {
+        "type": "object",
+        "required": ["domain"],
+        "properties": { "domain": { "type": "string" } }
+      },
+      "result": {
+        "type": "object",
+        "required": ["configs"],
+        "properties": {
+          "configs": {
+            "type": "array",
+            "items": { "$ref": "#/x-models/EngineConfig" }
+          }
+        }
+      }
+    },
+    {
+      "name": "engine_configs.create",
+      "summary": "新增配置（可选直接启用）",
+      "params": {
+        "type": "object",
+        "required": ["domain", "name"],
+        "properties": {
+          "domain": { "type": "string" },
+          "name": { "type": "string" },
+          "base_url": { "type": "string" },
+          "api_key": { "type": "string" },
+          "model": { "type": "string" },
+          "enable": { "type": "boolean" }
+        }
+      },
+      "result": { "$ref": "#/x-models/EngineConfig" }
+    },
+    {
+      "name": "engine_configs.update",
+      "summary": "更新配置（启用中的配置同步镜像）",
+      "params": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "base_url": { "type": "string" },
+          "api_key": { "type": "string" },
+          "model": { "type": "string" }
+        }
+      },
+      "result": { "$ref": "#/x-models/EngineConfig" }
+    },
+    {
+      "name": "engine_configs.delete",
+      "summary": "删除配置（启用中的配置拒绝删除）",
+      "params": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "string" } }
+      },
+      "result": {
+        "type": "object",
+        "required": ["ok"],
+        "properties": { "ok": { "type": "boolean" } }
+      }
+    },
+    {
+      "name": "engine_configs.enable",
+      "summary": "启用配置（同域单启用；LLM 域镜像至 settings）",
+      "params": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "string" } }
+      },
+      "result": { "$ref": "#/x-models/EngineConfig" }
+    },
+    {
+      "name": "engine_configs.test",
+      "summary": "连通性测试（最小请求测延迟）",
+      "params": {
+        "type": "object",
+        "required": ["base_url", "model"],
+        "properties": {
+          "base_url": { "type": "string" },
+          "api_key": { "type": "string" },
+          "model": { "type": "string" }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["ok"],
+        "properties": {
+          "ok": { "type": "boolean" },
+          "latency_s": { "type": "number" },
+          "error": { "type": "string" }
+        }
+      }
+    }
+  ]
+}

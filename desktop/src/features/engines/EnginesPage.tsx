@@ -86,7 +86,7 @@ export function EnginesPage() {
         ) : tab === 'tts' ? (
           <TtsTab models={data.models} settings={data.settings} onSave={(values) => { void saveSettings(values); }} onChanged={() => { void load(); }} />
         ) : tab === 'llm' ? (
-          <LlmTab settings={data.settings} onSave={saveSettings} />
+          <LlmTab onChanged={() => { void load(); }} />
         ) : (
           <OverviewTab models={data.models} settings={data.settings} />
         )}

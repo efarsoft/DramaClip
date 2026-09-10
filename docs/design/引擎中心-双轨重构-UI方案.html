@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>引擎中心 · 双轨重构 UI 方案 v2 — DramaClip</title>
+<style>
+  :root {
+    --bg-sidebar: #0B0E14;
+    --bg-layout: #10141C;
+    --bg-container: #171C26;
+    --bg-elevated: #1F2634;
+    --bg-input: #141922;
+    --border: #2A3140;
+    --border-2: #212736;
+    --primary: #4D9FFF;
+    --success: #34D399;
+    --warning: #FBBF24;
+    --error: #F87171;
+    --text-1: #EAEEF5;
+    --text-2: #9BA3B4;
+    --text-3: #626B7D;
+    --accent-soft: rgba(77,159,255,0.08);
+    --radius-card: 10px;
+    --radius-ctl: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #05070B;
+    font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    color: var(--text-1);
+    display: flex; justify-content: center; padding: 24px;
+  }
+  .window {
+    width: 1280px; height: 880px;
+    background: var(--bg-layout);
+    border-radius: 12px; overflow: hidden;
+    display: flex; flex-direction: column;
+    border: 1px solid var(--border);
+    box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+  }
+  .titlebar {
+    height: 36px; background: var(--bg-sidebar);
+    display: flex; align-items: center; padding: 0 14px; gap: 8px;
+    border-bottom: 1px solid var(--border-2);
+  }
+  .logo { width: 18px; height: 18px; border-radius: 5px;
+    background: linear-gradient(135deg,#4D9FFF,#7C5CFF); }
+  .titlebar .name { font-size: 12px; font-weight: 700; }
+  .titlebar .winbtns { margin-left: auto; display: flex; gap: 14px; color: var(--text-3); font-size: 11px; }
+  .body { flex: 1; display: flex; min-height: 0; }
+  .rail {
+    width: 68px; background: var(--bg-sidebar);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 18px 0; gap: 6px; border-right: 1px solid var(--border-2);
+  }
+  .rail .item {
+    width: 52px; padding: 9px 0; border-radius: var(--radius-ctl);
+    text-align: center; font-size: 11px; color: var(--text-3); cursor: pointer;
+  }
+  .rail .item.active { background: var(--accent-soft); color: var(--primary); }
+  .rail .icon { font-size: 16px; display: block; margin-bottom: 4px; }
+  .main { flex: 1; padding: 26px 34px; overflow-y: auto; }
+  .page-title { font-size: 20px; font-weight: 700; }
+  .page-desc { font-size: 12px; color: var(--text-3); margin: 6px 0 20px; }
+
+  /* 能力域 tabs */
+  .domains { display: flex; gap: 8px; margin-bottom: 18px; }
+  .domain {
+    padding: 8px 16px; border-radius: var(--radius-ctl);
+    font-size: 13px; color: var(--text-2); cursor: pointer;
+    border: 1px solid var(--border-2); background: var(--bg-container);
+  }
+  .domain.active { color: var(--primary); border-color: var(--primary); background: var(--accent-soft); font-weight: 600; }
+  .domain.disabled { color: var(--text-3); cursor: default; opacity: 0.55; }
+  .domain .tag { font-size: 10px; margin-left: 5px; padding: 1px 6px; border-radius: 999px;
+    background: rgba(255,255,255,0.06); color: var(--text-3); }
+
+  /* 本地/云端 双轨切换 */
+  .track-tabs {
+    display: inline-flex; background: var(--bg-input);
+    border: 1px solid var(--border-2); border-radius: var(--radius-ctl);
+    padding: 3px; gap: 3px; margin-bottom: 16px;
+  }
+  .track-tab {
+    padding: 7px 22px; border-radius: 6px; font-size: 13px;
+    color: var(--text-2); cursor: pointer; position: relative;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .track-tab.active { background: var(--bg-elevated); color: var(--text-1); font-weight: 600; }
+  .track-tab .use-dot { width: 6px; height: 6px; border-radius: 999px;
+    background: var(--success); box-shadow: 0 0 6px var(--success); }
+  .track-tab .use-label { font-size: 10px; color: var(--success); }
+
+  /* 启用方案卡 */
+  .active-card {
+    background: var(--accent-soft); border: 1px solid var(--border);
+    border-radius: var(--radius-card); padding: 14px 18px; margin-bottom: 18px;
+  }
+  .active-card .row { display: flex; align-items: center; gap: 10px; }
+  .dot { width: 7px; height: 7px; border-radius: 999px; box-shadow: 0 0 8px currentColor; flex-shrink: 0; }
+  .dot.ok { background: var(--success); color: var(--success); }
+  .active-card .headline { font-size: 14px; font-weight: 700; }
+  .active-card .meta { font-size: 12px; color: var(--text-3); margin-top: 6px; }
+
+  /* 分区卡 */
+  .section {
+    background: var(--bg-container); border: 1px solid var(--border-2);
+    border-radius: var(--radius-card); padding: 16px 18px; margin-bottom: 16px;
+  }
+  .section h3 { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .section h3::before { content: ""; width: 3px; height: 13px; border-radius: 2px;
+    background: linear-gradient(135deg,#4D9FFF,#7C5CFF); }
+  .section .hint { font-size: 11.5px; color: var(--text-3); margin-bottom: 12px; }
+
+  /* 模型行 */
+  .tier { font-size: 12px; color: var(--text-2); margin: 12px 0 8px; }
+  .tier b { color: var(--text-1); }
+  .mrow {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; border: 1px solid var(--border-2);
+    border-radius: var(--radius-ctl); background: var(--bg-layout); margin-bottom: 6px;
+  }
+  .mrow .name { font-size: 13px; font-weight: 600; }
+  .mrow .desc { font-size: 11.5px; color: var(--text-3); }
+  .mrow .size { font-size: 11px; color: var(--text-3);
+    background: var(--bg-elevated); padding: 2px 8px; border-radius: 999px; }
+  .mrow .spacer { flex: 1; }
+  .badge { font-size: 11px; padding: 2px 9px; border-radius: 999px; }
+  .badge.ok { background: rgba(52,211,153,0.12); color: var(--success); }
+  .badge.idle { background: rgba(255,255,255,0.05); color: var(--text-3); }
+  .btn {
+    font-size: 12px; padding: 5px 12px; border-radius: var(--radius-ctl);
+    border: 1px solid var(--border); background: var(--bg-elevated);
+    color: var(--text-2); cursor: pointer;
+  }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
+  .btn.ghost { background: none; }
+  .radio { width: 14px; height: 14px; border-radius: 999px;
+    border: 1.5px solid var(--text-3); flex-shrink: 0; position: relative; }
+  .radio.on { border-color: var(--primary); }
+  .radio.on::after { content: ""; position: absolute; inset: 2.5px;
+    border-radius: 999px; background: var(--primary); }
+
+  /* 云端配置行 */
+  .crow {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 12px; border: 1px solid var(--border-2);
+    border-radius: var(--radius-ctl); background: var(--bg-layout); margin-bottom: 8px;
+  }
+  .crow.enabled { border-color: var(--primary); background: var(--accent-soft); }
+  .crow .cname { font-size: 13px; font-weight: 600; }
+  .crow .cmodel { font-size: 11.5px; color: var(--text-2);
+    background: var(--bg-elevated); padding: 2px 8px; border-radius: 999px; }
+  .crow .chost { font-size: 11px; color: var(--text-3); }
+  .crow .spacer { flex: 1; }
+  .add-btn {
+    width: 100%; padding: 9px; text-align: center; font-size: 12.5px;
+    border: 1px dashed var(--border); border-radius: var(--radius-ctl);
+    color: var(--text-3); cursor: pointer; background: none;
+  }
+  .footnote { font-size: 11px; color: var(--text-3); margin-top: 10px; }
+  .view { display: none; }
+  .view.active { display: block; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="logo"></div><div class="name">DramaClip</div>
+    <div class="winbtns"><span>—</span><span>□</span><span>✕</span></div>
+  </div>
+  <div class="body">
+    <div class="rail">
+      <div class="item"><span class="icon">▣</span>工作台</div>
+      <div class="item"><span class="icon">🗂</span>项目</div>
+      <div class="item"><span class="icon">▶</span>作品</div>
+      <div class="item active"><span class="icon">☁</span>模型</div>
+      <div class="item"><span class="icon">⚙</span>设置</div>
+    </div>
+    <div class="main">
+      <div class="page-title">模型中心</div>
+      <div class="page-desc">按能力域管理本地与云端模型——每个域独立启用一套方案，可随时切换</div>
+
+      <div class="domains">
+        <div class="domain" onclick="showDomain('asr')">语音识别</div>
+        <div class="domain" onclick="showDomain('tts')">配音合成</div>
+        <div class="domain" onclick="showDomain('llm')">文案生成</div>
+        <div class="domain disabled">图片生成<span class="tag">规划中</span></div>
+        <div class="domain disabled">视频理解<span class="tag">规划中</span></div>
+      </div>
+
+      <!-- ===== TTS ===== -->
+      <div class="view" id="view-tts">
+        <div class="active-card">
+          <div class="row">
+            <span class="dot ok"></span>
+            <span class="headline">当前生效：本地 · Kokoro 82M 中文 · 就绪</span>
+          </div>
+          <div class="meta">切换轨道或方案即时生效，无需重启；本地与云端互斥</div>
+        </div>
+
+        <div class="track-tabs">
+          <div class="track-tab active" onclick="showTrack(this,'tts-local')">本地模型</div>
+          <div class="track-tab" onclick="showTrack(this,'tts-cloud')">云端配置</div>
+        </div>
+
+        <div class="panel active" id="panel-tts-local">
+          <div class="section">
+            <h3>本地模型</h3>
+            <div class="hint">下载到本机运行，免费离线、数据不出本机；单选启用一个</div>
+            <div class="tier"><b>轻量档</b></div>
+            <div class="mrow">
+              <div class="radio on"></div>
+              <span class="name">Kokoro 82M 中文</span>
+              <span class="desc">轻量离线，CPU 实时合成</span>
+              <div class="spacer"></div>
+              <span class="size">~350MB</span><span class="badge ok">已启用</span>
+              <button class="btn ghost">目录</button>
+            </div>
+            <div class="tier"><b>高质量档</b><span class="why">建议 N 卡 4GB+ 显存</span></div>
+            <div class="mrow">
+              <div class="radio"></div>
+              <span class="name">IndexTTS2</span>
+              <span class="desc">音色克隆 · 情绪控制 · 时长精确对齐</span>
+              <div class="spacer"></div>
+              <span class="size">~5.5GB</span><span class="badge idle">未安装</span>
+              <button class="btn primary">下载</button>
+            </div>
+            <div class="mrow">
+              <div class="radio"></div>
+              <span class="name">CosyVoice3 0.5B</span>
+              <span class="desc">多语言 · 18 种中文方言 · 零样本克隆</span>
+              <div class="spacer"></div>
+              <span class="size">~3.2GB</span><span class="badge idle">未安装</span>
+              <button class="btn primary">下载</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-tts-cloud">
+          <div class="section">
+            <h3>云端配置</h3>
+            <div class="hint">可添加多个，同一时间仅启用一个；切换即时生效</div>
+            <div class="crow enabled">
+              <div class="radio on"></div>
+              <span class="cname">edge-tts（免费）</span>
+              <span class="cmodel">微软 Edge</span>
+              <span class="chost">免费 · 需联网</span>
+              <div class="spacer"></div>
+              <button class="btn ghost">测试</button>
+              <button class="btn ghost">编辑</button>
+              <button class="btn ghost">删除</button>
+            </div>
+            <div class="crow">
+              <div class="radio"></div>
+              <span class="cname">火山引擎</span>
+              <span class="cmodel">seed-tts</span>
+              <span class="chost">按量计费</span>
+              <div class="spacer"></div>
+              <button class="btn ghost">测试</button>
+              <button class="btn ghost">编辑</button>
+              <button class="btn ghost">删除</button>
+            </div>
+            <div class="add-btn">＋ 添加云端配置</div>
+            <div class="footnote">本地与云端互斥：启用云端后，本地模型暂停使用；切回本地即时恢复。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== LLM ===== -->
+      <div class="view" id="view-llm">
+        <div class="active-card">
+          <div class="row">
+            <span class="dot ok"></span>
+            <span class="headline">当前生效：云端 · qwen3.7-plus（token-plan）· 已连接</span>
+          </div>
+          <div class="meta">剧本生成 · 风格自动匹配 · 调用留痕：data/logs/llm/</div>
+        </div>
+
+        <div class="track-tabs">
+          <div class="track-tab" onclick="showTrack(this,'llm-local')">本地模型</div>
+          <div class="track-tab active" onclick="showTrack(this,'llm-cloud')">云端配置</div>
+        </div>
+
+        <div class="panel active" id="panel-llm-cloud">
+          <div class="section">
+            <h3>云端配置（OpenAI 兼容）</h3>
+            <div class="hint">可添加多个服务商，单选启用；API Key 脱敏存储</div>
+            <div class="crow enabled">
+              <div class="radio on"></div>
+              <span class="cname">qwen3.7-plus</span>
+              <span class="chost">token-plan.cn-beijing…</span>
+              <div class="spacer"></div>
+              <span class="badge ok">已启用</span>
+              <button class="btn ghost">测试</button>
+              <button class="btn ghost">编辑</button>
+              <button class="btn ghost">删除</button>
+            </div>
+            <div class="crow">
+              <div class="radio"></div>
+              <span class="cname">GLM-4.6</span>
+              <span class="chost">open.bigmodel.cn</span>
+              <div class="spacer"></div>
+              <button class="btn ghost">测试</button>
+              <button class="btn ghost">编辑</button>
+              <button class="btn ghost">删除</button>
+            </div>
+            <div class="crow">
+              <div class="radio"></div>
+              <span class="cname">deepseek-v4</span>
+              <span class="chost">api.deepseek.com</span>
+              <div class="spacer"></div>
+              <button class="btn ghost">测试</button>
+              <button class="btn ghost">编辑</button>
+              <button class="btn ghost">删除</button>
+            </div>
+            <div class="add-btn">＋ 添加云端配置</div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-llm-local">
+          <div class="section">
+            <h3>本地大模型</h3>
+            <div class="hint">经 Ollama / LM Studio 的 OpenAI 兼容端点接入，可添加多个</div>
+            <div class="crow">
+              <div class="radio"></div>
+              <span class="cname">Ollama · qwen3:14b</span>
+              <span class="chost">http://127.0.0.1:11434/v1</span>
+              <div class="spacer"></div>
+              <button class="btn ghost">测试</button>
+              <button class="btn ghost">编辑</button>
+              <button class="btn ghost">删除</button>
+            </div>
+            <div class="add-btn">＋ 添加本地端点</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== ASR ===== -->
+      <div class="view" id="view-asr">
+        <div class="active-card">
+          <div class="row">
+            <span class="dot ok"></span>
+            <span class="headline">当前生效：本地 · Whisper Small（更准，稍慢）· 就绪</span>
+          </div>
+          <div class="meta">GPU 加速：已就绪 · CUDA 运行库缺失时自动回退 CPU</div>
+        </div>
+
+        <div class="track-tabs">
+          <div class="track-tab active" onclick="showTrack(this,'asr-local')">本地模型</div>
+          <div class="track-tab" onclick="showTrack(this,'asr-cloud')">云端配置</div>
+        </div>
+
+        <div class="panel active" id="panel-asr-local">
+          <div class="section">
+            <h3>本地模型</h3>
+            <div class="hint">下载到本机运行；单选启用一个</div>
+            <div class="tier"><b>轻量档</b></div>
+            <div class="mrow">
+              <div class="radio on"></div>
+              <span class="name">Whisper Base</span>
+              <span class="desc">CPU 快速转写</span>
+              <div class="spacer"></div>
+              <span class="size">~145MB</span><span class="badge ok">已安装</span>
+              <button class="btn ghost">目录</button>
+            </div>
+            <div class="tier"><b>均衡档</b></div>
+            <div class="mrow">
+              <div class="radio on"></div>
+              <span class="name">Whisper Small</span>
+              <span class="desc">速度与准确度平衡</span>
+              <div class="spacer"></div>
+              <span class="size">~480MB</span><span class="badge ok">已安装</span>
+              <button class="btn ghost">目录</button>
+            </div>
+            <div class="tier"><b>高质量档</b><span class="why">建议 GPU</span></div>
+            <div class="mrow">
+              <div class="radio"></div>
+              <span class="name">Whisper Large-v3</span>
+              <span class="desc">精度天花板</span>
+              <div class="spacer"></div>
+              <span class="size">~3GB</span><span class="badge idle">未安装</span>
+              <button class="btn primary">下载</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-asr-cloud">
+          <div class="section">
+            <h3>云端配置（低配机适配）</h3>
+            <div class="hint">无独显设备的可选路线；按音频时长计费</div>
+            <div class="crow enabled">
+              <div class="radio on"></div>
+              <span class="cname">OpenAI 兼容转写</span>
+              <span class="chost">api.siliconflow.cn</span>
+              <div class="spacer"></div>
+              <button class="btn ghost">测试</button>
+              <button class="btn ghost">编辑</button>
+              <button class="btn ghost">删除</button>
+            </div>
+            <div class="add-btn">＋ 添加云端配置</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 图片/视频 占位 ===== -->
+      <div class="view" id="view-image">
+        <div class="section"><div class="placeholder">图片生成 · 规划中（封面 / 插图 / 角色立绘）</div></div>
+      </div>
+      <div class="view" id="view-video">
+        <div class="section"><div class="placeholder">视频理解 · 规划中（剧情摘要 / 高光检测）</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function showDomain(key) {
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById('view-' + key).classList.add('active');
+    document.querySelectorAll('.domain').forEach(d => d.classList.remove('active'));
+    event.currentTarget.classList.add('active');
+  }
+  function showTrack(el, panelId) {
+    const view = el.closest('.view');
+    view.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    view.querySelectorAll('.track-tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('panel-' + panelId).classList.add('active');
+  }
+</script>
+</body>
+</html>
