@@ -119,6 +119,10 @@ def cut_segment_args(
         "30",
         "-map_metadata",
         "-1",
+        # AAC priming 会写出负起点/编辑列表，concat demuxer 流复制时音频时长
+        # 被逐段双倍累计（真机实证：195s 计划渲染出 416s 成片）——归零时间戳
+        "-avoid_negative_ts",
+        "make_zero",
         out_path,
     ]
     return args
