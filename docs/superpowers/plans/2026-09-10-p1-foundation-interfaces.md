@@ -41,6 +41,16 @@ Task 3 已完成（`bab5106`）。三条约束是实测出来的，不是风格�
 
 另顺手修一处相邻遗漏：`service_app.py` 的**用户可见**恢复通知原先只报中断任务数，与刚扩成三项的 stdout 行不一致 —— 崩溃重启后用户看得到"3 个中断任务"，却看不到"2 个未完成导出也被复位"。已改为三项齐报。
 
+## Task 5 落地后的实测修正（Task 6 必须遵守）
+
+Task 5 已完成（`cb369b7`）。以下与本计划正文不同，**Task 6 写文档以实际实现为准**：
+
+1. **`Project.settings` 在线上是 JSON 对象，不是 TEXT 字符串。** 计划 Step 5 写的是 `"type": "string"`，实施时按仓库既有先例改了：`repos/plans.py::_row_to_dict` 就是把 `plan_data` 用 `json.loads` 解码后返回、`narration.json` 声明为 `object`、TS 侧是 `PlanData`。故仓储层统一解码（`_parse_settings` / `_decoded`），schema 写 `"type": "object"`，TS 写 `Record<string, unknown>`，并有 `test_settings_never_a_string_on_the_wire` 钉住。**任何前端或文档写"JSON 字符串"都是错的。**
+2. **`project.duplicate` 会复制覆盖参数**（同参数、新素材；不复制会逼人重配），有测试。
+3. **测试实为 9 条**（计划 6 条 + duplicate / create 线上形状 / 损坏 blob 容错）。损坏 JSON 降级为"无覆盖"而非抛错。
+4. 合并语义：**键级合并**，值为 `null` 表示恢复该项全局默认；`_ERR_INVALID_SETTINGS = -32104`（项目域）。
+5. 无需迁移（008 已在 Task 1 建好列），`test_db.py` 白名单未动。
+
 ## Task 2 落地后的实测修正（Task 3-6 必须遵守）
 
 Task 2 已完成（`ddb76a5`）。它抓到并修掉**计划自身的两个错**，另有一条 Task 1 遗留限制：
