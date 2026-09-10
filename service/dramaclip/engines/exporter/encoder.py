@@ -117,6 +117,10 @@ def cut_segment_args(
         "128k",
         "-r",
         "30",
+        # 音频采样率统一 48k：TTS（24k）与源素材（48k）混流后 concat 流复制
+        # 以首段采样率解读全部包，采样率不一致会把时长/语速翻倍或减半
+        "-ar",
+        "48000",
         "-map_metadata",
         "-1",
         # AAC priming 会写出负起点/编辑列表，concat demuxer 流复制时音频时长

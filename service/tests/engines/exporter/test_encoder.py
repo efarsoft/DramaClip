@@ -31,6 +31,7 @@ def test_cut_segment_args_original_audio() -> None:
     assert "eq=contrast=" in joined, "消重色彩抖动"
     assert "atempo=" in joined, "微变速"
     assert "-map_metadata -1" in joined, "元数据擦除"
+    assert "-ar 48000" in joined, "采样率统一（concat 流复制防语速失真）"
     assert "amix" not in joined
 
 
