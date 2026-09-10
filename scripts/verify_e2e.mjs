@@ -104,6 +104,18 @@ async function main() {
   const ping = await rpc('system.ping', {});
   console.log('[e2e] ping:', ping.service_version);
 
+  const importDir = process.argv
+    .find((arg) => arg.startsWith('--import='))
+    ?.split('=')[1];
+  if (importDir !== undefined) {
+    const name =
+      process.argv.find((arg) => arg.startsWith('--name='))?.split('=')[1] ??
+      path.basename(importDir);
+    const created = await rpc('project.create', { name, source_path: importDir });
+    const scanned = await rpc('project.scan_episodes', { project_id: created.id });
+    console.log(`[e2e] 已导入项目「${name}」：${scanned.length} 集`);
+  }
+
   const projects = await rpc('project.list');
   const wanted =
     process.argv.find((arg) => arg.startsWith('--project='))?.split('=')[1] ?? '';
@@ -121,13 +133,13 @@ async function main() {
   const episodes = (await rpc('project.get', { project_id: project.id })).episodes;
   if (episodes.length > 0) {
     const prescreen = await rpc('analysis.prescreen', { project_id: project.id }).catch(() => null);
-    if (prescreen !== null) await waitJob(prescreen.job_id, 300000);
+    if (prescreen !== null) await waitJob(prescreen.job_id, 600000);
   }
 
   let analysis = null;
   try {
     const { job_id } = await rpc('analysis.start', { project_id: project.id });
-    analysis = await waitJob(job_id, 900000);
+    analysis = await waitJob(job_id, 3600000);
   } catch (error) {
     if (String(error.message).includes('-32202')) {
       console.log('[e2e] 全部集已完成分析，跳过（增量回归）');
