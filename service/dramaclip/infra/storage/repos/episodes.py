@@ -116,3 +116,10 @@ def reorder(
         )
     conn.commit()
     return True
+
+
+def reset_stale_analyzing(conn: sqlite3.Connection) -> int:
+    """启动清扫：崩溃残留的 analyzing 集回退 prescreened（无服务运行=无分析在跑，恒安全）。"""
+    cursor = conn.execute("UPDATE episodes SET status = 'prescreened' WHERE status = 'analyzing'")
+    conn.commit()
+    return cursor.rowcount or 0

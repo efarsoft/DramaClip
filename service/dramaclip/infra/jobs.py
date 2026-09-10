@@ -43,23 +43,47 @@ class JobStore:
     def mark_cancelled(self, job_id: str) -> None:
         self._transition(job_id, "cancelled")
 
-    def set_progress(self, job_id: str, percent: float) -> None:
-        self._conn.execute(
-            "UPDATE jobs SET progress = ?, updated_at = ? WHERE id = ?",
-            (percent, _now_ms(), job_id),
-        )
+    def set_progress(self, job_id: str, percent: float, label: str | None = None) -> None:
+        """更新进度；label 为队列页要显示的人读阶段（如「第3集 预筛中」）。"""
+        if label is None:
+            self._conn.execute(
+                "UPDATE jobs SET progress = ?, updated_at = ? WHERE id = ?",
+                (percent, _now_ms(), job_id),
+            )
+        else:
+            self._conn.execute(
+                "UPDATE jobs SET progress = ?, label = ?, updated_at = ? WHERE id = ?",
+                (percent, label, _now_ms(), job_id),
+            )
         self._conn.commit()
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         row = self._conn.execute(
-            "SELECT id, type, ref_id, status, progress, error, created_at, updated_at"
+            "SELECT id, type, ref_id, status, progress, label, error, created_at, updated_at"
             " FROM jobs WHERE id = ?",
             (job_id,),
         ).fetchone()
         if row is None:
             return None
-        keys = ("id", "type", "ref_id", "status", "progress", "error", "created_at", "updated_at")
+        keys = (
+            "id", "type", "ref_id", "status", "progress",
+            "label", "error", "created_at", "updated_at",
+        )
         return dict(zip(keys, row, strict=True))
+
+    _LIST_COLUMNS = (
+        "id", "type", "ref_id", "status", "progress", "label", "error", "created_at", "updated_at",
+    )
+
+    def list_recent(self, *, limit: int = 50, active_only: bool = False) -> list[dict[str, Any]]:
+        """队列页数据源：按最近变更倒序取任务，可只要未终态。"""
+        where = " WHERE status IN ('pending', 'running')" if active_only else ""
+        rows = self._conn.execute(
+            f"SELECT {', '.join(self._LIST_COLUMNS)} FROM jobs{where}"
+            " ORDER BY updated_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(zip(self._LIST_COLUMNS, row, strict=True)) for row in rows]
 
     def sweep_interrupted(self) -> int:
         """启动清扫：上一会话遗留的 running 任务标记失败（崩溃重入协议）。"""

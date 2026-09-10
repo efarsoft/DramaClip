@@ -273,3 +273,24 @@ def test_resync_semantic_rejects_missing_analysis(
         )
     )
     assert response.error is not None and response.error.code == -32203
+
+
+def test_start_reanalyzes_stale_analyzing_episode(
+    harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    """崩溃残留的 analyzing 集（无分析数据）必须被下次分析重跑，而不是被跳过。"""
+    project_id = _make_project(harness, tmp_path, sample_video)
+    first = harness.rpc("analysis.start", {"project_id": project_id})
+    harness.wait_done(str(first["job_id"]))
+    episodes = episodes_repo.list_by_project(memory_db, project_id)
+    stale = episodes[0]
+    memory_db.execute("DELETE FROM episode_analysis WHERE episode_id = ?", (stale["id"],))
+    memory_db.execute("UPDATE episodes SET status = 'analyzing' WHERE id = ?", (stale["id"],))
+    memory_db.commit()
+
+    second = harness.rpc("analysis.start", {"project_id": project_id})
+    status = harness.wait_done(str(second["job_id"]))
+
+    assert status["status"] == "completed"
+    refreshed = episodes_repo.list_by_project(memory_db, project_id)
+    assert all(ep["status"] == "done" for ep in refreshed)

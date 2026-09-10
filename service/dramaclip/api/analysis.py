@@ -94,7 +94,7 @@ def _run_prescreen(
                 recommended=bool(result["recommended"]),
             )
             episodes_repo.set_status(context.conn, episode_id, "prescreened")
-        context.job_store.set_progress(job_id, 100.0)
+        context.job_store.set_progress(job_id, 100.0, "预筛完成")
         context.notifier.progress(job_id, 100.0, "预筛完成")
         context.job_store.mark_completed(job_id)
     except Exception as exc:
@@ -110,9 +110,10 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
     episode_ids = params.get("episode_ids")
     if episode_ids is None:
+        # analyzing 一并纳入：能开新任务即说明无并发分析，该状态必为崩溃/中断残留
         targets = [
             ep for ep in episodes_repo.list_by_project(context.conn, project_id)
-            if ep["status"] in ("pending", "prescreened", "failed")
+            if ep["status"] in ("pending", "prescreened", "failed", "analyzing")
         ]
     else:
         wanted = [str(item) for item in episode_ids]
@@ -252,7 +253,7 @@ def _run_resync(
             highlights=json.dumps([h.model_dump() for h in semantic_result.highlights]),
             genre=semantic_result.genre or None,
         )
-        context.job_store.set_progress(job_id, 100.0)
+        context.job_store.set_progress(job_id, 100.0, "语义结果已刷新")
         context.notifier.progress(job_id, 100.0, "语义结果已刷新")
         context.job_store.mark_completed(job_id)
     except Exception as exc:
@@ -364,7 +365,7 @@ def _analyze_one(
 
     def report(percent: float, message: str) -> None:
         overall = (index + percent) / total * 100
-        context.job_store.set_progress(job_id, round(overall, 1))
+        context.job_store.set_progress(job_id, round(overall, 1), f"{label} {message}")
         context.notifier.progress(job_id, round(overall, 1), f"{label} {message}")
 
     episodes_repo.set_status(context.conn, episode_id, "analyzing")
