@@ -1,7 +1,7 @@
 """导出编码器：滤镜链编排与两阶段执行（原案 7.1）。
 
 Phase A 逐段：精确切割 → 竖屏 1080x1920 裁切 → 消重（微缩放/eq/微变速）
-        → 遮罩（非纯原片模式）→ 段级混音（narration 段旁白+原声压低）→ 重编码。
+        → 遮罩（非纯原片模式）→ 段级混音（narration/ducked 段旁白 + 原声压低）→ 重编码。
 Phase B 拼接：concat demuxer（-c copy）+ `-map_metadata -1` 指纹擦除。
 进度：Phase A 按段数、Phase B 占 10%。
 """
@@ -45,7 +45,11 @@ def cut_segment_args(
     ass_path: str | None = None,
     out_size: tuple[int, int] = (OutWidth, OutHeight),
 ) -> list[str]:
-    """构建单段切割命令（Phase A）。audio: original | narration | ducked。"""
+    """构建单段切割命令（Phase A）。
+
+    audio 角色语义：narration 与 ducked 在携带旁白音频时渲染等价（旁白为主 + 原声压低，
+    前者原声 20%、后者 12% 衬底）；任一角色拿不到旁白音频时回退纯原声。original 恒原声。
+    """
     out_w, out_h = out_size
     dedup = dedup_params.generate(rng)
     speed = dedup.speed_factor
@@ -158,7 +162,7 @@ def export_plan(
     out_path: Path,
     work_dir: Path,
     *,
-    tts_audio_by_segment: dict[int, Path] | None = None,
+    tts_audio_by_segment: dict[int, str] | None = None,
     mask: bool = True,
     cancel: threading.Event | None = None,
     on_progress: Callable[[float, str], None] | None = None,
@@ -180,28 +184,25 @@ def export_plan(
     rng = random.Random()
 
     total = len(segments)
-    # Phase A：构建每段命令参数（含 SRT/能量安全切点、字幕、混音）
+    # Phase A：构建每段命令参数（含台词保护区安全切点、字幕、混音）
     job_args: list[list[str]] = []
-    srt_cache: dict[str, list[SpeechZone]] = {}
+    zones_cache: dict[str, list[SpeechZone]] = {}
     for index, segment in enumerate(segments):
         source = episode_paths.get(segment.episode_id)
         if source is None or not Path(source).is_file():
             raise EpisodeSourceMissing(f"第 {segment.episode_id} 集源文件缺失")
-        if segment.episode_id not in srt_cache:
-            asr_zones = (dialogue_zones or {}).get(segment.episode_id)
-            if asr_zones:
-                srt_cache[segment.episode_id] = list(asr_zones)
-            else:
-                srt = jitter.srt_for_source(Path(source))
-                srt_cache[segment.episode_id] = (
-                    jitter.parse_srt(srt) if srt is not None else []
-                )
+        if segment.episode_id not in zones_cache:
+            # 同名 .srt 优先（尊重手工校对过的字幕文件），缺失才回退库内 ASR 区
+            srt = jitter.srt_for_source(Path(source))
+            zones_cache[segment.episode_id] = (
+                jitter.parse_srt(srt)
+                if srt is not None
+                else list((dialogue_zones or {}).get(segment.episode_id) or [])
+            )
         safe_start, safe_end = jitter.safe_times(
-            segment.start, segment.end, srt_cache[segment.episode_id], rng=rng
+            segment.start, segment.end, zones_cache[segment.episode_id], rng=rng
         )
-        tts_audio = None
-        if tts_audio_by_segment and index in tts_audio_by_segment:
-            tts_audio = str(tts_audio_by_segment[index])
+        tts_audio = (tts_audio_by_segment or {}).get(index)
         ass_path: str | None = None
         if subtitle_burner is not None and segment.subtitle_text:
             ass_path = str(

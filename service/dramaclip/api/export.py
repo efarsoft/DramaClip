@@ -107,6 +107,22 @@ def list_works(context: AppContext, params: dict[str, Any]) -> list[dict[str, An
     return exports_repo.list_completed_works(context.conn, limit=limit)
 
 
+def tts_audio_by_segment(plan: PlanData) -> dict[int, str]:
+    """段序号 → 旁白音频路径。按 segment.narration_id 显式取用，绝不按位置推断。
+
+    位置推断在两条路上都会静默错音：`ducked`（全片解说每段都是）从来不算 narration 段，
+    整片旁白因此丢失；TTS 失败被 `kept_texts` 过滤后，「第 N 条 narration 段」与
+    「第 N 条文案」也不再同号。id 缺失或对不上号的段就是没有旁白，直接不给条目。
+    """
+    by_id = {
+        text.id: text.audio_path for text in plan.narration_texts if text.audio_path is not None
+    }
+    return {
+        index: by_id[segment.narration_id]
+        for index, segment in enumerate(plan.timeline)
+        if segment.narration_id is not None and segment.narration_id in by_id
+    }
+
 
 def _output_size(settings: dict[str, str]) -> tuple[int, int]:
     """输出分辨率：设置键 export.width/height，偶数化并钳制最小 480。"""
@@ -137,8 +153,9 @@ def render_export(
         str(ep["id"]): str(ep["source_path"])
         for ep in episodes_repo.list_by_project(context.conn, project_id)
     }
-    # 台词保护区（批次 0.5 接线）：直接消费分析层 asr_segments，
-    # 不再依赖从未产出的同名 .srt；SRT 路径保留为手动放置时的兼容来源
+    # 台词保护区的库内兜底源：分析层 asr_segments 按集预取一次。
+    # 优先级在编码器里判：源视频同名 .srt（人工校对过的手工字幕）优先，
+    # 该文件不存在时才回退用这里预取的 ASR 区（见 encoder.export_plan 的 zones_cache）
     dialogue_zones: dict[str, list[SpeechZone]] = {}
     for segment in plan_data.timeline:
         episode_id = segment.episode_id
@@ -155,18 +172,7 @@ def render_export(
         if zones:
             dialogue_zones[episode_id] = zones
 
-    # TTS 音频按「时间轴内第 N 条 narration 段」对应第 N 条解说词——
-    # 按时间轴全量索引会在原声/旁白交替的模式（交叉/超短）下错位或丢音
-    tts_segments: dict[int, Path] = {}
-    narration_order = 0
-    for index, segment in enumerate(plan_data.timeline):
-        if segment.audio != "narration":
-            continue
-        if narration_order < len(plan_data.narration_texts):
-            text = plan_data.narration_texts[narration_order]
-            if text.audio_path is not None:
-                tts_segments[index] = Path(text.audio_path)
-        narration_order += 1
+    tts_segments = tts_audio_by_segment(plan_data)
     mask = plan_row["narration_mode"] not in _NO_MASK_MODES
     preset = subtitle_presets.get_preset(context.settings.get("subtitle.default_preset"))
     out_size = _output_size(context.settings)

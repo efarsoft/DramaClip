@@ -258,7 +258,11 @@ def synthesize_narration_texts(
     work_dir: Path,
     models_dir: Path | None = None,
 ) -> PlanData:
-    """逐段合成旁白音频并回填 audio_path/duration；narration 段时长随 TTS 回填。"""
+    """逐段合成旁白音频并回填 audio_path/duration。
+
+    narration 与 ducked 段都按各自旁白实际时长回填时长与解说字幕，并把该条文案的
+    id 记进 `segment.narration_id`；导出层据此取音（拿不到音的段回退原声并清 id）。
+    """
     if not plan.narration_texts:
         return plan
     engine = create_tts(settings.get("tts.engine", "edge"), models_dir)
@@ -277,19 +281,30 @@ def synthesize_narration_texts(
     timeline = [segment.model_dump() for segment in plan.timeline]
     narration_order = 0
     for segment in timeline:
-        if segment["audio"] != "narration" or narration_order >= len(updated):
+        # ducked（全片解说全程压底旁白）与 narration 同权：两者都要回填时长与解说字幕
+        if segment["audio"] not in ("narration", "ducked"):
+            continue
+        # 陈旧映射先抹掉：本轮没拿到音频的段必须回落到纯原声，导出侧才无从错取
+        segment["narration_id"] = None
+        if narration_order >= len(updated):
+            segment["audio"] = "original"  # 旁白文案已用尽 → 无音可挂
+            segment["subtitle_text"] = None
             continue
         text = updated[narration_order]
+        narration_order += 1
         duration = text["duration"]
         if duration is not None and duration > 0:
             segment["end"] = round(segment["start"] + duration, 3)
             segment["subtitle_text"] = str(text["text"])
+            segment["narration_id"] = str(text["id"])
         else:
             segment["audio"] = "original"  # 无旁白音频 → 回退原声段（字幕一并取消）
             segment["subtitle_text"] = None
-        narration_order += 1
     kept_texts = [text for text in updated if text["duration"] is not None]
-    return plan.model_copy(update={"narration_texts": kept_texts, "timeline": timeline})
+    # 校验回模型：model_copy 会把裸 dict 塞进 timeline，导出层按属性读段就会炸
+    return PlanData.model_validate(
+        {**plan.model_dump(), "narration_texts": kept_texts, "timeline": timeline}
+    )
 
 
 def segment_source_map(episodes: list[dict[str, Any]]) -> dict[str, str]:

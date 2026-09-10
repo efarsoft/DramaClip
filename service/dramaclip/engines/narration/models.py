@@ -19,6 +19,9 @@ class TimelineSegment(BaseModel):
     transition: Literal["cut", "fade", "black", "flash"] = "cut"
     subtitle_text: str | None = None
     emotion_label: str | None = None
+    # 本段旁白对应的 NarrationText.id（TTS 回填时写下，回退原声时清空）。
+    # 导出侧据此取音，禁止再靠位置索引推断。
+    narration_id: str | None = None
 
 
 class NarrationText(BaseModel):
