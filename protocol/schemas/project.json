@@ -35,6 +35,10 @@
         },
         "cover_path": {
           "type": "string"
+        },
+        "settings": {
+          "type": "object",
+          "description": "项目级参数覆盖（方案数 K/转写档位/解说风格/字幕预设等）；空对象=全部使用全局默认。库内为 JSON 文本，仓储层解析后以对象返回（同 narration.PlanData.plan_data）"
         }
       }
     },
@@ -215,8 +219,45 @@
       }
     },
     {
+      "name": "project.update_settings",
+      "summary": "项目级参数覆盖（默认+覆盖机制的存储落点）；null 值=恢复该项默认",
+      "params": {
+        "type": "object",
+        "required": [
+          "project_id",
+          "settings"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "settings": {
+            "type": "object",
+            "description": "与现有覆盖集做键级合并；某键值为 null 表示删除该键",
+            "additionalProperties": true
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "project_id",
+          "settings"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "settings": {
+            "type": "object",
+            "description": "合并后的完整项目级覆盖集"
+          }
+        }
+      }
+    },
+    {
       "name": "project.duplicate",
-      "summary": "复制项目元数据与集列表（分析结果不复制）",
+      "summary": "复制项目元数据与集列表（分析结果不复制；settings 覆盖值带过去）",
       "params": {
         "type": "object",
         "required": [

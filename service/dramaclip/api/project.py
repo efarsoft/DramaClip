@@ -16,6 +16,7 @@ from dramaclip.transport.rpc import Router, RpcDomainError
 _ERR_PROJECT_NOT_FOUND = -32101
 _ERR_SOURCE_INVALID = -32102
 _ERR_NO_EPISODES = -32103
+_ERR_INVALID_SETTINGS = -32104
 
 _VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".webm", ".flv"}
 
@@ -28,6 +29,7 @@ def register(router: Router, context: AppContext) -> None:
     router.register("project.get", lambda params: get(context, params))
     router.register("project.delete", lambda params: delete(context, params))
     router.register("project.rename", lambda params: rename(context, params))
+    router.register("project.update_settings", lambda params: update_settings(context, params))
     router.register("project.duplicate", lambda params: duplicate(context, params))
     router.register("project.scan_episodes", lambda params: scan_episodes(context, params))
     router.register("project.dashboard_summary", lambda _params: dashboard_summary(context))
@@ -73,6 +75,18 @@ def rename(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     if not projects_repo.rename(context.conn, project_id, name):
         raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
     return projects_repo.get(context.conn, project_id) or {}
+
+
+def update_settings(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """项目级参数覆盖（K / 转写档位 / 风格 / 字幕预设）。null 值=恢复该项默认。"""
+    project_id = str(params.get("project_id", ""))
+    changes = params.get("settings")
+    if not isinstance(changes, dict):
+        raise RpcDomainError(_ERR_INVALID_SETTINGS, "settings 必须是对象")
+    merged = projects_repo.update_settings(context.conn, project_id, changes)
+    if merged is None:
+        raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
+    return {"project_id": project_id, "settings": merged}
 
 
 def duplicate(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:

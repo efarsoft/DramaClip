@@ -74,6 +74,8 @@ export interface Project {
   readonly created_at: number;
   readonly episode_count: number;
   readonly cover_path?: string;
+  /** 项目级参数覆盖（方案数 K/转写档位/解说风格/字幕预设等）；空对象=全部使用全局默认。 */
+  readonly settings: Record<string, unknown>;
 }
 
 export interface Episode {
@@ -313,6 +315,7 @@ export const METHOD_NAMES = [
   'project.get',
   'project.delete',
   'project.rename',
+  'project.update_settings',
   'project.duplicate',
   'project.scan_episodes',
   'project.dashboard_summary',
