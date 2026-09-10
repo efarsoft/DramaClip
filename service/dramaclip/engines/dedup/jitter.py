@@ -19,6 +19,9 @@ _PROTECT_AFTER_S = 0.15
 _JITTER_MIN_S = 0.08
 _JITTER_MAX_S = 0.3
 _MIN_SEGMENT_S = 0.45
+# 边界顺延/回退上限：连续对白里 ASR 段可长达数十秒，无上限的贴边
+# 会把 5s 切片扩成 40s+（真机回归实证），亚秒级足以覆盖"不吞字尾"
+_MAX_ADJUST_S = 1.0
 
 _SRT_TIME = re.compile(r"(\d+):(\d+):(\d+)[,.](\d+)")
 
@@ -73,10 +76,12 @@ def safe_start(
             jitter = min(gap, generator.uniform(_JITTER_MIN_S, _JITTER_MAX_S))
             return max(0.0, start - jitter)
         return start
-    # 命中保护区：外移到最近保护区起点之前
+    # 命中保护区：外移到最近保护区起点之前（过远则保持原切点，防整段吞入）
     for begin, _end in sorted(spans):
         if begin <= start <= _end:
-            return max(0.0, begin)
+            if start - begin <= _MAX_ADJUST_S:
+                return max(0.0, begin)
+            break
     return start
 
 
@@ -86,13 +91,15 @@ def safe_end(
     *,
     rng: random.Random | None = None,
 ) -> float:
-    """出点安全化：命中保护区则回收至保护区结束之后（不吞字尾）。"""
+    """出点安全化：命中保护区则顺延至保护区结束之后（不吞字尾，距离有上限）。"""
     spans = _protected_spans(zones)
     if not _in_protection(end, spans):
         return end
     for begin, stop in sorted(spans):
         if begin <= end <= stop:
-            return stop
+            if stop - end <= _MAX_ADJUST_S:
+                return stop
+            break
     return end
 
 
