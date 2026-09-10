@@ -29,7 +29,6 @@ export function EpisodeListRow({
   onDrop: () => void;
   onMove: (direction: -1 | 1) => void;
 }): React.ReactElement {
-  const asrOk = episode.status === 'done';
   return (
     <DragShell
       active={active}
@@ -43,7 +42,7 @@ export function EpisodeListRow({
       <RowThumb episode={episode} />
       <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
         <RowName episode={episode} active={active} />
-        <RowMeta duration={episode.duration ?? 0} asrOk={asrOk} highlightCount={highlightCount} />
+        <RowMeta duration={episode.duration ?? 0} status={episode.status} highlightCount={highlightCount} />
       </span>
       <MoveButtons onMove={onMove} />
     </DragShell>
@@ -224,19 +223,25 @@ function RowCheckbox({
 
 function RowMeta({
   duration,
-  asrOk,
+  status,
   highlightCount,
 }: {
   duration: number;
-  asrOk: boolean;
+  status: Episode['status'];
   highlightCount: number;
 }): React.ReactElement {
+  // 三态各自可辨；失败用 status/error（#F87171）——#FF4D4F 只留给钩子语义，
+  // colorWarning 已被同行的「高光」计数占用，挪用会让失败与提示撞色。
+  const state =
+    status === 'done'
+      ? { label: '已转写', color: tokens.colorSuccess }
+      : status === 'failed'
+        ? { label: '分析失败', color: tokens.colorError }
+        : { label: '待分析', color: tokens.textTertiary };
   return (
     <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary, display: 'flex', gap: 8 }}>
       <span>{Math.round(duration)}s</span>
-      <span style={{ color: asrOk ? tokens.colorSuccess : tokens.textTertiary }}>
-        ● {asrOk ? '已转写' : '待分析'}
-      </span>
+      <span style={{ color: state.color }}>● {state.label}</span>
       {highlightCount > 0 && (
         <span style={{ color: tokens.colorWarning }}>高光 {String(highlightCount)}</span>
       )}
