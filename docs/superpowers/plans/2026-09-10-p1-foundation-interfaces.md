@@ -25,11 +25,11 @@
 
 **基线（2026-09-10 实测）**：`cd service && ../.venv/Scripts/python -m pytest tests` → **190 passed, 8 warnings in ~19s**。本计划全程**只增不减**。
 `.venv` 在仓库根，不在 `service/` 下。`pyproject.toml` 有 `addopts = "-q"`，所以 `pytest -q` 等于 `-qq`，**不打印通过摘要行**——要计数就别加 `-q`。
-**已知失败（非本计划引入，Task 2-6 都会撞上）**：`tests/api/test_analysis.py::test_resync_semantic_refreshes_without_touching_asr`
-- **不是随机 flaky，是确定性的测试隔离污染**：`cd service && ../.venv/Scripts/python -m pytest tests/engines tests/api -o addopts="" -q` **每次都挂**；单独跑该测试 0.97 秒通过；`tests/transport+api`、`tests/api` 自身均绿。
-- 已排除 `tests/engines/exporter` 与 `tests/engines/analysis`；污染源在 `tests/engines/{dedup|narration|semantic|subtitle}` 四者之一，**尚未定位**。
-- 代价：套件从 ~15 秒涨到 ~45 秒（它在等 30 秒 job 超时），且让"全绿"判据不可信。
-- **纪律**：跑计数一律带 `-o addopts=""`（绕开 `addopts=-q`）；**不得为它放宽断言、不得加 sleep 掩盖、不要在 Task 2-6 里顺手"修好"它**——它是独立的测试隔离缺陷，混进功能提交里只会让两边都说不清。要修就单独立一条。
+**已知失败（非本计划引入，后续 Task 都会撞上）**：`tests/api/test_analysis.py` 的 `test_resync_semantic_refreshes_without_touching_asr` 与 `test_start_reanalyzes_stale_analyzing_episode`
+- **是测试隔离缺陷，不是随机噪声。** 全量跑约 **3 次挂 1 次**，挂的是哪条不固定；两条**单独跑都稳定通过（1.1 秒）**；`tests/api` 单跑、`tests/transport + tests/api` 均绿。
+- **至少两种失效模式**：① 套件 ~45 秒时挂在 `wait_done`（`test_analysis.py:79` 的 30 秒轮询超时）；② 套件 **~15 秒即失败**——这种**不可能是超时**，是断言直接不成立。
+- 我此前两处说法都被实测推翻，记录以免继续误导：「每次都挂」（样本太少，不可复现）与「只是负载相关的 30 秒墙钟」（只覆盖模式 ①）。**模式 ② 说明存在真实的状态污染**（共享 fixture 或前序测试遗留的 job/episode 状态），需单独定位。
+- **纪律**：跑计数一律带 `-o addopts=""`（绕开 `addopts=-q`）；**不得为它放宽断言、不得加 sleep 掩盖、不要在后续 Task 里顺手"修好"它**。要修就单独立一条提交，且**必须先复现出模式 ② 再动手**——只修超时那一半会留下更隐蔽的那个。
 
 ## Task 3 落地后的实测修正（Task 4-6 必须遵守）
 
