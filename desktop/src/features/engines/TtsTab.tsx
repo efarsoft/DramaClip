@@ -31,7 +31,8 @@ export function TtsTab({
   onChanged: () => void;
 }): React.ReactElement {
   const engine = settings['tts.engine'] === 'kokoro' ? 'kokoro' : 'edge';
-  const kokoro = models.find((m) => m.model_id.includes('kokoro'));
+  const ttsModels = models.filter((m) => m.kind === 'tts');
+  const kokoro = ttsModels.find((m) => m.model_id.includes('kokoro'));
   const voices = engine === 'kokoro' ? KOKORO_VOICES : EDGE_VOICES;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -65,11 +66,12 @@ export function TtsTab({
           }}
         />
       </PageSection>
-      {engine === 'kokoro' && kokoro !== undefined && (
-        <PageSection title="本地模型">
-          <ModelList models={[kokoro]} onChanged={onChanged} />
-        </PageSection>
-      )}
+      <PageSection title="本地模型库">
+        <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginBottom: 14 }}>
+          可提前下载大模型；合成引擎接入前仅 Kokoro / Edge 可选为当前引擎。
+        </div>
+        <ModelList models={ttsModels} onChanged={onChanged} />
+      </PageSection>
     </div>
   );
 }
