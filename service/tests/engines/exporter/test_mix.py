@@ -40,3 +40,12 @@ def test_original_segment_keeps_source_audio() -> None:
 
 def test_narration_without_audio_falls_back_to_plain() -> None:
     assert "-filter_complex" not in _args("narration", None), "无音频时不应声明第二路输入"
+
+
+def test_amix_does_not_normalize_inputs() -> None:
+    """amix 默认把每路除以输入数（此处各砍 6dB），声明的 0.2/0.12 会变成假数字。"""
+    joined = " ".join(_args("narration", "n1.mp3"))
+    assert "amix=inputs=2:duration=first:normalize=0" in joined
+    assert "volume=0.2," in joined, "narration 段原声须真压到 20%"
+    joined_ducked = " ".join(_args("ducked", "n1.mp3"))
+    assert "volume=0.12," in joined_ducked and "normalize=0" in joined_ducked
