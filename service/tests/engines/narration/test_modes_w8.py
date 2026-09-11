@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dramaclip.engines.narration.models import StrategySpec
-from dramaclip.engines.narration.modes_w8 import build_full, narration_texts_for
+from dramaclip.engines.narration.modes_w8 import build_full
 from dramaclip.engines.semantic.models import ConflictScore
 
 _STRATEGY = StrategySpec(min_duration_s=10, max_duration_s=120)
@@ -17,7 +17,7 @@ def _scenes() -> list[ConflictScore]:
 
 
 def test_full_covers_timeline_with_ducked_audio() -> None:
-    plan = build_full("ep1", _scenes(), _STRATEGY, "透视眼", genre="逆袭")
+    plan = build_full("ep1", _scenes(), _STRATEGY)
     assert plan.mode == "full_narration"
     assert all(segment.audio == "ducked" for segment in plan.timeline)
     starts = [segment.start for segment in plan.timeline]
@@ -25,24 +25,23 @@ def test_full_covers_timeline_with_ducked_audio() -> None:
 
 
 def test_full_scene_cap_and_texts() -> None:
-    plan = build_full("ep1", _scenes(), _STRATEGY, "透视眼", genre="逆袭")
+    plan = build_full("ep1", _scenes(), _STRATEGY)
     assert len(plan.timeline) <= 8
     assert len(plan.narration_texts) == len(plan.timeline)
-    assert "透视眼" in plan.narration_texts[0].text
-    assert "逆袭" in plan.narration_texts[0].text
-    assert "全集" in plan.narration_texts[-1].text
+    assert [s.narration_id for s in plan.timeline] == [t.id for t in plan.narration_texts]
+    assert all(not t.text and t.slot and t.window for t in plan.narration_texts)
 
 
-def test_narration_texts_position_semantics() -> None:
-    scenes = _scenes()[:4]
-    texts = narration_texts_for(scenes, "剧名", None)
-    assert len(texts) == 4
-    assert "剧名" in texts[0].text
-    assert "冲突直接拉满" in texts[1].text, "score>=85 的高潮分支优先于位置分支"
-    assert "麻烦" in texts[2].text  # 偶数位埋悬念
-    assert "全集" in texts[3].text  # 收尾
+def test_full_slot_roles_follow_narrative_position() -> None:
+    """位置与冲突分决定槽位职责（原模板的位置语义搬到这里，句子本身归编剧）。"""
+    plan = build_full("ep1", _scenes(), _STRATEGY)
+    texts = plan.narration_texts
+    assert texts[0].slot.startswith("开篇")
+    assert "高潮" in texts[1].slot, "score>=85 的高潮分支优先于推进分支"
+    assert texts[3].slot.startswith("推进")
+    assert texts[-1].slot.startswith("收尾")
 
 
 def test_full_empty_scenes() -> None:
-    plan = build_full("ep1", [], _STRATEGY, "x")
+    plan = build_full("ep1", [], _STRATEGY)
     assert plan.timeline == []

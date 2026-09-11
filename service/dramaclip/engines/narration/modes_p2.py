@@ -32,36 +32,38 @@ def build_dual_host(
     episode_id: str,
     scenes: list[ConflictScore],
     strategy: StrategySpec,
-    project_name: str,
 ) -> PlanData:
     """双人对谈（原案 6.10）：A 抛话题、B 推剧情，交替对谈 + 原声压低。"""
     picked = _pick(scenes)
     if not picked:
         return PlanData(mode="dual_host_chat", strategy=strategy)
 
+    count = len(picked)
     timeline: list[TimelineSegment] = []
     texts: list[NarrationText] = []
     for index, scene in enumerate(picked):
-        speaker_voice = _VOICE_A if index % 2 == 0 else _VOICE_B
+        slot_id = f"dual-{index + 1}"
+        voice = _VOICE_A if index % 2 == 0 else _VOICE_B
+        speaker = "主持人 A" if index % 2 == 0 else "嘉宾 B"
         if index == 0:
-            line = f"你们看过最爽的复仇剧吗？{project_name}直接杀疯了。"
-        elif index == len(picked) - 1:
-            line = f"所以我说，{project_name}的结局才是真正的王炸。想看全集点下方。"
+            role = f"{speaker} 开场抛话题：用剧名点出这片为什么值得看"
+        elif index == count - 1:
+            role = f"{speaker} 收尾：放狠话评结局并引导看全集"
         elif index % 2 == 1:
-            line = "我跟你说，这段看得我血压都上来了。"
+            role = f"{speaker} 接话：情绪反应 + 补一个刚才没说的细节"
         else:
-            line = "更狠的还在后面，接着看。"
+            role = f"{speaker} 抛下一层：把冲突往更狠处推一句"
+        window = (scene.start, round(min(scene.start + _SCENE_S, scene.end), 3))
         timeline.append(
             TimelineSegment(
                 episode_id=episode_id,
                 start=round(scene.start, 3),
-                end=round(min(scene.start + _SCENE_S, scene.end), 3),
+                end=window[1],
                 audio="narration",
+                narration_id=slot_id,
             )
         )
-        texts.append(
-            NarrationText(id=f"dual-{index + 1}", text=line, voice=speaker_voice)
-        )
+        texts.append(NarrationText(id=slot_id, slot=role, voice=voice, window=window))
     return PlanData(
         mode="dual_host_chat", timeline=timeline, narration_texts=texts, strategy=strategy
     )
@@ -71,34 +73,36 @@ def build_monologue(
     episode_id: str,
     scenes: list[ConflictScore],
     strategy: StrategySpec,
-    project_name: str,
 ) -> PlanData:
-    """角色内心独白（原案 6.11）：第一人称 OS 贯穿，情绪内收。"""
+    """角色内心独白（原案 6.11）：主角第一人称 OS 贯穿，情绪内收。"""
     picked = _pick(scenes)
     if not picked:
         return PlanData(mode="inner_monologue", strategy=strategy)
 
+    count = len(picked)
     timeline: list[TimelineSegment] = []
     texts: list[NarrationText] = []
-    count = len(picked)
     for index, scene in enumerate(picked):
+        slot_id = f"mono-{index + 1}"
         if index == 0:
-            line = f"嫁进{project_name}的这个家三年，我以为忍让就会被接纳。"
+            role = "第一人称开场：主角此刻的处境与误判，一句话"
         elif index == count - 1:
-            line = "该还的，一分都不能少。想看我怎么讨回来，点下方。"
+            role = "第一人称收尾：态度反转落定 + 一句点击引导"
         elif scene.score >= 85:
-            line = "那一刻我明白了，退让换不来尊重。"
+            role = "第一人称高潮：这一刻主角想明白了什么，短促、带情绪"
         else:
-            line = "我以为只要再忍一忍，一切都会过去。"
+            role = "第一人称推进：忍让如何一点点失效"
+        window = (scene.start, round(min(scene.start + _SCENE_S, scene.end), 3))
         timeline.append(
             TimelineSegment(
                 episode_id=episode_id,
                 start=round(scene.start, 3),
-                end=round(min(scene.start + _SCENE_S, scene.end), 3),
+                end=window[1],
                 audio="narration",
+                narration_id=slot_id,
             )
         )
-        texts.append(NarrationText(id=f"mono-{index + 1}", text=line, voice=_VOICE_A))
+        texts.append(NarrationText(id=slot_id, slot=role, voice=_VOICE_A, window=window))
     return PlanData(
         mode="inner_monologue", timeline=timeline, narration_texts=texts, strategy=strategy
     )

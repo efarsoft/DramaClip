@@ -149,7 +149,14 @@ def test_full_narration_plan_maps_every_segment_to_own_text(
         ConflictScore(scene_index=index, start=index * 12.0, end=index * 12.0 + 10.0, score=score)
         for index, score in enumerate([60, 85, 45, 90, 55, 75, 40, 95, 50, 65])
     ]
-    plan = build_full("ep1", scenes, StrategySpec(min_duration_s=10, max_duration_s=120), "透视眼")
+    plan = build_full("ep1", scenes, StrategySpec(min_duration_s=10, max_duration_s=120))
+    # 文案槽位由编剧层填充（Task 6 前先用替身模拟其产出）
+    plan = plan.model_copy(update={
+        "narration_texts": [
+            t.model_copy(update={"text": f"第 {i} 段解说文案"})
+            for i, t in enumerate(plan.narration_texts)
+        ]
+    })
     result = pipeline.synthesize_narration_texts(plan, {"tts.engine": "edge"}, tmp_path)
 
     assert len(result.timeline) > 1, "本用例要多段才有意义"

@@ -1,6 +1,6 @@
 """解说管线：分析结果 → 编排方案（raw_clip/intro/cross/ultra_short/dialogue）+ TTS 合成。
 
-LLM 文案未配置时用模板降级（W3 同策略）；TTS 用 edge（云端免费，无需本地模型）。
+编排层只产出画面结构与旁白槽位；文案由 narration.copywriter 生成，TTS 由本模块回填。
 """
 
 from __future__ import annotations
@@ -64,37 +64,24 @@ def build_plan(
     if mode == "raw_clip":
         return modes.build_raw_clip(episode_id, conflict_scores, highlights, strategy)
     if mode == "intro_narration":
-        text = intro_text(conflict_scores, settings)
-        return modes.build_intro(episode_id, conflict_scores, strategy, text)
+        return modes.build_intro(episode_id, conflict_scores, strategy)
     if mode == "cross_narration":
         return modes_w5.build_cross(episode_id, conflict_scores, strategy)
     if mode == "ultra_short_hook":
-        return modes_w5.build_ultra_short(
-            episode_id, conflict_scores, strategy, settings.get("_project_name", "这部剧")
-        )
+        return modes_w5.build_ultra_short(episode_id, conflict_scores, strategy)
     if mode == "dialogue_narration":
         lines = dialogue_selector.select_dialogue_lines(asr_segments, audio)
         return dialogue_selector.build_dialogue(episode_id, lines, strategy)
     if mode == "full_narration":
-        return modes_w8.build_full(
-            episode_id,
-            conflict_scores,
-            strategy,
-            settings.get("_project_name", "这部剧"),
-            settings.get("_genre"),
-        )
+        return modes_w8.build_full(episode_id, conflict_scores, strategy)
     if mode == "subtitle_flow":
         return modes_w9.build_subtitle_flow(
             episode_id, conflict_scores, asr_segments, strategy
         )
     if mode == "dual_host_chat":
-        return modes_p2.build_dual_host(
-            episode_id, conflict_scores, strategy, settings.get("_project_name", "这部剧")
-        )
+        return modes_p2.build_dual_host(episode_id, conflict_scores, strategy)
     if mode == "inner_monologue":
-        return modes_p2.build_monologue(
-            episode_id, conflict_scores, strategy, settings.get("_project_name", "这部剧")
-        )
+        return modes_p2.build_monologue(episode_id, conflict_scores, strategy)
     raise ValueError(f"模式暂未支持: {mode}（{_MODE_LABELS.get(mode, mode)} 将随后续阶段启用）")
 
 
@@ -242,17 +229,6 @@ def parse_audio_features(audio_json: str | None) -> AudioFeatures:
 
 def parse_asr_segments(asr_json: str) -> list[AsrSegment]:
     return [AsrSegment.model_validate(item) for item in json.loads(asr_json)]
-
-
-def intro_text(conflict_scores: list[ConflictScore], settings: dict[str, str]) -> str:
-    """片头钩子文案：LLM 未配置时用模板降级（原案 6.4 引子 + 悬念收尾）。"""
-    project_name = settings.get("_project_name", "这部剧")
-    peak = max((scene.score for scene in conflict_scores), default=60)
-    if peak >= 80:
-        hook = f"{project_name}这段剧情，直接把冲突拉满了"
-    else:
-        hook = f"{project_name}的故事，从一场爆发开始"
-    return f"{hook}。三分钟带你看完全过程，看到最后你绝对想不到。"
 
 
 def synthesize_narration_texts(

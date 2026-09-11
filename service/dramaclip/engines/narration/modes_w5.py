@@ -1,7 +1,6 @@
 """W5 模式编排：交叉解说（原案 6.3）与超短悬念版（原案 6.9）。
 
-文案均为模板降级（LLM 文案精修随 P1 后续接入）；
-旁白段时长在导出阶段由 TTS 音频实际时长回填（同 intro 机制）。
+编排只产出画面结构与旁白槽位，文案一律由 narration.copywriter 生成（无模板兜底）。
 """
 
 from __future__ import annotations
@@ -18,16 +17,6 @@ _CROSS_SCENE_S = 8.0        # 交叉解说单场景原声段基准时长
 _CROSS_MAX_S = 120.0
 _HOOK_TTS_FALLBACK_S = 4.0  # TTS 时长回填前的保守估算
 _ULTRA_CONFLICT_S = 8.0     # 超短版冲突画面时长
-
-# 旁白串联文案池（按位置取用；LLM 接入后替换）
-_CROSS_NARRATIONS: tuple[str, ...] = (
-    "故事，从这里开始变得不对劲。",
-    "然而事情远没有这么简单。",
-    "接下来的这一幕，让所有人都没想到。",
-    "真正的好戏，现在才刚刚开场。",
-    "命运的转折，就藏在这个决定里。",
-    "所有的铺垫，都是为了这一刻。",
-)
 
 
 def build_cross(
@@ -64,17 +53,23 @@ def build_cross(
         # 场景间插入旁白段（画面延续到下一场景开头；末尾场景后用本场景尾部）
         anchor = picked[index + 1] if index + 1 < len(picked) else scene
         narration_seconds = _HOOK_TTS_FALLBACK_S
-        narration_text = _CROSS_NARRATIONS[index % len(_CROSS_NARRATIONS)]
+        slot_id = f"cross-{index + 1}"
+        texts.append(
+            NarrationText(
+                id=slot_id,
+                slot="原声片段之间的串联：承接上一幕，给下一幕留半句钩",
+                window=(anchor.start, anchor.start + narration_seconds),
+            )
+        )
         segments.append(
             TimelineSegment(
                 episode_id=episode_id,
                 start=round(anchor.start, 3),
                 end=round(anchor.start + narration_seconds, 3),
                 audio="narration",
-                subtitle_text=narration_text,
+                narration_id=slot_id,
             )
         )
-        texts.append(NarrationText(id=f"cross-{index + 1}", text=narration_text))
         used += narration_seconds
     return PlanData(
         mode="cross_narration", timeline=segments, narration_texts=texts, strategy=strategy
@@ -85,26 +80,25 @@ def build_ultra_short(
     episode_id: str,
     scenes: list[ConflictScore],
     strategy: StrategySpec,
-    project_name: str,
 ) -> PlanData:
-    """超短悬念版（10-20s）：TTS 钩子 → 最高冲突原声画面 → TTS 收尾引导。
-
-    三段画面均来自冲突分最高的场景（信息密度最高的几秒）。
-    """
+    """超短悬念版（10-20s）：钩子旁白 → 最高冲突原声画面 → 收尾引导。"""
     if not scenes:
         return PlanData(mode="ultra_short_hook", strategy=strategy)
     best = max(scenes, key=lambda s: s.score)
     scene_span = min(best.end - best.start, _ULTRA_CONFLICT_S)
-    hook_text = f"{project_name}最炸裂的一段，看完整个人都是懵的"
-    cta_text = "结局更狠，点下方看全集"
-
+    slots = (
+        ("hook-1", "开场钩子：一句，最大反差或最狠的悬念，不超过 20 字",
+         (best.start, best.start + _HOOK_TTS_FALLBACK_S)),
+        ("cta-1", "收尾引导：一句，指向「结局更狠」并引导点击，不超过 15 字",
+         (best.end - _HOOK_TTS_FALLBACK_S, best.end)),
+    )
     timeline = [
         TimelineSegment(
             episode_id=episode_id,
-            start=round(best.start, 3),
-            end=round(best.start + _HOOK_TTS_FALLBACK_S, 3),
+            start=round(slots[0][2][0], 3),
+            end=round(slots[0][2][1], 3),
             audio="narration",
-            subtitle_text=hook_text,
+            narration_id=slots[0][0],
         ),
         TimelineSegment(
             episode_id=episode_id,
@@ -114,16 +108,13 @@ def build_ultra_short(
         ),
         TimelineSegment(
             episode_id=episode_id,
-            start=round(best.end - _HOOK_TTS_FALLBACK_S, 3),
-            end=round(best.end, 3),
+            start=round(slots[1][2][0], 3),
+            end=round(slots[1][2][1], 3),
             audio="narration",
-            subtitle_text=cta_text,
+            narration_id=slots[1][0],
         ),
     ]
-    texts = [
-        NarrationText(id="hook-1", text=hook_text),
-        NarrationText(id="cta-1", text=cta_text),
-    ]
+    texts = [NarrationText(id=sid, slot=slot, window=window) for sid, slot, window in slots]
     return PlanData(
         mode="ultra_short_hook", timeline=timeline, narration_texts=texts, strategy=strategy
     )

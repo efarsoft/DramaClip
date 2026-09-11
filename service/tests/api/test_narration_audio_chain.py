@@ -57,7 +57,14 @@ def _scenes() -> list[ConflictScore]:
 
 def _full_plan(episode_id: str, tts_dir: Path) -> PlanData:
     """真实 full_narration 编排（build_full 产出的全 ducked 时间轴）+ 旁白回填。"""
-    plan = build_full(episode_id, _scenes(), StrategySpec(min_duration_s=10), "透视眼")
+    plan = build_full(episode_id, _scenes(), StrategySpec(min_duration_s=10))
+    # 文案槽位由编剧层填充（Task 6 前先用替身模拟其产出）
+    plan = plan.model_copy(update={
+        "narration_texts": [
+            t.model_copy(update={"text": f"第 {i} 段解说文案"})
+            for i, t in enumerate(plan.narration_texts)
+        ]
+    })
     return pipeline.synthesize_narration_texts(plan, {"tts.engine": "edge"}, tts_dir)
 
 

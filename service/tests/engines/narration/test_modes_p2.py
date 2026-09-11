@@ -17,24 +17,28 @@ def _scenes() -> list[ConflictScore]:
 
 
 def test_dual_host_alternates_voices() -> None:
-    plan = build_dual_host("ep1", _scenes(), _STRATEGY, "透视眼")
+    plan = build_dual_host("ep1", _scenes(), _STRATEGY)
     voices = [text.voice for text in plan.narration_texts]
     assert voices[0] != voices[1], "双音色应交替"
     assert voices[0] == voices[2], "同主持人的音色一致"
     assert all(segment.audio == "narration" for segment in plan.timeline)
-    assert plan.narration_texts[0].text.startswith("你们看过")
+    assert all(t.slot and not t.text for t in plan.narration_texts)
+    assert "主持人 A" in plan.narration_texts[0].slot, "编剧要知道这句该谁开口"
+    assert "嘉宾 B" in plan.narration_texts[1].slot
+    assert [s.narration_id for s in plan.timeline] == [t.id for t in plan.narration_texts]
 
 
 def test_dual_host_empty_safe() -> None:
-    plan = build_dual_host("ep1", [], _STRATEGY, "x")
+    plan = build_dual_host("ep1", [], _STRATEGY)
     assert plan.timeline == [] and plan.narration_texts == []
 
 
 def test_monologue_first_person_single_voice() -> None:
-    plan = build_monologue("ep1", _scenes(), _STRATEGY, "透视眼")
+    plan = build_monologue("ep1", _scenes(), _STRATEGY)
     assert plan.mode == "inner_monologue"
     voices = {text.voice for text in plan.narration_texts}
     assert len(voices) == 1, "内心独白应为单一音色"
-    assert "三年" in plan.narration_texts[0].text, "第一人称开场"
-    assert any("点下方" in text.text for text in plan.narration_texts), "收尾引导"
+    assert all(t.slot.startswith("第一人称") for t in plan.narration_texts), "全程第一人称"
+    assert all(not t.text and t.window for t in plan.narration_texts)
+    assert [s.narration_id for s in plan.timeline] == [t.id for t in plan.narration_texts]
     assert all(segment.audio == "narration" for segment in plan.timeline)

@@ -37,9 +37,11 @@ def test_raw_clip_all_original_audio() -> None:
 
 
 def test_intro_marks_first_segment_as_narration() -> None:
-    plan = build_intro("ep1", _scenes(), _STRATEGY, "钩子文案")
+    plan = build_intro("ep1", _scenes(), _STRATEGY)
     assert plan.mode == "intro_narration"
-    assert plan.narration_texts[0].text == "钩子文案"
+    assert plan.narration_texts[0].id == "intro-1" and plan.narration_texts[0].window
+    assert plan.narration_texts[0].slot and not plan.narration_texts[0].text
+    assert plan.timeline[0].narration_id == "intro-1", "段与文案按 id 配对"
     assert plan.timeline[0].audio == "narration"
     assert plan.timeline[0].end - plan.timeline[0].start <= 30
     assert all(seg.audio == "original" for seg in plan.timeline[1:])

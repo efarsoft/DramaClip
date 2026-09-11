@@ -15,6 +15,7 @@ RAW_CLIP_MIN_SCORE = 70
 _RAW_CLIP_MIN_S = 3.0
 _RAW_CLIP_MAX_S = 25.0
 _INTRO_MAX_S = 30.0  # 片头段保守时长（TTS 实际时长在导出时回填）
+_INTRO_SLOT_ID = "intro-1"
 
 
 def build_raw_clip(
@@ -51,18 +52,27 @@ def build_intro(
     intro_episode_id: str,
     body_scenes: list[ConflictScore],
     strategy: StrategySpec,
-    narration_text: str,
 ) -> PlanData:
-    """片头解说编排（原案 6.4）：TTS 引子段（原声压低）+ 正片高光（原声）。
+    """片头解说编排（原案 6.4）：引子旁白段（画面为正文首镜）+ 正片高光（原声）。
 
-    片头段时长在导出阶段由 TTS 音频实际时长回填；此处先按保守值估算。
+    引子文案由编剧层填充；段时长在导出阶段由 TTS 实际时长回填。
     """
     ordered = sorted(body_scenes, key=lambda s: s.start)
     timeline = _fit_duration(intro_episode_id, ordered, strategy, intro_first=True)
+    if not timeline:
+        return PlanData(mode="intro_narration", timeline=timeline, strategy=strategy)
+    opener = timeline[0].model_copy(update={"narration_id": _INTRO_SLOT_ID})
+    timeline[0] = opener
     return PlanData(
         mode="intro_narration",
         timeline=timeline,
-        narration_texts=[NarrationText(id="intro-1", text=narration_text)],
+        narration_texts=[
+            NarrationText(
+                id=_INTRO_SLOT_ID,
+                slot="片头钩子：两三句把最大冲突抛出来，收尾留悬念，不要复述剧情梗概",
+                window=(opener.start, opener.end),
+            )
+        ],
         strategy=strategy,
     )
 
@@ -95,7 +105,6 @@ def _fit_duration(
         )
         for index, scene in enumerate(kept)
     ]
-    _ = intro_first  # 引子字幕文本由 synthesize 回填（时长确定后写 timeline[0]）
     if intro_first and segments:
         first = segments[0]
         segments[0] = first.model_copy(

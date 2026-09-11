@@ -25,13 +25,17 @@ class TimelineSegment(BaseModel):
 
 
 class NarrationText(BaseModel):
-    """旁白文案段（intro 等模式的 TTS 输入）。"""
+    """旁白槽位：编排器定"在哪段画面、以什么职责说话"，编剧填 `text`，配音回填音频与时长。"""
 
     id: str
-    text: str
+    text: str = ""
     voice: str | None = None
     audio_path: str | None = None
     duration: float | None = None
+    # 槽位职责，进编剧 prompt：如「原声之间的串联：承接上一幕、留下一幕的悬念」
+    slot: str = ""
+    # 该槽位覆盖的素材区间（其所在集内秒）：编剧据此读台词，不做位置推断
+    window: tuple[float, float] | None = None
 
 
 class StrategySpec(BaseModel):
