@@ -332,7 +332,6 @@ export const METHOD_NAMES = [
   'narration.list_plans',
   'narration.produce',
   'narration.list_styles',
-  'narration.replace_timeline',
   'export.start',
   'export.retry',
   'export.list',

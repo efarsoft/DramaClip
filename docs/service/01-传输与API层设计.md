@@ -64,7 +64,6 @@ api/project.py      create / list / get / delete / rename / duplicate /
 api/analysis.py     prescreen / start / status / cancel / results /
                     resync_semantic / update_asr                          （7）
 api/narration.py    generate_plans / list_plans / produce / list_styles   （4）
-api/timeline.py     narration.replace_timeline                            （1）
 api/export.py       start / retry / list / list_works                     （4）
 api/subtitle.py     list_presets                                          （1）
 api/models.py       list / download / scan_local / delete                 （4）
@@ -73,15 +72,16 @@ api/engine_configs.py  create / list / update / delete / enable / test    （6�
 api/jobs.py         list / get / cancel                                   （3）
 ```
 
-**实测合计 47 个方法**（P-1 收口时以 `Router.method_names` 数出，非估算）。
-命名空间分布：`project` 11、`analysis` 7、`engine_configs` 6、`narration` 5、`export` 4、
-`models` 4、`jobs` 3、`settings` 3、`system` 3、`subtitle` 1。
+**实测合计 46 个方法**（P-1 收口时以 `Router.method_names` 数出，非估算）。
+命名空间分布：`project` 11、`analysis` 7、`engine_configs` 6、`export` 4、`models` 4、
+`narration` 4、`jobs` 3、`settings` 3、`system` 3、`subtitle` 1。
 
-「文件 = 命名空间」有且只有一处例外：`api/timeline.py` 是时间线整轴回写的实现文件，
-但它注册的是 `narration.replace_timeline`（归属 narration 命名空间，见 `protocol/schemas/narration.json`）。
+「文件 = 命名空间」**当前无例外**。历史上唯一的例外是 `api/timeline.py`——它的实现文件
+注册的是 `narration.replace_timeline`；该端点与「阶段条只读、不做方案片段手动调整」的既定
+非目标冲突且前端零调用者，已于正确性批次整条删除（实现文件 + schema + `METHOD_NAMES` 同删）。
 方法名集合由 `tests/transport/test_contract_sync.py` 与 `protocol/schemas/*.json` 的 `x-methods`
 做**集合相等**校验（桌面侧 `desktop/src/__tests__/contract.test.ts` 同校验），
-新增/删除方法漏登记 schema 即 CI 红——上面的 47 因此不是手工统计。
+新增/删除方法漏登记 schema 即 CI 红——上面的 46 因此不是手工统计。
 
 **尚无 api 文件的既定命名空间**：`tts.*`（原案 list_voices / preview）从未实现，且**没有任何音色枚举
 RPC**——音色只有 `tts.voice` 这一设置键可用；`prescreen` 也不是独立命名空间：方法名是

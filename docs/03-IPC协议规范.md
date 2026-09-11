@@ -83,7 +83,7 @@ Router 不做 schema 校验，参数问题一律由各 handler 抛业务域码�
 | -32201 ~ -32204 | analysis | 任务不存在 / 无集 / 无分析结果 / 段非法 |
 | -32301 / -32302 | narration | 无分析结果 / 模式不支持 |
 | -32310 / -32311 | engine_configs | 参数或状态非法（含「启用中的配置不可删」） / 配置不存在 |
-| -32401 / -32403 | export / timeline | 编排方案不存在 / 时间线段非法 |
+| -32401 | export | 编排方案不存在 / 编排时间轴为空 |
 | -32404 / -32405 | export | 导出记录不存在 / **不可重试**（非 failed 态、或已被并发重试抢先复位） |
 | -32501 | jobs | 任务不存在 |
 
@@ -109,13 +109,13 @@ Router 不做 schema 校验，参数问题一律由各 handler 抛业务域码�
 | `system.health` | `{}` | `{status:"ok", uptime_s, gpu?, vram_free_mb?, disk_free_gb?, models_ok?}`（扩展字段供侧边栏/工作台系统状态） |
 | `system.shutdown` | `{}` | `{ok:true}`（Python 优雅退出） |
 
-### 已落地全集（P-1 收口实测：**47 个方法 / 10 个命名空间**）
+### 已落地全集（P-1 收口实测：**46 个方法 / 10 个命名空间**）
 
 以 `Router.method_names` 与 `protocol/schemas/*.json` 的 `x-methods` 双向集合相等为准（两侧契约测试强制）。
 
 - `project.*`（11）：create / list / get / delete / rename / duplicate / scan_episodes（导入=扫描目录，返回逐文件时长/大小）/ dashboard_summary（工作台统计4卡）/ ensure_covers / reorder_episodes / **update_settings**（P-1 新增：项目级参数覆盖，键级合并，`null` 值=恢复该项默认）
 - `analysis.*`（7）：prescreen（阶段一预筛）/ start（阶段二全量）/ status / cancel / results / resync_semantic（语义增量刷新）/ update_asr（手工改写）
-- `narration.*`（5）：generate_plans（LLM 一次生成各模式文案与编排）/ list_plans / list_styles / produce / replace_timeline（时间线整轴回写，实现文件是 `api/timeline.py`）
+- `narration.*`（4）：generate_plans（LLM 一次生成各模式文案与编排）/ list_plans / list_styles / produce
 - `export.*`（4）：start / **retry**（P-1 新增：复用原 export_id 覆盖写，仅 failed 可重试）/ list / list_works（跨项目作品库）
 - `jobs.*`（3，**P-1 新建命名空间**）：list（跨类型任务列表，`limit`/`active_only`，队列页数据源）/ get（单任务详情，含 error）/ cancel（统一取消入口，不可中断时如实回 `cancelling:false + reason`）
 - `models.*`（4）：list / download / scan_local（本地放置后重探测）/ delete
