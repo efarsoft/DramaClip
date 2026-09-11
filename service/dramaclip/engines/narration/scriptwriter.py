@@ -24,7 +24,7 @@ _MIN_LINES_PER_EPISODE = 3  # 集数再多，每集也至少露面的保底线
 
 # 基本功层（永远注入，不交给模型发挥）：平台验证过的解说手艺底线。
 # 题材口味由口味层（风格 directives）差异化，与此处不重叠。
-_FUNDAMENTALS = (
+FUNDAMENTALS = (
     "\n\n【解说基本功——逐条强制遵守】\n"
     "视角与语言：全程口语化说书人视角；短句为主，单句不超过 15 字；"
     "禁止书面腔、总结腔（如「本剧讲述了…」），禁止空洞形容词堆砌。"
@@ -50,7 +50,7 @@ _SYSTEM_PROMPT = (
     "要求：1) start/end 必须取自转写台词的时间区间且按时间顺序；"
     "2) 4-10 段，每段文案不超过 60 字；3) 覆盖剧情完整钩子-冲突-反转弧线；"
     "4) 只输出 JSON，不要多余文字。"
-    + _FUNDAMENTALS
+    + FUNDAMENTALS
 )
 
 
@@ -266,14 +266,14 @@ def write_script_episodes(
         if script is not None:
             break
     if trace_path is not None:
-        _dump_trace(
+        dump_trace(
             trace_path,
             {"system": _SYSTEM_PROMPT, "user": user_prompt, "attempts": attempts},
         )
     return script
 
 
-def _dump_trace(path: Path, payload: dict[str, Any]) -> None:
+def dump_trace(path: Path, payload: dict[str, Any]) -> None:
     """LLM 调用全量留痕（system/user/原始响应），供人工检查。"""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
