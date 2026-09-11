@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12 / pydantic v2 / stdlib urllib（ADR-005 统一 OpenAI 协议）/ ffmpeg（`amix`、`loudnorm` 两遍法、`ebur128` 测量）/ pytest。
 
-规格出处：`docs/superpowers/specs/2026-09-10-dramaclip-ui-redesign-design.md` §12（批次定义）、§11（服务对接清单）、§3.3（静默禁止清单）。
+规格出处：`docs/superpowers/specs/2026-09-10-dramaclip-ui-redesign-design.md` §12（批次定义）、§3.3.1（降级裁决表，Task 1 入库）、§11（服务对接清单）、§3.3（静默禁止清单）。
 
 ---
 
@@ -30,13 +30,14 @@
 | 剧本驱动失败 → 规则编排 | `pipeline.build_from_script_dialogue`（死）、`script_driver` 返回 `None`、`_generate_one` 回落 `build_plan` | **禁止 → 抛错** | 同上，且失败会伪装成"这个模式本来就是这版" |
 | TTS 单段失败 → 该段回退原声 | `pipeline.synthesize_narration_texts` | **禁止 → 抛错** | 半条旁白的片子不可交付；失败粒度=单条方案，不整批停摆 |
 | `amix` 默认归一化把音量砍半 | `encoder.cut_segment_args` | **禁止 → 关掉归一化** | 声明的 0.2/0.12 是假的，响度失控无人负责 |
+| 成片响度实测超容差 → 放行 | `exporter/loudness.py`（P-1.5 新建） | **禁止 → 抛错** | 响度观众听得见；两遍法后的实测复核就是它的验收线 |
 | 口味层 LLM 选题失败 → 题材静态映射 | `script_driver`（现）/ `resolve_run_style`（后） | **允许，但必须留痕** | 兜底值仍是人写的风格指令，不是假文案 |
 | 分析层 LLM → 关键词打分 | `semantic/conflict.py`、`genre.py` | **允许，界面必须可见** | 影响选段而非文案；可见性归 §3.3，界面在 P-3 |
 | CUDA → CPU | `analysis/transcriber.py` | **允许** | 同结果，只慢 |
 | 下载多源降级 | `model_manager/downloader.py` | **允许** | 同一个文件 |
 | 同名 `.srt` 缺失 → 库内 ASR 保护区 | `encoder.export_plan` | **允许** | 两个都是保护区来源，等价 |
 | `raw_clip` 冲突分不足 → 放宽取全部场景 | `modes.build_raw_clip` | **允许** | 素材可得性问题，不改变观众听到的内容 |
-| `ass` 路径跨盘 → 双转义保底 | `encoder._escape_filter_path` | **允许，但记为已知缺陷** | 工程兜底；真正的修法在 Backlog（跨盘转义脆弱性） |
+| `ass` 路径跨盘 → 双转义保底 | `encoder._escape_filter_path` | **允许，但记为已知缺陷** | 工程兜底；跨盘转义脆弱性需根治，`docs/05` 的 Backlog 无此条且该文件用户自维护，**本行即登记处** |
 
 ---
 
@@ -78,7 +79,7 @@
 
 - [ ] **Step 1: 在 §3.3 之后插入"降级分类表"**
 
-把上文《降级分类表》整节（含全部 11 行）作为 `### 3.3.1 降级裁决表（P-1.5 定案）` 插入 §3.3 之后，并在表前加一句：
+把上文《降级分类表》整节（含全部 12 行）作为 `### 3.3.1 降级裁决表（P-1.5 定案）` 插入 §3.3 之后，并在表前加一句：
 
 > **裁决口径**：改变观众所听所见内容的降级一律禁止（抛错，失败粒度=单条方案）；只改变成本或可用素材的降级允许，但必须留痕。
 
