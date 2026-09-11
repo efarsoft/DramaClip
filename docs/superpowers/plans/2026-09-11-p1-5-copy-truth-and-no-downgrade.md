@@ -67,6 +67,23 @@
 
 **提交纪律**：只 `git add` 显式路径，禁止 `git add -A`/`.`——同树同分支另有工程师在提交，宽 add 会卷走别人的暂存。
 
+### 实现定案修正（Task 2/3 落地后经两轮审查确定，后续任务以此为准）
+
+**本文件 Task 2/3 代码块里的 `NarrationText.slot` 与 `.window` 已经不存在。pydantic 默认忽略未知 kwargs——照抄旧字段名不会报错，只会静默丢字段。** 定案：
+
+| 项 | 定案 | 原因 |
+|---|---|---|
+| 槽位职责字段 | **`brief`**（不是 `slot`）；辅助函数 `_slot_brief` | `NarrationText` 本身就是槽位，字段再叫 `slot` 读不通；仓内一度 `slot`/`role`/`职责` 三名并存；`role` 与 `dual_host` 的 `speaker` 撞意 |
+| 槽位画面区间 | **无独立字段**，由 `narration_id` 反查 `TimelineSegment.start/end` | `window` 是段区间的第三份拷贝，而 `synthesize_narration_texts` 回填时会改写段 `end`，两份答案必然打架。文案恒在回填之前生成，故段区间即计划区间 |
+| 段↔槽位配对 | 反查不到即 `raise ValueError("槽位 X 没有配对画面段")` | 原 `window is None` 静默降级分支，等于用一句"别编造"去回答一个编排器 bug |
+| 时间戳格式化 | `scriptwriter.clock`（公开，与 `FUNDAMENTALS`/`dump_trace` 同批） | 曾与 `copywriter._clock` 逐字重复 |
+| TTS 测试替身 | **空文案必须抛**，与真引擎一致（`tts/base.py` 的 ffprobe `check=True` 会死在 0 字节文件上） | 否则"`text` 默认空串"这个最该炸的情形被替身判成通过——实测已证明旧替身确实掩盖过一次 |
+| 配对断言 | `tests/engines/narration/conftest.py::assert_slots_paired`，六个模式测试共用 | 同一条不变量原先有五种写法 |
+| LLM 拒绝分支 | 未知 id、空答复、超长、漏槽 + 配对缺失，共五条，**每条都做过"删掉这行分支看它红不红"** | 见 Task 3 实测修正节 |
+
+`copywriter.write_plan_copy` 的 `mode_label` 已改为**必填**关键字参数。
+`service/pyproject.toml` 一度带着他人未提交的 lint 配置，本批次的 ruff/mypy/pytest 读数均含其工作区改动。
+
 ---
 
 ## Task 1: 降级分类表入规格 + 三处失效文案更正
@@ -1506,9 +1523,10 @@ def synthesize_narration_texts(
 ```python
     hook_id = "n0"
     timeline.append(narration_span(first.episode, script.hook, hook_start, narration_id=hook_id))
-    texts.append(NarrationText(id=hook_id, text=script.hook, slot="开场钩子",
-                              window=(hook_start, hook_start + estimate_duration(script.hook))))
+    texts.append(NarrationText(id=hook_id, text=script.hook, brief="开场钩子：抛出全片最大悬念"))
 ```
+
+**字段名按本文件「实现定案修正」节：`brief`，不是 `slot`；没有 `window`。** 槽位的画面区间唯一的真相源是它 `narration_id` 指到的那条 `TimelineSegment`——这里不要再算一遍 `hook_start + estimate_duration(...)`，那正是 `window` 被删掉的原因（回填会改写段 `end`，两份答案必然打架）。
 
 `narration_span` 增加形参 `narration_id: str` 并在 `TimelineSegment(...)` 里带上；正文段与 CTA 段同法（正文 id 已是 `f"n{order}"`，CTA 用 `f"n{len(script.segments) + 1}"`，两处保持一致）。
 
