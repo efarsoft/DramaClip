@@ -77,13 +77,13 @@
 - Modify: `docs/superpowers/specs/2026-09-10-dramaclip-ui-redesign-design.md`（§3.3 之后、§4.2、§12）
 - Modify: `docs/service/02-引擎设计.md`（§3 表、§8 表、`llm_client` 行）
 
-- [ ] **Step 1: 在 §3.3 之后插入"降级分类表"**
+- [x] **Step 1: 在 §3.3 之后插入"降级分类表"**
 
 把上文《降级分类表》整节（含全部 12 行）作为 `### 3.3.1 降级裁决表（P-1.5 定案）` 插入 §3.3 之后，并在表前加一句：
 
 > **裁决口径**：改变观众所听所见内容的降级一律禁止（抛错，失败粒度=单条方案）；只改变成本或可用素材的降级允许，但必须留痕。
 
-- [ ] **Step 2: 修掉 §12 的空引用**
+- [x] **Step 2: 修掉 §12 的空引用**
 
 `docs/superpowers/specs/2026-09-10-dramaclip-ui-redesign-design.md:444` 的 ②：
 
@@ -91,7 +91,7 @@
 ② 把 §3.3.1「降级裁决表」里**禁止级**的全部改为抛错（失败粒度是单条方案，不整批停摆）；
 ```
 
-- [ ] **Step 3: 修 §12 出口判据的口径（7 个模式，不是 4 个）**
+- [x] **Step 3: 修 §12 出口判据的口径（7 个模式，不是 4 个）**
 
 §12 P-1.5「内容」① 只点了 cross/ultra_short/full/intro，但 `modes_p2.py` 的双人对谈与内心独白同样是模板池，出口判据却要求"除 raw_clip/subtitle_flow 外全为 llm_script"。把 ① 改为：
 
@@ -100,7 +100,7 @@
   （与 dialogue 已跑通的编剧链共用同一个语言层模块 `narration/copywriter.py`）；
 ```
 
-- [ ] **Step 4: 修 §4.2 空态第②步的假承诺**
+- [x] **Step 4: 修 §4.2 空态第②步的假承诺**
 
 `docs/.../design.md:145` 现写「跳过则文案走关键词降级」——P-1.5 之后这句话不成立了。改为：
 
@@ -109,7 +109,7 @@
    仅「纯原片剪辑」「字幕金句流」不依赖 LLM）
 ```
 
-- [ ] **Step 5: 同步 `docs/service/02-引擎设计.md`**
+- [x] **Step 5: 同步 `docs/service/02-引擎设计.md`**
 
 三处：
 
@@ -126,7 +126,7 @@
 | `loudness.py` | 成片响度归一（Phase C） | 拼接完成后整片两遍 `loudnorm` 至 `export.loudness_target_lufs/-true_peak_dbtp`，视频流复制；复核实测超容差即抛（降级禁止） |
 ```
 
-- [ ] **Step 6: 校验无残留**
+- [x] **Step 6: 校验无残留**
 
 Run: `grep -rn "关键词降级" docs/service/02-引擎设计.md docs/superpowers/specs/`
 Expected: 只剩分析层一处（`llm_client.py` 行里"分析层走关键词降级"），解说文案处不再出现该说法。
@@ -135,7 +135,7 @@ Expected: 无输出（空引用已改掉）。
 Run: `grep -rn "hook_generator" docs/service/02-引擎设计.md`
 Expected: 仅剩 `copywriter.py` 行里"承接原 hook_generator.py 职责"这一处提及。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add docs/superpowers/specs/2026-09-10-dramaclip-ui-redesign-design.md docs/service/02-引擎设计.md docs/superpowers/plans/2026-09-11-p1-5-copy-truth-and-no-downgrade.md
