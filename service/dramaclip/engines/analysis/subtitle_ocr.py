@@ -22,7 +22,7 @@ from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 
 _LOGGER = logging.getLogger(__name__)
 
-_PROBE_COUNT = 4          # 字幕带定位的探针帧数
+_PROBE_COUNT = 10         # 字幕带定位探针帧数：台词有行间空隙，4 探针可能全落空（ep4 实证）
 _SAMPLE_FPS = 1.0         # 抽帧率：短剧镜头 1.5~3s，字幕驻留普遍 ≥1s
 _ROI_WIDTH = 800          # 裁剪后缩放宽（识别耗时与像素量成正比）
 _BAND_EXPAND = 0.04       # 字幕带上下各扩 4% 画面高，容納描边/阴影
@@ -79,7 +79,7 @@ def _probe_frames(
     """全帧检测探针帧：返回 (时刻, 全帧结果)。"""
     out: list[tuple[float, FrameResult]] = []
     for index in range(_PROBE_COUNT):
-        second = duration_s * (index + 1) / (_PROBE_COUNT + 1)
+        second = duration_s * (index + 0.5) / _PROBE_COUNT  # 错位取样，避开片头片尾
         frame = _extract_frame(video_path, work_dir, second)
         if frame is None:
             continue
