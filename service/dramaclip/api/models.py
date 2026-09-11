@@ -7,6 +7,7 @@ import threading
 from typing import Any
 
 from dramaclip.api.context import AppContext
+from dramaclip.infra.jobs import STATUS_RUNNING
 from dramaclip.infra.model_manager import downloader, registry
 from dramaclip.transport.rpc import Router, RpcDomainError
 
@@ -72,7 +73,7 @@ def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     def _watch() -> None:
         done_event.wait()
         job = context.job_store.get(job_id)
-        if job is not None and job["status"] == "running":
+        if job is not None and job["status"] == STATUS_RUNNING:
             context.job_store.mark_completed(job_id)
         context.cancel_events.pop(job_id, None)
 

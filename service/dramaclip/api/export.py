@@ -127,7 +127,9 @@ def retry(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     record = exports_repo.get(context.conn, export_id)
     if record is None:
         raise RpcDomainError(_ERR_EXPORT_NOT_FOUND, f"导出记录不存在: {export_id}")
-    if record["status"] != "failed":
+    # 可重试判据与 reset_for_retry 的 CAS 条件必须同为一个谓词，否则下面的 Python 检查
+    # 与后面的 SQL 复位会各说各话、并发保护失效；故两边都读 exports_repo.STATUS_FAILED。
+    if record["status"] != exports_repo.STATUS_FAILED:
         raise RpcDomainError(
             _ERR_EXPORT_NOT_RETRYABLE, f"仅失败记录可重试，当前 {record['status']}"
         )

@@ -9,6 +9,11 @@ from uuid import uuid4
 
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
+# 「运行中」的唯一拼写源：写它的是 mark_running，比它的是启动清扫的 SQL 与
+# api/models.py 的下载看门狗。三处必须同值——看门狗据此判断该不该收尾，启动清扫据此
+# 判定哪些是崩溃残留；拼写一分家就退回「任务永停 pending 且重启也清不掉」那个假状态。
+STATUS_RUNNING = "running"
+
 
 def is_terminal(status: str) -> bool:
     """是否终态：终态任务不可再迁移，也不可再取消。上层据此判断，勿各写字面量。"""
@@ -37,7 +42,7 @@ class JobStore:
         return job_id
 
     def mark_running(self, job_id: str) -> None:
-        self._transition(job_id, "running")
+        self._transition(job_id, STATUS_RUNNING)
 
     def mark_completed(self, job_id: str) -> None:
         self._transition(job_id, "completed")
@@ -104,8 +109,8 @@ class JobStore:
         """启动清扫：上一会话遗留的 running 任务标记失败（崩溃重入协议）。"""
         cursor = self._conn.execute(
             "UPDATE jobs SET status = 'failed', error = '服务中断', updated_at = ?"
-            " WHERE status = 'running'",
-            (_now_ms(),),
+            " WHERE status = ?",
+            (_now_ms(), STATUS_RUNNING),
         )
         self._conn.commit()
         return cursor.rowcount or 0
