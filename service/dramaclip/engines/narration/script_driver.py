@@ -1,8 +1,8 @@
 """解说剧本装配：口味层选题（每任务一次）+ 跨集剧本驱动的对话解说。
 
 由 api 层注入 log 回调；本模块不 import transport。
-降级链：选题 LLM 自选 → genre 静态映射 → 通用（`resolve_run_style`，允许但留痕）；
-编写失败 → 规则编排（api 层处理，Task 5 收口）。
+口味层降级链：选题 LLM 自选 → genre 静态映射 → 通用（`resolve_run_style`，允许但留痕）；
+编剧失败一律抛异常，不再退回规则编排（规格 §3.3.1）。
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration import scriptwriter, styles
 from dramaclip.engines.narration.models import PlanData, StrategySpec
-from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig
+from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
 
 # 剧本生成实测可达 100s+（qwen3.7-plus），远超 LLM 客户端默认 60s 超时
 SCRIPT_LLM_TIMEOUT_S = 240.0
@@ -63,46 +63,43 @@ def script_dialogue_plan(
     episode_inputs: list[dict[str, Any]],
     settings: dict[str, str],
     *,
-    log: LogFn,
     trace_dir: Any = None,
-) -> tuple[PlanData, list[str]] | None:
-    """跨集剧本驱动的对话解说；LLM 未配置或编写失败时返回 None（api 层降级规则编排）。
+) -> tuple[PlanData, list[str]]:
+    """跨集剧本驱动的对话解说。LLM 未配置或剧本不合格一律抛（降级已禁止）。
 
-    风格由任务级 `resolve_run_style` 先行解析并写进 `settings["_style_directives"]`，
-    本函数只读不再选题。
+    口味层由调用方经 resolve_run_style 注入 settings["_style_directives"]，
+    本函数不再自行选题——一个任务只该付一次选题成本。
 
     episode_inputs 每项：{"number", "episode_id", "duration",
     "segments": [{"start", "end", "text"}]}，按集号升序。
     返回 (编排方案, 使用的集 id 列表)。
     """
-    if not LlmConfig.from_settings(settings).configured:
-        return None
+    config = LlmConfig.from_settings(settings)
+    if not config.configured:
+        raise LlmUnavailable(
+            "LLM 未配置：剧情解说由编剧模型成稿，请先在「引擎」页配置文本模型"
+        )
     strategy = StrategySpec(
         platform="douyin",
         min_duration_s=float(settings.get("strategy.min_duration_s", "30")),
         max_duration_s=float(settings.get("strategy.max_duration_s", "300")),
     )
-    style_directives = str(settings.get("_style_directives") or "")
 
     # 基本功层内置于编剧 system prompt；口味层 directives 注入 user prompt
-    llm = LlmClient(LlmConfig.from_settings(settings), timeout_s=SCRIPT_LLM_TIMEOUT_S)
+    llm = LlmClient(config, timeout_s=SCRIPT_LLM_TIMEOUT_S)
     trace_path = None
     if trace_dir is not None:
         trace_dir = Path(trace_dir)
-        stamp = time.strftime("%m%d_%H%M%S")
-        trace_path = trace_dir / f"llm_script_{stamp}.json"
+        trace_path = trace_dir / f"llm_script_{time.strftime('%m%d_%H%M%S')}.json"
     script = scriptwriter.write_script_episodes(
         llm,
         episode_inputs,
         target_min_s=strategy.min_duration_s,
         target_max_s=strategy.max_duration_s,
-        project_name=str(settings.get("_project_name", "这部剧")),
-        style_directives=style_directives,
+        project_name=str(settings.get("_project_name") or "这部剧"),
+        style_directives=str(settings.get("_style_directives") or ""),
         trace_path=trace_path,
     )
-    if script is None:
-        log("warn", "AI 编剧未产出跨集剧本，剧情解说降级规则编排")
-        return None
 
     episode_map = {
         int(ep["number"]): (

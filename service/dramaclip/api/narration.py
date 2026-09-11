@@ -197,8 +197,6 @@ def _generate_one(
 ) -> None:
     """生成单模式编排：剧情解说走跨集剧本，其余模式走规则编排 + 逐槽文案。"""
     project_id = str(episodes[0]["project_id"])
-    plan: PlanData | None = None
-    used_ids = [str(episodes[0]["id"])]
 
     if mode == "dialogue_narration":
         if not episode_inputs:
@@ -208,18 +206,13 @@ def _generate_one(
             f"跨集输入：{len(episode_inputs)} 集 → "
             f"每集约 {scriptwriter.transcript_sampling_quota(len(episode_inputs))} 段摘录",
         )
-        scripted = script_driver.script_dialogue_plan(
+        plan, used_ids = script_driver.script_dialogue_plan(
             episode_inputs,
             settings,
-            log=context.notifier.log,
             trace_dir=context.data_dir / "logs" / "llm",
         )
-        if scripted is not None:
-            plan, used_ids = scripted
-
-    if plan is None:
-        episode = episodes[0]
-        episode_id = str(episode["id"])
+    else:
+        episode_id = str(episodes[0]["id"])
         used_ids = [episode_id]
         record = analysis_repo.get(context.conn, episode_id)
         if record is None:

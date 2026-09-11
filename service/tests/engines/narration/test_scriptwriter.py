@@ -1,4 +1,4 @@
-"""跨集编剧：LLM 输出清洗、逐集裁剪与重试降级。"""
+"""跨集编剧：LLM 输出清洗、逐集裁剪、重试与失败即抛。"""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ class FakeLLM:
         return item
 
 
-def _run(llm: FakeLLM) -> Script | None:
+def _run(llm: FakeLLM) -> Script:
     return write_script_episodes(
         llm,
         _EPISODES,
@@ -64,7 +64,6 @@ def _run(llm: FakeLLM) -> Script | None:
 def test_valid_payload_returns_sanitized_script() -> None:
     llm = FakeLLM([dict(_VALID_PAYLOAD)])
     script = _run(llm)
-    assert script is not None
     assert [segment.text for segment in script.segments] == [
         "第一段解说",
         "第二段解说",
@@ -86,7 +85,6 @@ def test_segments_sorted_and_overlaps_trimmed_per_episode() -> None:
         ],
     )
     script = _run(FakeLLM([payload]))
-    assert script is not None
     ep1 = [segment for segment in script.segments if segment.episode == 1]
     starts = [segment.start for segment in ep1]
     assert starts == sorted(starts), "同集内乱序段被排序"
@@ -105,27 +103,29 @@ def test_out_of_bounds_clamped_to_episode_duration() -> None:
         ],
     )
     script = _run(FakeLLM([payload]))
-    assert script is not None
     assert len(script.segments) == 3, "未越界段原样保留"
     assert max(segment.end for segment in script.segments) <= 40.0
 
 
-def test_invalid_json_degrades_to_none() -> None:
-    assert _run(FakeLLM([ValueError("非法 JSON")])) is None
+def test_invalid_json_raises() -> None:
+    with pytest.raises(ValueError, match="未产出合法剧本"):
+        _run(FakeLLM([ValueError("非法 JSON")]))
 
 
-def test_too_few_segments_degrades_to_none() -> None:
+def test_too_few_segments_raises() -> None:
+    """清洗后不足 `_MIN_SEGMENTS` 段：越界集号被丢光，等同没写。"""
     payload = dict(
         _VALID_PAYLOAD,
-        segments=[{"episode": 1, "start": 1.0, "end": 10.0, "text": "只有一段"}],
+        segments=[{"episode": 9, "start": 1.0, "end": 10.0, "text": "集号不存在"}],
     )
-    assert _run(FakeLLM([payload])) is None
+    with pytest.raises(ValueError, match="未产出合法剧本"):
+        _run(FakeLLM([payload]))
 
 
-def test_retries_once_before_degrading() -> None:
+def test_retries_once_before_raising() -> None:
     llm = FakeLLM([ValueError("第一次失败"), dict(_VALID_PAYLOAD)])
-    script = _run(llm)
-    assert script is not None and llm.calls == 2
+    _run(llm)
+    assert llm.calls == 2, "第一次失败必须重问一次"
 
 
 @pytest.mark.parametrize(
@@ -136,5 +136,16 @@ def test_retries_once_before_degrading() -> None:
         {"segments": [{"episode": 1, "start": 1.0, "end": 2.0, "text": "无钩子"}]},
     ],
 )
-def test_malformed_payloads_degrade_to_none(payload: dict[str, Any]) -> None:
-    assert _run(FakeLLM([payload])) is None
+def test_malformed_payloads_raise(payload: dict[str, Any]) -> None:
+    with pytest.raises(ValueError, match="未产出合法剧本"):
+        _run(FakeLLM([payload]))
+
+
+def test_no_transcript_raises() -> None:
+    """所有集都没有转写：无米下锅要直说，不能返回 None 让上层以为是自己降级了。"""
+    empty = [{"number": 1, "duration": 40.0, "segments": []}]
+    with pytest.raises(ValueError, match="无米下锅"):
+        write_script_episodes(
+            FakeLLM([dict(_VALID_PAYLOAD)]), empty,
+            target_min_s=30, target_max_s=300, project_name="测试剧",
+        )

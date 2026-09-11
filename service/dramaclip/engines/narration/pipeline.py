@@ -12,7 +12,6 @@ from typing import Any
 
 from dramaclip.engines.analysis.models import AsrSegment, AudioFeatures
 from dramaclip.engines.narration import (
-    dialogue_selector,
     modes,
     modes_p2,
     modes_w5,
@@ -70,8 +69,9 @@ def build_plan(
     if mode == "ultra_short_hook":
         return modes_w5.build_ultra_short(episode_id, conflict_scores, strategy)
     if mode == "dialogue_narration":
-        lines = dialogue_selector.select_dialogue_lines(asr_segments, audio)
-        return dialogue_selector.build_dialogue(episode_id, lines, strategy)
+        raise ValueError(
+            "剧情解说为剧本驱动，不经规则编排（走 script_driver.script_dialogue_plan）"
+        )
     if mode == "full_narration":
         return modes_w8.build_full(episode_id, conflict_scores, strategy)
     if mode == "subtitle_flow":
@@ -83,68 +83,6 @@ def build_plan(
     if mode == "inner_monologue":
         return modes_p2.build_monologue(episode_id, conflict_scores, strategy)
     raise ValueError(f"模式暂未支持: {mode}（{MODE_LABELS.get(mode, mode)} 将随后续阶段启用）")
-
-
-def build_from_script_dialogue(
-    episode_id: str,
-    script: Script,
-    asr_segments: list[AsrSegment],
-    strategy: StrategySpec,
-) -> PlanData:
-    """剧本驱动编排（对话解说试点）：钩子+分段解说+CTA，片段吸附台词边界。
-
-    时长由文案决定：narration 段先按字数估算，合成阶段以 TTS 实际音频回填。
-    """
-    max_end = max((segment.end for segment in asr_segments), default=0.0)
-    bounds = sorted(
-        {round(bound, 2) for segment in asr_segments for bound in (segment.start, segment.end)}
-    )
-
-    def snap(value: float) -> float:
-        candidates = [bound for bound in bounds if abs(bound - value) <= 1.5]
-        return min(candidates, key=lambda bound: abs(bound - value)) if candidates else value
-
-    def narration_span(text: str, start: float) -> TimelineSegment:
-        return TimelineSegment(
-            episode_id=episode_id,
-            start=round(start, 2),
-            end=round(min(start + estimate_duration(text), max_end + 30), 2),
-            audio="narration",
-            subtitle_text=text,
-        )
-
-    timeline: list[TimelineSegment] = []
-    texts: list[NarrationText] = []
-    first = script.segments[0]
-    hook_start = snap(first.start)
-    timeline.append(narration_span(script.hook, hook_start))
-    texts.append(NarrationText(id="n0", text=script.hook))
-
-    order = 0
-    cursor = hook_start + estimate_duration(script.hook)
-    for segment in script.segments:
-        start = max(snap(segment.start), cursor)
-        end = max(snap(segment.end), start + 0.5)
-        order += 1
-        timeline.append(
-            TimelineSegment(
-                episode_id=episode_id,
-                start=round(start, 2),
-                end=round(end, 2),
-                audio="narration",
-                subtitle_text=segment.text,
-            )
-        )
-        texts.append(NarrationText(id=f"n{order}", text=segment.text))
-        cursor = end
-
-    if script.cta != "":
-        order += 1
-        timeline.append(narration_span(script.cta, min(cursor, max_end + 1)))
-        texts.append(NarrationText(id=f"n{order}", text=script.cta))
-
-    return PlanData(mode="dialogue_narration", timeline=timeline, narration_texts=texts,
-                    strategy=strategy, planner="llm_script")
 
 
 def build_from_script_episodes(

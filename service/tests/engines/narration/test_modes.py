@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
+from dramaclip.engines.analysis.models import AudioFeatures
+from dramaclip.engines.narration import pipeline
 from dramaclip.engines.narration.models import StrategySpec
 from dramaclip.engines.narration.modes import build_intro, build_raw_clip
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
@@ -56,3 +60,11 @@ def test_intro_empty_scenes() -> None:
 def test_highlights_not_required() -> None:
     plan = build_raw_clip("ep1", _scenes(), [HighlightSegment(start=0, end=6, score=80)], _STRATEGY)
     assert plan.timeline
+
+
+def test_build_plan_refuses_dialogue_rule_arrangement() -> None:
+    """剧情解说只走剧本链：规则编排这条路已封死，误闯必须当场报错而不是出一版。"""
+    with pytest.raises(ValueError, match="剧本驱动"):
+        pipeline.build_plan(
+            "dialogue_narration", "ep1", _scenes(), [], [], AudioFeatures(), {}
+        )

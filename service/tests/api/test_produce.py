@@ -21,6 +21,7 @@ from dramaclip.api import project as project_api
 from dramaclip.engines.analysis.models import AudioFeatures
 from dramaclip.engines.narration import copywriter, pipeline, script_driver, styles
 from dramaclip.engines.narration.models import PlanData
+from dramaclip.engines.semantic.llm_client import LlmUnavailable
 from dramaclip.infra import jobs
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -428,10 +429,10 @@ def test_pinned_style_survives_a_project_without_transcripts(
     assert _FakeLlm.calls == [], "钉死风格无需选题，一次请求都不该发"
 
 
-def test_dialogue_unconfigured_llm_keeps_rule_fallback(
+def test_dialogue_unconfigured_llm_fails_the_plan(
     memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
 ) -> None:
-    """编剧链此刻仍会返回 None（未配置 LLM）：api 侧必须继续接得住，Task 5 才改抛。"""
+    """降级禁止：未配置 LLM 时剧情解说整条方案失败，不再退回规则编排那一版。"""
     project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     context = harness.context
@@ -442,13 +443,10 @@ def test_dialogue_unconfigured_llm_keeps_rule_fallback(
         context, settings, episodes, ["dialogue_narration"]
     )
     assert episode_inputs, "种子数据应当给出跨集输入，否则本用例什么都没走"
-    narration_api._generate_one(context, "dialogue_narration", episodes, episode_inputs, settings)
-
-    plan_row = narration_api._newest_ready_plan(context, project_id, "dialogue_narration")
-    assert plan_row is not None
-    plan_data = PlanData.model_validate(plan_row["plan_data"])
-    assert plan_data.planner == "rule"
-    assert plan_data.narration_texts == []
+    with pytest.raises(LlmUnavailable, match="引擎"):
+        narration_api._generate_one(
+            context, "dialogue_narration", episodes, episode_inputs, settings
+        )
 
 
 @pytest.mark.parametrize("method", ["narration.produce", "narration.generate_plans"])

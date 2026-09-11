@@ -1,8 +1,8 @@
 """LLM 编剧：读取带时间戳的台词转写，产出结构化推广解说剧本。
 
 剧本驱动模式（用户提案）：时长由文案与叙事完整度决定，预算仅作为
-提示词里的目标区间；LLM 不可用或输出非法时返回 None，调用方降级
-到规则预算编排。
+提示词里的目标区间；LLM 不可用或输出非法一律抛异常——降级到模板文案
+已被 P-1.5 取消（规格 §3.3.1）。
 """
 
 from __future__ import annotations
@@ -212,11 +212,11 @@ def write_script_episodes(
     project_name: str,
     style_directives: str = "",
     trace_path: Path | None = None,
-) -> Script | None:
+) -> Script:
     """跨集剧本：读多集转写（每集一个「【第N集】」分组），产出带集号的跨集故事剧本。
 
     episode_inputs 每项：{"number": 集号, "duration": 集时长秒,
-    "segments": [{"start", "end", "text"}]}。失败返回 None，调用方降级规则编排。
+    "segments": [{"start", "end", "text"}]}。失败抛异常；降级被禁止（规格 §3.3.1）。
     喂给模型的转写由 `_format_transcript_episodes` 按集分配额取样（超预算时
     每集等距摘录并在块尾标注），不再按集号头部截断。
     """
@@ -226,7 +226,7 @@ def write_script_episodes(
     }
     transcript_block = _format_transcript_episodes(episode_inputs)
     if not transcript_block:
-        return None
+        raise ValueError("编剧无米下锅：所有集都没有台词转写")
     cross_block = (
         "跨集叙事要求：转写按集分组（每组以「【第N集】」单独一行开头），"
         "其后每行一条台词，格式为「开始-结束 台词」，时间为该集内的相对时间。"
@@ -270,6 +270,12 @@ def write_script_episodes(
         dump_trace(
             trace_path,
             {"system": _SYSTEM_PROMPT, "user": user_prompt, "attempts": attempts},
+        )
+    if script is None:
+        detail = "；".join(str(item.get("error", "清洗后片段不足")) for item in attempts)
+        raise ValueError(
+            f"编剧未产出合法剧本（{len(attempts)} 次尝试）：{detail}"
+            + (f"；完整往返见 {trace_path}" if trace_path else "")
         )
     return script
 

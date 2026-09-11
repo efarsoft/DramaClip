@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from dramaclip.engines.narration import script_driver
+from dramaclip.engines.semantic.llm_client import LlmUnavailable
 
 
 def _noop_log(_level: str, _message: str) -> None:
@@ -78,10 +79,19 @@ def driver(monkeypatch: pytest.MonkeyPatch) -> Any:
     return script_driver
 
 
-def test_llm_unconfigured_returns_none() -> None:
+def test_unconfigured_llm_raises_not_none() -> None:
+    """降级禁止：LLM 未配置时报错并说明去配什么，绝不悄悄出一版规则编排。"""
     settings = dict(_SETTINGS)
     settings["llm.base_url"] = ""
-    assert script_driver.script_dialogue_plan(_EPISODES, settings, log=_noop_log) is None
+    with pytest.raises(LlmUnavailable, match="引擎"):
+        script_driver.script_dialogue_plan(_EPISODES, settings)
+
+
+def test_no_script_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(script_driver, "LlmClient", FakeLlmClient)
+    FakeLlmClient.queue = [{"hook": "", "segments": []}]
+    with pytest.raises(ValueError, match="剧本"):
+        script_driver.script_dialogue_plan(_EPISODES, dict(_SETTINGS))
 
 
 def test_resolve_run_style_uses_llm_choice(driver: Any) -> None:
@@ -126,9 +136,7 @@ def test_script_plan_injects_directives_without_selection(driver: Any) -> None:
     settings = dict(_SETTINGS)
     settings["_style_directives"] = planted
     FakeLlmClient.queue = [dict(_SCRIPT_PAYLOAD)]
-    result = script_driver.script_dialogue_plan(_EPISODES, settings, log=_noop_log)
-    assert result is not None
-    plan, used = result
+    plan, used = script_driver.script_dialogue_plan(_EPISODES, settings)
     assert plan.planner == "llm_script"
     assert used == ["ep-1", "ep-2"]
     assert len(FakeLlmClient.calls) == 1, f"剧本装配不该再发选题请求：{FakeLlmClient.calls}"

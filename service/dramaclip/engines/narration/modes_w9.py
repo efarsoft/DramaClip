@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from dramaclip.engines.analysis.models import AsrSegment
+from dramaclip.engines.narration.line_scoring import score_line
 from dramaclip.engines.narration.models import (
     PlanData,
     StrategySpec,
@@ -26,8 +27,6 @@ def strongest_line(
     segments: list[AsrSegment],
 ) -> str | None:
     """场景内最强金句：冲突/情绪词密度最高的对白；无对白返回 None。"""
-    from dramaclip.engines.narration.dialogue_selector import score_line
-
     inside = [
         segment
         for segment in segments

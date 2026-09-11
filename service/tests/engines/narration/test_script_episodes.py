@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import scriptwriter
 from dramaclip.engines.narration.models import StrategySpec
@@ -53,19 +55,19 @@ def test_write_script_episodes_multi() -> None:
     script = scriptwriter.write_script_episodes(
         fake, _EPISODE_INPUTS, target_min_s=30, target_max_s=120, project_name="剧"
     )
-    assert script is not None
     episodes = [segment.episode for segment in script.segments]
     assert episodes == [1, 2]  # 未知集号（9）被丢弃
     assert "【第1集】" in fake.prompts[0] and "【第2集】" in fake.prompts[0]
     assert "跨集叙事要求" in fake.prompts[0]
 
 
-def test_write_script_episodes_empty_transcript_fails() -> None:
+def test_write_script_episodes_empty_transcript_raises() -> None:
     fake = FakeLLM(_payload())
     empty = [{"number": 1, "duration": 60.0, "segments": []}]
-    assert scriptwriter.write_script_episodes(
-        fake, empty, target_min_s=30, target_max_s=60, project_name="剧"
-    ) is None
+    with pytest.raises(ValueError, match="无米下锅"):
+        scriptwriter.write_script_episodes(
+            fake, empty, target_min_s=30, target_max_s=60, project_name="剧"
+        )
 
 
 def _asr(spans: list[tuple[float, float]]) -> list[AsrSegment]:
@@ -115,7 +117,14 @@ def test_build_clamps_to_episode_duration() -> None:
 
 def test_prompt_keeps_raw_segments_by_episode() -> None:
     """转写逐段原样提交（不合并）：每段一行「开始-结束 台词」，按集分组。"""
-    fake = FakeLLM(_payload())
+    fake = FakeLLM({
+        "hook": "钩子",
+        "segments": [
+            {"episode": 1, "start": 0.0, "end": 1.0, "text": "解说一"},
+            {"episode": 1, "start": 1.0, "end": 2.0, "text": "解说二"},
+        ],
+        "cta": "",
+    })
     inputs = [
         {
             "number": 1,
