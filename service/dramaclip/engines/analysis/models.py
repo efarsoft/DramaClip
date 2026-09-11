@@ -13,6 +13,15 @@ class AsrSegment(BaseModel):
     emotion: str | None = None
 
 
+class OcrSegment(BaseModel):
+    """硬字幕条：OCR 通道产物（人工校对文本，时间轴为字幕驻留区间）。"""
+
+    start: float
+    end: float
+    text: str
+    conf: float = 1.0
+
+
 class SceneInfo(BaseModel):
     start: float
     end: float

@@ -54,6 +54,19 @@ strict = true
 # 第三方无类型库按模块登记放宽（docs/04 第 2 节），禁止全局降 strict
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = [
+  "faster_whisper.*",
+  "funasr.*",
+  "kokoro.*",
+  "librosa.*",
+  "rapidocr_onnxruntime.*",
+  "scenedetect.*",
+  "soundfile.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
