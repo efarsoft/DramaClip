@@ -1,7 +1,8 @@
-"""剧本驱动对话解说编排（跨集）：LLM 自选风格（口味层）+ 基本功写剧本（两级降级）。
+"""解说剧本装配：口味层选题（每任务一次）+ 跨集剧本驱动的对话解说。
 
 由 api 层注入 log 回调；本模块不 import transport。
-降级链：LLM 自选 → genre 静态映射 → 通用；编写失败 → 规则编排（api 层处理）。
+降级链：选题 LLM 自选 → genre 静态映射 → 通用（`resolve_run_style`，允许但留痕）；
+编写失败 → 规则编排（api 层处理，Task 5 收口）。
 """
 
 from __future__ import annotations
@@ -20,9 +21,42 @@ from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig
 # 剧本生成实测可达 100s+（qwen3.7-plus），远超 LLM 客户端默认 60s 超时
 SCRIPT_LLM_TIMEOUT_S = 240.0
 _SELECT_TIMEOUT_S = 60.0
-_SELECT_LINES_PER_EPISODE = 8
 
 LogFn = Callable[[str, str], None]
+
+
+def resolve_run_style(
+    settings: dict[str, str],
+    episode_inputs: list[dict[str, Any]],
+    *,
+    log: LogFn,
+) -> dict[str, Any]:
+    """口味层解析，每个任务只跑一次（原状是每模式一次，produce 白付 6 次 LLM 往返）。
+
+    auto + 已配置 LLM 才让模型选题；未配置时静默走题材映射——真正的失败留给
+    文案层报（那里才是非有 LLM 不可的地方，报两次只会混淆原因）。
+    """
+    preferred = settings.get("narration.style_id")
+    genre = settings.get("_genre")
+    style_id = styles.resolve_style_id(preferred, genre)
+    reason = ""
+    if (
+        preferred in (styles.AUTO_STYLE_ID, None, "")
+        and episode_inputs
+        and LlmConfig.from_settings(settings).configured
+    ):
+        selector = LlmClient(LlmConfig.from_settings(settings), timeout_s=_SELECT_TIMEOUT_S)
+        try:
+            selection = styles.select_style_with_reason(selector, _excerpt(episode_inputs))
+        except Exception:  # noqa: BLE001 - 选题失败必须降级而非中断出片
+            selection = None
+        if selection is None:
+            log("warn", "AI 风格选题失败，按题材静态映射兜底")
+        else:
+            style_id, reason = selection
+    style = styles.get_style(style_id)
+    log("info", _style_log_line(preferred, style, genre, reason))
+    return style
 
 
 def script_dialogue_plan(
@@ -33,6 +67,9 @@ def script_dialogue_plan(
     trace_dir: Any = None,
 ) -> tuple[PlanData, list[str]] | None:
     """跨集剧本驱动的对话解说；LLM 未配置或编写失败时返回 None（api 层降级规则编排）。
+
+    风格由任务级 `resolve_run_style` 先行解析并写进 `settings["_style_directives"]`，
+    本函数只读不再选题。
 
     episode_inputs 每项：{"number", "episode_id", "duration",
     "segments": [{"start", "end", "text"}]}，按集号升序。
@@ -45,23 +82,7 @@ def script_dialogue_plan(
         min_duration_s=float(settings.get("strategy.min_duration_s", "30")),
         max_duration_s=float(settings.get("strategy.max_duration_s", "300")),
     )
-    genre = settings.get("_genre")
-    preferred = settings.get("narration.style_id")
-
-    # 口味层：LLM 读跨集转写节选自选风格；选题失败降级题材静态映射
-    style_id = styles.resolve_style_id(preferred, genre)
-    reason = ""
-    if preferred == styles.AUTO_STYLE_ID or not preferred:
-        selector = LlmClient(LlmConfig.from_settings(settings), timeout_s=_SELECT_TIMEOUT_S)
-        try:
-            selection = styles.select_style_with_reason(selector, _excerpt(episode_inputs))
-        except Exception:  # noqa: BLE001 - 选题失败必须降级而非中断出片
-            selection = None
-        if selection is None:
-            log("warn", "AI 风格选题失败，按题材静态映射兜底")
-        else:
-            style_id, reason = selection
-    style = styles.get_style(style_id)
+    style_directives = str(settings.get("_style_directives") or "")
 
     # 基本功层内置于编剧 system prompt；口味层 directives 注入 user prompt
     llm = LlmClient(LlmConfig.from_settings(settings), timeout_s=SCRIPT_LLM_TIMEOUT_S)
@@ -76,13 +97,12 @@ def script_dialogue_plan(
         target_min_s=strategy.min_duration_s,
         target_max_s=strategy.max_duration_s,
         project_name=str(settings.get("_project_name", "这部剧")),
-        style_directives=str(style.get("directives", "")),
+        style_directives=style_directives,
         trace_path=trace_path,
     )
     if script is None:
         log("warn", "AI 编剧未产出跨集剧本，剧情解说降级规则编排")
         return None
-    log("info", _style_log_line(preferred, style, genre, reason))
 
     episode_map = {
         int(ep["number"]): (

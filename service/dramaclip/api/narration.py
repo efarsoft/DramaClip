@@ -8,11 +8,10 @@ from typing import Any
 
 from dramaclip.api.context import AppContext
 from dramaclip.api.export import ExportRun, render_export
+from dramaclip.engines.narration import copywriter, script_driver, scriptwriter
 from dramaclip.engines.narration import pipeline as narration_pipeline
-from dramaclip.engines.narration import scriptwriter
 from dramaclip.engines.narration import styles as styles_lib
 from dramaclip.engines.narration.models import PlanData
-from dramaclip.engines.narration.script_driver import script_dialogue_plan
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -37,8 +36,8 @@ SUPPORTED_MODES = (
     "inner_monologue",
 )
 
-# 无 TTS 模式可与 TTS 合成并行（原案 6.12）
-_NO_TTS_MODES = frozenset({"raw_clip", "dialogue_narration", "subtitle_flow"})
+# 与 TTS 合成并行的两组：剧情解说已由 LLM 剧本驱动，每段都要配音，不再属"无 TTS"。
+_NO_TTS_MODES = frozenset({"raw_clip", "subtitle_flow"})
 
 
 def register(router: Router, context: AppContext) -> None:
@@ -87,6 +86,30 @@ def list_styles(context: AppContext, _params: dict[str, Any] | None = None) -> l
     return styles_lib.list_styles()
 
 
+def _inject_run_settings(
+    context: AppContext,
+    settings: dict[str, str],
+    episodes: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """任务级一次性注入：项目名、题材、跨集转写、口味层风格。返回跨集输入。"""
+    project_id = str(episodes[0]["project_id"])
+    project = projects_repo.get(context.conn, project_id)
+    if project is None:
+        raise ValueError(f"项目不存在: {project_id}")
+    settings["_project_name"] = str(project["name"])
+    record = analysis_repo.get(context.conn, str(episodes[0]["id"]))
+    if record is not None and record["genre"]:
+        settings["_genre"] = str(record["genre"])
+    episode_inputs = _collect_episode_inputs(context, episodes)
+    if episode_inputs:
+        settings["_style_directives"] = str(
+            script_driver.resolve_run_style(
+                settings, episode_inputs, log=context.notifier.log
+            ).get("directives", "")
+        )
+    return episode_inputs
+
+
 def _run_generation_parallel(
     context: AppContext,
     job_id: str,
@@ -97,14 +120,8 @@ def _run_generation_parallel(
 ) -> None:
     """一键全部生成（原案 6.12）：无 TTS 模式与 TTS 模式两组并行，单模式失败不中断。"""
     context.job_store.mark_running(job_id)
-    project = projects_repo.get(context.conn, project_id)
-    if project is None:
-        raise ValueError("项目不存在")
     settings = dict(context.settings)
-    settings["_project_name"] = str(project["name"])
-    analysis_record = analysis_repo.get(context.conn, str(episodes[0]["id"]))
-    if analysis_record is not None and analysis_record["genre"]:
-        settings["_genre"] = str(analysis_record["genre"])
+    episode_inputs = _inject_run_settings(context, settings, episodes)
 
     tts_modes = [mode for mode in modes if mode not in _NO_TTS_MODES]
     fast_modes = [mode for mode in modes if mode in _NO_TTS_MODES]
@@ -118,10 +135,11 @@ def _run_generation_parallel(
         for mode in group_modes:
             if cancel_event.is_set():
                 return
+            label = narration_pipeline.MODE_LABELS.get(mode, mode)
             try:
-                _generate_one(context, mode, episodes, dict(settings))
+                _generate_one(context, mode, episodes, episode_inputs, dict(settings))
             except Exception as exc:
-                failures.append(f"{_mode_label(mode)}: {exc}")
+                failures.append(f"{label}: {exc}")
             with lock:
                 done_count += 1
                 context.job_store.set_progress(job_id, round(done_count / total * 100, 1))
@@ -150,69 +168,34 @@ def _run_generation_parallel(
     context.cancel_events.pop(job_id, None)
 
 
-def _run_generation(
-    context: AppContext,
-    job_id: str,
-    project_id: str,
-    episodes: list[dict[str, Any]],
-    modes: list[str],
-    cancel_event: threading.Event,
-) -> None:
-    """逐模式生成编排；intro 额外合成 TTS 引子。单模式失败不中断其余。"""
-    context.job_store.mark_running(job_id)
-    project = projects_repo.get(context.conn, project_id)
-    if project is None:
-        raise ValueError("项目不存在")
-    settings = dict(context.settings)
-    settings["_project_name"] = str(project["name"])
-    analysis_record = analysis_repo.get(context.conn, str(episodes[0]["id"]))
-    if analysis_record is not None and analysis_record["genre"]:
-        settings["_genre"] = str(analysis_record["genre"])
-    total = len(modes)
-    try:
-        for index, mode in enumerate(modes):
-            if cancel_event.is_set():
-                context.job_store.mark_cancelled(job_id)
-                return
-            percent = index / total * 100
-            context.job_store.set_progress(job_id, percent, f"生成{_mode_label(mode)}编排")
-            context.notifier.progress(job_id, percent, f"生成{_mode_label(mode)}编排")
-            _generate_one(context, mode, episodes, settings)
-        context.job_store.mark_completed(job_id)
-    except Exception as exc:
-        context.job_store.mark_failed(job_id, str(exc))
-        context.notifier.log("error", f"编排生成失败: {exc}")
-    finally:
-        context.cancel_events.pop(job_id, None)
-
-
 def _generate_one(
     context: AppContext,
     mode: str,
     episodes: list[dict[str, Any]],
+    episode_inputs: list[dict[str, Any]],
     settings: dict[str, str],
 ) -> None:
-    """生成单模式编排。对话解说：跨集 LLM 剧本（全部完成集），失败降级规则编排。"""
+    """生成单模式编排：剧情解说走跨集剧本，其余模式走规则编排 + 逐槽文案。"""
     project_id = str(episodes[0]["project_id"])
     plan: PlanData | None = None
     used_ids = [str(episodes[0]["id"])]
 
     if mode == "dialogue_narration":
-        episode_inputs = _collect_episode_inputs(context, episodes)
-        if episode_inputs:
-            context.notifier.log(
-                "info",
-                f"跨集输入：{len(episode_inputs)} 集 → "
-                f"每集约 {scriptwriter.transcript_sampling_quota(len(episode_inputs))} 段摘录",
-            )
-            result = script_dialogue_plan(
-                episode_inputs,
-                settings,
-                log=context.notifier.log,
-                trace_dir=context.data_dir / "logs" / "llm",
-            )
-            if result is not None:
-                plan, used_ids = result
+        if not episode_inputs:
+            raise ValueError("没有带转写的已完成集，无法生成解说剧本")
+        context.notifier.log(
+            "info",
+            f"跨集输入：{len(episode_inputs)} 集 → "
+            f"每集约 {scriptwriter.transcript_sampling_quota(len(episode_inputs))} 段摘录",
+        )
+        scripted = script_driver.script_dialogue_plan(
+            episode_inputs,
+            settings,
+            log=context.notifier.log,
+            trace_dir=context.data_dir / "logs" / "llm",
+        )
+        if scripted is not None:
+            plan, used_ids = scripted
 
     if plan is None:
         episode = episodes[0]
@@ -234,6 +217,14 @@ def _generate_one(
             audio,
             settings,
         )
+        if plan.narration_texts:
+            plan = copywriter.write_plan_copy(
+                plan,
+                asr_segments,
+                settings,
+                mode_label=narration_pipeline.MODE_LABELS.get(mode, mode),
+                trace_dir=context.data_dir / "logs" / "llm",
+            )
 
     if plan.narration_texts:
         tts_dir = context.work_dir / "tts"
@@ -283,11 +274,6 @@ def _parse_highlights(raw: str | None) -> list[HighlightSegment]:
     return [HighlightSegment.model_validate(item) for item in json.loads(raw or "[]")]
 
 
-def _mode_label(mode: str) -> str:
-    return {"raw_clip": "纯原片剪辑", "intro_narration": "片头解说"}.get(mode, mode)
-
-
-
 def produce(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     """组合任务：逐模式 编排(文案/配音) → 自动渲染成片；出片记录随产随记。"""
     project_id = str(params.get("project_id", ""))
@@ -324,13 +310,8 @@ def _run_produce(
 ) -> None:
     """逐模式：编排(文案/配音) → 渲染成片；单模式失败不中断其余。"""
     context.job_store.mark_running(job_id)
-    project = projects_repo.get(context.conn, project_id)
     settings = dict(context.settings)
-    if project is not None:
-        settings["_project_name"] = str(project["name"])
-    analysis_record = analysis_repo.get(context.conn, str(episodes[0]["id"]))
-    if analysis_record is not None and analysis_record["genre"]:
-        settings["_genre"] = str(analysis_record["genre"])
+    episode_inputs = _inject_run_settings(context, settings, episodes)
 
     total = len(modes)
     failures: list[str] = []
@@ -340,7 +321,7 @@ def _run_produce(
             context.cancel_events.pop(job_id, None)
             return
         base = index / total * 100
-        label = _mode_label(mode)
+        label = narration_pipeline.MODE_LABELS.get(mode, mode)
 
         def report(percent: float, message: str, _base: float = base) -> None:
             context.job_store.set_progress(job_id, round(_base + percent / total, 1), message)
@@ -348,7 +329,7 @@ def _run_produce(
 
         context.notifier.progress(job_id, round(base, 1), f"({index + 1}/{total}) 生成{label}编排")
         try:
-            _generate_one(context, mode, episodes, dict(settings))
+            _generate_one(context, mode, episodes, episode_inputs, dict(settings))
             plan_row = _newest_ready_plan(context, project_id, mode)
             if plan_row is None:
                 raise ValueError("编排结果缺失")

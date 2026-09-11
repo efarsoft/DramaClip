@@ -1,4 +1,4 @@
-"""script_driver：跨集剧本编排装配——选题降级链与降级路径。"""
+"""script_driver：任务级口味层解析（`resolve_run_style`）+ 跨集剧本装配。"""
 
 from __future__ import annotations
 
@@ -50,16 +50,18 @@ _SCRIPT_PAYLOAD: dict[str, Any] = {
 
 
 class FakeLlmClient:
-    """按队列响应 chat_json；记录调用供断言。"""
+    """按队列响应 chat_json；记录 system/user 供断言哪一层被调用。"""
 
     calls: list[str] = []
+    systems: list[str] = []
     queue: list[Any] = []
 
     def __init__(self, _config: Any, timeout_s: float = 60.0) -> None:
         self.timeout_s = timeout_s
 
-    def chat_json(self, _system: str, _user: str) -> Any:
-        FakeLlmClient.calls.append(_user)
+    def chat_json(self, system: str, user: str) -> Any:
+        FakeLlmClient.systems.append(system)
+        FakeLlmClient.calls.append(user)
         queue = FakeLlmClient.queue
         item = queue.pop(0) if len(queue) > 1 else queue[0]
         if isinstance(item, Exception):
@@ -71,6 +73,7 @@ class FakeLlmClient:
 def driver(monkeypatch: pytest.MonkeyPatch) -> Any:
     FakeLlmClient.queue = []
     FakeLlmClient.calls = []
+    FakeLlmClient.systems = []
     monkeypatch.setattr(script_driver, "LlmClient", FakeLlmClient)
     return script_driver
 
@@ -81,38 +84,53 @@ def test_llm_unconfigured_returns_none() -> None:
     assert script_driver.script_dialogue_plan(_EPISODES, settings, log=_noop_log) is None
 
 
-def test_manual_style_skips_selection_call(driver: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_run_style_uses_llm_choice(driver: Any) -> None:
+    """auto 且已配置 LLM：口味层让模型选题，选中的风格才是本次的答案。"""
+    FakeLlmClient.queue = [{"style_id": "sweet", "reason": "甜宠互动密集"}]
+    style = driver.resolve_run_style(dict(_SETTINGS), _EPISODES, log=_noop_log)
+    assert style["style_id"] == "sweet", "模型选中的风格未被采纳（逆袭→shuanggan 是兜底答案）"
+    assert len(FakeLlmClient.calls) == 1, "选题应只付一次 LLM 往返"
+
+
+def test_resolve_run_style_manual_skips_llm(driver: Any) -> None:
+    FakeLlmClient.queue = [{"style_id": "sweet", "reason": "x"}]
     settings = dict(_SETTINGS)
-    settings["narration.style_id"] = "shuanggan"
-    FakeLlmClient.queue = [dict(_SCRIPT_PAYLOAD)]
-    plan, used = script_driver.script_dialogue_plan(_EPISODES, settings, log=_noop_log)
-    assert plan is not None and plan.planner == "llm_script"
-    assert len(FakeLlmClient.calls) == 1, "手动风格应跳过选题调用"
-    assert used == ["ep-1", "ep-2"]
+    settings["narration.style_id"] = "suspense"
+    style = driver.resolve_run_style(settings, _EPISODES, log=lambda *_a: None)
+    assert style["style_id"] == "suspense"
+    assert FakeLlmClient.calls == [], "手动指定风格不该发选题请求"
 
 
-def test_auto_selects_style_then_writes(driver: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    FakeLlmClient.queue = [
-        {"style_id": "shuanggan", "reason": "打脸弧线完整"},
-        dict(_SCRIPT_PAYLOAD),
-    ]
-    plan, used = script_driver.script_dialogue_plan(_EPISODES, dict(_SETTINGS), log=_noop_log)
-    assert plan is not None and plan.planner == "llm_script"
-    assert used == ["ep-1", "ep-2"]
-
-
-def test_selection_failure_falls_back_to_genre(
-    driver: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    FakeLlmClient.queue = [
-        RuntimeError("选题服务不可用"),
-        dict(_SCRIPT_PAYLOAD),
-    ]
+def test_resolve_run_style_falls_back_to_genre_mapping(driver: Any) -> None:
+    FakeLlmClient.queue = [RuntimeError("选题服务不可用")]
     logs: list[tuple[str, str]] = []
+    style = driver.resolve_run_style(
+        dict(_SETTINGS), _EPISODES, log=lambda lv, msg: logs.append((lv, msg))
+    )
+    assert style["style_id"] == "shuanggan", "_SETTINGS 的 _genre=逆袭 应映射爽感"
+    assert any("题材静态映射" in msg for _lv, msg in logs)
 
-    def log(level: str, message: str) -> None:
-        logs.append((level, message))
 
-    plan, used = script_driver.script_dialogue_plan(_EPISODES, dict(_SETTINGS), log=log)
-    assert plan is not None and plan.planner == "llm_script"
-    assert any("题材静态映射" in message for _level, message in logs)
+def test_resolve_run_style_unconfigured_skips_llm(driver: Any) -> None:
+    """未配置 LLM：一个请求都不发，但题材映射照样给出可用风格（失败留给文案层报）。"""
+    settings = dict(_SETTINGS)
+    settings["llm.model"] = ""
+    style = driver.resolve_run_style(settings, _EPISODES, log=_noop_log)
+    assert FakeLlmClient.calls == [], "未配置也要发选题请求 = 七模式白撞七次网关"
+    assert style["style_id"] == "shuanggan"
+
+
+def test_script_plan_injects_directives_without_selection(driver: Any) -> None:
+    """剧本装配不再选题：风格由任务级注入，本函数只把它交给编剧。"""
+    planted = "每三句一个反问，把爽点砸实"
+    settings = dict(_SETTINGS)
+    settings["_style_directives"] = planted
+    FakeLlmClient.queue = [dict(_SCRIPT_PAYLOAD)]
+    result = script_driver.script_dialogue_plan(_EPISODES, settings, log=_noop_log)
+    assert result is not None
+    plan, used = result
+    assert plan.planner == "llm_script"
+    assert used == ["ep-1", "ep-2"]
+    assert len(FakeLlmClient.calls) == 1, f"剧本装配不该再发选题请求：{FakeLlmClient.calls}"
+    assert not any("风格库" in system for system in FakeLlmClient.systems)
+    assert planted in FakeLlmClient.calls[0], "注入的风格指令未进编剧 prompt"

@@ -33,7 +33,7 @@ from dramaclip.infra.ffmpeg import probe
 
 _LOGGER = logging.getLogger(__name__)
 
-_MODE_LABELS = {
+MODE_LABELS = {
     "raw_clip": "纯原片剪辑",
     "intro_narration": "片头解说",
     "cross_narration": "交叉解说",
@@ -82,7 +82,7 @@ def build_plan(
         return modes_p2.build_dual_host(episode_id, conflict_scores, strategy)
     if mode == "inner_monologue":
         return modes_p2.build_monologue(episode_id, conflict_scores, strategy)
-    raise ValueError(f"模式暂未支持: {mode}（{_MODE_LABELS.get(mode, mode)} 将随后续阶段启用）")
+    raise ValueError(f"模式暂未支持: {mode}（{MODE_LABELS.get(mode, mode)} 将随后续阶段启用）")
 
 
 def build_from_script_dialogue(
