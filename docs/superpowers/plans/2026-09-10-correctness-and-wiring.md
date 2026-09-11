@@ -1762,3 +1762,18 @@ git commit -m "test(modes): 真机九模式回归脚本，断言音轨存在/时
 **边界（未做，别当成已验）**：计划 Step 6 的真机复验（`npm run dev` + 40 集以上剧 + 新的 `llm_script_*.json`）**没有执行**，环境无 GUI/真实 LLM 调用。替代证据是离线端到端跑 `write_script_episodes`（12 集 × 60 段）确认第 12 集及其集尾行进入 prompt 且能被 `_sanitize_episodes` 接受。**80 集尺度只做了结构性验证，未做真机验证。**
 
 `total_cap` 现在是软上限：>166 集时因 3 行下限会超出 500（200 集 → 600 行）。这是"集集可见"优先于行数的有意取舍，别把它当硬边界读。
+
+**已完成 · 清理波（`c0c748a` `2b11db5` `7eea2a1` `9ab6644` `9ffeef0` `5bc800c`，255 → 260 passed）**
+
+| 项 | 处置 |
+|---|---|
+| 删 `narration.replace_timeline` 死路 | 四处触点同删（`api/timeline.py`、注册、schema、`METHOD_NAMES`、`TimelineEditor.tsx`），同时堵掉"保存抹掉 `narration_id` 配对"的潜伏洞。mypy 文件数 90→89 |
+| 默认值单一真相源 | 画幅接到 `EXPORT_WIDTH/HEIGHT`；`prescreen_episode` 去掉重复默认、强制调用方传；`_LIMIT_MAX` 与 schema 的关系收口 |
+| `api/export.py` 去重 | `start`/`retry` 投递逻辑合一，渲染入参收成 `ExportRun`（原 7 元位置参数 Data Clump） |
+| 状态字面量 | 两处「同一谓词各写一遍」收进共享常量 / `is_terminal` |
+| `api/models.py` 零覆盖 | 补 `mark_running` 回归守卫，并做了**变异测试**：去掉该调用则 3/3 行为测试失败，证明守卫真的有效 |
+| 死配置键 | `export.encoder` / `export.bitrate_kbps` 从 `DEFAULTS` 删除（无消费方、无 UI） |
+
+**建议不做 · 测试脚手架去重**：`test_export_retry.py`、`test_jobs_api.py`、`test_project_settings.py` 各有一份约 10 行的 fake context 与 `_call`。合并会把测试里最值钱的东西——**每个测试自解释、可独立读**——换成一层间接，且第四份 `test_engine_configs.py` 属另一执行者。收益低于代价，建议保留这份重复。
+
+**升级为全仓库决策 · docstring**：审查只点了 8 个函数，实测 **137 个公共函数无 docstring**，遍布 `api/`、`repos/`、`engines/`、`transport/`、`infra/`。`docs/04 §2` 要求公共函数必须有——说明这条标准从未真正执行过，不是某次改动引入的。三个选项：**(a)** 按模块分批补齐；**(b)** 把标准收窄到"仅跨模块导出的公共 API"，一次性补齐；**(c)** 承认现状，从 `docs/04` 删掉这条。**当前最糟的是留着一条没人执行的标准**——它让每次审查都得重新解释"为什么这次要遵守"。
