@@ -19,13 +19,18 @@ class TimelineSegment(BaseModel):
     transition: Literal["cut", "fade", "black", "flash"] = "cut"
     subtitle_text: str | None = None
     emotion_label: str | None = None
-    # 本段旁白对应的 NarrationText.id（TTS 回填时写下，回退原声时清空）。
-    # 导出侧据此取音，禁止再靠位置索引推断。
+    # 本段旁白对应的 NarrationText.id：编排时由模式写入（与槽位一一配对），
+    # TTS 回填时刷新、回退原声时清空。编剧据此读画面区间、导出侧据此取音，
+    # 两处都禁止再靠位置索引推断。
     narration_id: str | None = None
 
 
 class NarrationText(BaseModel):
-    """旁白槽位：编排器定"在哪段画面、以什么职责说话"，编剧填 `text`，配音回填音频与时长。"""
+    """旁白槽位：编排器定"这段画面要说什么"，编剧填 `text`，配音回填音频与时长。
+
+    槽位压在成片哪一段时间里没有第二个真相源：它就是要它的那个 `TimelineSegment`
+    （按 `narration_id` 配对）的 start/end。这里再存一份必然与回填后的段长打架。
+    """
 
     id: str
     text: str = ""
@@ -33,9 +38,7 @@ class NarrationText(BaseModel):
     audio_path: str | None = None
     duration: float | None = None
     # 槽位职责，进编剧 prompt：如「原声之间的串联：承接上一幕、留下一幕的悬念」
-    slot: str = ""
-    # 该槽位覆盖的素材区间（其所在集内秒）：编剧据此读台词，不做位置推断
-    window: tuple[float, float] | None = None
+    brief: str = ""
 
 
 class StrategySpec(BaseModel):

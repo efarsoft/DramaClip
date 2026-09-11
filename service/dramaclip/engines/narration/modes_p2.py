@@ -46,24 +46,24 @@ def build_dual_host(
         voice = _VOICE_A if index % 2 == 0 else _VOICE_B
         speaker = "主持人 A" if index % 2 == 0 else "嘉宾 B"
         if index == 0:
-            role = f"{speaker} 开场抛话题：用剧名点出这片为什么值得看"
+            brief = f"{speaker} 开场抛话题：用剧名点出这片为什么值得看"
         elif index == count - 1:
-            role = f"{speaker} 收尾：放狠话评结局并引导看全集"
+            brief = f"{speaker} 收尾：放狠话评结局并引导看全集"
         elif index % 2 == 1:
-            role = f"{speaker} 接话：情绪反应 + 补一个刚才没说的细节"
+            brief = f"{speaker} 接话：情绪反应 + 补一个刚才没说的细节"
         else:
-            role = f"{speaker} 抛下一层：把冲突往更狠处推一句"
-        window = (scene.start, round(min(scene.start + _SCENE_S, scene.end), 3))
+            brief = f"{speaker} 抛下一层：把冲突往更狠处推一句"
+        end = round(min(scene.start + _SCENE_S, scene.end), 3)
         timeline.append(
             TimelineSegment(
                 episode_id=episode_id,
                 start=round(scene.start, 3),
-                end=window[1],
+                end=end,
                 audio="narration",
                 narration_id=slot_id,
             )
         )
-        texts.append(NarrationText(id=slot_id, slot=role, voice=voice, window=window))
+        texts.append(NarrationText(id=slot_id, brief=brief, voice=voice))
     return PlanData(
         mode="dual_host_chat", timeline=timeline, narration_texts=texts, strategy=strategy
     )
@@ -85,24 +85,24 @@ def build_monologue(
     for index, scene in enumerate(picked):
         slot_id = f"mono-{index + 1}"
         if index == 0:
-            role = "第一人称开场：主角此刻的处境与误判，一句话"
+            brief = "第一人称开场：主角此刻的处境与误判，一句话"
         elif index == count - 1:
-            role = "第一人称收尾：态度反转落定 + 一句点击引导"
+            brief = "第一人称收尾：态度反转落定 + 一句点击引导"
         elif scene.score >= 85:
-            role = "第一人称高潮：这一刻主角想明白了什么，短促、带情绪"
+            brief = "第一人称高潮：这一刻主角想明白了什么，短促、带情绪"
         else:
-            role = "第一人称推进：忍让如何一点点失效"
-        window = (scene.start, round(min(scene.start + _SCENE_S, scene.end), 3))
+            brief = "第一人称推进：忍让如何一点点失效"
+        end = round(min(scene.start + _SCENE_S, scene.end), 3)
         timeline.append(
             TimelineSegment(
                 episode_id=episode_id,
                 start=round(scene.start, 3),
-                end=window[1],
+                end=end,
                 audio="narration",
                 narration_id=slot_id,
             )
         )
-        texts.append(NarrationText(id=slot_id, slot=role, voice=_VOICE_A, window=window))
+        texts.append(NarrationText(id=slot_id, brief=brief, voice=_VOICE_A))
     return PlanData(
         mode="inner_monologue", timeline=timeline, narration_texts=texts, strategy=strategy
     )

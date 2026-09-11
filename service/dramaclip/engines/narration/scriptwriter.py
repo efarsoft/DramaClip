@@ -98,8 +98,8 @@ def _sanitize_episodes(raw: Any, durations: dict[int, float]) -> Script | None:
     return script.model_copy(update={"segments": kept})
 
 
-def _clock(seconds: float) -> str:
-    """秒 → MM:SS（转写展示用）。"""
+def clock(seconds: float) -> str:
+    """秒 → MM:SS（转写展示用）：公开给 copywriter 复用，别再各抄一份。"""
     minutes, secs = divmod(max(int(seconds), 0), 60)
     return f"{minutes:02d}:{secs:02d}"
 
@@ -184,7 +184,7 @@ def _format_transcript_episodes(
             text = str(seg.get("text", "")).strip()
             if text == "":
                 continue
-            span = f"{_clock(float(seg.get('start', 0)))}-{_clock(float(seg.get('end', 0)))}"
+            span = f"{clock(float(seg.get('start', 0)))}-{clock(float(seg.get('end', 0)))}"
             rendered.append(f"{span} {text}")
         if not rendered:  # 一行没进就不留孤立集标题
             continue
@@ -254,7 +254,8 @@ def write_script_episodes(
             raw = llm.chat_json(_SYSTEM_PROMPT, user_prompt)
             script = _sanitize_episodes(raw, durations)
         except (LlmUnavailable, ValidationError, ValueError, TypeError, KeyError) as exc:
-            attempts.append({"error": str(exc)})
+            # 留痕必须带上异常类型：网关挂了与 schema 不合规是两件完全不同的事
+            attempts.append({"error": f"{type(exc).__name__}: {exc}"})
             continue
         attempts.append(
             {

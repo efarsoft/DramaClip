@@ -5,6 +5,7 @@ from __future__ import annotations
 from dramaclip.engines.narration.models import StrategySpec
 from dramaclip.engines.narration.modes_w8 import build_full
 from dramaclip.engines.semantic.models import ConflictScore
+from tests.engines.narration.conftest import assert_slots_paired
 
 _STRATEGY = StrategySpec(min_duration_s=10, max_duration_s=120)
 
@@ -27,19 +28,17 @@ def test_full_covers_timeline_with_ducked_audio() -> None:
 def test_full_scene_cap_and_texts() -> None:
     plan = build_full("ep1", _scenes(), _STRATEGY)
     assert len(plan.timeline) <= 8
-    assert len(plan.narration_texts) == len(plan.timeline)
-    assert [s.narration_id for s in plan.timeline] == [t.id for t in plan.narration_texts]
-    assert all(not t.text and t.slot and t.window for t in plan.narration_texts)
+    assert_slots_paired(plan, "full_narration")
 
 
-def test_full_slot_roles_follow_narrative_position() -> None:
+def test_full_slot_briefs_follow_narrative_position() -> None:
     """位置与冲突分决定槽位职责（原模板的位置语义搬到这里，句子本身归编剧）。"""
     plan = build_full("ep1", _scenes(), _STRATEGY)
     texts = plan.narration_texts
-    assert texts[0].slot.startswith("开篇")
-    assert "高潮" in texts[1].slot, "score>=85 的高潮分支优先于推进分支"
-    assert texts[3].slot.startswith("推进")
-    assert texts[-1].slot.startswith("收尾")
+    assert texts[0].brief.startswith("开篇")
+    assert "高潮" in texts[1].brief, "score>=85 的高潮分支优先于推进分支"
+    assert texts[3].brief.startswith("推进")
+    assert texts[-1].brief.startswith("收尾")
 
 
 def test_full_empty_scenes() -> None:

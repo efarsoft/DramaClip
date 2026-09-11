@@ -38,6 +38,8 @@ class _StubTts:
     """每段旁白落成各自的 mp3（文件名即文案 id）；时长探测已被打桩。"""
 
     def synthesize(self, text: str, voice: str | None, out_path: Path) -> Path:
+        if text.strip() == "":  # 真引擎对空文案会失败（ffprobe check=True）：替身必须一样
+            raise RuntimeError("TTS 空文案：槽位未被语言层填充")
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(b"")
         return out_path
@@ -58,7 +60,7 @@ def _scenes() -> list[ConflictScore]:
 def _full_plan(episode_id: str, tts_dir: Path) -> PlanData:
     """真实 full_narration 编排（build_full 产出的全 ducked 时间轴）+ 旁白回填。"""
     plan = build_full(episode_id, _scenes(), StrategySpec(min_duration_s=10))
-    # 文案槽位由编剧层填充（Task 6 前先用替身模拟其产出）
+    # 文案槽位由编剧层填充（copywriter 于 Task 4 接入，本替身到 Task 6 删除）
     plan = plan.model_copy(update={
         "narration_texts": [
             t.model_copy(update={"text": f"第 {i} 段解说文案"})

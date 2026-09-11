@@ -1,7 +1,10 @@
-"""逐槽文案编剧：编排器给出"在哪段画面、以什么职责说话"，本模块让模型把话说出来。
+"""逐槽文案编剧：编排器给出"这个画面段要说什么"，本模块让模型把话说出来。
 
-降级禁止（规格 §3.3.1）：LLM 未配置、槽位漏答、答非所问、句子超长，一律抛出，
-不再有模板池。失败粒度是单条方案——api 层逐模式捕获，其余模式继续出片。
+槽位压在成片哪一段时间不是这里的数据：它是配对画面段（按 narration_id）的 start/end，
+编剧读区间内的台词下笔，区间外的台词一概不进这一槽。
+
+降级禁止（规格 §3.3.1）：LLM 未配置、槽位漏答、答非所问、句子超长、槽位没有配对画面段，
+一律抛出，不再有模板池。失败粒度是单条方案——api 层逐模式捕获，其余模式继续出片。
 
 单集槽位模式（intro/cross/ultra_short/full/dual_host/inner_monologue）共用本模块；
 跨集剧本驱动（dialogue_narration）走 scriptwriter，两条链共享 FUNDAMENTALS。
@@ -15,7 +18,7 @@ from typing import Any
 
 from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import scriptwriter
-from dramaclip.engines.narration.models import NarrationText, PlanData
+from dramaclip.engines.narration.models import NarrationText, PlanData, TimelineSegment
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
 
 COPY_LLM_TIMEOUT_S = 240.0  # 与编剧同量级：多槽位成稿实测可达 100s+
@@ -24,8 +27,8 @@ _OVERSIZE_TOLERANCE = 1.2  # 容忍 20% 溢出，再长即判不合格重问
 _ATTEMPTS = 2
 
 _SYSTEM_PROMPT = (
-    "你是短剧推广解说编剧。下面给出若干旁白槽位，每个槽位标注了它在成片里的位置、"
-    "承担的职责、覆盖的画面区间，以及该区间内的原片台词。为每个槽位各写一条解说文案。\n"
+    "你是短剧推广解说编剧。下面给出若干旁白槽位，每个槽位标注了它承担的职责、"
+    "覆盖的画面区间，以及该区间内的原片台词。为每个槽位各写一条解说文案。\n"
     '只输出 JSON：{"lines": [{"id": "槽位id", "text": "解说文案"}]}，不要其他文字。\n'
     f"硬性要求：lines 必须覆盖全部槽位 id（数量与 id 一字不差）；每条不超过 {_MAX_LINE_CHARS} 字；"
     "按给定顺序书写，相邻两条要能连读成一条故事线；"
@@ -34,31 +37,28 @@ _SYSTEM_PROMPT = (
 )
 
 
-def _clock(seconds: float) -> str:
-    minutes, secs = divmod(max(int(seconds), 0), 60)
-    return f"{minutes:02d}:{secs:02d}"
-
-
 def _slot_block(
     texts: list[NarrationText],
+    segments: list[TimelineSegment],
     asr_segments: list[AsrSegment],
 ) -> str:
-    """每个槽位一段：职责 + 画面区间 + 区间内台词。台词为编剧唯一的事实来源。"""
+    """每个槽位一段：职责 + 它压在的画面区间 + 区间内台词。台词为编剧唯一的事实来源。"""
+    by_id = {segment.narration_id: segment for segment in segments if segment.narration_id}
     lines: list[str] = []
     for text in texts:
-        lines.append(f"[{text.id}] 职责：{text.slot}")
-        if text.window is not None:
-            start, end = text.window
-            lines.append(f"  画面区间：{start:.1f}-{end:.1f}s")
-            inside = [
-                seg for seg in asr_segments if seg.start < end and seg.end > start
-            ]
-        else:
-            inside = []
+        segment = by_id.get(text.id)
+        if segment is None:
+            raise ValueError(f"槽位 {text.id} 没有配对画面段：编排器漏写 narration_id")
+        lines.append(f"[{text.id}] 要做的事：{text.brief}")
+        lines.append(f"  画面区间：{segment.start:.1f}-{segment.end:.1f}s")
+        inside = [
+            seg for seg in asr_segments if seg.start < segment.end and seg.end > segment.start
+        ]
         if inside:
             lines.append("  区间内台词：")
             lines.extend(
-                f"    {_clock(seg.start)}-{_clock(seg.end)} {seg.text.strip()}"
+                f"    {scriptwriter.clock(seg.start)}-{scriptwriter.clock(seg.end)} "
+                f"{seg.text.strip()}"
                 for seg in inside
             )
         else:
@@ -95,7 +95,7 @@ def write_plan_copy(
     asr_segments: list[AsrSegment],
     settings: dict[str, str],
     *,
-    mode_label: str = "",
+    mode_label: str,
     trace_dir: Path | None = None,
 ) -> PlanData:
     """填满 plan 的全部旁白槽位并置 planner=llm_script；任何不合格都抛异常。"""
@@ -114,8 +114,9 @@ def write_plan_copy(
     user_prompt = (
         f"项目：{project_name}"
         + (f"（题材：{genre}）" if genre else "")
-        + (f"\n模式：{mode_label}" if mode_label else "")
-        + f"\n文案槽位：\n{_slot_block(plan.narration_texts, asr_segments)}"
+        + f"\n模式：{mode_label}"
+        + "\n文案槽位：\n"
+        + _slot_block(plan.narration_texts, plan.timeline, asr_segments)
         + (f"\n\n解说风格要求：{directives}" if directives else "")
     )
     llm = LlmClient(config, timeout_s=COPY_LLM_TIMEOUT_S)
@@ -138,9 +139,7 @@ def write_plan_copy(
         )
     if filled is None:
         detail = "；".join(str(item["error"]) for item in attempts)
-        raise ValueError(
-            f"编剧未产出合格文案（{'，'.join(t.id for t in plan.narration_texts)}）：{detail}"
-        )
+        raise ValueError(f"编剧未产出合格文案：{detail}")
     return plan.model_copy(update={
         "narration_texts": [
             text.model_copy(update={"text": filled[text.id]}) for text in plan.narration_texts

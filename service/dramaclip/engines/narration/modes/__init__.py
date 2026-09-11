@@ -55,22 +55,20 @@ def build_intro(
 ) -> PlanData:
     """片头解说编排（原案 6.4）：引子旁白段（画面为正文首镜）+ 正片高光（原声）。
 
-    引子文案由编剧层填充；段时长在导出阶段由 TTS 实际时长回填。
+    引子文案由编剧层填充；槽位压在哪一段画面即本时间轴首段，段时长在导出阶段由 TTS 实际时长回填。
     """
     ordered = sorted(body_scenes, key=lambda s: s.start)
     timeline = _fit_duration(intro_episode_id, ordered, strategy, intro_first=True)
     if not timeline:
         return PlanData(mode="intro_narration", timeline=timeline, strategy=strategy)
-    opener = timeline[0].model_copy(update={"narration_id": _INTRO_SLOT_ID})
-    timeline[0] = opener
+    timeline[0] = timeline[0].model_copy(update={"narration_id": _INTRO_SLOT_ID})
     return PlanData(
         mode="intro_narration",
         timeline=timeline,
         narration_texts=[
             NarrationText(
                 id=_INTRO_SLOT_ID,
-                slot="片头钩子：两三句把最大冲突抛出来，收尾留悬念，不要复述剧情梗概",
-                window=(opener.start, opener.end),
+                brief="片头钩子：两三句把最大冲突抛出来，收尾留悬念，不要复述剧情梗概",
             )
         ],
         strategy=strategy,

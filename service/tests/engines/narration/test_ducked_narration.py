@@ -29,6 +29,8 @@ class _StubTts:
     """落一个空文件即返回路径；时长探测已被打桩，不碰网络也不碰真音频。"""
 
     def synthesize(self, text: str, voice: str | None, out_path: Path) -> Path:
+        if text.strip() == "":  # 真引擎对空文案会失败（ffprobe check=True）：替身必须一样
+            raise RuntimeError("TTS 空文案：槽位未被语言层填充")
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(b"")
         return out_path
@@ -50,12 +52,7 @@ def _plan(roles: list[str]) -> PlanData:
             for i, role in enumerate(roles)
         ],
         narration_texts=[
-            NarrationText(
-                id=f"n{i}",
-                text=f"旁白{i}",
-                window=(float(i), float(i) + 1.0),
-            )
-            for i in range(len(roles))
+            NarrationText(id=f"n{i}", text=f"旁白{i}") for i in range(len(roles))
         ],
     )
 
@@ -155,7 +152,7 @@ def test_full_narration_plan_maps_every_segment_to_own_text(
         for index, score in enumerate([60, 85, 45, 90, 55, 75, 40, 95, 50, 65])
     ]
     plan = build_full("ep1", scenes, StrategySpec(min_duration_s=10, max_duration_s=120))
-    # 文案槽位由编剧层填充（Task 6 前先用替身模拟其产出）
+    # 文案槽位由编剧层填充（copywriter 于 Task 4 接入，本替身到 Task 6 删除）
     plan = plan.model_copy(update={
         "narration_texts": [
             t.model_copy(update={"text": f"第 {i} 段解说文案"})
@@ -185,14 +182,12 @@ def test_backfilled_plan_still_round_trips_through_json(
     )
     reloaded = PlanData.model_validate(result.model_dump())
     assert [segment.narration_id for segment in reloaded.timeline] == ["n0", "n1"]
-    assert [text.window for text in reloaded.narration_texts] == [(0.0, 1.0), (1.0, 2.0)]
     assert [type(segment).__name__ for segment in result.timeline] == [
         "TimelineSegment",
         "TimelineSegment",
     ], "回填后的 plan 必须是校验过的模型，不能是裸 dict"
-    # 库里 plan_data 存的是 JSON 数组（repos/plans.py: json.loads 那一列）：
-    # 编剧据此读台词，读回后 window 必须仍是可下标比较的区间，不能退成 list/str
+    # 库里 plan_data 存的是 JSON 字符串（repos/plans.py: json.loads 那一列）：
+    # 编剧按 narration_id 取区间、导出按它取音，走一趟真 JSON 配对不能散
     from_db = PlanData.model_validate_json(result.model_dump_json())
-    assert [text.window for text in from_db.narration_texts] == [(0.0, 1.0), (1.0, 2.0)]
-    second = from_db.narration_texts[1].window
-    assert second is not None and second[1] > second[0], "落库读回后区间仍可比较"
+    assert [segment.narration_id for segment in from_db.timeline] == ["n0", "n1"]
+    assert [text.id for text in from_db.narration_texts] == ["n0", "n1"]

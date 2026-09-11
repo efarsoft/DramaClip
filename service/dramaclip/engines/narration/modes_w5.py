@@ -57,8 +57,7 @@ def build_cross(
         texts.append(
             NarrationText(
                 id=slot_id,
-                slot="原声片段之间的串联：承接上一幕，给下一幕留半句钩",
-                window=(anchor.start, anchor.start + narration_seconds),
+                brief="原声片段之间的串联：承接上一幕，给下一幕留半句钩",
             )
         )
         segments.append(
@@ -86,19 +85,20 @@ def build_ultra_short(
         return PlanData(mode="ultra_short_hook", strategy=strategy)
     best = max(scenes, key=lambda s: s.score)
     scene_span = min(best.end - best.start, _ULTRA_CONFLICT_S)
-    slots = (
-        ("hook-1", "开场钩子：一句，最大反差或最狠的悬念，不超过 20 字",
-         (best.start, best.start + _HOOK_TTS_FALLBACK_S)),
-        ("cta-1", "收尾引导：一句，指向「结局更狠」并引导点击，不超过 15 字",
-         (best.end - _HOOK_TTS_FALLBACK_S, best.end)),
-    )
+    texts = [
+        NarrationText(id="hook-1", brief="开场钩子：一句，最大反差或最狠的悬念，不超过 20 字"),
+        NarrationText(
+            id="cta-1",
+            brief="收尾引导：一句，指向「结局更狠」并引导点击，不超过 15 字",
+        ),
+    ]
     timeline = [
         TimelineSegment(
             episode_id=episode_id,
-            start=round(slots[0][2][0], 3),
-            end=round(slots[0][2][1], 3),
+            start=round(best.start, 3),
+            end=round(best.start + _HOOK_TTS_FALLBACK_S, 3),
             audio="narration",
-            narration_id=slots[0][0],
+            narration_id=texts[0].id,
         ),
         TimelineSegment(
             episode_id=episode_id,
@@ -108,13 +108,12 @@ def build_ultra_short(
         ),
         TimelineSegment(
             episode_id=episode_id,
-            start=round(slots[1][2][0], 3),
-            end=round(slots[1][2][1], 3),
+            start=round(best.end - _HOOK_TTS_FALLBACK_S, 3),
+            end=round(best.end, 3),
             audio="narration",
-            narration_id=slots[1][0],
+            narration_id=texts[1].id,
         ),
     ]
-    texts = [NarrationText(id=sid, slot=slot, window=window) for sid, slot, window in slots]
     return PlanData(
         mode="ultra_short_hook", timeline=timeline, narration_texts=texts, strategy=strategy
     )

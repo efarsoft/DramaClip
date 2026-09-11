@@ -5,6 +5,7 @@ from __future__ import annotations
 from dramaclip.engines.narration.models import StrategySpec
 from dramaclip.engines.narration.modes import build_intro, build_raw_clip
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
+from tests.engines.narration.conftest import assert_slots_paired
 
 _STRATEGY = StrategySpec(min_duration_s=10, max_duration_s=30)
 
@@ -39,12 +40,17 @@ def test_raw_clip_all_original_audio() -> None:
 def test_intro_marks_first_segment_as_narration() -> None:
     plan = build_intro("ep1", _scenes(), _STRATEGY)
     assert plan.mode == "intro_narration"
-    assert plan.narration_texts[0].id == "intro-1" and plan.narration_texts[0].window
-    assert plan.narration_texts[0].slot and not plan.narration_texts[0].text
-    assert plan.timeline[0].narration_id == "intro-1", "段与文案按 id 配对"
+    assert_slots_paired(plan, "intro_narration")
+    assert plan.timeline[0].narration_id == "intro-1"
     assert plan.timeline[0].audio == "narration"
     assert plan.timeline[0].end - plan.timeline[0].start <= 30
     assert all(seg.audio == "original" for seg in plan.timeline[1:])
+
+
+def test_intro_empty_scenes() -> None:
+    """无素材 ⇒ 无槽位：否则等于叫编剧对着空时间轴凭空写。"""
+    plan = build_intro("ep1", [], _STRATEGY)
+    assert plan.timeline == [] and plan.narration_texts == []
 
 
 def test_highlights_not_required() -> None:
