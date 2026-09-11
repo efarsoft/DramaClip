@@ -80,8 +80,10 @@ def _render(
     conn: sqlite3.Connection,
     tmp_path: Path,
     builder: Callable[[str, Path], PlanData],
-) -> tuple[PlanData, list[list[str]]]:
-    """种真实项目/集/编排/导出记录，走 render_export，返回 plan_data 与逐段 ffmpeg 命令。"""
+    settings: dict[str, str] | None = None,
+) -> tuple[PlanData, list[list[str]], list[Any]]:
+    """种真实项目/集/编排/导出记录，走 render_export，返回 plan_data、逐段 ffmpeg 命令
+    与 Phase C 收到的响度目标。"""
     source = tmp_path / "ep1.mp4"
     source.write_bytes(b"x")
     project_id = str(projects_repo.create(conn, "全片解说剧", str(tmp_path))["id"])
@@ -102,13 +104,20 @@ def _render(
     export_id = exports_repo.create(conn, project_id, plan_id, plan.mode)
 
     commands: list[list[str]] = []
+    loudness_targets: list[Any] = []
     monkeypatch.setattr(encoder, "_run_cut", lambda args: commands.append(args))
     monkeypatch.setattr(encoder, "_concat", lambda _files, _out: None)
+    # Phase C 不真跑 ffmpeg，但记录它收到的目标值——接线证明靠这份记录
+    monkeypatch.setattr(
+        encoder.loudness,
+        "normalize_in_place",
+        lambda _path, **kw: loudness_targets.append(kw["target"]),
+    )
     context = SimpleNamespace(
         conn=conn,
         data_dir=tmp_path,
         work_dir=tmp_path / "cache",
-        settings={},
+        settings=dict(settings or {}),
     )
     export_api.render_export(
         context,  # type: ignore[arg-type]
@@ -121,7 +130,7 @@ def _render(
         ),
         report=lambda _p, _m: None,
     )
-    return plan_data, list(commands)
+    return plan_data, list(commands), loudness_targets
 
 
 def _second_input(args: list[str]) -> str:
@@ -136,7 +145,7 @@ def test_full_narration_every_segment_mixes_its_own_narration(
 ) -> None:
     """核心可达性证明：全 ducked 的 full_narration，每段命令都要有混音分支和自己的旁白。"""
     _stub_tts(monkeypatch, _StubTts())
-    plan_data, commands = _render(monkeypatch, memory_db, tmp_path, _full_plan)
+    plan_data, commands, _targets = _render(monkeypatch, memory_db, tmp_path, _full_plan)
 
     assert plan_data.mode == "full_narration"
     assert len(commands) == len(plan_data.timeline) > 1
@@ -167,7 +176,7 @@ def test_full_narration_map_covers_every_index(
 ) -> None:
     """映射层：ducked 时间轴的每个下标都要有条音，一个都不能漏。"""
     _stub_tts(monkeypatch, _StubTts())
-    plan_data, _commands = _render(monkeypatch, memory_db, tmp_path, _full_plan)
+    plan_data, _commands, _targets = _render(monkeypatch, memory_db, tmp_path, _full_plan)
 
     mapping = export_api.tts_audio_by_segment(plan_data)
     assert set(mapping) == set(range(len(plan_data.timeline)))
@@ -183,3 +192,24 @@ def test_failed_tts_fails_the_plan(
     _stub_tts(monkeypatch, _BrokenTts())
     with pytest.raises(RuntimeError, match="合成失败"):
         _render(monkeypatch, memory_db, tmp_path, _full_plan)
+
+
+def test_render_export_feeds_settings_loudness_target_to_phase_c(
+    monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """生产接线证明：render_export 必须把 settings 里的响度目标传进 normalize_in_place。
+
+    漏传（loudness_target 默认 None）等于 Phase C 在生产路径上根本没跑，
+    成片响度回到没人负责的状态——这条用例就是那个"没跑"的探测器。
+    """
+    _stub_tts(monkeypatch, _StubTts())
+    _, _, targets = _render(
+        monkeypatch,
+        memory_db,
+        tmp_path,
+        _full_plan,
+        settings={"export.loudness_target_lufs": "-12"},
+    )
+    assert len(targets) == 1, "Phase C 必须被调用恰好一次"
+    assert targets[0].integrated_lufs == -12.0, "目标必须来自 settings，而不是写死值"
+    assert targets[0].true_peak_dbtp == -1.5, "settings 未给的键应回退 DEFAULTS"

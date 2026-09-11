@@ -36,6 +36,9 @@ DEFAULTS: dict[str, str] = {
     "strategy.max_duration_s": "300",
     "download.hf_mirror": "https://hf-mirror.com",
     "download.ms_base": "https://modelscope.cn",
+    # 成片响度目标（EBU R128）：Phase C 整片两遍 loudnorm 收口，见 engines/exporter/loudness.py
+    "export.loudness_target_lufs": "-14",
+    "export.loudness_true_peak_dbtp": "-1.5",
     "export.width": str(EXPORT_WIDTH),
     "export.height": str(EXPORT_HEIGHT),
     "hardware.max_parallel_jobs": "2",
@@ -60,3 +63,11 @@ def get_int(settings: Settings, key: str) -> int:
         return int(settings[key])
     except (KeyError, ValueError):
         return int(DEFAULTS.get(key, "0"))
+
+
+def get_float(settings: Settings, key: str) -> float:
+    """按 float 读取；缺失/非法回退 DEFAULTS（与 get_int 同一约定）。"""
+    try:
+        return float(settings[key])
+    except (KeyError, ValueError, TypeError):
+        return float(DEFAULTS[key])

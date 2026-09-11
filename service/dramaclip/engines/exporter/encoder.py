@@ -3,6 +3,7 @@
 Phase A 逐段：精确切割 → 竖屏 1080x1920 裁切 → 消重（微缩放/eq/微变速）
         → 遮罩（非纯原片模式）→ 段级混音（narration/ducked 段旁白 + 原声压低）→ 重编码。
 Phase B 拼接：concat demuxer（-c copy）+ `-map_metadata -1` 指纹擦除。
+Phase C 响度：整片两遍 loudnorm 归一到 settings 目标（见 loudness.py）。
 进度：Phase A 按段数、Phase B 占 10%。
 """
 
@@ -18,6 +19,7 @@ from pathlib import Path
 from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.dedup import jitter
 from dramaclip.engines.dedup import params as dedup_params
+from dramaclip.engines.exporter import loudness
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle.mask import drawbox_filter
 from dramaclip.infra import config
@@ -173,12 +175,16 @@ def export_plan(
     parallel: int = 2,
     dialogue_zones: dict[str, list[SpeechZone]] | None = None,
     out_size: tuple[int, int] = _DEFAULT_OUT_SIZE,
+    loudness_target: loudness.LoudnessTarget | None = None,
 ) -> Path:
     """执行两阶段导出，返回成片路径。
 
     Phase A：段级并行切割（竖屏 + 消重 + 遮罩 + 字幕烧录 + 混音）；
     Phase B：concat 拼接 + `-map_metadata -1` 元数据擦除。
     段间无依赖，线程池并行（ffmpeg 自身多线程，2 并发已接近 IO/CPU 饱和）。
+
+    `loudness_target=None` 仅用于"零加工模式不做归一"的显式关闭，不是兼容垫片；
+    生产调用点必传（Phase C 是成片响度的唯一负责人）。
     """
     segments = plan.timeline
     if not segments:
@@ -246,6 +252,10 @@ def export_plan(
 
     segment_files = sorted(work_dir.glob("seg_*.mp4"))
     _concat(segment_files, out_path)
+    if loudness_target is not None:
+        loudness.normalize_in_place(
+            out_path, target=loudness_target, work_dir=work_dir / "loudnorm"
+        )
     if on_progress is not None:
         on_progress(100.0, "导出完成")
     return out_path

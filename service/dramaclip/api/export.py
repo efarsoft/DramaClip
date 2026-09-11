@@ -11,7 +11,7 @@ from typing import Any
 
 from dramaclip.api.context import AppContext
 from dramaclip.engines.analysis.models import SpeechZone
-from dramaclip.engines.exporter import encoder
+from dramaclip.engines.exporter import encoder, loudness
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle import presets as subtitle_presets
 from dramaclip.engines.subtitle.ass_generator import build_ass
@@ -264,6 +264,7 @@ def render_export(
         subtitle_burner=burn_subtitle if plan_data.mode != "raw_clip" else None,
         dialogue_zones=dialogue_zones,
         out_size=out_size,
+        loudness_target=loudness.LoudnessTarget.from_settings(context.settings),
     )
     exports_repo.mark_completed(context.conn, export_id, str(out_path))
     try:

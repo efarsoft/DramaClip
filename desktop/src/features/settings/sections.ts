@@ -71,6 +71,22 @@ const EXPORT_SECTION: SectionSpec = {
       min: 10,
       max: 120,
     },
+    {
+      key: 'export.loudness_target_lufs',
+      label: '成片响度目标 (LUFS)',
+      type: 'number',
+      min: -24,
+      max: -6,
+      help: '整片两遍归一的落点；移动端短剧建议 -16 ~ -12。数值越大越响，过大只会让平台压得更狠',
+    },
+    {
+      key: 'export.loudness_true_peak_dbtp',
+      label: '真峰值上限 (dBTP)',
+      type: 'number',
+      min: -6,
+      max: 0,
+      help: '防爆音的天花板，一般不用改',
+    },
   ],
 };
 
