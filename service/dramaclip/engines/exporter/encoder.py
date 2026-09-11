@@ -20,11 +20,12 @@ from dramaclip.engines.dedup import jitter
 from dramaclip.engines.dedup import params as dedup_params
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle.mask import drawbox_filter
+from dramaclip.infra import config
 from dramaclip.infra.ffmpeg import runner
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 
-OutWidth = 1080
-OutHeight = 1920
+# 画幅数值不在这里定义（docs/04 §5.2）：源是 infra.config，settings 默认值读的是同一个常量。
+_DEFAULT_OUT_SIZE = (config.EXPORT_WIDTH, config.EXPORT_HEIGHT)
 
 
 class EpisodeSourceMissing(Exception):
@@ -43,7 +44,7 @@ def cut_segment_args(
     rng: random.Random,
     transition: str = "cut",
     ass_path: str | None = None,
-    out_size: tuple[int, int] = (OutWidth, OutHeight),
+    out_size: tuple[int, int] = _DEFAULT_OUT_SIZE,
 ) -> list[str]:
     """构建单段切割命令（Phase A）。
 
@@ -63,7 +64,7 @@ def cut_segment_args(
         f"scale={out_w}:{out_h}",
         f"setpts=PTS/{speed}",
     ]
-    box = drawbox_filter(mask)
+    box = drawbox_filter(mask, out_size)
     if box:
         filters.append(box)
     if transition == "fade":
@@ -169,7 +170,7 @@ def export_plan(
     subtitle_burner: Callable[[int, str, float], str] | None = None,
     parallel: int = 2,
     dialogue_zones: dict[str, list[SpeechZone]] | None = None,
-    out_size: tuple[int, int] = (OutWidth, OutHeight),
+    out_size: tuple[int, int] = _DEFAULT_OUT_SIZE,
 ) -> Path:
     """执行两阶段导出，返回成片路径。
 

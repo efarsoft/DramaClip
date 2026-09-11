@@ -11,7 +11,11 @@ from dramaclip.transport.rpc import Router, RpcDomainError
 
 _ERR_JOB_NOT_FOUND = -32501  # 任务域 -32500~-32599（见 common.json x-error-codes）
 
-_LIMIT_MAX = 200  # 与 protocol/schemas/jobs.json 的 params.limit.maximum 一致
+# 钳制值必须在运行时可得，而 protocol/schemas/ 不随 sidecar 打包（scripts/build-service.py
+# 未收录该目录），故运行时用下面两个常量、schema 的 limit.maximum/default 只做接口声明。
+# 一致性不是注释里的口头承诺：tests/transport/test_contract_sync.py 直接读 schema 断言相等。
+_LIMIT_MAX = 200
+_LIMIT_DEFAULT = 50
 
 
 def register(router: Router, context: AppContext) -> None:
@@ -24,7 +28,7 @@ def list_jobs(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     """跨类型任务列表，按最近变更倒序。"""
     # 双向钳制，与 params schema 的 minimum/maximum 一致（Router 不做 schema 校验）：
     # 只钳上限时，负数会原样进 SQL——SQLite 的负 LIMIT 语义是「不限量」。
-    limit = max(min(int(params.get("limit", 50)), _LIMIT_MAX), 1)
+    limit = max(min(int(params.get("limit", _LIMIT_DEFAULT)), _LIMIT_MAX), 1)
     active_only = bool(params.get("active_only", False))
     return {
         "jobs": context.job_store.list_recent(limit=limit, active_only=active_only),

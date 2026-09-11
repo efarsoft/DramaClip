@@ -9,9 +9,16 @@ import sqlite3
 
 from dramaclip.infra.storage.repos import settings as settings_repo
 
+# 单一真相源（docs/04 §5.2）：以下数值只在此处定义一次，别处一律 import 不再各写一份。
+# 放在 infra 而非渲染层，是因为依赖方向恒为 engines → infra——
+# 反过来让 encoder 当设置的源会成环，所以设置的默认值与渲染几何同源读这里。
+EXPORT_WIDTH = 1080  # 竖屏画幅（无 UI 覆盖，仅 settings 键可改；见 docs/service/04 §3）
+EXPORT_HEIGHT = 1920
+PRESCREEN_THRESHOLD = 70  # 预筛推荐线：评分量纲 0-100（prescreen 四项权重和为 100）
+
 DEFAULTS: dict[str, str] = {
     "analysis.full_threshold": "15",
-    "analysis.prescreen_threshold": "70",
+    "analysis.prescreen_threshold": str(PRESCREEN_THRESHOLD),
     "asr.engine": "faster_whisper",
     "asr.model": "small",
     "asr.device": "auto",
@@ -30,8 +37,8 @@ DEFAULTS: dict[str, str] = {
     "download.ms_base": "https://modelscope.cn",
     "export.encoder": "h264",
     "export.bitrate_kbps": "8000",
-    "export.width": "1080",
-    "export.height": "1920",
+    "export.width": str(EXPORT_WIDTH),
+    "export.height": str(EXPORT_HEIGHT),
     "hardware.max_parallel_jobs": "2",
 }
 

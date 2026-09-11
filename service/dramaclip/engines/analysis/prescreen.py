@@ -61,9 +61,14 @@ def prescreen_episode(
     video_path: Path,
     wav_path: Path,
     *,
-    threshold: float = 70.0,
+    threshold: float,
 ) -> dict[str, float]:
-    """预筛单集，返回四项信号 + prescreen_score + recommended。调用方负责落库。"""
+    """预筛单集，返回四项信号 + prescreen_score + recommended。调用方负责落库。
+
+    `threshold` 必填且不在这里给默认值：推荐线的唯一真相源是设置项
+    `analysis.prescreen_threshold`（源 infra.config.DEFAULTS，设置页可调），
+    引擎自带第二份 70 会让"改了设置不生效"这类问题无法被发现。
+    """
     from dramaclip.engines.analysis import pipeline as analysis_pipeline
 
     wav_path.parent.mkdir(parents=True, exist_ok=True)

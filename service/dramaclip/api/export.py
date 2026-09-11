@@ -13,6 +13,7 @@ from dramaclip.engines.exporter import encoder
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle import presets as subtitle_presets
 from dramaclip.engines.subtitle.ass_generator import build_ass
+from dramaclip.infra import config
 from dramaclip.infra.ffmpeg import probe
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -124,10 +125,14 @@ def tts_audio_by_segment(plan: PlanData) -> dict[int, str]:
     }
 
 
-def _output_size(settings: dict[str, str]) -> tuple[int, int]:
-    """输出分辨率：设置键 export.width/height，偶数化并钳制最小 480。"""
-    width = max(int(settings.get("export.width", "1080")), 480)
-    height = max(int(settings.get("export.height", "1920")), 480)
+def _output_size(settings: config.Settings) -> tuple[int, int]:
+    """输出分辨率：读设置键 export.width/height（默认值源在 infra.config），偶数化并钳制最小 480。
+
+    走 config.get_int 而非本地字面量兜底：本文件不得再抄一份 1080/1920（docs/04 §5.2），
+    且该函数对缺失与非法值统一回退默认，不像 int(settings.get(...)) 那样被脏值炸穿。
+    """
+    width = max(config.get_int(settings, "export.width"), 480)
+    height = max(config.get_int(settings, "export.height"), 480)
     return width - width % 2, height - height % 2
 
 

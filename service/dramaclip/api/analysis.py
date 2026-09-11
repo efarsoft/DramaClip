@@ -17,6 +17,7 @@ from dramaclip.engines.analysis.models import (
     SceneInfo,
 )
 from dramaclip.engines.semantic import pipeline as semantic_pipeline
+from dramaclip.infra import config
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import prescreen as prescreen_repo
@@ -65,8 +66,6 @@ def _run_prescreen(
     targets: list[dict[str, Any]],
     cancel_event: threading.Event,
 ) -> None:
-    from pathlib import Path
-
     context.job_store.mark_running(job_id)
     total = len(targets)
     try:
@@ -81,7 +80,7 @@ def _run_prescreen(
             result = prescreen_engine.prescreen_episode(
                 Path(str(episode["source_path"])),
                 context.work_dir / "prescreen" / f"{episode_id}.wav",
-                threshold=float(context.settings.get("analysis.prescreen_threshold", "70")),
+                threshold=float(config.get_int(context.settings, "analysis.prescreen_threshold")),
             )
             prescreen_repo.upsert(
                 context.conn,
