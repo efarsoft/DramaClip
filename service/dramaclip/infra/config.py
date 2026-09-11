@@ -35,8 +35,6 @@ DEFAULTS: dict[str, str] = {
     "strategy.max_duration_s": "300",
     "download.hf_mirror": "https://hf-mirror.com",
     "download.ms_base": "https://modelscope.cn",
-    "export.encoder": "h264",
-    "export.bitrate_kbps": "8000",
     "export.width": str(EXPORT_WIDTH),
     "export.height": str(EXPORT_HEIGHT),
     "hardware.max_parallel_jobs": "2",
