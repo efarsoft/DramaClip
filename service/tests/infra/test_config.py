@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from dramaclip.infra import config
 
 
@@ -29,3 +31,22 @@ def test_get_int_fallback_on_invalid(memory_db: sqlite3.Connection) -> None:
     settings["hardware.max_parallel_jobs"] = "oops"
     assert config.get_int(settings, "hardware.max_parallel_jobs") == 2  # 回退默认
     assert config.get_int(settings, "analysis.full_threshold") == 15
+
+
+def test_get_float_falls_back_to_defaults_on_dirty_value() -> None:
+    key = "export.loudness_target_lufs"
+    assert config.get_float({key: "-12"}, key) == -12.0  # 用户覆盖优先
+    assert config.get_float({key: "abc"}, key) == -14.0  # 脏值回退 DEFAULTS
+    assert config.get_float({}, key) == -14.0  # 缺键回退 DEFAULTS
+    assert config.get_float({}, "export.loudness_true_peak_dbtp") == -1.5
+
+
+def test_get_float_raises_for_key_outside_defaults() -> None:
+    """`get_float` 比 `get_int` 严：DEFAULTS 里没有的键直接 KeyError，不回 0.0。
+
+    这是有意的分歧，不是待统一的疏漏。响度目标写错一个键名时，静默给 0.0 会把整片推到
+    0 LUFS（还顺带炸真峰值门限），比当场报错难查得多。别为了"两个 getter 长得不一样"
+    就把它改成 `DEFAULTS.get(key, "0")`。
+    """
+    with pytest.raises(KeyError):
+        config.get_float({}, "export.loudness_typo")

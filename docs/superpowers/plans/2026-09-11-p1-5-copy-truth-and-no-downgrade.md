@@ -2110,6 +2110,115 @@ git add service/dramaclip/engines/exporter/loudness.py service/dramaclip/engines
 git commit -m "feat(export): Phase C 整片两遍响度归一，目标值进设置页"
 ```
 
+### Task 8 落地后的实测修正
+
+本节数字全部来自 `resources/ffmpeg/ffmpeg.exe`（8.1.1-essentials）真跑。素材 =
+仓里 **9 部 Phase C 之前的真成片**（`data/outputs/86511b3e…`，九个模式各一部，crest 10.2–17.8 dB）
++ **20 个合成源**（噪声床 / 门控爆发 / 静音轨，crest 4.6–27.3 dB）。
+
+- **本计划把 loudnorm 的两个 JSON 键名编造了出来，而测试抄的正是这份编造**。Step 4 的代码块解析
+  `offset` 与 `target_thresh`；ffmpeg 真机输出的键集是
+  `input_i, input_tp, input_lra, input_thresh, output_i, output_tp, output_lra, output_thresh,
+  normalization_type, target_offset`——**没有 `offset`，也没有 `target_thresh`**。29 个源逐源比对，
+  **只有这一种键集**。落地代码用 `.get("offset", "0")` 兜底，于是两遍法的回喂量从落地那天起恒为
+  `0.0`；而 `test_parse_measurements` 断言的 `offset_lu == 0.50` 是对着 Step 1 那份**手写的假
+  stderr** 断言的，所以它永远绿。
+  **规矩：凡代表真实工具输出的夹具一律现场捕获，不许从计划里抄，也不许从既有夹具里抄。**
+  实测回喂值范围 0.01–7.03 LU；丢掉它的代价（其余参数不变，真机对照）：真成片
+  `dialogue_narration` 偏离目标 0.45 → 1.09 LU；一个 −51 LUFS / crest 27 dB 的极端源
+  0.55 → 5.74 LU。已修：改读 `target_offset`，并把 `target_offset` 与 `output_thresh`
+  **一起塞进缺字段守卫**——守卫比取值要紧，它把"哪天 ffmpeg 改键名"从静默 0.0 变成当场报错。
+- **`target_thresh` 那个字段是死的，已删**。`LoudnessMeasurement.target_threshold` 全仓只有三处：
+  dataclass 字段、解析点、一条测试断言；**没有任何消费者**，而 loudnorm 也没有"目标阈值"这个输入项。
+  "有个测试在读"不构成保留理由。`output_thresh` 一样不消费，但**留在缺字段守卫里**（同上条理由）。
+- **真峰值门限的余量比 AAC 的过冲还小（Fix F2）**。门限是 `target + 0.5`（默认 −1.0 dBTP），
+  但 loudnorm 是在滤镜内部按 **192 kHz** 限峰的，之后 192k→48k 重采样 + AAC 编码还会再抬出
+  采样间过冲，而门限量的是抬过之后的值。实测 **14 个被限峰的源**（滤镜自报 `output_tp=-1.50`）
+  编码后落在 **−1.50 … −0.64 dBTP**：过门的那批里最差只剩 **0.08 dB** 余量（−1.08 对门限 −1.0），
+  两个高 crest 源（LRA 0.2–0.3、crest 14.2 / 14.7 dB）直接硬失败
+  （`真峰值超标：-0.8 dBTP` / `真峰值超标：-0.6 dBTP`）。
+  修法是**在滤镜侧多要余量，不是把门限放宽**：`normalize_args` 现在要
+  `TP = target − _TP_ENCODE_HEADROOM_DB`（1.0 dB），门限仍是 `target + _TP_GATE_MARGIN_DB`（0.5 dB），
+  两个常量成对出现、由用例钉住关系。放宽门限只是把编码器过冲藏起来，不给它做预算。
+  复验：那两个硬失败的源现在过门，余量 0.94 / 0.91 dB；0.08 dB 那条升到 0.50 dB。
+- **`-b:a 192k` 是这道门限的一部分，不是码率旋钮（Fix F7 一并认账）**。同素材同滤镜只把 192k
+  换成 128k，编码后真峰 −1.40→−0.67、−1.35→−0.82、−1.08→−0.15 dBTP——**192k 下过门的三条在
+  128k 下全部超标**。以后谁做"优化码率"那一刀，会静默把响度合规打掉。
+  顺带把账认下来：段级音轨本来就是 AAC 128k（`cut_segment_args`），Phase C 解码再编一次，
+  这是**货真价实的第二次有损代**。整片归一没有别的走法（响度只能对整片量），
+  128k→192k 的听感差异可忽略——但它必须被写出来，不能装作不存在。
+- **多要 1.0 dB 余量是有代价的，代价落在两处**。
+  1. **它把一批素材从 linear 推到 dynamic（Fix F4）**。loudnorm 走线性的条件是**两条**：
+     `0 < measured_LRA ≤ LRA`，且 `measured_TP + (I − measured_I) ≤ TP`（即 crest ≤ `TP − I`）。
+     **本计划只写了后一条，漏了 LRA 那条**——实测把 `measured_LRA` 从 0.0 扫到 12.0：
+     0.0 → dynamic，0.5–11.0 → linear，12.0 → dynamic；一个 crest 只有 4.6 dB、`output_tp`
+     −9.4 dBTP（余量多得很）的恒定正弦源，**仅因为 `measured_LRA=0.00` 就走了 dynamic**。
+     线性上限随 TP 走：TP=−1.5 时 crest ≤ 12.5 dB，TP=−2.5 时只剩 ≤ 11.5 dB。
+     真成片按 −1.5 要 TP 时 8 部里 **7 linear / 1 dynamic**，按 −2.5 要时只剩 **3 linear / 5 dynamic**，
+     分界与那条不等式逐部吻合。所以 docstring 不许再写"线性归一"：
+     **线性是偏好，dynamic 是常态**，安静段落上可能听出泵动。Task 10 的耳朵验收按这个预期去听。
+  2. **对 TP 受限的素材，多要 1.0 dB 就是少 1.0 dB 响度**，失败方式会从"真峰值超标"变成"偏离目标"。
+     一个 −38 LUFS / crest 14.7 dB 的合成极端源从偏离 1.03 LU（过门）变成 2.24 LU（超容差）。
+     9 部真成片的偏离都 ≤ 1.01 LU（**响度**这一侧没有一部受影响；真峰值那一侧见下一条），
+     `_TOLERANCE_LU = 2.0` 保持不动；
+     真要撞上，按降级分类表也该硬失败而不是出一版更响的片。
+- **F2 还不足以让九个模式全过门——Task 9 会在这里绊一下（新发现，未修）**。
+  `intro_narration` 的真成片（crest 12.9 dB，**源自身已经削顶：`input_tp=+3.26 dBTP`**）
+  三种组合的实测：本轮之前（`offset=0.0`、TP=−1.5）编码后 −0.83 dBTP，超门限 0.17 dB，
+  抛 `真峰值超标：-0.8 dBTP`；只修 F1（offset 回喂、TP 仍 −1.5）→ −1.38 dBTP → **过门**；
+  本轮之后（offset 回喂 + TP=−2.5）→ −0.82 dBTP，超门限 0.18 dB，同样抛错。
+  **所以 F2 没有让它变坏（之前就是失败的），但也没把它救回来，而单靠 F1 本可以。**
+  原因是过冲**对所请求的 TP 不单调**：同一部片子按 TP=−1.5/−2.0/−2.25/−2.5/−2.75/−3.0/−3.5
+  逐个重编，过冲是 0.12 / 0.96 / 0.87 / **1.68** / 0.99 / 0.71 / 0.66 dB——−2.5 正踩在一个谐振点上。
+  超标峰全部落在片尾 180–198 s 那一个窗口（其余窗口都 ≤ −2.25 dBTP），不是 AAC priming
+  （跳过前 1 s / 5 s 数值不变），且**逐次重跑完全可复现**（同参数三次都是 −0.82）。
+  结论：**任何固定的 headroom 都不可能被证明够用**。要么把它做成自适应
+  （复核超标就用更大的 headroom 重试一次，实测 TP=−3.0 可过该片、且 `dialogue_narration`
+  在 −3.0 时偏离 1.45 LU 仍在容差内），要么去治上游——`amix normalize=0` 让段级混音可以越过
+  0 dBTP，`intro_narration` 的成片因此带着 +3.26 dBTP 的削顶进 Phase C。
+  **本轮按批准的 −1.0 落地，未擅自改数**；此条留给 Task 9/10。
+- **无音轨成片从"静默交付"变成"硬失败"，而且原先报的是运维看不懂的错（Fix F5）**。
+  可达路径：`cut_segment_args` 的 else 分支把音频写成可选映射（`-map 0:a:0?`），
+  无音轨源集 → 无音轨段 → 无音轨成片。修复前 Phase C 撞上它抛的是
+  `ffmpeg 退出码 4294967274：… Stream map '' matches no streams`（4294967274 是 −22 的无符号回绕）。
+  现在改成事前 `probe.probe(...).has_audio` 判定，抛 `成片没有音轨，无法归一响度：<name>`。
+  选探测而不是匹配 ffmpeg 的报错文本：文本随版本/语言漂，探测结果是结构化的，
+  而且 `infra.ffmpeg.probe` 本来就是本仓的媒体探测缝（`api/export.py:271` 也在用）。
+  **这是一处行为变更**：Phase C 之前无音轨成片是照常交付的。方向符合降级分类表
+  （近乎无声的片子不该交付），但它值得单独记一笔。
+- **`os.replace` 原先跑在复核前面（Fix F8）**：一次 `真峰值超标` 抛错之后，成品路径上
+  已经躺着一版能播的超标片（实测 sha256 与字节数都变了）。库里写 failed、`list_works` 也不显示它，
+  但文件就在 `data/outputs/<project>/` 里——最难查的那种不一致。已改成"复核 staged → 判定 → 才落地"。
+- **两条"看着可以顺手统一"的重构会静默毁掉整条链（Fix F9），已就地写进源码注释**：
+  1. `measure_args` **不得带 `-loglevel`**：loudnorm 的 JSON 打在 `AV_LOG_INFO` 上。实测同一条命令
+     只换旗标——不带 → JSON 在；`info` → 在；`warning` → 没了；`error` → 没了；**四种都 exit 0**。
+     而紧邻的 `normalize_args` 恰恰**要**带 `-loglevel error`，所以"把两处弄一致"会让 Phase C
+     全线量不出响度，而当时全套字符串断言一条不红（现已补 `test_measure_args_never_caps_loglevel`）。
+     附带一条：`normalize_args` 带 `-loglevel error`，所以**第二遍的 `print_format=summary`
+     在生产里根本看不见**（summary 也是 INFO 级）——要看 `normalization_type` 得另跑一趟。
+  2. `-ar 48000` 不能省：loudnorm 走 **dynamic** 时内部工作在 192 kHz，不指定 `-ar` 时 ffmpeg
+     exit 0 并静默写出 `aac, sample_rate=96000`（降到 AAC 合法上限）。
+     **但这个坑只在 dynamic 素材上出现**——linear 模式不升采样，去掉 `-ar` 输出仍是 48000。
+     实测：crest 14.2 / 13.7 / 17.8 dB 三部 → 96000；crest 6.6 dB 一部 → 48000。
+     素材相关，所以它一直没被发现。96k 对短视频平台非标准，也破坏本仓"全段 48k"的不变量
+     （concat 流复制按首段采样率解读全部包）。
+- **`get_float` 的 docstring 声称与 `get_int` 同一约定，其实不是，而且不该是（Fix F6）**。
+  `get_int` 对 DEFAULTS 里也没有的键回 0（`DEFAULTS.get(key, "0")`），`get_float` 用
+  `DEFAULTS[key]` 直接 KeyError。严格的那一侧是对的：响度键名打错一个字母时静默回 0.0，
+  等于把整片推到 0 LUFS 再顺带炸真峰门限。**行为一字未动**，只改 docstring 并补一条
+  "未知键必须抛"的用例，免得以后谁做"统一两个 getter"时挑错方向。
+- **`export_plan` 的 docstring 编了一个不存在的生产行为（Fix F3）**。原文说 `loudness_target=None`
+  是"零加工模式不做归一"的显式关闭——`grep -rn "export_plan(" service/dramaclip` 只有一个生产调用点
+  （`api/export.py:255`）且**无条件**传值，没有任何生产路径去看模式；`None` 只有两个测试能到达。
+  已改成如实描述（测试缝），保留"生产调用点必传"。**没有**给 raw_clip 开豁免：本仓的"零加工"
+  一路都指**视频包装**（`docs/service/02-引擎设计.md:57` 不加字幕不遮罩、`api/export.py:31` 不遮罩、
+  `modes/__init__.py:27` 不遮罩），raw_clip 本身照样过 scale/crop/eq/atempo 抖动 + x264 全量重编码，
+  而 Task 9 的出口判据要求**九个模式全部**落在响度窗口内——开口子会直接打破它。
+- 本轮新增/改动的守卫全部做了变异检验：**11 条变异逐条变红，逐条按字节还原**
+  （`offset_lu` 硬编码 0.0、两个键各从守卫里摘一次、`_TP_ENCODE_HEADROOM_DB`→0、
+  `_TP_GATE_MARGIN_DB`→1.5、`-b:a`→128k、删掉无音轨判定、`os.replace` 挪回复核前、
+  测量遍加 `-loglevel error`、归一遍删 `-ar`、`get_float` 改宽松）。
+
 ---
 
 ## Task 9: 门禁升级——量响度、验 `planner`、预检 LLM

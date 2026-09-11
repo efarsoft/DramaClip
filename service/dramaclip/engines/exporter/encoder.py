@@ -183,7 +183,12 @@ def export_plan(
     Phase B：concat 拼接 + `-map_metadata -1` 元数据擦除。
     段间无依赖，线程池并行（ffmpeg 自身多线程，2 并发已接近 IO/CPU 饱和）。
 
-    `loudness_target=None` 仅用于"零加工模式不做归一"的显式关闭，不是兼容垫片；
+    `loudness_target=None` 是测试缝，不是兼容垫片：今天唯一的生产调用点
+    （`api/export.py:255`）无条件传值，没有任何生产路径去看模式。
+    它也**不是**"零加工模式不做归一"的开关——本仓的"零加工"指的一直是视频包装
+    （`docs/service/02-引擎设计.md:57` 不加字幕不遮罩、`api/export.py:31`、
+    `modes/__init__.py:27`），raw_clip 照样要过 scale/crop/eq/atempo 抖动 + x264 全量重编码；
+    而且 Task 9 的出口判据要求**九个模式全部**落在响度窗口内，给它开口子会直接打破那条。
     生产调用点必传（Phase C 是成片响度的唯一负责人）。
     """
     segments = plan.timeline
