@@ -898,7 +898,7 @@ git commit -m "feat(narration): copywriter 逐槽编剧，模板兜底就此没�
 - Modify: `service/dramaclip/engines/narration/pipeline.py:36-46`
 - Test: `service/tests/engines/narration/test_script_driver.py`、`service/tests/api/test_produce.py`
 
-- [ ] **Step 1: 写失败测试——每任务只选题一次**
+- [x] **Step 1: 写失败测试——每任务只选题一次**
 
 追加到 `service/tests/api/test_produce.py`（文件顶部需补 `import pytest`；`Harness`、`_seed_project_with_analysis`、`narration_api` 均已在该文件内）：
 
@@ -934,12 +934,12 @@ def test_style_selection_runs_once_per_job(
     assert len(calls) == 1, f"选题被调 {len(calls)} 次，应为每任务一次"
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd service && ../.venv/Scripts/python -m pytest tests/api/test_produce.py -q -k style_selection`
 Expected: FAIL —— `AttributeError: <module 'dramaclip.engines.narration.script_driver'> has no attribute 'resolve_run_style'`
 
-- [ ] **Step 3: `script_driver.resolve_run_style`**
+- [x] **Step 3: `script_driver.resolve_run_style`**
 
 `service/dramaclip/engines/narration/script_driver.py`：新增函数（放在 `script_dialogue_plan` 之前），并把 `script_dialogue_plan` 内的选题块整体删除：
 
@@ -985,7 +985,7 @@ def resolve_run_style(
 `style_directives=style_directives`；紧随其后的 `log("info", _style_log_line(...))` 一行删除（风格日志已随选题进 `resolve_run_style`，每任务打一次即可）。
 `_style_log_line` 与 `_excerpt`、`_SELECT_TIMEOUT_S` 都仍被 `resolve_run_style` 使用，留在本文件；`_SELECT_LINES_PER_EPISODE` 全仓库无引用，删除。
 
-- [ ] **Step 4: `api/narration.py` 任务级注入**
+- [x] **Step 4: `api/narration.py` 任务级注入**
 
 `service/dramaclip/api/narration.py`：
 
@@ -1031,7 +1031,7 @@ def _inject_run_settings(
 `_generate_one(context, mode, episodes, episode_inputs, dict(settings))`。
 6. 删除 `_run_generation`（第 153-186 行，全仓库无引用，已确认死码）。
 
-- [ ] **Step 5: `_generate_one` 收形参，删重复取数**
+- [x] **Step 5: `_generate_one` 收形参，删重复取数**
 
 ```python
 def _generate_one(
@@ -1093,7 +1093,7 @@ def _generate_one(
 
 （import 增 `from dramaclip.engines.narration import copywriter`。`if plan is None` 本任务仍保留——Task 5 让剧本链改抛错后，它天然只剩"非 dialogue 模式"一条路。）
 
-- [ ] **Step 6: 跑测试**
+- [x] **Step 6: 跑测试**
 
 Run: `cd service && ../.venv/Scripts/python -m pytest tests/api/test_produce.py tests/engines/narration/test_script_driver.py tests/api -q`
 Expected: `test_style_selection_runs_once_per_job` PASS。
@@ -1121,7 +1121,7 @@ def test_resolve_run_style_manual_skips_llm(monkeypatch) -> None:
     assert FakeLlmClient.calls == [], "手动指定风格不该发选题请求"
 ```
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add service/dramaclip/api/narration.py service/dramaclip/engines/narration/script_driver.py service/dramaclip/engines/narration/pipeline.py service/tests/api/test_produce.py service/tests/engines/narration/test_script_driver.py
@@ -1131,6 +1131,11 @@ git commit -m "refactor(narration): 口味层与跨集输入上提到任务级�
 ### Task 4 落地后的实测修正
 
 - 九模式在仓里有**三面镜子**：`narration_api.SUPPORTED_MODES`、`pipeline.MODE_LABELS`、`desktop/src/components/modeMeta.ts` 的 `MODE_INFO`。已加 `test_every_supported_mode_has_a_chinese_label` 钉住前两面（漏标签会让队列页露出英文模式名，本任务实测踩过）；第三面是 TS，service 侧的 pytest 够不着——**P-3 已知接受项**，随全站重排一并收口。
+- **两个同类的"失败没人接"残留，Task 5/6 按名接手**（都是本轮 Task 4 实测中撞出来的，不是假想）：
+  1. `executor.submit` **没有 done-callback**（执行池在 `service/dramaclip/service_app.py:70-71`，`submit` 在 `:146`）。任务一旦入队而未开跑，行会**永远停在 `pending`**，只有重启时的 `sweep_interrupted` 才清得掉。实测复现形状：同一个 `Harness` 的 executor 连投两个 produce job，第二个偶发（约 2/5）根本没进 `_run_produce`——`status='pending', progress=0.0, error=None`，线程栈里只有闲置 worker。生产用进程级单池，同样的两作业序列确实可发生。
+  2. 两个 runner **没有** `try/finally` 保护 `cancel_events`，只有一个逐模式的 `try/except` 加末尾一句无条件 `pop`。装配期的抛错已由 `2ef6289` 收口，但**在末尾 `pop` 之前的任何一处抛错仍会漏掉取消事件**（`_run_produce` 的渲染段就在保护圈外）。
+  修法同出一条：给 submit 挂 done-callback 兜住 terminal 状态与 `cancel_events.pop`，或把 runner 主体包进 `try/finally`。**Task 6 处理配音抛错语义时一并做**——那时"任务级失败"的路径会变多，不做就会多出一批僵尸行。
+- 派发时给实施者的路径 `service/dramaclip/api/transport/service_app.py` 是**错的**，实际在 `service/dramaclip/service_app.py`；顺带纠正"runner 已有 try/finally"这句假设，它并不成立。
 
 ---
 
