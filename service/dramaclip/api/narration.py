@@ -70,7 +70,6 @@ def generate_plans(context: AppContext, params: dict[str, Any]) -> dict[str, Any
         _run_generation_parallel,
         context,
         job_id,
-        project_id,
         done_episodes,
         modes,
         cancel_event,
@@ -113,7 +112,6 @@ def _inject_run_settings(
 def _run_generation_parallel(
     context: AppContext,
     job_id: str,
-    project_id: str,
     episodes: list[dict[str, Any]],
     modes: list[str],
     cancel_event: threading.Event,

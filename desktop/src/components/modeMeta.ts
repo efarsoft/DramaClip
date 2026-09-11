@@ -1,4 +1,4 @@
-/** 九种出片模式静态信息（展示用；权威定义 service/_MODE_LABELS）。 */
+/** 九种出片模式静态信息（展示用；权威定义 service/dramaclip/engines/narration/pipeline.py 的 MODE_LABELS）。 */
 
 export interface ModeInfoItem {
   readonly mode: string;
