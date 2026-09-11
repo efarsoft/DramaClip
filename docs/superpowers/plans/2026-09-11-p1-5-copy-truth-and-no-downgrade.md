@@ -156,7 +156,7 @@ git commit -m "docs(spec): 补降级裁决表并修正 P-1.5 出口口径（七�
 - Modify: `service/dramaclip/engines/narration/modes_p2.py`
 - Test: `service/tests/engines/narration/test_modes.py`、`test_modes_w5.py`、`test_modes_w8.py`、`test_modes_p2.py`
 
-- [ ] **Step 1: 写失败测试——槽位结构**
+- [x] **Step 1: 写失败测试——槽位结构**
 
 在 `service/tests/engines/narration/test_modes_w5.py` 末尾新增（既有 `test_ultra_short_structure` 的文案断言到 Step 9 一并改）：
 
@@ -173,12 +173,12 @@ def test_cross_slots_carry_role_and_window() -> None:
     assert set(by_id) == {text.id for text in plan.narration_texts}, "段与文案必须按 id 两两配对"
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd service && ../.venv/Scripts/python -m pytest tests/engines/narration/test_modes_w5.py -q`
 Expected: FAIL —— `AssertionError` 于 `text.text == ""`（当前是模板句）。
 
-- [ ] **Step 3: `NarrationText` 槽位化**
+- [x] **Step 3: `NarrationText` 槽位化**
 
 `service/dramaclip/engines/narration/models.py`，整块替换 `NarrationText`：
 
@@ -197,7 +197,7 @@ class NarrationText(BaseModel):
     window: tuple[float, float] | None = None
 ```
 
-- [ ] **Step 4: `modes.build_intro` 建槽位**
+- [x] **Step 4: `modes.build_intro` 建槽位**
 
 `service/dramaclip/engines/narration/modes/__init__.py`：在常量区加 `_INTRO_SLOT_ID = "intro-1"`，并把 `build_intro` 换成：
 
@@ -233,7 +233,7 @@ def build_intro(
 
 同时删除 `_fit_duration` 里的 `_ = intro_first` 空转行（`intro_first` 已在函数内被使用，注释也过期）。
 
-- [ ] **Step 5: `modes_w5` 删池、建槽位**
+- [x] **Step 5: `modes_w5` 删池、建槽位**
 
 `service/dramaclip/engines/narration/modes_w5.py`：
 
@@ -311,7 +311,7 @@ def build_ultra_short(
     )
 ```
 
-- [ ] **Step 6: `modes_w8` 删池**
+- [x] **Step 6: `modes_w8` 删池**
 
 `service/dramaclip/engines/narration/modes_w8.py`：删除 `narration_texts_for` 整个函数，`build_full` 换成（同时去掉 `project_name` / `genre` 两个形参）：
 
@@ -361,7 +361,7 @@ def build_full(
     )
 ```
 
-- [ ] **Step 7: `modes_p2` 删池（双音色保留）**
+- [x] **Step 7: `modes_p2` 删池（双音色保留）**
 
 `service/dramaclip/engines/narration/modes_p2.py`：两个 `build_*` 都去掉 `project_name` 形参，槽位职责替代模板句，音色仍由编排层决定：
 
@@ -446,7 +446,7 @@ def build_monologue(
     )
 ```
 
-- [ ] **Step 8: 改 `pipeline.build_plan` 的调用面**
+- [x] **Step 8: 改 `pipeline.build_plan` 的调用面**
 
 `service/dramaclip/engines/narration/pipeline.py`：
 
@@ -475,7 +475,7 @@ def build_monologue(
 3. 模块 docstring 第 3 行改为：
    `编排层只产出画面结构与旁白槽位；文案由 narration.copywriter 生成，TTS 由本模块回填。`
 
-- [ ] **Step 9: 更新既有单测的调用签名与断言**
+- [x] **Step 9: 更新既有单测的调用签名与断言**
 
 四个测试文件里所有 `build_*` 调用去掉被删形参，并把断言文案的语句改为断言槽位：
 
@@ -488,10 +488,10 @@ def build_monologue(
   `assert [s.narration_id for s in plan.timeline] == [t.id for t in plan.narration_texts]`。
 - `test_modes_p2.py` → `build_dual_host` / `build_monologue` 去掉 `"剧名"` 实参；文案断言改断言 `voice` 交替与 `slot` 非空。
 
-- [ ] **Step 10: 跑测试**
+- [x] **Step 10: 跑测试**
 
 Run: `cd service && ../.venv/Scripts/python -m pytest tests/engines/narration -q`
-Expected: PASS（`test_ducked_narration.py`、`test_script_episodes.py` 若因 `build_full` 签名报错，同法去掉多余实参）。
+Expected: PASS（`test_ducked_narration.py` 若因 `build_full` 签名报错，同法去掉多余实参）。
 
 Run: `cd service && ../.venv/Scripts/python -m pytest tests/api -q`
 Expected: 此时 `tests/api/test_narration_audio_chain.py` 会有失败——它直接 `build_full` 后合成，而文案已空。
@@ -509,14 +509,27 @@ Expected: 此时 `tests/api/test_narration_audio_chain.py` 会有失败——它
     return pipeline.synthesize_narration_texts(plan, {"tts.engine": "edge"}, tts_dir)
 ```
 
-重跑 `tests/api/test_narration_audio_chain.py` 至 PASS。
+**同一个替身还要打第二处**（计划原稿漏了）：`tests/engines/narration/test_ducked_narration.py:153`
+的 `test_full_narration_plan_maps_every_segment_to_own_text` 也走 `build_full` + 直接合成，
+空文案会让 `subtitle_text` 变成 `""` 而断言失败。两处的标记注释必须逐字一致，Task 6 靠它检索。
 
-- [ ] **Step 11: 提交**
+重跑 `tests/api/test_narration_audio_chain.py` 与 `tests/engines/narration` 至 PASS。
+
+- [x] **Step 11: 提交**
 
 ```bash
 git add service/dramaclip/engines/narration/models.py service/dramaclip/engines/narration/modes/__init__.py service/dramaclip/engines/narration/modes_w5.py service/dramaclip/engines/narration/modes_w8.py service/dramaclip/engines/narration/modes_p2.py service/dramaclip/engines/narration/pipeline.py service/tests/engines/narration service/tests/api/test_narration_audio_chain.py
 git commit -m "refactor(narration): 编排层退成槽位，六个模板文案池删除"
 ```
+
+### Task 2 落地后的实测修正
+
+- **Step 5 的 `build_ultra_short` 代码块无法通过 `ast.parse`**：cta 槽位串 `"...指向"结局更狠"并引导点击..."` 把 ASCII 双引号嵌在了双引号串里（6 个 ASCII 引号）。实施改用中文引号 `「结局更狠」`——与本仓其余文案一致，也是 `modes_p2.py:3`/`api/jobs.py:30`/`export.py:169` 的既有约定。**照抄本块的人会在第一个字符就撞语法错**。
+- `_ = intro_first` 确认是纯 no-op（`intro_first` 在函数内另有两处真实使用），删该行、留形参。
+- `modes_w8` 的模块 docstring 原写「模板降级，LLM 精修后替换」，删 `narration_texts_for` 后该句为假，一并改口。
+- 被删的 `test_modes_w8::narration_texts_for` 用例覆盖着一条真实不变量（`score>=85` 的**高潮**分支优先于位置性的**推进**分支），已移植为 `test_full_slot_roles_follow_narrative_position`。**注意位置算绪**：`build_full` 先按分数取 top-8 再按时间排序，所以"第 3 个场景"不等于"第 3 个槽位"——该用例首版断 index 2 即红（那格确实是高潮），正确值是 index 3。
+- `copywriter.py` 的 `_LOGGER`（本计划 Step 4 代码块自带）无任何使用者，与 `import logging` 一并删除。失败路径已抛完整信息、日志归 api 层，不留占位代码。
+- `test_ducked_narration.py::_plan` 与 `test_backfilled_plan_still_round_trips_through_json` 补了 `window` 的落库往返断言（`model_dump_json → model_validate_json` 才是 `repos/plans.py` 的真实路径；只做 python-mode `model_dump` 证不出什么）。
 
 ---
 
@@ -527,7 +540,7 @@ git commit -m "refactor(narration): 编排层退成槽位，六个模板文案�
 - Modify: `service/dramaclip/engines/narration/scriptwriter.py:25-54`（`_FUNDAMENTALS`→`FUNDAMENTALS`、`_dump_trace`→`dump_trace`）
 - Test: `service/tests/engines/narration/test_copywriter.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `service/tests/engines/narration/test_copywriter.py`：
 
@@ -656,17 +669,17 @@ def test_oversize_line_rejected(llm: Any) -> None:
     assert len(llm.calls) == 2, "超长应触发一次重问"
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd service && ../.venv/Scripts/python -m pytest tests/engines/narration/test_copywriter.py -q`
 Expected: `ModuleNotFoundError: No module named 'dramaclip.engines.narration.copywriter'`
 
-- [ ] **Step 3: 把编剧基本功转成可复用常量**
+- [x] **Step 3: 把编剧基本功转成可复用常量**
 
 `service/dramaclip/engines/narration/scriptwriter.py`：`_FUNDAMENTALS` → `FUNDAMENTALS`、`_dump_trace` → `dump_trace`（含各自唯一引用点：`_SYSTEM_PROMPT` 末尾的 `+ _FUNDAMENTALS`、`write_script_episodes` 里的 `_dump_trace(...)`）。改完执行
 `grep -rn "_FUNDAMENTALS\|_dump_trace" service/ --include=*.py` 确认无残留。
 
-- [ ] **Step 4: 写 `copywriter.py`**
+- [x] **Step 4: 写 `copywriter.py`**
 
 ```python
 """逐槽文案编剧：编排器给出"在哪段画面、以什么职责说话"，本模块让模型把话说出来。
@@ -821,12 +834,12 @@ def write_plan_copy(
     })
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd service && ../.venv/Scripts/python -m pytest tests/engines/narration/test_copywriter.py -q`
 Expected: PASS（6 项）。若 `_slot_block` 的台词断言失败，检查 `AsrSegment` 是否真有 `start/end/text` 三字段（`engines/analysis/models.py`）。
 
-- [ ] **Step 6: 变异检查（防止断言空转）**
+- [x] **Step 6: 变异检查（防止断言空转）**
 
 依次手工破坏以下三项，每项跑测试必须变红，改回后绿：
 1. `_sanitize` 的 `missing` 检查改成 `if False:` → `test_missing_slot_raises` 必须红。
@@ -835,12 +848,26 @@ Expected: PASS（6 项）。若 `_slot_block` 的台词断言失败，检查 `As
 
 Run（每轮）: `cd service && ../.venv/Scripts/python -m pytest tests/engines/narration/test_copywriter.py -q`
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add service/dramaclip/engines/narration/copywriter.py service/dramaclip/engines/narration/scriptwriter.py service/tests/engines/narration/test_copywriter.py
 git commit -m "feat(narration): copywriter 逐槽编剧，模板兜底就此没有去处"
 ```
+
+### Task 3 落地后的实测修正
+
+`_sanitize` 有**四条**拒绝分支：(a) 未知槽位 id、(b) 空答复、(c) 超长、(d) 漏槽。
+**本计划原稿给的六条用例只覆盖了 (c)(d)**——把 `key not in wanted` 或 `value == ""` 删掉，全套测试照绿。
+已补 `test_unknown_ids_never_count_as_answers` 与 `test_empty_answer_counts_as_no_answer` 两条。
+
+补用例时踩到一个值得记下的事实：**普通的"全部 id 都是垃圾"构造并不变异敏感**——`missing` 是拿我们自己的 id 去查表算的，
+未知 id 无论 filter 在不在都填不上槽位，删掉 filter 分支测试仍绿。真正能观察到该分支的唯一形态是
+**让某条垃圾 id 的行同时超长**：filter 在时它被丢弃、报错点名我们的槽位；filter 没了它就去抢报错、
+把失败原因换成一句关于我们从未请求过的 id 的长度抱怨。
+
+**规矩**：新增拒绝分支的用例必须当场做"删掉这行分支看它红不红"的验证，否则它只是把 happy path 又跑了一遍。
+另：`build_ultra_short` 的引号问题与 `_LOGGER` 之死见 Task 2 的实测修正节。
 
 ---
 
