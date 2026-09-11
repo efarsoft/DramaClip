@@ -192,7 +192,7 @@
 
 ### 4.6 引擎 `/engines`、设置 `/settings`
 
-沿用既有定案，本次只动三处：设置页新增「生产线默认值」分区（K 默认、时长档、风格默认）；输出四键在接线前标注「当前未生效：成片固定 1080×1920 / CRF 20」；页内补 `test_tts` / `test_asr` / `test_vlm` 三条连通自检（今天只有 `test_llm`），其中 `test_vlm` 即 §10 画面通道的配置入口——**视觉模型块留空即继承文本凭据**。
+沿用既有定案，本次只动三处：设置页新增「生产线默认值」分区（K 默认、时长档、风格默认）；输出四键接线前标注「当前未生效：成片固定 1080×1920」；**连通自检复用已存在的 `engine_configs.test`，不再新造 `settings.test_*`**（本规格原稿在此写了三条新方法，属重复造轮子，见 §11）。`engine_configs` 已声明 `llm/tts_cloud/asr_cloud/image/video` 五个域却**无任何消费者**，所以真正的工作是把消费端接过来，而不是再造一套配置面。
 **TTS 引擎仅两项**（OpenAI 兼容 + Edge 兜底）、**视觉模型凭据留空即继承文本凭据**——两条既有铁律不变，不在本次范围内改动。
 
 ### 4.7 工具箱 `/tools`
@@ -228,7 +228,7 @@
 2. 关掉显式角标必须二次确认并留痕（对应第九条的记录义务），且写明"平台可能拒发或自行二次加标"；
 3. **封面经图生图重绘后同样适用**——重绘属生成合成，不因"打底是真实帧"而豁免。这条会实打实影响封面观感与点击，是真实取舍，请在实施前确认接受。
 
-**与引擎页的分工**：`引擎` 页的 `test_tts` / `test_asr` 只验连通性（3 秒试听、样例转写一行）；工具箱出**成品文件**。两者共用同一套凭据，不重复配置。
+**与引擎页的分工**：`引擎` 页的 `engine_configs.test` 只验连通性（3 秒试听、样例转写一行）；工具箱出**成品文件**。两者共用同一份配置，不重复录入。
 
 ### 4.8 关于 `/about`（渲染为覆盖层）
 
@@ -275,7 +275,7 @@
 | 19 | 剧空间③ | 重叠率 | 显示角度间取材重叠 | 规划期新增度量 **新**（批1） |
 | 20 | 剧空间③ | 模式多选 | 作为 `plan_variants` 入参 | `narration.plan_variants(modes, k)` **新** |
 | 20b | 剧空间④ | 风格 / 字幕预设 / 原字幕处理三档 | 存项目设置 | `project.update_settings` + `narration.list_styles` + `subtitle.list_presets` ✓ |
-| 20c | 剧空间② | 字幕带探测 | 抽帧走视觉模型定位原字幕带 | `settings.test_vlm` **新**（画面通道，§10） |
+| 20c | 剧空间② | 字幕带探测 | 抽帧走视觉模型定位原字幕带 | `semantic/subtitle_probe` **新**（连通性复用 `engine_configs.test`） |
 | 21 | 剧空间④ | 连载模式开关 | 每集各出一条 | `narration.plan_variants(serial_per_episode=true)` **新**（批1） |
 | 22 | 剧空间④ | 开始出片 | 排队渲染并跳队列 | `export.submit(plan_ids)` **新**（批1，由 produce 拆出） |
 | 23 | 队列 | 进入页面 | 全量任务列表 | `jobs.list` / `jobs.get` **新** |
@@ -290,7 +290,7 @@
 | 32 | 成品 | 重命名 | 改片名 | `export.rename` **新** |
 | 33 | 成品 | 跳回方案 | 定位角度卡 | `narration.get_plan` **新** |
 | 34 | 设置 | 生产线默认值 | 存全局默认 | `settings.update` ✓ |
-| 35 | 引擎 | 连通自检 TTS/ASR/视觉 | 试听 / 样例转写 / 抽帧定位字幕带 | `settings.test_tts` / `test_asr` / `test_vlm` **新**（现仅 `test_llm`） |
+| 35 | 引擎 | 连通自检（各域） | 试听 / 样例转写 / 抽帧定位字幕带 | `engine_configs.test` **已存在**，缺的是按域实现（§11） |
 | 36 | 工具箱 | 转写取稿 | 单文件转写，不建项目 | `tools.transcribe` **新**（引擎 `transcriber` ✓） |
 | 37 | 工具箱 | 文案转字幕 | 生成 ASS/SRT 文件 | `tools.build_subtitle` **新**（引擎 `ass_generator` ✓） |
 | 38 | 工具箱 | 配音合成 | 出成品音频文件 | `tools.synthesize_speech` **新**（引擎 `tts.factory` ✓） |
@@ -322,9 +322,9 @@
 | **核心** | `project.batch_create`、`project.list` 阶段聚合 | 批量新增项目、剧库页、工作台待办 |
 | **度量** | 角度重叠度量、`analysis.results` 覆盖度字段 | 阶段③ 重叠率与覆盖度告警 |
 | **度量** | 成片自检四项、`export.set_cover` | 成品库徽章与逐片封面 |
-| **画面** | `semantic/subtitle_probe` + `settings.test_vlm` + `episode_analysis.subtitle_zone` | 阶段④ 原字幕三档、批次 3 画面高光（§10） |
+| **画面** | `semantic/subtitle_probe` + `engine_configs` 增 `vision` 域 + `episode_analysis.subtitle_zone` | 阶段④ 原字幕三档、批次 3 画面高光（§10、§11） |
 | **图像** | `tools.generate_image` + 图像模型凭据与下载 | 工具箱图片生成、封面生成器重绘（§4.7） |
-| **旁支** | `settings.test_tts` / `test_asr`、`export.delete` / `export.rename`、更新检查器（关于页手动检查） | 引擎自检、成品整理、关于页 |
+| **旁支** | `export.delete` / `export.rename`、更新检查器（关于页手动检查） | 成品整理、关于页 |
 
 **拆分 `produce` 是单点解锁**：规划与渲染解耦后，阶段③ 才可能"只看方案、反复重掷、不付渲染成本"，队列页才可能按方案粒度取消重试，成本预估才可能精确到条。它是本规格里优先级最高的后端动作。
 
@@ -400,3 +400,46 @@ P-3 依赖 P-1、P-2；P-2 依赖 P-1 的 `jobs.*`（重掷与规划都要进队
 **后续复用（批次 3 起）**：同一条通道直接支撑画面高光（构图/动作/情绪表达）、竖屏重构图、成片自检的"画面到底好不好看"。也就是说批次 3 的认知层不必再另起一次视觉接入。
 
 **归属批次 2 而非 3 的理由**：字幕定位自身就有独立价值，且与云端 ASR、繁简归一同属"输入与呈现的地基"，三者一次接完，不必等认知层设计定案。
+
+---
+
+## 11. 服务对接清单（一个都不能遗漏，且必须可审计）
+
+**为什么用这张表而不是一个列表**：我无法靠回忆保证"齐了"。所以每行都配一条**可复核的证据命令**——任何一次评审都能重跑并发现新漏项。表的三列刻意分开，因为本轮实测发现一个反直觉事实：**配置面常常已经建好，缺的全是消费者**（`engine_configs` 就是这种孤岛）。
+
+| # | 服务面 | 配置面 | 消费端 | 连通自检 | 归属 | 证据命令 |
+|---|---|---|---|---|---|---|
+| 1 | LLM 文本（编剧/冲突/题材/风格/角度） | `llm.*` 单例 ✓ + `engine_configs[llm]` 多实例 ✓ | `llm_client.py` **只读 `llm.*`**，不读 engine_configs | `settings.test_llm` ✓ | P-1.5 | `grep -n "llm\." engines/semantic/llm_client.py` |
+| 2 | ASR 本地 | `asr.engine/model/device/language` ✓ | `analysis/runtime.py` ✓ | **缺** | P-1.5 | `grep -n "asr\." engines/analysis/runtime.py` |
+| 3 | **ASR 云端**（OpenAI `/audio/transcriptions`） | `engine_configs[asr_cloud]` **已声明** | **完全无** | 缺 | 批次 2 | `grep -rn "transcriptions\|asr_cloud" dramaclip/` |
+| 4 | TTS 本地 Kokoro | `tts.engine/voice` ✓ | `tts/factory.py` ✓ | 缺 | P-1.5 | `grep -n "kokoro" engines/tts/factory.py` |
+| 5 | TTS Edge 兜底 | 同上 | ✓ | 缺 | P-1.5 | 同上 |
+| 6 | **TTS OpenAI 兼容**（`/audio/speech`） | `engine_configs[tts_cloud]` **已声明** | **完全无** | 缺 | 批次 2 | `grep -rn "audio/speech\|tts_cloud" dramaclip/` |
+| 7 | **VLM 视觉**（字幕带→画面高光） | `engine_configs` **无 `vision` 域** | 无 | 无 | 批次 2 | `grep -n "_DOMAINS" api/engine_configs.py` |
+| 8 | **图像生成**（文生图 + 图生图） | `engine_configs[image]` **已声明** | **完全无** | 缺 | 批次 4 | `grep -rn "generate_image" dramaclip/` |
+| 9 | **视频生成** | `engine_configs[video]` **已声明** | 完全无 | 缺 | **未立项** | 同上——域已挖坑但产品从未讨论过要不要做 |
+| 10 | 说话人分离（dual_host 真按角色分派） | 无 | 无（现为 A/B 交替音色模板） | 无 | **未决策** | `grep -n "speaker" engines/` |
+| 11 | 模型下载多源 | `download.hf_mirror/ms_base` ✓ | `model_manager/downloader.py` ✓ | n/a | 已完成 | — |
+| 12 | GPU 探测 | 无 | `infra/gpu.py` ✓ | n/a | 已完成 | — |
+| 13 | **凭据安全存储** | 明文存 `data.db`（本轮实测可见） | — | — | Backlog | `grep -n "api_key" data/data.db` 能读到即为证 |
+| 14 | **更新检查器** | 无 | 无 | — | P-3（关于页） | `grep -rn "checkForUpdates\|autoUpdater" desktop/` |
+
+**三条从这张表里长出来的结论**：
+
+1. **`engine_configs` 是孤岛，这是本轮最大的结构性发现**。它注册了 6 个方法、声明五个域、还有 `engine_configs.test` 端点，但**全仓库无任何消费者**——所有引擎仍读扁平 `settings`。所以"对接服务"的实际工作量不在建配置面（已建），而在**把消费端逐个切过去**。本规格原稿在此犯了重复造轮子的错（新提 `settings.test_tts/test_asr/test_vlm`），已更正为复用 `engine_configs.test`。
+2. **`video` 域是别人替我们挖的坑，产品从未讨论要不要做视频生成**。要么明确划入非目标，要么立项；留着会让后续每个会话都重新困惑一次。
+3. **`vision` 域缺失会卡住批次 2 的画面通道**——它是这张表里唯一"消费者要先等于配置面"的项。
+
+**完整性怎么保证**：这张表由 `config.DEFAULTS` 全量键 + `engine_configs._DOMAINS` + `model_manager/registry.py` 的 kind + 各 `factory/runtime` 的读设置点交叉导出，而非回忆。**每次新增服务面必须同时加一行并填三列**，缺列即视为未对接。
+
+---
+
+## 12. 批次顺序定案
+
+**用户定案（2026-09-10）**：`P-1 → P-1.5 → P-2 → P-2.5 → P-3`。
+
+**P-1.5 · 文案真值化 + 禁止降级**（新增，插在产能放大之前）：
+
+- **为什么必须在 P-2 之前**：九模式真机门禁实测 `planner` 列——**8 个模式是 `rule`，只有 `dialogue_narration` 是 `llm_script`**。cross/ultra_short/full 的旁白文案**本来就是硬编码模板池**，不是"降级到模板"。`plan_variants` 一上线就是 K=3 × 多模式 = 一次 27 条模板文案片，**产能会把质量问题放大 27 倍**，与"成片质量第一优先级"直接冲突。
+- **内容**：① 把 cross/ultra_short/full/intro 的文案接上真 LLM 通路（复用 dialogue 已跑通的编剧链）；② 把 §11 那张"降级分类表"里**禁止级**的全部改为抛错（失败粒度是单条方案，不整批停摆）；③ 混音响度定目标（九模式实测：带旁白 -22~-30 dB vs 纯原声 -12 dB，六个样本同向，`amix` 默认归一化实锤）。
+- **出口**：九模式重跑门禁，`planner` 列除 `raw_clip`/`subtitle_flow` 外全为 `llm_script`，且响度落在目标区间。
