@@ -7,7 +7,7 @@ import threading
 from typing import Any
 
 from dramaclip.api.context import AppContext
-from dramaclip.api.export import render_export
+from dramaclip.api.export import ExportRun, render_export
 from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration import scriptwriter
 from dramaclip.engines.narration import styles as styles_lib
@@ -357,14 +357,21 @@ def _run_produce(
                 context.conn, project_id, str(plan_row["id"]), mode
             )
             report(30, f"渲染{label}成片")
+
+            def scale_report(percent: float, message: str) -> None:
+                """渲染进度 0-100 映射到本轮模式的 30~100 区间（编排占前 30）。"""
+                report(30 + percent * 0.7, message)
+
             render_export(
                 context,
-                export_id,
-                project_id,
-                plan_row,
-                plan_data,
-                cancel_event=cancel_event,
-                report=lambda p, m, _r=report, _b=base: _r(30 + p * 0.7, m),
+                ExportRun(
+                    export_id=export_id,
+                    project_id=project_id,
+                    plan_row=plan_row,
+                    plan_data=plan_data,
+                    cancel_event=cancel_event,
+                ),
+                report=scale_report,
             )
         except Exception as exc:
             failures.append(f"{label}: {exc}")

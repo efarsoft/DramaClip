@@ -101,8 +101,15 @@ def test_inprocess_failure_still_records_error(
 
     with pytest.raises(Exception, match="源文件缺失"):
         export_api.render_export(
-            context, export_id, project_id, plan_row, plan_data,
-            cancel_event=threading.Event(), report=lambda _p, _m: None,
+            context,
+            export_api.ExportRun(
+                export_id=export_id,
+                project_id=project_id,
+                plan_row=plan_row,
+                plan_data=plan_data,
+                cancel_event=threading.Event(),
+            ),
+            report=lambda _p, _m: None,
         )
 
     # render_export 本身不落库；落库由调用方 _run_export 的 except 负责

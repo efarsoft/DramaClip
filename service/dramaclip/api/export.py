@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +46,56 @@ def register(router: Router, context: AppContext) -> None:
     router.register("export.list_works", lambda params: list_works(context, params))
 
 
+@dataclass(frozen=True)
+class ExportRun:
+    """一次导出渲染的不变输入（export_id 之外全部只读，渲染期间不会改写）。
+
+    收成对象前这些值以位置参数在 start/retry/produce → _run_export → render_export
+    链路上传递，`export_id` 与 `project_id` 同为 str 且相邻——传颠倒不会报错，
+    只会把成片渲染进另一个项目。三处调用点共用一个名字即是收益。
+    不含 job_id：produce 路径复用 render_export 时那个 job 是 produce job，不是 export job。
+    """
+
+    export_id: str
+    project_id: str
+    plan_row: dict[str, Any]
+    plan_data: PlanData
+    cancel_event: threading.Event
+
+
+def _submit_export(
+    context: AppContext,
+    *,
+    export_id: str,
+    project_id: str,
+    plan_row: dict[str, Any],
+    plan_data: PlanData,
+) -> str:
+    """建 export 任务 → 注册取消事件 → 投递执行池，返回 job_id。
+
+    start 与 retry 曾各写一遍这四步；取消事件的注册与 _run_export finally 里的回收
+    必须成对，两处各写时漏掉一半就留下 cancel_events 无界增长。
+    """
+    job_id = context.job_store.create("export", ref_id=export_id)
+    cancel_event = threading.Event()
+    context.cancel_events[job_id] = cancel_event
+    context.executor.submit(
+        _run_export,
+        context,
+        job_id,
+        ExportRun(
+            export_id=export_id,
+            project_id=project_id,
+            plan_row=plan_row,
+            plan_data=plan_data,
+            cancel_event=cancel_event,
+        ),
+    )
+    return job_id
+
+
 def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """新建一次导出：建记录后投递渲染任务（渲染本身异步，进度走 jobs）。"""
     plan_id = str(params.get("plan_id", ""))
     plan_row = plans_repo.get(context.conn, plan_id)
     if plan_row is None:
@@ -60,11 +111,12 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         plan_id=plan_id,
         narration_mode=str(plan_row["narration_mode"]),
     )
-    job_id = context.job_store.create("export", ref_id=export_id)
-    cancel_event = threading.Event()
-    context.cancel_events[job_id] = cancel_event
-    context.executor.submit(
-        _run_export, context, job_id, export_id, project_id, plan_row, plan_data, cancel_event
+    job_id = _submit_export(
+        context,
+        export_id=export_id,
+        project_id=project_id,
+        plan_row=plan_row,
+        plan_data=plan_data,
     )
     return {"job_id": job_id, "export_id": export_id}
 
@@ -88,12 +140,12 @@ def retry(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     # 另一个在此被判不可重试，避免双双渲染进同一产物路径。
     if not exports_repo.reset_for_retry(context.conn, export_id):
         raise RpcDomainError(_ERR_EXPORT_NOT_RETRYABLE, "该导出已被其他请求抢先重试")
-    job_id = context.job_store.create("export", ref_id=export_id)
-    cancel_event = threading.Event()
-    context.cancel_events[job_id] = cancel_event
-    context.executor.submit(
-        _run_export, context, job_id, export_id, str(record["project_id"]),
-        plan_row, plan_data, cancel_event,
+    job_id = _submit_export(
+        context,
+        export_id=export_id,
+        project_id=str(record["project_id"]),
+        plan_row=plan_row,
+        plan_data=plan_data,
     )
     return {"job_id": job_id, "export_id": export_id}
 
@@ -138,15 +190,20 @@ def _output_size(settings: config.Settings) -> tuple[int, int]:
 
 def render_export(
     context: AppContext,
-    export_id: str,
-    project_id: str,
-    plan_row: dict[str, Any],
-    plan_data: PlanData,
+    run: ExportRun,
     *,
-    cancel_event: threading.Event,
-    report: Any,
+    report: Callable[[float, str], None],
 ) -> Path:
-    """渲染核心：剪辑→遮罩→字幕→编码→写成品记录（失败抛异常，不管理 job）。"""
+    """渲染核心：剪辑→遮罩→字幕→编码→写成品记录（失败抛异常，不管理 job）。
+
+    入参收成 ExportRun 后本函数不再关心 job 与取消事件的注册，只按 run 渲染。
+    """
+    export_id = run.export_id
+    project_id = run.project_id
+    plan_row = run.plan_row
+    plan_data = run.plan_data
+    cancel_event = run.cancel_event
+
     output_root = context.data_dir / "outputs" / project_id
     output_root.mkdir(parents=True, exist_ok=True)
     project = projects_repo.get(context.conn, project_id)
@@ -217,36 +274,25 @@ def render_export(
     return out_path
 
 
-def _run_export(
-    context: AppContext,
-    job_id: str,
-    export_id: str,
-    project_id: str,
-    plan_row: dict[str, Any],
-    plan_data: PlanData,
-    cancel_event: threading.Event,
-) -> None:
+def _run_export(context: AppContext, job_id: str, run: ExportRun) -> None:
+    """执行池入口：把一次 ExportRun 跑成 jobs 表里的一条终态记录。
+
+    进度双写（jobs + export_jobs）是有意的：前者给队列页、后者给出片记录页。
+    渲染失败只记不抛——异常已写进两条记录，再抛给未来得及看的调用方没有意义。
+    """
     context.job_store.mark_running(job_id)
 
     def report(percent: float, message: str) -> None:
         context.job_store.set_progress(job_id, round(percent, 1), message)
         context.notifier.progress(job_id, round(percent, 1), message)
-        exports_repo.set_progress(context.conn, export_id, round(percent, 1))
+        exports_repo.set_progress(context.conn, run.export_id, round(percent, 1))
 
     try:
-        out_path = render_export(
-            context,
-            export_id,
-            project_id,
-            plan_row,
-            plan_data,
-            cancel_event=cancel_event,
-            report=report,
-        )
+        out_path = render_export(context, run, report=report)
         context.job_store.mark_completed(job_id)
         context.notifier.log("info", f"导出完成: {out_path.name}")
     except Exception as exc:
-        exports_repo.mark_failed(context.conn, export_id, str(exc))
+        exports_repo.mark_failed(context.conn, run.export_id, str(exc))
         context.job_store.mark_failed(job_id, str(exc))
         context.notifier.log("error", f"导出失败: {exc}")
     finally:

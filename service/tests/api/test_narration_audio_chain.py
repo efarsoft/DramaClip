@@ -103,11 +103,13 @@ def _render(
     )
     export_api.render_export(
         context,  # type: ignore[arg-type]
-        export_id,
-        project_id,
-        plan_row,
-        plan_data,
-        cancel_event=threading.Event(),
+        export_api.ExportRun(
+            export_id=export_id,
+            project_id=project_id,
+            plan_row=plan_row,
+            plan_data=plan_data,
+            cancel_event=threading.Event(),
+        ),
         report=lambda _p, _m: None,
     )
     return plan_data, list(commands)
