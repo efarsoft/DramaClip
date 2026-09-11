@@ -12,6 +12,8 @@ dependencies = [
   "pydantic>=2.7",
   # edge-tts：片头解说旁白合成（云端免费，无需本地模型；登记理由见 docs/04 准入制）
   "edge-tts>=7.0",
+  # jieba：OCR 字幕热词挖掘（全剧高频专名 → ASR hotwords 事前注入）
+  "jieba>=0.42",
 ]
 
 [project.optional-dependencies]

@@ -64,9 +64,16 @@ def _fuse_segment(
         min(o.start for o in ocr_hits) - _WINDOW_S,
         max(o.end for o in ocr_hits) + _WINDOW_S,
     )
-    chars = [w for w in seg.words if span[0] <= (w.start + w.end) / 2 <= span[1]]
-    if not chars:
+    hit_words = [w for w in seg.words if span[0] <= (w.start + w.end) / 2 <= span[1]]
+    if not hit_words:
         return [seg]
+    # 词炸成单字单元：whisper 词是多字的（"你是"=1 词），与 OCR 单字粒度对齐
+    # 不一致时 NW 会走出"OCR 补字 + ASR 整词赢回"的叠字路径（真机实证）
+    chars = [
+        WordSpan(start=w.start, end=w.end, word=ch, probability=w.probability)
+        for w in hit_words
+        for ch in w.word
+    ]
     lines = "".join(o.text for o in sorted(ocr_hits, key=lambda o: o.start)).replace(" ", "")
     ocr_conf = sum(o.conf for o in ocr_hits) / len(ocr_hits)  # 条置信均值为该段 OCR 置信
     ocr_chars = [c for c in lines]

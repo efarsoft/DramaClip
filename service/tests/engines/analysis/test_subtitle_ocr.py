@@ -62,3 +62,10 @@ def test_merge_runs_empty_frame_splits_runs() -> None:
     results = [(0.0, boxes("你好")), (1.0, []), (2.0, boxes("你好"))]
     segments = _merge_runs(results)
     assert len(segments) == 2, "中间无字帧断开运行，不跨帧拼接"
+
+
+def test_merge_runs_drops_single_char_fragments() -> None:
+    boxes = lambda t: [(t, 0.66, 0.68, 0.9)]  # noqa: E731
+    results = [(0.0, boxes("你")), (1.0, boxes("你是谁"))]
+    segments = _merge_runs(results)
+    assert [s.text for s in segments] == ["你是谁"], "单字残条丢弃，不污染对齐"

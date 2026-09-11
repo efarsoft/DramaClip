@@ -86,6 +86,7 @@ function SegmentRow({
         <span style={{ fontFamily: tokens.fontFamilyMono, fontSize: tokens.fontMicro, color: tokens.textTertiary, flexShrink: 0 }}>
           -{formatClock(segment.end)}
         </span>
+        <SourceBadge source={segment.source} />
         <span
           style={{ color: tokens.textPrimary, cursor: 'text' }}
           onClick={() => {
@@ -153,5 +154,33 @@ function SeekButton({
     >
       {text}
     </button>
+  );
+}
+
+function SourceBadge({ source }: { source: string | undefined }): React.ReactElement | null {
+  if (source === 'ocr_fixed') {
+    return <Chip text="OCR 校对" color={tokens.colorSuccess} />;
+  }
+  if (source === 'review') {
+    return <Chip text="待复核" color={tokens.colorWarning} />;
+  }
+  return null;
+}
+
+function Chip({ text, color }: { text: string; color: string }): React.ReactElement {
+  return (
+    <span
+      style={{
+        flexShrink: 0,
+        fontSize: tokens.fontMicro,
+        lineHeight: '14px',
+        padding: '0 6px',
+        borderRadius: tokens.radiusChip,
+        border: `1px solid ${color}`,
+        color,
+      }}
+    >
+      {text}
+    </span>
   );
 }

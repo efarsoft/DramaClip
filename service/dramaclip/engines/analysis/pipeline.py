@@ -33,6 +33,7 @@ def analyze_episode(
     *,
     cancel: threading.Event | None = None,
     report: ProgressReporter | None = None,
+    hotwords: str = "",
 ) -> EpisodeRawAnalysis:
     """执行单集第一层分析。cancel 置位在步骤间隙生效。"""
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -50,7 +51,7 @@ def analyze_episode(
     if _cancelled():
         raise runner.FfmpegError("已取消", cancelled=True)
     _emit(0.2, f"ASR 转写（{transcriber.name}）")
-    asr_segments = transcriber.transcribe(wav_path, language=language)
+    asr_segments = transcriber.transcribe(wav_path, language=language, hotwords=hotwords)
     if _cancelled():
         raise runner.FfmpegError("已取消", cancelled=True)
     _emit(0.55, "场景切割")

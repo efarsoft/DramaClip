@@ -29,6 +29,7 @@ _BAND_EXPAND = 0.04       # 字幕带上下各扩 4% 画面高，容納描边/�
 _HEAD_PAD_S = 0.5         # 字幕条起点向前补（采样间隔一半）
 _TAIL_PAD_S = 1.0         # 字幕条结尾向后补（采样间隔 + 消失延迟）
 _MERGE_RATIO = 0.85       # 相邻帧文本相似度阈值（OCR 抖动容差）
+_MIN_BAR_CHARS = 2        # 字幕条最短字数：单字残条=切镜半帧噪声
 
 # OCR 单帧结果：文本 + 归一化纵向位置（top, bottom）
 FrameResult = list[tuple[str, float, float, float]]
@@ -176,7 +177,8 @@ def _merge_runs(results: list[tuple[float, FrameResult]]) -> list[OcrSegment]:
     run_confs: list[float] = []
 
     def flush() -> None:
-        if run_text is None:
+        # 单字残条 = 快速切镜采到半帧字幕，只会污染融合对齐，整条丢弃
+        if run_text is None or len(run_text.strip()) < _MIN_BAR_CHARS:
             return
         segments.append(
             OcrSegment(

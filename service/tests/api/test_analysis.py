@@ -30,7 +30,9 @@ class FakeTranscriber:
     def name(self) -> str:
         return "fake"
 
-    def transcribe(self, wav_path: Path, language: str = "zh") -> list[AsrSegment]:
+    def transcribe(
+        self, wav_path: Path, language: str = "zh", *, hotwords: str = ""
+    ) -> list[AsrSegment]:
         if self.delay_s:
             time.sleep(self.delay_s)
         return [AsrSegment(start=0.2, end=1.0, text="测试台词")]

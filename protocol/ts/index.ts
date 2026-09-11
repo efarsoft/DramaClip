@@ -109,6 +109,8 @@ export interface AsrSegment {
   readonly text: string;
   readonly speaker?: string;
   readonly emotion?: string;
+  /** 文本来源：ocr_fixed=OCR 校对过；review=待人工复核；缺省=纯 ASR */
+  readonly source?: string;
 }
 
 export interface EpisodeAnalysisResult {

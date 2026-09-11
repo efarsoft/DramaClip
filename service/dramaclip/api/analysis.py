@@ -8,7 +8,15 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext
-from dramaclip.engines.analysis import fusion, pipeline, runtime, subtitle_ocr
+from dramaclip.engines.analysis import (
+    fusion,
+    pipeline,
+    runtime,
+    subtitle_ocr,
+)
+from dramaclip.engines.analysis import (
+    hotwords as hotwords_engine,
+)
 from dramaclip.engines.analysis import prescreen as prescreen_engine
 from dramaclip.engines.analysis.models import (
     AsrSegment,
@@ -326,18 +334,24 @@ def _run_job(
     targets: list[dict[str, Any]],
     cancel_event: threading.Event,
 ) -> None:
-    """执行池任务：逐集分析，单集失败不中断其余；进度经 jobs 表 + 通知双通道。"""
+    """执行池任务：全剧 OCR→热词→逐集分析，单集失败不中断其余。"""
     context.job_store.mark_running(job_id)
     projects_repo.set_status(context.conn, project_id, "analyzing")
     total = len(targets)
     failures = 0
     language = runtime.language(context.settings)
     try:
+        bars_by_episode, hotwords = _mine_hotwords(context, targets, cancel_event)
         for index, episode in enumerate(targets):
             if cancel_event.is_set():
                 context.job_store.mark_cancelled(job_id)
                 return
-            if not _analyze_one(context, job_id, episode, index, total, language, cancel_event):
+            episode_id = str(episode["id"])
+            bars = bars_by_episode.get(episode_id)
+            if not _analyze_one(
+                context, job_id, episode, index, total, language, cancel_event,
+                ocr_bars=bars, hotwords=hotwords,
+            ):
                 failures += 1
         context.job_store.mark_completed(job_id)
     except Exception as exc:  # 引擎级致命错误（如模型加载失败）
@@ -358,6 +372,9 @@ def _analyze_one(
     total: int,
     language: str,
     cancel_event: threading.Event,
+    *,
+    ocr_bars: list[OcrSegment] | None = None,
+    hotwords: str = "",
 ) -> bool:
     """分析单集；返回是否成功（失败标记后继续其余集）。"""
     episode_id = str(episode["id"])
@@ -377,13 +394,14 @@ def _analyze_one(
             language=language,
             cancel=cancel_event,
             report=report,
+            hotwords=hotwords,
         )
         semantic_result = semantic_pipeline.enhance(raw, context.settings)
     except Exception as exc:
         episodes_repo.set_status(context.conn, episode_id, "failed")
         context.notifier.log("error", f"{label} 分析失败: {exc}")
         return False
-    asr_segments, ocr_segments = _fuse_ocr(context, episode, raw.asr_segments)
+    asr_segments, ocr_segments = _fuse_ocr(context, episode, raw.asr_segments, ocr_bars)
     analysis_repo.upsert(
         context.conn,
         episode_id,
@@ -405,28 +423,64 @@ def _fuse_ocr(
     context: AppContext,
     episode: dict[str, Any],
     asr: list[AsrSegment],
+    ocr_bars: list[OcrSegment] | None = None,
 ) -> tuple[list[AsrSegment], list[OcrSegment] | None]:
     """硬字幕 OCR 通道 + 融合（analysis.ocr_enabled 默认开）。
 
+    ocr_bars：全剧 OCR 阶段预提取的字幕条；缺省时单集现抽（兼容直跑路径）。
     依赖缺失（ml extras 未装）静默回退纯 ASR；运行失败留痕不阻塞分析。
     """
     if context.settings.get("analysis.ocr_enabled", "1") != "1":
         return asr, None
+    if ocr_bars is None:
+        ocr_bars = _extract_bars(context, episode)
+        if ocr_bars is None:
+            return asr, None
+    if not ocr_bars:
+        return asr, None
+    return fusion.fuse(asr, ocr_bars), ocr_bars
+
+
+def _extract_bars(context: AppContext, episode: dict[str, Any]) -> list[OcrSegment] | None:
+    """单集 OCR 抽取；失败返回 None 并留痕（不阻塞分析主链路）。"""
     duration = float(episode["duration"] or 0)
     if duration <= 0:
-        return asr, None
+        return None
     try:
-        ocr = subtitle_ocr.extract_subtitles(
+        return subtitle_ocr.extract_subtitles(
             Path(str(episode["source_path"])),
             context.work_dir / f"ocr_{episode["id"]}",
             duration_s=duration,
         )
     except ImportError:
-        return asr, None  # rapidocr 未安装：ml extras 约定的纯 ASR 路径
+        return None  # rapidocr 未安装：ml extras 约定的纯 ASR 路径
     except Exception as exc:  # noqa: BLE001 - OCR 失败不影响分析主链路
         context.notifier.log("warn", f"OCR 字幕通道失败（不影响分析）: {exc}")
-        return asr, None
-    if not ocr:
-        return asr, None
-    return fusion.fuse(asr, ocr), ocr
+        return None
+
+
+def _mine_hotwords(
+    context: AppContext,
+    targets: list[dict[str, Any]],
+    cancel_event: threading.Event,
+) -> tuple[dict[str, list[OcrSegment]], str]:
+    """阶段 A：全剧 OCR 抽取（落库）→ 挖掘全剧热词表。"""
+    bars_by_episode: dict[str, list[OcrSegment]] = {}
+    if context.settings.get("analysis.ocr_enabled", "1") != "1":
+        return bars_by_episode, ""
+    for episode in targets:
+        if cancel_event.is_set():
+            break
+        episode_id = str(episode["id"])
+        bars = _extract_bars(context, episode)
+        if not bars:
+            continue
+        bars_by_episode[episode_id] = bars
+        analysis_repo.update_ocr_segments(
+            context.conn, episode_id, json.dumps([b.model_dump() for b in bars])
+        )
+    hotwords = hotwords_engine.mine([b for bars in bars_by_episode.values() for b in bars])
+    if hotwords:
+        context.notifier.log("info", f"全剧热词表：{hotwords}")
+    return bars_by_episode, hotwords
 

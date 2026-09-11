@@ -83,3 +83,15 @@ def test_no_words_returns_untouched() -> None:
 def test_empty_ocr_returns_untouched() -> None:
     seg = _seg("顾霆琛你是谁")
     assert fuse([seg], []) == [seg]
+
+
+def test_multi_char_asr_words_no_duplication() -> None:
+    """whisper 词是多字 token：与 OCR 单字对齐不得产出叠字（真机实证缺陷）。"""
+    words = [
+        WordSpan(start=10.0, end=10.7, word="你是", probability=0.95),
+        WordSpan(start=10.7, end=11.0, word="谁", probability=0.12),
+    ]
+    seg = AsrSegment(start=10.0, end=11.0, text="你是谁", words=words)
+    ocr = [OcrSegment(start=9.8, end=11.2, text="你是谁", conf=0.66)]
+    result = fuse([seg], ocr)
+    assert result[0] is seg, "对齐结果与原文一致 → 段保留，不得叠字"
