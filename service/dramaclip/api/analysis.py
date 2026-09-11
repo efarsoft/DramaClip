@@ -8,12 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext
-from dramaclip.engines.analysis import pipeline, runtime
+from dramaclip.engines.analysis import fusion, pipeline, runtime, subtitle_ocr
 from dramaclip.engines.analysis import prescreen as prescreen_engine
 from dramaclip.engines.analysis.models import (
     AsrSegment,
     AudioFeatures,
     EpisodeRawAnalysis,
+    OcrSegment,
     SceneInfo,
 )
 from dramaclip.engines.semantic import pipeline as semantic_pipeline
@@ -382,15 +383,50 @@ def _analyze_one(
         episodes_repo.set_status(context.conn, episode_id, "failed")
         context.notifier.log("error", f"{label} 分析失败: {exc}")
         return False
+    asr_segments, ocr_segments = _fuse_ocr(context, episode, raw.asr_segments)
     analysis_repo.upsert(
         context.conn,
         episode_id,
-        asr_segments=json.dumps([seg.model_dump() for seg in raw.asr_segments]),
+        asr_segments=json.dumps([seg.model_dump() for seg in asr_segments]),
         scene_data=json.dumps([scene.model_dump() for scene in raw.scenes]),
         audio_features=raw.audio.model_dump_json(),
         conflict_scores=json.dumps([s.model_dump() for s in semantic_result.conflict_scores]),
         highlights=json.dumps([h.model_dump() for h in semantic_result.highlights]),
         genre=semantic_result.genre or None,
+        ocr_segments=(
+            json.dumps([o.model_dump() for o in ocr_segments]) if ocr_segments else None
+        ),
     )
     episodes_repo.set_status(context.conn, episode_id, "done")
     return True
+
+
+def _fuse_ocr(
+    context: AppContext,
+    episode: dict[str, Any],
+    asr: list[AsrSegment],
+) -> tuple[list[AsrSegment], list[OcrSegment] | None]:
+    """硬字幕 OCR 通道 + 融合（analysis.ocr_enabled 默认开）。
+
+    依赖缺失（ml extras 未装）静默回退纯 ASR；运行失败留痕不阻塞分析。
+    """
+    if context.settings.get("analysis.ocr_enabled", "1") != "1":
+        return asr, None
+    duration = float(episode["duration"] or 0)
+    if duration <= 0:
+        return asr, None
+    try:
+        ocr = subtitle_ocr.extract_subtitles(
+            Path(str(episode["source_path"])),
+            context.work_dir / f"ocr_{episode["id"]}",
+            duration_s=duration,
+        )
+    except ImportError:
+        return asr, None  # rapidocr 未安装：ml extras 约定的纯 ASR 路径
+    except Exception as exc:  # noqa: BLE001 - OCR 失败不影响分析主链路
+        context.notifier.log("warn", f"OCR 字幕通道失败（不影响分析）: {exc}")
+        return asr, None
+    if not ocr:
+        return asr, None
+    return fusion.fuse(asr, ocr), ocr
+

@@ -19,6 +19,7 @@ PRESCREEN_THRESHOLD = 70  # 预筛推荐线：评分量纲 0-100（prescreen 四
 DEFAULTS: dict[str, str] = {
     "analysis.full_threshold": "15",
     "analysis.prescreen_threshold": str(PRESCREEN_THRESHOLD),
+    "analysis.ocr_enabled": "1",
     "asr.engine": "faster_whisper",
     "asr.model": "small",
     "asr.device": "auto",
