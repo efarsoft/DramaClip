@@ -13,7 +13,9 @@ from dramaclip.engines.analysis.models import AsrSegment, AudioFeatures, SceneIn
 class FakeTranscriber:
     name = "fake"
 
-    def transcribe(self, wav_path: Path, language: str = "zh") -> list[AsrSegment]:
+    def transcribe(
+        self, wav_path: Path, language: str = "zh", *, hotwords: str = ""
+    ) -> list[AsrSegment]:
         assert wav_path.is_file(), "管线应先完成真实音频提取"
         return [AsrSegment(start=0.5, end=2.0, text="你好世界")]
 
