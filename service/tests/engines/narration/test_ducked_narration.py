@@ -3,7 +3,7 @@
 回归动机（两轴审查 B1）：`modes_w8` 把 `full_narration` 每一段都标成 `ducked`，
 而 `pipeline` 的回填循环只认 `"narration"` —— 于是全片解说的段长与解说字幕
 永不回填；导出侧再靠「第 N 条 narration 段」重推映射，`ducked` 一段也拿不到。
-本文件锁死回填语义：两类角色都回填，且每段显式写下自己的 `narration_id`。
+本文件锁死回填语义：两类角色都回填，且段↔文案只认 `narration_id`，绝不按位置推断。
 """
 
 from __future__ import annotations
@@ -37,24 +37,32 @@ class _StubTts:
 
 
 class _BrokenTts:
-    """云端不可达：每次合成都抛错，走回填的失败降级分支。"""
+    """云端不可达：每次合成都抛错，方案必须随之失败。"""
 
     def synthesize(self, text: str, voice: str | None, out_path: Path) -> Path:
         raise RuntimeError("云端不可达")
 
 
 def _plan(roles: list[str]) -> PlanData:
-    """按角色序列造一条等长旁白文案的编排（下标即文案 id 尾号）。"""
-    return PlanData(
-        mode="full_narration",
-        timeline=[
-            TimelineSegment(episode_id="ep1", start=float(i), end=float(i) + 1.0, audio=role)
-            for i, role in enumerate(roles)
-        ],
-        narration_texts=[
-            NarrationText(id=f"n{i}", text=f"旁白{i}") for i in range(len(roles))
-        ],
-    )
+    """按角色序列造编排：旁白段按出现顺序拿到自己的文案，配对靠 id 不靠位置。"""
+    timeline: list[TimelineSegment] = []
+    texts: list[NarrationText] = []
+    order = 0
+    for index, role in enumerate(roles):
+        if role == "original":
+            timeline.append(
+                TimelineSegment(episode_id="ep1", start=float(index), end=float(index) + 1.0,
+                                audio=role)
+            )
+            continue
+        slot = f"n{order}"
+        timeline.append(
+            TimelineSegment(episode_id="ep1", start=float(index), end=float(index) + 1.0,
+                            audio=role, narration_id=slot)
+        )
+        texts.append(NarrationText(id=slot, text=f"旁白{order}"))
+        order += 1
+    return PlanData(mode="full_narration", timeline=timeline, narration_texts=texts)
 
 
 def _stub_tts(monkeypatch: pytest.MonkeyPatch, duration: float | None) -> None:
@@ -111,35 +119,22 @@ def test_alternating_roles_map_to_owning_text(
     assert result.timeline[3].subtitle_text == "旁白1"
 
 
-def test_failed_tts_falls_back_and_clears_id(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """合成失败 → 段回退原声，且不得留下会错配的 narration_id 与残留字幕。"""
+def test_failed_tts_fails_the_plan(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """合成失败 = 方案失败：不再有"回退原声继续出片"这条路（规格 §3.3.1）。"""
     _broken_tts(monkeypatch)
-    result = pipeline.synthesize_narration_texts(
-        _plan(["narration", "ducked"]), {"tts.engine": "edge"}, tmp_path
-    )
-    for segment in result.timeline:
-        assert segment.audio == "original"
-        assert segment.narration_id is None
-        assert segment.subtitle_text is None
-    assert result.narration_texts == [], "无音频的文案不回填进 plan_data"
+    with pytest.raises(RuntimeError, match="合成失败"):
+        pipeline.synthesize_narration_texts(
+            _plan(["narration", "ducked"]), {"tts.engine": "edge"}, tmp_path
+        )
 
 
-def test_stale_id_cleared_when_later_synthesis_fails(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """重跑回填（重试语义）：本次失败的段必须清掉上一轮写下的 id，不能留陈旧映射。"""
-    _stub_tts(monkeypatch, _TTS_DURATION_S)
-    first = pipeline.synthesize_narration_texts(
-        _plan(["ducked"]), {"tts.engine": "edge"}, tmp_path
-    )
-    assert first.timeline[0].narration_id == "n0"
-
-    _broken_tts(monkeypatch)
-    second = pipeline.synthesize_narration_texts(first, {"tts.engine": "edge"}, tmp_path)
-    assert second.timeline[0].narration_id is None
-    assert second.timeline[0].audio == "original"
+def test_zero_duration_fails_the_plan(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """探测到 0 长音频同样不许继续——它和"没合成出来"是同一件事。"""
+    _stub_tts(monkeypatch, None)
+    with pytest.raises(RuntimeError, match="时长"):
+        pipeline.synthesize_narration_texts(
+            _plan(["ducked"]), {"tts.engine": "edge"}, tmp_path
+        )
 
 
 def test_full_narration_plan_maps_every_segment_to_own_text(
@@ -152,7 +147,7 @@ def test_full_narration_plan_maps_every_segment_to_own_text(
         for index, score in enumerate([60, 85, 45, 90, 55, 75, 40, 95, 50, 65])
     ]
     plan = build_full("ep1", scenes, StrategySpec(min_duration_s=10, max_duration_s=120))
-    # 文案槽位由编剧层填充（copywriter 于 Task 4 接入，本替身到 Task 6 删除）
+    # 编剧层产出（见 test_narration_no_downgrade 对空文案的守卫）
     plan = plan.model_copy(update={
         "narration_texts": [
             t.model_copy(update={"text": f"第 {i} 段解说文案"})

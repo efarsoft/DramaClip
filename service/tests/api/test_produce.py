@@ -480,3 +480,121 @@ def test_assembly_failure_lands_in_jobs_table(
     assert status["status"] == "failed", f"任务停在 {status['status']}，装配失败没人兜底"
     assert status["error"] == "项目不存在: 装配期已被删除"
     assert job_id not in harness.context.cancel_events, "cancel_events 未释放"
+
+
+def test_produce_runner_raise_still_settles_the_job(
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """渲染循环里、逐模式 try 之外抛出：作业仍须进终态，cancel_event 仍须释放。
+
+    `notifier.progress` 那句就在保护圈外（`_run_produce` 的渲染段）：它一炸，
+    没有 try/finally 的 runner 会把异常丢进 executor 的 future 里没人读，
+    jobs 行永远停在 running、cancel_events 里永远挂着这个 job。
+    """
+    project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
+    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
+
+    def boom(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("进度通知通道已断")
+
+    monkeypatch.setattr(harness.context.notifier, "progress", boom)
+    job_id = str(
+        harness.rpc(
+            "narration.produce", {"project_id": project_id, "modes": ["raw_clip"]}
+        )["job_id"]
+    )
+
+    status = _wait_terminal(harness, job_id)
+    assert jobs.is_terminal(str(status["status"])), f"作业停在 {status['status']}：抛出没人接"
+    assert job_id not in harness.context.cancel_events, "cancel_events 未释放"
+
+
+def test_generation_runner_raise_still_releases_cancel_event(
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """落终态那一步抛出（末尾 pop 之前）：cancel_event 不能留在字典里。"""
+    project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
+    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
+    monkeypatch.setattr(narration_api, "_generate_one", lambda *_a, **_k: None)
+
+    def boom(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("jobs 表写不进去")
+
+    monkeypatch.setattr(harness.context.job_store, "mark_completed", boom)
+    job_id = str(
+        harness.rpc(
+            "narration.generate_plans", {"project_id": project_id, "modes": ["raw_clip"]}
+        )["job_id"]
+    )
+
+    status = _wait_terminal(harness, job_id)
+    assert jobs.is_terminal(str(status["status"])), f"作业停在 {status['status']}：抛出没人接"
+    assert job_id not in harness.context.cancel_events, "cancel_events 未释放"
+
+
+class _FullModeBrokenTts:
+    """只对 full_narration 的槽位（id 前缀 `full-`）不可达：用来量失败粒度。"""
+
+    def synthesize(self, text: str, _voice: str | None, out_path: Path) -> Path:
+        if out_path.stem.startswith("full"):
+            raise RuntimeError("云端不可达")
+        assert text.strip(), "语言层没填上文案，槽位还是空的"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(b"")
+        return out_path
+
+
+def test_tts_failure_fails_one_mode_not_the_batch(
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """失败粒度=单条方案：第二个模式配音缺件，第一个照样成稿并进入渲染。
+
+    配音改成抛错之后，最容易顺手写坏的就是这层：异常一路冒出 `_run_produce`，
+    整批作业中止，第一个模式明明已经出了片却在 jobs 里查无此人。
+    """
+    project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
+    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
+    context = harness.context
+    context.settings.update(
+        {
+            "llm.base_url": "http://llm.test/v1",
+            "llm.api_key": "sk-test",
+            "llm.model": "test-model",
+            "narration.style_id": _PLANTED_STYLE_ID,
+        }
+    )
+    _FakeLlm.calls = []
+    monkeypatch.setattr(script_driver, "LlmClient", _FakeLlm)
+    monkeypatch.setattr(copywriter, "LlmClient", _FakeLlm)
+    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: _FullModeBrokenTts())
+    monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: 1.25)
+    rendered: list[str] = []
+    monkeypatch.setattr(
+        narration_api,
+        "render_export",
+        lambda _ctx, run, report: rendered.append(run.plan_data.mode),
+    )
+
+    job = harness.rpc(
+        "narration.produce",
+        {"project_id": project_id, "modes": ["intro_narration", "full_narration"]},
+    )
+    status = _wait_terminal(harness, str(job["job_id"]))
+
+    assert status["status"] == "failed", status
+    error = str(status["error"])
+    assert "全片解说" in error and "合成失败" in error, f"失败没点名到模式与原因：{error}"
+    assert "片头解说" not in error, f"第一个模式被第二个的失败牵连了：{error}"
+    assert rendered == ["intro_narration"], f"渲染只该跑成功的那条方案：{rendered}"
+    assert narration_api._newest_ready_plan(context, project_id, "intro_narration") is not None
+    assert narration_api._newest_ready_plan(context, project_id, "full_narration") is None
+    assert str(job["job_id"]) not in context.cancel_events, "cancel_events 未释放"

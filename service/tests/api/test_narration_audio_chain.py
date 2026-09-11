@@ -60,7 +60,7 @@ def _scenes() -> list[ConflictScore]:
 def _full_plan(episode_id: str, tts_dir: Path) -> PlanData:
     """真实 full_narration 编排（build_full 产出的全 ducked 时间轴）+ 旁白回填。"""
     plan = build_full(episode_id, _scenes(), StrategySpec(min_duration_s=10))
-    # 文案槽位由编剧层填充（copywriter 于 Task 4 接入，本替身到 Task 6 删除）
+    # 编剧层产出（见 test_narration_no_downgrade 对空文案的守卫）
     plan = plan.model_copy(update={
         "narration_texts": [
             t.model_copy(update={"text": f"第 {i} 段解说文案"})
@@ -176,17 +176,10 @@ def test_full_narration_map_covers_every_index(
     ]
 
 
-def test_failed_tts_renders_no_mix_branch_and_no_stale_mapping(
+def test_failed_tts_fails_the_plan(
     monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    """TTS 全失败：段回退原声、映射为空、命令里不得出现混音分支或第二路输入。"""
+    """配音失败 = 方案失败：不再有"回退原声继续渲染"这条路。"""
     _stub_tts(monkeypatch, _BrokenTts())
-    plan_data, commands = _render(monkeypatch, memory_db, tmp_path, _full_plan)
-
-    assert export_api.tts_audio_by_segment(plan_data) == {}
-    assert [segment.audio for segment in plan_data.timeline] == ["original"] * len(commands)
-    assert all(segment.narration_id is None for segment in plan_data.timeline)
-    for cmd in commands:
-        assert "-filter_complex" not in cmd
-        assert "-vf" in cmd
-        assert cmd.count("-i") == 1, "回退段不得引用旁白音频"
+    with pytest.raises(RuntimeError, match="合成失败"):
+        _render(monkeypatch, memory_db, tmp_path, _full_plan)

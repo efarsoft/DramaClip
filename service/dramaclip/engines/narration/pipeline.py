@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +28,6 @@ from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from dramaclip.engines.tts import base as tts_base
 from dramaclip.engines.tts.factory import create as create_tts
 from dramaclip.infra.ffmpeg import probe
-
-_LOGGER = logging.getLogger(__name__)
 
 MODE_LABELS = {
     "raw_clip": "纯原片剪辑",
@@ -106,7 +103,9 @@ def build_from_script_episodes(
         near = [b for b in candidates if abs(b - value) <= 1.5]
         return min(near, key=lambda b: abs(b - value)) if near else value
 
-    def narration_span(number: int, text: str, start: float) -> TimelineSegment:
+    def narration_span(
+        number: int, text: str, start: float, *, narration_id: str
+    ) -> TimelineSegment:
         limit = durations.get(number, 0.0) + 5
         return TimelineSegment(
             episode_id=episode_map[number][0],
@@ -114,6 +113,7 @@ def build_from_script_episodes(
             end=round(min(start + estimate_duration(text), limit), 2),
             audio="narration",
             subtitle_text=text,
+            narration_id=narration_id,
         )
 
     timeline: list[TimelineSegment] = []
@@ -122,8 +122,13 @@ def build_from_script_episodes(
 
     first = script.segments[0]
     hook_start = snap(first.episode, first.start)
-    timeline.append(narration_span(first.episode, script.hook, hook_start))
-    texts.append(NarrationText(id="n0", text=script.hook))
+    hook_id = "n0"
+    timeline.append(
+        narration_span(first.episode, script.hook, hook_start, narration_id=hook_id)
+    )
+    texts.append(
+        NarrationText(id=hook_id, text=script.hook, brief="开场钩子：抛出全片最大悬念")
+    )
     cursors[first.episode] = hook_start + estimate_duration(script.hook)
 
     for order, segment in enumerate(script.segments, start=1):
@@ -133,6 +138,7 @@ def build_from_script_episodes(
         end = min(max(snap(ep, segment.end), start + 0.5), limit)
         if end <= start:
             continue
+        body_id = f"n{order}"
         timeline.append(
             TimelineSegment(
                 episode_id=episode_map[ep][0],
@@ -140,15 +146,21 @@ def build_from_script_episodes(
                 end=round(end, 2),
                 audio="narration",
                 subtitle_text=segment.text,
+                narration_id=body_id,
             )
         )
-        texts.append(NarrationText(id=f"n{order}", text=segment.text))
+        texts.append(NarrationText(id=body_id, text=segment.text))
         cursors[ep] = end
 
     if script.cta != "":
         last_ep = script.segments[-1].episode
-        timeline.append(narration_span(last_ep, script.cta, cursors.get(last_ep, 0.0)))
-        texts.append(NarrationText(id=f"n{len(script.segments) + 1}", text=script.cta))
+        cta_id = f"n{len(script.segments) + 1}"
+        timeline.append(
+            narration_span(
+                last_ep, script.cta, cursors.get(last_ep, 0.0), narration_id=cta_id
+            )
+        )
+        texts.append(NarrationText(id=cta_id, text=script.cta))
 
     return PlanData(
         mode="dialogue_narration",
@@ -175,60 +187,58 @@ def synthesize_narration_texts(
     work_dir: Path,
     models_dir: Path | None = None,
 ) -> PlanData:
-    """逐段合成旁白音频并回填 audio_path/duration。
+    """逐段合成旁白并按 narration_id 回填时长与解说字幕。
 
-    narration 与 ducked 段都按各自旁白实际时长回填时长与解说字幕，并把该条文案的
-    id 记进 `segment.narration_id`；导出层据此取音（拿不到音的段回退原声并清 id）。
+    降级禁止（规格 §3.3.1）：任一段没有合格音频，整条方案失败——
+    半条旁白的片子不可交付。段↔文案只认 id，绝不按位置推断。
     """
     if not plan.narration_texts:
         return plan
     engine = create_tts(settings.get("tts.engine", "edge"), models_dir)
     default_voice = settings.get("tts.voice", "")
-    updated: list[dict[str, Any]] = []
+    voiced: dict[str, tuple[str, str, float]] = {}  # id → (audio_path, text, duration)
     for item in plan.narration_texts:
+        if not item.text.strip():
+            raise RuntimeError(
+                f"旁白 {item.id} 文案为空——编剧链未执行，这条方案不该往下走配音"
+            )
         # 段级 voice 优先（双人对谈的双音色），缺省用全局设置
         voice = item.voice or default_voice
         try:
             audio_path = engine.synthesize(item.text, voice, work_dir / f"{item.id}.mp3")
-            duration: float | None = tts_base.audio_duration_s(audio_path)
-        except Exception as exc:  # 云端不可达/模型缺失等：该段降级为原声，不阻塞编排
-            # 必须留痕：降级是产品行为，静默降级是缺陷。此前这里连一行日志都没有，
-            # 结果"整片零旁白"与"该模式本就没有旁白"在事后完全无法区分。
-            _LOGGER.warning("TTS 段降级为原声 %s：%s：%s", item.id, type(exc).__name__, exc)
-            audio_path = work_dir / f"{item.id}.mp3"
-            duration = None
-        updated.append(dict(item.model_dump(), audio_path=str(audio_path), duration=duration))
+            duration = tts_base.audio_duration_s(audio_path)
+        except Exception as exc:  # noqa: BLE001 - 任何配音失败都是方案失败，原因要原样带出
+            raise RuntimeError(
+                f"旁白 {item.id} 合成失败（引擎={settings.get('tts.engine', 'edge')}）："
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        if not duration or duration <= 0:
+            raise RuntimeError(f"旁白 {item.id} 合成后音频时长无效（{duration}s）")
+        voiced[item.id] = (str(audio_path), item.text, float(duration))
+
     timeline = [segment.model_dump() for segment in plan.timeline]
-    narration_order = 0
     for segment in timeline:
         # ducked（全片解说全程压底旁白）与 narration 同权：两者都要回填时长与解说字幕
         if segment["audio"] not in ("narration", "ducked"):
             continue
-        # 陈旧映射先抹掉：本轮没拿到音频的段必须回落到纯原声，导出侧才无从错取
-        segment["narration_id"] = None
-        if narration_order >= len(updated):
-            segment["audio"] = "original"  # 旁白文案已用尽 → 无音可挂
-            segment["subtitle_text"] = None
-            continue
-        text = updated[narration_order]
-        narration_order += 1
-        duration = text["duration"]
-        if duration is not None and duration > 0:
-            segment["end"] = round(segment["start"] + duration, 3)
-            segment["subtitle_text"] = str(text["text"])
-            segment["narration_id"] = str(text["id"])
-        else:
-            segment["audio"] = "original"  # 无旁白音频 → 回退原声段（字幕一并取消）
-            segment["subtitle_text"] = None
-    kept_texts = [text for text in updated if text["duration"] is not None]
-    if plan.narration_texts and not kept_texts:
-        _LOGGER.warning(
-            "该方案 %d 段旁白全部合成失败，成片将完全没有解说音（引擎=%s，模型目录=%s）",
-            len(plan.narration_texts), settings.get("tts.engine", "edge"), models_dir,
+        key = segment.get("narration_id")
+        if key not in voiced:
+            raise RuntimeError(
+                f"编排自相矛盾：旁白段 {segment['episode_id']}@{segment['start']} "
+                f"的 narration_id={key!r} 在文案表里不存在"
+            )
+        _audio_path, text, duration = voiced[key]
+        segment["end"] = round(segment["start"] + duration, 3)
+        segment["subtitle_text"] = text
+    updated = [
+        item.model_copy(
+            update={"audio_path": voiced[item.id][0], "duration": voiced[item.id][2]}
         )
+        for item in plan.narration_texts
+    ]
     # 校验回模型：model_copy 会把裸 dict 塞进 timeline，导出层按属性读段就会炸
     return PlanData.model_validate(
-        {**plan.model_dump(), "narration_texts": kept_texts, "timeline": timeline}
+        {**plan.model_dump(), "narration_texts": updated, "timeline": timeline}
     )
 
 

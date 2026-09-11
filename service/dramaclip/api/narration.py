@@ -133,59 +133,62 @@ def _run_generation_parallel(
     cancel_event: threading.Event,
 ) -> None:
     """一键全部生成（原案 6.12）：无 TTS 模式与 TTS 模式两组并行，单模式失败不中断。"""
-    context.job_store.mark_running(job_id)
-    settings = dict(context.settings)
     try:
-        episode_inputs = _inject_run_settings(context, settings, episodes, modes)
-    except Exception as exc:  # noqa: BLE001 - 任务级装配失败必须落进 jobs 表，不能留 running
-        context.job_store.mark_failed(job_id, str(exc))
-        context.notifier.log("error", f"任务上下文装配失败: {exc}")
+        context.job_store.mark_running(job_id)
+        settings = dict(context.settings)
+        try:
+            episode_inputs = _inject_run_settings(context, settings, episodes, modes)
+        except Exception as exc:  # noqa: BLE001 - 任务级装配失败必须落进 jobs 表，不能留 running
+            context.job_store.mark_failed(job_id, str(exc))
+            context.notifier.log("error", f"任务上下文装配失败: {exc}")
+            return
+
+        tts_modes = [mode for mode in modes if mode not in _NO_TTS_MODES]
+        fast_modes = [mode for mode in modes if mode in _NO_TTS_MODES]
+        total = len(modes)
+        done_count = 0
+        lock = threading.Lock()
+        failures: list[str] = []
+
+        def run_group(group_modes: list[str]) -> None:
+            nonlocal done_count
+            for mode in group_modes:
+                if cancel_event.is_set():
+                    return
+                label = narration_pipeline.MODE_LABELS.get(mode, mode)
+                try:
+                    _generate_one(context, mode, episodes, episode_inputs, dict(settings))
+                except Exception as exc:
+                    failures.append(f"{label}: {exc}")
+                with lock:
+                    done_count += 1
+                    context.job_store.set_progress(job_id, round(done_count / total * 100, 1))
+
+        threads = [
+            threading.Thread(
+                target=run_group,
+                args=(group,),
+                name=f"gen-{'tts' if group is tts_modes else 'fast'}",
+            )
+            for group in (tts_modes, fast_modes)
+            if group
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        if cancel_event.is_set():
+            context.job_store.mark_cancelled(job_id)
+        elif failures:
+            context.job_store.mark_failed(job_id, "; ".join(failures))
+            context.notifier.log("error", f"部分编排失败: {'; '.join(failures)}")
+        else:
+            context.job_store.mark_completed(job_id)
+    except Exception as exc:  # noqa: BLE001 - 逐模式守卫之外的抛出没人接就是一行永停 running
+        context.job_store.mark_failed(job_id, f"编排任务异常终止: {type(exc).__name__}: {exc}")
+    finally:
         context.cancel_events.pop(job_id, None)
-        return
-
-    tts_modes = [mode for mode in modes if mode not in _NO_TTS_MODES]
-    fast_modes = [mode for mode in modes if mode in _NO_TTS_MODES]
-    total = len(modes)
-    done_count = 0
-    lock = threading.Lock()
-    failures: list[str] = []
-
-    def run_group(group_modes: list[str]) -> None:
-        nonlocal done_count
-        for mode in group_modes:
-            if cancel_event.is_set():
-                return
-            label = narration_pipeline.MODE_LABELS.get(mode, mode)
-            try:
-                _generate_one(context, mode, episodes, episode_inputs, dict(settings))
-            except Exception as exc:
-                failures.append(f"{label}: {exc}")
-            with lock:
-                done_count += 1
-                context.job_store.set_progress(job_id, round(done_count / total * 100, 1))
-
-    threads = [
-        threading.Thread(
-            target=run_group,
-            args=(group,),
-            name=f"gen-{'tts' if group is tts_modes else 'fast'}",
-        )
-        for group in (tts_modes, fast_modes)
-        if group
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-
-    if cancel_event.is_set():
-        context.job_store.mark_cancelled(job_id)
-    elif failures:
-        context.job_store.mark_failed(job_id, "; ".join(failures))
-        context.notifier.log("error", f"部分编排失败: {'; '.join(failures)}")
-    else:
-        context.job_store.mark_completed(job_id)
-    context.cancel_events.pop(job_id, None)
 
 
 def _generate_one(
@@ -322,69 +325,73 @@ def _run_produce(
     cancel_event: threading.Event,
 ) -> None:
     """逐模式：编排(文案/配音) → 渲染成片；单模式失败不中断其余。"""
-    context.job_store.mark_running(job_id)
-    settings = dict(context.settings)
     try:
-        episode_inputs = _inject_run_settings(context, settings, episodes, modes)
-    except Exception as exc:  # noqa: BLE001 - 任务级装配失败必须落进 jobs 表，不能留 running
-        context.job_store.mark_failed(job_id, str(exc))
-        context.notifier.log("error", f"任务上下文装配失败: {exc}")
-        context.cancel_events.pop(job_id, None)
-        return
+        context.job_store.mark_running(job_id)
+        settings = dict(context.settings)
+        try:
+            episode_inputs = _inject_run_settings(context, settings, episodes, modes)
+        except Exception as exc:  # noqa: BLE001 - 任务级装配失败必须落进 jobs 表，不能留 running
+            context.job_store.mark_failed(job_id, str(exc))
+            context.notifier.log("error", f"任务上下文装配失败: {exc}")
+            return
 
-    total = len(modes)
-    failures: list[str] = []
-    for index, mode in enumerate(modes):
+        total = len(modes)
+        failures: list[str] = []
+        for index, mode in enumerate(modes):
+            if cancel_event.is_set():
+                context.job_store.mark_cancelled(job_id)
+                return
+            base = index / total * 100
+            label = narration_pipeline.MODE_LABELS.get(mode, mode)
+
+            def report(percent: float, message: str, _base: float = base) -> None:
+                context.job_store.set_progress(job_id, round(_base + percent / total, 1), message)
+                context.notifier.progress(job_id, round(_base + percent / total, 1), message)
+
+            context.notifier.progress(
+                job_id, round(base, 1), f"({index + 1}/{total}) 生成{label}编排"
+            )
+            try:
+                _generate_one(context, mode, episodes, episode_inputs, dict(settings))
+                plan_row = _newest_ready_plan(context, project_id, mode)
+                if plan_row is None:
+                    raise ValueError("编排结果缺失")
+                plan_data = PlanData.model_validate(plan_row["plan_data"])
+                export_id = exports_repo.create(
+                    context.conn, project_id, str(plan_row["id"]), mode
+                )
+                report(30, f"渲染{label}成片")
+
+                def scale_report(percent: float, message: str) -> None:
+                    """渲染进度 0-100 映射到本轮模式的 30~100 区间（编排占前 30）。"""
+                    report(30 + percent * 0.7, message)
+
+                render_export(
+                    context,
+                    ExportRun(
+                        export_id=export_id,
+                        project_id=project_id,
+                        plan_row=plan_row,
+                        plan_data=plan_data,
+                        cancel_event=cancel_event,
+                    ),
+                    report=scale_report,
+                )
+            except Exception as exc:
+                failures.append(f"{label}: {exc}")
+                context.notifier.log("error", f"{label} 出片失败: {exc}")
+
         if cancel_event.is_set():
             context.job_store.mark_cancelled(job_id)
-            context.cancel_events.pop(job_id, None)
-            return
-        base = index / total * 100
-        label = narration_pipeline.MODE_LABELS.get(mode, mode)
-
-        def report(percent: float, message: str, _base: float = base) -> None:
-            context.job_store.set_progress(job_id, round(_base + percent / total, 1), message)
-            context.notifier.progress(job_id, round(_base + percent / total, 1), message)
-
-        context.notifier.progress(job_id, round(base, 1), f"({index + 1}/{total}) 生成{label}编排")
-        try:
-            _generate_one(context, mode, episodes, episode_inputs, dict(settings))
-            plan_row = _newest_ready_plan(context, project_id, mode)
-            if plan_row is None:
-                raise ValueError("编排结果缺失")
-            plan_data = PlanData.model_validate(plan_row["plan_data"])
-            export_id = exports_repo.create(
-                context.conn, project_id, str(plan_row["id"]), mode
-            )
-            report(30, f"渲染{label}成片")
-
-            def scale_report(percent: float, message: str) -> None:
-                """渲染进度 0-100 映射到本轮模式的 30~100 区间（编排占前 30）。"""
-                report(30 + percent * 0.7, message)
-
-            render_export(
-                context,
-                ExportRun(
-                    export_id=export_id,
-                    project_id=project_id,
-                    plan_row=plan_row,
-                    plan_data=plan_data,
-                    cancel_event=cancel_event,
-                ),
-                report=scale_report,
-            )
-        except Exception as exc:
-            failures.append(f"{label}: {exc}")
-            context.notifier.log("error", f"{label} 出片失败: {exc}")
-
-    if cancel_event.is_set():
-        context.job_store.mark_cancelled(job_id)
-    elif failures:
-        context.job_store.mark_failed(job_id, "; ".join(failures))
-    else:
-        context.job_store.set_progress(job_id, 100.0)
-        context.job_store.mark_completed(job_id)
-    context.cancel_events.pop(job_id, None)
+        elif failures:
+            context.job_store.mark_failed(job_id, "; ".join(failures))
+        else:
+            context.job_store.set_progress(job_id, 100.0)
+            context.job_store.mark_completed(job_id)
+    except Exception as exc:  # noqa: BLE001 - 逐模式守卫之外的抛出没人接就是一行永停 running
+        context.job_store.mark_failed(job_id, f"出片任务异常终止: {type(exc).__name__}: {exc}")
+    finally:
+        context.cancel_events.pop(job_id, None)
 
 
 def _newest_ready_plan(context: AppContext, project_id: str, mode: str) -> dict[str, Any] | None:
