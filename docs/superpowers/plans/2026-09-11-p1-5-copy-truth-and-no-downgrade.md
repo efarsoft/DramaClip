@@ -1128,6 +1128,10 @@ git add service/dramaclip/api/narration.py service/dramaclip/engines/narration/s
 git commit -m "refactor(narration): 口味层与跨集输入上提到任务级，删除三处死路"
 ```
 
+### Task 4 落地后的实测修正
+
+- 九模式在仓里有**三面镜子**：`narration_api.SUPPORTED_MODES`、`pipeline.MODE_LABELS`、`desktop/src/components/modeMeta.ts` 的 `MODE_INFO`。已加 `test_every_supported_mode_has_a_chinese_label` 钉住前两面（漏标签会让队列页露出英文模式名，本任务实测踩过）；第三面是 TS，service 侧的 pytest 够不着——**P-3 已知接受项**，随全站重排一并收口。
+
 ---
 
 ## Task 5: 禁止降级（一）——编剧链失败即抛，删规则编排退路

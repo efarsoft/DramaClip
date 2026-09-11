@@ -1,4 +1,7 @@
-"""narration 命名空间：generate_plans（job）/ list_plans。"""
+"""narration 命名空间：编排/出片任务（generate_plans、produce）与风格清单。
+
+任务级上下文（项目名、题材、跨集转写、口味层风格）统一在 `_inject_run_settings` 装配一次。
+"""
 
 from __future__ import annotations
 
@@ -38,6 +41,11 @@ SUPPORTED_MODES = (
 
 # 与 TTS 合成并行的两组：剧情解说已由 LLM 剧本驱动，每段都要配音，不再属"无 TTS"。
 _NO_TTS_MODES = frozenset({"raw_clip", "subtitle_flow"})
+
+# 会产出旁白槽位、因而读 `settings["_style_directives"]` 的模式（copywriter /
+# scriptwriter 两侧都只往解说槽位里塞风格指令）。派生自上面两个集合，绝不另立
+# 第四份手抄模式清单——纯剪辑作业连口味层的答案都无人可读，不该为它付选题往返。
+_NARRATION_MODES = frozenset(SUPPORTED_MODES) - _NO_TTS_MODES
 
 
 def register(router: Router, context: AppContext) -> None:
@@ -89,8 +97,14 @@ def _inject_run_settings(
     context: AppContext,
     settings: dict[str, str],
     episodes: list[dict[str, Any]],
+    modes: list[str],
 ) -> list[dict[str, Any]]:
-    """任务级一次性注入：项目名、题材、跨集转写、口味层风格。返回跨集输入。"""
+    """任务级一次性注入：项目名、题材、跨集转写、口味层风格。返回跨集输入。
+
+    风格指令只有会产出旁白槽位的模式才读得到，故按 `modes` 设闸：纯剪辑作业
+    一次选题都不付。转写只是 **AI 自选**风格的原料——用户钉死了风格就没有自选
+    这回事，没有转写也照样要把用户选的风格注进去（否则既丢风格又丢那句留痕）。
+    """
     project_id = str(episodes[0]["project_id"])
     project = projects_repo.get(context.conn, project_id)
     if project is None:
@@ -100,7 +114,9 @@ def _inject_run_settings(
     if record is not None and record["genre"]:
         settings["_genre"] = str(record["genre"])
     episode_inputs = _collect_episode_inputs(context, episodes)
-    if episode_inputs:
+    preferred = settings.get("narration.style_id")
+    pinned = bool(preferred) and preferred != styles_lib.AUTO_STYLE_ID
+    if any(mode in _NARRATION_MODES for mode in modes) and (episode_inputs or pinned):
         settings["_style_directives"] = str(
             script_driver.resolve_run_style(
                 settings, episode_inputs, log=context.notifier.log
@@ -119,7 +135,13 @@ def _run_generation_parallel(
     """一键全部生成（原案 6.12）：无 TTS 模式与 TTS 模式两组并行，单模式失败不中断。"""
     context.job_store.mark_running(job_id)
     settings = dict(context.settings)
-    episode_inputs = _inject_run_settings(context, settings, episodes)
+    try:
+        episode_inputs = _inject_run_settings(context, settings, episodes, modes)
+    except Exception as exc:  # noqa: BLE001 - 任务级装配失败必须落进 jobs 表，不能留 running
+        context.job_store.mark_failed(job_id, str(exc))
+        context.notifier.log("error", f"任务上下文装配失败: {exc}")
+        context.cancel_events.pop(job_id, None)
+        return
 
     tts_modes = [mode for mode in modes if mode not in _NO_TTS_MODES]
     fast_modes = [mode for mode in modes if mode in _NO_TTS_MODES]
@@ -309,7 +331,13 @@ def _run_produce(
     """逐模式：编排(文案/配音) → 渲染成片；单模式失败不中断其余。"""
     context.job_store.mark_running(job_id)
     settings = dict(context.settings)
-    episode_inputs = _inject_run_settings(context, settings, episodes)
+    try:
+        episode_inputs = _inject_run_settings(context, settings, episodes, modes)
+    except Exception as exc:  # noqa: BLE001 - 任务级装配失败必须落进 jobs 表，不能留 running
+        context.job_store.mark_failed(job_id, str(exc))
+        context.notifier.log("error", f"任务上下文装配失败: {exc}")
+        context.cancel_events.pop(job_id, None)
+        return
 
     total = len(modes)
     failures: list[str] = []
