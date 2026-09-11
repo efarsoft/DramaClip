@@ -35,24 +35,24 @@ def fuse(
 ) -> list[AsrSegment]:
     """融合主入口：返回与 asr_segments 同构的新段列表（text/source 已按决策表改写）。
 
-    与 OCR 无重叠的 ASR 段原样保留（source=None）；OCR 文本无法对齐的段保持 ASR 原文。
+    OCR 条按「条中点落在段区间内」归属到唯一 ASR 段（防止相邻条跨段串文本）；
+    与 OCR 无交集的 ASR 段原样保留（source=None）。
     """
     if not ocr_segments:
         return asr_segments
-    words = [word for seg in asr_segments for word in seg.words]
-    if not words:
+    if not any(seg.words for seg in asr_segments):
         return asr_segments
     fused: list[AsrSegment] = []
     for seg in asr_segments:
-        overlapping = [
+        assigned = [
             ocr
             for ocr in ocr_segments
-            if ocr.start < seg.end + _WINDOW_S and ocr.end > seg.start - _WINDOW_S
+            if seg.start - _WINDOW_S <= (ocr.start + ocr.end) / 2 <= seg.end + _WINDOW_S
         ]
-        if not overlapping:
+        if not assigned:
             fused.append(seg)
             continue
-        fused.extend(_fuse_segment(seg, overlapping))
+        fused.extend(_fuse_segment(seg, assigned))
     return fused
 
 

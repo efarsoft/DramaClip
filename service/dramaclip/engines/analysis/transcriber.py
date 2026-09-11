@@ -17,7 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 _CUDA_PROBLEM = re.compile(r"cublas|cudnn|cudart|cuda|gpu", re.I)
 
 
-def _simplify(text: str) -> str:
+def simplify(text: str) -> str:
     """繁→简归一（opencc，ml extras 懒加载；whisper 中文输出混繁体是已知行为）。"""
     try:
         from opencc import OpenCC
@@ -90,14 +90,14 @@ class FasterWhisperEngine:
         )
         result: list[AsrSegment] = []
         for seg in segments:
-            text = _simplify(seg.text.strip())
+            text = simplify(seg.text.strip())
             if not text:
                 continue
             words = [
                 WordSpan(
                     start=word.start,
                     end=word.end,
-                    word=_simplify(word.word.strip()),
+                    word=simplify(word.word.strip()),
                     probability=word.probability,
                 )
                 for word in (seg.words or [])

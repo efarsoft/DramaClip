@@ -17,6 +17,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 from dramaclip.engines.analysis.models import OcrSegment
+from dramaclip.engines.analysis.transcriber import simplify
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ def extract_subtitles(
     ocr: OcrCallable | None = None,
 ) -> list[OcrSegment]:
     """抽取全集硬字幕条。ocr 可注入（测试）；缺省懒加载 RapidOCR。"""
+    work_dir.mkdir(parents=True, exist_ok=True)
     if ocr is None:
         ocr = _rapidocr()
     probes = _probe_frames(video_path, work_dir, duration_s, ocr)
@@ -64,7 +66,7 @@ def extract_subtitles(
         t0 = index / _SAMPLE_FPS
         results.append((t0, boxes))
         frame.unlink(missing_ok=True)
-    return _merge_runs(results, band)
+    return _merge_runs(results)
 
 
 def _probe_frames(
@@ -153,11 +155,21 @@ def _sample_frames(video_path: Path, work_dir: Path, band: _Band) -> list[Path]:
     return sorted(out_dir.glob("f*.jpg"))
 
 
-def _merge_runs(
-    results: list[tuple[float, FrameResult]],
-    band: _Band,
-) -> list[OcrSegment]:
-    """相邻帧同文本合并为字幕条：时间取首末帧（前后补采样间隔），文本取最长。"""
+def _merge_runs(results: list[tuple[float, FrameResult]]) -> list[OcrSegment]:
+    """相邻帧同文本合并为字幕条：时间取首末帧（前后补采样间隔），文本取最长。
+
+    帧内多行（两行字幕）按纵向位置序拼接为一条；坐标已在裁剪带内，无需再过滤。
+    """
+    frame_texts: list[tuple[float, str, float]] = []
+    for t0, boxes in results:
+        if not boxes:
+            frame_texts.append((t0, "", 0.0))
+            continue
+        ordered = sorted(boxes, key=lambda box: box[1])
+        text = simplify("".join(box[0] for box in ordered))
+        conf = sum(box[3] for box in ordered) / len(ordered)
+        frame_texts.append((t0, text, float(conf)))
+
     segments: list[OcrSegment] = []
     run_text: str | None = None
     run_start = run_end = 0.0
@@ -175,27 +187,21 @@ def _merge_runs(
             )
         )
 
-    for t0, boxes in results:
-        hit = None
-        for text, top, _bottom, conf in boxes:
-            if band.top - _BAND_EXPAND <= top <= band.bottom + _BAND_EXPAND:
-                hit = (text, conf)
-                break
-        if hit is None:
+    for t0, text, conf in frame_texts:
+        if not text:
             flush()
             run_text = None
             run_confs = []
             continue
-        text, conf = hit
         if run_text is not None and _similar(text, run_text):
             run_end = t0
-            run_confs.append(float(conf))
+            run_confs.append(conf)
             if len(text) > len(run_text):
                 run_text = text
         else:
             flush()
             run_text, run_start, run_end = text, t0, t0
-            run_confs = [float(conf)]
+            run_confs = [conf]
     flush()
     return segments
 
