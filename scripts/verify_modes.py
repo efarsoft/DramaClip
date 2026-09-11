@@ -45,6 +45,20 @@ ALL_MODES = [
     "dual_host_chat", "inner_monologue",
 ]
 
+# 各模式的旁白预期，取自 docs/service/02 §3 与各模式 docstring 的设计定义。
+# 写成表是为了不再拿"全局最小时长 + 一律要有旁白"去套所有模式——那会造成假失败。
+EXPECT_NARRATION = {
+    "raw_clip": "none",          # 零加工：不烧字幕、不遮罩、无旁白
+    "subtitle_flow": "none",     # 金句流：只烧句级字幕，无旁白音频
+    "intro_narration": "one",    # 片头解说：一段引子旁白 + 正片原声
+    "cross_narration": "many",   # 原声/旁白交替
+    "ultra_short_hook": "many",  # 钩子 + 收尾 CTA
+    "dialogue_narration": "many",
+    "full_narration": "many",    # 全片 ducked：每段都要旁白
+    "dual_host_chat": "many",
+    "inner_monologue": "many",
+}
+
 MIN_MEAN_VOLUME_DB = -70.0  # 近乎静音的判据：旁白整条丢失会落在这里
 MAX_FREEZE_S = 2.0  # 任一静止段超过这么久即判失败
 
@@ -292,20 +306,26 @@ def main() -> int:
             failures.append(f"{mode}: 成片无音轨")
         if rec["mean_volume_db"] is None or rec["mean_volume_db"] < MIN_MEAN_VOLUME_DB:
             failures.append(f"{mode}: 近乎静音（mean_volume={rec['mean_volume_db']} dB）")
-        budget_max = float(ctx.settings.get("strategy.max_duration_s", "300"))
-        budget_min = float(ctx.settings.get("strategy.min_duration_s", "30"))
-        if not budget_min <= rec["duration_s"] <= budget_max:
-            failures.append(f"{mode}: 时长 {rec['duration_s']}s 超出预算 [{budget_min:.0f},{budget_max:.0f}]")
+        if rec["duration_s"] <= 0:
+            failures.append(f"{mode}: 成片时长为 0")
+        if rec["duration_s"] > float(ctx.settings.get("strategy.max_duration_s", "300")):
+            failures.append(f"{mode}: 时长 {rec['duration_s']}s 超上限")
+        # 不在此 enforce 最小时长：超短悬念版本就该十几秒、金句流随句数浮动，
+        # 每模式的目标区间是产品参数（生产线默认值），门禁不该发明它。
         if rec["max_freeze_s"] >= MAX_FREEZE_S:
             failures.append(f"{mode}: 存在 {rec['max_freeze_s']}s 冻结画面")
         wants_tts = sum(1 for c in CAPTURED if c["audio"] in ("narration", "ducked"))
-        if mode == "raw_clip":
+        expected = EXPECT_NARRATION.get(mode, "many")
+        if expected == "none":
             if wants_tts or rec["segments_mixed"]:
-                failures.append(f"{mode}: 纯原片不该混入旁白（零加工原则）")
+                failures.append(f"{mode}: 该模式设计上无旁白，却混入 {wants_tts} 段")
         else:
             planned = sum(v for k, v in roles.items() if k in ("narration", "ducked"))
-            if planned == 0:
-                failures.append(f"{mode}: 编排里没有任何旁白段（音频角色={roles}）")
+            floor = 1 if expected == "one" else 2
+            if planned < floor:
+                failures.append(
+                    f"{mode}: 预期至少 {floor} 段旁白，编排里只有 {planned} 段（角色={roles}）"
+                )
             elif rec["segments_with_tts"] == 0:
                 failures.append(
                     f"{mode}: 应有 {planned} 段旁白，实际混入 0 段 —— "
