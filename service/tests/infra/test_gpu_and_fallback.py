@@ -77,14 +77,17 @@ class _FakeLazyWhisper:
         self.device = device
         _FakeLazyWhisper.created.append(device)
 
-    def transcribe(self, _wav: object, language: str = "zh", vad_filter: bool = False):  # type: ignore[no-untyped-def]
+    def transcribe(  # type: ignore[no-untyped-def]
+        self, _wav: object, language: str = "zh", vad_filter: bool = False,
+        *, word_timestamps: bool = False, hotwords: str | None = None,
+    ):
         if self.device == "cuda":
             def _boom() -> Generator[None, None, None]:
                 raise RuntimeError("Library cublas64_12.dll is not found or cannot be loaded")
                 yield  # pragma: no cover
 
             return _boom(), None
-        seg = types.SimpleNamespace(start=0.0, end=1.0, text=" 你好 ")
+        seg = types.SimpleNamespace(start=0.0, end=1.0, text=" 你好 ", words=[])
         return iter([seg]), None
 
 

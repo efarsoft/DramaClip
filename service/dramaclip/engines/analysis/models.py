@@ -5,12 +5,24 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+class WordSpan(BaseModel):
+    """字/词级时间戳（whisper word_timestamps），供 OCR 对齐与置信度决策。"""
+
+    start: float
+    end: float
+    word: str
+    probability: float = 1.0
+
+
 class AsrSegment(BaseModel):
     start: float
     end: float
     text: str
     speaker: str | None = None
     emotion: str | None = None
+    words: list[WordSpan] = Field(default_factory=list)
+    # 文本来源：asr=纯语音识别；ocr_fixed=OCR 校对过；review=待人工复核
+    source: str | None = None
 
 
 class OcrSegment(BaseModel):

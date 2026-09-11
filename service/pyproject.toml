@@ -33,6 +33,8 @@ ml = [
   "transformers>=4.40",
   "kokoro>=0.7",
   "misaki>=0.7",
+  "rapidocr-onnxruntime>=1.3",
+  "opencc-python-reimplemented>=0.1.7",
 ]
 
 [project.scripts]

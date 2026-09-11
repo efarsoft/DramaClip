@@ -11,10 +11,19 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from dramaclip.engines.analysis.models import AsrSegment
+from dramaclip.engines.analysis.models import AsrSegment, WordSpan
 
 _LOGGER = logging.getLogger(__name__)
 _CUDA_PROBLEM = re.compile(r"cublas|cudnn|cudart|cuda|gpu", re.I)
+
+
+def _simplify(text: str) -> str:
+    """繁→简归一（opencc，ml extras 懒加载；whisper 中文输出混繁体是已知行为）。"""
+    try:
+        from opencc import OpenCC
+    except ImportError:
+        return text
+    return str(OpenCC("t2s").convert(text))
 
 if TYPE_CHECKING:
     # 仅类型检查期导入（运行时懒加载；缺依赖时经 ignore_missing_imports 兜底）
@@ -28,7 +37,9 @@ class AsrEngine(Protocol):
     @property
     def name(self) -> str: ...
 
-    def transcribe(self, wav_path: Path, language: str = "zh") -> list[AsrSegment]: ...
+    def transcribe(
+        self, wav_path: Path, language: str = "zh", *, hotwords: str = ""
+    ) -> list[AsrSegment]: ...
 
 
 class FasterWhisperEngine:
@@ -50,9 +61,11 @@ class FasterWhisperEngine:
     def name(self) -> str:
         return f"faster_whisper:{self._model_size}"
 
-    def transcribe(self, wav_path: Path, language: str = "zh") -> list[AsrSegment]:
+    def transcribe(
+        self, wav_path: Path, language: str = "zh", *, hotwords: str = ""
+    ) -> list[AsrSegment]:
         try:
-            return self._run(self._ensure_model(), wav_path, language)
+            return self._run(self._ensure_model(), wav_path, language, hotwords)
         except Exception as exc:  # noqa: BLE001 - CUDA 运行库问题统一按关键字识别
             # cuBLAS/cuDNN 缺失往往在首次推理（惰性计算）时才暴露，构造期兜不住
             if self._device == "cpu" or not _CUDA_PROBLEM.search(str(exc)):
@@ -62,15 +75,36 @@ class FasterWhisperEngine:
 
             cpu_model = self._create(WhisperModel, "cpu")
             self._model = cpu_model  # 缓存 CPU 模型，后续集不再重复走失败的 CUDA 路径
-            return self._run(cpu_model, wav_path, language)
+            return self._run(cpu_model, wav_path, language, hotwords)
 
-    def _run(self, model: WhisperModel, wav_path: Path, language: str) -> list[AsrSegment]:
-        segments, _info = model.transcribe(str(wav_path), language=language, vad_filter=True)
-        return [
-            AsrSegment(start=seg.start, end=seg.end, text=seg.text.strip())
-            for seg in segments
-            if seg.text.strip()
-        ]
+    def _run(
+        self, model: WhisperModel, wav_path: Path, language: str, hotwords: str
+    ) -> list[AsrSegment]:
+        # word_timestamps：字级时间戳+概率，供 OCR 融合对齐（关闭则 words 为空）
+        segments, _info = model.transcribe(
+            str(wav_path),
+            language=language,
+            vad_filter=True,
+            word_timestamps=True,
+            hotwords=hotwords or None,
+        )
+        result: list[AsrSegment] = []
+        for seg in segments:
+            text = _simplify(seg.text.strip())
+            if not text:
+                continue
+            words = [
+                WordSpan(
+                    start=word.start,
+                    end=word.end,
+                    word=_simplify(word.word.strip()),
+                    probability=word.probability,
+                )
+                for word in (seg.words or [])
+                if word.word.strip()
+            ]
+            result.append(AsrSegment(start=seg.start, end=seg.end, text=text, words=words))
+        return result
 
     def _ensure_model(self) -> WhisperModel:
         if self._model is None:
@@ -112,7 +146,9 @@ class SenseVoiceEngine:
     def name(self) -> str:
         return "sensevoice"
 
-    def transcribe(self, wav_path: Path, language: str = "zh") -> list[AsrSegment]:
+    def transcribe(
+        self, wav_path: Path, language: str = "zh", *, hotwords: str = ""
+    ) -> list[AsrSegment]:
         model = self._ensure_model()
         raw = model.generate(
             input=str(wav_path),
