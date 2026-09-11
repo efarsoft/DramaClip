@@ -6,6 +6,7 @@ LLM 文案未配置时用模板降级（W3 同策略）；TTS 用 edge（云端�
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,8 @@ from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from dramaclip.engines.tts import base as tts_base
 from dramaclip.engines.tts.factory import create as create_tts
 from dramaclip.infra.ffmpeg import probe
+
+_LOGGER = logging.getLogger(__name__)
 
 _MODE_LABELS = {
     "raw_clip": "纯原片剪辑",
@@ -274,7 +277,10 @@ def synthesize_narration_texts(
         try:
             audio_path = engine.synthesize(item.text, voice, work_dir / f"{item.id}.mp3")
             duration: float | None = tts_base.audio_duration_s(audio_path)
-        except Exception:  # 云端不可达等：该段降级为原声，不阻塞编排
+        except Exception as exc:  # 云端不可达/模型缺失等：该段降级为原声，不阻塞编排
+            # 必须留痕：降级是产品行为，静默降级是缺陷。此前这里连一行日志都没有，
+            # 结果"整片零旁白"与"该模式本就没有旁白"在事后完全无法区分。
+            _LOGGER.warning("TTS 段降级为原声 %s：%s：%s", item.id, type(exc).__name__, exc)
             audio_path = work_dir / f"{item.id}.mp3"
             duration = None
         updated.append(dict(item.model_dump(), audio_path=str(audio_path), duration=duration))
@@ -301,6 +307,11 @@ def synthesize_narration_texts(
             segment["audio"] = "original"  # 无旁白音频 → 回退原声段（字幕一并取消）
             segment["subtitle_text"] = None
     kept_texts = [text for text in updated if text["duration"] is not None]
+    if plan.narration_texts and not kept_texts:
+        _LOGGER.warning(
+            "该方案 %d 段旁白全部合成失败，成片将完全没有解说音（引擎=%s，模型目录=%s）",
+            len(plan.narration_texts), settings.get("tts.engine", "edge"), models_dir,
+        )
     # 校验回模型：model_copy 会把裸 dict 塞进 timeline，导出层按属性读段就会炸
     return PlanData.model_validate(
         {**plan.model_dump(), "narration_texts": kept_texts, "timeline": timeline}
