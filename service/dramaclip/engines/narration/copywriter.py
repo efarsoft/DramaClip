@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -18,8 +17,6 @@ from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import scriptwriter
 from dramaclip.engines.narration.models import NarrationText, PlanData
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
-
-_LOGGER = logging.getLogger(__name__)
 
 COPY_LLM_TIMEOUT_S = 240.0  # 与编剧同量级：多槽位成稿实测可达 100s+
 _MAX_LINE_CHARS = 60

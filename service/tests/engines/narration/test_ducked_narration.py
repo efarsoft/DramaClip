@@ -50,7 +50,12 @@ def _plan(roles: list[str]) -> PlanData:
             for i, role in enumerate(roles)
         ],
         narration_texts=[
-            NarrationText(id=f"n{i}", text=f"旁白{i}") for i in range(len(roles))
+            NarrationText(
+                id=f"n{i}",
+                text=f"旁白{i}",
+                window=(float(i), float(i) + 1.0),
+            )
+            for i in range(len(roles))
         ],
     )
 
@@ -180,7 +185,14 @@ def test_backfilled_plan_still_round_trips_through_json(
     )
     reloaded = PlanData.model_validate(result.model_dump())
     assert [segment.narration_id for segment in reloaded.timeline] == ["n0", "n1"]
+    assert [text.window for text in reloaded.narration_texts] == [(0.0, 1.0), (1.0, 2.0)]
     assert [type(segment).__name__ for segment in result.timeline] == [
         "TimelineSegment",
         "TimelineSegment",
     ], "回填后的 plan 必须是校验过的模型，不能是裸 dict"
+    # 库里 plan_data 存的是 JSON 数组（repos/plans.py: json.loads 那一列）：
+    # 编剧据此读台词，读回后 window 必须仍是可下标比较的区间，不能退成 list/str
+    from_db = PlanData.model_validate_json(result.model_dump_json())
+    assert [text.window for text in from_db.narration_texts] == [(0.0, 1.0), (1.0, 2.0)]
+    second = from_db.narration_texts[1].window
+    assert second is not None and second[1] > second[0], "落库读回后区间仍可比较"
