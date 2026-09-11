@@ -1,7 +1,6 @@
 """解说风格库：内置只读风格（resources，随版本走）。
 
-风格注入编剧 system prompt，影响钩子句式、叙事节奏与文案口味；
-规则降级编排不受风格影响（模板文案无风格自由度）。
+风格只注入编剧链（scriptwriter / copywriter）；纯剪辑两模式不产文案，与风格无关。
 """
 
 from __future__ import annotations

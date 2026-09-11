@@ -91,7 +91,9 @@ def test_unsynthesized_text_is_dropped() -> None:
 
 
 def test_original_segment_with_stale_id_is_mapped_by_id_only() -> None:
-    """映射只认 id：音频角色不参与推断（回退段由回填层负责清 id，见 test_ducked_narration）。"""
+    """映射只认 id：音频角色不参与推断
+    （回填层已改为缺件即失败，不再有回退段——
+    见 test_ducked_narration::test_failed_tts_fails_the_plan）。"""
     plan = _plan(
         [TimelineSegment(episode_id="e", start=0, end=1, audio="original", narration_id="n0")],
         _texts(["n0"]),

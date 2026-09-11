@@ -1132,7 +1132,9 @@ git commit -m "refactor(narration): 口味层与跨集输入上提到任务级�
 
 - 九模式在仓里有**三面镜子**：`narration_api.SUPPORTED_MODES`、`pipeline.MODE_LABELS`、`desktop/src/components/modeMeta.ts` 的 `MODE_INFO`。已加 `test_every_supported_mode_has_a_chinese_label` 钉住前两面（漏标签会让队列页露出英文模式名，本任务实测踩过）；第三面是 TS，service 侧的 pytest 够不着——**P-3 已知接受项**，随全站重排一并收口。
 - **两个同类的"失败没人接"残留，Task 5/6 按名接手**（都是本轮 Task 4 实测中撞出来的，不是假想）：
-  1. `executor.submit` **没有 done-callback**（执行池在 `service/dramaclip/service_app.py:70-71`，`submit` 在 `:146`）。任务一旦入队而未开跑，行会**永远停在 `pending`**，只有重启时的 `sweep_interrupted` 才清得掉。实测复现形状：同一个 `Harness` 的 executor 连投两个 produce job，第二个偶发（约 2/5）根本没进 `_run_produce`——`status='pending', progress=0.0, error=None`，线程栈里只有闲置 worker。生产用进程级单池，同样的两作业序列确实可发生。
+  1. `executor.submit` **没有 done-callback**（执行池在 `service/dramaclip/service_app.py:70-71`，`submit` 在 `:146`）。任务一旦入队而未开跑，行会**永远停在 `pending`**。实测复现形状：同一个 `Harness` 的 executor 连投两个 produce job，第二个偶发（约 2/5）根本没进 `_run_produce`——`status='pending', progress=0.0, error=None`，线程栈里只有闲置 worker。生产用进程级单池，同样的两作业序列确实可发生。
+     **本条原先还写着"只有重启时的 `sweep_interrupted` 才清得掉"，那句是错的**：`infra/jobs.py::sweep_interrupted` 当时只 `WHERE status = 'running'`，pending 行连重启都清不掉，是真正的永生行。
+     **已修（本轮审查，M12）**：按"无服务运行即无任务在飞"这条已经在为 `running` 背书的同一理由，把清扫扩到 `pending`（`WHERE status IN (pending, running)`），与 `exports.reset_stale_pending` 同构；`tests/infra/test_jobs.py::test_sweep_interrupted_marks_running_and_pending_failed` 钉住。**没有**给 submit 挂 done-callback，也没动任务生命周期——那是更大的设计问题，不在本轮范围。
   2. 两个 runner **没有** `try/finally` 保护 `cancel_events`，只有一个逐模式的 `try/except` 加末尾一句无条件 `pop`。装配期的抛错已由 `2ef6289` 收口，但**在末尾 `pop` 之前的任何一处抛错仍会漏掉取消事件**（`_run_produce` 的渲染段就在保护圈外）。
   修法同出一条：给 submit 挂 done-callback 兜住 terminal 状态与 `cancel_events.pop`，或把 runner 主体包进 `try/finally`。**Task 6 处理配音抛错语义时一并做**——那时"任务级失败"的路径会变多，不做就会多出一批僵尸行。
 - 派发时给实施者的路径 `service/dramaclip/api/transport/service_app.py` 是**错的**，实际在 `service/dramaclip/service_app.py`；顺带纠正"runner 已有 try/finally"这句假设，它并不成立。

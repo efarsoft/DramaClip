@@ -9,9 +9,12 @@ from uuid import uuid4
 
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
-# 「运行中」的唯一拼写源：写它的是 mark_running，比它的是启动清扫的 SQL 与
-# api/models.py 的下载看门狗。三处必须同值——看门狗据此判断该不该收尾，启动清扫据此
-# 判定哪些是崩溃残留；拼写一分家就退回「任务永停 pending 且重启也清不掉」那个假状态。
+# 两个非终态值的唯一拼写源：写 pending 的是 create，写 running 的是 mark_running；
+# 比它们的是启动清扫的 SQL（两者同为崩溃残留）与 api/models.py 的下载看门狗（只认
+# running 才收尾）。三处必须同值——看门狗据此判断该不该收尾，启动清扫据此判定哪些是
+# 崩溃残留；拼写一分家就退回「任务永停某个非终态且重启也清不掉」那个假状态。
+# 写入侧一并命名，否则常量就成了没人写的孤立值（同 exports.py 的 STATUS_PENDING）。
+STATUS_PENDING = "pending"
 STATUS_RUNNING = "running"
 
 
@@ -35,8 +38,8 @@ class JobStore:
         now = _now_ms()
         self._conn.execute(
             "INSERT INTO jobs (id, type, ref_id, status, progress, created_at, updated_at)"
-            " VALUES (?, ?, ?, 'pending', 0, ?, ?)",
-            (job_id, job_type, ref_id, now, now),
+            " VALUES (?, ?, ?, ?, 0, ?, ?)",
+            (job_id, job_type, ref_id, STATUS_PENDING, now, now),
         )
         self._conn.commit()
         return job_id
@@ -106,11 +109,17 @@ class JobStore:
         return [dict(zip(self._LIST_COLUMNS, row, strict=True)) for row in rows]
 
     def sweep_interrupted(self) -> int:
-        """启动清扫：上一会话遗留的 running 任务标记失败（崩溃重入协议）。"""
+        """启动清扫：上一会话遗留的 running / pending 任务标记失败（崩溃重入协议）。
+
+        无服务运行即无任务在飞，故 pending 与 running 同一条理由成立：`executor.submit`
+        不挂 done-callback，入队而 worker 始终没跑起来的行原本会永远停在 pending，
+        队列页挂着一只永不推进的任务。与 `exports.reset_stale_pending` 同构——
+        认非终态即复位，终态行不动，进度保留原值，两表不得互相矛盾。
+        """
         cursor = self._conn.execute(
             "UPDATE jobs SET status = 'failed', error = '服务中断', updated_at = ?"
-            " WHERE status = ?",
-            (_now_ms(), STATUS_RUNNING),
+            " WHERE status IN (?, ?)",
+            (_now_ms(), STATUS_PENDING, STATUS_RUNNING),
         )
         self._conn.commit()
         return cursor.rowcount or 0

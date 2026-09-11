@@ -98,6 +98,10 @@ def test_build_from_script_episodes_spans_multiple_sources() -> None:
     # 钩子挂第一段所在集；解说字幕与 narration_texts 一一对应
     assert plan.timeline[0].subtitle_text == "钩子"
     assert len(plan.narration_texts) == 4
+    # 段→文案的 id 接线：剧本链的文案是成稿，故不能用 conftest.assert_slots_paired
+    # （它还断言 `not text.text`）。少了这行，删掉钩子/正文/CTA 三处 narration_id= 全绿，
+    # 而回填层只认 id——届时每条剧情解说方案都在配音期炸「编排自相矛盾」，模式等于死了。
+    assert [seg.narration_id for seg in plan.timeline] == [t.id for t in plan.narration_texts]
 
 
 def test_build_clamps_to_episode_duration() -> None:

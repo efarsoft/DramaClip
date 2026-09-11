@@ -125,6 +125,21 @@ def _inject_run_settings(
     return episode_inputs
 
 
+def _settle_failed(context: AppContext, job_id: str, error: str) -> None:
+    """失败落库；行已终态时只记日志，绝不用记账错误顶掉原始异常。
+
+    `JobStore._transition` 对终态行抛 `ValueError("任务已终态")`。它从兜底 handler 里
+    逃出去就落进 executor 的 future——没人 `.result()` 就没人读，原始原因连一行日志都
+    不留。兜底路径自己会抛，等于"失败没人接"这条线断在最后一环。
+    """
+    try:
+        context.job_store.mark_failed(job_id, error)
+    except Exception as exc:  # 记账失败不该盖掉业务失败：原因一并写进日志
+        context.notifier.log(
+            "error", f"任务 {job_id} 状态写入失败({exc})；原始原因：{error}"
+        )
+
+
 def _run_generation_parallel(
     context: AppContext,
     job_id: str,
@@ -160,6 +175,7 @@ def _run_generation_parallel(
                     _generate_one(context, mode, episodes, episode_inputs, dict(settings))
                 except Exception as exc:
                     failures.append(f"{label}: {exc}")
+                    context.notifier.log("error", f"{label} 编排失败: {exc}")
                 with lock:
                     done_count += 1
                     context.job_store.set_progress(job_id, round(done_count / total * 100, 1))
@@ -181,12 +197,13 @@ def _run_generation_parallel(
         if cancel_event.is_set():
             context.job_store.mark_cancelled(job_id)
         elif failures:
-            context.job_store.mark_failed(job_id, "; ".join(failures))
-            context.notifier.log("error", f"部分编排失败: {'; '.join(failures)}")
+            detail = "; ".join(failures)
+            context.job_store.mark_failed(job_id, detail)
+            context.notifier.log("error", f"部分编排失败: {detail}")
         else:
             context.job_store.mark_completed(job_id)
     except Exception as exc:  # noqa: BLE001 - 逐模式守卫之外的抛出没人接就是一行永停 running
-        context.job_store.mark_failed(job_id, f"编排任务异常终止: {type(exc).__name__}: {exc}")
+        _settle_failed(context, job_id, f"编排任务异常终止: {type(exc).__name__}: {exc}")
     finally:
         context.cancel_events.pop(job_id, None)
 
@@ -384,12 +401,14 @@ def _run_produce(
         if cancel_event.is_set():
             context.job_store.mark_cancelled(job_id)
         elif failures:
-            context.job_store.mark_failed(job_id, "; ".join(failures))
+            detail = "; ".join(failures)
+            context.job_store.mark_failed(job_id, detail)
+            context.notifier.log("error", f"部分出片失败: {detail}")
         else:
             context.job_store.set_progress(job_id, 100.0)
             context.job_store.mark_completed(job_id)
     except Exception as exc:  # noqa: BLE001 - 逐模式守卫之外的抛出没人接就是一行永停 running
-        context.job_store.mark_failed(job_id, f"出片任务异常终止: {type(exc).__name__}: {exc}")
+        _settle_failed(context, job_id, f"出片任务异常终止: {type(exc).__name__}: {exc}")
     finally:
         context.cancel_events.pop(job_id, None)
 

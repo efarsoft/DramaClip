@@ -1,4 +1,4 @@
-"""解说管线：分析结果 → 编排方案（raw_clip/intro/cross/ultra_short/dialogue）+ TTS 合成。
+"""解说管线：分析结果 → 规则编排（除剧情解说外的八模式）+ 剧本驱动装配 + TTS 合成回填。
 
 编排层只产出画面结构与旁白槽位；文案由 narration.copywriter 生成，TTS 由本模块回填。
 """
@@ -181,6 +181,32 @@ def parse_asr_segments(asr_json: str) -> list[AsrSegment]:
     return [AsrSegment.model_validate(item) for item in json.loads(asr_json)]
 
 
+def _assert_voiceable(plan: PlanData) -> None:
+    """配音前的上游契约校验：文案非空、每个旁白段都按 id 配到文案。
+
+    这两条违约都来自编排/编剧链，不是 TTS 结果，故一律排在合成之前——第三个槽位
+    为空时不该先为前两个槽位付两轮真实合成。段↔文案只认 `narration_id`，绝不按位置推断。
+
+    扫段而非只看文案表是否为空：`narration_texts` 为空只说明"没有文案"，不说明
+    "没有段要文案"。带着旁白段的空表是静音片，必须在这里就炸。
+    """
+    for item in plan.narration_texts:
+        if not item.text.strip():
+            raise RuntimeError(
+                f"旁白 {item.id} 文案为空——编剧链未执行，这条方案不该往下走配音"
+            )
+    voiced_ids = {item.id for item in plan.narration_texts}
+    for segment in plan.timeline:
+        # ducked（全片解说全程压底旁白）与 narration 同权：两者都必须配到文案
+        if segment.audio not in ("narration", "ducked"):
+            continue
+        if segment.narration_id not in voiced_ids:
+            raise RuntimeError(
+                f"编排自相矛盾：旁白段 {segment.episode_id}@{segment.start} "
+                f"的 narration_id={segment.narration_id!r} 在文案表里不存在"
+            )
+
+
 def synthesize_narration_texts(
     plan: PlanData,
     settings: dict[str, str],
@@ -190,18 +216,16 @@ def synthesize_narration_texts(
     """逐段合成旁白并按 narration_id 回填时长与解说字幕。
 
     降级禁止（规格 §3.3.1）：任一段没有合格音频，整条方案失败——
-    半条旁白的片子不可交付。段↔文案只认 id，绝不按位置推断。
+    半条旁白的片子不可交付。上游契约由 `_assert_voiceable` 先一次性验完，
+    本函数只管合成与回填。
     """
+    _assert_voiceable(plan)
     if not plan.narration_texts:
         return plan
     engine = create_tts(settings.get("tts.engine", "edge"), models_dir)
     default_voice = settings.get("tts.voice", "")
     voiced: dict[str, tuple[str, str, float]] = {}  # id → (audio_path, text, duration)
     for item in plan.narration_texts:
-        if not item.text.strip():
-            raise RuntimeError(
-                f"旁白 {item.id} 文案为空——编剧链未执行，这条方案不该往下走配音"
-            )
         # 段级 voice 优先（双人对谈的双音色），缺省用全局设置
         voice = item.voice or default_voice
         try:
@@ -221,13 +245,7 @@ def synthesize_narration_texts(
         # ducked（全片解说全程压底旁白）与 narration 同权：两者都要回填时长与解说字幕
         if segment["audio"] not in ("narration", "ducked"):
             continue
-        key = segment.get("narration_id")
-        if key not in voiced:
-            raise RuntimeError(
-                f"编排自相矛盾：旁白段 {segment['episode_id']}@{segment['start']} "
-                f"的 narration_id={key!r} 在文案表里不存在"
-            )
-        _audio_path, text, duration = voiced[key]
+        _audio_path, text, duration = voiced[str(segment["narration_id"])]
         segment["end"] = round(segment["start"] + duration, 3)
         segment["subtitle_text"] = text
     updated = [
@@ -236,7 +254,7 @@ def synthesize_narration_texts(
         )
         for item in plan.narration_texts
     ]
-    # 校验回模型：model_copy 会把裸 dict 塞进 timeline，导出层按属性读段就会炸
+    # timeline 是裸 dict，必须过 model_validate 才是模型实例，导出层按属性读段
     return PlanData.model_validate(
         {**plan.model_dump(), "narration_texts": updated, "timeline": timeline}
     )

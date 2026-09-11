@@ -508,7 +508,10 @@ def test_produce_runner_raise_still_settles_the_job(
     )
 
     status = _wait_terminal(harness, job_id)
-    assert jobs.is_terminal(str(status["status"])), f"作业停在 {status['status']}：抛出没人接"
+    assert status["status"] == "failed", f"作业停在 {status['status']}：抛出没人接"
+    assert "进度通知通道已断" in str(status["error"]), (
+        f"jobs 表里的原因不是注入的那个：{status['error']!r}"
+    )
     assert job_id not in harness.context.cancel_events, "cancel_events 未释放"
 
 
@@ -534,17 +537,69 @@ def test_generation_runner_raise_still_releases_cancel_event(
     )
 
     status = _wait_terminal(harness, job_id)
-    assert jobs.is_terminal(str(status["status"])), f"作业停在 {status['status']}：抛出没人接"
+    assert status["status"] == "failed", f"作业停在 {status['status']}：抛出没人接"
+    assert "jobs 表写不进去" in str(status["error"]), (
+        f"jobs 表里的原因不是注入的那个：{status['error']!r}"
+    )
+    assert job_id not in harness.context.cancel_events, "cancel_events 未释放"
+
+
+_ORIGINAL_AFTER_TERMINAL = "完成落库后连接断了"
+
+
+def test_bookkeeping_error_never_replaces_the_original(
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """行已终态时 `mark_failed` 抛 `ValueError("任务已终态")`：它绝不能顶掉原始异常。
+
+    兜底 handler 自己会抛，是"失败没人接"这条线的最后一环：那个 ValueError 从 except
+    里逃出去就落进 executor 的 future，没人 `.result()` 就没人读——原始原因连一行日志
+    都不留，运维手上只有一条 completed 的行和一段无从追查的沉默。记账失败只许记日志。
+    """
+    project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
+    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
+    monkeypatch.setattr(narration_api, "_generate_one", lambda *_a, **_k: None)
+
+    real_completed = harness.context.job_store.mark_completed
+
+    def completed_then_boom(job_id: str) -> None:
+        real_completed(job_id)  # 行真的进了终态，紧接着一句写库才炸
+        raise RuntimeError(_ORIGINAL_AFTER_TERMINAL)
+
+    monkeypatch.setattr(harness.context.job_store, "mark_completed", completed_then_boom)
+    job_id = str(
+        harness.rpc(
+            "narration.generate_plans", {"project_id": project_id, "modes": ["raw_clip"]}
+        )["job_id"]
+    )
+
+    status = _wait_terminal(harness, job_id)
+    assert status["status"] == "completed", f"记账失败把成品行改写了：{status}"
+    sent = [str(item) for item in harness.sent]
+    assert any(_ORIGINAL_AFTER_TERMINAL in item for item in sent), (
+        f"原始原因没留下任何痕迹，被记账错误顶掉了：{harness.sent}"
+    )
     assert job_id not in harness.context.cancel_events, "cancel_events 未释放"
 
 
 class _FullModeBrokenTts:
-    """只对 full_narration 的槽位（id 前缀 `full-`）不可达：用来量失败粒度。"""
+    """只对 full_narration 的槽位（id 前缀 `full-`）不可达：用来量失败粒度。
+
+    断言不写在替身里——它跑在 worker 线程上，炸出来只是 jobs 行里一条模式失败字符串，
+    不是一条指向本行的测试失败。这里只记账，由用例读账。
+    """
+
+    def __init__(self) -> None:
+        self.empty_text_ids: list[str] = []
 
     def synthesize(self, text: str, _voice: str | None, out_path: Path) -> Path:
         if out_path.stem.startswith("full"):
             raise RuntimeError("云端不可达")
-        assert text.strip(), "语言层没填上文案，槽位还是空的"
+        if not text.strip():
+            self.empty_text_ids.append(out_path.stem)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(b"")
         return out_path
@@ -575,7 +630,8 @@ def test_tts_failure_fails_one_mode_not_the_batch(
     _FakeLlm.calls = []
     monkeypatch.setattr(script_driver, "LlmClient", _FakeLlm)
     monkeypatch.setattr(copywriter, "LlmClient", _FakeLlm)
-    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: _FullModeBrokenTts())
+    broken_tts = _FullModeBrokenTts()
+    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: broken_tts)
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: 1.25)
     rendered: list[str] = []
     monkeypatch.setattr(
@@ -595,6 +651,9 @@ def test_tts_failure_fails_one_mode_not_the_batch(
     assert "全片解说" in error and "合成失败" in error, f"失败没点名到模式与原因：{error}"
     assert "片头解说" not in error, f"第一个模式被第二个的失败牵连了：{error}"
     assert rendered == ["intro_narration"], f"渲染只该跑成功的那条方案：{rendered}"
+    assert broken_tts.empty_text_ids == [], (
+        f"语言层没填上文案，槽位还是空的：{broken_tts.empty_text_ids}"
+    )
     assert narration_api._newest_ready_plan(context, project_id, "intro_narration") is not None
     assert narration_api._newest_ready_plan(context, project_id, "full_narration") is None
     assert str(job["job_id"]) not in context.cancel_events, "cancel_events 未释放"
