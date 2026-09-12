@@ -2409,10 +2409,15 @@ Expected: 文件存在。素材目录默认 `D:\BaiduNetdiskDownload\小小球�
 - [ ] **Step 2: 先跑单模式，确认文案真的换了**
 
 Run: `.venv/Scripts/python scripts/verify_modes.py --modes full_narration > /tmp/gate-full.log 2>&1; echo REAL_EXIT=$?`
-Expected: `REAL_EXIT=0`，表格里 `planner=llm_script`、`LUFS` 落在目标 ±2.5。
-再人工看一条：`ls -t data/logs/llm/llm_script_*.json | head -1` 之后
-Run: `.venv/Scripts/python -c "import json,sys,glob;p=sorted(glob.glob('data/logs/llm/llm_copy_*.json'))[-1];d=json.load(open(p,encoding='utf-8'));print(d['user'][:1200])"`
-Expected: prompt 里能看到 `[full-1] 职责：开篇…` 与区间台词。**若 `llm_copy_*` 一个都没有，说明语言层根本没被调用，别往下走。**
+Expected: `REAL_EXIT=0`，表格里 `planner=llm_script`、`LUFS` 落在目标 ±2.5、`峰dB` 在门限内。
+
+再人工核一条编剧留痕。**注意留痕不在 `data/logs/llm/`**：门禁跑的是隔离库副本，`data_dir` 指向它自己建的临时目录，`llm_copy_*.json` 落在那里并随临时目录一起删。所以要在清理之前从临时副本里取：
+
+Run: `ls -dt tmp_dc-verify-data_*/logs/llm/llm_copy_*.json 2>/dev/null | head -1`
+（拿到路径后）Run: `.venv/Scripts/python -c "import json,sys;d=json.load(open(sys.argv[1],encoding='utf-8'));print(d['user'][:1200])" <上一步的路径>`
+Expected: prompt 里能看到 `[full-1] 要做的事：开篇…`、该槽位的画面区间、以及区间内台词。
+**若一个 `llm_copy_*` 都没有，说明语言层根本没被调用，别往下走**——那比任何响度数字都严重。
+（Task 9 已实测确认过这条路径：临时副本里确实生成了 `llm_copy_full_narration_*.json`。）
 
 - [ ] **Step 3: 九模式全跑**
 
