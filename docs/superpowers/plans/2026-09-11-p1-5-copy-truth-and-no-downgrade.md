@@ -30,6 +30,7 @@
 | 剧本驱动失败 → 规则编排 | `pipeline.build_from_script_dialogue`（死）、`script_driver` 返回 `None`、`_generate_one` 回落 `build_plan` | **禁止 → 抛错** | 同上，且失败会伪装成"这个模式本来就是这版" |
 | TTS 单段失败 → 该段回退原声 | `pipeline.synthesize_narration_texts` | **禁止 → 抛错** | 半条旁白的片子不可交付；失败粒度=单条方案，不整批停摆 |
 | `amix` 默认归一化把音量砍半 | `encoder.cut_segment_args` | **禁止 → 关掉归一化** | 声明的 0.2/0.12 是假的，响度失控无人负责 |
+| 混音求和可削顶 → 放行 | `encoder.cut_segment_args`（`amix` 之后） | **禁止 → 求和挂前瞻限幅器** | 关掉归一化同时关掉了 amix 顺带白送的 6 dB 余量；实测混音段 +4.02 dBTP（平顶硬削，不可逆失真），比它引起的门限失败更严重。天花板 `_MIX_PEAK_CEILING_DBFS = -3.0`，`alimiter` `level=disabled`（`level` 默认 true 是自动电平，会把天花板自己抵消）；限幅不接管绝对响度，Phase C 仍是唯一负责人 |
 | 成片响度实测超容差 → 放行 | `exporter/loudness.py`（P-1.5 新建） | **禁止 → 抛错** | 响度观众听得见；两遍法后的实测复核就是它的验收线 |
 | 口味层 LLM 选题失败 → 题材静态映射 | `script_driver`（现）/ `resolve_run_style`（后） | **允许，但必须留痕** | 兜底值仍是人写的风格指令，不是假文案 |
 | 分析层 LLM → 关键词打分 | `semantic/conflict.py`、`genre.py` | **允许，界面必须可见** | 影响选段而非文案；可见性归 §3.3，界面在 P-3 |
@@ -2218,6 +2219,55 @@ git commit -m "feat(export): Phase C 整片两遍响度归一，目标值进设�
   （`offset_lu` 硬编码 0.0、两个键各从守卫里摘一次、`_TP_ENCODE_HEADROOM_DB`→0、
   `_TP_GATE_MARGIN_DB`→1.5、`-b:a`→128k、删掉无音轨判定、`os.replace` 挪回复核前、
   测量遍加 `-loglevel error`、归一遍删 `-ar`、`get_float` 改宽松）。
+
+#### 增补（F2 遗留项落锤）：混音求和限幅 + Phase C 真峰有界重试
+
+- **根因：Task 7 关掉 `amix` 的默认归一化时，顺带关掉了它意外的削顶保护**。`amix` 默认把每路
+  除以输入数（两路即各 −6 dB），那 6 dB 一直是白送的余量；`normalize=0` 之后声明的 0.2/0.12
+  终于是实际值（Task 7 的目的，不改），但旁白（unity）+ 原声（0.2/0.12）的求和可以直接冲过
+  0 dBFS。实测：真成片 `intro_narration_325c84` 整片 `input_tp=+3.26 dBTP`——**混音在归一之前
+  就已经在削顶**，正真峰意味着采样间过冲，是交付物里听得见的失真，比它引起的门限失败
+  （编码后 −0.82 对门限 −1.0）更严重。合成最坏情况（原声床 −0.23 dBTP + 旁白等价音 +3.00 dBTP，
+  走完整条 `cut_segment_args` 到 AAC 128k 段）：剥掉限幅 `input_tp=+4.02 dBTP`、采样峰 0.0 dBFS
+  （平顶硬削）；挂上限幅 `−2.43 dBTP` / 采样峰 −2.4 dBFS。
+- **修法（encoder.py）：求和之后挂前瞻限幅器**，天花板是具名常量 `_MIX_PEAK_CEILING_DBFS = -3.0`，
+  滤镜 `alimiter=limit=0.7079:level=disabled:latency=true`。选 `alimiter` 不选
+  `acompressor`/`dynaudnorm`：`alimiter` 是前瞻限幅器（`-h filter=alimiter`："Audio lookahead
+  limiter"），`limit` 就是硬天花板；`acompressor` 无前瞻（attack 期间瞬时峰照过）；`dynaudnorm`
+  是电平器，又会归一化——正是 Task 7 要消灭的东西。**`level=disabled` 必须显式给**：`level`
+  默认 `true` 是自动电平（按 1/limit 把输出抬回去），实测最坏情况求和过 `level=enabled` 出来
+  `+0.19 dBTP`——天花板被它自己抵消；而且它对根本没碰天花板的素材照样抬（−38.1 dBFS 安静信号
+  → −35.1 dB，凭空 +3.0），等于从后门放回"声明值 ≠ 实际值"。`latency=true` 补掉前瞻的
+  4.98 ms 音画错位（实测 silencedetect 的 silence_end 1.000021 → 1.005 → 1.000021）。
+  取 −3.0 的依据：段级音轨 AAC 128k 编码后还要再抬——限干净的信号只再抬 0.57–1.06 dB
+  （四例实测 −2.43/−1.94/−2.12/−2.18 dBTP），**已削平的平顶波形**抬得多得多（同一真实源集窗口
+  自身 +0.30，128k 回环变 +4.04，192k 只到 +0.48）——过冲的大头是削平本身，所以先把求和限干净，
+  段真峰稳在 0 dBTP 之下。限幅**不接管绝对响度**（旁白热到碰天花板时混音段实测掉 0.77 LU，
+  Phase C 按目标补回），Phase C 仍是唯一负责人。边界记账：天花板只管混音分支，`else` 那条
+  （original 段）源素材自己热照样带正真峰进 Phase C（仓里 `raw_clip_e35201` 整片 +2.98 dBTP），
+  那是段级 128k 的账，由 Phase C 的门限与重试兜住。`test_mix.py` 用真 ffmpeg 钉住，含
+  "剥掉限幅器必须真的超标"的对照组（字符串里有没有 `alimiter` 与"会不会削顶"是两件事）；
+  变异检验：整体剥掉限幅器 → 字符串用例 + 声学对照组（+4.02 超天花板预算）双红、
+  `level=disabled`→`enabled` → 声学用例红（实测 +0.19 dBTP），逐条按字节还原。
+- **Phase C 增加真峰有界重试（loudness.py），因为 AAC 过冲对所请求的滤镜 TP 不单调**。
+  同一部 `intro_narration_325c84` 按滤镜 TP=−1.5/−2.0/−2.25/−2.5/−2.75/−3.0/−3.5 逐个重编，
+  过冲 0.12 / 0.96 / 0.87 / **1.68** / 0.99 / 0.71 / 0.66 dB——−2.5（首遍：目标 −1.5 减
+  `_TP_ENCODE_HEADROOM_DB`=1.0）正踩谐振点。**任何固定余量都不可能被证明对任意素材够用**，
+  所以做成自适应但**有界**：复核**专因真峰**超标时，按 `_TP_RETRY_HEADROOM_DB`=1.5（滤镜
+  TP=−3.0，实测可过该片）从**原始成片**重编**一次**；再超标就抛，不循环到成功为止——
+  打不到的目标必须响（出一版超规格的片子正是本批次要消灭的东西）。integrated 偏离超容差
+  **不重试**：那是电平问题，多要余量只会更偏，重试等于掩盖真缺陷。哪一版过的门走模块
+  logger 留痕（warning 触发 + info 过门），队列页/Task 9 据此区分一次过与重试过。
+  三条新分支全部变异检验（首抛不重试→红、重试无界→红、重试不换余量→红、漂移走重试→红、
+  log 降 debug→红，逐条按字节还原）。
+- **九部真成片复跑修正后的 Phase C，九部全过**（Phase C 之前那批，`data/outputs/86511b3e…`
+  09-11 17:08–17:11 一轮；副本复制到 D:/tmp 处理，未写回 `data/`）：integrated
+  −15.01…−13.94 LUFS（对目标 −14 最大偏离 1.01 LU，容差 2.0 之内），真峰 −3.77…−2.17 dBTP
+  （门限 −1.0）。**只有 `intro_narration_325c84` 用了重试**：首遍编码后 −0.82 dBTP 超门限
+  （与前一轮实测逐位一致），重试（滤镜 TP=−3.0）后 −13.94 LUFS / −2.29 dBTP、偏离 0.06 LU。
+  上面 F2 那条"留给 Task 9/10"的遗留**本轮双路都落了**：上游限幅（新片的求和不再能削顶）
+  + Phase C 自适应重试（历史削顶素材也能过门）。这九部是限幅修复**之前**渲染的；重渲染后
+  重试应成为罕见路径，Task 9 的门禁若见重试留痕频繁出现，说明上游又坏了。
 
 ---
 

@@ -158,6 +158,19 @@ def test_normalize_args_requests_more_headroom_than_the_gate_allows() -> None:
     assert f"TP={_TARGET.true_peak_dbtp}:LRA" not in joined, "归一遍不得按门限值要真峰值"
     assert loudness._TP_ENCODE_HEADROOM_DB == 1.0
     assert loudness._TP_GATE_MARGIN_DB == 0.5
+    # 重试那档钉死在 1.5：默认目标 -1.5 下即滤镜 TP=-3.0，是唯一被实测证明可过
+    # `intro_narration_325c84`（首遍 -2.5 踩谐振点、编码后 -0.82 dBTP）的档位。
+    assert loudness._TP_RETRY_HEADROOM_DB == 1.5
+    retry = " ".join(
+        loudness.normalize_args(
+            "in.mp4",
+            "out.mp4",
+            _TARGET,
+            _measurement(),
+            headroom_db=loudness._TP_RETRY_HEADROOM_DB,
+        )
+    )
+    assert f"TP={_TARGET.true_peak_dbtp - 1.5}:LRA" in retry
 
 
 def test_normalize_args_keeps_192k_audio_bitrate() -> None:
@@ -279,14 +292,20 @@ def test_recheck_drift_beyond_tolerance_raises(
 def test_recheck_true_peak_over_limit_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """真峰超门限且重试仍超 → 抛错。staged 复核不过就不许碰成品路径。"""
     film = tmp_path / "final.mp4"
     film.write_bytes(b"film")
-    _stub_run(
+    seen = _stub_run(
         monkeypatch,
-        [_measure_stderr(-23.7, -3.1), _measure_stderr(-14.0, -0.4)],  # 真峰超 -1.5+0.5
+        [
+            _measure_stderr(-23.7, -3.1),
+            _measure_stderr(-14.0, -0.4),  # 真峰超 -1.5+0.5
+            _measure_stderr(-14.0, -0.4),  # 重试后仍超
+        ],
     )
     with pytest.raises(loudness.LoudnessError, match="真峰值超标"):
         loudness.normalize_in_place(film, target=_TARGET, work_dir=tmp_path / "wn")
+    assert len([call for call in seen if "null" not in call]) == 2, "抛错前恰好重试过一次"
     assert film.read_bytes() == b"film", "同上：超标片不得留在成品路径"
 
 
@@ -305,7 +324,12 @@ def test_recheck_true_peak_at_exact_gate_margin_passes(
         film.write_bytes(b"film")
         _stub_run(
             monkeypatch,
-            [_measure_stderr(-23.7, -3.1), _measure_stderr(-14.0, true_peak)],
+            [
+                _measure_stderr(-23.7, -3.1),
+                _measure_stderr(-14.0, true_peak),
+                # 超线的那一格会触发有界重试：重试复核也喂同一个超标值，让它走到抛错。
+                _measure_stderr(-14.0, true_peak),
+            ],
         )
         if expect_pass:
             loudness.normalize_in_place(film, target=_TARGET, work_dir=case / "wn")
@@ -314,6 +338,85 @@ def test_recheck_true_peak_at_exact_gate_margin_passes(
             with pytest.raises(loudness.LoudnessError, match="真峰值超标"):
                 loudness.normalize_in_place(film, target=_TARGET, work_dir=case / "wn")
             assert film.read_bytes() == b"film"
+
+
+# ---- 真峰值复核失败的有界重试（过冲对所请求 TP 不单调，一次尝试可能冤枉好片） ----
+#
+# 实测依据（plan 的 Task 8 实测修正）：同一部 `intro_narration` 真成片按滤镜 TP
+# −1.5/−2.0/−2.25/−2.5/−2.75/−3.0/−3.5 逐个重编，过冲 0.12/0.96/0.87/**1.68**/0.99/0.71/0.66 dB
+# ——−2.5（= 默认目标 −1.5 减 1.0 dB 余量）正踩谐振点，而 −3.0（减 1.5 dB）可过、
+# integrated 偏离仅 0.06 LU。所以重试是**换余量重编一次**，不是循环到成功为止。
+
+
+def test_true_peak_recheck_retries_once_with_more_headroom(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """真峰复核超标 → 从**原始成片**按 `_TP_RETRY_HEADROOM_DB` 重编一次，过了就落地。
+
+    重试不回炉测量遍：源没变，第一遍的 measured_* 仍然有效；变的只有滤镜 TP。
+    """
+    film = tmp_path / "final.mp4"
+    film.write_bytes(b"film")
+    seen = _stub_run(
+        monkeypatch,
+        [
+            _measure_stderr(-23.7, -3.1),  # 源测量
+            _measure_stderr(-14.0, -0.4),  # 复核 1：超门限（-1.5 + 0.5 = -1.0）
+            _measure_stderr(-14.0, -1.4),  # 复核 2（重试产物）：过门
+        ],
+    )
+    with caplog.at_level("INFO", logger="dramaclip.engines.exporter.loudness"):
+        checked = loudness.normalize_in_place(film, target=_TARGET, work_dir=tmp_path / "wn")
+    assert checked.true_peak_dbtp == -1.4, "返回的必须是重试那一版的复核"
+    assert film.read_bytes() == b"normalized"
+    encodes = [call for call in seen if "null" not in call]
+    assert len(encodes) == 2, "一次重试：两遍编码，不多不少"
+    first, second = (" ".join(call) for call in encodes)
+    assert f"TP={_TARGET.true_peak_dbtp - loudness._TP_ENCODE_HEADROOM_DB}" in first
+    assert f"TP={_TARGET.true_peak_dbtp - loudness._TP_RETRY_HEADROOM_DB}" in second, (
+        "重试必须真的换更大的余量（实测可过的那一档是滤镜 TP=-3.0）"
+    )
+    assert encodes[1][encodes[1].index("-i") + 1] == str(film), (
+        "重试从原始成片重编，不许拿上一遍的 staged 产物再压一次（那是第三次有损代）"
+    )
+    assert "重试" in caplog.text, "哪一版过的门必须留痕：队列页/Task 9 要能区分一次过与重试过"
+
+
+def test_true_peak_retry_is_bounded_and_still_fails_loud(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """重试也超标 → 抛错，成品路径不动。不许循环到成功为止：打不到的目标就该响。"""
+    film = tmp_path / "final.mp4"
+    film.write_bytes(b"film")
+    seen = _stub_run(
+        monkeypatch,
+        [
+            _measure_stderr(-23.7, -3.1),
+            _measure_stderr(-14.0, -0.4),  # 复核 1 超标
+            _measure_stderr(-14.0, -0.6),  # 复核 2 仍超标
+        ],
+    )
+    with pytest.raises(loudness.LoudnessError, match="真峰值超标"):
+        loudness.normalize_in_place(film, target=_TARGET, work_dir=tmp_path / "wn")
+    encodes = [call for call in seen if "null" not in call]
+    assert len(encodes) == 2, "只有一次重试；第三次编码出现即说明循环没界"
+    assert film.read_bytes() == b"film"
+
+
+def test_drift_failure_does_not_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """integrated 偏离超容差 → 立即抛，不重试：那是电平问题，多要余量救不了，重试只会掩盖真缺陷。"""
+    film = tmp_path / "final.mp4"
+    film.write_bytes(b"film")
+    seen = _stub_run(
+        monkeypatch,
+        [_measure_stderr(-23.7, -3.1), _measure_stderr(-20.0, -3.0)],  # 复核差 6 LU
+    )
+    with pytest.raises(loudness.LoudnessError, match="偏离目标"):
+        loudness.normalize_in_place(film, target=_TARGET, work_dir=tmp_path / "wn")
+    assert len(seen) == 3, "测量+编码+复核各一次；第四次调用出现即说明漂移也走了重试"
+    assert film.read_bytes() == b"film"
 
 
 def test_normalize_without_output_file_raises(

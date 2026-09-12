@@ -3,7 +3,8 @@
 为什么放在拼接之后而不是段内：段内逐段归一会让相邻段之间忽大忽小（响度泵动），
 而混音阶段的目标只是"比例正确"（旁白 vs 原声），绝对响度由这一层统一负责。
 两遍法（先测后归一）是 ffmpeg 官方推荐路径；测完再复核一遍，超差即抛——
-静默出一版"响度没到位"的片子等同于降级。
+静默出一版"响度没到位"的片子等同于降级。唯一例外：**真峰**复核超标允许换更大滤镜余量
+重试一次（AAC 过冲对所请求 TP 不单调，见 `_TP_RETRY_HEADROOM_DB`）；integrated 偏差不重试。
 
 归一方式：我们**要求**线性（`linear=true`，纯增益、不动动态），但 loudnorm 只在两个条件
 同时成立时才肯走线性——`0 < measured_LRA ≤ LRA`，且 `measured_TP + (I − measured_I) ≤ TP`
@@ -19,6 +20,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess  # noqa: S404 - 参数为受控列表
@@ -29,12 +31,14 @@ from dramaclip.infra import config
 from dramaclip.infra.ffmpeg import probe
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 
+_LOGGER = logging.getLogger(__name__)
+
 _SAMPLE_RATE = 48000
 _LRA = 11.0
 _TOLERANCE_LU = 2.0  # 复核容差：dynamic 受真峰值钳制打不满目标，实测残差 0.03–1.09 LU
 _TIMEOUT_S = 600.0
 
-# 真峰值的两笔预算，改任一个都必须同时复核另一个（tests 把这对关系钉死了）。
+# 真峰值的三笔预算，改任一个都必须同时复核其余（tests 把首遍那对关系钉死了）。
 #
 # `_TP_ENCODE_HEADROOM_DB`：**滤镜侧多要的余量**。loudnorm 在滤镜内部按 192 kHz 限真峰，
 # 之后 192k→48k 重采样 + AAC 编码会再抬出一截采样间过冲，而复核门限量的是抬过之后的值。
@@ -45,8 +49,20 @@ _TIMEOUT_S = 600.0
 #
 # `_TP_GATE_MARGIN_DB`：**门限侧放的余量**。放宽它只是把编码器过冲藏起来，不解决问题；
 # 余量必须在滤镜侧先要出来。
+#
+# `_TP_RETRY_HEADROOM_DB`：**真峰复核超标后重试一次的滤镜余量**。为什么必须重试而不是
+# 把首遍余量直接调大：过冲对所请求的 TP **不单调**。真机实测（8.1.1-essentials，
+# `intro_narration_325c84` 真成片）按滤镜 TP=−1.5/−2.0/−2.25/−2.5/−2.75/−3.0/−3.5 逐个重编，
+# 过冲 0.12/0.96/0.87/**1.68**/0.99/0.71/0.66 dB——−2.5（首遍：目标 −1.5 减 1.0）正踩谐振点，
+# 编码后 −0.82 dBTP 超门限；−3.0 可过（integrated 偏离仅 0.06 LU）。任何固定余量都不可能被
+# 证明对任意素材够用，所以：**首遍按 1.0 dB 要（对绝大多数素材够用、响度代价最小），
+# 复核专因真峰超标时换 1.5 dB 从原始成片重编一次；再超标就抛**。只重试一次：过冲不单调，
+# 更长的梯子在证明力上并不比实测选出的这一步强，而每次重试都是整片重编的分钟级代价；
+# 打不到的目标必须响，不许循环到成功为止。integrated 偏离超容差**不重试**——
+# 那是电平问题，多要余量救不了，重试只会掩盖真缺陷。
 _TP_ENCODE_HEADROOM_DB = 1.0
 _TP_GATE_MARGIN_DB = 0.5
+_TP_RETRY_HEADROOM_DB = 1.5
 
 _JSON_BLOCK = re.compile(r"\{[^{}]*\"input_i\"[^{}]*\}", re.S)
 
@@ -133,6 +149,8 @@ def normalize_args(
     out_path: str,
     target: LoudnessTarget,
     measurement: LoudnessMeasurement,
+    *,
+    headroom_db: float = _TP_ENCODE_HEADROOM_DB,
 ) -> list[str]:
     return [
         "-hide_banner",
@@ -143,10 +161,11 @@ def normalize_args(
         source,
         "-filter_complex",
         f"[0:a]{target.filter(**{
-            # 真峰值按 target−1.0 要，不是按 target 要：滤镜在 192 kHz 内限峰，
+            # 真峰值按 target−headroom 要，不是按 target 要：滤镜在 192 kHz 内限峰，
             # 之后重采样 + AAC 还会抬出采样间过冲，而复核门限量的是抬过之后的值。
-            # 实测数字与"为什么不去放宽门限"见 _TP_ENCODE_HEADROOM_DB。
-            'TP': target.true_peak_dbtp - _TP_ENCODE_HEADROOM_DB,
+            # 首遍 headroom=_TP_ENCODE_HEADROOM_DB；真峰复核超标后的那一次重试按
+            # _TP_RETRY_HEADROOM_DB 要（实测数字与"为什么不去放宽门限"见两常量的注释）。
+            'TP': target.true_peak_dbtp - headroom_db,
             'measured_I': measurement.integrated_lufs,
             'measured_TP': measurement.true_peak_dbtp,
             'measured_LRA': measurement.lra,
@@ -238,6 +257,10 @@ def normalize_in_place(
     复核量的是 staged 产物，通过了才 `os.replace` 落地：反过来做的话，一次"真峰值超标"
     抛错之后成品路径上已经躺着一版能播的超标片——库里写着 failed、`list_works` 也不显示它，
     是最难查的那种不一致。
+
+    真峰复核超标允许**一次**重试（换 `_TP_RETRY_HEADROOM_DB` 从原始成片重编）：
+    AAC 过冲对所请求的滤镜 TP 不单调，首遍可能纯属踩点（实测与界为什么是一次见
+    `_TP_RETRY_HEADROOM_DB` 的注释）。integrated 偏离超容差不重试，直接抛。
     """
     # 事前判无音轨，别等 ffmpeg 报 `Stream map '' matches no streams`（退出码 -22 的无符号
     # 回绕 4294967274）：运维看不懂那句话。可达路径是 `cut_segment_args` 的 else 分支把音频
@@ -249,17 +272,50 @@ def normalize_in_place(
     work_dir.mkdir(parents=True, exist_ok=True)
     measurement = parse_measurements(_run(measure_args(str(file_path), target)))
     staged = work_dir / "loudnorm_stage.mp4"
-    _run(normalize_args(str(file_path), str(staged), target, measurement))
-    if not staged.is_file() or staged.stat().st_size == 0:
-        raise LoudnessError("响度归一未产出文件")
-    checked = parse_measurements(_run(measure_args(str(staged), target)))
-    drift = abs(checked.integrated_lufs - target.integrated_lufs)
-    if drift > _TOLERANCE_LU:
-        raise LoudnessError(
-            f"响度归一后仍偏离目标 {drift:.1f} LU"
-            f"（实测 {checked.integrated_lufs:.1f} / 目标 {target.integrated_lufs:.1f}）"
+    gate = target.true_peak_dbtp + _TP_GATE_MARGIN_DB
+    headroom_db = _TP_ENCODE_HEADROOM_DB
+    retried = False
+    while True:
+        _run(
+            normalize_args(
+                str(file_path), str(staged), target, measurement, headroom_db=headroom_db
+            )
         )
-    if checked.true_peak_dbtp > target.true_peak_dbtp + _TP_GATE_MARGIN_DB:
-        raise LoudnessError(f"真峰值超标：{checked.true_peak_dbtp:.1f} dBTP")
-    os.replace(staged, file_path)
-    return checked
+        if not staged.is_file() or staged.stat().st_size == 0:
+            raise LoudnessError("响度归一未产出文件")
+        checked = parse_measurements(_run(measure_args(str(staged), target)))
+        drift = abs(checked.integrated_lufs - target.integrated_lufs)
+        if drift > _TOLERANCE_LU:
+            # 不重试：偏离目标是电平问题，多要真峰余量只会让它更偏（见 _TP_RETRY_HEADROOM_DB）。
+            raise LoudnessError(
+                f"响度归一后仍偏离目标 {drift:.1f} LU"
+                f"（实测 {checked.integrated_lufs:.1f} / 目标 {target.integrated_lufs:.1f}）"
+            )
+        if checked.true_peak_dbtp > gate:
+            if retried:
+                raise LoudnessError(
+                    f"真峰值超标：{checked.true_peak_dbtp:.1f} dBTP"
+                    f"（滤镜余量 {_TP_RETRY_HEADROOM_DB} dB 重试后仍超门限 {gate:.1f}）"
+                )
+            retried = True
+            headroom_db = _TP_RETRY_HEADROOM_DB
+            _LOGGER.warning(
+                "真峰值复核超标（%.2f dBTP > 门限 %.2f），滤镜余量 %.1f→%.1f dB 重试一次：%s",
+                checked.true_peak_dbtp,
+                gate,
+                _TP_ENCODE_HEADROOM_DB,
+                _TP_RETRY_HEADROOM_DB,
+                file_path.name,
+            )
+            continue
+        if retried:
+            # 留痕：队列页/门禁据此区分"一次过门"与"重试过门"（没有这行 info 就是一次过）。
+            _LOGGER.info(
+                "响度归一重试过门（滤镜余量 %.1f dB）：%s integrated=%.2f LUFS / tp=%.2f dBTP",
+                headroom_db,
+                file_path.name,
+                checked.integrated_lufs,
+                checked.true_peak_dbtp,
+            )
+        os.replace(staged, file_path)
+        return checked
