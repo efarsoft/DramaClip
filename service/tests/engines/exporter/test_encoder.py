@@ -96,13 +96,19 @@ def test_original_audio_branch_carries_the_segment_peak_ceiling() -> None:
     assert "-filter_complex" not in args, "无旁白音频时必须走单路原声，不该声明第二路输入"
     af = args[args.index("-af") + 1]
     ceiling = encoder._peak_ceiling_filter()
-    assert af.startswith("atempo="), f"原声直通段的 -af 应以 atempo 开头：{af!r}"
+    assert af.startswith(encoder._audio_format_filter()), (
+        f"原声直通段的 -af 应以两条分支共用的格式级开头：{af!r}"
+    )
     assert af.endswith(ceiling), (
         f"原声直通段挂的不是两条分支共用的那一处天花板（-af={af!r}，期望以 {ceiling!r} 结尾）"
     )
     assert af.index("atempo=") < af.index("alimiter="), (
         "限幅器必须在 atempo 之后（= 进 AAC 前最后一级）：alimiter 的 limit 只约束它自己的"
         "输出，后面再重采样会重新长出采样间过冲，天花板被下游悄悄作废"
+    )
+    assert af.index("aformat=") < af.index("alimiter="), (
+        "格式级必须在限幅器**之前**：挂在限幅器之后等于限完再重采样，实测把段真峰从 "
+        "-0.3 抬到 +0.1 dBTP（数字见 encoder._SEGMENT_CHANNEL_LAYOUT 的注释）"
     )
     assert ":level=disabled:" in af, "少了它 alimiter 会自动电平回抬，天花板形同不存在"
     assert af.endswith(":latency=true"), "少了它前瞻延迟不补偿，段段音画错位 4.98 ms"
@@ -114,4 +120,54 @@ def test_original_audio_branch_carries_the_segment_peak_ceiling() -> None:
         )
     )
     assert f",{ceiling}[a]" in mixed, "混音分支那道天花板不许被顺手改掉或改窄"
-    assert encoder._SEGMENT_PEAK_CEILING_DBFS == -3.0, "改天花板值必须带着实测理由一起改"
+    # 天花板绝对值只在这一处钉死：改它必须带着实测理由（推导过程写在常量注释里）。
+    # 其余断言一律读常量算派生值，下一次重新推导就不用改五处数字。
+    assert encoder._SEGMENT_PEAK_CEILING_DBFS == -9.0, "改天花板值必须带着实测理由一起改"
+
+
+def test_both_branches_force_one_channel_layout() -> None:
+    """两条分支（含 amix 的**两路输入**）必须读同一处格式级，把布局钉成同一个值。
+
+    漏点来历（真机实测）：`amix` 在"一路 mono 旁白 + 一路 stereo 原声"上协商出 mono，
+    把原声**下混**；原声直通段跟着源走 stereo。Phase B 是 `-c copy`，两种布局照单拼进
+    同一条音轨——实测 236 mono / 472 stereo（真成片 `ultra_short_hook_2c9b87` 同法
+    177 mono / 533 stereo）。后果是 ebur128 一次运行吐 **2 块** Summary、连跑三次
+    integrated 极差 0.6 LU，门禁与 Phase C 取的都是最后一块（只覆盖后半段）。
+
+    断言的是**三处同源**而不是"含有 aformat"：混音分支那两路各写一份、或直通分支写死
+    一个 `aformat=...stereo`，字符串断言全都照绿，而改布局只会改一半——正是本缺陷本身。
+    声学证据（真渲染 + 真 concat + 门禁那条命令连跑三次）在
+    tests/engines/exporter/test_mix.py::test_delivered_track_has_one_channel_layout。
+    """
+    fmt = encoder._audio_format_filter()
+    assert fmt == "aformat=sample_rates=48000:channel_layouts=stereo", (
+        "格式级串改了：布局/采样率是交付音轨的不变量，改它要带着真机 concat 的实测一起改"
+    )
+
+    original = cut_segment_args(
+        "src.mp4", "seg.mp4", start=1.5, end=8.25, audio="original", mask=True,
+        tts_audio=None, rng=random.Random(42),
+    )
+    af = original[original.index("-af") + 1]
+    assert af.count("aformat=") == 1 and af.startswith(fmt), (
+        f"原声直通段没有以共用格式级开头（-af={af!r}）"
+    )
+    # 输出侧的 -ar 与滤镜侧的 sample_rates 必须同源，不许一处改了另一处没改
+    assert original[original.index("-ar") + 1] == str(encoder._SEGMENT_SAMPLE_RATE)
+    assert f"sample_rates={encoder._SEGMENT_SAMPLE_RATE}:" in fmt
+
+    mixed = cut_segment_args(
+        "src.mp4", "seg.mp4", start=0, end=10, audio="narration", mask=True,
+        tts_audio="intro.mp3", rng=random.Random(7),
+    )
+    graph = mixed[mixed.index("-filter_complex") + 1]
+    assert graph.count("aformat=") == 2, (
+        f"混音分支必须给 amix 的**两路输入**都钉格式（实测 {graph.count('aformat=')} 处）："
+        "只钉一路，amix 照样协商出 mono 并把另一路下混"
+    )
+    for leg in ("[0:a]", "[1:a]"):
+        chain = graph[graph.index(leg):]
+        assert chain.startswith(f"{leg}{fmt}"), (
+            f"{leg} 那一路没有以共用格式级开头：{chain[:120]!r}"
+        )
+    assert f"channel_layouts={encoder._SEGMENT_CHANNEL_LAYOUT}" in fmt

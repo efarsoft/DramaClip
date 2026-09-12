@@ -72,7 +72,63 @@ _DEFAULT_OUT_SIZE = (config.EXPORT_WIDTH, config.EXPORT_HEIGHT)
 # Phase C 的真峰门限与有界重试负责（见 loudness.py）。三档都在 tests/engines/exporter/
 # test_mix.py 用真 ffmpeg 钉住，含"剥掉限幅器必须超标"的对照组与 level=enabled 变异
 # （实测把段真峰推回 +1.34 / +0.28 dBTP，自动电平按 1/limit 抵消天花板）。
-_SEGMENT_PEAK_CEILING_DBFS = -3.0
+#
+# 为什么是 **-9.0** 而不是原先的 -3.0（2026-09-12 实测改的，别顺手改回去）：
+# 加了下面的 `_audio_format_filter()` 之后，同一张削平热源的段真峰从原记录的 +0.37
+# 变成了 **+2.07 dBTP**（`test_original_ceiling_holds_acoustically` 当场量到的数）——
+# 强制 stereo 改变了 AAC 的编码模式，平顶波形上的采样间过冲跟着变大，-3.0 那道天花板
+# 于是不再成立。降到 -9.0 是给这部分过冲留出余量。
+# **降天花板不损失任何交付响度**：绝对响度由 Phase C 的 `loudnorm`/增益路统一负责
+# （见 loudness.py），段级天花板只是余量管理；代价仅是进 AAC 前信号低 6 dB，
+# 192k/128k AAC 上听不出来，而 Phase C 会把电平补回目标。
+_SEGMENT_PEAK_CEILING_DBFS = -9.0
+
+# 段级音频格式：**每一段交付音频**的采样率与声道布局都必须逐字相同。
+#
+# 为什么必须有这一级（真机实测，`resources/ffmpeg` 8.1.1-essentials）：`amix` 会把求和
+# 收成 mono——混音段的旁白是 mono（真 TTS 产物 `preflight.mp3` 实测 `24000 Hz / 1 ch`），
+# 原声是 stereo（真片源 `小小球神不好惹/1.mp4` 实测 `aac / 48000 Hz / 2 ch / stereo`），
+# 两路进 amix 之后 ffmpeg 的格式协商选了 mono，**原声被下混**；而原声直通段跟着源走 stereo。
+# Phase B 又是 `-c copy` 流复制，两种布局照单拼进同一条音轨。实测一段 narration + 一段
+# original 各 5 s 拼起来：`ffprobe … frame=channel_layout | sort | uniq -c` → **236 mono /
+# 472 stereo**（真成片同法：`ultra_short_hook_2c9b87` → 177 mono / 533 stereo，
+# `intro_narration_c3eb30` → 399 mono / 9299 stereo）。
+#
+# 后果是**任何响度读数都不复现**：布局换点处 ffmpeg 打印 `Reconfiguring filter graph`、
+# 把测量滤镜 flush 掉，一次运行吐出**两块** ebur128 Summary；门禁与 Phase C 都取最后一块，
+# 而最后一块只覆盖换点之后。实测同一片直接量 mp4 连跑三次 I = **-14.3 / -14.5 / -13.9 LUFS**
+# （2 块 Summary、1 次 Reconfiguring），先解码成 stereo WAV 再量则是 **1 块、0 次、
+# I = -15.5 三次逐位相同**——最后一块把整片响度高估约 1.2 LU，而且它自己就不复现。
+# Phase C 的决策读数用的是同一套量法，所以增益路的可行性预测继承同样的误差
+# （`loudness.py` 实测那部 15.32 s 的片子上增益路漂 1.20 LU）。
+#
+# 为什么钉 **stereo** 而不是 mono：源素材本来就是 stereo，全部下混成 mono 是实打实的
+# 画质外的音质倒退（今天 amix 已经在混音段上意外这么干了）；反过来把 mono 旁白升成
+# dual-mono 不丢任何信息。stereo 也是唯一能同时满足两条分支的布局。
+#
+# 为什么挂在**每条音频链的头一级**而不是收尾（三种改法都用真 ffmpeg 量过，素材同上，
+# 一段 narration + 一段 original 走真 `cut_segment_args` + 真 `_concat`）：
+#   aformat 挂头（本实现）  → 708 帧全 stereo、1 块、三次 I=-15.5、段真峰 **-0.3 dBTP**
+#   aformat 挂尾（限幅之后）→ 布局同样均匀，但段真峰 **+0.1 dBTP**（高 0.4 dB，过了 0）
+#   pan 只挂旁白那一路      → 布局均匀靠的是"源恰好是 stereo"，直通段仍跟着源走
+# 挂尾那 0.4 dB 正是既有注释与用例钉住的那条不变量：**限幅器必须是进 AAC 前的最后一级**，
+# 后面再重采样会重新长出采样间过冲。所以格式统一放在头、限幅器收尾。
+# `pan` 不选的理由：mono 源集会让直通段照样输出 mono，布局统一这件事就取决于素材了。
+_SEGMENT_SAMPLE_RATE = 48000
+_SEGMENT_CHANNEL_LAYOUT = "stereo"
+
+
+def _audio_format_filter() -> str:
+    """段级音频格式滤镜串——两条分支（含 amix 的两路输入）共用的**唯一**一处构造。
+
+    做成函数而不是把串抄三遍：与 `_peak_ceiling_filter` 同一个理由——抄开之后改布局
+    只会改一半，而"只改一半"恰恰是本用例要消灭的那个缺陷本身。
+    `sample_rates` 与输出侧的 `-ar` 同源读 `_SEGMENT_SAMPLE_RATE`，两处不许各写各的。
+    """
+    return (
+        f"aformat=sample_rates={_SEGMENT_SAMPLE_RATE}"
+        f":channel_layouts={_SEGMENT_CHANNEL_LAYOUT}"
+    )
 
 
 def _peak_ceiling_filter() -> str:
@@ -172,7 +228,11 @@ def cut_segment_args(
         args += [
             "-filter_complex",
             f"[0:v]{','.join(filters)}[v];"
-            f"[0:a]volume={bg_volume},atempo={speed}[bg];[1:a]atempo={speed}[tts];"
+            # 两路输入都先过 `_audio_format_filter()`：amix 的格式协商在"一路 mono 一路
+            # stereo"时会选 mono，把原声**下混**掉（实测数字与该选 stereo 的理由见常量注释）。
+            # 两路都钉成 stereo 之后 amix 无需协商，求和保持 stereo。
+            f"[0:a]{_audio_format_filter()},volume={bg_volume},atempo={speed}[bg];"
+            f"[1:a]{_audio_format_filter()},atempo={speed}[tts];"
             f"[bg][tts]amix=inputs=2:duration=first:normalize=0,"
             f"{_peak_ceiling_filter()}[a]",
             "-map",
@@ -195,8 +255,12 @@ def cut_segment_args(
         args += [
             "-vf",
             ",".join(filters),
+            # 格式统一挂头、限幅器收尾：`_audio_format_filter()` 放在 atempo 之前，
+            # 保证 alimiter 仍是"进 AAC 前的最后一级"（挂尾实测把段真峰从 -0.3 抬到
+            # +0.1 dBTP，见常量注释）。这一级也让 **mono 源集**的直通段落到 stereo，
+            # 布局统一不再取决于素材。
             "-af",
-            f"atempo={speed},{_peak_ceiling_filter()}",
+            f"{_audio_format_filter()},atempo={speed},{_peak_ceiling_filter()}",
             "-map",
             "0:v:0",
             "-map",
@@ -216,9 +280,11 @@ def cut_segment_args(
         "-r",
         "30",
         # 音频采样率统一 48k：TTS（24k）与源素材（48k）混流后 concat 流复制
-        # 以首段采样率解读全部包，采样率不一致会把时长/语速翻倍或减半
+        # 以首段采样率解读全部包，采样率不一致会把时长/语速翻倍或减半。
+        # 与 `_audio_format_filter()` 里的 `sample_rates` 同源读一个常量：滤镜侧钉 48k
+        # 是为了让段与段布局/采样率逐字相同，输出侧这个 `-ar` 是同一件事的封装层保险。
         "-ar",
-        "48000",
+        str(_SEGMENT_SAMPLE_RATE),
         "-map_metadata",
         "-1",
         # AAC priming 会写出负起点/编辑列表，concat demuxer 流复制时音频时长

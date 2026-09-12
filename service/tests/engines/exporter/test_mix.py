@@ -88,7 +88,7 @@ def test_mix_limits_the_sum_after_amix() -> None:
     回到 1.000021（与 anull 逐位相同），时长仍是 3.000000 s、天花板仍是 -3.0 dB。
     每段各自映射 [0:v]，不补偿就是段段音频恒定晚于画面。
     """
-    assert encoder._SEGMENT_PEAK_CEILING_DBFS == -3.0
+    assert encoder._SEGMENT_PEAK_CEILING_DBFS == -9.0
     joined = " ".join(_args("narration", "n1.mp3"))
     assert f"{_limit_option()}:level=disabled:latency=true" in joined
     assert joined.index("amix") < joined.index("alimiter"), (
@@ -155,10 +155,22 @@ def _ffmpeg(repo_root: Path) -> str:
 
 
 # 确定性原声床：四条正弦相加（不用 anoisesrc，理由见 `worst_case` 的 docstring）。
-# 两个夹具共用同一张床，只在其上叠不同的热度处理，免得"最坏情况"各说各话。
+# 各夹具共用同一张床，只在其上叠不同的热度处理，免得"最坏情况"各说各话。
+#
+# 必须是 **stereo**（真机实测，8.1.1-essentials）：交付段现在一律强制 stereo
+# （见 `encoder._SEGMENT_CHANNEL_LAYOUT`），而 AAC 的过冲跟着**编码声道数**走——
+# 同一张削平的床（volume=1.4 落 s16、源自报 `input_tp=+1.98`）剥掉限幅器编成段，
+# mono 出口实测 **+1.41 dBTP**，stereo 出口只有 **-2.38 dBTP**（差 3.8 dB）。
+# 用 mono 床量出来的是"不再交付的那种产物"，对照组也不再超标（用例自己就写着
+# "该换素材而不是改断言"）。真片源实测是 `aac / 48000 Hz / 2 ch / stereo`。
+#
+# 两声道用**不同**的正弦组（97/613/2371/5903 对 101/617/2377/5909 Hz）才是真 stereo；
+# 每声道峰值仍是 1.0（0.35+0.3+0.2+0.15），与原 mono 床同热度，好让各档增益的标定可比。
 _BED_EXPR = (
     "aevalsrc=0.35*sin(2*PI*97*t)+0.3*sin(2*PI*613*t)"
-    "+0.2*sin(2*PI*2371*t)+0.15*sin(2*PI*5903*t):s=48000:d=8"
+    "+0.2*sin(2*PI*2371*t)+0.15*sin(2*PI*5903*t)"
+    "|0.35*sin(2*PI*101*t)+0.3*sin(2*PI*617*t)"
+    "+0.2*sin(2*PI*2377*t)+0.15*sin(2*PI*5909*t):s=48000:d=8"
 )
 
 
@@ -451,4 +463,163 @@ def test_original_ceiling_meets_the_documented_aac_budget(
     assert auto_level > budget, (
         f"level=enabled（实测 {auto_level:.2f}）仍落在预算内，"
         "`level=disabled` 这条守卫形同虚设"
+    )
+
+
+# ---- 交付音轨的声道布局：混音段被 amix 收成 mono、直通段跟着源走 stereo ----
+#
+# 为什么这是一条**声学**用例而不是字符串用例：布局不统一的后果是"任何响度读数都不复现"，
+# 只有把两段真渲染拼起来、再拿门禁那条命令量三遍才量得出来。
+#
+# 真机实测（`resources/ffmpeg` 8.1.1-essentials，修复前）：一段 narration（旁白 mono 24 kHz
+# + 原声 stereo 48k）与一段 original 各 5 s，走真 `cut_segment_args` + 真 `encoder._concat`
+# 之后
+#   `ffprobe -select_streams a:0 -show_entries frame=channel_layout -of csv=p=0 | sort | uniq -c`
+#   → **236 mono / 472 stereo**（同法量真成片 `ultra_short_hook_2c9b87` → 177 mono / 533 stereo，
+#     `intro_narration_c3eb30` → 399 mono / 9299 stereo，与门禁那两部的读数对得上）
+#   门禁那条 `ebur128=peak=true:framelog=quiet` → **2 块 Summary、1 次 Reconfiguring**，
+#   最后一块连跑三次 I = **-14.3 / -14.5 / -13.9 LUFS**（极差 0.6 LU）；
+#   同一片先解码成 stereo WAV 再量 → **1 块、0 次 Reconfiguring、I = -15.5 三次逐位相同**。
+#   即"取最后一块"把整片响度高估了约 1.2 LU，而且它自己就不复现。
+# 修复后（本用例钉住的状态）：708 帧全部 stereo、1 块、0 次 Reconfiguring、
+# 三次 I = -15.5，且与 WAV 参考**逐位相同**。
+
+
+def _probe(repo_root: Path, args: list[str]) -> str:
+    """跑 ffprobe 并返回 **stdout**（`_sh` 返回的是 stderr，那是 ffmpeg 日志那一侧）。"""
+    ffprobe = str(repo_root / "resources" / "ffmpeg" / "ffprobe.exe")
+    proc = subprocess.run(  # noqa: S603
+        [ffprobe, *args], capture_output=True, text=True, encoding="utf-8",
+        errors="replace", check=False, timeout=180,
+    )
+    assert proc.returncode == 0, proc.stderr[-800:]
+    return proc.stdout or ""
+
+
+@pytest.fixture(scope="module")
+def stereo_source_and_mono_tts(
+    tmp_path_factory: pytest.TempPathFactory, repo_root: Path
+) -> tuple[Path, Path]:
+    """布局用例的素材：stereo 48k 的原声源 + mono 24 kHz 的旁白。
+
+    两路的形态都是照真机量的，不是随手挑的：
+      * 原声源 —— 真片源 `小小球神不好惹/1.mp4` 实测 `aac / 48000 Hz / 2 ch / stereo`
+        （`ffprobe -select_streams a:0 -show_entries stream=codec_name,sample_rate,channels,
+        channel_layout`）；
+      * 旁白 —— 九模式门禁留下的真 TTS 产物 `preflight.mp3` 实测
+        `mp3 / 24000 Hz / 1 ch / mono / 1.0 s`（同一条 ffprobe 命令）。
+    正是"mono 旁白 + stereo 原声"这对组合让 `amix` 把求和收成 mono 的。
+
+    夹具自己先量一遍布局：源不是 stereo、旁白不是 mono 就直接红——素材悄悄变均匀的话，
+    下面那条用例就成了量空气（本批次被"断言假象"咬过三次）。
+    """
+    ffmpeg = _ffmpeg(repo_root)
+    d = tmp_path_factory.mktemp("stereo-source")
+    src = d / "stereo_src.mp4"
+    tts = d / "tts_mono.wav"
+    _sh([ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=8",
+         "-f", "lavfi", "-i", _BED_EXPR,
+         "-map", "0:v", "-map", "1:a",
+         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+         "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-shortest", str(src)])
+    _sh([ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", "sine=frequency=997:sample_rate=24000:duration=8",
+         "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", str(tts)])
+    src_layout = _probe(repo_root, ["-v", "error", "-select_streams", "a:0",
+                                    "-show_entries", "stream=channel_layout",
+                                    "-of", "csv=p=0", str(src)]).strip()
+    # 旁白那条量**声道数**而不是 channel_layout：真机实测裸 WAV 头里没有声道掩码，
+    # `channel_layout` 报 `unknown`（`channels` 才是 1）。源那条是 AAC in mp4，报 `stereo`。
+    tts_channels = _probe(repo_root, ["-v", "error", "-select_streams", "a:0",
+                                      "-show_entries", "stream=channels",
+                                      "-of", "csv=p=0", str(tts)]).strip()
+    assert src_layout == "stereo", f"原声源不是 stereo（实测 {src_layout!r}），用例在量空气"
+    assert tts_channels == "1", f"旁白不是单声道（实测 channels={tts_channels!r}），用例在量空气"
+    return src, tts
+
+
+def _gate_pass(repo_root: Path, target: Path) -> tuple[str, loudness.LoudnessMeasurement]:
+    """跑一遍**门禁逐字那条**命令，返回 (stderr, 解析出的读数)。
+
+    命令取自 `scripts/verify_modes.py::ebur128`，与 `loudness.measure_gate_args` 同一条：
+      ffmpeg -hide_banner -nostats -i <x> -map 0:a:0 \
+             -af ebur128=peak=true:framelog=quiet -f null -
+    解析走生产解析器 `loudness.parse_gate_reading`（多块时取最后一块，与门禁同判）。
+    """
+    stderr = _sh([_ffmpeg(repo_root), *loudness.measure_gate_args(str(target))])
+    return stderr, loudness.parse_gate_reading(stderr)
+
+
+def test_delivered_track_has_one_channel_layout(
+    repo_root: Path,
+    stereo_source_and_mono_tts: tuple[Path, Path],
+    tmp_path: Path,
+) -> None:
+    """混音段与原声直通段拼起来，逐帧声道布局必须**只有一种**，响度读数必须**可复现**。
+
+    为什么这条比"字符串里有 aformat"重要（honesty rule 3：量产物，不量命令）：
+    Phase B 是 `-c copy` 流复制，它照单全收两段不同的布局，拼出来的音轨中途换布局；
+    ffmpeg 于是在换点 `Reconfiguring filter graph`，把测量滤镜 flush 掉——
+    一次运行吐出**两块** Summary，门禁与 Phase C 都取最后一块，而最后一块只覆盖后半段。
+    实测数字见本节开头那段注释（修复前 236 mono / 472 stereo、2 块、极差 0.6 LU）。
+    """
+    src, tts = stereo_source_and_mono_tts
+    ffmpeg = _ffmpeg(repo_root)
+    segments: list[Path] = []
+    for index, (audio, tts_arg) in enumerate((("narration", str(tts)), ("original", None))):
+        segment = tmp_path / f"seg_{index:03d}.mp4"
+        args = encoder.cut_segment_args(
+            str(src), str(segment), start=1.0, end=6.0, audio=audio, mask=False,
+            tts_audio=tts_arg, rng=random.Random(11),
+        )
+        _sh([ffmpeg, *args])
+        segments.append(segment)
+
+    film = tmp_path / "film.mp4"
+    encoder._concat(segments, film)
+
+    # ffprobe -v error -select_streams a:0 -show_entries frame=channel_layout -of csv=p=0 film.mp4
+    layouts = [
+        line for line in _probe(
+            repo_root, ["-v", "error", "-select_streams", "a:0", "-show_entries",
+                        "frame=channel_layout", "-of", "csv=p=0", str(film)]
+        ).splitlines() if line
+    ]
+    assert layouts, "拼出来的片子没有音频帧，用例在量空气"
+    histogram = {kind: layouts.count(kind) for kind in sorted(set(layouts))}
+    assert set(layouts) == {"stereo"}, (
+        f"交付音轨的声道布局不统一：{histogram}"
+        "——concat 流复制会把它照单拼进同一条流，测量工具在换点重配滤镜图并多吐一块 Summary"
+    )
+
+    stderr, reading = _gate_pass(repo_root, film)
+    assert stderr.count("Summary:") == 1, (
+        f"门禁那条命令吐了 {stderr.count('Summary:')} 块 Summary（应为 1）："
+        "布局中途变了，最后一块只覆盖后半段，门禁与 Phase C 量的都不是整片"
+    )
+    assert "Reconfiguring filter graph" not in stderr, (
+        "滤镜图仍在中途重配（声道布局/采样率不统一的直接症状）"
+    )
+
+    repeats = [_gate_pass(repo_root, film)[1].integrated_lufs for _ in range(2)]
+    spread = max(repeats + [reading.integrated_lufs]) - min(repeats + [reading.integrated_lufs])
+    assert spread <= 0.1, (
+        f"同一片子连量三次 integrated 极差 {spread:.2f} LU"
+        f"（{reading.integrated_lufs:.2f} / {repeats[0]:.2f} / {repeats[1]:.2f}）："
+        "读数不复现，Phase C 的增益预测就没有立足点"
+    )
+
+    # 与"先解码成 stereo WAV 再量"的稳定参考对齐：那一路上 reconfig 恒为 0、Summary 恒为 1，
+    # 是不受封装影响的整片读数。修复前两者差约 1.2 LU（-14.3…-14.5 对 -15.5）。
+    # cmd: ffmpeg -i film.mp4 -map 0:a:0 -ar 48000 -ac 2 -c:a pcm_s16le ref.wav
+    wav = tmp_path / "ref.wav"
+    _sh([ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(film),
+         "-map", "0:a:0", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", str(wav)])
+    ref_stderr, ref = _gate_pass(repo_root, wav)
+    assert ref_stderr.count("Summary:") == 1, "WAV 参考本身就多块，参考不成立"
+    assert abs(reading.integrated_lufs - ref.integrated_lufs) <= 0.1, (
+        f"直接量成片 {reading.integrated_lufs:.2f} LUFS 与整片解码参考 "
+        f"{ref.integrated_lufs:.2f} LUFS 差 {reading.integrated_lufs - ref.integrated_lufs:+.2f}"
+        "——量到的不是整片"
     )
