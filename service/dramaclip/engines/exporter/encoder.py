@@ -2,9 +2,11 @@
 
 Phase A 逐段：精确切割 → 竖屏 1080x1920 裁切 → 消重（微缩放/eq/微变速）
         → 遮罩（非纯原片模式）→ 段级混音（narration/ducked 段旁白 + 原声压低 + 求和限幅）
+        → 段级真峰天花板（**混音与原声直通两条分支都挂**，见 `_SEGMENT_PEAK_CEILING_DBFS`）
         → 重编码。
 Phase B 拼接：concat demuxer（-c copy）+ `-map_metadata -1` 指纹擦除。
-Phase C 响度：整片两遍 loudnorm 归一到 settings 目标（见 loudness.py）。
+Phase C 响度：整片归一到 settings 目标——优先确定性纯增益，素材真需要动态压缩时才走
+        两遍 loudnorm（见 loudness.py）。
 进度：Phase A 按段数、Phase B 占 10%。
 """
 
@@ -30,13 +32,23 @@ from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 # 画幅数值不在这里定义（docs/04 §5.2）：源是 infra.config，settings 默认值读的是同一个常量。
 _DEFAULT_OUT_SIZE = (config.EXPORT_WIDTH, config.EXPORT_HEIGHT)
 
-# 段级混音求和后的采样峰天花板（dBFS）。
+# 段级真峰天花板（dBFS）：**每一段交付音频**都过这道限幅，不分混音还是原声直通。
 #
-# 为什么必须有：Task 7 把 `amix` 的默认归一化关掉（声明的 0.2/0.12 才是实际值）时，
-# 顺带关掉了它**意外的削顶保护**——原先每路除以 2 等于白送 6 dB 余量。真机实测
-# （`resources/ffmpeg/ffmpeg.exe` 8.1.1-essentials）：真实源集 5 s 窗口（源自身
+# 为什么必须有（混音分支的来历）：Task 7 把 `amix` 的默认归一化关掉（声明的 0.2/0.12
+# 才是实际值）时，顺带关掉了它**意外的削顶保护**——原先每路除以 2 等于白送 6 dB 余量。
+# 真机实测（`resources/ffmpeg/ffmpeg.exe` 8.1.1-essentials）：真实源集 5 s 窗口（源自身
 # `input_tp=+0.30`）配 +3.0 dBTP 的旁白，混音段 `input_tp=+4.37 dBTP`、采样峰 +4.36 dB
 # （硬削顶，不可逆的失真）；真成片 `intro_narration_325c84` 整片 `input_tp=+3.26 dBTP`。
+#
+# 为什么天花板必须**长出混音分支之外**（这一版新加的账，九模式门禁实测）：
+# 片源 `小小球神不好惹` 10 集全部 stereo 48k，**源音频进仓就在削顶**。Phase C 之前的
+# 九部真成片里七部 `input_tp` 是 −3.77…−2.17 dBTP，另外两部是 **+3.38**
+# （`intro_narration_c3eb30`，207.8 s）与 **+1.88**（`ultra_short_hook_2c9b87`，15.2 s）
+# ——恰好就是时间轴里带 `original` 段的那两部。漏点正是本函数 `else` 那条：
+# 混音分支有限幅、直通分支只有 `atempo`，源素材自己的热度原样穿过 AAC 128k 进了成片
+# （`raw_clip` 整片 +2.98 dBTP 同一成因）。loudnorm 只能再限、不能"反削顶"，
+# 而 AAC 重编已削平的波形还会过冲，所以 Phase C 的有界真峰重试也救不回来
+# （实测 1.5 dB 余量重试后仍 −0.2 dBTP，整条导出硬失败）。
 #
 # 取 -3.0 的依据：段级音轨是 AAC 128k，编码后还会抬出采样间过冲。实测同一窗口
 # 128k 编解码回环把 +0.30 抬到 **+4.04 dBTP**（换 192k 只抬到 +0.48）——过冲的大头是
@@ -47,12 +59,44 @@ _DEFAULT_OUT_SIZE = (config.EXPORT_WIDTH, config.EXPORT_HEIGHT)
 # 代价：旁白本来就热到碰天花板时，混音段实测掉 0.77 LU / 真峰掉 0.81 dB——这是限幅不是电平，
 # 掉的电平 Phase C 按目标响度补回来。它**不接管绝对响度**，Phase C 仍是唯一负责人。
 #
-# 边界（诚实记账）：这个天花板只管**混音分支**。`else` 那条（original 段）没有求和、
-# 也没有限幅，源素材自己热就会照样带正真峰进 Phase C——实测真实源集 5 s 窗口自身
-# `input_tp=+0.30`，过本函数 else 分支（atempo + AAC 128k）出来是 **+4.04 dBTP**，
-# 仓里的 `raw_clip` 成片整片 +2.98 dBTP 就是这么来的。那是"段级码率 128k"这一笔账，
-# 不是混音的账，Phase C 的真峰值门限与重试负责兜住（见 loudness.py）。
-_MIX_PEAK_CEILING_DBFS = -3.0
+# 边界（诚实记账，别把这道天花板当保证）：对**进仓就已削平**的源，限幅器能把电平压回
+# -3.0 dBFS，却不能把削掉的顶长回来；AAC 重编平顶波形的过冲照旧，而且**过冲跟着削顶深度走**。
+# 真机实测（同一张 aevalsrc 床，`resources/ffmpeg/ffmpeg.exe` 8.1.1-essentials，走完整条
+# else 分支到 AAC 128k 段；素材确定性：同一命令两次生成的 mp4 md5 逐字节相同）：
+#   源 +1.98（抬 1.4 倍落 s16 平顶）→ 剥限幅 +1.41 / 挂限幅 **-0.87**（掉 2.28 dB，过冲 2.13）
+#   源 +3.59（抬 2.0 倍落 s16 平顶）→ 剥限幅 +3.33 / 挂限幅 **+0.37**（掉 2.96 dB，仍过 0）
+#   源 +2.29（抬 1.4 倍、**未削平**）→ 剥限幅 -0.11 / 挂限幅 **-2.31**（落进 1.5 dB 预算）
+# 读法：**源没被削平时预算成立**；源已是平顶时"限回 -3.0 dBFS"能做到、"落进预算"做不到，
+# 削得越深漏得越多——真机超标那部整片 +3.38 dBTP 正落在第二档那一带，所以别把段级天花板
+# 当成出口保证。它的作用是"没削平的源彻底治住 + 已削平的源少漏 2~3 dB"，剩下的账仍由
+# Phase C 的真峰门限与有界重试负责（见 loudness.py）。三档都在 tests/engines/exporter/
+# test_mix.py 用真 ffmpeg 钉住，含"剥掉限幅器必须超标"的对照组与 level=enabled 变异
+# （实测把段真峰推回 +1.34 / +0.28 dBTP，自动电平按 1/limit 抵消天花板）。
+_SEGMENT_PEAK_CEILING_DBFS = -3.0
+
+
+def _peak_ceiling_filter() -> str:
+    """段级天花板滤镜串——两条分支共用的**唯一**一处构造。
+
+    选 alimiter 不选 acompressor/dynaudnorm：前者是**前瞻**限幅器，`limit` 就是硬天花板，
+    而 acompressor 无前瞻（attack 期间瞬时峰照过）、dynaudnorm 是电平器（又会归一化，
+    正是 Task 7 要消灭的东西）。
+
+    `level=disabled` 必须显式给——alimiter 的 `level` 默认 true，会按 1/limit 把输出抬回去
+    （自动电平，行为等同 maximizer），天花板等于没设；真机实测（0 dBFS 正弦过
+    `alimiter=limit=0.7079`）默认 `level=true` → `max_volume 0.0 dB`，`level=disabled`
+    → `-3.0 dB`。而且它对根本没碰到天花板的素材照样抬（-38.1 dBFS 的安静信号过默认参数
+    变成 -35.1 dB，凭空 +3.0 dB）——那正是 Task 7 刚消灭的"声明值 ≠ 实际值"。
+
+    `latency=true` 补掉前瞻带来的 4.98 ms 音画错位（实测数字见 test_mix）。
+
+    做成函数而不是模块常量：常量在 import 时就把数字烘进串里，改 `_SEGMENT_PEAK_CEILING_DBFS`
+    不会生效，`test_ceiling_constant_drives_both_branches` 也就守不住"单一来源"这件事。
+    """
+    return (
+        f"alimiter=limit={10 ** (_SEGMENT_PEAK_CEILING_DBFS / 20):.4f}"
+        ":level=disabled:latency=true"
+    )
 
 
 class EpisodeSourceMissing(Exception):
@@ -77,8 +121,10 @@ def cut_segment_args(
 
     audio 角色语义：narration 与 ducked 在携带旁白音频时渲染等价（旁白为主 + 原声压低，
     前者原声 20%、后者 12% 衬底）；任一角色拿不到旁白音频时回退纯原声。original 恒原声。
-    混音分支的求和过一道 `_MIX_PEAK_CEILING_DBFS` 限幅器：Task 7 关掉 amix 的默认归一化时
-    也关掉了它顺带白送的 6 dB 余量，天花板得自己长出来，否则旁白 + 原声可以直接冲过 0 dBFS。
+    **两条分支都过 `_SEGMENT_PEAK_CEILING_DBFS` 那道前瞻限幅**：混音分支是因为 Task 7
+    关掉 amix 的默认归一化时也关掉了它顺带白送的 6 dB 余量，求和可以直接冲过 0 dBFS；
+    原声直通分支是因为源素材自己就在削顶（九模式门禁实测 +1.88/+3.38 dBTP 的两部成片
+    都漏在这里），限幅不能反削顶，但少漏一点就少一点，剩下的账 Phase C 负责。
     """
     out_w, out_h = out_size
     dedup = dedup_params.generate(rng)
@@ -119,34 +165,38 @@ def cut_segment_args(
         # 那样上面的 bg_volume 声明值与实际听感差一倍，响度无人负责。最终响度由 Phase C 统一收口。
         #
         # 求和之后必须挂限幅器：normalize=0 也把 amix 那 6 dB 的意外余量一起去掉了，
-        # 旁白 + 原声可以直接冲过 0 dBFS（真机实测见 _MIX_PEAK_CEILING_DBFS）。
-        # 选 alimiter 不选 acompressor/dynaudnorm：前者是**前瞻**限幅器，`limit` 就是硬天花板，
-        # 而 acompressor 无前瞻（attack 期间瞬时峰照过）、dynaudnorm 是电平器（又会归一化，
-        # 正是 Task 7 要消灭的东西）。`level=disabled` 必须显式给——alimiter 的 `level`
-        # 默认 true，会按 1/limit 把输出抬回去（自动电平），天花板等于没设；
-        # `latency=true` 补掉前瞻带来的 4.98 ms 音画错位（实测数字见 test_mix）。
+        # 旁白 + 原声可以直接冲过 0 dBFS。滤镜选型与 `level=disabled` / `latency=true`
+        # 为什么不可省，见 `_peak_ceiling_filter`；实测数字见 test_mix。
         bg_volume = "0.2" if audio == "narration" else "0.12"
-        limiter = (
-            f"alimiter=limit={10 ** (_MIX_PEAK_CEILING_DBFS / 20):.4f}"
-            ":level=disabled:latency=true"
-        )
         args += ["-i", tts_audio]
         args += [
             "-filter_complex",
             f"[0:v]{','.join(filters)}[v];"
             f"[0:a]volume={bg_volume},atempo={speed}[bg];[1:a]atempo={speed}[tts];"
-            f"[bg][tts]amix=inputs=2:duration=first:normalize=0,{limiter}[a]",
+            f"[bg][tts]amix=inputs=2:duration=first:normalize=0,"
+            f"{_peak_ceiling_filter()}[a]",
             "-map",
             "[v]",
             "-map",
             "[a]",
         ]
     else:
+        # 原声直通段：以前这里只有 atempo，源素材自己的热度原样进成片（真机实测
+        # `intro_narration_c3eb30` 整片 +3.38 dBTP / `ultra_short_hook_2c9b87` +1.88 dBTP，
+        # 九部里就这两部带 original 段，也就只有这两部超门限）。
+        #
+        # 限幅器挂在 atempo **之后**，即"进 AAC 前的最后一级"：alimiter 的 `limit` 只约束
+        # 它**自己的输出**，后面再接重采样会重新长出采样间过冲，天花板就被下游悄悄作废。
+        # 诚实记账：实测这三档素材上"先限后变"反而低 0.06–0.65 dB（平顶源 -1.52 vs -0.87），
+        # 那是素材巧合、不是可依赖的保证；而"限幅器收尾"是有语义的——atempo 在前与
+        # **只挂限幅器**逐档同值（-0.87 / +0.37 / -2.31 vs -0.87 / +0.37 / -2.32），
+        # 说明前置的微变速不扰动天花板。混音分支同理（amix → 限幅器 → 编码器）。
+        # 顺序被 test_mix 与 test_encoder 双向钉住，翻转即红。
         args += [
             "-vf",
             ",".join(filters),
             "-af",
-            f"atempo={speed}",
+            f"atempo={speed},{_peak_ceiling_filter()}",
             "-map",
             "0:v:0",
             "-map",
