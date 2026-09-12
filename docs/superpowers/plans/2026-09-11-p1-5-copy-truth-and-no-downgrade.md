@@ -2401,12 +2401,12 @@ git commit -m "test(gate): 响度按 R128 实测断言、planner 逐模式验源
 
 不产新代码，只产证据。这一步是本批次的定义本身——P-1.5 的出口判据写在门禁上，没跑过就不算完成。
 
-- [ ] **Step 1: 确认环境就绪**
+- [x] **Step 1: 确认环境就绪**
 
 Run: `ls resources/ffmpeg/ffmpeg.exe && ls data/models/tts/kokoro 2>/dev/null | head -3`
 Expected: 文件存在。素材目录默认 `D:\BaiduNetdiskDownload\小小球神不好惹`（`--media` 可换）。
 
-- [ ] **Step 2: 先跑单模式，确认文案真的换了**
+- [x] **Step 2: 先跑单模式，确认文案真的换了**
 
 Run: `.venv/Scripts/python scripts/verify_modes.py --modes full_narration > /tmp/gate-full.log 2>&1; echo REAL_EXIT=$?`
 Expected: `REAL_EXIT=0`，表格里 `planner=llm_script`、`LUFS` 落在目标 ±2.5、`峰dB` 在门限内。
@@ -2419,19 +2419,19 @@ Expected: prompt 里能看到 `[full-1] 要做的事：开篇…`、该槽位的
 **若一个 `llm_copy_*` 都没有，说明语言层根本没被调用，别往下走**——那比任何响度数字都严重。
 （Task 9 已实测确认过这条路径：临时副本里确实生成了 `llm_copy_full_narration_*.json`。）
 
-- [ ] **Step 3: 九模式全跑**
+- [x] **Step 3: 九模式全跑**
 
 Run: `.venv/Scripts/python scripts/verify_modes.py --modes all --out D:/tmp/dc-p15 > /tmp/gate-all.log 2>&1; echo REAL_EXIT=$?`
 Expected: `REAL_EXIT=0`。九条全成、`planner` 除 raw_clip/subtitle_flow 外全 `llm_script`、响度全在窗口内、`max_freeze_s` 全部 <2。
 耗时提示：LLM 成稿 7 次 + TTS 若干 + 渲染，单集素材约 15-25 分钟；用 `run_in_background`，不要中途判死。
 
-- [ ] **Step 4: 用耳朵验收一条（不可省略）**
+- [ ] **Step 4:（待用户耳朵验收） 用耳朵验收一条（不可省略）**
 
 响度数字过关不等于好听。至少人工听 `full_narration`（旁白压原声最重）与 `dual_host_chat`（双音色）各一条，确认：
 ① 旁白没有被原声盖住；② 双人交替的音色区分仍在；③ 没有因 `normalize=0` 带来的爆音。
 把这一步的结论写进 Step 5 的记录里——**写"已听，结论 X"，不接受"断言全绿所以应该没问题"**。
 
-- [ ] **Step 5: 把实测写回计划并清理临时目录**
+- [x] **Step 5: 把实测写回计划并清理临时目录**
 
 在本文档末尾追加 `## Task N 落地后的实测修正` 小节，记录：九模式实测表（planner/LUFS/峰/时长/冻结）、与预期不符之处、以及计划里被证伪的假设（如有）。
 
@@ -2448,7 +2448,7 @@ ls data/models/tts/kokoro/*/ | head -3   # 必须仍在：联接被删过一次�
 
 若最后一条 `ls` 为空，立刻停下并报出来——那说明联接连同模型被误删，需要从 `data/models` 的备份或重新下载恢复，不要继续提交。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add docs/superpowers/plans/2026-09-11-p1-5-copy-truth-and-no-downgrade.md
@@ -2456,6 +2456,33 @@ git commit -m "docs(plan): 记录 P-1.5 真机复验结果与实测修正"
 ```
 
 ---
+
+### Task 10 落地后的实测结果（2026-09-12，九模式全量重跑）
+
+`REAL_EXIT=0`，**全部断言通过**。素材《小小球神不好惹》10 集，隔离副本，真 LLM（qwen3.7-plus，预检往返 2.67 s）+ 真 TTS（kokoro，预检可出声）。响度规格：目标 −14.0 LUFS ± 2.5 LU，真峰门限 −1.00 dBTP。
+
+| 模式 | 时长 s | LUFS | 峰 dBTP | 冻结 s | 来源 | 段/插桩 | TTS | 带旁白 | 耗时 s |
+|---|---|---|---|---|---|---|---|---|---|
+| raw_clip | 15.48 | −14.0 | −4.00 | 0.0 | rule | 3/3 | 0 | 0 | 6.1 |
+| intro_narration | 209.51 | −14.0 | −2.30 | 0.0 | **llm_script** | 46/46 | 1 | 1 | 112.8 |
+| cross_narration | 64.34 | −14.0 | −2.80 | 0.0 | **llm_script** | 12/12 | 6 | 6 | 73.7 |
+| ultra_short_hook | 15.48 | −14.1 | −5.20 | 0.0 | **llm_script** | 3/3 | 2 | 2 | 48.6 |
+| dialogue_narration | 56.10 | −14.1 | −2.20 | 0.0 | **llm_script** | 7/7 | 7 | 7 | 134.7 |
+| full_narration | 49.83 | −14.1 | −2.20 | 0.0 | **llm_script** | 8/8 | 8 | 8 | 78.1 |
+| subtitle_flow | 32.43 | −14.0 | −2.70 | 0.0 | rule | 7/7 | 0 | 0 | 13.1 |
+| dual_host_chat | 58.92 | −14.0 | −2.30 | 0.0 | **llm_script** | 8/8 | 8 | 8 | 99.2 |
+| inner_monologue | 49.91 | −14.0 | −2.40 | 0.0 | **llm_script** | 8/8 | 8 | 8 | 82.7 |
+
+**出口判据逐条核对**：① 九个模式全部 `completed`；② `planner` 除 `raw_clip`/`subtitle_flow` 外**七条全为 `llm_script`**；③ 响度全部落在 −14.0/−14.1 LUFS，**最大偏差 0.1 LU**（容差 2.5），真峰 −2.20…−5.20 dBTP 全部在门限内；④ 冻结帧九条全 0.0 s；⑤ 插桩覆盖率九条都是「段==插桩」，所以本表每一行都可信；⑥ 带旁白段数 == TTS 段数，无一段漏音。
+
+**与本批次起点的对比**（这是 P-1.5 存在的理由）：起点是 `planner` 八条 `rule`、只有 `dialogue_narration` 一条 `llm_script`，带旁白模式均量 −22…−30 dB vs 纯原声 −12 dB。现在七条真 LLM 成稿，九条响度统一到 0.1 LU 以内。
+
+**过程中被实测推翻的三个假设**（详见 Task 8 的实测修正与提交 `2e41164`）：
+1. 关掉 `amix` 默认归一化同时也关掉了它**意外提供的削顶保护**——真机素材进仓就已削顶（+3.38 dBTP），天花板必须覆盖原声直通段，且强制 stereo 后 AAC 过冲变大，天花板由 −3.0 降到 −9.0 dBFS。
+2. 段级声道布局不统一（`amix` 收 mono、原声段跟源 stereo、Phase B 流复制拼接）会让**同一部片连量三次得到 −14.3/−14.5/−13.9 LUFS**——门禁自己在漂。统一 `aformat` 后三次逐位相同。
+3. 15 s 短片上 `loudnorm` 动态模式不收敛（偏 3.2 LU），改为「能用纯增益就不压缩」后合成短片偏差 0.00 LU。
+
+**仍未完成的一步**：Step 4 的耳朵验收只能由用户做。响度数字过关不等于好听——现在真实素材上 Phase C 多数走的是**动态**归一（非线性），安静段可能有轻微泵感；`dual_host_chat` 的双音色区分度也只能靠听。
 
 ## 完成判据（全部满足才算 P-1.5 收口）
 
