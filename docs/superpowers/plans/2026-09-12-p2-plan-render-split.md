@@ -1,10 +1,8 @@
 # P-2a 规划/渲染解耦 实施计划
 
-> ⚠️ **执行前必读（2026-09-12 状态）**：本文件正在按业主「P-2a 做真跨集」的裁决重构，重构代理在写到 **Task 6** 时中断。
-> 已确认重构完成的：**《定案二》改写、《P-2c 取消记录》、Task 3c（`casting.py` + 六个编排器跨集化）、Task 4（成稿链 + 槽位台词按集取用）、Task 5**，以及顶部《修订记录（2026-09-12 跨集裁决后）》的 C1–C13。
-> **尚未复核的：Task 6 至 Task 11**——它们可能仍按「单条方案限一集」的旧前提书写（旧前提已被裁决作废）。
-> **因此：Task 6 及之后不得直接执行**，必须先做一次针对跨集前提的审计（重点：`_plan_one` 的取数是否按集、重叠度量是否按 `(episode, start, end)` 三元组、Task 9 的门禁阈值是否仍成立、Task 11 的期望数字是否要求 ≥2 集已分析）。
-> 审计完成前，本计划的可执行范围是 Task 1–5。
+> ✅ **全计划已按「P-2a 做真跨集」的裁决审计完毕，Task 1–11 均可执行（2026-09-12）。**
+> 本轮审计覆盖 **Task 6–11 与全部尾部章节**（Task 1–5、3b、3c 由上一轮重构完成，见《修订记录（2026-09-12 跨集裁决后）》C1–C13；本轮的改动记在 **C14–C23**）。逐条核过的东西：`_plan_one`/`_casting_for` 的按集取数、重叠度量与两道闸门都走 `(episode_id, start, end)` 三元组、`get_plan` 的取材集暴露与 `plan_cost` 的集数无关性、`export.submit` 守卫的逐集覆盖、九模式门禁**七个阈值逐条重新推导**（结论：一个字不改，依据在 Task 9 Step 2.8 的表）、全部 `Task N Step M` 交叉引用、以及"已作废的收窄"在全文的残留（《P-2c 取消记录》已就位，《开放问题》一节已补上——它原先被正文引用五处却根本不存在）。
+> **唯一的开工前置**：《开放问题》#5 —— `raw_clip` 在 `--variants 1`（门禁默认口径）下会把 `_fit_duration` 的预算吃满，活库实测 planned **296.21s / 51 段 / 9 集**、成片预估 **≈303s** > 用户设的 **300s**。修法是给预算留一档编码漂移余量（落在 Task 3c 的 `_fit_duration`），**余量取多少是设计决定，本审计没有替业主拍**。Task 11 已把 `raw_clip` 那一跑挪到 `--variants 3`（不撞这条）并另加 Step 3d 用"只算不渲"的脚本量这个数；《完成判据》#10 要求收口前**要么改掉、要么明确接受并登记**，不许既不改也不记就签收。
 
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -113,6 +111,23 @@ Task 5 原本的存在理由是"给每个作业单独一个 TTS 目录，免得 
 2. **`build_cross` 的旁白段盖的是"上一个原声段"的集，不是锚点的集**。原代码两段都写 `episode_id=episode_id`（同一个入参，单集时无所谓），而旁白段的 `start/end` 取的是 **`anchor`**（`modes_w5.py:54,65-70`）——跨集时画面在下一集、集号写的是上一集，`export_plan` 会去**上一集的同一秒**切画面。改成 `episode_id=anchor.episode_id`，配 `test_cross_narration_segment_carries_the_anchor_episode`。变异实测：改回 `scene.episode_id` → 该用例红。
 3. **`max(scenes, key=lambda s: s.score)` 在同分时取输入顺序的第一个**（`modes_w5.py:86`）。单集时输入顺序来自一份 JSON，稳定；跨集时输入顺序来自 `episodes_repo.list_by_project`，**没有契约**，于是"整组重规划两次取到不同的集"。活库实测 333 个场景只有 19 个不同分值，同分是常态不是边角。改成 `min(scenes, key=casting.score_order)`，配 `test_ultra_short_breaks_a_cross_episode_score_tie_by_episode_number`（夹具把 ep2 排在输入第一位、两集同为 95 分）。变异实测：改回 `max(key=score)` → 该用例红。
 4. **预算会在后面的集拿到任何画面之前就被吃光**，于是"取材集"会缩水。活库实测 `intro_narration` 一手四集 `[2,5,6,9]`：planned 269.06s，但时间轴上**只出现 2 集**（ep2、ep5），ep6/ep9 一帧都没有——因为 `_fit_duration` 按播出序填充、预算 270s 在 ep5 就用完了。这不是缺陷（`intro_narration` 本来就没有场景条数上限，与其余五个模式的 `_MAX_SCENES` 不同），但**落库的 `episode_ids` 必须从建好的时间轴反推**，不能抄角度点名的那份，否则卡片的「取材集区间」会列两集没出现的集（§9.5 假文案类）。`script_driver.script_dialogue_plan` 早就是这么做的（`used_ids = sorted({seg.episode_id for seg in plan.timeline})`），`_plan_one` 沿用同一口径，配 Task 6 的 `test_episode_ids_come_from_the_timeline_not_the_brief`。
+
+---
+
+**Task 6–11 审计轮（2026-09-12，接 C13 之后）**：上一轮的重构代理在写 Task 6 时中断，Task 6 只改了一半、Task 7–11 与全部尾部章节（《P-2c 交接规格》/《完成判据》/《已知不做》/《自查》）一字未动，而**当时**顶部那条 ⚠️ 横幅（"Task 6 及之后不得直接执行"，本轮已改写成 ✅）声称《P-2c 取消记录》已经存在——**它当时不存在**。下面每条都附证据；实测口径与上一轮相同（活库 `data/data.db` 只读聚合查询、代码基线 `9b42f24`、`scripts/verify_modes.py` 与 `api/*.py` 逐行读）。
+
+| # | 改了什么 | 实测/代码证据 | 作废了本文件里的什么 |
+|---|---|---|---|
+| **C14** | **Task 6 Step 10 的变异表修三行、补两行**：#10 的破坏对象从 `_pick_episode`（已不存在）改成 `_casting_for` 的 `if missing: raise`；#12 从 `if len(windows) < k:` 改成 `if len(hands) < k:`；#14 从 `_CROSS_EPISODE_MODES` 改成 `_SCRIPT_DRIVEN_MODES` 并按 C10 换掉理由；新增 **#10b**（`record is None` 那条 raise）与 **#16**（`used_ids` 从时间轴反推 + "某集没有冲突场景"的留痕） | `_pick_episode` 在 Task 6 Step 7 第 11 点已被 `_casting_for` 取代（全文再无定义）；`_rule_variants` 的判据是 `len(hands) < k`（C9 的轮转发窗之后 `windows` 是集排名、`hands` 才是条数）；**《定案二》的失败模式表逐字把 #10b 与 #16 登记在"Task 6 Step 10"名下，而那张表里两行都不存在**——一条被承诺的变异检查不存在，比没有变异检查更坏（读的人以为它被测着） | Step 10 的 #10/#12/#14 三行原文；《定案二》失败模式表第 2、3 行的落点从"承诺"变成"已兑现" |
+| **C15** | **`test_rule_mode_yields_fewer_than_k_and_leaves_a_trace` 整条重写**：docstring 从"top-3 窗按集去重后只剩 1 条"改成"轮转发窗只够 1 手"，留痕断言从 `"top-3 冲突窗" in item and "1 集" in item` 改成 `"轮转发窗只够 1 手"` + `"其中 1 手只取到一集"` **两条** | `_rule_variants` 实际打的两句是「全剧只有 N 集带冲突窗，**轮转发窗只够** M 手，本模式出 M 条」与「…不足 2×K 集，**其中 T 手只取到一集**…」，**两句里都没有"top-3 冲突窗"这个串**，也没有裸的"1 集"（是"只够 1 手"）。照旧断言跑 ⇒ 用例**必红**，而它是 Task 6 Step 8 的"Expected: PASS"里的一条 | C9 那行末尾"`test_rule_mode_yields_fewer_than_k_and_leaves_a_trace` 的留痕断言文案随之改"从**待办**变成**已做**（上一轮记了要做、没做） |
+| **C16** | **Task 6 Step 3 补两条用例**：`test_named_episode_without_an_analysis_row_fails_only_that_variant`（桩掉选题、让 `analysis_repo.get` 对第 2 集回 `None`，断言只有角度2 失败且错误串点名到集号）与 `test_episode_ids_come_from_the_timeline_not_the_brief`（把第 2 集的 `conflict_scores` 重种成 `[]`，断言 `episode_ids` 只含第 1 集 + 有留痕） | 两条分别守 `_casting_for` 的 `record is None` raise 与 `_plan_one` 的 `used_ids = sorted({segment.episode_id for segment in plan.timeline})`；**没有它们，C14 新增的 #10b/#16 两行变异就是"红不了"的**（本仓已经为三条红不了的变异检查付过账）。夹具用 `analysis_repo.upsert`（实测 `repos/analysis.py:11-41`，`ON CONFLICT(episode_id) DO UPDATE` 整行覆盖）重种一集，不需要新助手 | Task 6 Step 4/Step 8 的用例计数（16 条/18 项 → **18 条/20 项**）；Step 4 的 `-k` 片段清单（14 → 17 个，原先**漏了 `cancel_releases`**，那条用例在 Step 8 之前从没被跑过一眼，而 Step 8 的 Expected 把它算进了通过数） |
+| **C17** | **Task 7 补一条跨集用例 + 把两个"核对过、不用改"的结论连同证据写进任务开头**：`test_get_plan_exposes_the_episodes_a_plan_spans`（两集一条方案：`episode_ids` 与时间轴上的集**逐字相等**、分组不丢段、无零长区间、`cost == {"copy_llm_calls": 1, "tts_calls": 6}` **字面整数**）；Step 3 补变异 **#2b**（把 `copy_llm_calls` 改成按集数计 → 该用例红） | ① 返回体**已经**够拼「取材集区间」：`episode_ids` 由 `_row_to_dict` `json.loads` 成 `list[str]`（`repos/plans.py:20-24`），逐段区间在 `plan_data.timeline[*]`；集号不在返回体里是有意的——`project.get` 已给 `Episode.episode_number`（`protocol/schemas/project.json:49-88`），再抄一份就是 docs/04 §5.2 的双处定义。② `plan_cost` 与集数无关：`write_plan_copy` 把全部槽位拼进**一个** prompt（`copywriter.py:114-121`），它的循环是 `for _ in range(_ATTEMPTS)`（重试，`:125-133`）；剧本链同理（`scriptwriter.py:227-241`）。断言用字面整数是 B6 的教训（`len(plan.narration_texts)` 是把实现的公式又算一遍） | Task 7 Step 2 的"PASS（4 条）"→ **5 条**；Step 3 的变异表从 4 行到 6 行 |
+| **C18** | **Task 8 补两条跨集用例 + 把"守卫不查源文件"的依据写进用例 docstring**：`test_submit_accepts_a_plan_spanning_two_episodes`、`test_submit_rejects_an_unvoiced_slot_in_the_second_episode`（第二集的 ducked 槽位没配音 → 必须 `rejected` 且理由点名 `ep2`）；`_seed_plan` 的 `episode_ids` 从写死 `["ep1"]` 改成从时间轴反推；Step 8 补变异 **#10**（守卫的配音遍历加一行"只查第一集"）与 **#11**（覆盖边界，登记为"本文件不红"）；Step 4 末尾补 `serial_per_episode` 归 P-2.5 的两句话 | **守卫不需要自己查源文件，核过两处**：`render_export` 的 `episode_paths` 取自 `episodes_repo.list_by_project(conn, project_id)`——项目**全部**集（`api/export.py:216-219`），`dialogue_zones` 逐段按 `segment.episode_id` 预取（`:223-237`）；而 `encoder.export_plan` 对**每一段**做 `episode_paths.get(...)`，缺就抛 `EpisodeSourceMissing(f"第 {…} 集源文件缺失")`（`encoder.py:360-362`）——逐段查、点名到集，且它跑在**渲染那一刻**，比提交时 stat 一遍更靠得住。变异 #10 是本轮最重要的一条：**它在单集夹具上是死代码，11 条既有用例一条都不红**，而它放出去的是"前半段有解说、后半段静默"的片（§3.3.1 禁止级） | Step 2 的 Expected（补上"12 条/14 项"与 `retry` 那条的红法）；Step 7 的 Expected；Step 8 从 9 行到 11 行；`test_export_submit.py` 的模块 docstring 从"钉三件事"到"钉四件事" |
+| **C19** | **Task 9 Step 2 从七个改动点补到八个**：2.4 的停机分支散文按 C12 整段重写（并补 `--require-cross-episode` 需要 ≥2 集这第二条前置）；2.6 的附注行加"逐条取材集数"；2.7 的"保持不动"清单**收窄**（`_mode_table_drift` 与 `columns`/`values` 现在要动）；**新增 2.8**（`SINGLE_EPISODE_MODES` + 它的子集核对 + `集数` 列 + 跨集断言 + 门禁阈值逐条重新推导表）；2.2 的 batch 查询改成一次取 `id, plan_data`（集数由此推出，不再二次查同一个 batch）；2.3 从两个旗标到三个；Files 行从"五处"到"八处"；"原 8 行"改成实测的 **7** 行 | 2.4 的原文「解说类模式一条片只取一集（`dialogue_narration` 除外）」在裁决之后是**假话**（C12 点名要重写，上一轮没做）；`_mode_table_drift` 的既有纪律逐字是"手抄清单必须与 `SUPPORTED_MODES` 对账，否则新模式会按默认值悄悄判绿"（`:322-328`），而 `SINGLE_EPISODE_MODES` 正是一份手抄子集——写错一个名字就让 §1 的判据对那个模式**永远不判**；`:638` 是 `zip(values, columns, strict=True)`，两表不同长会当场 `ValueError`（这是本文件里少数"改错就响"的地方）；`:459-465` 实测是 7 行不是 8 行 | 2.4 的整段散文；2.7 那句「`_mode_table_drift()`、响度窗口、planner 断言、冻结帧断言全部不动」里的**第一项**（其余三项仍然不动）；Files 行的"五处"；C12 那行末尾"Task 9 Step 2.4/2.7、Task 11 Step 2/3b 的判据"从**待办**变成**已做** |
+| **C20** | **门禁阈值逐条重新推导，写进 Task 9 Step 2.8 的表**（`EXPECT_PLANNER`、`EXPECT_NARRATION`、时长、响度窗、真峰门限、冻结帧、插桩覆盖各一行，每行给"不用改因为 Y"的代码或实测依据）。**结论：七个阈值一个字都不改** | 响度：Phase C 归一的是**整片**，P-1.5 九部真成片全部落在 −14.0/−14.1 LUFS，**最大偏差 0.1 LU** 对容差 **2.5 LU**。真峰：段级天花板挂在每段 `atempo` 之后（`encoder.py:263`）、混音限幅挂在 `amix` 之后，都是**逐段**；实测 −2.20…−5.20 dBTP 对门限 −1.00，**最小余量 1.20 dB**。冻结：跨集只增加硬切点，实测九部全 **0.0s** 对门限 2.0s。planner/旁白段数：都由**模式族**决定，不读集数（`pipeline.py:173`、`copywriter.py:147`、`PlanData.planner` 默认 `"rule"` 在 `models.py:60`）。插桩覆盖：**它不是跨集正确性的守卫**——盖错集号时段数照样对得上，这一条已在表里写明，免得下一个人拿它当证据 | C6 那句「门禁的时长阈值一个字都不改」与《定案二》第 ③ 行「逐条推导与实测数字见 Task 9 Step 2.8」——**Step 2.8 原先不存在**，两处引用都悬空；现在兑现了 |
+| **C21** | **新查出一条 C6 没算到的时长顶穿，并把它交出去而不是就地拍板**：`raw_clip` 在 `--variants 1` 下 planned **296.21s**、成片预估 **≈303.0s** > 门禁的 **300s**。修法（给 `_fit_duration` 的预算留编码漂移余量）落在 Task 3c，**余量取多少是设计决定，本轮不替业主拍**；改为记进《开放问题》#5 +《完成判据》#10（收口前必须"改"或"明确接受并登记"，不许既不改也不记），并把 Task 11 Step 3b 的 `raw_clip` 那一跑挪到 `--variants 3`（一手四集，planned 117.89s）、另加 Step 3d 用**只算不渲**的脚本把这个数交给业主 | 机制：`deal_windows(windows, hands=1)` → `min(1, len(windows))` = **1 手**、逐窗 `dealt[rank % 1]` ⇒ K=1 时一手装**全部**集（`--variants 1` 正是门禁默认口径）。活库只读实测：十集 **333** 场景，合格（分数 ≥ `RAW_CLIP_MIN_SCORE`=70 且 3-25s）**59** 个、合计 **346.5** 场景秒 > 预算 **300** ⇒ 吃满，**51 段 / 296.21s / 覆盖 9 集**（ep10 一帧没有）。成片漂移比值取自 P-1.5 实测：`raw_clip` 15.48/15.13 = **1.0231**、`subtitle_flow` 32.43/30.57 = **1.0609** ⇒ 303.0s（保守 314.3s）。**这套重算的可信度**：它在五个独立点上与 Task 3c Step 8 那张实测表逐位对上（ep1 `raw_clip` 15.13/3 段、四集一手 117.89/21 段/4 集、`subtitle_flow` 36.24/7 段/3 集、窗排名 `[6,7,8,2,3,4,9,10,1,5]`、`intro_narration` 269.06）。单集时代不可能发生：ep1 合格场景只有 **15.1s**，差 20 倍 | Task 11 Step 3b 原来"`dialogue_narration,raw_clip --variants 1`"那一跑（会撞这条红）；《完成判据》原 8 条（补 #9 跨集机器判据、#10 本条的处置） |
+| **C22** | **Task 10 从三份文档扩到五份**：新增 `docs/service/02-引擎设计.md`（`:59` 的 `copywriter.py` 行写着 `slot` / `window` 两个**早已不存在**的字段名）与规格本身（§3.3.1 降级裁决表 `:126` 的「位置」列点名 `api/narration._generate_one`，Task 6 删掉它）；Step 4 补两点（`docs/service/04:247-250` 的 `jobs.type` 注记被本批次**同时**过期两次；`narration_plans` 那节写明"跨集不加列"）；Step 7 的 `git add` 与提交信息随之扩 | `docs/service/02:59` 逐字是「编排器只产出槽位（`slot` 职责 + `window` 素材区间）」，而 P-1.5《实现定案修正》定的字段是 `brief`、`window` **已删**——pydantic **静默忽略未知 kwargs**，照这行写代码不报错、只丢数据，正是本仓付过两次账的那类"编造出来的规格"；该表 `:40` 的免责句只管"未建条目"，管不到"已建条目写错字段名"。规格 `:126` 是全 `docs/`（除计划目录）里**唯一**一处 `_generate_one` 命中，实测 `grep -rn "_generate_one\|_run_produce\|_newest_ready_plan\|_run_generation_parallel" docs/ --include=*.md | grep -v superpowers/plans` 只回这一行。`docs/service/04:247-250` 同时写着"`produce`（`narration.produce`）"与"`jobs.json` 同样漏了 `semantic`"，前者随 Task 6 失效、后者随 Task 9 Step 3 修掉。迁移号实测最高仍是 `009_ocr_segments.sql`（`ls migrations/` = 9 个文件），故 `010` 未被占用、`docs/04:305` 的"实测 8 个文件"确实过期 | Task 10 的 Files 清单（3 → 5 份）与 Step 7 的 `git add`；Step 4 从 3 点到 5 点；《自查》第 4 项的清单 |
+| **C23** | **尾部四节全部按裁决重写**：《P-2b / P-2c 交接规格》→《P-2b 交接规格 / P-2c 取消记录》（P-2c 那一节整节替换成一张"原待办 → 落在哪 → 状态"的对账表，并说明为什么保留记录而不是删掉）；**新建《开放问题》一节**（#1–#5）；《已知不做》改两条（`serial_per_episode` 从"规格自相矛盾、等裁决"改成"`4228bef` 已裁决、归 P-2.5"；磁盘回收那条的 `work_dir/tts/<job>/…` 路径层级已随 Task 5 删除）+ 补一条（规则类重掷留痕无用例，Step 10 #15 承诺登记在此）；《自查》补 §1 / §4.2 / §4.3 ④ / §5 #21 / §3.3 留痕 五行、修 `narration_id` 那行被 C7 半作废的"Task 4 未改"、第 3 项按裁决后的签名整段重写（`_pick_episode`/`cross_episode`/`_voice(…, job_id, mode, index)`/`_plan_one(…, brief)` 四处作废，补 `casting.*`、`build_plan` 新签名、`deal_windows`、`_Variant`/`_OverlapHit`、门禁新名字）；《完成判据》#6 补 `--include=*.mjs` 并把 Expected 从"无输出"改成"三处零命中 + `scripts` 下恰好两条" | **《开放问题》这一节原先根本不存在**，而正文有**五处**点名到它（R2、R3、《定案二》末段、《定案四》末段两处、Task 3b Step 3 的 docstring）——悬空引用与悬空指针同类：读的人会以为答案在别处。《完成判据》#6 的 grep 实测**没有** `--include=*.mjs` 而 Expected 写着"无输出"，可 `scripts/verify_e2e.mjs:152,168` 是两条永久命中 ⇒ 那是一条**永远红的门禁**，正是 R6 说要同步、B9 说比没有门禁更坏的那种（教会执行者"这条不用看"）。顶部横幅声称《P-2c 取消记录》已存在——实测 `grep -n "P-2c" 本文件` 在改写前**九处命中里没有一处是取消记录**，`:6959` 那节标题仍是《P-2c：单条方案内的跨集拼接》，正文仍写着"P-2a 让角度之间跨集，但六个单集模式的单条方案内仍限于一集" | 《P-2c 交接规格》整节（C1 点名要改成取消记录，上一轮没做）；R2/R3 两行末尾"并进《开放问题》#1/#2"从**待办**变成**已兑现**；《自查》表里没有 §1/§4.2/§4.3 ④ 三行（C1 与 R1 各点名过一次）；《已知不做》的 `serial_per_episode` 条与 `work_dir/tts/<job>/…` 那条路径 |
 
 ---
 
@@ -4084,11 +4099,14 @@ def test_rule_mode_yields_fewer_than_k_and_leaves_a_trace(
     tmp_path: Path,
     sample_video: Path,
 ) -> None:
-    """全剧只分析完一集时，top-3 窗全落在第 1 集 → 按集去重后只剩 1 条。
+    """全剧只分析完一集时，轮转发窗只够 1 手 → 规则类只出 1 条，且必须留痕。
 
     规格 §1 允许「每模式产出 **1..K** 条」，所以少出不是失败；但 §3.3 禁止静默：
     少出必须留痕，否则界面会把「这个模式只出了 1 条」显示成「这个模式本来就只能出 1 条」。
-    本用例不需要任何 LLM/TTS 替身——规则类两个都不碰（上一条用例钉死了这一点）。
+    **两条留痕各钉一条断言**：`_rule_variants` 对"少发几手"与"某一手只取到一集"分别打一行
+    （《定案四》第 3 点），后者是跨集裁决新长出来的义务——卡片写着"跨集方案"，
+    实际只取一集时必须说清楚。本用例不需要任何 LLM/TTS 替身——规则类两个都不碰
+    （上一条用例钉死了这一点）。
     """
     project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
@@ -4101,12 +4119,15 @@ def test_rule_mode_yields_fewer_than_k_and_leaves_a_trace(
     assert status["status"] == "completed", status.get("error")
 
     plans = plans_repo.list_by_batch(memory_db, project_id, str(result["batch_id"]))
-    assert len(plans) == 1, f"一集只能出一条规则类方案，实得 {len(plans)}"
+    assert len(plans) == 1, f"一集只发得出一手，实得 {len(plans)} 条"
     assert plans[0]["variant_index"] == 1
     assert plans[0]["overlap_max"] is None
     logged = [str(item) for item in harness.sent]
-    assert any("top-3 冲突窗" in item and "1 集" in item for item in logged), (
+    assert any("轮转发窗只够 1 手" in item and "本模式出 1 条" in item for item in logged), (
         f"少出方案却没留痕（规格 §3.3）：{harness.sent}"
+    )
+    assert any("其中 1 手只取到一集" in item for item in logged), (
+        f"一集的手没被点名成「只取到一集」（卡片会写着跨集而实际没有）：{harness.sent}"
     )
 
 
@@ -4116,13 +4137,14 @@ def test_rejected_angle_does_not_pay_for_copy(
     sample_video: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """R7：同集角度的重叠闸门必须排在**成稿之前**，否则被拦的角度白付一次 LLM。
+    """R7：同一组取材集的两条角度，其重叠闸门必须排在**成稿之前**，否则被拦的白付一次 LLM。
 
-    可判定性是证明出来的、不是猜的：`_plan_one` 的非剧情解说分支里，角度只进
+    可判定性是证明出来的、不是猜的：`_plan_one` 的非剧本分支里，角度只进
     `copywriter` 的 `angle_block`，**不进 `build_plan`**——
-    `build_plan(mode, episode_id, conflicts, highlights, asr, audio, settings)`
-    七个入参没有一个来自角度。故时间轴是 `(mode, episode_id)` 的纯函数，
-    同集 ⇒ 同时间轴 ⇒ Jaccard = 1.0，成稿前就该判得出来。
+    `build_plan(mode, scenes, highlights, material, settings)`
+    五个入参没有一个来自角度名或理由，而 `scenes`/`material` 都由 `_casting_for`
+    从 `variant.episode_numbers` 确定性装配。故时间轴是 `(mode, 取材集组合)` 的纯函数，
+    同一组集 ⇒ 同一条时间轴 ⇒ Jaccard = 1.0，成稿前就该判得出来。
 
     成稿调用数按 copywriter 的 system prompt 认（`_SYSTEM_PROMPT` 首句是
     「你是短剧推广解说编剧」），与选题（「选题操盘手」）、口味层（「风格库」）三者互不混淆。
@@ -4165,11 +4187,13 @@ def test_unknown_episode_in_a_brief_fails_only_that_variant(
     sample_video: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`_pick_episode` 的兜底分支：点名集不在已完成集里就抛，绝不悄悄换一集顶上。
+    """`_casting_for` 的缺号分支：点名集不在已完成集里就抛，绝不悄悄换一集顶上。
 
-    这条用例是 Task 6 Step 10 变异 #10 的唯一守卫。没有它，把 `_pick_episode` 的
-    raise 改成 `return episodes[0]` 全套照绿——而那正是「K 条其实是同一部片切 K 次」
-    的根源之一（每条角度都被悄悄换成第 1 集）。
+    这条用例是 Task 6 Step 10 变异 #10 的唯一守卫。没有它，把 `_casting_for` 的
+    raise 改成"只用点得到的那几集"（或退回 `episodes[0]`）全套照绿——而那正是
+    「K 条其实是同一部片切 K 次」的根源之一（每条角度都被悄悄换成同一批集）。
+    **跨集之后这条分支的语义从"换一集"变成"少一集"**，两种都禁止：一次点名**全部**
+    缺号再抛，运维才知道要补哪几集，而不是补完一集再炸一集。
     """
     project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
@@ -4201,6 +4225,134 @@ def test_unknown_episode_in_a_brief_fails_only_that_variant(
     assert "全片解说·角度1:" not in error, f"兄弟变体被牵连了：{error}"
     plans = plans_repo.list_by_batch(memory_db, project_id, str(result["batch_id"]))
     assert [row["angle"] for row in plans] == ["角度1"], "只有点名越界那条不该落库"
+
+
+def test_named_episode_without_an_analysis_row_fails_only_that_variant(
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """角度点名的集**没有 `episode_analysis` 行**：抛，点名到集号，不牵连兄弟（Step 10 #10b）。
+
+    生产上这一支被 `angles._sanitize` 挡在前面（它的 `known_numbers` 取自 `episode_inputs`，
+    而没有分析行的集进不了 `episode_inputs`——`_collect_episode_inputs` 对 `record is None`
+    直接 `continue`）。**所以本用例桩掉选题**，验的是 `_casting_for` 自己那一层：两层守卫
+    不能只留一层，否则哪天放宽 `_sanitize`（例如允许点名"分析失败的集"以便界面解释原因），
+    `_plan_one` 就会拿不到素材、在编排器里出一个空时间轴，报出来的却是"没有可用素材"——
+    看不出真因是缺分析行，而规格 §3.3.1 要求的是**点名到集号**的响亮失败。
+    """
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
+    ep2 = str(
+        next(
+            episode["id"]
+            for episode in episodes_repo.list_by_project(memory_db, project_id)
+            if int(episode["episode_number"]) == 2
+        )
+    )
+    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
+    harness.context.settings.update(_LLM_SETTINGS)
+    calls: list[tuple[str, str]] = []
+    _stub_language_and_tts(monkeypatch, calls)
+    monkeypatch.setattr(
+        angles,
+        "select_angles",
+        lambda *a, **k: [
+            angles.AngleBrief(name="角度1", reason="理由1", hook="钩子1", episode_numbers=[1]),
+            angles.AngleBrief(name="角度2", reason="理由2", hook="钩子2", episode_numbers=[2]),
+        ],
+    )
+
+    real_get = analysis_repo.get
+
+    def get_without_episode_2(conn: sqlite3.Connection, episode_id: str) -> Any:
+        """只让第 2 集的分析行消失：其余集照常，兄弟变体才有机会证明自己没被牵连。"""
+        return None if episode_id == ep2 else real_get(conn, episode_id)
+
+    monkeypatch.setattr(analysis_repo, "get", get_without_episode_2)
+
+    result = harness.rpc(
+        "narration.plan_variants",
+        {"project_id": project_id, "modes": ["full_narration"], "k": 2},
+    )
+    status = _wait_terminal(harness, str(result["job_id"]))
+    assert status["status"] == "failed", status
+    error = str(status["error"])
+    assert "全片解说·角度2:" in error and "第 2 集分析记录缺失" in error, error
+    assert "全片解说·角度1:" not in error, f"兄弟变体被牵连了：{error}"
+    plans = plans_repo.list_by_batch(memory_db, project_id, str(result["batch_id"]))
+    assert [row["angle"] for row in plans] == ["角度1"], "只有缺分析行那条不该落库"
+
+
+def test_episode_ids_come_from_the_timeline_not_the_brief(
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """落库的 `episode_ids` 从**建好的时间轴**反推，不抄角度点名的那份（Step 10 #16）。
+
+    卡片四要素之一是「取材集区间」（规格 §4.3），而它的数据源就是这一列。抄点名会把
+    一集**一帧都没出现**的集列上去——规格 §9.5 的假文案类，且肉眼查不出来
+    （成片看着正常，卡片上多写了一集）。
+
+    夹具是"第 2 集分析过但一个冲突场景都没出"；**生产上不必这么构造**：活库实测
+    `intro_narration` 一手点了 4 集 `[2,5,6,9]`、时间轴上只出现 2 集（ep2、ep5），
+    因为 `_fit_duration` 按播出序填充、270s 的预算在 ep5 就用完了（Task 3c Step 8 的实测表）。
+    同一个口径 `script_driver.script_dialogue_plan` 早就在用（它的 `used_ids` 逐字是
+    `sorted({seg.episode_id for seg in plan.timeline})`，`script_driver.py:113`）。
+
+    顺带钉住允许级降级的留痕（规格 §3.3）：取不到某一集的画面不是失败，但必须说一声。
+    """
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
+    number_to_id = {
+        int(episode["episode_number"]): str(episode["id"])
+        for episode in episodes_repo.list_by_project(memory_db, project_id)
+    }
+    # 第 2 集：分析行在、冲突场景表为空（analysis_repo.upsert 是整行覆盖，故原地重种一次）
+    analysis_repo.upsert(
+        memory_db,
+        number_to_id[2],
+        asr_segments=json.dumps([{"start": 200.2, "end": 203.0, "text": "第二集台词"}]),
+        scene_data="[]",
+        audio_features=AudioFeatures().model_dump_json(),
+        conflict_scores="[]",
+        highlights="[]",
+    )
+    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
+    harness.context.settings.update(_LLM_SETTINGS)
+    calls: list[tuple[str, str]] = []
+    _stub_language_and_tts(monkeypatch, calls)
+    monkeypatch.setattr(
+        angles,
+        "select_angles",
+        lambda *a, **k: [
+            angles.AngleBrief(
+                name="角度1", reason="理由1", hook="钩子1", episode_numbers=[1, 2]
+            )
+        ],
+    )
+
+    result = harness.rpc(
+        "narration.plan_variants",
+        {"project_id": project_id, "modes": ["full_narration"], "k": 1},
+    )
+    status = _wait_terminal(harness, str(result["job_id"]))
+    assert status["status"] == "completed", status.get("error")
+
+    plans = plans_repo.list_by_batch(memory_db, project_id, str(result["batch_id"]))
+    assert len(plans) == 1
+    timeline = PlanData.model_validate(plans[0]["plan_data"]).timeline
+    assert {segment.episode_id for segment in timeline} == {number_to_id[1]}, (
+        "夹具前提塌了：第 2 集没有冲突场景，时间轴上不该出现它"
+    )
+    assert plans[0]["episode_ids"] == [number_to_id[1]], (
+        f"episode_ids 抄了角度点名的两集，卡片会列一集没出现的集：{plans[0]['episode_ids']}"
+    )
+    logged = [str(item) for item in harness.sent]
+    assert any("第 2 集没有冲突场景" in item for item in logged), (
+        f"取不到某一集的画面却没留痕（规格 §3.3）：{harness.sent}"
+    )
 
 
 def test_post_copy_overlap_gate_still_guards_cross_episode_modes(
@@ -4468,14 +4620,14 @@ from dramaclip.infra.storage.repos import plans as plans_repo
 
 - [ ] **Step 4: 跑测试确认失败**
 
-Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/api/test_plan_variants.py -q -k "writes_k_plans or variant_failure or mode_failure or rule_mode or rejected_angle_does_not_pay or unknown_episode or post_copy or overlapping_angle or exclude_plan_ids or k_defaults or project_override or k_out_of_range or unknown_excluded or empty_modes"`
+Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/api/test_plan_variants.py -q -k "writes_k_plans or variant_failure or mode_failure or rule_mode or rejected_angle_does_not_pay or unknown_episode or named_episode_without or episode_ids_come_from or post_copy or overlapping_angle or exclude_plan_ids or k_defaults or project_override or k_out_of_range or unknown_excluded or empty_modes or cancel_releases"`
 
-Expected: FAIL —— 16 条新用例（`k_out_of_range` 参数化 3 项，故实为 18 项）全红，两种形态：
+Expected: FAIL —— **18 条新用例**（`k_out_of_range` 参数化 3 项，故实为 **20 项**）全红，两种形态：
 
 - 走 `harness.rpc(...)` 的报 `AssertionError: narration.plan_variants RPC 错误: [-32601] 方法不存在`；
 - 走 `harness.router.dispatch(...)` 的三条边界用例报 `assert -32601 == -32303`（或 `-32302`/`-32304`）——方法还没注册，拿到的自然是"方法不存在"。
 
-**`-k` 里刻意不写 `plan_variants`**：Step 2 已把文件改名成 `test_plan_variants.py`，而 `-k` 是按**关键字子串**匹配的，模块名 `test_plan_variants` 含 `plan_variants` → 那样会**静默选中整个文件**，把 Task 9 Step 6 才迁移的旧 produce 用例一起拉进来，红的形态就分不清了。上面 14 个片段没有一个是 `test_plan_variants` 的子串。
+**`-k` 里刻意不写 `plan_variants`**：Step 2 已把文件改名成 `test_plan_variants.py`，而 `-k` 是按**关键字子串**匹配的，模块名 `test_plan_variants` 含 `plan_variants` → 那样会**静默选中整个文件**，把 Task 9 Step 6 才迁移的旧 produce 用例一起拉进来，红的形态就分不清了。上面 17 个片段没有一个是 `test_plan_variants` 的子串，且**逐条对得上 Step 3 的 18 个函数**（`rule_mode` 一个片段命中两条：`rule_modes_never_construct_an_llm_client` 与 `rule_mode_yields_fewer_than_k_and_leaves_a_trace`）。少写一个片段的后果不是"少跑一条"，是**那条用例在 Step 8 之前从没被看过一眼**，而 Step 8 的 Expected 会把它算进通过数里。
 
 - [ ] **Step 5: 改 schema**
 
@@ -5222,6 +5374,13 @@ def _plan_one(
 
     **不落库**：`plans_repo.create` 只在 runner 里发生一次，那里才有 batch_id /
     variant_index / overlap_max 三个只有 runner 知道的值。
+
+    **两个分支的缺号守卫不对称，是有意的**：非剧本分支经 `_casting_for` 自己校验缺号
+    （它从 `episodes`——全部 done 集——装配，那份清单比选题看到的宽）；剧本分支直接过滤
+    `episode_inputs`，不再校验一遍，因为 `angles._sanitize` 的 `known_numbers` 逐字就是
+    `{int(ep["number"]) for ep in episode_inputs}`——**同一份清单**。在这里再抄一道守卫，
+    就是 docs/04 §5.2 禁止的"同一概念双处定义"，而且两处一旦漂移（例如 `_collect_episode_inputs`
+    将来放宽成"没有转写也收进来"），先炸的是那条抄来的。
     """
     trace_dir = context.data_dir / "logs" / "llm"
 
@@ -5276,8 +5435,9 @@ def _casting_for(
     不需要迁移、也不需要重跑分析（《修订记录》C3）。
 
     点名集不在已完成集里时**一次点名全部缺号**再抛：逐个抛会让第一条缺号掩盖其余的，
-    运维补完一集再跑又炸一集。绝不悄悄换一集顶上——那是「K 条其实是同一部片切 K 次」
-    的根源之一（`_pick_episode` 时代的老毛病，本函数取代了它）。
+    运维补完一集再跑又炸一集。绝不悄悄换一集顶上，也绝不只用点得到的那几集——被本函数
+    取代的老写法是 `_generate_one` 里无条件的一句 `episode_id = str(episodes[0]["id"])`，
+    那正是「K 条其实是同一部片切 K 次」的根源之一（每条方案都取第 1 集）。
     """
     wanted = sorted(set(variant.episode_numbers))
     by_number = {int(episode["episode_number"]): episode for episode in episodes}
@@ -5324,9 +5484,9 @@ Expected: 无输出。**新写的代码里也不许出现这些名字**（连注
 
 - [ ] **Step 8: 跑测试确认通过**
 
-Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/api/test_plan_variants.py -q -k "writes_k_plans or variant_failure or mode_failure or rule_mode or rejected_angle_does_not_pay or unknown_episode or post_copy or overlapping_angle or exclude_plan_ids or k_defaults or project_override or k_out_of_range or unknown_excluded or empty_modes or cancel_releases"`
+Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/api/test_plan_variants.py -q -k "writes_k_plans or variant_failure or mode_failure or rule_mode or rejected_angle_does_not_pay or unknown_episode or named_episode_without or episode_ids_come_from or post_copy or overlapping_angle or exclude_plan_ids or k_defaults or project_override or k_out_of_range or unknown_excluded or empty_modes or cancel_releases"`
 
-Expected: PASS（**16 条新增用例、18 个参数化项**：Step 3 原有的 11 条 + 本轮为 B2/R1 与 R7 新增的 5 条 `rule_modes_never_construct_an_llm_client` / `rule_mode_yields_fewer_than_k_and_leaves_a_trace` / `rejected_angle_does_not_pay_for_copy` / `unknown_episode_in_a_brief_fails_only_that_variant` / `post_copy_overlap_gate_still_guards_cross_episode_modes`）。`-k` 的片段选择理由见 Step 4。
+Expected: PASS（**18 条新增用例、20 个参数化项**：Step 3 原有的 11 条 + 上一轮审查为 B2/R1 与 R7 新增的 5 条（`rule_modes_never_construct_an_llm_client` / `rule_mode_yields_fewer_than_k_and_leaves_a_trace` / `rejected_angle_does_not_pay_for_copy` / `unknown_episode_in_a_brief_fails_only_that_variant` / `post_copy_overlap_gate_still_guards_cross_episode_modes`）+ 本轮为跨集裁决新增的 2 条（`named_episode_without_an_analysis_row_fails_only_that_variant` / `episode_ids_come_from_the_timeline_not_the_brief`，对应《定案二》失败模式表的 #10b 与 #16）。`-k` 的片段选择理由见 Step 4。
 
 Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/transport/test_contract_sync.py -q`
 
@@ -5363,12 +5523,14 @@ Expected: 无输出、退出码 0。若 mypy 报 `re.search(...).group(1)` 的 `
 | 7 | `if not modes: raise` 整块删掉 | `test_empty_modes_is_rejected` |
 | 8 | `_effective_settings` 的 `str(value)` 改成 `value` | `test_project_override_beats_the_global_default` |
 | 9 | `batch_id=job_id` 改成 `batch_id=None` | `test_plan_variants_writes_k_plans_without_rendering`（`list_by_batch` 取不到任何行） |
-| 10 | `_pick_episode` 的 `raise` 改成 `return episodes[0]` | `test_unknown_episode_in_a_brief_fails_only_that_variant`（Step 3 已给出完整代码；原计划这里写的是"补一条"，那是本计划自己禁止的占位符） |
-| **11** | **`_run_plan_variants` 里的 `if mode in _NARRATION_MODES:` 分流删掉，改成无条件调 `_angle_variants`** | **`test_rule_modes_never_construct_an_llm_client`（替身在 `__init__` 里就炸，所以红得干脆）。这是 B2/R1 的主守卫：它红，说明"仅两个纯剪辑模式不依赖 LLM"这条用户定案被推翻了** |
-| 12 | `_rule_variants` 的 `if len(windows) < k:` 那段 `notifier.log` 整块删掉 | `test_rule_mode_yields_fewer_than_k_and_leaves_a_trace`（留痕断言）。少出方案本身仍然合法（规格 §1 的 1..K），红的是**静默** |
+| 10 | `_casting_for` 的 `if missing: raise` 改成"只用点得到的那几集"（`wanted = [n for n in wanted if n in by_number]`，删掉 raise） | `test_unknown_episode_in_a_brief_fails_only_that_variant`（Step 3 已给出完整代码；原计划这里写的是"补一条"，那是本计划自己禁止的占位符）。**别写成 `return episodes[0]` 那种单集时代的破坏形态**——`_casting_for` 返回的是三样东西，退回一集要伪造整份装配，破坏得不像真缺陷，红了也说明不了什么 |
+| **10b** | **`_casting_for` 的 `if record is None: raise ValueError(f"第 {number} 集分析记录缺失…")` 改成 `continue`（跳过这一集继续装配其余的）** | **`test_named_episode_without_an_analysis_row_fails_only_that_variant`（Step 3 新增）。跳过之后 `scenes_by_episode` 少一集、`build_full` 照样出片、作业 `completed`，于是"点名的集取不到"变成了一部静默少一集的片——正是《定案二》失败模式表第 2 行要拦的形态。这条与 #10 各守一半：#10 守"集号不存在"，#10b 守"集号存在但没有分析行"，两个 raise 删掉任一个另一条用例都不红** |
+| **11** | **`_run_plan_variants` 里的 `if mode in _NARRATION_MODES:` 分流删掉，改成无条件调 `_angle_variants`** | **`test_rule_modes_never_construct_an_llm_client`（替身在 `__init__` 里就炸，所以红得干脆）。这是 B2/R1 的主守卫：它红，说明"仅两个纯剪辑模式不依赖 LLM"这条用户定案被推翻了。跨集裁决没有动这条分流的理由，只是动了它**下游**的东西（`_rule_variants` 从"一集一条"改成"轮转发窗"），故本行原样保留** |
+| 12 | `_rule_variants` 的 `if len(hands) < k:` 那段 `notifier.log` 整块删掉 | `test_rule_mode_yields_fewer_than_k_and_leaves_a_trace`（第一条留痕断言）。少出方案本身仍然合法（规格 §1 的 1..K），红的是**静默**。**原表这里写的是 `if len(windows) < k:`——那是 C9 轮转发窗之前的判据**，`windows` 是集排名（一集一窗），`hands` 才是发出去的条数；照着旧名去找那一行会找不到，或者更糟，改错一处 |
 | 13 | `_reject_same_episode_sibling` 的第一行改成 `if True: return`（即前置闸门失效） | `test_rejected_angle_does_not_pay_for_copy`（成稿次数 1 → 3）。**`test_overlapping_angle_is_dropped_not_stored` 不会红**——成稿后那道闸门会顶包，方案照样不落库；差别只在"有没有白付两次成稿"，而那正是 R7 要修的 |
-| 14 | `_reject_same_episode_sibling` 的 `if mode in _CROSS_EPISODE_MODES: return` 整块删掉 | **本文件不红**——`dialogue_narration` 的端到端规划路径在本批次**没有自动化覆盖**（要真 LLM 写剧本，或给 `script_driver` 造一个能产出可控跨集时间轴的替身）。它由九模式真机门禁覆盖，而 Task 11 Step 3 原先只跑 `full_narration`，故本轮补了 **Step 3b：加跑一次 `dialogue_narration`**。**不要为了"让这条变异能红"而给跨集模式造一个假剧本替身**——那会钉住替身的形状而不是产品的行为 |
+| 14 | `_reject_same_episode_sibling` 的 `if mode in _SCRIPT_DRIVEN_MODES: return` 整块删掉 | **本文件不红**——`dialogue_narration` 的端到端规划路径在本批次**没有自动化覆盖**（要真 LLM 写剧本，或给 `script_driver` 造一个能产出可控跨集时间轴的替身）。它由九模式真机门禁覆盖，而 Task 11 Step 3 原先只跑 `full_narration`，故上一轮补了 **Step 3b：加跑一次 `dialogue_narration`**。**不要为了"让这条变异能红"而给剧本模式造一个假剧本替身**——那会钉住替身的形状而不是产品的行为。（**常量名与理由都随 C10 换过**：它不再表示"只有这个模式能跨集"——裁决之后九个都能——只表示"这条方案的时间轴不是 `(mode, 取材集组合)` 的纯函数，成稿前判不了重叠"。删掉这行豁免的后果也随之换了：不是"把单集模式误当跨集"，而是**给 `dialogue_narration` 加了一道判不了的前置闸门**，同一组集的两条剧本第二条会被误拦，而它们其实可能压在完全不同的画面上） |
 | 15 | `_rule_variants` 的 `if rerolled:` 那段 `notifier.log` 整块删掉 | **本文件不红**：没有用例断言这条留痕（它只在"重掷一条规则类方案"时出现，而那条路径要 P-2.5 的阶段③ 才有入口）。**记在《已知不做》**，等阶段③ 落地时补用例；此处保留代码是因为 §3.3 禁止静默，而不是因为测到了 |
+| **16** | **两处破坏各红一半，都在 `test_episode_ids_come_from_the_timeline_not_the_brief` 上：① `_plan_one` 末尾的 `used_ids = sorted({segment.episode_id for segment in plan.timeline})` 改成用 `_casting_for` 点名装配的那份集 id（让它多返回一个 `wanted_ids`，`_plan_one` 直接返回它）；② `_casting_for` 里 `if not conflicts:` 那段 `notifier.log` 整块删掉** | **① 红 `episode_ids == [number_to_id[1]]` 那条断言（实得两集，其中一集一帧都没出现）；② 红「第 2 集没有冲突场景」那条留痕断言。这一行是《定案二》失败模式表第 3 行的落点，也是 Task 3c Step 8 实测表第 1 条注记（活库 `intro_narration` 一手点 4 集、时间轴上只出现 2 集）的唯一自动化守卫。两处必须分开破坏：它们红的是同一条用例的不同断言，一起改就看不出是哪一半失效了** |
 
 Run（每轮）: `cd service && ../.venv/Scripts/python.exe -m pytest tests/api/test_plan_variants.py -q`
 
@@ -5387,6 +5549,11 @@ Expected: 上述路径为 `A`/`M`（已暂存），且 `tests/api/test_produce.p
 ## Task 7: `narration.get_plan` 的用例补齐
 
 `get_plan` 的实现与 schema 已在 Task 6 落地（它与 `plan_variants` 共用 `NarrationPlan` 模型，分两次改 schema 会让契约测试红两轮）。本任务只补它自己的用例——**实现先于用例是这里的例外，理由是契约同步的原子性；例外必须显式记账，故本任务独立成一步而不是混进 Task 6。**
+
+**跨集裁决对本任务的两个问题，都是"核对过、结论是不用改"，故把证据写在这里而不是留给下一个人重算一遍**：
+
+1. **返回体够不够拼出卡片的「取材集区间」（规格 §4.3 ③ 四要素之一）？够。** 两样东西都已在行里：`narration_plans.episode_ids`（`repos/plans.py::_row_to_dict` 把这一列 `json.loads` 成 `list[str]`，且 Task 6 的 `_plan_one` 保证它是**时间轴反推**出来的那份，见 Step 10 #16）与 `plan_data.timeline[*].episode_id/start/end`（逐段的集内相对秒）。**集号不在返回体里，是有意的**：`episode_ids` 存的是集 id，而集号由既有的 `project.get`（`protocol/schemas/project.json` 的 `Episode.episode_number`）给出——在 `PlanDetail` 里再抄一份集号就是 docs/04 §5.2 禁止的"同一概念双处定义"，而两处一旦漂移，卡片会写着"第 3-7 集"而时间轴上其实是另外几集。区间怎么显示（`第2-9集` 还是逐集列举）是 P-2.5 阶段③ 的展示决策。
+2. **`plan_cost` 在一条方案跨集时还算得对吗？对，两个数都与集数无关。** `copy_llm_calls` 数的是**成稿往返**：`copywriter.write_plan_copy` 一次调用把全部槽位拼进**一个** prompt（`copywriter.py:114-121` 的 `user_prompt` 由 `_slot_block(全部 texts, …)` 一次生成），它的循环是 `for _ in range(_ATTEMPTS)`（重试，`:125-133`）而不是"逐集一次"；剧本链同理（`scriptwriter.write_script_episodes` 把整份跨集转写按集分组塞进**一个** prompt：`transcript_block` 在 `:227`、`user_prompt` 拼装在 `:241-249`）。`tts_calls` 数的是**槽位**，`synthesize_narration_texts` 逐槽合成、与集无关。所以跨集只改变"这条片有多长、取了几集的画面"，不改变它的 LLM/TTS 账——**Step 1 新增的用例把这一条钉成断言**（两集一条方案，`copy_llm_calls` 仍是 1）。
 
 **Files:**
 - Modify: `service/tests/api/test_plan_variants.py`
@@ -5454,6 +5621,67 @@ def test_get_plan_of_a_silent_mode_costs_no_llm_call(
     assert detail["cost"] == {"copy_llm_calls": 0, "tts_calls": 0}
 
 
+def test_get_plan_exposes_the_episodes_a_plan_spans(
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """规格 §1 + §4.3 ③：详情要能说出这条方案取了哪几集、每集哪几段。
+
+    三件事各钉一条断言：
+    ① `episode_ids` 与时间轴上的集**逐字相等**（不是"包含"）——多写一集，卡片的
+      「取材集区间」就列了一集没出现的集（§9.5 假文案类，Task 6 Step 10 #16 的下游）；
+    ② 这条方案**真的**跨了两集，否则①是一条永远绿、什么也没守着的断言（B6 同一类）；
+    ③ 每集的段可以按 `episode_id` 分开取回，且区间是**集内相对秒**——这才是"区间"
+      两个字的可核对形态，也是渲染侧按 `segment.episode_id` 查 `episode_paths` 的同一个键。
+
+    成本账同时钉住"与集数无关"：两集一条方案仍是一次成稿往返（`copywriter` 把全部槽位
+    拼进一个 prompt），配音按槽位计。若哪天有人把成稿改成"逐集一次"，这条会红，
+    而那时 `plan_cost` 的口径必须同批改（否则成本卡少报）。
+    """
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
+    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
+    harness.context.settings.update(_LLM_SETTINGS)
+    calls: list[tuple[str, str]] = []
+    _stub_language_and_tts(monkeypatch, calls)
+
+    result = harness.rpc(
+        "narration.plan_variants",
+        {"project_id": project_id, "modes": ["full_narration"], "k": 1},
+    )
+    status = _wait_terminal(harness, str(result["job_id"]))
+    assert status["status"] == "completed", status.get("error")
+    plan_id = str(plans_repo.list_by_batch(memory_db, project_id, result["batch_id"])[0]["id"])
+
+    detail = harness.rpc("narration.get_plan", {"plan_id": plan_id})
+    plan = PlanData.model_validate(detail["plan"]["plan_data"])
+    spans_by_episode: dict[str, list[tuple[float, float]]] = {}
+    for segment in plan.timeline:
+        spans_by_episode.setdefault(segment.episode_id, []).append((segment.start, segment.end))
+
+    assert len(spans_by_episode) == 2, (
+        f"夹具前提塌了：这条方案只取到 {sorted(spans_by_episode)} 一集，"
+        "于是下面那条 episode_ids 断言在单集方案上也恒成立、什么也没守着"
+    )
+    assert len(plan.narration_texts) == 6, (
+        f"夹具前提塌了：两集各 3 个场景应给出 6 个槽位，实得 {len(plan.narration_texts)}"
+    )
+    assert detail["plan"]["episode_ids"] == sorted(spans_by_episode), (
+        f"episode_ids={detail['plan']['episode_ids']} 与时间轴上的集 "
+        f"{sorted(spans_by_episode)} 不一致——卡片的「取材集区间」会说谎"
+    )
+    assert sum(len(spans) for spans in spans_by_episode.values()) == len(plan.timeline), (
+        "按集分组丢了段：区间之和必须还原整条时间轴"
+    )
+    assert all(end > start for spans in spans_by_episode.values() for start, end in spans), (
+        "有零长区间：它在 overlap 的口径里不算素材，卡片上却会占一格"
+    )
+    # 断**字面整数**，不写 `len(plan.narration_texts)`：后者是把实现自己的公式又算一遍
+    # （B6 的教训），前提塌了它照样绿。前提由上面那条 6 槽位断言单独守着。
+    assert detail["cost"] == {"copy_llm_calls": 1, "tts_calls": 6}
+
+
 def test_get_plan_unknown_id_raises(
     memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
 ) -> None:
@@ -5502,7 +5730,7 @@ def test_list_plans_can_filter_by_batch(
 
 Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/api/test_plan_variants.py -q -k "get_plan or filter_by_batch"`
 
-Expected: PASS（4 条）
+Expected: PASS（**5** 条：`get_plan` 四条 + `filter_by_batch` 一条）
 
 - [ ] **Step 3: 变异检查**
 
@@ -5510,8 +5738,10 @@ Expected: PASS（4 条）
 |---|---|---|
 | 1 | `plan_cost` 的 `1 if voiced else 0` 改成 `1` | `test_get_plan_of_a_silent_mode_costs_no_llm_call`（`copy_llm_calls` 0 → 1） |
 | 2 | `plan_cost` 的 `tts_calls` 改成 `len(plan.timeline)` | `test_get_plan_returns_row_and_cost`（`tts_calls` 1 → **3**，因为 `intro_narration` 是 3 段 1 槽）。**在原来的 `full_narration` 夹具上这条变异红不了**：`build_full` 每槽恰好一段 `ducked`，两个数恒等（B6） |
+| **2b** | **`plan_cost` 的 `copy_llm_calls` 改成按集数计：`len({seg.episode_id for seg in plan.timeline}) if voiced else 0`（"跨集方案每集各成稿一次"这个想当然的口径）** | **`test_get_plan_exposes_the_episodes_a_plan_spans`（`copy_llm_calls` 1 → 2）。这一条是跨集裁决新长出来的破坏形态：单集时代两个口径恒等，谁都红不了；跨集之后只有这条用例能区分它们。若它红，说明有人把"一次成稿往返"与"取了几集"混成了一件事，而 `copywriter.write_plan_copy` 逐字只发一次请求（`copywriter.py:125-133` 的循环是重试次数）** |
 | 3 | `get_plan` 的 `if row is None: raise` 改成 `return {"plan": {}, "cost": {}}` | `test_get_plan_unknown_id_raises` |
 | 4 | `list_plans` 的 `if batch_id is not None` 分支整块删掉 | `test_list_plans_can_filter_by_batch` |
+| **5** | **（无本任务的破坏）**`test_get_plan_exposes_the_episodes_a_plan_spans` 的 `episode_ids` 那一半守的是 Task 6 `_plan_one` 的 `used_ids` 口径 | **破坏与红法登记在 Task 6 Step 10 #16，此处不重复登记**（同一条不变量抄两遍，将来只有一处会被更新，另一处就成了关于测试的假话——Task 3c Step 9 #13 同一条纪律）。本行存在的唯一目的是让读这张表的人知道：这条用例**有**守卫，只是守卫在别的任务里 |
 
 Run（每轮）: `cd service && ../.venv/Scripts/python.exe -m pytest tests/api/test_plan_variants.py -q`
 
@@ -5541,10 +5771,12 @@ git add service/tests/api/test_plan_variants.py
 ```python
 """export.submit：把已规划好的方案排队渲染。
 
-本文件钉三件事：① 一条方案一个 export job（取消/重试的粒度必须是单条片）；
+本文件钉四件事：① 一条方案一个 export job（取消/重试的粒度必须是单条片）；
 ② 拒绝路径逐条给理由，而不是一整批一起炸；③ 可渲染性守卫——规划与渲染拆开后，
 render_export 只读库里的 plan_data、自己不做任何配音，一版没配音的方案会被
-静默渲成哑片（规格 §3.3.1 禁止级）。守卫由 submit 与 retry 共用，两处必须同形。
+静默渲成哑片（规格 §3.3.1 禁止级）。守卫由 submit 与 retry 共用，两处必须同形；
+④ 守卫不得假设"一条片属于一集"（规格 §1）：跨集方案照常提交，而**每一集**的旁白段
+都要查到——"前一集配上了、后一集没配上"是跨集才有的哑片形态，单集用例一条都抓不到。
 """
 
 from __future__ import annotations
@@ -5623,7 +5855,11 @@ def _seed_plan(
     project_id = str(projects_repo.create(memory_db, "提交剧", str(tmp_path))["id"])
     plan_id = str(
         plans_repo.create(
-            memory_db, project_id, plan_data.mode, ["ep1"], plan_data.model_dump(),
+            memory_db, project_id, plan_data.mode,
+            # 从时间轴反推，与生产同口径（Task 6 的 `_plan_one`）；写死 ["ep1"] 的话
+            # 下面那条跨集夹具会落一行自相矛盾的数据（行说一集、时间轴说两集）
+            sorted({segment.episode_id for segment in plan_data.timeline}),
+            plan_data.model_dump(),
             status=status,
         )["id"]
     )
@@ -5762,6 +5998,100 @@ def test_silent_modes_need_no_audio(
     assert len(result["exports"]) == 1
 
 
+def _cross_episode_plan(tmp_path: Path, *, unvoiced: str = "") -> PlanData:
+    """一条横跨两集的方案，两集各一个 ducked 槽位；`unvoiced` 点名的那一集不给音频。
+
+    两集的区间刻意**完全重合**（都是 0.0-1.25s）：活库实测十集的场景起点全部从 0.0 开始，
+    集与集的集内相对秒互相覆盖。守卫若按 `(start, end)` 认段而不按
+    `(episode_id, start, end)`，这两段就会被当成同一段素材——它今天不这么做，
+    这两条用例就是钉住它别开始这么做。
+    """
+    timeline: list[TimelineSegment] = []
+    texts: list[NarrationText] = []
+    for index, episode_id in enumerate(("ep1", "ep2"), start=1):
+        slot_id = f"full-{index}"
+        audio_path: str | None = None
+        if episode_id != unvoiced:
+            audio = tmp_path / "tts" / f"{slot_id}-{episode_id}.mp3"
+            audio.parent.mkdir(parents=True, exist_ok=True)
+            audio.write_bytes(b"mp3")
+            audio_path = str(audio)
+        timeline.append(
+            TimelineSegment(
+                episode_id=episode_id,
+                start=0.0,
+                end=1.25,
+                audio="ducked",
+                narration_id=slot_id,
+                subtitle_text=f"第{index}段解说",
+            )
+        )
+        texts.append(
+            NarrationText(
+                id=slot_id,
+                text=f"第{index}段解说",
+                audio_path=audio_path,
+                duration=1.25,
+            )
+        )
+    return PlanData(mode="full_narration", timeline=timeline, narration_texts=texts)
+
+
+def test_submit_accepts_a_plan_spanning_two_episodes(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """规格 §1：一条方案可以横跨多集，守卫不得假设"一条片属于一集"。
+
+    **渲染侧本来就跨集，两处证据都核过（不是推断）**：`render_export` 的 `episode_paths`
+    取自 `episodes_repo.list_by_project(conn, project_id)`——项目**全部**集，不是方案点名的
+    那几集（`api/export.py:216-219`）；`dialogue_zones` 逐段按 `segment.episode_id` 预取一次
+    （`:223-237`），`encoder.export_plan` 的 `zones_cache` 同样按 `episode_id` 分键
+    （`encoder.py:358-370`）。所以这条用例红只有一种可能：守卫或提交路径里被人塞进了
+    一个"单集"假设。
+
+    **源文件存在性不在守卫里查，是有意的**：`encoder.export_plan` 对**每一段**做
+    `episode_paths.get(segment.episode_id)`，缺就抛
+    `EpisodeSourceMissing(f"第 {segment.episode_id} 集源文件缺失")`（`encoder.py:360-362`）——
+    逐段查、点名到集，比在守卫里再 stat 一遍更靠得住：守卫跑在**提交时**，而源文件可能在
+    渲染前才消失（移动盘、手工清理），只有渲染那一刻的检查才是真的。那次抛出会带着集号
+    落进 `export_jobs.error` 与队列页（`api/export.py:297-300`）。在守卫里抄一份是
+    docs/04 §5.2 的双处定义，还得为拿 `episode_paths` 多查一次库。
+    """
+    monkeypatch.setattr(export_api, "_run_export", lambda *_a, **_k: None)
+    plan_data = _cross_episode_plan(tmp_path)
+    assert len({segment.episode_id for segment in plan_data.timeline}) == 2, "夹具前提塌了"
+    _project_id, plan_id = _seed_plan(memory_db, tmp_path, plan_data)
+    harness = _harness(memory_db, tmp_path)
+
+    result = _rpc(harness, "export.submit", {"plan_ids": [plan_id]})
+    assert result["rejected"] == [], f"跨集方案被守卫误拦：{result['rejected']}"
+    assert len(result["exports"]) == 1
+
+
+def test_submit_rejects_an_unvoiced_slot_in_the_second_episode(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """守卫必须**逐段**查配音，包括第二集那段——这是跨集才存在的哑片形态。
+
+    单集时代"有一条段没配音"与"整条片没配音"是同一件事；跨集之后多了第三种：
+    **前一集配上了、后一集没配上**。渲出来是一部前半段有解说、后半段静默的片，
+    而规格 §3.3.1 的禁止级逐字是「半条旁白的片子不可交付」。守卫的遍历若被人写成
+    "只查第一集"（最省事的错法：`if segment.episode_id != timeline[0].episode_id: continue`），
+    单集用例一条都不红——只有这条会红。
+    """
+    monkeypatch.setattr(export_api, "_run_export", lambda *_a, **_k: None)
+    plan_data = _cross_episode_plan(tmp_path, unvoiced="ep2")
+    _project_id, plan_id = _seed_plan(memory_db, tmp_path, plan_data)
+    harness = _harness(memory_db, tmp_path)
+
+    result = _rpc(harness, "export.submit", {"plan_ids": [plan_id]})
+    assert result["exports"] == [], f"第二集的哑段被放行了：{result['exports']}"
+    reason = result["rejected"][0]["reason"]
+    assert "没有配音音频" in reason and "ep2" in reason, (
+        f"拒绝理由没点名到出问题的集，运维看不出是哪一集没配上：{reason}"
+    )
+
+
 @pytest.mark.parametrize("params", [{}, {"plan_ids": []}, {"plan_ids": "一个字符串"}])
 def test_bad_plan_ids_are_rejected_at_the_rpc_boundary(
     memory_db: sqlite3.Connection, tmp_path: Path, params: dict[str, Any]
@@ -5804,7 +6134,7 @@ def test_retry_shares_the_renderability_guard(
 
 Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/api/test_export_submit.py -q`
 
-Expected: FAIL —— 多数报 `AssertionError: export.submit RPC 错误: [-32601] 方法不存在`
+Expected: FAIL —— **12 条用例（`bad_plan_ids` 参数化 3 项，故实为 14 项）**，多数报 `AssertionError: export.submit RPC 错误: [-32601] 方法不存在`；`test_retry_shares_the_renderability_guard` 报的是 `assert response.error.code == -32407`（`export.retry` 今天就注册着，红的是守卫还没装上去，错误码是 `None`）。两种形态都算"如期失败"。
 
 - [ ] **Step 3: 改 `api/export.py`**
 
@@ -6013,6 +6343,11 @@ def _assert_renderable(plan_row: dict[str, Any], plan_data: PlanData) -> None:
     }
 ```
 
+**`serial_per_episode` 不在本批次，且这是规格已经裁决过的、不是本计划自己收窄的**：规格 §5 #21（`4228bef` 修订后）逐字把它写成 `export.submit(plan_ids, serial_per_episode=true)` 的**提交时参数**，并注「**本参数归 P-2.5** …P-2 的 `plan_variants` 拆分**不交付它**」，§6 的 P-2 行也写着「**不含 `serial_per_episode`**」。故本步的 schema **只有 `plan_ids` 一个属性**。留给 P-2.5 的两句话，写在这里免得它踩：
+
+1. `"additionalProperties": false` 意味着 P-2.5 必须**在这一条 schema 里补上那个属性**，不能只在 Python 侧读 `params.get(...)`；
+2. 而**忘了补也不会红**——`transport/rpc.py::Router.dispatch` 不做任何 JSON Schema 校验（《定案三》末段实测），参数会照样进来、照样生效，只有契约文档在说谎。这是"schema 是文档而不是执行者"这条既有事实的又一个实例，P-2.5 若顺手给 Router 加上校验，就会连带改掉本计划三个手写错误码的归属（同一段末尾已交代）。
+
 - [ ] **Step 5: 同步 `METHOD_NAMES` 与 TS 类型**
 
 `protocol/ts/index.ts`：`METHOD_NAMES` 里 `'export.start',` 替换为 `'export.submit',`；并在 `PlanVariantsResult` 之后新增：
@@ -6061,21 +6396,25 @@ export const exportApi = {
 
 Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/api/test_export_submit.py tests/api/test_export.py tests/api/test_export_retry.py tests/api/test_export_tts_mapping.py -q`
 
-Expected: PASS。`test_export_retry.py` 的既有夹具用的是 `raw_clip` + 无 `narration_texts`（`tests/api/test_export_retry.py:41-45`），守卫对它是空转，故不受影响。
+Expected: PASS（`test_export_submit.py` **12 条 / 14 项**，其余三个文件既有用例全绿）。`test_export_retry.py` 的既有夹具用的是 `raw_clip` + 无 `narration_texts`（`tests/api/test_export_retry.py:41-44`），守卫对它是空转，故不受影响。
+
+**那个夹具还顺手证明了"源文件不在守卫里查"是对的**：它的 docstring（`:38-39`）逐字写着「项目下没有任何 episode，渲染时 encoder 必抛 `EpisodeSourceMissing` —— 确定失败，不需真素材」，即"集源文件缺失"这条路径**已有既有用例守在渲染侧**，而且它守的位置比守卫更好（渲染那一刻，而不是提交那一刻）。本任务不动它——若 Step 3 之后它红了，说明守卫拦下了一件本该由渲染报的事，回去把守卫收窄，**不要改它的断言**。
 
 - [ ] **Step 8: 变异检查**
 
 | # | 破坏 | 必须红的用例 |
 |---|---|---|
 | 1 | `submit` 的 `list(dict.fromkeys(...))` 改成 `list(raw)` | `test_submit_dedupes_plan_ids_within_one_call` |
-| 2 | `_assert_renderable` 的 `if not audio_path: raise` 整块删掉 | `test_submit_rejects_an_unvoiced_narration_plan` |
+| 2 | `_assert_renderable` 的 `if not audio_path: raise` 整块删掉 | `test_submit_rejects_an_unvoiced_narration_plan` **与** `test_submit_rejects_an_unvoiced_slot_in_the_second_episode`（两条同时红——前者守"整条没配音"，后者守"只有后一集没配音"，删掉这一行两种都放行） |
 | 3 | `_assert_renderable` 的 `if not Path(audio_path).is_file(): raise` 整块删掉 | `test_submit_rejects_a_plan_whose_audio_file_is_gone` |
 | 4 | `_assert_renderable` 的 `if plan_row["status"] != "ready"` 整块删掉 | `test_submit_rejects_a_plan_that_is_not_ready` |
 | 5 | `_assert_renderable` 的 `if not plan_data.timeline` 整块删掉 | `test_submit_rejects_an_empty_timeline` |
-| 6 | `_assert_renderable` 的 `if segment.audio not in ("narration", "ducked"): continue` 改成只认 `"narration"` | 本文件不红——**ducked 段无音频这条路径缺一条专属用例**。补一条：把 `_voiced_plan` 的 `audio="ducked"` 保留、`narration_texts` 清空、`timeline` 的 `narration_id` 保留，断言 `rejected[0]["reason"]` 含「没有配音音频」，再对本条变异重跑 |
+| 6 | `_assert_renderable` 的 `if segment.audio not in ("narration", "ducked"): continue` 改成只认 `"narration"` | 本文件不红——**ducked 段无音频这条路径缺一条专属用例**。补一条：把 `_voiced_plan` 的 `audio="ducked"` 保留、`narration_texts` 清空、`timeline` 的 `narration_id` 保留，断言 `rejected[0]["reason"]` 含「没有配音音频」，再对本条变异重跑。（**跨集夹具已经覆盖了一半**：`_cross_episode_plan` 的两段都是 `ducked`，故 #2 那条变异在跨集用例上就红了；本行要补的是**单集** ducked 那一格，两条夹具各守一半，别把 #6 当成已被覆盖而跳过） |
 | 7 | `retry` 里新插入的 `_assert_renderable(plan_row, plan_data)` 删掉 | `test_retry_shares_the_renderability_guard` |
 | 8 | `retry` 里把 `_assert_renderable` 挪到 `reset_for_retry` **之后** | 同上用例的后半段断言（`status` 仍是 `failed`） |
 | 9 | `if not isinstance(raw, list) or not raw: raise` 整块删掉 | `test_bad_plan_ids_are_rejected_at_the_rpc_boundary` |
+| **10** | **`_assert_renderable` 的配音遍历里插一行"只查第一集"：`if segment.episode_id != plan_data.timeline[0].episode_id: continue`** | **`test_submit_rejects_an_unvoiced_slot_in_the_second_episode`（`exports` 从 `[]` 变成 1 条，第二集的哑段被放行）。⚠️ 本文件其余 11 条用例一条都不红**——它们的方案全是单集，`timeline[0].episode_id` 恒等于每一段的集号，这行 `continue` 在单集方案上是死代码。这就是"跨集才存在的缺陷"的标准形状：它在旧夹具上不可见，而它放出去的是**半条旁白的片子**（规格 §3.3.1 禁止级） |
+| **11** | **（覆盖边界，不是一条待跑的变异）`submit` 在调 `_submit_export` 之前把时间轴裁成第一集：`plan_data = plan_data.model_copy(update={"timeline": [s for s in plan_data.timeline if s.episode_id == plan_data.timeline[0].episode_id]})`（"一条片属于一集"这个旧假设的另一种写法）** | **本文件不红**：裁完的方案仍然可渲染，守卫照过，`test_submit_accepts_a_plan_spanning_two_episodes` 只断言"没被拒"。真正红的是渲染产物，而本文件把 `_run_export` 桩掉了。挡住这种裁剪的是另外两处：Task 6 Step 10 #16 的 `used_ids` 口径、Task 11 Step 2 的落库核对（`episode_ids` 与时间轴逐字相等）。**别为了让本文件能红而去断言渲染产物**——那要把真 ffmpeg 拉进单元测试，而 P-2a 的纪律是"渲染侧一行不动、由真机门禁验" |
 
 Run（每轮）: `cd service && ../.venv/Scripts/python.exe -m pytest tests/api/test_export_submit.py -q`
 
@@ -6092,7 +6431,7 @@ git add service/dramaclip/api/export.py protocol/schemas/export.json protocol/ts
 规格 §6 说的是「**拆** `produce`」，不是"在旁边加两个新方法"。留着的理由只有一个（既有页面还能跑），而那个理由由 Step 4 的一次最小改写满足，不需要留方法。规格 §2.2 定案「一次性切换，不做新旧并存灰度」，docs/04 §5.2 禁止同一概念双处定义。
 
 **Files:**
-- Modify: `scripts/verify_modes.py`（**五处**：`:39` 的 import 区、`:75-85` 的 `EXPECT_PLANNER` 推导散文、`:351-356` 的 argparse 参数区、`:382` 的 `_generate_one` 注释、`:438-441` 之后插前置条件停机分支、`:456-500` 的模式循环与派发段）
+- Modify: `scripts/verify_modes.py`（**八处**，逐处都是实测锚点：① `:39` 的 import 区；② `:75-85` 的 `EXPECT_PLANNER` 推导散文；③ `:322-347` 的 `_mode_table_drift`（只加一条子集核对）；④ `:351-356` 的 argparse 参数区（`ap`，不是 `parser`）；⑤ `:382` 的 `_generate_one` 注释；⑥ `:438-441` 之后插前置条件停机分支；⑦ `:456-465` 的 Router 装配与单次派发段（换成规划+提交两步）；⑧ `:615-641` 的 `columns`/`values`/打印循环（新增 `集数` 列与跨集断言的落点））
 - Modify: `desktop/src/features/narration/useProduceJob.ts`（整文件替换）
 - Modify: `desktop/src/services/client.ts`（`export const narrationApi = {` 到它自己的 `} as const;`，实测 `:110-125`）
 - Modify: `service/tests/api/test_data_paths.py:18-23`
@@ -6144,7 +6483,7 @@ Expected: 打印出该文件最近一次提交的哈希、作者与日期——�
 
 - [ ] **Step 2: 迁 `scripts/verify_modes.py`（九模式门禁）**
 
-这一步有**五个**改动点，缺任何一个门禁都会假红或假绿。逐点做，做完再跑 Step 3。
+这一步有**八个**改动点（2.1–2.8），缺任何一个门禁都会假红或假绿。逐点做，做完再跑 Step 3。**其中 2.8 是 2026-09-12 跨集裁决新加的**（《修订记录》C12），它同时承载"门禁阈值逐条重新推导"这件事——C6 与《定案二》的表格都把推导数字指到了本步，所以它不是一列新表格那么轻，读之前先看它末尾那张阈值表。
 
 **2.1 补 `export_api` 的 import 与注册（B1——不做这一步，九个模式全红）**
 
@@ -6169,7 +6508,7 @@ from dramaclip.api import export as export_api
 
 **2.2 把单次派发换成"规划 + 提交"两步，并加 `--plan-only`（B10）**
 
-原 8 行（实测 `:459-465`，紧接上面那段 Router 装配）：
+原 **7** 行（实测 `:459-465`，紧接上面那段 Router 装配；`:459-460` 是一条跨两行的 `dispatch`）：
 
 ```python
         resp = router.dispatch(RpcRequest(id=mode, method="narration.produce",
@@ -6200,15 +6539,44 @@ from dramaclip.api import export as export_api
                          "error": job.get("error")})
             failures.append(f"{mode}: 规划未完成（{job['status']} · {job.get('error')}）")
             continue
-        plan_ids = [str(r[0]) for r in ctx.conn.execute(
-            "select id from narration_plans where batch_id=?"
+        # 一次查出本 batch 的方案 id 与 plan_data：id 用来提交渲染，plan_data 用来数
+        # 每条方案时间轴上的集数（2.8 的跨集判据）。分两条查询就是把同一个 batch 读两遍。
+        batch_rows = ctx.conn.execute(
+            "select id, plan_data from narration_plans where batch_id=?"
             " order by narration_mode, variant_index",
-            (str(resp.result["batch_id"]),)).fetchall()]
+            (str(resp.result["batch_id"]),)).fetchall()
+        plan_ids = [str(r[0]) for r in batch_rows]
+        # 集数按 (episode_id) 去重后数：一条方案的时间轴可以横跨多集（规格 §1），
+        # 而 plan_data.timeline 的 episode_id 与渲染侧查 episode_paths 用的是同一个键。
+        episodes_used = [
+            len({str(seg.get("episode_id"))
+                 for seg in json.loads(str(r[1])).get("timeline", [])})
+            for r in batch_rows
+        ]
+        # 跨集判据（规格 §1，C12）：**至少一条**方案的取材集 ≥2。不是"每条都必须 ≥2"——
+        # §1 要的是一条方案**可以**跨集取画面；ultra_short_hook 三个段压在同一个场景上，
+        # 恒为一集（C13），故按模式豁免。豁免清单在 SINGLE_EPISODE_MODES，见 2.8。
+        if args.require_cross_episode and mode not in SINGLE_EPISODE_MODES:
+            if not episodes_used:
+                failures.append(f"{mode}: --require-cross-episode 但本 batch 一条方案都没落库")
+            elif max(episodes_used) < 2:
+                failures.append(
+                    f"{mode}: --require-cross-episode 但每条方案都只取一集（集数 {episodes_used}）"
+                    "——规格 §1 的「跨集方案」没做到。先分辨是哪一种："
+                    "① 看 logs/llm/llm_angles_*.json 里模型给的 episode_numbers，"
+                    "若它每条都只点一集，那是选题 prompt 的问题（《开放问题》#1）；"
+                    "② 若模型点了多集而时间轴上只剩一集，那是 casting/预算的问题"
+                    "（Task 3c：_fit_duration 按播出序填充，预算可能在第二集之前就用完，"
+                    "活库实测 intro_narration 一手点 4 集、时间轴上只出现 2 集）")
         if args.plan_only:
             # --plan-only 的判据是**查库**，不是"门禁报没有成品"：把失败当证据是假绿的一种。
             # 这个 batch 的方案一行 export_jobs 都没有，才叫"规划阶段一条片都没渲"。
+            # 集数存两份：列里打 max（本行没有"那一条被渲出来的方案"，取最跨的一条），
+            # 附注行打全部（2.6），于是"哪几条只取了一集"在终端上看得见，不用去翻 summary.json。
             rec = {"mode": mode, "status": job["status"], "phase": "plan-only",
-                   "elapsed_s": round(time.time() - started, 1), "plans": len(plan_ids)}
+                   "elapsed_s": round(time.time() - started, 1), "plans": len(plan_ids),
+                   "episodes": max(episodes_used, default=0),
+                   "episodes_per_plan": episodes_used}
             if not plan_ids:
                 failures.append(f"{mode}: --plan-only 规划出 0 条方案")
             else:
@@ -6240,7 +6608,7 @@ from dramaclip.api import export as export_api
 
 （`max(..., key=...)` 的口径是"有失败就报失败"：`completed` 排 0、其余排 1，取最大即优先暴露失败行。这比"取最后一条"诚实——`--variants > 1` 时最后一条恰好成功会掩盖前面的失败。取到的 `job` 直接喂给下面原有的 `rec: dict[str, Any] = {...}`（实测 `:466-468`），那一行与它之后的全部断言**一字不动**。）
 
-**2.3 argparse 加两个旗标**
+**2.3 argparse 加三个旗标**
 
 参数区在 `main()` 开头（实测 `:351-356`），变量名是 **`ap`**（`ap = argparse.ArgumentParser()`），**不是 `parser`**——原计划写的是 `parser.add_argument(...)`，照抄会 `NameError`。在 `ap.add_argument("--job-timeout", …)` 之后加：
 
@@ -6250,27 +6618,44 @@ from dramaclip.api import export as export_api
     ap.add_argument("--plan-only", action="store_true",
                     help="只规划、不提交渲染，并查库断言该 batch 的 export_jobs 为 0"
                          "（P-2a Task 11 Step 1 用它证明「规划阶段一条片都没渲」）")
+    ap.add_argument("--require-cross-episode", action="store_true",
+                    help="断言每个模式至少有一条方案的时间轴横跨 ≥2 集（规格 §1 的机器判据，"
+                         "P-2a Task 11）。ultra_short_hook 豁免：它三个段压在同一个场景上，"
+                         "恒为一集（见 SINGLE_EPISODE_MODES）")
 ```
 
-**2.4 前置条件停机分支（B11）**
+**2.4 前置条件停机分支（B11，散文按裁决重写）**
 
 `done` 计数的那句打印（实测 `:438-441`，`print(f"项目 {project_id[:8]} · 已分析 {done} 集 · …")`）**之后**插入：
 
 ```python
-    # 前置条件：--variants K 需要至少 K 集已分析。门禁自己不分析任何东西，
-    # 它读的是复制来的 data/data.db 里现成的东西，所以这一条必须显式设卡。
-    if done < args.variants:
-        print(f"环境未就绪：--variants {args.variants} 需要至少 {args.variants} 集已分析，"
-              f"库里只有 {done} 集。", file=sys.stderr)
-        print("解说类模式一条片只取一集（dialogue_narration 除外），集数不足时 K 条角度会"
-              "全部指向同一集 → 取材重叠 100% → 第 2..K 条被重叠闸门拦下 → 作业 failed。"
+    # 前置条件（都属"环境未就绪"= 退出码 2，不是产品缺陷）。门禁自己不分析任何东西，
+    # 它读的是复制来的 data/data.db 里现成的东西，所以这两条必须显式设卡：
+    # ① --variants K：K 条方案的**取材集组合**必须互不相同，否则成稿前那道
+    #    _reject_same_episode_sibling 会把第 2..K 条判成 100% 重叠、作业 failed。
+    #    只有 1 集时任何角度的取材集都只能是 {1}，K>1 必然失败。
+    #    严格说 K 条互异只需要 ≥2 集（{1}、{2}、{1,2} 就是三组），这里按 K 集设卡是
+    #    **刻意保守**：取材集由选题模型给，2 集时它很可能三条都点同一组，那时看到的红
+    #    分不清是「模型没给出互异角度」还是「素材不够」。宁可先要求 K 集，把两种红分开。
+    # ② --require-cross-episode：规格 §1 的判据是"至少存在一条横跨 ≥2 集的方案"，
+    #    1 集时它恒假，跑出来只会是一条与产品无关的红。
+    if done < args.variants or (args.require_cross_episode and done < 2):
+        need = max(args.variants, 2 if args.require_cross_episode else 0)
+        print(f"环境未就绪：本次口径需要至少 {need} 集已分析，库里只有 {done} 集。",
+              file=sys.stderr)
+        print("裁决之后**九个模式都能在一条方案里跨集取画面**（Task 3c 的 casting 层），"
+              "所以集数不足不再是「某个模式做不到跨集」，而是两件事：① 只有 1 集时任何两条"
+              "角度的取材集都相同 → 成稿前闸门判 100% 重叠 → 第 2..K 条被拦 → 作业 failed；"
+              "② --require-cross-episode 要的是「至少一条方案横跨 ≥2 集」，1 集时恒假。"
               "那时看到的红不是产品坏了，是门禁的前提没满足。", file=sys.stderr)
-        print(f"要么先把集数分析到 ≥ {args.variants}，要么把 --variants 降到 1"
-              "（九模式门禁的默认口径）。", file=sys.stderr)
+        print(f"要么先把集数分析到 ≥ {need}，要么去掉 --require-cross-episode 并把"
+              " --variants 降到 1（九模式门禁的默认口径）。", file=sys.stderr)
         return 2
 ```
 
-（退出码 **2** = "环境未就绪"，与本文件开头 docstring 里那两档的划分一致：0=通过、1=断言失败、2=环境未就绪。用 1 会把"库里没有足够的集"报成"产品有缺陷"。）
+（退出码 **2** = "环境未就绪"，与本文件开头 docstring 里那两档的划分一致：0=通过、1=断言失败、2=环境未就绪。用 1 会把"库里没有足够的集"报成"产品有缺陷"。
+
+**原文那句「解说类模式一条片只取一集（`dialogue_narration` 除外）」在裁决之后是假话**，而且是**有害的**假话：它会让运维照着"再去分析两集"之外的错误方向排查（以为解说类天生跨不了集、去找编排器的 bug）。《修订记录》C12 点名要重写它，重写后的版本把两条前置条件各自的**真理由**写在注释里，而不是复述一个已经作废的模式分类。）
 
 **2.5 改 `EXPECT_PLANNER` 的推导散文与 `:382` 的注释（R5）**
 
@@ -6298,7 +6683,7 @@ from dramaclip.api import export as export_api
     # 模型目录必须是 <data_dir>/models —— api/narration.py::_voice 就是这么拼路径的。
 ```
 
-**2.6 表格打印：让 `--plan-only` 的证据可见**
+**2.6 表格打印：让 `--plan-only` 与集数的证据可见**
 
 打印循环里 `if r.get("audio_roles"):` 那两行（实测 `:640-641`）**之后**插入：
 
@@ -6306,13 +6691,92 @@ from dramaclip.api import export as export_api
         if r.get("phase") == "plan-only":
             print(f"{'':<29}规划 {r.get('plans', 0)} 条 · 建了 "
                   f"{r.get('export_jobs', 0)} 行 export_jobs（必须为 0）")
+        if r.get("episodes_per_plan"):
+            # 列里只有 max（见 2.8），逐条的集数在这里打：哪几条只取了一集必须看得见，
+            # 否则 --require-cross-episode 绿了也只知道"至少有一条跨了"，不知道其余几条。
+            print(f"{'':<29}逐条取材集数：{r['episodes_per_plan']}")
 ```
 
-（不加这一段，`--plan-only` 跑完只在 `summary.json` 里有数，终端表格里看不出来——而 Task 11 Step 1 的判据正是要**看见** `plans=3`、`export_jobs=0`。）
+（不加这两段，`--plan-only` 跑完只在 `summary.json` 里有数，终端表格里看不出来——而 Task 11 Step 1 的判据正是要**看见** `plans=3`、`export_jobs=0`。**那个 `{'':<29}` 是 18+11 两列的宽度（`模式`+`状态`），2.8 新增的 `集数` 列插在它们右边，故这个 29 不受影响、不要顺手改它**。）
 
-**2.7 保持不动的部分**
+**2.7 保持不动的部分（范围比原计划窄了两处，逐条说清楚）**
 
-`export_jobs` 的成品定位查询（实测 `:482-484`）一字不动：它取"最新一条已完成出片记录"并校验 `narration_mode` 对得上，两步派发之后这个语义不变（`--variants 1` 时一个模式恰好一条成品）。`_mode_table_drift()`、响度窗口、planner 断言、冻结帧断言全部不动——**这是"渲染侧一行未改"的门禁证据，动它就等于把证据本身改了**。
+- `export_jobs` 的成品定位查询（实测 `:482-484`）**一字不动**：它取"最新一条已完成出片记录"并校验 `narration_mode` 对得上，两步派发之后这个语义不变（`--variants 1` 时一个模式恰好一条成品）。
+- **响度窗口、真峰门限、planner 断言、冻结帧断言、插桩覆盖断言全部不动**——这是"渲染侧一行未改"的门禁证据，动它就等于把证据本身改了。2.8 末尾那张表逐条给出"为什么跨集之后它们仍然成立"的推导，**结论是阈值一个字都不改**，但推导必须写在计划里，否则下一个人只能重新猜一遍。
+- **`_mode_table_drift()` 要动一处**（原计划写"全部不动"，那是 C12 之前的话）：2.8 新加的 `SINGLE_EPISODE_MODES` 是一份**手抄的模式子集**，而这个文件的既有纪律正是"手抄清单必须与 `SUPPORTED_MODES` 对账，否则新模式会按默认值悄悄判绿"（`:322-328` 的 docstring 逐字如此）。一个写错名字的豁免会让 `--require-cross-episode` 对那个模式**永远不判**——假绿，而且是"规格 §1 的判据"上的假绿，代价最高。故给它补一条子集核对。
+- **`columns` / `values` 两张表要动**（同上，原计划的"不动"清单里列了它）：新增 `集数` 一列。两张表在 `:615-620` 与 `:624-635`，**必须同批改**——`:638` 是 `zip(values, columns, strict=True)`，长度不一致会当场抛 `ValueError`，这是本文件里少数几个"改错就响"的地方，别指望它静默。
+
+**2.8 新增 `集数` 列、`SINGLE_EPISODE_MODES` 与跨集断言（C12/C13）**
+
+门禁今天**没有任何一条断言能区分"跨集"与"单集"**：它量时长/响度/真峰/冻结/planner/插桩覆盖，全部与集数无关。不加这一条，《完成判据》里"覆盖规格 §1"就是一句自我声明——而这一句正是业主拒绝签字的那次收窄能悄悄活下来的原因。
+
+1. 模块级常量，插在 `EXPECT_PLANNER` 那张表之后（实测 `:96` 之后）：
+
+```python
+# 跨集豁免（P-2a《修订记录》C13）：ultra_short_hook 的三个段全压在同一个场景上
+# （modes_w5.build_ultra_short 的 best），是 10-20s 的单镜头悬念版，取材集恒为 1。
+# 规格 §1 要的是一条方案**可以**跨集取画面，不是每条方案**必须** ≥2 集；
+# 为跨集而把 15 秒的悬念版拆成两集，会毁掉这个模式全部的卖点。
+# 活库实测：单集 ep1 planned 14.77s、跨集一手 planned 14.40s、集数恒为 1、段数恒为 3。
+# **这份清单是手抄的，故 _mode_table_drift 里有它的子集核对**——写错一个名字，
+# 那个模式的跨集断言就永远不判（假绿），而这正是本文件既有纪律要防的事。
+SINGLE_EPISODE_MODES = frozenset({"ultra_short_hook"})
+```
+
+2. `_mode_table_drift()`（实测 `:322-347`）在 `return problems` 之前插入：
+
+```python
+    # 豁免清单只要求是子集（它天生比 SUPPORTED_MODES 小），故不能进上面那个双向对账循环：
+    # 那里对"缺"与"多"一视同仁，而这里"缺"是正常的。要防的只有"多"——一个不在生产清单里
+    # 的名字，意味着某个模式的跨集断言被一条永真的豁免吃掉了。
+    unknown = SINGLE_EPISODE_MODES - authoritative
+    if unknown:
+        problems.append(
+            f"SINGLE_EPISODE_MODES 里有不在 SUPPORTED_MODES 中的名字：{sorted(unknown)}"
+            "（豁免清单写错会让 --require-cross-episode 对某个模式永远不判）"
+        )
+```
+
+3. `columns`（实测 `:615-620`）在 `("段", 4, ">")` 之后插入一格；`values`（实测 `:624-635`）在 `f"{r.get('segments', 0)}"` 之后插入一格。**两边都改，`zip(..., strict=True)` 会替你数**：
+
+```python
+        ("段", 4, ">"), ("集数", 5, ">"), ("插桩", 5, ">"), ("TTS", 5, ">"), ("带旁白", 7, ">"),
+```
+
+```python
+            f"{r.get('segments', 0)}", f"{r.get('episodes', 0)}",
+            f"{r.get('segments_captured', 0)}",
+```
+
+4. 渲染路径的 `rec.update({...})`（实测 `:512-533`）里加一行（`timeline` 这个局部在 `:501` 已经有了，不要另查一次库）：
+
+```python
+            "episodes": len({str(seg.get("episode_id")) for seg in timeline}),
+```
+
+（**口径**：这一列是"本行量到的那条方案的取材集数"。渲染路径上就是被渲出来的那一条；`--plan-only` 路径上没有"被渲出来的那一条"，取本 batch 的 max，并把逐条的数打在 2.6 的附注行里，于是两种路径都不会把一个数藏起来。`plan-only` 的 `rec` 里那两键由 2.2 的替换块给出。）
+
+**豁免这条分支的覆盖边界，如实写下来**：Task 11 **不跑** `--modes ultra_short_hook --require-cross-episode`，所以"豁免生效"在真机上没有被走过一次。别为此加一跑——它会带来一个**合法但看着像失败**的读数：`build_ultra_short` 只取"点名集里全剧最高分的那一个场景"，两条角度只要都点到那个场景所在的集，两条方案的时间轴就**逐字节相同** ⇒ Jaccard = 1.0 ⇒ 第二条被成稿后的重叠闸门拦下 ⇒ `plans < K`。那是闸门在正确工作（两部一样的 15 秒悬念版不该都出），不是缺陷，但门禁表格上会显示成"少出了方案"。豁免的**效果**由 Task 3c 的 `test_ultra_short_is_a_single_scene_film_and_says_which_episode`（集数恒为 1、且那一集是全剧最高分那集）与 `test_cross_episode_arrangement.py` 的 `continue` 分支守着；豁免**清单写错名字**由上面第 2 点的 `_mode_table_drift` 子集核对守着，它在开跑之前就红、连临时目录都不建。**唯一没被守的是"豁免条件被写反"**（`not in` 写成 `in`），那种情况只在真跑 `ultra_short_hook` 时可见——如果哪天有人跑了并看到 `REAL_EXIT=1` 且失败串是"每条方案都只取一集"，先查这一行，别去改编排器。
+
+**门禁阈值逐条重新推导（C6 与《定案二》第 ③ 行都把数字指到了这里）。结论：一个字都不改；下面是"为什么不用改"的逐条依据，以及一条**必须改代码而不是改阈值**的实测发现。**
+
+| 断言（`verify_modes.py` 实测行号） | 跨集之后 | 依据 |
+|---|---|---|
+| `EXPECT_PLANNER`（`:544-547`） | **不用改** | 它量的是"文案谁写的"，与集数无关。九个模式的取值由**模式族**决定：规则类两模式走 `_rule_variants`（零 LLM，`PlanData.planner` 停在默认 `"rule"`），`dialogue_narration` 由 `build_from_script_episodes` 直接写 `planner="llm_script"`（`pipeline.py:173`），其余五个由 `copywriter.write_plan_copy` 置 `llm_script`（`copywriter.py:147`）。三处都不读集数 |
+| `EXPECT_NARRATION`（`:587-606`） | **不用改** | 它数的是**角色为 narration/ducked 的段数下限**（`one`→1、`many`→2）。跨集只增加段数、不减少：六个编排器都是逐场景产段（`build_full` 一场景一槽、`build_cross` 场景与旁白交替），段数随取材集增加而增加。下限断言在段数变多时只会更容易过 |
+| 时长 `duration_s > strategy.max_duration_s`（`:579-582`） | **阈值不改，但代码要改一处**（见下） | 阈值读设置（活库实测 `strategy.max_duration_s` = **300**，与 `infra/config.py` 的 DEFAULTS 同值），`_fit_duration` 也按同一个键截断，两侧同源。C6 已经处理了两种顶穿：末场景预算豁免（活库最长单场景 **7.94s**，跨集两集 405.8 场景秒时豁免会把成片推到 **307.9s**）与引子槽位余量（预留 `_INTRO_MAX_S`=30 之后，四集一手 planned **269.06s** → 成片 ≈ **286.4s**）。**剩下第三种，C6 没算到**，见下面那段 |
+| 响度窗口 `abs(integrated − target) > 2.5 LU`（`:551-559`） | **不用改** | Phase C 归一的是**整片**（`loudness.normalize_in_place`，两遍 `loudnorm`），它不知道也不关心片段来自几集；输入变长只改变测量样本量，不改变目标。实测余量极大：P-1.5 九部真成片全部落在 −14.0/−14.1 LUFS，**最大偏差 0.1 LU** 对容差 2.5 LU。且 `dialogue_narration` 早就出多集成片并过门（56.10s / −14.1 LUFS） |
+| 真峰门限 `true_peak > target + margin`（`:565-574`） | **不用改** | 两级都是**逐段**作用：段级天花板 `_peak_ceiling_filter()` 挂在每段的 `atempo` 之后（`encoder.py:263`），混音限幅器挂在 `amix` 之后；Phase C 的真峰有界重试量的也是最终成片。段来自哪一集不进这条链。实测余量：九部真成片 −2.20…−5.20 dBTP 对门限 −1.00，**最小余量 1.20 dB** |
+| 冻结帧 `max_freeze_s >= 2.0`（`:585-586`） | **不用改** | 冻结是**成片上相邻帧相同**，跨集拼接只增加硬切点（两集之间必然不相似），不会制造静止画面。实测九部全 **0.0s** 对门限 2.0s |
+| 插桩覆盖 `segments_captured != segments`（`:537-539`） | **不用改，但它是本轮最重要的一条** | 它逐段核对"每段都真的走了 `cut_segment_args`"，而 `cut_segment_args` 正是按 `segment.episode_id` 取源的那一层。**跨集之后它是"段号与集号对得上"的唯一机器证据**：若某个编排器盖错了集号（Task 3c Step 9 #14 那条最贵的变异），段数仍然对得上、这条断言不红——所以它**不是**跨集正确性的守卫，只是"本行实测可信"的守卫。跨集正确性由 2.8 的 `集数` 列 + `--require-cross-episode` + Task 3c 的十条用例负责，别把这条当成前者 |
+
+⚠️ **必须改代码（不是改阈值）的第三种顶穿：`raw_clip` 在 `--variants 1` 下会吃满预算，成片越过 300s。** 这是本轮审计**新查出**的，C6 只算了末场景豁免与引子余量两种：
+
+- **机制**：`deal_windows(windows, hands=1)` 把**全部**集发进同一手（`min(1, len(windows))` = 1 手，逐窗 `dealt[rank % 1]`），于是 `--variants 1`（门禁的默认口径、也是 Task 11 Step 3b 的口径）下 `raw_clip` 的取材集是**全剧**。`build_raw_clip` 的候选是"分数 ≥ `RAW_CLIP_MIN_SCORE`=70 且时长 3-25s"的全部场景，再由 `_fit_duration` 按 300s 预算截断。
+- **活库实测（只读 `data/data.db`，用真编排器的选取规则重算，不渲染）**：十集共 **333** 个场景，其中 **59** 个合格、合计 **346.5** 场景秒 > 300 的预算 ⇒ `_fit_duration` **吃满**，planned **296.21s / 51 段 / 覆盖 9 集**（ep10 一帧都拿不到）。对照：同一套算法在四集一手 `[2,5,6,9]` 上给出 **117.89s / 21 段**、在 ep1 单集上给出 **15.13s / 3 段**——与 Task 3c Step 8 那张实测表**逐位对上**，故这套重算是可信的。
+- **成片会超**：`raw_clip` 没有旁白槽位，成片长度 = planned × 编码漂移。P-1.5 的实测比值是 **15.48 / 15.13 = 1.0231**（`subtitle_flow` 同类无旁白，比值 **32.43 / 30.57 = 1.0609**）。⇒ 296.21 × 1.0231 ≈ **303.0s** > 300 ⇒ `:581` 的时长断言**红**，`REAL_EXIT=1`。按更保守的 1.0609 算是 **314.3s**。
+- **单集时代不可能发生**：ep1 单集的合格场景只有 15.1s（3 段），离 300 的预算差 20 倍。**这是跨集裁决直接产生的新失败形态**，而它同时也是一条**产品**缺陷：用户设的 `strategy.max_duration_s` 没生效（规格 §9.5「参数未生效」那一类），不只是门禁红。
+- **修法在 `_fit_duration`（Task 3c），不在门禁**：C6 已经定了"阈值一个字都不改"，而阈值确实不该改——它量的是用户的设置。要给预算留一档**编码漂移余量**（与它已经给引子槽位预留 `_INTRO_MAX_S` 同一个手法），余量由上面两个实测比值定（≥6.1%，即 300s 的预算收到 ≤282s）。**这一档常数取多少是设计决定，本审计不替业主拍**：已记进《开放问题》#5，并把 Task 11 Step 3b 的 `raw_clip` 那一跑改成不撞这条的口径（`--variants 3`，一手四集 → planned 117.89s → 成片 ≈120.6s），同时保留一条**只算不渲**的测量步骤把 296.21 这个数交给业主。
 
 Run: `cd /d/PersonProjects/DramaClip && .venv/Scripts/python.exe -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/verify_modes.py').read_text(encoding='utf-8')); print('ast OK')"`
 
@@ -6672,6 +7136,8 @@ api/narration.py 自此不再 import api/export.py 的任何东西——规划�
 - Modify: `docs/03-IPC协议规范.md`
 - Modify: `docs/service/01-传输与API层设计.md`
 - Modify: `docs/service/04-数据模型.md`
+- Modify: `docs/service/02-引擎设计.md`（**本轮新加**：`:59` 的 `copywriter.py` 行仍写着「编排器只产出槽位（`slot` 职责 + `window` 素材区间）」，而这两个字段名在 P-1.5 的《实现定案修正》里就已经改成 `brief` / 无 `window`；Task 4 又把槽位台词改成按集取用，这一行因此同时是**过期的**与**不完整的**）
+- Modify: `docs/superpowers/specs/2026-09-10-dramaclip-ui-redesign-design.md`（**本轮新加，只改一行**：§3.3.1 降级裁决表 `:126` 的「位置」列点名 `api/narration._generate_one`，Task 6 删掉那个函数。那张表是裁决的**权威登记处**、规格 §11 要求"每次新增降级点必须在本表加一行"，留一个指向已删函数的位置列会让下一个人以为回落路径还在）
 
 - [ ] **Step 1: 数出新的方法合计**
 
@@ -6785,6 +7251,52 @@ CREATE INDEX idx_plans_batch ON narration_plans(project_id, batch_id);
 
 （`009` 是另一位工程师的迁移，他只加了文件没登记表——本批次顺手补上，**不改他的迁移文件本身**。）
 
+4. **`jobs` 表那段「type 取值以代码为准」的注记（实测 `:247-250`）整块替换**——它被本批次**同时**过期了两次：`produce` 这个 job 类型不再有人创建（`plan_variants` 复用既有的 `narration` 类型，见 Task 9 Step 3），而它末尾那句「已知偏差：`protocol/schemas/jobs.json` 的 `JobInfo.type` 描述同样漏了 `semantic`」也由 Task 9 Step 3 修掉了：
+
+```markdown
+- **type 取值以代码为准**：上表是 `job_store.create()` 实际创建过的全集。`001_init.sql` 的行内注释
+  写了 `tts` 但从未有代码产出该类型，也漏了 `semantic`（`analysis.resync_semantic`）；迁移文件
+  不可回改，故此处为准。**`produce` 曾是 `narration.produce` 创建的类型，P-2a 把该方法拆成
+  `narration.plan_variants` + `export.submit` 之后不再有新行**（规划复用 `narration`、渲染复用
+  `export`）；库里既有的 `produce` 行是历史数据，查询与界面都要容得下它，故此处保留登记。
+  `protocol/schemas/jobs.json` 的 `JobInfo.type` 描述已随 P-2a 补上 `semantic`、去掉 `produce`。
+```
+
+5. **`narration_plans` 那节要写明"跨集不加列"**（《修订记录》C3）：集身份是**规划期注入**的（`casting.stamp` 把 `episode_analysis.conflict_scores` 那一行的主键盖到场景上），所以本批次的迁移**只有 `010` 的五列角度**，`episode_ids` 是既有列、`ConflictScore` 一个字段都没加。不写这一句，下一个人看到"跨集"会去找那一列在哪：
+
+```markdown
+**跨集取材不需要新列**（P-2a）：一条方案的取材集就是既有 `episode_ids`（JSON string[]）与
+`plan_data.timeline[*].episode_id`，两者都由规划期从时间轴反推写入；场景的集身份来自
+`episode_analysis.conflict_scores` **那一行的主键**（`engines/narration/casting.py::stamp`
+在解析时盖章），故 `engines/semantic/models.py::ConflictScore` 不含集字段、也不需要迁移。
+```
+
+- [ ] **Step 4b: 改 `docs/service/02-引擎设计.md` 的 `copywriter.py` 行（本轮新增）**
+
+`:59` 那一行逐字是：
+
+```markdown
+| `copywriter.py` | 逐槽文案编剧（P-1.5） | 编排器只产出槽位（`slot` 职责 + `window` 素材区间），一次 LLM 调用填满全部槽位置 `planner=llm_script`；漏槽/超长/空文即抛，**无模板兜底**（UI 重规划规格 §3.3.1；承接原 `hook_generator.py` 职责） |
+```
+
+替换为：
+
+```markdown
+| `copywriter.py` | 逐槽文案编剧（P-1.5；P-2a 起槽位台词按集取用） | 编排器只产出槽位（`NarrationText.brief` 是职责，**没有 `window` 字段**：槽位压在成片哪一段由它 `narration_id` 指到的那条 `TimelineSegment` 的 start/end 给出），一次 LLM 调用填满全部槽位置 `planner=llm_script`；漏槽/超长/空文即抛，**无模板兜底**（UI 重规划规格 §3.3.1；承接原 `hook_generator.py` 职责）。P-2a 之后第二参是按集分开的取材原料表（`casting.MaterialByEpisode`），`_slot_block` 按 `segment.episode_id` 取台词——跨集时间轴上集与集的集内相对秒互相覆盖，摊平一张表会把别集的对白喂给编剧 |
+```
+
+**为什么这一行必须改**：`slot` 与 `window` 两个字段名**都不存在**（P-1.5《实现定案修正》：`NarrationText` 只有 `brief`，`window` 已删）。而 pydantic **静默忽略未知 kwargs**，所以照着这行文档写 `NarrationText(slot=…, window=…)` 不会报错、只会丢数据——正是本仓付过两次账的那类"编造出来的规格"。同一张表的 `:40` 已经声明「本表为**原案模块清单**，非实现清单 …未建条目一律以现码为准」，但**已建条目写成错的字段名不在那句免责里**。
+
+顺带核一眼：P-2a 新建的三个模块（`angles.py` / `casting.py` / `overlap.py`）**不必**逐个补进那张表——`:40` 的免责句管的正是"未建/新建条目以现码为准"，而补进去就要连带维护"原案 vs 实现"两栏的对应关系。**只有 `copywriter.py` 这种"已登记且写错了"的行必须改。**
+
+- [ ] **Step 4c: 改规格 §3.3.1 降级裁决表的位置列（本轮新增，只改一行）**
+
+`docs/superpowers/specs/2026-09-10-dramaclip-ui-redesign-design.md:126` 的「位置」列里 `api/narration._generate_one` 回落 `build_plan` 那一项替换为 `api/narration._plan_one`（Task 6 之后规划的唯一入口）。**裁决列（「禁止 → 抛错」）与理由列一个字不动**——本批次没有改变这条降级的裁决，只是那个函数换了名字。
+
+Run: `cd /d/PersonProjects/DramaClip && grep -rn "_generate_one\|_run_produce\|_newest_ready_plan\|_run_generation_parallel" docs/ --include=*.md | grep -v superpowers/plans`
+
+Expected: **无输出**。（`docs/superpowers/plans/` 下的历史记述**不改**——它们是当时的真相，本计划自己的两节《修订记录》里就大量点名这些函数；这条 grep 已用 `grep -v superpowers/plans` 把它们滤掉。实测除计划目录外全 `docs/` 只有规格 `:126` 一处命中，即本步要改的那一行。）
+
 - [ ] **Step 5: 全量门禁**
 
 Run: `cd service && ../.venv/Scripts/ruff.exe check .`
@@ -6839,8 +7351,15 @@ Expected: 无输出——**本批次新增的两个模块里不许出现任何�
 - [ ] **Step 7: 提交**
 
 ```bash
-git add docs/03-IPC协议规范.md docs/service/01-传输与API层设计.md docs/service/04-数据模型.md docs/superpowers/plans/2026-09-12-p2-plan-render-split.md
-git commit -m "docs: 方法清单/错误码/迁移登记随 produce 拆分收口，并登记 tts_segments 死列"
+git add docs/03-IPC协议规范.md docs/service/01-传输与API层设计.md docs/service/02-引擎设计.md docs/service/04-数据模型.md docs/superpowers/specs/2026-09-10-dramaclip-ui-redesign-design.md docs/superpowers/plans/2026-09-12-p2-plan-render-split.md
+git commit -m "docs: 方法清单/错误码/迁移登记随 produce 拆分收口，并清掉三处过期字段与函数名
+
+- docs/03：错误码表补 -32303/-32304/-32406/-32407，-32401 那行不再覆盖「时间轴为空」
+- docs/service/01：方法清单与合计数按 build_router 实测重写，projects.settings 已有消费端
+- docs/service/04：narration_plans 五列 + 010 登记 + 补漏登记的 009 + tts_segments 死列
+  + jobs.type 的 produce 退役注记 + 跨集不加列（集身份是规划期注入）
+- docs/service/02：copywriter 行的 slot/window 两个字段名早已不存在，改成 brief + 配对段
+- 规格 §3.3.1：降级裁决表的位置列 _generate_one → _plan_one（裁决与理由一字未改）"
 ```
 
 ---
@@ -6849,27 +7368,33 @@ git commit -m "docs: 方法清单/错误码/迁移登记随 produce 拆分收口
 
 不产新代码，只产证据。**先决条件：P-1.5 Task 10 的九模式门禁已闭环、机器上没有别的门禁在跑**（本任务要真跑 LLM 与 ffmpeg，CPU 争用会让两边的时序断言都不可信）。
 
-- [ ] **Step 1: 只跑规划，确认"不渲染"是真的**
+- [ ] **Step 1: 只跑规划，确认"不渲染"是真的，且方案真的跨集**
 
-Run: `cd /d/PersonProjects/DramaClip && .venv/Scripts/python.exe scripts/verify_modes.py --modes full_narration --variants 3 --plan-only --out D:/tmp/dc-p2a-plan > /tmp/p2a-plan.log 2>&1; echo REAL_EXIT=$?`
+Run: `cd /d/PersonProjects/DramaClip && .venv/Scripts/python.exe scripts/verify_modes.py --modes full_narration --variants 3 --plan-only --require-cross-episode --out D:/tmp/dc-p2a-plan > /tmp/p2a-plan.log 2>&1; echo REAL_EXIT=$?`
 
-Expected: **`REAL_EXIT=0`**，日志末尾的表格里 `状态=completed`，紧跟着一行附注 `规划 3 条 · 建了 0 行 export_jobs（必须为 0）`；`/tmp/p2a-plan.log` 里能看到 3 条角度的规划留痕（`全片解说·第 1 条 …` 这类 `notifier` 行不进日志，看 `summary.json`）。
+Expected: **`REAL_EXIT=0`**，日志末尾的表格里 `状态=completed`、**`集数` 列 ≥2**，紧跟两行附注：`规划 3 条 · 建了 0 行 export_jobs（必须为 0）` 与 `逐条取材集数：[3, 2, 3]` 这类（**逐条的数比列里那个 max 重要**：max 只说明"至少有一条跨了"，逐条才说明"三条各自取了几集"）。
+
+**为什么这两个旗标一起跑**：`--plan-only` 一条片都不渲，所以 `--require-cross-episode` 在这一跑上**零成本**——规格 §1 的机器判据因此不必等 Step 3 那次真渲染。这也让本步成为整份 Task 11 里唯一"既能证明拆分生效、又能证明跨集生效"的一步。
 
 **原计划这一步的 Expected 是虚构的（B10）**：它期望门禁"因为只规划不渲染而报没有成品"，可 Task 9 Step 2 的改写让门禁**总是**提交渲染，于是 `--variants 3` 跑完会真渲三部片、`REAL_EXIT=0`，什么都证不了。修法不是改期望文字，是给门禁加 `--plan-only`（Task 9 Step 2.2/2.3）：规划完就 `continue`，并**查库断言该 batch 的方案一行 `export_jobs` 都没有**。把失败当证据是假绿的一种；查库得到的 0 才是证据。
 
-Run: `cd /d/PersonProjects/DramaClip && .venv/Scripts/python.exe -c "import json,pathlib;rows=json.loads(pathlib.Path('D:/tmp/dc-p2a-plan/summary.json').read_text(encoding='utf-8'));print([{k:r.get(k) for k in ('mode','status','phase','plans','export_jobs')} for r in rows])"`
+Run: `cd /d/PersonProjects/DramaClip && .venv/Scripts/python.exe -c "import json,pathlib;rows=json.loads(pathlib.Path('D:/tmp/dc-p2a-plan/summary.json').read_text(encoding='utf-8'));print([{k:r.get(k) for k in ('mode','status','phase','plans','export_jobs','episodes','episodes_per_plan')} for r in rows])"`
 
-Expected: `[{'mode': 'full_narration', 'status': 'completed', 'phase': 'plan-only', 'plans': 3, 'export_jobs': 0}]`。**`plans` 必须是 3、`export_jobs` 必须是 0**：`plans < 3` 说明有角度被重叠闸门拦了（回去看 Step 2 的集数前提），`export_jobs > 0` 说明 `--plan-only` 没接住提交，两者都是真缺陷。
+Expected: `[{'mode': 'full_narration', 'status': 'completed', 'phase': 'plan-only', 'plans': 3, 'export_jobs': 0, 'episodes': 3, 'episodes_per_plan': [3, 2, 3]}]`（**`episodes_per_plan` 的具体数字由选题模型给，逐次会不同**；要断的是三件事：`plans == 3`、`export_jobs == 0`、`max(episodes_per_plan) >= 2`）。
+
+- `plans < 3`：说明有角度被重叠闸门拦了（回去看 Step 2 的集数前提与 `llm_angles_*.json` 里的 `episode_numbers`）。
+- `export_jobs > 0`：说明 `--plan-only` 没接住提交，两者都是真缺陷。
+- `max(episodes_per_plan) < 2`（此时 `REAL_EXIT` 已经是 1，门禁自己报了）：**先分辨是哪一种**，别直接改代码——① `llm_angles_*.json` 里模型给的 `episode_numbers` 每条都只有一个集号 ⇒ 选题 prompt 的问题，属《开放问题》#1，交业主；② 模型点了多集而落库的时间轴上只剩一集 ⇒ casting/预算的问题（Task 3c：`_fit_duration` 按播出序填充，预算可能在第二集之前就用完；活库实测 `intro_narration` 一手点 4 集、时间轴上只出现 2 集），那是**本批次的缺陷**，就地查 `_casting_for` 与编排器的盖章处。
 
 **不要用 `| tail` 判退出码**（管道退出码是 `tail` 的，P-1.5 真踩过）。
 
-- [ ] **Step 2: 人工核三条角度真的互异**
+- [ ] **Step 2: 人工核三条角度真的互异、且真的跨集**
 
-**先确认前提**：本步骤期望"三条角度取三集、重叠近 0"，那要求隔离副本库里**至少有 3 集 `status='done'`**。门禁自己不分析任何东西，它读的是复制来的 `data/data.db` 里现成的东西。Task 9 Step 2.4 已为此加了停机分支（`done < --variants` → 打印原因 → `return 2`），所以：
+**先确认前提**：本步骤期望"三条角度的**取材集组合**互不相同、重叠近 0，且至少一条横跨 ≥2 集"，那要求隔离副本库里**至少有 3 集 `status='done'`**（K=3 的口径；跨集判据本身只要 2 集）。门禁自己不分析任何东西，它读的是复制来的 `data/data.db` 里现成的东西。Task 9 Step 2.4 已为此加了停机分支（`done < --variants`，或 `--require-cross-episode` 而 `done < 2` → 打印原因 → `return 2`），所以：
 
 Run: `grep -E "已分析|环境未就绪" /tmp/p2a-plan.log | head -3`
 
-Expected: 一行 `项目 xxxxxxxx · 已分析 N 集 · …` 且 **N ≥ 3**（审查时实测活库是 **10 集**，故正常情况满足）。若看到 `环境未就绪：--variants 3 需要至少 3 集已分析`、`REAL_EXIT=2`，那不是产品坏了——先把集数分析够，或退而用 `--variants 1` 只验 Step 3。**不要为了让 Step 1 过而把 `--variants` 悄悄降到 1**：那样 `plans=3` 那条判据就自动失效了，本步骤要验的正是"K 条真的互异"。
+Expected: 一行 `项目 xxxxxxxx · 已分析 N 集 · …` 且 **N ≥ 3**（审查时实测活库是 **10 集**，故正常情况满足）。若看到 `环境未就绪：本次口径需要至少 3 集已分析`、`REAL_EXIT=2`，那不是产品坏了——先把集数分析够，或退而用 `--variants 1` 只验 Step 3。**不要为了让 Step 1 过而把 `--variants` 悄悄降到 1**：那样 `plans=3` 与 `集数 ≥2` 两条判据就都自动失效了，本步骤要验的正是"K 条真的互异、且真的跨集"。
 
 集数够，才继续下面两条。
 
@@ -6879,53 +7404,184 @@ Expected: 打印出一个路径，形如 `tmp_dc-verify-data_xxxxxxxx/logs/llm/l
 
 （拿到路径后）Run: `.venv/Scripts/python.exe -c "import json,sys;d=json.load(open(sys.argv[1],encoding='utf-8'));print(d['user'][:1500]);print('---');print(json.dumps(d['attempts'][-1],ensure_ascii=False)[:1200])" <上一步的路径>`
 
-Expected: prompt 里有「需要 3 条卖点互异的取材角度」、「恰好一个集号」、跨集转写摘录；`attempts` 末项里有 3 条 `name` 互不相同、`episode_numbers` 互不相同的角度。
+Expected: prompt 里有「需要 3 条卖点互异的取材角度」、「**每条角度的 episode_numbers 给出这条片要用到的全部集号（至少一个，可多个）**」、跨集转写摘录（每集一个「【第N集】」分组）；`attempts` 末项里有 3 条 `name` 互不相同、`episode_numbers` **组合**互不相同的角度。
+
+**⚠️ 这里原先期望的是「恰好一个集号」——那句措辞随 C8 一起删掉了**（`angles._episode_rule` 与 `_sanitize` 里那条 `len(numbers) != 1` 的 raise 都不存在了）。照旧文案核对会误判成"选题层没按新前提改"，或者更糟：为了让它对上而把 `cross_episode` 形参加回去，那就是把已经作废的收窄又装回代码里。**现在的正确形态是：prompt 明确要求每条角度给出全部取材集，且至少有一条给出 ≥2 个集号。**
 
 **若一个 `llm_angles_*` 都没有，说明选题层根本没被调用，别往下走**——那比任何后续数字都严重（与 P-1.5 Task 10 Step 2 对 `llm_copy_*` 的判据同理）。
 
-再从隔离副本库里读落库的角度与重叠（**副本，不是 `data/data.db`**）：
+再从隔离副本库里读落库的角度、重叠与**集数**（**副本，不是 `data/data.db`**）：
 
-Run: `.venv/Scripts/python.exe -c "import sqlite3,glob,sys;p=sorted(glob.glob('tmp_dc-verify-data_*/*.db'))+sorted(glob.glob('tmp_dc-verify-data_*/data.db'));print(p);c=sqlite3.connect(p[0]);print(c.execute('select variant_index,angle,overlap_max,episode_ids from narration_plans order by variant_index').fetchall())"`
+Run: `.venv/Scripts/python.exe -c "import json,sqlite3,glob;p=(sorted(glob.glob('tmp_dc-verify-data_*/data.db'))+sorted(glob.glob('tmp_dc-verify-data_*/*.db')))[0];print(p);c=sqlite3.connect(p);rows=c.execute('select variant_index,angle,overlap_max,episode_ids,plan_data from narration_plans order by narration_mode,variant_index').fetchall();print([(v,a,o,len(json.loads(e)),len({s['episode_id'] for s in json.loads(d)['timeline']})) for v,a,o,e,d in rows])"`
 
-Expected: 3 行，`angle` 三个不同名字，首行 `overlap_max` 为 `None`，其余两行为接近 0 的小数（三集互异取材）。**若三行 `overlap_max` 都是 0.0，说明首条被误当成"比过且不重叠"，回去查 `_worst_overlap` 的 None 分支。**
+Expected: **3 行**，每行是 `(variant_index, angle, overlap_max, episode_ids 的集数, 时间轴上的集数)`：
+
+- `angle` 三个不同名字；首行 `overlap_max` 为 `None`，其余两行为接近 0 的小数（三条角度的取材集互不相交）。**若三行 `overlap_max` 都是 0.0，说明首条被误当成"比过且不重叠"，回去查 `_worst_overlap` 的 `None` 分支。**
+- **每行最后两个数必须相等**（`episode_ids` 的长度 == 时间轴上不同 `episode_id` 的个数）。不等就是卡片的「取材集区间」会说谎（规格 §9.5），而这条不变量在真数据上只有这一步能验——单元测试里它由 `test_episode_ids_come_from_the_timeline_not_the_brief` 与 `test_get_plan_exposes_the_episodes_a_plan_spans` 守着，但那两条的夹具都是手搓的。
+- **至少一行的集数 ≥2**：那就是规格 §1 的「跨集方案」在真素材上的样子。若三行都是 1，Step 1 的 `--require-cross-episode` 已经红了，按那里的两分支法排查（选题 prompt vs casting/预算）。
 
 - [ ] **Step 3: 规划 + 提交两步都跑通，出一条真片**
 
 Run: `cd /d/PersonProjects/DramaClip && .venv/Scripts/python.exe scripts/verify_modes.py --modes full_narration --variants 1 --out D:/tmp/dc-p2a > /tmp/p2a-gate.log 2>&1; echo REAL_EXIT=$?`
 
-Expected: `REAL_EXIT=0`，表格里 `planner=llm_script`、`LUFS` 落在目标 ±2.5、`峰dB` 在门限内、`max_freeze_s < 2`。**这一步同时证明渲染侧一行未改**：P-1.5 的响度与 planner 判据在拆分之后仍然成立。
+Expected: `REAL_EXIT=0`，表格里 `planner=llm_script`、`LUFS` 落在目标 ±2.5、`峰dB` 在门限内、`max_freeze_s < 2`、**`集数` ≥1（这条口径不强制跨集，理由见下）**。**这一步同时证明渲染侧一行未改**：P-1.5 的响度与 planner 判据在拆分之后仍然成立。
 
-耗时提示：LLM 选题 1 次 + 成稿 1 次 + TTS 若干 + 渲染，单集素材约 5-10 分钟；用 `run_in_background`，不要中途判死。
+**两个与 P-1.5 实测表的预期差异，先说清楚免得被当成回归**：
 
-- [ ] **Step 3b: 加跑一次跨集模式与一个规则模式（本轮新增，补两处覆盖缺口）**
+1. **时长会比 P-1.5 的 49.83s 长**。`full_narration` 的 `_MAX_SCENES`=8 与 `_FULL_SCENE_S`=10 都没变，但取材池从"ep1 一集"变成"角度点名的那几集"，8 个场景现在可能来自 2-3 集。活库实测（只读重算，见 Step 3d 的方法）：四集一手 planned **42.04s / 8 段 / 3 集**，按 P-1.5 的成片比值 1.44 推 ≈ **60.5s**。上限 300s，余量极大。
+2. **本步刻意不加 `--require-cross-episode`**：K=1 时取材集由选题模型给的一条角度决定，它可能只点一集——那是合法形状（§1 要的是一条方案**可以**跨集），拿它当硬判据会造出一条与产品无关的红。规格 §1 的机器判据在 **Step 1**（K=3、零渲染成本）。本步只看 `集数` 列的**读数**并记进 Step 5。
 
-Run: `cd /d/PersonProjects/DramaClip && .venv/Scripts/python.exe scripts/verify_modes.py --modes dialogue_narration,raw_clip --variants 1 --out D:/tmp/dc-p2a-cross > /tmp/p2a-cross.log 2>&1; echo REAL_EXIT=$?`
+耗时提示：LLM 选题 1 次 + 成稿 1 次 + TTS 若干 + 渲染，跨集素材约 5-10 分钟；用 `run_in_background`，不要中途判死。
 
-Expected: `REAL_EXIT=0`，表格里两行都 `状态=completed`，且：
+- [ ] **Step 3b: 加跑一次剧本驱动模式（补 Task 6 Step 10 #14 的覆盖缺口）**
 
-- `dialogue_narration` 的 `来源=llm_script`、响度落在窗口内。这是**跨集规划路径唯一的端到端证据**：Task 6 Step 10 的变异 #14（删掉 `_reject_same_episode_sibling` 对 `_CROSS_EPISODE_MODES` 的豁免）在单元测试里红不了，因为本批次没有 `dialogue_narration` 的端到端用例（要真 LLM 写剧本，或造一个能产出可控跨集时间轴的替身——后者会钉住替身的形状而不是产品的行为）。**这一跑就是它的替代证据**，别省。
-- `raw_clip` 的 `来源=rule`、`TTS=0`、`带旁白=0`。这是**规则类没被拖进 LLM** 的真机证据（《定案四》第 5 点）：`EXPECT_PLANNER["raw_clip"] == "rule"` 是门禁自己钉的，若规划侧把 `raw_clip` 送进了成稿链，这一行会当场红。顺带它也在真数据上跑通了 `top_conflict_windows` → `_rule_variants` → `_plan_one` 这条新链路。
+Run: `cd /d/PersonProjects/DramaClip && .venv/Scripts/python.exe scripts/verify_modes.py --modes dialogue_narration --variants 1 --out D:/tmp/dc-p2a-cross > /tmp/p2a-cross.log 2>&1; echo REAL_EXIT=$?`
 
-耗时提示：`dialogue_narration` 的编剧链比单集成稿慢（跨集转写摘录 + 一次剧本往返），加渲染约 10-20 分钟；`raw_clip` 很快。整条命令用 `run_in_background`。
+Expected: `REAL_EXIT=0`，`来源=llm_script`、响度落在窗口内、**`集数` ≥2**（剧本驱动的跨集是 P-1.5 之前就有的行为：`build_from_script_episodes` 逐 `script.segments` 按集号取素材、`cursors` 按集各持一个游标；P-1.5 实测那条片 56.10s / 7 段 / 7 插桩，本次的取材集会由角度收窄，故段数可能变少，但集数不该掉到 1——掉到 1 说明 `_plan_one` 的 `scoped` 过滤把角度点名的集全滤掉了，回去查 `episode_inputs` 的集号类型）。
+
+**这是"剧本驱动豁免成稿前闸门"唯一的端到端证据**：Task 6 Step 10 的变异 #14（删掉 `_reject_same_episode_sibling` 对 `_SCRIPT_DRIVEN_MODES` 的豁免）在单元测试里红不了，因为本批次没有 `dialogue_narration` 的端到端用例（要真 LLM 写剧本，或造一个能产出可控跨集时间轴的替身——后者会钉住替身的形状而不是产品的行为）。**这一跑就是它的替代证据**，别省。
+
+耗时提示：编剧链比规则成稿慢（跨集转写摘录 + 一次剧本往返），加渲染约 10-20 分钟；整条命令用 `run_in_background`。
 
 **若 `dialogue_narration` 因"取材集都没有转写"或剧本不合格而 failed**：那是 P-1.5 已知的编剧链行为（禁止降级，拿不到合格剧本就抛），不是 P-2a 引入的回归。判据是看 `/tmp/p2a-cross.log` 里的失败原因串——含「选题」/「剧本」字样属上游，含 `-32601` / `不可渲染` / `没有配音音频` 才是本批次的问题。
+
+- [ ] **Step 3c: 加跑规则类两模式，`--variants 3`（本轮新增：真数据上的轮转发窗）**
+
+Run: `cd /d/PersonProjects/DramaClip && .venv/Scripts/python.exe scripts/verify_modes.py --modes raw_clip,subtitle_flow --variants 3 --out D:/tmp/dc-p2a-rule > /tmp/p2a-rule.log 2>&1; echo REAL_EXIT=$?`
+
+Expected: `REAL_EXIT=0`，两行都 `状态=completed`、`来源=rule`、`TTS=0`、`带旁白=0`、**`集数` ≥3**，且日志里能看到 `_rule_variants` 的逐条留痕（`纯原片剪辑·第 1 条：取第 2、5、6、9 集（全剧冲突窗轮转发窗，不经选题模型）` 这类）。
+
+这一步一次验四件事，且**都是活库实测过、可以照抄核对的数字**（只读重算的方法见 Step 3d；活库十集的窗排名实测 `[6,7,8,2,3,4,9,10,1,5]`，K=3 发成三手 `[2,5,6,9]` / `[3,7,10]` / `[1,4,8]`，三手互不相交 ⇒ 取材重叠恒为 0 ⇒ `overlap_max` 首条 `None`、其余 `0.0`）：
+
+| 模式 | 第 1 条 | 第 2 条 | 第 3 条 |
+|---|---|---|---|
+| `raw_clip` | 21 段 / planned 117.89s / **4 集** → 成片 ≈120.6s | 20 段 / 120.89s / **3 集** → ≈123.7s | 18 段 / 107.72s / **3 集** → ≈110.2s |
+| `subtitle_flow` | 7 段 / planned 36.24s / **3 集** → 成片 ≈38.4s | 7 段 / 38.84s / **3 集** → ≈41.2s | 7 段 / 35.28s / **3 集** → ≈37.4s |
+
+（成片预估用的比值取自 P-1.5 的九模式实测：两个无旁白模式的 成片/planned 是 `raw_clip` **1.0231**、`subtitle_flow` **1.0609**。真机数字会因素材与消重抖动而差几秒，**差 5% 以内都算对上**；差得多就先查 `集数` 与 `段数`，那两个数不该漂。）
+
+四件事：① **规则类没被拖进 LLM**（`来源=rule`、`TTS=0`，即《定案四》第 5 点与 `EXPECT_PLANNER` 的真机证据）；② **`top_conflict_windows` → `deal_windows` → `_casting_for` → 编排器**这条新链在真数据上跑得通；③ **手间不共集 ⇒ 零重叠**在真数据上成立（不是只在手搓夹具上成立）；④ **规则类的方案真的跨集**（每条 3-4 集），这是规格 §1 在**零 LLM** 那一族上的证据——Step 1 只覆盖了解说类。
+
+耗时提示：两个模式都不配音，P-1.5 实测单条渲染 6.1s / 13.1s，六条片合计约 2 分钟，是本任务最便宜的一步。
+
+- [ ] **Step 3d: 量一次 `--variants 1` 的预算饱和（只算不渲，本轮新增）**
+
+**这一步不渲染、不写库、不跑 LLM**，只用真编排器在活库的只读副本上算 planned 源秒。它存在的全部理由是 Task 9 Step 2.8 末尾那条发现：`--variants 1` 时 `deal_windows(windows, 1)` 把**全部**集发进同一手，`raw_clip` 的候选场景因此吃满 `_fit_duration` 的预算，成片会越过 `strategy.max_duration_s`。这个数必须交给业主（《开放问题》#5），但**不该靠跑一次注定红的渲染去拿**——那是把 3 分钟的门禁时间花在一个已经算出来的结论上。
+
+把下面这份存成 `D:/tmp/p2a_measure_k1.py`（**它只以 `mode=ro` 打开活库，不写任何东西，也不打印集 id 或任何标识符**）：
+
+```python
+"""只读活库 + 真编排器算 planned 源秒：不渲染、不写库、不打印标识符。"""
+
+import json
+import sqlite3
+import sys
+from pathlib import Path
+
+REPO = Path(r"D:/PersonProjects/DramaClip")
+sys.path.insert(0, str(REPO / "service"))
+
+from dramaclip.engines.narration import casting, pipeline
+from dramaclip.engines.narration.modes import build_raw_clip
+from dramaclip.engines.narration.modes_w9 import build_subtitle_flow
+from dramaclip.engines.narration.models import StrategySpec
+from dramaclip.engines.semantic.models import ConflictScore
+
+# 成片/planned 的比值取自 P-1.5 Task 10 的九模式实测（两个无旁白模式各一个）
+DRIFT = {"raw_clip": 15.48 / 15.13, "subtitle_flow": 32.43 / 30.57}
+
+conn = sqlite3.connect(f"file:{REPO / 'data' / 'data.db'}?mode=ro", uri=True)
+budget = float(
+    conn.execute("select value from settings where key='strategy.max_duration_s'").fetchone()[0]
+)
+rows = conn.execute(
+    "select e.episode_number, a.conflict_scores, a.asr_segments from episodes e"
+    " join episode_analysis a on a.episode_id = e.id where e.status='done'"
+    " order by cast(e.episode_number as integer)"
+).fetchall()
+scored = [
+    (int(number), [ConflictScore.model_validate(item) for item in json.loads(raw or "[]")])
+    for number, raw, _asr in rows
+]
+# 集 id 用占位串：本脚本只量时长与集数，真 id 不进输出（活库纪律）
+material = {
+    f"ep{number}": casting.EpisodeMaterial(number=number, asr=[])
+    for number, _scenes in scored
+}
+windows = pipeline.top_conflict_windows(scored, len(scored))
+by_number = dict(scored)
+print(f"窗排名={[n for n, _ in windows]} · 预算={budget:.0f}s")
+for hands in (1, 3):
+    print(f"=== --variants {hands} ===")
+    for rank, hand in enumerate(pipeline.deal_windows(windows, hands), start=1):
+        scenes = casting.stamp([(n, f"ep{n}", by_number[n]) for n in hand])
+        for mode, plan in (
+            ("raw_clip", build_raw_clip(scenes, [], StrategySpec(max_duration_s=budget))),
+            ("subtitle_flow", build_subtitle_flow(scenes, material, StrategySpec())),
+        ):
+            planned = sum(seg.end - seg.start for seg in plan.timeline)
+            film = planned * DRIFT[mode]
+            flag = " ← 顶穿预算" if film > budget else ""
+            print(
+                f"  第{rank}条 手={hand} {mode}: {len(plan.timeline)}段 / "
+                f"{len({s.episode_id for s in plan.timeline})}集 / planned {planned:.2f}s"
+                f" → 成片≈{film:.2f}s{flag}"
+            )
+```
+
+Run: `cd /d/PersonProjects/DramaClip && .venv/Scripts/python.exe D:/tmp/p2a_measure_k1.py`
+
+Expected（**审计时用一个与真编排器同规则的重算得到，并与 Task 3c Step 8 那张实测表在五个点上逐位对上**：ep1 单集 `raw_clip` 15.13s/3 段、四集一手 117.89s/21 段/4 集、`subtitle_flow` 36.24s/7 段/3 集、窗排名 `[6,7,8,2,3,4,9,10,1,5]`、`intro_narration` 269.06s——故下面这组数可信；跑完请拿真脚本的输出替换它）：
+
+```
+窗排名=[6, 7, 8, 2, 3, 4, 9, 10, 1, 5] · 预算=300s
+=== --variants 1 ===
+  第1条 手=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10] raw_clip: 51段 / 9集 / planned 296.21s → 成片≈303.06s ← 顶穿预算
+  第1条 手=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10] subtitle_flow: 7段 / 6集 / planned 37.77s → 成片≈40.07s
+=== --variants 3 ===
+  第1条 手=[2, 5, 6, 9] raw_clip: 21段 / 4集 / planned 117.89s → 成片≈120.61s
+  …（其余两手与 Step 3c 的表一致）
+```
+
+**读到 `← 顶穿预算` 那一行要做的三件事**（不要就地改门禁阈值——C6 已经裁定阈值不动，而阈值确实不该动，它量的是用户的设置）：
+
+1. 把这一行的三个数（手覆盖的集数、`planned`、预估成片）抄进 Step 5 的实测记录；
+2. 确认 `subtitle_flow` **没有**顶穿（它被 `_MAX_SCENES`=6 × `_FLOW_SCENE_S`=8 卡住，与预算无关）——所以这不是"规则类整体超时长"，是 `raw_clip` 一个模式的问题，因为它没有场景条数上限；
+3. 交《开放问题》#5：修法是给 `_fit_duration` 的预算留一档**编码漂移余量**（与它已经给引子槽位预留 `_INTRO_MAX_S` 同一个手法），余量 ≥6.1%（两个无旁白模式的实测漂移比值里较大的那个）。**这一档常数取多少是设计决定，本审计不替业主拍**，故它落在 Task 3c 而不是这里。
 
 - [ ] **Step 4: 用耳朵验收一条（不可省略）**
 
 至少人工听 Step 3 出的那条 `full_narration`，确认：① 旁白没有被原声盖住；② 没有因 `normalize=0` 带来的爆音；③ **解说内容与角度名对得上**（这是本批次唯一能靠耳朵验的东西——重叠率是数字，"这条片是不是在讲它宣称的那个卖点"只能听）。
 
-把结论写进 Step 5 的记录里——**写"已听，结论 X"，不接受"断言全绿所以应该没问题"**。
+**跨集裁决给这一步加了两条只有耳朵能验的**（都对应一个"数字全绿而片子是坏的"的真实坏法）：
+
+④ **集与集硬切的那一处，解说讲的还是画面上这件事吗？** 这是 C7 那个缺陷的验收面：`_slot_block` 若仍按摊平的 ASR 表取台词，编剧会拿到**别的集**的对白，写出一段通顺、可信、说的却不是这段画面的解说——`overlap_max`、`planner`、响度、插桩覆盖**全都正常**，`episode_ids` 也全对，唯一的破绽在耳朵里。听的时候盯住切换点前后各一句：前一句收尾的东西与后一句开场的画面，得是同一条线。
+⑤ **整条片读起来是一条故事线，还是十集交错？** 叙事顺序是播出序（`casting.episode_order` = 集号 → 集内起点 → scene_index）。若哪个编排器还在按 `start` 排，成片会 ep1@0s、ep7@0s、ep1@12s 这么来回跳——**这条同样没有任何数字能抓到**（段数、集数、时长全对），只有看着像"剪得很碎"。
+
+把结论写进 Step 5 的记录里——**写"已听，结论 X"，不接受"断言全绿所以应该没问题"**。④⑤ 两条若听不出来（例如那条片恰好只取了一集），也要如实写"本条未跨集，④⑤ 无从验"，并在 Step 3c 的六条规则类片里挑一条跨集的补听——**不许跳过、也不许写"应该没问题"**。
 
 - [ ] **Step 5: 把实测写回本计划并清理临时目录**
 
-在本文档末尾追加 `## Task N 落地后的实测修正` 小节（与 P-1.5 同一体例），记录：三条角度的实测名字与 `overlap_max`、选题 prompt 的实际形态、Step 1 的 `plans`/`export_jobs` 实测值、Step 3b 里 `dialogue_narration` 与 `raw_clip` 的 `来源`/`TTS`/`带旁白` 三列实测值、与预期不符之处、以及计划里被证伪的假设（如有）。**Task 9 Step 1b 要求移交的 `scripts/verify_e2e.mjs` 两处失效派发也记在这里**（文件、行号、旧方法名、新调用形态、属主名字）——那是给下一个人看的，不是给本批次验收用的。
+在本文档末尾追加 `## Task N 落地后的实测修正` 小节（与 P-1.5 同一体例），记录：
+
+- 三条角度的实测名字、各自的 `episode_numbers` 与 `overlap_max`（Step 2）；
+- 选题 prompt 的实际形态（尤其"每条角度给出全部取材集（至少一个，可多个）"那句是否被模型遵守）；
+- Step 1 的 `plans` / `export_jobs` / `episodes` / `episodes_per_plan` 四个实测值；
+- Step 3 的 `集数` 与 `时长s` 实测值（与预估的 ≈60.5s 对一下）；
+- Step 3b 里 `dialogue_narration` 的 `来源`/`集数`/`TTS`/`带旁白` 四列实测值；
+- Step 3c 那张表的**六格实测**（两模式 × 三条），逐格与预估对齐或写明偏差；
+- **Step 3d 的 `← 顶穿预算` 那一行三个数**（手覆盖集数 / planned / 预估成片），并在《开放问题》#5 下面追加一行"真机实测已确认/未确认"；
+- Step 4 的耳朵结论，逐条 ①–⑤；
+- 与预期不符之处、以及计划里被证伪的假设（如有）。
+
+**Task 9 Step 1b 要求移交的 `scripts/verify_e2e.mjs` 两处失效派发也记在这里**（文件、`:152`/`:168` 两个行号、旧方法名、新调用形态 `narration.plan_variants` → 等作业 → `narration.list_plans(batch_id)` → `export.submit(plan_ids)` → 等全部 export job、以及 `git log -1 --format=%an` 取到的属主名字）——那是给下一个人看的，不是给本批次验收用的。
 
 清理。临时目录由 `_same_drive_temp` 创建，**首选 `dir=REPO`，所以它们落在仓库根**。其中 `tmp_dc-verify-data_*` 里有一个名为 `models` 的目录联接指向真实的 `data/models`——**顺序不可颠倒**：先 `rmdir` 摘掉联接，再 `rm -rf` 目录；反过来会顺着联接删掉开发者的模型。
 
 ```bash
 cd /d/PersonProjects/DramaClip
 for d in tmp_dc-verify-data_*; do cmd //c "rmdir $(cygpath -w "$PWD/$d/models")" 2>/dev/null || true; done
-rm -rf tmp_dc-verify-data_* tmp_dc-verify_* D:/tmp/dc-p2a D:/tmp/dc-p2a-plan D:/tmp/dc-p2a-cross
+rm -rf tmp_dc-verify-data_* tmp_dc-verify_* D:/tmp/dc-p2a D:/tmp/dc-p2a-plan D:/tmp/dc-p2a-cross D:/tmp/dc-p2a-rule D:/tmp/p2a_measure_k1.py
 ls data/models/tts/kokoro/*/ | head -3   # 必须仍在：联接被删过一次就再也没有了
 ```
 
@@ -6940,9 +7596,9 @@ git commit -m "docs(plan): 记录 P-2a 真机复验结果与实测修正"
 
 ---
 
-## P-2b / P-2c 交接规格
+## P-2b 交接规格 / P-2c 取消记录
 
-本计划只交付规格 §6 的 P-2 五项里的前三项。后两项与一项被本批次显式收窄的工作，按下面的边界各自成计划。**这里给的是边界与已知陷阱，不是任务步骤**——步骤由各自的 writing-plans 轮次产出。
+本计划只交付规格 §6 的 P-2 五项里的前三项。后两项按下面的边界另成计划。**这里给的是边界与已知陷阱，不是任务步骤**——步骤由各自的 writing-plans 轮次产出。（本节原先还含一份《P-2c 交接规格》，已被下面那段《取消记录》整节替换。）
 
 ### P-2b：剧库（规格 §6 的 P-2 第 ④⑤ 项）
 
@@ -6956,18 +7612,26 @@ git commit -m "docs(plan): 记录 P-2a 真机复验结果与实测修正"
 
 **冲突面（必须等 P-2a 合入再开工）**：`protocol/ts/index.ts`（`METHOD_NAMES` 与 `Project` 类型）、`protocol/schemas/project.json`、`docs/03-IPC协议规范.md` §5.2/§6、`docs/service/01-传输与API层设计.md` §4/§6、`docs/service/04-数据模型.md` §4 迁移清单、`desktop/src/services/client.ts` 的 `projectApi`。**迁移号用 `011`**（P-2a 占了 `010`）；若 P-2b 其实不需要新列（阶段聚合是纯查询），就不要建迁移。
 
-### P-2c：单条方案内的跨集拼接（**开工前须业主先回答《开放问题》#1**）
+### P-2c 取消记录（2026-09-12 业主裁决）
 
-> ⚠️ **P-2c 是否必须存在，取决于业主对规格 §1 那句"跨集方案"的读法（R2）。**
-> 若业主认定 §1 的"跨集"只要求"K 条合起来覆盖全剧"，那么 P-2a 已经交付了它，P-2c 降格为一次可选的成质量优化；
-> 若业主认定"每条方案自己就要跨集取画面"，那么 **P-2a 的出口判据是不完整的**，P-2c 是补完规格所必需、且必须排在 P-1.5 出口闭环之后。
-> **在拿到这个答复之前，不要把 P-2c 写成"已计划推迟"，也不要拿本节的收窄当既成事实。**
+**这一节原来是《P-2c：单条方案内的跨集拼接》的交接规格，现在是一份取消记录。**
 
-P-2a 让**角度之间**跨集（不同角度取不同集），但六个单集模式的**单条方案内**仍限于一集，因为它们的编排器签名是 `(episode_id, scenes, strategy)`。要真正做到"一条片跨集取画面"，得让 `ConflictScore` 带上集身份、或让编排器接受"每集一组场景"，并重新分配时长预算（`_fit_duration` 现在按 `strategy.max_duration_s` 截断单集场景，多集直接叠加会超预算数倍）。
+**裁决**：业主**拒绝**给《定案二》那次收窄签字。规格 §1 的原话是「一次提交（剧 × 模式）→ 每模式产出 1..K 条**卖点角度互异**的**跨集**方案」——"跨集"是**方案**的定语，不是批次之间比较的定语。**P-2a 就做真跨集：一条方案可以从多集取画面拼在同一条时间轴上。P-2c 不存在。**
 
-**同一个前置也卡着《定案四》的后半句**：规则类两模式今天只能做到"用全剧 top-K 冲突窗决定**条数与取材集**"，做不到"每条方案的内容就是它那一窗"——因为 `build_raw_clip`/`build_subtitle_flow` 是 `(episode_id, 该集场景表)` 的确定性纯函数，喂同一集必得同一片。P-2c 给 `ConflictScore` 加集身份之后，这一半也才做得成。两件事是同一个改动，应排在同一份计划里。
+**原交接规格里列的每一件待办，都落进了本批次，逐条对账**：
 
-**为什么不在 P-2a 里做**：它改成片形态，而九模式真机门禁的出口判据（时长窗、响度窗、冻结帧）正压在这个形态上。P-1.5 Task 10 尚未闭环时改成片结构，等于把两批的验收证据混在一起，出问题时无法归因。**P-2c 必须在 P-1.5 出口闭环之后、且自己带一轮九模式门禁。**
+| 原 P-2c 的内容 | 落在哪 | 状态 |
+|---|---|---|
+| 「得让 `ConflictScore` 带上集身份、或让编排器接受『每集一组场景』」 | **两条都没选**，选的是第三条：`casting.EpisodeScene` 子类在**规划期**盖章（`casting.stamp`），`ConflictScore` 一个字段不加、`episode_analysis` 一行不改、不需要迁移 | Task 3c Step 1/3，理由与"加字段会往落库 JSON 里写 `episode_number: 0` 这种假值"的实测见《修订记录》C3/C4 |
+| 六个编排器「签名是 `(episode_id, scenes, strategy)`，一条片只吃一集」 | 六个编排器首参换成 `scenes: list[EpisodeScene]`，段的 `episode_id` 由**每个场景自己**带；排序键换成播出序（`casting.episode_order`）与确定性分数序（`casting.score_order`）；12 处盖章逐个改 | Task 3c Step 4，跨集性质由 `test_cross_episode_arrangement.py` 十条 + 14 条变异检查守着 |
+| 「重新分配时长预算（`_fit_duration` 现在按 `strategy.max_duration_s` 截断单集场景，多集直接叠加会超预算数倍）」 | `_fit_duration` 的**末场景预算豁免删掉**（单集时代它是死的：活库最大单集 204.2 场景秒 < 300）、`intro_first` 时从预算里**预留** `_INTRO_MAX_S`=30s | Task 3c Step 4 + 《修订记录》C6；门禁阈值一个字不改，逐条推导在 Task 9 Step 2.8 |
+| 「同一个前置也卡着《定案四》的后半句：规则类做不到"每条方案的内容就是它那一窗"」 | 前置**已拆掉**（集身份与预算都有了）。剩下的理由从技术变成**产品**：一个窗只有 3-25s，"内容 = 一窗"会把 `raw_clip` 压成 3-25 秒的片，而活库实测它今天是 15.13s（跨集一手 117.89s）。本批次交付的是"用全剧冲突榜决定**条数与每条的取材集组合**"，再让编排器在这些集的全部场景上照常选 | Task 3b 的 `top_conflict_windows` + `deal_windows`（轮转发成 K 手，手间不共集）；**这一半仍待业主回答，见《开放问题》#1** |
+| 「P-2c 必须在 P-1.5 出口闭环之后、且自己带一轮九模式门禁」 | 不再是"另一轮门禁"：跨集判据（`集数` 列 + `--require-cross-episode`）直接进了**既有的**九模式门禁，与响度/时长/planner 同一次跑 | Task 9 Step 2.8 + Task 11 Step 1/3c/3d |
+| 槽位台词按集取用（原交接规格**没有**这一条，是裁决逼出来的真缺陷） | `copywriter.write_plan_copy` 第二参换成 `casting.MaterialByEpisode`，`_slot_block` 按 `segment.episode_id` 取台词并把集名写进 prompt；缺键**抛**，不退回"该区间无台词"。`modes_w9.strongest_line` 同病同修 | Task 4 Step 3b + 《修订记录》C7；这是本裁决最贵的一条：不改就是编剧对着别集的画面、拿别集的台词写出一段通顺可信的假解说 |
+
+**为什么保留这份记录而不是把整节删掉**：本文件里还有三处正文点名"P-2c"（《计划修订记录》R2、《修订记录》C1/C4/C6、《定案二》末段），它们是**当时的真相**——R2 记的是"这次收窄不是计划自己能定的"，C1 记的是"业主拒绝签字"。删掉这一节会让那三处引用悬空，而悬空引用正是"下一个人以为还有 P-2c 可以做"的入口。**取消要留痕，取消的痕迹不能自己变成一个新的悬空指针。**
+
+**真的还开着的两条**（都不是 P-2c，都在《开放问题》里）：#1 规则类的"内容 = 一窗"与 `raw_clip` 的形态变化；#5 `raw_clip` 在 `--variants 1` 下吃满时长预算（Task 9 Step 2.8 的实测发现，修法在 `_fit_duration`）。
 
 ### P-3：回收站 / 本地数据（**这一条是 P-2a 新产生的义务，不是原有的**）
 
@@ -6989,11 +7653,13 @@ P-2a 让**角度之间**跨集（不同角度取不同集），但六个单集�
 1. `cd service && ../.venv/Scripts/python.exe -m pytest -q` 全绿（`test_analysis.py` 的既有隔离 flake 除外，且本批次未碰它）。
 2. `cd service && ../.venv/Scripts/ruff.exe check .` 与 `../.venv/Scripts/mypy.exe dramaclip` 均无输出。
 3. `cd /d/PersonProjects/DramaClip && npm run lint && npm run typecheck && npm run test` 全绿（含两侧契约同步测试）。
-4. Task 11 Step 3 的真机门禁 `REAL_EXIT=0`，且 `planner=llm_script`、响度落在窗口内——**这是"渲染侧一行未改"的证据**。
-5. Task 11 Step 2 的实测记录已写回本文件：三条角度名互异、`overlap_max` 首条为 `None`、其余接近 0。
-6. `grep -rn "generate_plans\|_run_generation_parallel\|_generate_one\|_newest_ready_plan\|_run_produce\|narration.produce\|export.start" service/dramaclip desktop/src protocol scripts --include=*.py --include=*.ts --include=*.tsx --include=*.json` **无输出**——旧入口一个不剩。
+4. Task 11 **Step 3 / 3b / 3c** 三次真机门禁全部 `REAL_EXIT=0`，且 `planner` 逐模式对上 `EXPECT_PLANNER`、响度落在窗口内、`集数` 列有读数——**前三项是"渲染侧一行未改"的证据，最后一项是"跨集真的发生了"的证据**。
+5. Task 11 Step 2 的实测记录已写回本文件：三条角度名互异、`overlap_max` 首条为 `None`、其余接近 0，**且每行 `episode_ids` 的集数 == 该方案时间轴上不同 `episode_id` 的个数**（不等就是卡片的「取材集区间」会说谎，规格 §9.5）。
+6. `grep -rn "generate_plans\|_run_generation_parallel\|_generate_one\|_newest_ready_plan\|_run_produce\|narration.produce\|export.start" service/dramaclip desktop/src protocol scripts --include=*.py --include=*.ts --include=*.tsx --include=*.json --include=*.mjs` —— **`service/dramaclip` / `desktop/src` / `protocol` 三处零命中**，`scripts` 下**恰好两条**且都在另一位工程师的 `scripts/verify_e2e.mjs`（`:152` 与 `:168`，已按 Task 9 Step 1b 书面移交、并写进 Task 9 Step 8 的提交信息）。**`--include=*.mjs` 不可省**：R6 那次漏了它，于是"逐条对账，一条都不许漏"正好漏掉唯一一个 `.mjs` 调用方，而 Expected 写"无输出"会让执行者以为门禁坏了、或者去改别人的文件。
 7. `export.submit` 对一个已规划好的 batch 提交后，`export_jobs` 行数等于该 batch 的方案行数（一条方案一行），且每行都有对应的 `jobs` 行（`type='export'`、`ref_id=export_id`）。
 8. 本计划里每一张变异检查表都逐条跑过并逐条按字节还原。
+9. **规格 §1 的机器判据过了**：Task 11 Step 1 带 `--require-cross-episode` 跑完 `REAL_EXIT=0`，即 `full_narration` 的三条方案里**至少一条**的时间轴横跨 ≥2 集；Step 3c 的规则类三手各 3-4 集（**零 LLM 那一族的跨集证据**，与 Step 1 各覆盖一半）。`ultra_short_hook` 按 C13 豁免，其 `集数` 期望值是 **1**。
+10. **《开放问题》#5 有明确处置**：`raw_clip` 在 `--variants 1`（门禁默认口径）下会把 `_fit_duration` 的预算吃满、成片越过用户设的 `strategy.max_duration_s`（活库实测 planned **296.21s / 51 段 / 9 集** → 预估成片 **≈303s** > 300）。收口前必须二选一并写进实测记录：**要么**在 `_fit_duration` 里给编码漂移留出余量（≥6.1%，两个无旁白模式的实测比值）并重跑 Step 3d 确认不再顶穿，**要么**业主明确接受"K=1 的 `raw_clip` 会略超时长上限"并把它记进《已知不做》。**不许既不改也不记就签收**——那是规格 §9.5「参数未生效」那一类，而它同时会让九模式门禁在默认口径下红一条。
 
 ## 已知不做 / 不在本批
 
@@ -7001,11 +7667,46 @@ P-2a 让**角度之间**跨集（不同角度取不同集），但六个单集�
 - **成品自检四项、`export.set_cover`**：P-3。
 - **`tools.*` 工具箱**：规格 §6 建议的独立小批次，与本批次无交集。
 - **画面通道 / `subtitle_probe` / `vision` 域**：规格 §10，批次 2。
-- **`serial_per_episode`（连载模式开关，规格 §5 #21）**：**规格自相矛盾**——§5 #21 把它挂在 `plan_variants` 上，§4.3 ④ 又说它是"提交时参数，不写入 `project.settings`"。两处不可能同时对。本批次不实现，等这个矛盾被裁决；若最终归规划侧，它的语义是"每集各出一条方案"，会让方案数变成 `集数 × 模式数`（80 集 × 9 模式 = 720 条），**没有队列页根本不可用**，故它天然属于 P-2.5 而不是 P-2a。
+- **`serial_per_episode`（连载模式开关，规格 §5 #21）**：**规格自己已经裁决过了，本批次不实现。** `4228bef` 把 §5 #21 改成 `export.submit(plan_ids, serial_per_episode=true)`——**提交时参数**，与 §4.3 ④ 那句"提交时参数，不写入 `project.settings`"一致，原先那处"§5 挂在 `plan_variants` 上、§4.3 ④ 说它是提交时参数"的自相矛盾**已不存在**；§6 的 P-2 行也明写「**不含 `serial_per_episode`**」，P-2.5 行把它列为该批次的唯一附带项。理由与量级不变：一条方案/集会把计划数推成 集数 × 模式数（80 集 × 9 模式 = **720 条**），没有队列页根本不可用，故它天然属 P-2.5。**P-2a 的 `export.submit` schema 因此只有 `plan_ids` 一个属性**（`additionalProperties: false`），P-2.5 接手时要补的两句话见 Task 8 Step 4 末尾。
 - **渲染侧的项目级覆盖**（字幕预设、输出四键、响度目标）：`render_export` 仍直接读 `context.settings`。P-2a 只把 K 与风格接上了项目覆盖（那是 `plan_variants` 自己的入参）。接线归 P-3 的包装区。
 - **阶段③ 如何把"重掷的单条"并回 K 条一组显示**：P-2a 保证方案行只追加、`batch_id` 齐全，任何并法都可行；具体并法是 P-3 的展示决策。
+- **规则类「重掷此条」的留痕没有用例**：`_rule_variants` 里 `if rerolled:` 那段 `notifier.log`（如实说明"窗口榜是确定性的、重掷会得到同一条方案"）**在自动化上红不了**——那条路径要 P-2.5 的阶段③ 才有入口，本批次没有任何用例会走到它。代码保留是因为 §3.3 禁止静默，不是因为测到了；等阶段③ 落地时补用例（Task 6 Step 10 #15 登记的是同一件事）。
 - **`narration_plans.tts_segments` 死列**：已在 `docs/service/04` 登记为死列，不在本批删除（理由见 Task 10 Step 4）。
-- **配音音频的磁盘回收**：定案一把 `work_dir/tts/<job>/…` 变成承重存储，它只增不减。回收归 P-3 的「关于 → 本地数据」与回收站。
+- **配音音频的磁盘回收**：《定案一》把 `work_dir/tts/` 变成承重存储（**内容寻址之后没有"按作业分目录"这一层了**，Task 5 已论证并删掉），它只增不减。回收归 P-3 的「关于 → 本地数据」与回收站，且**不能按作业或按时间删**——见《P-3 交接规格》第 1 条。
+
+---
+
+## 开放问题（正文点名到这里，逐条都要业主回答；未答的不许当成"已默认同意"）
+
+本节原先**不存在**，而正文有五处点名到它（R2/R3 与《定案四》末段、《定案二》、Task 9 Step 2.8、Task 11 Step 3d）——那是上一轮修订留下的悬空引用，本轮补上。每条都给"问题、依据的数字、需要谁决定什么"，不给结论。
+
+**#1 规则类两模式的"内容 = 一窗"，以及 `raw_clip` 的形态变化（原 R2 的那一问，裁决后换了内容）**
+
+- **原来问的是**："§1 的跨集是不是只要求 K 条合起来覆盖全剧？" —— **已被业主回答：不是，每条方案自己就要跨集。** 这一问关闭，P-2c 取消（见《P-2c 取消记录》）。
+- **现在问的是**：规格 §4.3 ④ 定「规则类 = 全剧 top-K 冲突窗」，本批次交付的是"用冲突窗**排名**决定条数与每条的取材集组合，再让编排器在这些集的全部场景上照常选"，**不是**"每条方案的内容就是它那一窗"。差别是量级上的：一个窗只有 3-25s（`_RAW_CLIP_MIN_S`/`_RAW_CLIP_MAX_S`），而活库实测 `raw_clip` 今天是 **15.13s / 3 段 / 1 集**，跨集一手（K=3）是 **117.89s / 21 段 / 4 集**——**7.8 倍**，从"三镜头爽点剪辑"变成"两分钟多集混剪"。
+- **要不要改成"内容 = 一窗"**：改了 `raw_clip` 每条只有 3-25s，而 `subtitle_flow` 的 CTA 卡片段（`_CTA_FALLBACK_S` = 3.0s）会比正片还长。**需要业主定**：规则类的每条方案应该是"一窗"还是"一手集里的全部合格场景"。本批次按后者实现，并在 `top_conflict_windows` 的 docstring 里如实写了这个差别。
+
+**#2 `serial_per_episode` 归哪一侧 —— 已关闭（`4228bef`）**
+
+规格 §5 #21 与 §6 已把它定为 `export.submit` 的提交时参数、归 P-2.5，P-2 行明写「不含 `serial_per_episode`」。原先那处"§5 与 §4.3 ④ 自相矛盾"的开放问题**不复存在**，本计划不实现它（详见《已知不做》对应条目与 Task 8 Step 4 末尾留给 P-2.5 的两句话）。**保留编号是为了让正文里"《开放问题》#2"这个引用不悬空**，不是还开着。
+
+**#3 规则类的方案卡上，「模型自选理由」那一格显示什么**
+
+- 规格 §4.3 ③ 把四要素写成**每卡**的结构，但规则类两模式没有模型、也就没有"模型自选理由"。本批次留空串（与 `protocol/schemas/narration.json` 里 `NarrationPlan.angle` 的描述「无解说的模式为空串」逐字对应）+ `notifier` 逐条留痕。
+- **需要业主定**：空串可接受，还是要显示一句**确定性推导**文案（例如「全剧冲突榜第 N 窗（第 X 集 a-bs，冲突分 S）」）？后者不是假文案（逐字可核对），但它不是"模型自选理由"，规格得给它一个名字。**界面留白 vs 规格加一个字段名，二选一。**
+
+**#4 规则类的「重掷此条」今天是个空操作**
+
+- `exclude_plan_ids` 只贡献角度名（`_excluded_angle_names` 跳过空 `angle`），而窗口榜是确定性的 ⇒ 重掷得到**同一条方案**。本批次如实留痕（`_rule_variants` 的 `if rerolled:` 那一行），但按钮按下去什么也不会变。
+- **需要业主定**：要不要把规则类的「重掷此条」换成「改方案数/改素材」——那是 P-2.5 队列页与阶段③ 的展示决策，本批次不做界面。
+
+**#5 `raw_clip` 在 `--variants 1` 下吃满时长预算，成片越过用户设的上限（本轮审计新查出）**
+
+- **数字**（活库只读重算，方法见 Task 11 Step 3d；同一套重算在 Task 3c Step 8 那张表的五个点上逐位对上）：`--variants 1` ⇒ `deal_windows(windows, 1)` 把**全部 10 集**发进同一手 ⇒ 合格场景（分数 ≥70、时长 3-25s）共 **59** 个、**346.5** 场景秒 > 预算 **300** ⇒ `_fit_duration` 吃满，planned **296.21s / 51 段 / 覆盖 9 集**（ep10 一帧都拿不到）。`raw_clip` 无旁白槽位，成片 = planned × 编码漂移，P-1.5 实测漂移 **1.0231**（`subtitle_flow` 同类 **1.0609**）⇒ 成片 **≈303.0s**（保守 **314.3s**）> 门禁的 `strategy.max_duration_s` = **300** ⇒ 时长断言红、`REAL_EXIT=1`。
+- **为什么单集时代不出这件事**：ep1 单集的合格场景只有 **15.1s / 3 段**，离 300 差 20 倍。这是**跨集裁决直接产生的新失败形态**。
+- **它不只是门禁红**：用户设的"最长时长"没生效，属规格 §9.5「参数未生效」那一类。
+- **修法在 `_fit_duration`（Task 3c），不在门禁阈值**（C6 已裁定阈值不动，且阈值确实不该动——它量的是用户的设置）：给预算留一档**编码漂移余量**，与它已经给引子槽位预留 `_INTRO_MAX_S` 同一个手法。**余量取多少需要业主/执行者拍**：实测依据是 ≥6.1%（两个无旁白模式的漂移比值里较大的那个），即 300s 的预算收到 ≤282s；取整到 `_JITTER_HEADROOM_RATIO = 0.07` 或固定 20s 都能覆盖，两者对 `intro_narration`（已预留 30s、成片 ≈286s）都还有余量。**本审计不替业主拍这个数**，故《完成判据》#10 要求收口前二选一：改，或明确接受并记进《已知不做》。
+- **顺带一条同源的产品问题**：K=1 时 `raw_clip` 的取材集是**全剧 10 集**、成片 ≈5 分钟。规格 §1 说「1..K 条」，K=1 是合法输入，而"一部 5 分钟的纯原片混剪"是不是操盘手要的`raw_clip`，与 #1 是同一个问题的两面。
 
 ---
 
@@ -7015,44 +7716,62 @@ P-2a 让**角度之间**跨集（不同角度取不同集），但六个单集�
 
 | 规格出处 | 要求 | 本计划落点 |
 |---|---|---|
+| **§1 核心处理单元** | **「每模式产出 1..K 条卖点角度互异的**跨集**方案」——"跨集"是**方案**的定语** | **Task 3c（`casting.py` + 六个编排器逐段盖自己场景的集号）+ Task 4 Step 3b（槽位台词按集取用，跨集的前置条件）+ Task 3b Step 3b（`deal_windows` 轮转发窗，让零 LLM 那一族也跨集）+ Task 6（`_casting_for` 按角度点名的集装配、`used_ids` 从时间轴反推）。机器判据：Task 9 Step 2.8 的 `集数` 列与 `--require-cross-episode`，Task 11 Step 1/3c 真机跑；豁免只有 `ultra_short_hook`（C13）。`ultra_short_hook` 之外任何模式的 `集数` 恒为 1，就是不达标** |
 | §6 P-2 第 ① 项 | 拆 `produce` → `plan_variants` + `export.submit` | Task 6（规划侧）+ Task 8（渲染侧）+ Task 9（删旧入口与迁调用点） |
-| §6 P-2 第 ② 项 | `narration.get_plan` | Task 6 Step 7 实现 + Task 7 用例 |
-| §6 P-2 第 ③ 项 | 角度重叠度量 | Task 2（度量）+ Task 6 Step 7 第 11 点（闸门）+ Task 11 Step 2（真机核对） |
+| §6 P-2 第 ② 项 | `narration.get_plan` | Task 6 Step 7 实现 + Task 7 用例（含跨集的 `episode_ids`/区间暴露，Task 7 Step 1 的 `test_get_plan_exposes_the_episodes_a_plan_spans`） |
+| §6 P-2 第 ③ 项 | 角度重叠度量 | Task 2（度量，**按 `(episode_id, start, end)` 三元组分组**：`source_spans` 逐集合并、`_intersect` 逐集双指针，故第 3 集的 0-10s 与第 7 集的 0-10s 是两段不同画面）+ Task 6 Step 7 第 10/11 点（成稿前按取材集组合、成稿后按实测 Jaccard 两道闸门）+ Task 11 Step 2（真机核对） |
 | §5 #16 | `plan_variants(project, modes, k)` | Task 6 |
 | §5 #17 | `plan_variants(exclude_plan_ids=[…])` | Task 6（`_excluded_angle_names` + `test_exclude_plan_ids_reaches_the_selection_prompt`） |
 | §5 #18/#33 | `narration.get_plan` 用于详情与成品追溯 | Task 6/7；方案行只追加、永不覆写（《定案三》）保证 #33 的追溯不漂 |
 | §5 #19 | 重叠率显示 | `overlap_max` 列（Task 1）+ 度量（Task 2） |
 | §5 #20 | 模式多选作为 `plan_variants` 入参 | Task 6 |
+| §5 #21 | `serial_per_episode` | **不在本批**——规格 `4228bef` 已定为 `export.submit` 的提交时参数、归 P-2.5（《已知不做》+《开放问题》#2 + Task 8 Step 4 末尾给 P-2.5 的两句话） |
 | §5 #22 | `export.submit(plan_ids)` | Task 8 |
-| §4.3 卡片四要素 | 角度名 / 取材集区间 / 钩子首句 / 模型自选理由 | `angle`（列）/ `episode_ids`+`plan_data.timeline`（既有）/ `narration_texts[0].text`（既有，见《定案三》为何不另立列）/ `angle_reason`（列） |
+| **§4.2 空态第 ② 步** | **「**仅「纯原片剪辑」「字幕金句流」不依赖 LLM**」（用户定案，本计划不得推翻）** | **《定案四》+ Task 3b（规则类的条数另有来源，零 LLM）+ Task 6 Step 7 第 11 点的 `if mode in _NARRATION_MODES` 分流 + `test_rule_modes_never_construct_an_llm_client`（替身在 `__init__` 里就炸，钉的是"不构造客户端"而不是"构造了但失败"）+ 变异 #11 + Task 11 Step 3c 的真机 `来源=rule`/`TTS=0`。B2/R1 就是这一条：原计划让每个模式都先调 `angles.select_angles`，等于把"不依赖 LLM"改成"依赖 LLM"** |
+| **§4.3 ④** | **「条数按模式族分别算：**解说类 = K，规则类 = 全剧 top-K 冲突窗**（两者不同源，已由用户定案）」** | **《定案四》+ Task 3（解说类的 K 条来自 `angles.select_angles`）+ Task 3b（规则类来自 `top_conflict_windows` → `deal_windows`，**不经任何模型**）+ Task 6 的 `_angle_variants`/`_rule_variants` 在 `_Variant` 上会合（五件事只写一遍）。两族**不同源**是用户定案，故本计划没有第四份手抄模式清单：规则类就是 `frozenset(SUPPORTED_MODES) - _NARRATION_MODES`** |
+| §4.3 卡片四要素 | 角度名 / 取材集区间 / 钩子首句 / 模型自选理由 | `angle`（列）/ `episode_ids`+`plan_data.timeline[*].episode_id,start,end`（既有；**跨集之后"区间"必须逐集给**，Task 7 开头第 1 点交代了为什么集号不另立字段）/ `narration_texts[0].text`（既有，见《定案三》为何不另立列）/ `angle_reason`（列，规则类为空串 →《开放问题》#3） |
 | §4.3 重叠率阈值 60% | 超阈值直接不出该角度 | `overlap.OVERLAP_LIMIT = 0.60` + Task 6 的 raise |
-| §3.3.1 禁止级 | 不得重新引入模板或规则兜底、不得吞掉编剧链的 raise | Task 10 Step 6 的第三条 grep（新模块里不许出现降级语义词）；`angles._sanitize` 少答即抛（Task 3）；`_plan_one` 原样透传 `copywriter`/`script_driver` 的异常（Task 6） |
+| §3.3.1 禁止级 | 不得重新引入模板或规则兜底、不得吞掉编剧链的 raise | Task 10 Step 6 的第三条 grep（新模块里不许出现降级语义词）；`angles._sanitize` 少答即抛（Task 3）；`_plan_one` 原样透传 `copywriter`/`script_driver` 的异常（Task 6）；**跨集新增的三条拒绝分支一律抛而不是降级**——缺号（`_casting_for` 的 `missing`）、缺分析行（`record is None`）、槽位的集不在台词表里（`casting.dialogue_of`/`label_of`），三条各有用例与变异检查（Task 6 Step 10 #10/#10b、Task 4 Step 7 #4/#5） |
+| §3.3 静默禁止（允许级降级必须留痕） | 少出方案、某集取不到画面、某手只取一集、规则类重掷无效 | Task 6 的 `_rule_variants` 四处 `notifier.log` + `_casting_for` 的"第 N 集没有冲突场景"；前三处有用例（`test_rule_mode_yields_fewer_than_k_and_leaves_a_trace`、`test_episode_ids_come_from_the_timeline_not_the_brief`），第四处如实登记为"没有用例"（Step 10 #15 +《已知不做》） |
 | 失败粒度=单条方案 | K 条独立失败 | Task 6 的 `test_one_variant_failure_does_not_kill_its_siblings` + `test_one_mode_failure_does_not_kill_other_modes`；try/except 位置下沉到变体循环内（变异检查 #1 钉住） |
-| `narration_id` 是唯一配对键 | 不得按位置推断 | 本批次未新增任何位置推断：`_assert_renderable` 按 `narration_id` 查音频表（Task 8），`angles` 不碰配对；`plan_data` 无 `window` 字段这一事实被沿用（`copywriter._slot_block` 从配对段读区间，Task 4 未改） |
-| 成本可观测 | 每变体 1 次成稿 + N 次配音，可观测而非事后重算 | `plan_cost()` 单一口径（Task 6 Step 7 第 8 点）+ 选题次数由 `batch_id` + `DISTINCT narration_mode` 数出（《定案二》） |
-| §6 P-2 出口 | 阶段③ 能只看方案不渲染 | `test_plan_variants_writes_k_plans_without_rendering` 断言 `export.list == []`；Task 11 Step 1 真机复核 |
+| `narration_id` 是唯一配对键 | 不得按位置推断 | 本批次未新增任何位置推断：`_assert_renderable` 按 `narration_id` 查音频表（Task 8），`tts_audio_by_segment` 逐字就是按 id 取（`api/export.py:172-179`），`angles` 不碰配对。**`plan_data` 无 `window` 字段这一事实继续成立，但 C7 改了它的一半**：区间仍从配对段读（`_slot_block` 的 `segment.start/end`），而**台词**在 Task 4 Step 3b 之后按 `segment.episode_id` 逐集读——原表这里写的"Task 4 未改"已作废 |
+| 成本可观测 | 每变体 1 次成稿 + N 次配音，可观测而非事后重算 | `plan_cost()` 单一口径（Task 6 Step 7 第 8 点），**两个数都与集数无关**（Task 7 开头第 2 点给了代码依据，`test_get_plan_exposes_the_episodes_a_plan_spans` + 变异 #2b 钉住）+ 选题次数由 `batch_id` + `DISTINCT narration_mode` 数出（《定案二》） |
+| §6 P-2 出口 | 阶段③ 能只看方案不渲染 | `test_plan_variants_writes_k_plans_without_rendering` 断言 `export.list == []`；Task 11 Step 1 真机复核（`--plan-only` 查库得 `export_jobs=0`） |
 | §6 P-2 出口 | 批量建项目与阶段定位可用 | **不在本计划**，见《P-2b 交接规格》——本计划开头《范围裁决》已说明拆分理由 |
 
 **2. 占位符扫描**：全文无 "TBD"、无"添加适当的错误处理"、无"同 Task N"式的转指（Task 9 Step 6 的对照表逐条写了处置方式与断言口径，不是"参照上文"）、代码块内无 `...（其余不变）...` 省略。每一处 `Expected:` 都给了具体的失败形态或退出码。
 
-**3. 类型与命名一致性**（逐个核对过）：
+**3. 类型与命名一致性**（逐个核对过；**本轮按裁决后的签名重核了一遍**，原表里 `_pick_episode`、`cross_episode`、`_voice(…, job_id, mode, index)`、`_plan_one(…, brief)` 四处都已作废）：
 
-- `angles.AngleBrief(name, reason, hook, episode_numbers)` —— Task 3 定义，Task 4（`prompt_block`）、Task 6（`_plan_one`/`_pick_episode`/`_worst_overlap`/`accepted` 的元素类型）、Task 6 测试夹具三处使用，字段名一致。
-- `angles.select_angles(mode, *, mode_label, k, episode_inputs, settings, cross_episode, excluded, trace_dir)` —— Task 3 定义，Task 6 `_run_plan_variants` 调用时七个关键字全给（`mode` 为位置参数），Task 6/9 的测试替身按 `kwargs.get("mode_label")` 取用，一致。
-- `angles.prompt_block(brief)` —— Task 3 定义，Task 4 测试与 Task 6 `_plan_one` 使用，一致。
-- `overlap.source_spans(plan)` / `overlap.overlap(left, right)` / `overlap.OVERLAP_LIMIT` —— Task 2 定义，Task 6 与 Task 2 测试使用，一致。
-- `narration_api._voice(context, plan, settings, *, job_id, mode, index)` —— Task 5 定义，Task 6 `_run_plan_variants` 调用与 Task 5/6 的测试替身签名一致（`voice_except_second` / `voice_then_cancel` 两个替身都按同一关键字集合定义）。
-- `narration_api._plan_one(context, mode, episodes, episode_inputs, settings, brief)` —— Task 6 定义，Task 9 Step 6 的桩与迁移用例按同一位置参数序使用。
-- `export_api._assert_renderable(plan_row, plan_data)` —— Task 8 定义，`submit` 与 `retry` 两处调用一致。
+- `casting.EpisodeScene`（`ConflictScore` 的子类，多 `number: int` 与 `episode_id: str` 两个字段）—— Task 3c 定义；六个编排器的首参类型、`pipeline.build_plan` 的第二参、`top_conflict_windows` 之外的全部取材入口都用它。`casting.EpisodeMaterial(number, asr)` 与别名 `MaterialByEpisode = dict[str, EpisodeMaterial]` —— Task 3c 定义，`build_subtitle_flow` / `write_plan_copy` 的第二参、`_casting_for` 的返回值之一，三处同名同形。
+- `casting.stamp(list[tuple[int, str, list[ConflictScore]]]) -> list[EpisodeScene]`、`episode_order` / `score_order`（排序键函数，不是方法）、`dialogue_of(material, episode_id)` / `label_of(material, episode_id)`（**缺键即抛**）—— Task 3c 定义；Task 4 Step 3b 的 `_slot_block`、Task 3c Step 4 的 `strongest_line`、Task 6 的 `_casting_for` 三处调用一致。
+- `pipeline.build_plan(mode, scenes, highlights, material, settings)` —— Task 3c Step 5 换的签名（**原 `episode_id` 与 `audio: AudioFeatures` 两个入参都消失**，C11），Task 6 的 `_plan_one` 是唯一生产调用点，`tests/engines/narration/test_modes.py` 的调用点同批迁移。
+- `pipeline.top_conflict_windows(list[tuple[int, list[ConflictScore]]], limit) -> list[tuple[int, ConflictScore]]` 与 `pipeline.deal_windows(windows, hands) -> list[list[int]]` —— Task 3b 定义，Task 6 的 `_rule_variants` 是唯一调用点；`deal_windows` 回的是**集号列表的列表**（一手一个升序集号表），直接进 `_Variant.episode_numbers`。
+- `overlap.source_spans(plan) -> dict[str, list[tuple[float, float]]]` / `overlap.overlap(left, right) -> float` / `overlap.OVERLAP_LIMIT` —— Task 2 定义，Task 6 的 `_worst_overlap` 是唯一生产调用点。**键是 `episode_id`**：`source_spans` 按 `segment.episode_id` 分组后**逐集**合并区间，`_intersect` 逐集双指针，故"第 3 集的 0-10s"与"第 7 集的 0-10s"是两段不同画面（`test_same_seconds_in_different_episodes_do_not_overlap` 钉住）。这是重叠度量在跨集时间轴上仍然正确的**全部**理由。
+- `angles.AngleBrief(name, reason, hook, episode_numbers)` —— Task 3 定义，Task 4（`prompt_block`）、Task 6（`_angle_variants` 把它转成 `_Variant`）、Task 6/9 的测试夹具使用，字段名一致。**规则类也复用这个类型**（`name`/`reason`/`hook` 一律空串，只填 `episode_numbers`），故读它时不要假设它一定出自 LLM（`AngleBrief` 的 docstring 明写）。
+- `angles.select_angles(mode, *, mode_label, k, episode_inputs, settings, excluded, trace_dir)` —— Task 3 定义，**六个关键字**（`cross_episode` 随 C8 删除，别顺手加回来），Task 6 的 `_angle_variants` 六个全给（`mode` 为位置参数），Task 6/9 的测试替身按 `kwargs.get("mode_label")` 取用，一致。
+- `angles.prompt_block(brief)` —— Task 3 定义，**措辞独家持有**：Task 6 的 `_angle_variants` 调它一次、结果存进 `_Variant.angle_block`，再由 `_plan_one` 分别交给 `copywriter.write_plan_copy(angle_block=…)` 与 `script_driver.script_dialogue_plan(angle_block=…)`。两条成稿链共用同一段字，不许各写一份。
+- `narration_api._Variant(name, reason, episode_numbers, angle_block)` 与 `_OverlapHit(name, ratio)` —— Task 6 Step 7 第 10 点定义的两个 frozen dataclass；`_Variant` 是**两族的会合点**（解说类填四个字段、规则类只填 `episode_numbers`），`accepted: list[tuple[_Variant, PlanData]]`、`_worst_overlap`、`_reject_same_episode_sibling`、`_slot_label` 四处按同一形状使用。
+- `narration_api._voice(context, plan, settings) -> PlanData` —— Task 5 定义（**只有三个位置参数，没有 `job_id`/`mode`/`index`**：内容寻址已在 `9b42f24` 落地，路径不需要它们），Task 6 的 `_run_plan_variants` 与 Task 5/6 的四个测试替身（`voice_except_second` / `voice_then_cancel` / Step 6 的两处 `lambda _ctx, plan, _settings: plan`）签名一致。
+- `narration_api._plan_one(context, mode, episodes, episode_inputs, settings, variant) -> tuple[PlanData, list[str]]` —— Task 6 定义（**第六参是 `_Variant`，不是 `AngleBrief`**；返回二元组，第二个是**从时间轴反推**的集 id），Task 9 Step 6 的迁移用例按同一位置参数序使用。
+- `narration_api._casting_for(context, episodes, variant) -> tuple[list[EpisodeScene], list[HighlightSegment], MaterialByEpisode]` —— Task 6 定义，取代了原来的 `_pick_episode`（那个函数名在本计划里**已不存在**，见到它就是残留）。
+- `copywriter.write_plan_copy(plan, material, settings, *, mode_label, angle_block, trace_dir)` —— Task 4 定义（第二参从摊平的 `list[AsrSegment]` 换成 `MaterialByEpisode`，`angle_block` 必填），Task 6 的 `_plan_one` 是唯一生产调用点。
+- `export_api._assert_renderable(plan_row, plan_data)` —— Task 8 定义，`submit` 与 `retry` 两处调用一致（守卫排在 `reset_for_retry` 的 CAS 之前）。
 - `plans_repo.create(..., angle=, angle_reason=, variant_index=, overlap_max=, batch_id=)` —— Task 1 定义，Task 6 `_run_plan_variants` 五个关键字全给，一致。
-- `plans_repo.list_by_batch(conn, project_id, batch_id)` —— Task 1 定义，Task 6/7/9 的测试与 Task 9 Step 2 的门禁 SQL（直接查库，不走仓储，因为 `verify_modes.py` 持有的是裸连接）语义一致。
-- `narration_api.plan_cost(row)` → `{"copy_llm_calls", "tts_calls"}` —— Task 6 定义，Task 7 断言与 `protocol/schemas/narration.json` 的 `PlanCost` 字段名逐字一致。
+- `plans_repo.list_by_batch(conn, project_id, batch_id)` —— Task 1 定义，Task 6/7/9 的测试与 Task 9 Step 2 的门禁 SQL（直接查库，不走仓储，因为 `verify_modes.py` 持有的是裸连接）语义一致；**门禁那条 SQL 现在一次取 `id, plan_data` 两列**（2.2），排序键与仓储同为 `narration_mode, variant_index`。
+- `narration_api.plan_cost(row)` → `{"copy_llm_calls", "tts_calls"}` —— Task 6 定义，Task 7 断言与 `protocol/schemas/narration.json` 的 `PlanCost` 字段名逐字一致；**两个数都与集数无关**（Task 7 开头第 2 点）。
+- `scripts/verify_modes.py` 的新名字：`SINGLE_EPISODE_MODES`（豁免清单，`_mode_table_drift` 有它的子集核对）、`args.variants` / `args.plan_only` / `args.require_cross_episode`（argparse 用连字符、属性用下划线）、`rec["episodes"]` 与 `rec["episodes_per_plan"]`（两条路径都写，前者进 `集数` 列、后者进附注行）。**`columns` 与 `values` 两张表必须同长**（`:638` 是 `zip(..., strict=True)`，改错当场 `ValueError`）。
 - 错误码：`-32303`（K 越界）、`-32304`（方案不存在，narration 域）、`-32406`（`plan_ids` 非法）、`-32407`（不可渲染，export 域）——Task 6/8 的常量、Task 6/7/8 的测试断言、Task 10 Step 2 的文档表三处一致。注意 `narration.get_plan` 用的是 **narration 域的 `-32304`**，而 `export.submit`/`retry` 对"方案不存在"用的是 **export 域的 `-32401`**：同一个概念两个码，是因为两个命名空间各有自己的分段（docs/03 §5），**不是笔误**，与既有的"任务不存在有两个码"（`-32501` vs `-32201`）同一处境。
 
-**4. 本计划自身发现并修正的规格问题**（详见交付报告，此处只列计划内的处置）：
+**4. 本计划自身发现并修正的规格/文档问题**（详见交付报告，此处只列计划内的处置）：
 
-- §5 #21 `serial_per_episode` 与 §4.3 ④ 自相矛盾 → 本批次不实现，写进《已知不做》并说明它天然属 P-2.5。
+- §5 #21 `serial_per_episode` 原先与 §4.3 ④ 自相矛盾 → **规格自己已在 `4228bef` 修掉**（定为 `export.submit` 的提交时参数、归 P-2.5，§6 的 P-2 行明写"不含"）。本计划随之从"等裁决"改成"已裁决、不实现"：《已知不做》+《开放问题》#2（保留编号只为不悬空）+ Task 8 Step 4 末尾留给 P-2.5 的两句话。
 - `docs/03` §6 声称 `narration.get_plan` "从未实现、等同 `list_plans`" → 本批次实现它并在 Task 10 Step 2 删掉那句话，理由（K×模式条数下 `list_plans` 不再是"看一条"的合理入口）写进 `get_plan` 的 docstring。
-- `docs/service/04` §4 的迁移清单漏登记 `009` → Task 10 Step 4 补上。
+- `docs/03:86` 的 `-32401` 行仍写着"编排时间轴为空" → Task 8 之后那件事改判 `-32407`，Task 10 Step 2 第 5 点改这一行（R4）。
+- `docs/service/04` §4 的迁移清单漏登记 `009`、且"实测 8 个文件"已过期（实为 9） → Task 10 Step 4 第 3 点补上。
+- `docs/service/04` §4 的 `jobs.type` 注记会被本批次**同时**过期两次（`produce` 类型退役、`jobs.json` 缺 `semantic` 那条偏差被 Task 9 Step 3 修掉） → Task 10 Step 4 第 4 点整块替换。
+- `docs/service/02:59` 的 `copywriter.py` 行写着 `slot` / `window` 两个**早已不存在**的字段名（P-1.5《实现定案修正》改成 `brief`、删掉 `window`），而 pydantic 静默忽略未知 kwargs ⇒ 照它写代码不报错、只丢数据 → Task 10 Step 4b 改这一行。
+- 规格 §3.3.1 降级裁决表 `:126` 的「位置」列点名 `api/narration._generate_one`，Task 6 删掉那个函数 → Task 10 Step 4c 改成 `_plan_one`（裁决列与理由列一字不动）。
 - `protocol/schemas/jobs.json` 的 `JobInfo.type` 词表缺 `semantic`、含即将消失的 `produce` → Task 9 Step 3 一并修正。
 - `narration_plans.tts_segments` 是死列 → Task 10 Step 4 登记，不在本批删。
+- **《开放问题》这一节原先不存在，而正文有五处点名到它** → 本轮补上（#1–#5，其中 #2 已关闭、#5 是本轮新查出的实测缺陷）。悬空引用与悬空指针是同一类缺陷：读的人会以为"另有一节写着答案"。
