@@ -2,7 +2,7 @@
 
 > ✅ **全计划已按「P-2a 做真跨集」的裁决审计完毕，Task 1–11 均可执行（2026-09-12）。**
 > 本轮审计覆盖 **Task 6–11 与全部尾部章节**（Task 1–5、3b、3c 由上一轮重构完成，见《修订记录（2026-09-12 跨集裁决后）》C1–C13；本轮的改动记在 **C14–C23**）。逐条核过的东西：`_plan_one`/`_casting_for` 的按集取数、重叠度量与两道闸门都走 `(episode_id, start, end)` 三元组、`get_plan` 的取材集暴露与 `plan_cost` 的集数无关性、`export.submit` 守卫的逐集覆盖、九模式门禁**七个阈值逐条重新推导**（结论：一个字不改，依据在 Task 9 Step 2.8 的表）、全部 `Task N Step M` 交叉引用、以及"已作废的收窄"在全文的残留（《P-2c 取消记录》已就位，《开放问题》一节已补上——它原先被正文引用五处却根本不存在）。
-> **唯一的开工前置**：《开放问题》#5 —— `raw_clip` 在 `--variants 1`（门禁默认口径）下会把 `_fit_duration` 的预算吃满，活库实测 planned **296.21s / 51 段 / 9 集**、成片预估 **≈303s** > 用户设的 **300s**。修法是给预算留一档编码漂移余量（落在 Task 3c 的 `_fit_duration`），**余量取多少是设计决定，本审计没有替业主拍**。Task 11 已把 `raw_clip` 那一跑挪到 `--variants 3`（不撞这条）并另加 Step 3d 用"只算不渲"的脚本量这个数；《完成判据》#10 要求收口前**要么改掉、要么明确接受并登记**，不许既不改也不记就签收。
+> **开工前置已清**：原《开放问题》#5（`raw_clip` 在 `--variants 1` 门禁默认口径下把 `_fit_duration` 的预算吃满、成片预估 **≈303s** > 用户设的 **300s**）已由业主裁决关闭（《修订记录》C24）——`strategy.max_duration_s` 重定义为**规划预算**，**不在 `_fit_duration` 里预留漂移余量**，门禁时长断言改为容许成片越过上限 **≤7%**（Task 9 Step 2.8）。`raw_clip` 跨集池化后的**形态**（K=1 活库实测 planned **296.21s / 51 段 / 9 集**）仍开着，owner-deferred 到真机复验、由业主看片再定（《开放问题》#1、Task 11 Step 3e）。
 
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -128,6 +128,7 @@ Task 5 原本的存在理由是"给每个作业单独一个 TTS 目录，免得 
 | **C21** | **新查出一条 C6 没算到的时长顶穿，并把它交出去而不是就地拍板**：`raw_clip` 在 `--variants 1` 下 planned **296.21s**、成片预估 **≈303.0s** > 门禁的 **300s**。修法（给 `_fit_duration` 的预算留编码漂移余量）落在 Task 3c，**余量取多少是设计决定，本轮不替业主拍**；改为记进《开放问题》#5 +《完成判据》#10（收口前必须"改"或"明确接受并登记"，不许既不改也不记），并把 Task 11 Step 3b 的 `raw_clip` 那一跑挪到 `--variants 3`（一手四集，planned 117.89s）、另加 Step 3d 用**只算不渲**的脚本把这个数交给业主 | 机制：`deal_windows(windows, hands=1)` → `min(1, len(windows))` = **1 手**、逐窗 `dealt[rank % 1]` ⇒ K=1 时一手装**全部**集（`--variants 1` 正是门禁默认口径）。活库只读实测：十集 **333** 场景，合格（分数 ≥ `RAW_CLIP_MIN_SCORE`=70 且 3-25s）**59** 个、合计 **346.5** 场景秒 > 预算 **300** ⇒ 吃满，**51 段 / 296.21s / 覆盖 9 集**（ep10 一帧没有）。成片漂移比值取自 P-1.5 实测：`raw_clip` 15.48/15.13 = **1.0231**、`subtitle_flow` 32.43/30.57 = **1.0609** ⇒ 303.0s（保守 314.3s）。**这套重算的可信度**：它在五个独立点上与 Task 3c Step 8 那张实测表逐位对上（ep1 `raw_clip` 15.13/3 段、四集一手 117.89/21 段/4 集、`subtitle_flow` 36.24/7 段/3 集、窗排名 `[6,7,8,2,3,4,9,10,1,5]`、`intro_narration` 269.06）。单集时代不可能发生：ep1 合格场景只有 **15.1s**，差 20 倍 | Task 11 Step 3b 原来"`dialogue_narration,raw_clip --variants 1`"那一跑（会撞这条红）；《完成判据》原 8 条（补 #9 跨集机器判据、#10 本条的处置） |
 | **C22** | **Task 10 从三份文档扩到五份**：新增 `docs/service/02-引擎设计.md`（`:59` 的 `copywriter.py` 行写着 `slot` / `window` 两个**早已不存在**的字段名）与规格本身（§3.3.1 降级裁决表 `:126` 的「位置」列点名 `api/narration._generate_one`，Task 6 删掉它）；Step 4 补两点（`docs/service/04:247-250` 的 `jobs.type` 注记被本批次**同时**过期两次；`narration_plans` 那节写明"跨集不加列"）；Step 7 的 `git add` 与提交信息随之扩 | `docs/service/02:59` 逐字是「编排器只产出槽位（`slot` 职责 + `window` 素材区间）」，而 P-1.5《实现定案修正》定的字段是 `brief`、`window` **已删**——pydantic **静默忽略未知 kwargs**，照这行写代码不报错、只丢数据，正是本仓付过两次账的那类"编造出来的规格"；该表 `:40` 的免责句只管"未建条目"，管不到"已建条目写错字段名"。规格 `:126` 是全 `docs/`（除计划目录）里**唯一**一处 `_generate_one` 命中，实测 `grep -rn "_generate_one\|_run_produce\|_newest_ready_plan\|_run_generation_parallel" docs/ --include=*.md | grep -v superpowers/plans` 只回这一行。`docs/service/04:247-250` 同时写着"`produce`（`narration.produce`）"与"`jobs.json` 同样漏了 `semantic`"，前者随 Task 6 失效、后者随 Task 9 Step 3 修掉。迁移号实测最高仍是 `009_ocr_segments.sql`（`ls migrations/` = 9 个文件），故 `010` 未被占用、`docs/04:305` 的"实测 8 个文件"确实过期 | Task 10 的 Files 清单（3 → 5 份）与 Step 7 的 `git add`；Step 4 从 3 点到 5 点；《自查》第 4 项的清单 |
 | **C23** | **尾部四节全部按裁决重写**：《P-2b / P-2c 交接规格》→《P-2b 交接规格 / P-2c 取消记录》（P-2c 那一节整节替换成一张"原待办 → 落在哪 → 状态"的对账表，并说明为什么保留记录而不是删掉）；**新建《开放问题》一节**（#1–#5）；《已知不做》改两条（`serial_per_episode` 从"规格自相矛盾、等裁决"改成"`4228bef` 已裁决、归 P-2.5"；磁盘回收那条的 `work_dir/tts/<job>/…` 路径层级已随 Task 5 删除）+ 补一条（规则类重掷留痕无用例，Step 10 #15 承诺登记在此）；《自查》补 §1 / §4.2 / §4.3 ④ / §5 #21 / §3.3 留痕 五行、修 `narration_id` 那行被 C7 半作废的"Task 4 未改"、第 3 项按裁决后的签名整段重写（`_pick_episode`/`cross_episode`/`_voice(…, job_id, mode, index)`/`_plan_one(…, brief)` 四处作废，补 `casting.*`、`build_plan` 新签名、`deal_windows`、`_Variant`/`_OverlapHit`、门禁新名字）；《完成判据》#6 补 `--include=*.mjs` 并把 Expected 从"无输出"改成"三处零命中 + `scripts` 下恰好两条" | **《开放问题》这一节原先根本不存在**，而正文有**五处**点名到它（R2、R3、《定案二》末段、《定案四》末段两处、Task 3b Step 3 的 docstring）——悬空引用与悬空指针同类：读的人会以为答案在别处。《完成判据》#6 的 grep 实测**没有** `--include=*.mjs` 而 Expected 写着"无输出"，可 `scripts/verify_e2e.mjs:152,168` 是两条永久命中 ⇒ 那是一条**永远红的门禁**，正是 R6 说要同步、B9 说比没有门禁更坏的那种（教会执行者"这条不用看"）。顶部横幅声称《P-2c 取消记录》已存在——实测 `grep -n "P-2c" 本文件` 在改写前**九处命中里没有一处是取消记录**，`:6959` 那节标题仍是《P-2c：单条方案内的跨集拼接》，正文仍写着"P-2a 让角度之间跨集，但六个单集模式的单条方案内仍限于一集" | 《P-2c 交接规格》整节（C1 点名要改成取消记录，上一轮没做）；R2/R3 两行末尾"并进《开放问题》#1/#2"从**待办**变成**已兑现**；《自查》表里没有 §1/§4.2/§4.3 ④ 三行（C1 与 R1 各点名过一次）；《已知不做》的 `serial_per_episode` 条与 `work_dir/tts/<job>/…` 那条路径 |
+| **C24** | **业主裁决（2026-09-12）：`strategy.max_duration_s`/`min_duration_s` 重定义为规划预算，不是交付时长**，据此**关闭《开放问题》#5**：① **不在 `_fit_duration` 里预留编码漂移余量**（原 #5 拟议的 `_JITTER_HEADROOM_RATIO=0.07` 或固定 20s 一律不做）；② 门禁时长断言从 `duration_s > strategy.max_duration_s` 改为 `duration_s > strategy.max_duration_s × 1.07`（Task 9 Step 2.8）；③ 设置页 `strategy.max_duration_s` 的 help 写明"规划预算、成片略长"（规格 §4.6 + `desktop/src/features/settings/sections.ts`）。`raw_clip` 跨集**形态**仍开着，owner-deferred 到真机复验（《开放问题》#1、Task 11 新增 Step 3e 渲染 K=1、交出 rendered 时长/段数/集数） | 成片越过上限的成因**不是 atempo 微变速**：`speed_factor` 0.996–1.004（`dedup/params.py:29`）经 `setpts=PTS/{speed}`（`encoder.py:196`）与 `atempo={speed}`（`:263`）双向作用，上界仅 `1/0.996 = +0.4016%`；**主体是切点安全抖动** `jitter.safe_times`（`encoder.py:371`）为避让台词保护区把入/出点**外移**（`jitter.py:24` `_MAX_ADJUST_S=1.0`、`:19` `_JITTER_MAX_S=0.3`，只延长不缩短）。P-1.5 Task 10 九模式实测 成片/planned：`raw_clip` **15.48/15.13 = 1.0231**、`subtitle_flow` **32.43/30.57 = 1.0609**（无旁白两模式，正是会吃满预算的那一类）。**1.07 取自实测漂移而非 atempo**：atempo + 帧取整（`-r 30`）对饱和 `raw_clip`（planned 296.21s / 51 段）只给 `296.21 × 1.004016 + 51/30 ≈ 299.1s`，**低于实测预估 303.0s**，差出来的 ≈4s 就是切点外移；故容差取两个无旁白比值里较大的 1.0609 上整到 **1.07**（与 #5 原拟的 0.07 同数，但**从 `_fit_duration` 的预算预留挪到门禁的比较式**）。饱和 `raw_clip` 预估 303.0s（保守 314.3s）< `300 × 1.07 = 321s` ⇒ 门禁绿；历史 AAC priming  runaway（`encoder.py:291` 注：195s planned 渲出 416s，比值 2.13）> 321s ⇒ 仍被抓 | 《开放问题》#5 整条（从"开着、余量待业主拍"改成"已关闭、裁决不留余量"）；《完成判据》#10（不再要求"改余量或明确接受"二选一，改成要求**门禁断言改对 + UI help 落地**）；Task 9 Step 2.8 的时长行与那条 ⚠️「修法在 `_fit_duration`」（改成"修法在门禁比较式"）；Task 11 Step 3d 第 3 点（"交 #5、余量 ≥6.1% 落在 Task 3c"改成"确认裁决、K=1 渲染交 Step 3e"）；本文件顶部「唯一的开工前置」那行；《P-2c 取消记录》末"真的还开着的两条"里 #5 那半句；C6 末句与 C20「门禁时长阈值一个字都不改」的结论（**仅时长那一行**被本裁决推翻，响度/真峰/冻结/planner/插桩/`EXPECT_NARRATION` 六个仍不改；Step 2.7 那条 bullet 与 2.8 表头已同步）。**Task 3c 的 `_fit_duration` 代码一字不改**——它今天只有末场景豁免删除 + `_INTRO_MAX_S` 引子预留（C6），**从没有漂移余量**，故本裁决对它是"确认不加"，不是"删掉已加的" |
 
 ---
 
@@ -237,7 +238,7 @@ Expected: 两条都无输出、退出码 0。
 |---|---|---|
 | ① 只有 `dialogue_narration` 能跨集拼（`pipeline.build_from_script_episodes` 按集号取素材），其余六个编排器签名是 `(episode_id, scenes, strategy)`，一条片只吃一集 | **给场景盖上集身份**：新增取材层 `engines/narration/casting.py`，六个编排器的第一个入参从 `episode_id: str` 换成 `scenes: list[EpisodeScene]`，段的 `episode_id` 由**每个场景自己**带。渲染侧一行不用改（见下面"渲染侧本来就跨集"那条证据） | **Task 3c** |
 | ② `ConflictScore`（`engines/semantic/models.py`）只有 `scene_index/start/end/score/reason`，**不带集身份**，所以跨集排序只能在编排器之外做 | **不动 `ConflictScore`、不加数据库列**：集身份是**规划期注入**的，因为 `episode_analysis.conflict_scores` 本来就是**按集一行**的 JSON，集身份就是那一行的主键。`casting.stamp` 在解析时盖章，活库已有的十集分析结果一行都不用改、不用重跑分析、不需要任何迁移 | **Task 3c Step 1/3** |
-| ③ 九模式门禁的时长/响度/冻结窗正压在现有单集成片形态上 | **响度与冻结窗不受影响**（Phase C 归一的是整片、段级天花板与格式滤镜逐段作用、`dialogue_narration` 早就出多集成片并且实测过门）；**时长窗会被顶穿，故改的是代码不是阈值**——`_fit_duration` 的末场景预算豁免与 `intro_narration` 的引子槽位余量。逐条推导与实测数字见 Task 9 Step 2.8 | **Task 3c Step 4 + Task 9 Step 2.8** |
+| ③ 九模式门禁的时长/响度/冻结窗正压在现有单集成片形态上 | **响度与冻结窗不受影响**（Phase C 归一的是整片、段级天花板与格式滤镜逐段作用、`dialogue_narration` 早就出多集成片并且实测过门）；**时长窗会被顶穿，分两层修**：planned 层面改代码（`_fit_duration` 的末场景预算豁免删除 + `intro_narration` 的引子槽位余量预留），planned→成片 的漂移层面改门禁比较式（C24：`duration_s > strategy.max_duration_s × 1.07`，上限是规划预算、不是交付硬上限）。逐条推导与实测数字见 Task 9 Step 2.8 | **Task 3c Step 4 + Task 9 Step 2.8** |
 
 **渲染侧本来就跨集，这是"改动只在规划侧"的静态证据**（三处，逐一核过）：
 
@@ -2236,9 +2237,14 @@ def _fit_duration(
     **末场景不再享受预算豁免**（原状是首尾都豁免）。豁免的上界是"一个最长场景"，
     单集时代它够不到预算，所以那条豁免是死的：活库实测十集里最大的一集只有 **204.2**
     场景秒，而 `strategy.max_duration_s` 是 **300**，于是 `used + duration > budget`
-    恒不成立。跨集之后两集就能到 **405.8** 场景秒，豁免会把成片推过 `max_duration_s`
-    （活库最长单场景 **7.9s** → 最坏 **307.9s**），而九模式真机门禁的时长断言正是
-    `duration_s > strategy.max_duration_s`（`scripts/verify_modes.py`）。
+    恒不成立。跨集之后两集就能到 **405.8** 场景秒，豁免会让 **planned 越过预算**
+    （活库最长单场景 **7.9s** → 最坏 planned **307.9s**）——而规划预算的不变量正是
+    planned ≤ 上限，故删掉它（成片层面的漂移不在这里管，见下）。
+
+    **这里不为编码漂移预留余量（业主裁决 C24）**：`max_duration_s` 是规划预算，只保证
+    planned ≤ 上限；planned→成片 的漂移（切点外移 + 消重微变速，P-1.5 实测 ≤6.1%）由
+    门禁容差吸收（`duration_s > max_duration_s × 1.07`，Task 9 Step 2.8），**不在预算里
+    收窄**。原《开放问题》#5 拟议的 `_JITTER_HEADROOM_RATIO` 一律不加。
 
     首场景仍然无条件保留：`intro_narration` 的旁白槽位挂在它上面（`build_intro` 的
     `timeline[0]`），丢掉它等于丢掉那条片唯一的解说。
@@ -3033,7 +3039,7 @@ Expected: **红，且红的地方全部可预期**——`tests/api/test_produce.
 **读这张表的三件事**：
 
 1. **`intro_narration` 一手点了 4 集，时间轴上只出现 2 集**。不是 bug：它没有场景条数上限（与其余五个模式的 `_MAX_SCENES` 不同），`_fit_duration` 按播出序填充、预算 270s 在 ep5 就用完了，ep6/ep9 一帧都拿不到。**后果是落库的 `episode_ids` 必须从建好的时间轴反推**，不能抄角度点名的那份，否则卡片的「取材集区间」会列两集没出现的集（§9.5 假文案类）。Task 6 Step 7 第 11 点的 `_plan_one` 因此写 `used_ids = sorted({segment.episode_id for segment in plan.timeline})`——与 `script_driver.script_dialogue_plan` 同一个口径（它的 `used_ids` 逐字就是这么算的），配 `test_episode_ids_come_from_the_timeline_not_the_brief`。
-2. **planned 源秒 ≠ 成片秒**：`synthesize_narration_texts` 会把每个旁白/ducked 段的 `end` 改成 `start + 实测音频时长`。P-1.5 Task 10 的实测比值（成片/planned）是 `intro_narration` 1.09、`full_narration` 1.44、`dual_host_chat` 1.71、`inner_monologue` 1.45、`cross_narration` 1.25、`ultra_short_hook` 1.05、`raw_clip`/`subtitle_flow` 1.02–1.06。按这些比值推跨集成片：最长的 `intro_narration` ≈ 269.06 × 1.09 ≈ **293s**（预留前是 313s，**顶穿 300**），其余全部 ≤ 120s。这就是 Step 4 那两处预算改动的全部理由，也是 Task 9 Step 2.8 断言"门禁时长阈值一个字都不用改"的依据。
+2. **planned 源秒 ≠ 成片秒**：`synthesize_narration_texts` 会把每个旁白/ducked 段的 `end` 改成 `start + 实测音频时长`。P-1.5 Task 10 的实测比值（成片/planned）是 `intro_narration` 1.09、`full_narration` 1.44、`dual_host_chat` 1.71、`inner_monologue` 1.45、`cross_narration` 1.25、`ultra_short_hook` 1.05、`raw_clip`/`subtitle_flow` 1.02–1.06。按这些比值推跨集成片：最长的 `intro_narration` ≈ 269.06 × 1.09 ≈ **293s**（预留前是 313s，**顶穿 300**），其余全部 ≤ 120s。这就是 Step 4 那两处预算改动的全部理由——它们在 **planned 层面**把 `intro_narration` 的成片估算压回 300 以内（293 < 300），故 intro 用不到门禁容差。**（门禁时长断言的比较式仍按 C24 改成 `duration_s > strategy.max_duration_s × 1.07`，那是为 `raw_clip` 饱和那一类的 planned→成片 漂移留的，见 Task 9 Step 2.8；其余六个阈值不改。）**
 3. **`raw_clip` 从 15s 变成 118s**（7.8 倍）。这是本裁决最容易被低估的一条产品后果：它不再是一条"三镜头爽点剪辑"，而是一条两分钟的多集混剪。阈值上合法（≤300）、门禁上会过，但**形态变了**。已写进《开放问题》#1 与交付报告，交业主定夺。
 
 - [ ] **Step 9: 变异检查**
@@ -6702,7 +6708,7 @@ from dramaclip.api import export as export_api
 **2.7 保持不动的部分（范围比原计划窄了两处，逐条说清楚）**
 
 - `export_jobs` 的成品定位查询（实测 `:482-484`）**一字不动**：它取"最新一条已完成出片记录"并校验 `narration_mode` 对得上，两步派发之后这个语义不变（`--variants 1` 时一个模式恰好一条成品）。
-- **响度窗口、真峰门限、planner 断言、冻结帧断言、插桩覆盖断言全部不动**——这是"渲染侧一行未改"的门禁证据，动它就等于把证据本身改了。2.8 末尾那张表逐条给出"为什么跨集之后它们仍然成立"的推导，**结论是阈值一个字都不改**，但推导必须写在计划里，否则下一个人只能重新猜一遍。
+- **响度窗口、真峰门限、planner 断言、冻结帧断言、插桩覆盖断言全部不动**——这是"渲染侧一行未改"的门禁证据，动它就等于把证据本身改了。2.8 末尾那张表逐条给出"为什么跨集之后它们仍然成立"的推导，**这五条一个字都不改**；时长断言的比较式是**唯一例外**，按 C24 改为容许成片越过上限 ≤7%（设置值不动，见表里那一行）。推导必须写在计划里，否则下一个人只能重新猜一遍。
 - **`_mode_table_drift()` 要动一处**（原计划写"全部不动"，那是 C12 之前的话）：2.8 新加的 `SINGLE_EPISODE_MODES` 是一份**手抄的模式子集**，而这个文件的既有纪律正是"手抄清单必须与 `SUPPORTED_MODES` 对账，否则新模式会按默认值悄悄判绿"（`:322-328` 的 docstring 逐字如此）。一个写错名字的豁免会让 `--require-cross-episode` 对那个模式**永远不判**——假绿，而且是"规格 §1 的判据"上的假绿，代价最高。故给它补一条子集核对。
 - **`columns` / `values` 两张表要动**（同上，原计划的"不动"清单里列了它）：新增 `集数` 一列。两张表在 `:615-620` 与 `:624-635`，**必须同批改**——`:638` 是 `zip(values, columns, strict=True)`，长度不一致会当场抛 `ValueError`，这是本文件里少数几个"改错就响"的地方，别指望它静默。
 
@@ -6758,25 +6764,25 @@ SINGLE_EPISODE_MODES = frozenset({"ultra_short_hook"})
 
 **豁免这条分支的覆盖边界，如实写下来**：Task 11 **不跑** `--modes ultra_short_hook --require-cross-episode`，所以"豁免生效"在真机上没有被走过一次。别为此加一跑——它会带来一个**合法但看着像失败**的读数：`build_ultra_short` 只取"点名集里全剧最高分的那一个场景"，两条角度只要都点到那个场景所在的集，两条方案的时间轴就**逐字节相同** ⇒ Jaccard = 1.0 ⇒ 第二条被成稿后的重叠闸门拦下 ⇒ `plans < K`。那是闸门在正确工作（两部一样的 15 秒悬念版不该都出），不是缺陷，但门禁表格上会显示成"少出了方案"。豁免的**效果**由 Task 3c 的 `test_ultra_short_is_a_single_scene_film_and_says_which_episode`（集数恒为 1、且那一集是全剧最高分那集）与 `test_cross_episode_arrangement.py` 的 `continue` 分支守着；豁免**清单写错名字**由上面第 2 点的 `_mode_table_drift` 子集核对守着，它在开跑之前就红、连临时目录都不建。**唯一没被守的是"豁免条件被写反"**（`not in` 写成 `in`），那种情况只在真跑 `ultra_short_hook` 时可见——如果哪天有人跑了并看到 `REAL_EXIT=1` 且失败串是"每条方案都只取一集"，先查这一行，别去改编排器。
 
-**门禁阈值逐条重新推导（C6 与《定案二》第 ③ 行都把数字指到了这里）。结论：一个字都不改；下面是"为什么不用改"的逐条依据，以及一条**必须改代码而不是改阈值**的实测发现。**
+**门禁阈值逐条重新推导（C6 与《定案二》第 ③ 行都把数字指到了这里）。结论：除时长断言的比较式按 C24 裁决改为"容许成片越过上限 ≤7%"（设置值 `strategy.max_duration_s` 不动）外，其余六个阈值一个字都不改；下面是逐条依据，以及那条时长比较式为什么必须改、改成什么。**
 
 | 断言（`verify_modes.py` 实测行号） | 跨集之后 | 依据 |
 |---|---|---|
 | `EXPECT_PLANNER`（`:544-547`） | **不用改** | 它量的是"文案谁写的"，与集数无关。九个模式的取值由**模式族**决定：规则类两模式走 `_rule_variants`（零 LLM，`PlanData.planner` 停在默认 `"rule"`），`dialogue_narration` 由 `build_from_script_episodes` 直接写 `planner="llm_script"`（`pipeline.py:173`），其余五个由 `copywriter.write_plan_copy` 置 `llm_script`（`copywriter.py:147`）。三处都不读集数 |
 | `EXPECT_NARRATION`（`:587-606`） | **不用改** | 它数的是**角色为 narration/ducked 的段数下限**（`one`→1、`many`→2）。跨集只增加段数、不减少：六个编排器都是逐场景产段（`build_full` 一场景一槽、`build_cross` 场景与旁白交替），段数随取材集增加而增加。下限断言在段数变多时只会更容易过 |
-| 时长 `duration_s > strategy.max_duration_s`（`:579-582`） | **阈值不改，但代码要改一处**（见下） | 阈值读设置（活库实测 `strategy.max_duration_s` = **300**，与 `infra/config.py` 的 DEFAULTS 同值），`_fit_duration` 也按同一个键截断，两侧同源。C6 已经处理了两种顶穿：末场景预算豁免（活库最长单场景 **7.94s**，跨集两集 405.8 场景秒时豁免会把成片推到 **307.9s**）与引子槽位余量（预留 `_INTRO_MAX_S`=30 之后，四集一手 planned **269.06s** → 成片 ≈ **286.4s**）。**剩下第三种，C6 没算到**，见下面那段 |
+| 时长 `duration_s > strategy.max_duration_s`（`:579-582`） | **比较式要改（C24）**：改成 `duration_s > strategy.max_duration_s × 1.07`（设置值不动） | 上限是**规划预算**不是交付硬上限（C24）。阈值仍读设置（活库实测 `strategy.max_duration_s` = **300**，与 `infra/config.py` 的 DEFAULTS 同值），`_fit_duration` 按同键截断 ⇒ **planned ≤ 上限恒成立**；但成片过切点抖动 + 消重微变速后 = planned × 编码漂移，可越过上限。容差 **1.07** 取自 P-1.5 实测无旁白两模式漂移比值里较大的 **1.0609**（`raw_clip` 1.0231、`subtitle_flow` 1.0609）上整——**不是 atempo**（±0.4% 太小，推导见下面那段）。C6 处理的两种顶穿（末场景豁免、引子余量）是 **planned 层面**的、仍成立；本行处理的是 **planned→成片 的漂移层面**，是 C6 没算到的第三种 |
 | 响度窗口 `abs(integrated − target) > 2.5 LU`（`:551-559`） | **不用改** | Phase C 归一的是**整片**（`loudness.normalize_in_place`，两遍 `loudnorm`），它不知道也不关心片段来自几集；输入变长只改变测量样本量，不改变目标。实测余量极大：P-1.5 九部真成片全部落在 −14.0/−14.1 LUFS，**最大偏差 0.1 LU** 对容差 2.5 LU。且 `dialogue_narration` 早就出多集成片并过门（56.10s / −14.1 LUFS） |
 | 真峰门限 `true_peak > target + margin`（`:565-574`） | **不用改** | 两级都是**逐段**作用：段级天花板 `_peak_ceiling_filter()` 挂在每段的 `atempo` 之后（`encoder.py:263`），混音限幅器挂在 `amix` 之后；Phase C 的真峰有界重试量的也是最终成片。段来自哪一集不进这条链。实测余量：九部真成片 −2.20…−5.20 dBTP 对门限 −1.00，**最小余量 1.20 dB** |
 | 冻结帧 `max_freeze_s >= 2.0`（`:585-586`） | **不用改** | 冻结是**成片上相邻帧相同**，跨集拼接只增加硬切点（两集之间必然不相似），不会制造静止画面。实测九部全 **0.0s** 对门限 2.0s |
 | 插桩覆盖 `segments_captured != segments`（`:537-539`） | **不用改，但它是本轮最重要的一条** | 它逐段核对"每段都真的走了 `cut_segment_args`"，而 `cut_segment_args` 正是按 `segment.episode_id` 取源的那一层。**跨集之后它是"段号与集号对得上"的唯一机器证据**：若某个编排器盖错了集号（Task 3c Step 9 #14 那条最贵的变异），段数仍然对得上、这条断言不红——所以它**不是**跨集正确性的守卫，只是"本行实测可信"的守卫。跨集正确性由 2.8 的 `集数` 列 + `--require-cross-episode` + Task 3c 的十条用例负责，别把这条当成前者 |
 
-⚠️ **必须改代码（不是改阈值）的第三种顶穿：`raw_clip` 在 `--variants 1` 下会吃满预算，成片越过 300s。** 这是本轮审计**新查出**的，C6 只算了末场景豁免与引子余量两种：
+⚠️ **第三种顶穿：`raw_clip` 在 `--variants 1` 下吃满预算、成片越过 300s——C24 裁决后这是预期行为，修的是门禁比较式，不是 `_fit_duration`。** C6 只算了末场景豁免与引子余量两种（都在 **planned 层面**）；这一种在 **planned→成片 的漂移层面**：
 
-- **机制**：`deal_windows(windows, hands=1)` 把**全部**集发进同一手（`min(1, len(windows))` = 1 手，逐窗 `dealt[rank % 1]`），于是 `--variants 1`（门禁的默认口径、也是 Task 11 Step 3b 的口径）下 `raw_clip` 的取材集是**全剧**。`build_raw_clip` 的候选是"分数 ≥ `RAW_CLIP_MIN_SCORE`=70 且时长 3-25s"的全部场景，再由 `_fit_duration` 按 300s 预算截断。
+- **机制**：`deal_windows(windows, hands=1)` 把**全部**集发进同一手（`min(1, len(windows))` = 1 手，逐窗 `dealt[rank % 1]`），于是 `--variants 1`（门禁的默认口径）下 `raw_clip` 的取材集是**全剧**。`build_raw_clip` 的候选是"分数 ≥ `RAW_CLIP_MIN_SCORE`=70 且时长 3-25s"的全部场景，再由 `_fit_duration` 按 300s 预算截断。
 - **活库实测（只读 `data/data.db`，用真编排器的选取规则重算，不渲染）**：十集共 **333** 个场景，其中 **59** 个合格、合计 **346.5** 场景秒 > 300 的预算 ⇒ `_fit_duration` **吃满**，planned **296.21s / 51 段 / 覆盖 9 集**（ep10 一帧都拿不到）。对照：同一套算法在四集一手 `[2,5,6,9]` 上给出 **117.89s / 21 段**、在 ep1 单集上给出 **15.13s / 3 段**——与 Task 3c Step 8 那张实测表**逐位对上**，故这套重算是可信的。
-- **成片会超**：`raw_clip` 没有旁白槽位，成片长度 = planned × 编码漂移。P-1.5 的实测比值是 **15.48 / 15.13 = 1.0231**（`subtitle_flow` 同类无旁白，比值 **32.43 / 30.57 = 1.0609**）。⇒ 296.21 × 1.0231 ≈ **303.0s** > 300 ⇒ `:581` 的时长断言**红**，`REAL_EXIT=1`。按更保守的 1.0609 算是 **314.3s**。
-- **单集时代不可能发生**：ep1 单集的合格场景只有 15.1s（3 段），离 300 的预算差 20 倍。**这是跨集裁决直接产生的新失败形态**，而它同时也是一条**产品**缺陷：用户设的 `strategy.max_duration_s` 没生效（规格 §9.5「参数未生效」那一类），不只是门禁红。
-- **修法在 `_fit_duration`（Task 3c），不在门禁**：C6 已经定了"阈值一个字都不改"，而阈值确实不该改——它量的是用户的设置。要给预算留一档**编码漂移余量**（与它已经给引子槽位预留 `_INTRO_MAX_S` 同一个手法），余量由上面两个实测比值定（≥6.1%，即 300s 的预算收到 ≤282s）。**这一档常数取多少是设计决定，本审计不替业主拍**：已记进《开放问题》#5，并把 Task 11 Step 3b 的 `raw_clip` 那一跑改成不撞这条的口径（`--variants 3`，一手四集 → planned 117.89s → 成片 ≈120.6s），同时保留一条**只算不渲**的测量步骤把 296.21 这个数交给业主。
+- **成片会越过上限，但这是规划预算的语义、不是缺陷**：`raw_clip` 没有旁白槽位，成片长度 = planned × 编码漂移。P-1.5 Task 10 实测比值 **15.48 / 15.13 = 1.0231**（`subtitle_flow` 同类无旁白 **32.43 / 30.57 = 1.0609**）⇒ 296.21 × 1.0231 ≈ **303.0s**（保守按 1.0609 是 **314.3s**），都 > 用户设的 300。**裁决（C24）：上限是规划预算，成片越过它属预期**，前提是设置页 help 写明（规格 §4.6、§3.3 该行、`sections.ts`）——写了就不是规格 §9.5「参数未生效」。
+- **漂移的成因要写准（本仓两次为"凭记忆写的规格"付过账）**：越过上限的主体**不是 atempo 微变速**。`speed_factor` 0.996–1.004（`dedup/params.py:29`）经 `setpts=PTS/{speed}`（`encoder.py:196`）与 `atempo={speed}`（`:263`）双向作用，上界仅 `1/0.996 = +0.4016%`，对饱和 `raw_clip` 只值 `296.21 × 0.004016 ≈ 1.19s`。**主体是切点安全抖动** `jitter.safe_times`（`encoder.py:371`）：为避让台词保护区把入点外移 ≤ `_MAX_ADJUST_S`=1.0s、出点外移 ≤1.0s（`jitter.py:24`；静音抖动另 ≤ `_JITTER_MAX_S`=0.3s，`:19`），**只延长不缩短**，51 段累加正是那 ≈4s。
+- **修法在门禁比较式（本节时长行），不在 `_fit_duration`、也不在设置值**：断言改成 `duration_s > strategy.max_duration_s × 1.07`。**1.07 的来历（不许凭记忆改）**：atempo + 帧取整（`-r 30`）对饱和 `raw_clip` 只给 `296.21 × 1.004016 + 51/30 ≈ 299.1s`，**低于实测预估 303.0s**——差出来的 `303.0 − 299.1 ≈ 3.95s` 就是切点外移，故容差**不能只按 atempo 推**。取两个无旁白模式实测漂移比值里较大的 **1.0609** 上整到 **1.07**（与《开放问题》#5 原拟的 `_JITTER_HEADROOM_RATIO=0.07` 同数，但**从预算预留挪到门禁容差**：预算不再收窄，门禁放宽）。`300 × 1.07 = 321s`：饱和 `raw_clip` 预估 303.0s（保守 314.3s）< 321 ⇒ 绿；历史 AAC priming runaway（`encoder.py:291` 注：195s planned 渲出 416s，比值 2.13）> 321 ⇒ 仍被抓，门禁没变成橡皮图章。Task 11 Step 3e 真渲一条 K=1 的 `raw_clip`，把 rendered 时长/段数/集数交给业主判形态（《开放问题》#1）。
 
 Run: `cd /d/PersonProjects/DramaClip && .venv/Scripts/python.exe -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/verify_modes.py').read_text(encoding='utf-8')); print('ast OK')"`
 
@@ -7466,7 +7472,7 @@ Expected: `REAL_EXIT=0`，两行都 `状态=completed`、`来源=rule`、`TTS=0`
 
 - [ ] **Step 3d: 量一次 `--variants 1` 的预算饱和（只算不渲，本轮新增）**
 
-**这一步不渲染、不写库、不跑 LLM**，只用真编排器在活库的只读副本上算 planned 源秒。它存在的全部理由是 Task 9 Step 2.8 末尾那条发现：`--variants 1` 时 `deal_windows(windows, 1)` 把**全部**集发进同一手，`raw_clip` 的候选场景因此吃满 `_fit_duration` 的预算，成片会越过 `strategy.max_duration_s`。这个数必须交给业主（《开放问题》#5），但**不该靠跑一次注定红的渲染去拿**——那是把 3 分钟的门禁时间花在一个已经算出来的结论上。
+**这一步不渲染、不写库、不跑 LLM**，只用真编排器在活库的只读副本上算 planned 源秒。它存在的全部理由是 Task 9 Step 2.8 末尾那条发现：`--variants 1` 时 `deal_windows(windows, 1)` 把**全部**集发进同一手，`raw_clip` 的候选场景因此吃满 `_fit_duration` 的预算，成片会越过 `strategy.max_duration_s`。**C24 裁决后这不再是缺陷、而是规划预算的预期语义**（《开放问题》#5 已关闭），门禁容差 ×1.07 已吸收它。本步用只读重算便宜地确认 planned 那个数（**296.21s / 51 段 / 9 集**）；**真渲染交给 Step 3e**——裁决后 K=1 渲染不再注定红（303s < 321s 容差），故可以真渲一条交业主判形态。
 
 把下面这份存成 `D:/tmp/p2a_measure_k1.py`（**它只以 `mode=ro` 打开活库，不写任何东西，也不打印集 id 或任何标识符**）：
 
@@ -7543,11 +7549,26 @@ Expected（**审计时用一个与真编排器同规则的重算得到，并与 
   …（其余两手与 Step 3c 的表一致）
 ```
 
-**读到 `← 顶穿预算` 那一行要做的三件事**（不要就地改门禁阈值——C6 已经裁定阈值不动，而阈值确实不该动，它量的是用户的设置）：
+**读到 `← 顶穿预算` 那一行要做的三件事**（门禁比较式的改动已在 Task 9 Step 2.8 按 C24 定死，**不要在 Task 11 就地再改**；设置值 `strategy.max_duration_s` 始终不动，它量的是用户的规划预算）：
 
 1. 把这一行的三个数（手覆盖的集数、`planned`、预估成片）抄进 Step 5 的实测记录；
 2. 确认 `subtitle_flow` **没有**顶穿（它被 `_MAX_SCENES`=6 × `_FLOW_SCENE_S`=8 卡住，与预算无关）——所以这不是"规则类整体超时长"，是 `raw_clip` 一个模式的问题，因为它没有场景条数上限；
-3. 交《开放问题》#5：修法是给 `_fit_duration` 的预算留一档**编码漂移余量**（与它已经给引子槽位预留 `_INTRO_MAX_S` 同一个手法），余量 ≥6.1%（两个无旁白模式的实测漂移比值里较大的那个）。**这一档常数取多少是设计决定，本审计不替业主拍**，故它落在 Task 3c 而不是这里。
+3. **《开放问题》#5 已由 C24 关闭**：裁决**不给 `_fit_duration` 留漂移余量**（原拟的 `_JITTER_HEADROOM_RATIO ≥6.1%` 一律不做），上限就是规划预算、门禁容差 ×1.07 吸收漂移（Task 9 Step 2.8）。本步只确认 planned 那个数；**成片形态交 Step 3e 真渲一条给业主判**（《开放问题》#1）。
+
+- [ ] **Step 3e: 真渲一条 K=1 的 `raw_clip`，把 rendered 形态交给业主（C24 后新增）**
+
+**为什么现在能渲**：C24 之前 K=1 的 `raw_clip` 成片预估 ≈303s > 门禁的 300s，渲了必红，故 Step 3d 只算不渲。C24 把门禁时长断言改成 `duration_s > strategy.max_duration_s × 1.07`（活库上限 300 ⇒ 容差 **321s**），303s < 321 ⇒ **这一跑现在会绿**，于是可以真渲一条交业主判形态——《开放问题》#1：`raw_clip` 从"三镜头爽点剪辑"（ep1 单集 **15.13s / 3 段 / 1 集**）变成"五分钟多集混剪"，业主看过真片再定要不要限制。
+
+Run: `cd /d/PersonProjects/DramaClip && .venv/Scripts/python.exe scripts/verify_modes.py --modes raw_clip --variants 1 --out D:/tmp/dc-p2a-rawclip > /tmp/p2a-rawclip.log 2>&1; echo REAL_EXIT=$?`
+
+Expected: **`REAL_EXIT=0`**（裁决后成片落在上限 300 与容差 321 之间属预期，门禁绿），表格里 `raw_clip` 一行 `状态=completed`、`来源=rule`、`TTS=0`、**`时长s` ≈303**、`段数` **51**、`集数` **9**。**这三个数（rendered 时长 / 段数 / 集数）连同那条真片的路径（`D:/tmp/dc-p2a-rawclip`）就是交业主判形态的全部依据**，抄进 Step 5。真机数字会因素材与消重抖动差几秒，**差 5% 以内都算对上 Step 3d 的预估**（与 Step 3c 同口径）。
+
+- 若 `REAL_EXIT=1` 且失败串是时长：**先确认 Task 9 Step 2.8 的 ×1.07 比较式真落地了**（`grep -n "max_duration_s" scripts/verify_modes.py`，看那一行是否乘了 1.07）——没落地是 Task 9 漏改、不是产品坏了；落地了还红（时长 > 321）才是真 runaway，回头查 `_fit_duration` 的预算截断。
+- 若 `集数` ≠ 9 或 `段数` ≠ 51：与 Step 3d 的只读重算对不上，查 `deal_windows(windows, 1)` 是否真把全集发进一手、`_casting_for` 的盖章是否漏集。
+
+耗时提示：`raw_clip` 无 TTS，P-1.5 实测 15s 片渲 6.1s；303s 片约 2 分钟，用 `run_in_background`，不要中途判死。
+
+**这一步不替业主判形态**：它只交出 rendered 时长/段数/集数与真片路径（业主若要看片本身，在 Step 5 清理前先看 `D:/tmp/dc-p2a-rawclip` 里那条成片——三个数是耐久的可记录证据，片是临时的）。要不要给 `raw_clip` 限取材集数或时长是《开放问题》#1，业主看过片再定，本批次不预设结论、也不在此设计限制方案。
 
 - [ ] **Step 4: 用耳朵验收一条（不可省略）**
 
@@ -7570,7 +7591,7 @@ Expected（**审计时用一个与真编排器同规则的重算得到，并与 
 - Step 3 的 `集数` 与 `时长s` 实测值（与预估的 ≈60.5s 对一下）；
 - Step 3b 里 `dialogue_narration` 的 `来源`/`集数`/`TTS`/`带旁白` 四列实测值；
 - Step 3c 那张表的**六格实测**（两模式 × 三条），逐格与预估对齐或写明偏差；
-- **Step 3d 的 `← 顶穿预算` 那一行三个数**（手覆盖集数 / planned / 预估成片），并在《开放问题》#5 下面追加一行"真机实测已确认/未确认"；
+- **Step 3d 的 `← 顶穿预算` 那一行三个数**（手覆盖集数 / planned / 预估成片）与 **Step 3e 的 rendered 三个数**（时长 / 段数 / 集数）+ 真片路径，并在《开放问题》#1 下面追加一行"真机渲染的 `raw_clip` 形态已交业主：rendered Xs / Y 段 / Z 集"（#5 已由 C24 关闭，不再追加）；
 - Step 4 的耳朵结论，逐条 ①–⑤；
 - 与预期不符之处、以及计划里被证伪的假设（如有）。
 
@@ -7581,7 +7602,7 @@ Expected（**审计时用一个与真编排器同规则的重算得到，并与 
 ```bash
 cd /d/PersonProjects/DramaClip
 for d in tmp_dc-verify-data_*; do cmd //c "rmdir $(cygpath -w "$PWD/$d/models")" 2>/dev/null || true; done
-rm -rf tmp_dc-verify-data_* tmp_dc-verify_* D:/tmp/dc-p2a D:/tmp/dc-p2a-plan D:/tmp/dc-p2a-cross D:/tmp/dc-p2a-rule D:/tmp/p2a_measure_k1.py
+rm -rf tmp_dc-verify-data_* tmp_dc-verify_* D:/tmp/dc-p2a D:/tmp/dc-p2a-plan D:/tmp/dc-p2a-cross D:/tmp/dc-p2a-rule D:/tmp/dc-p2a-rawclip D:/tmp/p2a_measure_k1.py
 ls data/models/tts/kokoro/*/ | head -3   # 必须仍在：联接被删过一次就再也没有了
 ```
 
@@ -7631,7 +7652,7 @@ git commit -m "docs(plan): 记录 P-2a 真机复验结果与实测修正"
 
 **为什么保留这份记录而不是把整节删掉**：本文件里还有三处正文点名"P-2c"（《计划修订记录》R2、《修订记录》C1/C4/C6、《定案二》末段），它们是**当时的真相**——R2 记的是"这次收窄不是计划自己能定的"，C1 记的是"业主拒绝签字"。删掉这一节会让那三处引用悬空，而悬空引用正是"下一个人以为还有 P-2c 可以做"的入口。**取消要留痕，取消的痕迹不能自己变成一个新的悬空指针。**
 
-**真的还开着的两条**（都不是 P-2c，都在《开放问题》里）：#1 规则类的"内容 = 一窗"与 `raw_clip` 的形态变化；#5 `raw_clip` 在 `--variants 1` 下吃满时长预算（Task 9 Step 2.8 的实测发现，修法在 `_fit_duration`）。
+**真的还开着的一条**（不是 P-2c，在《开放问题》里）：#1 规则类的"内容 = 一窗"与 `raw_clip` 的形态变化（owner-deferred 到真机复验，Task 11 Step 3e 真渲一条交业主判）。原 #5（`raw_clip` 在 `--variants 1` 下吃满时长预算、成片越上限）已由 **C24 关闭**——上限重定义为规划预算、门禁容差 ×1.07，修法在门禁比较式而非 `_fit_duration`。
 
 ### P-3：回收站 / 本地数据（**这一条是 P-2a 新产生的义务，不是原有的**）
 
@@ -7659,7 +7680,7 @@ git commit -m "docs(plan): 记录 P-2a 真机复验结果与实测修正"
 7. `export.submit` 对一个已规划好的 batch 提交后，`export_jobs` 行数等于该 batch 的方案行数（一条方案一行），且每行都有对应的 `jobs` 行（`type='export'`、`ref_id=export_id`）。
 8. 本计划里每一张变异检查表都逐条跑过并逐条按字节还原。
 9. **规格 §1 的机器判据过了**：Task 11 Step 1 带 `--require-cross-episode` 跑完 `REAL_EXIT=0`，即 `full_narration` 的三条方案里**至少一条**的时间轴横跨 ≥2 集；Step 3c 的规则类三手各 3-4 集（**零 LLM 那一族的跨集证据**，与 Step 1 各覆盖一半）。`ultra_short_hook` 按 C13 豁免，其 `集数` 期望值是 **1**。
-10. **《开放问题》#5 有明确处置**：`raw_clip` 在 `--variants 1`（门禁默认口径）下会把 `_fit_duration` 的预算吃满、成片越过用户设的 `strategy.max_duration_s`（活库实测 planned **296.21s / 51 段 / 9 集** → 预估成片 **≈303s** > 300）。收口前必须二选一并写进实测记录：**要么**在 `_fit_duration` 里给编码漂移留出余量（≥6.1%，两个无旁白模式的实测比值）并重跑 Step 3d 确认不再顶穿，**要么**业主明确接受"K=1 的 `raw_clip` 会略超时长上限"并把它记进《已知不做》。**不许既不改也不记就签收**——那是规格 §9.5「参数未生效」那一类，而它同时会让九模式门禁在默认口径下红一条。
+10. **C24 裁决落地（原《开放问题》#5 已关闭）**：`strategy.max_duration_s` 是规划预算，成片越过上限属预期（活库实测 K=1 的 `raw_clip` planned **296.21s / 51 段 / 9 集** → 预估成片 **≈303s** > 上限 300）。收口前必须**两条都做到**并写进实测记录：① **门禁时长断言改对**——`scripts/verify_modes.py` 的比较式是 `duration_s > strategy.max_duration_s × 1.07`（不是裸 `> max_duration_s`），且 Task 11 Step 3e 真渲 K=1 的 `raw_clip` 跑完 `REAL_EXIT=0`、rendered 时长落在 300 与 321 之间；② **设置页 help 落地**——`desktop/src/features/settings/sections.ts` 的 `strategy.max_duration_s` help 写明"规划预算、成片略长"（规格 §4.6、§3.3 该行）。**明确禁止在 `_fit_duration` 里预留漂移余量**（C24 否决原拟的 `_JITTER_HEADROOM_RATIO`）。两条缺一即未收口：缺①门禁会在默认口径红一条，缺②就是规格 §9.5「参数未生效」（参数语义改了却不可见）。
 
 ## 已知不做 / 不在本批
 
@@ -7685,6 +7706,7 @@ git commit -m "docs(plan): 记录 P-2a 真机复验结果与实测修正"
 - **原来问的是**："§1 的跨集是不是只要求 K 条合起来覆盖全剧？" —— **已被业主回答：不是，每条方案自己就要跨集。** 这一问关闭，P-2c 取消（见《P-2c 取消记录》）。
 - **现在问的是**：规格 §4.3 ④ 定「规则类 = 全剧 top-K 冲突窗」，本批次交付的是"用冲突窗**排名**决定条数与每条的取材集组合，再让编排器在这些集的全部场景上照常选"，**不是**"每条方案的内容就是它那一窗"。差别是量级上的：一个窗只有 3-25s（`_RAW_CLIP_MIN_S`/`_RAW_CLIP_MAX_S`），而活库实测 `raw_clip` 今天是 **15.13s / 3 段 / 1 集**，跨集一手（K=3）是 **117.89s / 21 段 / 4 集**——**7.8 倍**，从"三镜头爽点剪辑"变成"两分钟多集混剪"。
 - **要不要改成"内容 = 一窗"**：改了 `raw_clip` 每条只有 3-25s，而 `subtitle_flow` 的 CTA 卡片段（`_CTA_FALLBACK_S` = 3.0s）会比正片还长。**需要业主定**：规则类的每条方案应该是"一窗"还是"一手集里的全部合格场景"。本批次按后者实现，并在 `top_conflict_windows` 的 docstring 里如实写了这个差别。
+- **owner-deferred 到真机复验（C24）**：形态这一问业主看过真机渲染的成片再定，本批次不预设结论。Task 11 **Step 3e** 真渲一条 **K=1** 的 `raw_clip`（活库重算 planned **296.21s / 51 段 / 9 集**、成片 ≈303s——比正文引的 K=3 一手 117.89s 更极端，因为 K=1 把全剧发进一手），交出 rendered 时长/段数/集数与真片路径供业主判。**"时长越上限"那一半已由 #5（C24）关闭**（规划预算 + 门禁 ×1.07），#1 只剩"形态要不要限集数/时长"这半。
 
 **#2 `serial_per_episode` 归哪一侧 —— 已关闭（`4228bef`）**
 
@@ -7700,13 +7722,12 @@ git commit -m "docs(plan): 记录 P-2a 真机复验结果与实测修正"
 - `exclude_plan_ids` 只贡献角度名（`_excluded_angle_names` 跳过空 `angle`），而窗口榜是确定性的 ⇒ 重掷得到**同一条方案**。本批次如实留痕（`_rule_variants` 的 `if rerolled:` 那一行），但按钮按下去什么也不会变。
 - **需要业主定**：要不要把规则类的「重掷此条」换成「改方案数/改素材」——那是 P-2.5 队列页与阶段③ 的展示决策，本批次不做界面。
 
-**#5 `raw_clip` 在 `--variants 1` 下吃满时长预算，成片越过用户设的上限（本轮审计新查出）**
+**#5 `raw_clip` 在 `--variants 1` 下吃满时长预算、成片越过用户设的上限 —— 已关闭（C24，2026-09-12 业主裁决）**
 
-- **数字**（活库只读重算，方法见 Task 11 Step 3d；同一套重算在 Task 3c Step 8 那张表的五个点上逐位对上）：`--variants 1` ⇒ `deal_windows(windows, 1)` 把**全部 10 集**发进同一手 ⇒ 合格场景（分数 ≥70、时长 3-25s）共 **59** 个、**346.5** 场景秒 > 预算 **300** ⇒ `_fit_duration` 吃满，planned **296.21s / 51 段 / 覆盖 9 集**（ep10 一帧都拿不到）。`raw_clip` 无旁白槽位，成片 = planned × 编码漂移，P-1.5 实测漂移 **1.0231**（`subtitle_flow` 同类 **1.0609**）⇒ 成片 **≈303.0s**（保守 **314.3s**）> 门禁的 `strategy.max_duration_s` = **300** ⇒ 时长断言红、`REAL_EXIT=1`。
-- **为什么单集时代不出这件事**：ep1 单集的合格场景只有 **15.1s / 3 段**，离 300 差 20 倍。这是**跨集裁决直接产生的新失败形态**。
-- **它不只是门禁红**：用户设的"最长时长"没生效，属规格 §9.5「参数未生效」那一类。
-- **修法在 `_fit_duration`（Task 3c），不在门禁阈值**（C6 已裁定阈值不动，且阈值确实不该动——它量的是用户的设置）：给预算留一档**编码漂移余量**，与它已经给引子槽位预留 `_INTRO_MAX_S` 同一个手法。**余量取多少需要业主/执行者拍**：实测依据是 ≥6.1%（两个无旁白模式的漂移比值里较大的那个），即 300s 的预算收到 ≤282s；取整到 `_JITTER_HEADROOM_RATIO = 0.07` 或固定 20s 都能覆盖，两者对 `intro_narration`（已预留 30s、成片 ≈286s）都还有余量。**本审计不替业主拍这个数**，故《完成判据》#10 要求收口前二选一：改，或明确接受并记进《已知不做》。
-- **顺带一条同源的产品问题**：K=1 时 `raw_clip` 的取材集是**全剧 10 集**、成片 ≈5 分钟。规格 §1 说「1..K 条」，K=1 是合法输入，而"一部 5 分钟的纯原片混剪"是不是操盘手要的`raw_clip`，与 #1 是同一个问题的两面。
+- **裁决**：`strategy.max_duration_s` / `min_duration_s` 重定义为**规划预算，不是交付时长**。**不在 `_fit_duration` 里预留编码漂移余量**（原拟的 `_JITTER_HEADROOM_RATIO = 0.07` / 固定 20s 一律不做）：planned ≤ 上限仍由 `_fit_duration` 保证，planned→成片 的漂移改由**门禁容差**吸收——时长断言从 `duration_s > strategy.max_duration_s` 改成 `duration_s > strategy.max_duration_s × 1.07`（Task 9 Step 2.8）。**可见性**：设置页 `strategy.max_duration_s` 的 help 写明"规划预算、成片略长"（规格 §4.6、§3.3 该行、`desktop/src/features/settings/sections.ts`），于是它**不再是**规格 §9.5「参数未生效」——参数确实生效（planned ≤ 上限恒成立），只是语义被如实标注。
+- **数字（保留为证据）**：活库只读重算（方法见 Task 11 Step 3d，与 Task 3c Step 8 那张表五点逐位对上）：`--variants 1` ⇒ `deal_windows(windows, 1)` 把**全部 10 集**发进同一手 ⇒ 合格场景（分数 ≥70、时长 3-25s）共 **59** 个、**346.5** 场景秒 > 预算 **300** ⇒ `_fit_duration` 吃满，planned **296.21s / 51 段 / 覆盖 9 集**（ep10 一帧都拿不到）。成片 = planned × 编码漂移，P-1.5 Task 10 实测 **1.0231**（`raw_clip` 15.48/15.13）、同类 **1.0609**（`subtitle_flow` 32.43/30.57）⇒ **≈303.0s**（保守 **314.3s**），两者都 < `300 × 1.07 = 321s` ⇒ 门禁绿。单集时代不出这件事：ep1 合格场景只有 **15.1s / 3 段**，离 300 差 20 倍。
+- **漂移成因写准（C24 核过代码，纠正"atempo 致漂"的口传）**：主体**不是** atempo——`speed_factor` 0.996–1.004（`dedup/params.py:29`）经 `setpts`/`atempo`（`encoder.py:196,263`）只值 ±0.4016%（饱和片 ≈1.19s）；**主体是切点安全抖动** `jitter.safe_times`（`encoder.py:371`）把入/出点外移 ≤1.0s（`jitter.py:24` `_MAX_ADJUST_S`，只延长不缩短），51 段累加 ≈4s。故容差 1.07 取自实测比值 1.0609 上整，**不能只按 atempo 推**（atempo + 帧取整只给 `296.21 × 1.004016 + 51/30 ≈ 299.1s` < 实测预估 303.0s）。
+- **仍开着的那一半转 #1**：K=1 时 `raw_clip` 取材全剧、成片 ≈5 分钟，**形态**变没变、要不要限集数/时长，归 #1，owner-deferred 到真机复验（Task 11 Step 3e 真渲一条交业主判）。**保留 #5 编号只为让正文里"《开放问题》#5"的引用不悬空**（C21/C23、Task 9 Step 2.8、Task 11 Step 3d、《完成判据》#10 都点过它），不是还开着。
 
 ---
 
@@ -7774,4 +7795,4 @@ git commit -m "docs(plan): 记录 P-2a 真机复验结果与实测修正"
 - 规格 §3.3.1 降级裁决表 `:126` 的「位置」列点名 `api/narration._generate_one`，Task 6 删掉那个函数 → Task 10 Step 4c 改成 `_plan_one`（裁决列与理由列一字不动）。
 - `protocol/schemas/jobs.json` 的 `JobInfo.type` 词表缺 `semantic`、含即将消失的 `produce` → Task 9 Step 3 一并修正。
 - `narration_plans.tts_segments` 是死列 → Task 10 Step 4 登记，不在本批删。
-- **《开放问题》这一节原先不存在，而正文有五处点名到它** → 本轮补上（#1–#5，其中 #2 已关闭、#5 是本轮新查出的实测缺陷）。悬空引用与悬空指针是同一类缺陷：读的人会以为"另有一节写着答案"。
+- **《开放问题》这一节原先不存在，而正文有五处点名到它** → 本轮补上（#1–#5，其中 #2 已关闭（`4228bef`）、#5 已关闭（C24：规划预算 + 门禁 ×1.07）、#1 的 `raw_clip` 形态半开、owner-deferred 到真机复验）。悬空引用与悬空指针是同一类缺陷：读的人会以为"另有一节写着答案"。

@@ -62,7 +62,7 @@ const EXPORT_SECTION: SectionSpec = {
       type: 'number',
       min: 30,
       max: 1200,
-      help: '编排按此预算挑选场景；推广建议 60-180，解说涨粉建议 180-300',
+      help: '编排按此预算挑选场景；它是规划预算不是交付硬上限，成片逐段外移切点、消重微变速后会略长（实测 ≤6%）。推广建议 60-180，解说涨粉建议 180-300',
     },
     {
       key: 'strategy.min_duration_s',
