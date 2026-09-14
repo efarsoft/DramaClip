@@ -85,6 +85,89 @@ def build_plan(
     raise ValueError(f"模式暂未支持: {mode}（{MODE_LABELS.get(mode, mode)} 将随后续阶段启用）")
 
 
+def top_conflict_windows(
+    episodes: list[tuple[int, list[ConflictScore]]],
+    limit: int,
+) -> list[tuple[int, ConflictScore]]:
+    """全剧 top-K 冲突窗，**按集去重**（每集只留它排名最高的那一窗），按窗口名次返回。
+
+    规格 §4.3 ④：「条数按模式族分别算：解说类 = K，规则类 = 全剧 top-K 冲突窗
+    （两者不同源，已由用户定案）」。规则类两模式（`raw_clip` / `subtitle_flow`）
+    不经选题模型（规格 §4.2「仅「纯原片剪辑」「字幕金句流」不依赖 LLM」），
+    它们的条数因此必须另有一个来源，就是这个榜单。**本函数不发任何网络请求。**
+
+    为什么按集去重：`build_raw_clip` 与 `build_subtitle_flow` 都是**确定性纯函数**——
+    同一组的两个不同窗口喂进去会得到逐字节相同的方案。那不是 K 条互异，是 1 条复制 K 份，
+    而且会被 `overlap` 判成 100% 重叠、把 K-1 条报成失败。所以"窗"在这里的作用是把
+    **集**排出名次；排完由下面的 `deal_windows` 轮转发成 K 手，一手一条方案。
+
+    **仍然做不到的那一半，写在这里而不是藏在代码里**：让每条方案的内容真的等于它那一窗。
+    原先的理由是技术的（`ConflictScore` 不带集身份、`_fit_duration` 按单集截断），
+    **那个前提已经被 Task 3c 拆掉了**：集身份有了（`casting.EpisodeScene`），预算也重分了
+    （末场景豁免删掉、引子槽位预留 `_INTRO_MAX_S`）。剩下的理由是**产品**的：一个窗是
+    3-25s，"内容 = 一窗"会让 `raw_clip` 的每条方案掉到 3-25 秒，而活库实测今天它是
+    15.13s（三个场景）。所以本函数交付的是"用全剧冲突榜决定**条数与每条的取材集组合**"，
+    不是"每条方案就是一窗"。这个差别记在计划《定案四》末段与《开放问题》#1，不藏在这里。
+
+    排序键 `(-score, 集号, scene_index)`：分析层给的是 0-100 的**整数**分，同分在全剧
+    尺度上是常态；只按 -score 排时结果稳定于**输入顺序**，而输入顺序来自
+    `episodes_repo.list_by_project`，那个顺序没有契约。补两个次键才有"整组重规划可复现"。
+
+    返回条数可以少于 limit（集不够）。规格 §1 的原话是「每模式产出 **1..K** 条」，
+    少出是合法形状；**但调用方必须留痕**（规格 §3.3 静默禁止），见 `api/narration.py`
+    的 `_rule_variants`。本函数自己不发明错误语义：空榜就返回空表。
+
+    `limit < 1` 抛 ValueError：与 `angles.select_angles` 的 `k < 1` 同一口径——
+    条数是调用方的契约，不该在这里静默变成空表。
+    """
+    if limit < 1:
+        raise ValueError(f"窗口数 limit 必须 ≥ 1，实得 {limit}")
+    ranked = sorted(
+        ((number, scene) for number, scenes in episodes for scene in scenes),
+        key=lambda item: (-item[1].score, item[0], item[1].scene_index),
+    )
+    picked: list[tuple[int, ConflictScore]] = []
+    seen: set[int] = set()
+    for number, scene in ranked:
+        if number in seen:
+            continue
+        seen.add(number)
+        picked.append((number, scene))
+        if len(picked) == limit:
+            break
+    return picked
+
+
+def deal_windows(
+    windows: list[tuple[int, ConflictScore]], hands: int
+) -> list[list[int]]:
+    """把排名后的冲突窗**轮转**发成 hands 手，每手是它拿到的集号（升序、手间互不相交）。
+
+    规格 §4.3 ④ 定的是**条数**（「规则类 = 全剧 top-K 冲突窗」），规格 §1 定的是
+    **每条方案的形状**（「跨集方案」）。一集一条满足前者、违反后者；把窗轮转发成 K 手
+    同时满足两者，而且手与手拿到的是**互不相交的集**，于是取材重叠恒为 0——不必等
+    `overlap` 事后拦（《定案四》第 2 点原本靠"按集去重"换来的那条性质，跨集之后由
+    "手间不共集"接着保证）。
+
+    轮转（第 j 手拿排名 j, j+hands, j+2·hands …）而不是切块（前几集全给第 1 手）：
+    切块会让第 1 手独占全剧最狠的几集，三条片的强弱差一个量级；轮转让每手都拿到
+    一个高分窗，强弱可比。**实测**（活库十集、K=3）：排名 `[6,7,8,2,3,4,9,10,1,5]`
+    → `[[2,5,6,9],[3,7,10],[1,4,8]]`。
+
+    返回条数可以少于 hands（集不够）：规格 §1 允许「每模式产出 1..K 条」，
+    少出由调用方留痕（`api/narration.py::_rule_variants`），不在这里发明错误语义。
+    **集数 < 2 × hands 时每手会退化成一集**（3 集发 3 手就是 1/1/1），
+    那不是缺陷是算术：互不相交的多集手至少需要 2 × hands 集。调用方必须留痕。
+    `hands < 1` 抛，与 `top_conflict_windows` 的 `limit < 1` 同一口径。
+    """
+    if hands < 1:
+        raise ValueError(f"手数 hands 必须 ≥ 1，实得 {hands}")
+    dealt: list[list[int]] = [[] for _ in range(min(hands, len(windows)))]
+    for rank, (number, _scene) in enumerate(windows):
+        dealt[rank % len(dealt)].append(number)
+    return [sorted(hand) for hand in dealt]
+
+
 def build_from_script_episodes(
     episode_map: dict[int, tuple[str, list[AsrSegment]]],
     durations: dict[int, float],
