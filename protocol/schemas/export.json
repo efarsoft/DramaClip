@@ -84,31 +84,29 @@
   },
   "x-methods": [
     {
-      "name": "export.start",
-      "summary": "按编排方案导出成片（长任务 job：段切割+消重+遮罩+拼接+编码）",
+      "name": "export.submit",
+      "summary": "阶段4：把已规划好的方案排队渲染（一条方案一个 export job）",
       "params": {
         "type": "object",
-        "required": [
-          "plan_id"
-        ],
+        "required": ["plan_ids"],
         "properties": {
-          "plan_id": {
-            "type": "string"
-          },
-          "bitrate_kbps": {
-            "type": "integer"
+          "plan_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" }
           }
-        }
+        },
+        "additionalProperties": false
       },
       "result": {
         "type": "object",
-        "required": [
-          "job_id"
-        ],
+        "required": ["exports", "rejected"],
         "properties": {
-          "job_id": {
-            "type": "string"
-          }
+          "exports": {
+            "type": "array",
+            "items": {"type": "object" }
+          },
+          "rejected": {"type": "array" }
         }
       }
     },

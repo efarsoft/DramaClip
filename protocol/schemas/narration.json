@@ -37,9 +37,52 @@
         },
         "created_at": {
           "type": "integer"
+        },
+        "angle": {
+          "type": "string",
+          "description": "卖点角度名（界面金色标签）；无解说的模式为空串"
+        },
+        "angle_reason": {
+          "type": "string",
+          "description": "模型自选这条角度的理由（规格 4.3 卡片四要素之一）"
+        },
+        "variant_index": {
+          "type": "integer",
+          "description": "1..K 的槽位号；不靠 created_at 推，毫秒精度下同批会撞"
+        },
+        "overlap_max": {
+          "type": ["number", "null"],
+          "description": "与同 batch 同模式已接受兄弟方案的最大取材重叠（Jaccard，源素材秒）；null=首条无兄弟"
+        },
+        "batch_id": {
+          "type": ["string", "null"],
+          "description": "一次 plan_variants 调用产出全组的标识，取该作业 job_id"
         }
       }
     },
+    "PlanCost": {
+      "type": "object",
+      "required": ["copy_llm_calls", "tts_calls"],
+      "properties": {
+        "copy_llm_calls": {
+          "type": "integer",
+          "description": "本条方案的成稿往返数：有旁白槽位即 1，raw_clip/subtitle_flow 为 0。选题往返是模式级共担，不计在单条账上"
+        },
+        "tts_calls": {
+          "type": "integer",
+          "description": "配音段数 = 旁白槽位数"
+        }
+      }
+    },
+    "PlanDetail": {
+      "type": "object",
+      "required": ["plan", "cost"],
+      "properties": {
+        "plan": { "$ref": "#/x-models/NarrationPlan" },
+        "cost": { "$ref": "#/x-models/PlanCost" }
+      }
+    },
+
     "PlanMode": {
       "type": "string",
       "enum": [
@@ -79,58 +122,19 @@
   },
   "x-methods": [
     {
-      "name": "narration.generate_plans",
-      "summary": "为选中模式生成编排方案（长任务 job：编排 + TTS 合成；raw_clip 无 TTS）",
-      "params": {
-        "type": "object",
-        "required": [
-          "project_id",
-          "modes"
-        ],
-        "properties": {
-          "project_id": {
-            "type": "string"
-          },
-          "modes": {
-            "type": "array",
-            "items": {
-              "$ref": "#/x-models/PlanMode"
-            }
-          },
-          "episode_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "target_duration_s": {
-            "type": "number"
-          }
-        }
-      },
-      "result": {
-        "type": "object",
-        "required": [
-          "job_id"
-        ],
-        "properties": {
-          "job_id": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    {
       "name": "narration.list_plans",
       "summary": "项目编排方案列表",
       "params": {
-        "type": "object",
         "required": [
           "project_id"
         ],
         "properties": {
           "project_id": {
             "type": "string"
+          },
+          "batch_id": {
+            "type": "string",
+            "description": "只取该 batch（一次 plan_variants 调用）的方案；缺省取项目全部"
           }
         }
       },
@@ -142,37 +146,55 @@
       }
     },
     {
-      "name": "narration.produce",
-      "summary": "组合出片：逐模式 编排(文案/配音)→自动渲染成片；出片记录随产随记（job）",
+      "name": "narration.plan_variants",
+      "summary": "阶段3：为选中模式各产出 K 条卖点互异的方案，只规划不渲染（job）",
       "params": {
         "type": "object",
-        "required": [
-          "project_id",
-          "modes"
-        ],
+        "required": ["project_id", "modes"],
         "properties": {
-          "project_id": {
-            "type": "string"
-          },
+          "project_id": { "type": "string" },
           "modes": {
             "type": "array",
-            "items": {
-              "type": "string"
-            }
+            "minItems": 1,
+            "items": { "$ref": "#/x-models/PlanMode" }
+          },
+          "k": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "description": "每模式方案数；缺省读 narration.variants_per_mode（项目级覆盖优先）。minimum/maximum 在本仓只是文档：越界由 api 层手写拦下并回 -32303"
+          },
+          "exclude_plan_ids": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "重掷此条：被替换的方案，其角度名进选题排除清单。方案行永不覆写"
           }
-        }
+        },
+        "additionalProperties": false
       },
       "result": {
         "type": "object",
-        "required": [
-          "job_id"
-        ],
+        "required": ["job_id", "k", "batch_id"],
         "properties": {
-          "job_id": {
-            "type": "string"
+          "job_id": { "type": "string" },
+          "k": { "type": "integer" },
+          "batch_id": {
+            "type": "string",
+            "description": "本组方案的 batch_id（等于 job_id），供 narration.list_plans 按组取"
           }
         }
       }
+    },
+    {
+      "name": "narration.get_plan",
+      "summary": "单条方案详情 + 成本账（阶段3 只读详情、成品库跳回方案）",
+      "params": {
+        "type": "object",
+        "required": ["plan_id"],
+        "properties": { "plan_id": { "type": "string" } },
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/x-models/PlanDetail" }
     },
     {
       "name": "narration.list_styles",

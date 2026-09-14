@@ -9,6 +9,7 @@ import type {
   DashboardSummary,
   DramaClipBridge,
   ExportJob,
+  ExportSubmitResult,
   HealthResult,
   NarrationMode,
   NarrationPlan,
@@ -125,8 +126,10 @@ export const narrationApi = {
 } as const;
 
 export const exportApi = {
-  start: (planId: string): Promise<{ job_id: string }> =>
-    rpc<{ job_id: string }>('export.start', { plan_id: planId }),
+  submit: (planIds: string[]): Promise<ExportSubmitResult> =>
+    rpc<ExportSubmitResult>('export.submit', { plan_ids: planIds }),
+  retry: (exportId: string): Promise<{ job_id: string; export_id: string }> =>
+    rpc<{ job_id: string; export_id: string }>('export.retry', { export_id: exportId }),
   list: (projectId: string): Promise<ExportJob[]> =>
     rpc<ExportJob[]>('export.list', { project_id: projectId }),
 } as const;

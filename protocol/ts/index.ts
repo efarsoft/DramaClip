@@ -191,6 +191,54 @@ export interface NarrationPlan {
   readonly plan_data: PlanData;
   readonly status: string;
   readonly created_at: number;
+  /** 卖点角度名（界面金色标签）；无解说的模式为空串。 */
+  readonly angle?: string;
+  /** 模型自选这条角度的理由（规格 4.3 卡片四要素之一）。 */
+  readonly angle_reason?: string;
+  /** 1..K 的槽位号。 */
+  readonly variant_index?: number;
+  /** 与同 batch 同模式已接受兄弟方案的最大取材重叠；null=首条无兄弟。 */
+  readonly overlap_max?: number | null;
+  /** 一次 plan_variants 调用产出全组的标识（= 该作业 job_id）。 */
+  readonly batch_id?: string | null;
+}
+
+/** 一条方案的成本账（规格 4.4 成本预估卡数据源）。 */
+export interface PlanCost {
+  readonly copy_llm_calls: number;
+  readonly tts_calls: number;
+}
+
+/** narration.get_plan 返回体。 */
+export interface PlanDetail {
+  readonly plan: NarrationPlan;
+  readonly cost: PlanCost;
+}
+
+/** narration.plan_variants 返回体。 */
+export interface PlanVariantsResult {
+  readonly job_id: string;
+  readonly k: number;
+  readonly batch_id: string;
+}
+
+/** export.submit 接受的一条：方案 → 导出记录 → 任务。 */
+export interface ExportSubmission {
+  readonly plan_id: string;
+  readonly export_id: string;
+  readonly job_id: string;
+}
+
+/** export.submit 拒绝的一条，带人读理由（规格 4.4 队列页逐条显示）。 */
+export interface ExportRejection {
+  readonly plan_id: string;
+  readonly reason: string;
+}
+
+/** export.submit 返回体。 */
+export interface ExportSubmitResult {
+  readonly exports: readonly ExportSubmission[];
+  readonly rejected: readonly ExportRejection[];
 }
 
 export interface ExportJob {
@@ -330,11 +378,11 @@ export const METHOD_NAMES = [
   'analysis.status',
   'analysis.cancel',
   'analysis.results',
-  'narration.generate_plans',
+  'narration.plan_variants',
+  'narration.get_plan',
   'narration.list_plans',
-  'narration.produce',
   'narration.list_styles',
-  'export.start',
+  'export.submit',
   'export.retry',
   'export.list',
   'export.list_works',

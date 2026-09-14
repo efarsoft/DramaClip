@@ -1,4 +1,4 @@
-"""export 命名空间：start / retry（均为 job）/ list / list_works。"""
+"""export 命名空间：submit（按方案排队渲染）/ retry（幂等重跑）/ list / list_works。"""
 
 from __future__ import annotations
 
@@ -25,6 +25,8 @@ from dramaclip.infra.storage.repos import projects as projects_repo
 from dramaclip.transport.rpc import Router, RpcDomainError
 
 _ERR_PLAN_NOT_FOUND = -32401
+_ERR_NO_PLANS = -32406
+_ERR_PLAN_NOT_RENDERABLE = -32407
 _ERR_EXPORT_NOT_FOUND = -32404
 _ERR_EXPORT_NOT_RETRYABLE = -32405  # 导出域 -32400~-32499（见 common.json x-error-codes）
 
@@ -40,7 +42,7 @@ def _safe_filename(name: str) -> str:
 
 
 def register(router: Router, context: AppContext) -> None:
-    router.register("export.start", lambda params: start(context, params))
+    router.register("export.submit", lambda params: submit(context, params))
     router.register("export.retry", lambda params: retry(context, params))
     router.register("export.list", lambda params: list_exports(context, params))
     router.register("export.list_works", lambda params: list_works(context, params))
@@ -50,10 +52,9 @@ def register(router: Router, context: AppContext) -> None:
 class ExportRun:
     """一次导出渲染的不变输入（export_id 之外全部只读，渲染期间不会改写）。
 
-    收成对象前这些值以位置参数在 start/retry/produce → _run_export → render_export
-    链路上传递，`export_id` 与 `project_id` 同为 str 且相邻——传颠倒不会报错，
-    只会把成片渲染进另一个项目。三处调用点共用一个名字即是收益。
-    不含 job_id：produce 路径复用 render_export 时那个 job 是 produce job，不是 export job。
+    收成对象前这些值以位置参数在 submit/retry → _submit_export → _run_export →
+    render_export 链路上传递，`export_id` 与 `project_id` 同为 str 且相邻——传颠倒
+    不会报错，只会把成片渲染进另一个项目。两处调用点共用一个名字即是收益。
     """
 
     export_id: str
@@ -73,7 +74,7 @@ def _submit_export(
 ) -> str:
     """建 export 任务 → 注册取消事件 → 投递执行池，返回 job_id。
 
-    start 与 retry 曾各写一遍这四步；取消事件的注册与 _run_export finally 里的回收
+    取消事件的注册与 _run_export finally 里的回收
     必须成对，两处各写时漏掉一半就留下 cancel_events 无界增长。
     """
     job_id = context.job_store.create("export", ref_id=export_id)
@@ -94,31 +95,71 @@ def _submit_export(
     return job_id
 
 
-def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
-    """新建一次导出：建记录后投递渲染任务（渲染本身异步，进度走 jobs）。"""
-    plan_id = str(params.get("plan_id", ""))
-    plan_row = plans_repo.get(context.conn, plan_id)
-    if plan_row is None:
-        raise RpcDomainError(_ERR_PLAN_NOT_FOUND, f"编排方案不存在: {plan_id}")
-    plan_data = PlanData.model_validate(plan_row["plan_data"])
-    if not plan_data.timeline:
-        raise RpcDomainError(_ERR_PLAN_NOT_FOUND, "编排时间轴为空")
+def submit(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """阶段4：把已规划好的方案排队渲染。规划与渲染就此分开。一条方案一个 export job；
+    同一次调用里重复的 plan_id 只出一次片；坏的逐条拒绝并给理由，好的一起走。"""
+    raw = params.get("plan_ids")
+    if not isinstance(raw, list) or not raw:
+        raise RpcDomainError(_ERR_NO_PLANS, "plan_ids 必须是非空数组")
+    plan_ids = list(dict.fromkeys(str(item) for item in raw))
+    accepted: list[dict[str, str]] = []
+    rejected: list[dict[str, str]] = []
+    for plan_id in plan_ids:
+        plan_row = plans_repo.get(context.conn, plan_id)
+        if plan_row is None:
+            rejected.append({"plan_id": plan_id, "reason": f"编排方案不存在: {plan_id}"})
+            continue
+        try:
+            plan_data = PlanData.model_validate(plan_row["plan_data"])
+            _assert_renderable(plan_row, plan_data)
+        except RpcDomainError as exc:
+            rejected.append({"plan_id": plan_id, "reason": exc.message})
+            continue
+        project_id = str(plan_row["project_id"])
+        export_id = exports_repo.create(
+            conn=context.conn,
+            project_id=project_id,
+            plan_id=plan_id,
+            narration_mode=str(plan_row["narration_mode"]),
+        )
+        job_id = _submit_export(
+            context,
+            export_id=export_id,
+            project_id=project_id,
+            plan_row=plan_row,
+            plan_data=plan_data,
+        )
+        accepted.append({"plan_id": plan_id, "export_id": export_id, "job_id": job_id})
+    return {"exports": accepted, "rejected": rejected}
 
-    project_id = str(plan_row["project_id"])
-    export_id = exports_repo.create(
-        conn=context.conn,
-        project_id=project_id,
-        plan_id=plan_id,
-        narration_mode=str(plan_row["narration_mode"]),
-    )
-    job_id = _submit_export(
-        context,
-        export_id=export_id,
-        project_id=project_id,
-        plan_row=plan_row,
-        plan_data=plan_data,
-    )
-    return {"job_id": job_id, "export_id": export_id}
+
+def _assert_renderable(plan_row: dict[str, Any], plan_data: PlanData) -> None:
+    """提交/重试前的可渲染性守卫：方案行必须是拿去就能渲的成品输入。
+
+    配音音频是规划期落在 cache 里的文件，提交可能在几次重启之后，
+    所以文件在不在也在这里问一次。submit 与 retry 共用本函数。
+    """
+    if plan_row["status"] != "ready":
+        raise RpcDomainError(_ERR_PLAN_NOT_RENDERABLE, f"方案状态为 {plan_row['status']}，不可渲染")
+    if not plan_data.timeline:
+        raise RpcDomainError(_ERR_PLAN_NOT_RENDERABLE, "编排时间轴为空")
+    voiced = {text.id: text.audio_path for text in plan_data.narration_texts}
+    for segment in plan_data.timeline:
+        # ducked 与 narration 同权：两者都必须配到音频，否则渲染出哑片
+        if segment.audio not in ("narration", "ducked"):
+            continue
+        audio_path = voiced.get(segment.narration_id or "")
+        if not audio_path:
+            raise RpcDomainError(
+                _ERR_PLAN_NOT_RENDERABLE,
+                f"旁白段 {segment.episode_id}@{segment.start} 没有配音音频："
+                "这条方案未完成配音，渲染出来会是一版没有解说的哑片",
+            )
+        if not Path(audio_path).is_file():
+            raise RpcDomainError(
+                _ERR_PLAN_NOT_RENDERABLE,
+                f"配音音频已丢失：{audio_path}（重新规划这条方案即可）",
+            )
 
 
 def retry(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -137,7 +178,9 @@ def retry(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     plan_row = plans_repo.get(context.conn, plan_id)
     if plan_row is None:
         raise RpcDomainError(_ERR_PLAN_NOT_FOUND, f"编排方案不存在: {plan_id}")
+    # 守卫排在 CAS 复位之前：注定失败的重试不该把 failed 洗成 pending
     plan_data = PlanData.model_validate(plan_row["plan_data"])
+    _assert_renderable(plan_row, plan_data)
     # 复位是 CAS（仅当仍为 failed 才生效）：并发点两次重试时只有一个能复位成功，
     # 另一个在此被判不可重试，避免双双渲染进同一产物路径。
     if not exports_repo.reset_for_retry(context.conn, export_id):

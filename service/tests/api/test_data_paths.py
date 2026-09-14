@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from tests.api.test_produce import Harness, _seed_project_with_analysis
+from tests.api.test_plan_variants import Harness, _seed_project_with_analysis
 
 _SERVICE_ROOT = Path(__file__).resolve().parents[2] / "dramaclip"
 
