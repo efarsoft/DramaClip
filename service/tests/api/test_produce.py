@@ -20,7 +20,11 @@ from dramaclip.api import narration as narration_api
 from dramaclip.api import project as project_api
 from dramaclip.engines.analysis.models import AudioFeatures
 from dramaclip.engines.narration import copywriter, pipeline, script_driver, styles
-from dramaclip.engines.narration.models import PlanData
+from dramaclip.engines.narration.models import (
+    NarrationText,
+    PlanData,
+    TimelineSegment,
+)
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
 from dramaclip.infra import jobs
 from dramaclip.infra.storage.repos import analysis as analysis_repo
@@ -657,3 +661,100 @@ def test_tts_failure_fails_one_mode_not_the_batch(
     assert narration_api._newest_ready_plan(context, project_id, "intro_narration") is not None
     assert narration_api._newest_ready_plan(context, project_id, "full_narration") is None
     assert str(job["job_id"]) not in context.cancel_events, "cancel_events 未释放"
+
+def _variant_plan(copy_prefix: str) -> PlanData:
+    """同模式同槽位 id、只有文案不同的方案：id 确定性重复正是内容寻址要隔离的东西。"""
+    return PlanData(
+        mode="full_narration",
+        timeline=[
+            TimelineSegment(
+                episode_id="ep1", start=0.0, end=2.0, audio="ducked", narration_id="full-1"
+            )
+        ],
+        narration_texts=[
+            NarrationText(id="full-1", text=f"{copy_prefix}·第一段解说", brief="推进")
+        ],
+    )
+
+
+class _TextWritingTts:
+    """把文案原样写进"音频"文件：读文件内容即知这是谁的音。
+
+    与 tests/engines/narration/test_tts_audio_isolation.py 的替身同一手法——那个文件的
+    docstring 逐字写着「只断言"两条路径不同"抓不住 stale-pointer 回归，内容断言才抓得住」。
+    本文件在 api 层沿用同一条规矩。
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def synthesize(self, text: str, _voice: str | None, out_path: Path) -> Path:
+        assert text.strip(), "语言层没填上文案，槽位还是空的"
+        self.calls.append(text)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(text.encode("utf-8"))
+        return out_path
+
+
+def test_voice_gives_each_variant_its_own_audio(
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_voice` 是 plan_variants 唯一的配音出口，它给出的目录让内容寻址照常生效。
+
+    **本用例不是 test_tts_audio_isolation.py 的重复**：那六例守的是 pipeline 层
+    （文件名怎么算、缓存怎么判、失败怎么清），本用例守的是 **api 层到 pipeline 的接线**——
+    `_voice` 传错目录、传错 models_dir、或者干脆忘了调 synthesize_narration_texts，
+    那六例一条都不会红。断言读**文件内容**而不是比路径，理由同上。
+    """
+    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
+    engine = _TextWritingTts()
+    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: engine)
+    monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: 1.25)
+    settings = dict(harness.context.settings)
+
+    voiced = [
+        narration_api._voice(harness.context, _variant_plan(prefix), settings)
+        for prefix in ("角度一", "角度二")
+    ]
+
+    assert len(engine.calls) == 2, f"两条方案各一次配音，实得 {engine.calls}"
+    for plan in voiced:
+        text = plan.narration_texts[0]
+        assert text.audio_path, "配音后 audio_path 仍是空的"
+        content = Path(text.audio_path).read_text(encoding="utf-8")
+        assert content == text.text, (
+            f"audio_path 指向的不是这条方案自己的音：内容={content!r}，应为={text.text!r}"
+        )
+    first_path = voiced[0].narration_texts[0].audio_path
+    second_path = voiced[1].narration_texts[0].audio_path
+    assert first_path != second_path, "文案不同却落在同一路径——内容寻址没生效"
+
+
+def test_voice_keeps_the_cross_call_cache(
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """文案相同的槽位只合成一次：`_voice` 的目录**不得随调用变化**。
+
+    这条用例是"不要给 tts 目录加作业号/变体号/随机数"的唯一自动化守卫。加进去之后
+    路径仍然互异（所以上面那条隔离用例照样绿），但 pipeline 的缓存优先
+    （docs/service/02 §6、test_tts_audio_isolation.py::test_identical_copy_is_synthesised_once）
+    在 api 层就失效了：整组重规划与「重掷此条」都会为**没改过的槽位**再付一次配音。
+    """
+    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
+    engine = _TextWritingTts()
+    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: engine)
+    monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: 1.25)
+    settings = dict(harness.context.settings)
+
+    first = narration_api._voice(harness.context, _variant_plan("同一份文案"), settings)
+    calls_after_first = len(engine.calls)
+    second = narration_api._voice(harness.context, _variant_plan("同一份文案"), settings)
+
+    assert calls_after_first == 1
+    assert len(engine.calls) == 1, "第二次调用又付了一遍配音：目录随调用变化了"
+    assert second.narration_texts[0].audio_path == first.narration_texts[0].audio_path
+

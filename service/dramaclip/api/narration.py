@@ -267,16 +267,40 @@ def _generate_one(
                 trace_dir=context.data_dir / "logs" / "llm",
             )
 
-    if plan.narration_texts:
-        tts_dir = context.work_dir / "tts"
-        models_dir = context.data_dir / "models"
-        plan = narration_pipeline.synthesize_narration_texts(plan, settings, tts_dir, models_dir)
+    plan = _voice(context, plan, settings)
     plans_repo.create(
         context.conn,
         project_id,
         mode,
         used_ids,
         plan.model_dump(),
+    )
+
+
+def _voice(context: AppContext, plan: PlanData, settings: dict[str, str]) -> PlanData:
+    """配音：plan_variants 唯一的配音出口，只负责给出 tts 目录与 models 目录。
+
+    **路径隔离不是本函数的事**：文件名由 `pipeline._content_addressed_audio` 按
+    `(slot_id, text, voice, engine)` 内容寻址（commit 9b42f24），同名 即同内容，
+    所以 K 条同模式变体、并发的两个作业、重规划的两轮都不可能互相覆盖。
+    本函数**不得**给这个目录加作业号/变体号/随机数——那会让 pipeline 的缓存优先
+    在 api 层失效（`test_tts_audio_isolation.py::test_identical_copy_is_synthesised_once`
+    钉的"同文案不二次付费"），而换不来任何正确性收益；`test_voice_keeps_the_cross_call_cache`
+    守着这一条。
+
+    **无条件调用，不要包一层 `if plan.narration_texts`**：无槽位时（raw_clip /
+    subtitle_flow）`synthesize_narration_texts` 自己早退，但它先跑 `_assert_voiceable`——
+    那是"带旁白段却没有文案表"的静音片唯一会被拦下的地方，跳过它等于把 §3.3.1 的
+    禁止级降级从后门放回。
+
+    这些音频文件因此是承重存储：《定案一》让配音归规划侧，方案可能在几小时后、
+    几次重启后才被 `export.submit` 渲染，届时读的就是这里回填的 `audio_path`。
+    全仓没有任何路径清理 work_dir（`shutil.rmtree` 只出现在 `api/models.py:119`，
+    删的是模型目录），这个事实就此成为契约。**并且内容寻址意味着文案相同的两条方案
+    共用同一个文件**，所以将来的回收站不能按作业或按时间删——见《P-3 交接规格》第 1 条。
+    """
+    return narration_pipeline.synthesize_narration_texts(
+        plan, settings, context.work_dir / "tts", context.data_dir / "models"
     )
 
 

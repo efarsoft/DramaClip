@@ -318,9 +318,9 @@ def _synthesize_into(
     """缓存优先 + 暂存落位：命中即复用，未命中先写临时名、成功后原子搬进最终路径。
 
     临时名把两种脏产物挡在最终路径之外：合成失败留下的半截 mp3（当场清掉，
-    否则下一轮会把它当缓存命中）与并发写同名文件（`_run_generation_parallel`
-    双线程、produce 与 generate_plans 重叠）——os.replace 原子换入，读者
-    永远只见完整文件。
+    否则下一轮会把它当缓存命中）与并发写同名文件（同模式的 K 条变体、以及执行池里
+    并行的多个规划作业都可能同时写一个 slot_id，hardware.max_parallel_jobs 默认 2）
+    ——os.replace 原子换入，读者永远只见完整文件。
     """
     if final_path.is_file() and final_path.stat().st_size > 0:
         return
