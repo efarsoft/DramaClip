@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from dramaclip.engines.analysis.models import AsrSegment, AudioFeatures
+from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import (
     modes,
     modes_p2,
@@ -20,6 +20,7 @@ from dramaclip.engines.narration import (
     modes_w8,
     modes_w9,
 )
+from dramaclip.engines.narration.casting import EpisodeScene, MaterialByEpisode
 from dramaclip.engines.narration.models import (
     NarrationText,
     PlanData,
@@ -47,41 +48,48 @@ MODE_LABELS = {
 
 def build_plan(
     mode: str,
-    episode_id: str,
-    conflict_scores: list[ConflictScore],
+    scenes: list[EpisodeScene],
     highlights: list[HighlightSegment],
-    asr_segments: list[AsrSegment],
-    audio: AudioFeatures,
+    material: MaterialByEpisode,
     settings: dict[str, str],
 ) -> PlanData:
-    """按模式生成编排方案（纯计算，不触 IO）。"""
+    """按模式生成编排方案（纯计算，不触 IO）。
+
+    场景表带集身份（`casting.EpisodeScene`），故一条方案的时间轴可以含多集的段
+    （规格 §1「每模式产出 1..K 条卖点角度互异的**跨集**方案」）；段的 `episode_id`
+    由场景自己带，不再有"这一条片属于哪一集"这个入参。
+
+    **原签名的 `episode_id: str` 与 `audio: AudioFeatures` 两个入参都随本次改写消失**：
+    前者被逐场景的集身份取代；后者是**死参数**——原函数体从头到尾没有一处引用 `audio`
+    （九个分派分支只往下传 conflict_scores / highlights / asr_segments / strategy），
+    而它唯一的调用点为它专门调了一次 `parse_audio_features`。在一个刚被重写的签名里
+    留着一个没人读的 `audio` 形参，等于告诉下一个人"音频特征参与编排"。
+    """
     strategy = StrategySpec(
         platform="douyin",
         min_duration_s=float(settings.get("strategy.min_duration_s", "30")),
         max_duration_s=float(settings.get("strategy.max_duration_s", "120")),
     )
     if mode == "raw_clip":
-        return modes.build_raw_clip(episode_id, conflict_scores, highlights, strategy)
+        return modes.build_raw_clip(scenes, highlights, strategy)
     if mode == "intro_narration":
-        return modes.build_intro(episode_id, conflict_scores, strategy)
+        return modes.build_intro(scenes, strategy)
     if mode == "cross_narration":
-        return modes_w5.build_cross(episode_id, conflict_scores, strategy)
+        return modes_w5.build_cross(scenes, strategy)
     if mode == "ultra_short_hook":
-        return modes_w5.build_ultra_short(episode_id, conflict_scores, strategy)
+        return modes_w5.build_ultra_short(scenes, strategy)
     if mode == "dialogue_narration":
         raise ValueError(
             "剧情解说为剧本驱动，不经规则编排（走 script_driver.script_dialogue_plan）"
         )
     if mode == "full_narration":
-        return modes_w8.build_full(episode_id, conflict_scores, strategy)
+        return modes_w8.build_full(scenes, strategy)
     if mode == "subtitle_flow":
-        return modes_w9.build_subtitle_flow(
-            episode_id, conflict_scores, asr_segments, strategy
-        )
+        return modes_w9.build_subtitle_flow(scenes, material, strategy)
     if mode == "dual_host_chat":
-        return modes_p2.build_dual_host(episode_id, conflict_scores, strategy)
+        return modes_p2.build_dual_host(scenes, strategy)
     if mode == "inner_monologue":
-        return modes_p2.build_monologue(episode_id, conflict_scores, strategy)
+        return modes_p2.build_monologue(scenes, strategy)
     raise ValueError(f"模式暂未支持: {mode}（{MODE_LABELS.get(mode, mode)} 将随后续阶段启用）")
 
 
@@ -255,12 +263,6 @@ def build_from_script_episodes(
         strategy=strategy,
         planner="llm_script",
     )
-
-
-def parse_audio_features(audio_json: str | None) -> AudioFeatures:
-    if not audio_json:
-        return AudioFeatures()
-    return AudioFeatures.model_validate_json(audio_json)
 
 
 def parse_asr_segments(asr_json: str) -> list[AsrSegment]:

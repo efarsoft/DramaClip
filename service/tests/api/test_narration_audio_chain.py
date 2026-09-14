@@ -23,6 +23,7 @@ import pytest
 from dramaclip.api import export as export_api
 from dramaclip.engines.exporter import encoder
 from dramaclip.engines.narration import pipeline
+from dramaclip.engines.narration.casting import stamp
 from dramaclip.engines.narration.models import PlanData, StrategySpec
 from dramaclip.engines.narration.modes_w8 import build_full
 from dramaclip.engines.semantic.models import ConflictScore
@@ -64,7 +65,7 @@ def _scenes() -> list[ConflictScore]:
 
 def _full_plan(episode_id: str, tts_dir: Path) -> PlanData:
     """真实 full_narration 编排（build_full 产出的全 ducked 时间轴）+ 旁白回填。"""
-    plan = build_full(episode_id, _scenes(), StrategySpec(min_duration_s=10))
+    plan = build_full(stamp([(1, episode_id, _scenes())]), StrategySpec(min_duration_s=10))
     # 编剧层产出（见 test_narration_no_downgrade 对空文案的守卫）
     plan = plan.model_copy(update={
         "narration_texts": [

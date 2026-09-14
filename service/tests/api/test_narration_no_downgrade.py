@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from dramaclip.engines.narration import pipeline
+from dramaclip.engines.narration.casting import stamp
 from dramaclip.engines.narration.models import PlanData, StrategySpec, TimelineSegment
 from dramaclip.engines.narration.modes_w8 import build_full
 from dramaclip.engines.semantic.models import ConflictScore
@@ -37,7 +38,7 @@ class _StubTts:
 
 
 def _plan_with_copy() -> PlanData:
-    plan = build_full("ep1", _SCENES, StrategySpec(min_duration_s=10))
+    plan = build_full(stamp([(1, "ep1", _SCENES)]), StrategySpec(min_duration_s=10))
     return plan.model_copy(update={
         "narration_texts": [
             t.model_copy(update={"text": f"第 {i} 段解说文案"})
@@ -55,7 +56,7 @@ def _synth(monkeypatch, plan, engine, work_dir: Path, duration: float = 1.25) ->
 
 
 def test_empty_copy_raises_before_tts(monkeypatch, tmp_path: Path) -> None:
-    plan = build_full("ep1", _SCENES, StrategySpec(min_duration_s=10))
+    plan = build_full(stamp([(1, "ep1", _SCENES)]), StrategySpec(min_duration_s=10))
     with pytest.raises(RuntimeError, match="文案为空"):
         _synth(monkeypatch, plan, _StubTts(), tmp_path)
 

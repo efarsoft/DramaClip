@@ -5,17 +5,18 @@
 - inner_monologue：单一角色第一人称内心 OS，情绪更内收。
 配音用 edge 多音色（zh-CN-YunxiNeural 男 / zh-CN-XiaoyiNeural 女）；
 kokoro/IndexTTS-2 本地引擎接入后仅需替换 voice 参数与引擎工厂。
+场景表带集身份（`casting.EpisodeScene`），故一条对谈/独白弧可以横跨多集。
 """
 
 from __future__ import annotations
 
+from dramaclip.engines.narration.casting import EpisodeScene, episode_order, score_order
 from dramaclip.engines.narration.models import (
     NarrationText,
     PlanData,
     StrategySpec,
     TimelineSegment,
 )
-from dramaclip.engines.semantic.models import ConflictScore
 
 _VOICE_A = "zh-CN-YunxiNeural"  # 主持人（男）
 _VOICE_B = "zh-CN-XiaoyiNeural"  # 嘉宾（女）
@@ -23,14 +24,13 @@ _SCENE_S = 10.0
 _MAX_SCENES = 8
 
 
-def _pick(scenes: list[ConflictScore]) -> list[ConflictScore]:
-    ranked = sorted(scenes, key=lambda s: -s.score)[:_MAX_SCENES]
-    return sorted(ranked, key=lambda s: s.start)
+def _pick(scenes: list[EpisodeScene]) -> list[EpisodeScene]:
+    ranked = sorted(scenes, key=score_order)[:_MAX_SCENES]
+    return sorted(ranked, key=episode_order)
 
 
 def build_dual_host(
-    episode_id: str,
-    scenes: list[ConflictScore],
+    scenes: list[EpisodeScene],
     strategy: StrategySpec,
 ) -> PlanData:
     """双人对谈（原案 6.10）：A 抛话题、B 推剧情，交替对谈 + 原声压低。"""
@@ -56,7 +56,7 @@ def build_dual_host(
         end = round(min(scene.start + _SCENE_S, scene.end), 3)
         timeline.append(
             TimelineSegment(
-                episode_id=episode_id,
+                episode_id=scene.episode_id,
                 start=round(scene.start, 3),
                 end=end,
                 audio="narration",
@@ -70,8 +70,7 @@ def build_dual_host(
 
 
 def build_monologue(
-    episode_id: str,
-    scenes: list[ConflictScore],
+    scenes: list[EpisodeScene],
     strategy: StrategySpec,
 ) -> PlanData:
     """角色内心独白（原案 6.11）：主角第一人称 OS 贯穿，情绪内收。"""
@@ -95,7 +94,7 @@ def build_monologue(
         end = round(min(scene.start + _SCENE_S, scene.end), 3)
         timeline.append(
             TimelineSegment(
-                episode_id=episode_id,
+                episode_id=scene.episode_id,
                 start=round(scene.start, 3),
                 end=end,
                 audio="narration",

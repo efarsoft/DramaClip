@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dramaclip.engines.narration.casting import stamp
 from dramaclip.engines.narration.models import StrategySpec
 from dramaclip.engines.narration.modes_p2 import build_dual_host, build_monologue
 from dramaclip.engines.semantic.models import ConflictScore
@@ -18,7 +19,7 @@ def _scenes() -> list[ConflictScore]:
 
 
 def test_dual_host_alternates_voices() -> None:
-    plan = build_dual_host("ep1", _scenes(), _STRATEGY)
+    plan = build_dual_host(stamp([(1, "ep1", _scenes())]), _STRATEGY)
     voices = [text.voice for text in plan.narration_texts]
     assert voices[0] != voices[1], "双音色应交替"
     assert voices[0] == voices[2], "同主持人的音色一致"
@@ -29,12 +30,12 @@ def test_dual_host_alternates_voices() -> None:
 
 
 def test_dual_host_empty_safe() -> None:
-    plan = build_dual_host("ep1", [], _STRATEGY)
+    plan = build_dual_host([], _STRATEGY)
     assert plan.timeline == [] and plan.narration_texts == []
 
 
 def test_monologue_first_person_single_voice() -> None:
-    plan = build_monologue("ep1", _scenes(), _STRATEGY)
+    plan = build_monologue(stamp([(1, "ep1", _scenes())]), _STRATEGY)
     assert plan.mode == "inner_monologue"
     voices = {text.voice for text in plan.narration_texts}
     assert len(voices) == 1, "内心独白应为单一音色"

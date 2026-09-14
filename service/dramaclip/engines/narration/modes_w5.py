@@ -1,17 +1,18 @@
 """W5 模式编排：交叉解说（原案 6.3）与超短悬念版（原案 6.9）。
 
 编排只产出画面结构与旁白槽位，文案一律由 narration.copywriter 生成（无模板兜底）。
+场景表带集身份（`casting.EpisodeScene`），一条方案的时间轴可以含多集的段。
 """
 
 from __future__ import annotations
 
+from dramaclip.engines.narration.casting import EpisodeScene, episode_order, score_order
 from dramaclip.engines.narration.models import (
     NarrationText,
     PlanData,
     StrategySpec,
     TimelineSegment,
 )
-from dramaclip.engines.semantic.models import ConflictScore
 
 _CROSS_SCENE_S = 8.0        # 交叉解说单场景原声段基准时长
 _CROSS_MAX_S = 120.0
@@ -20,16 +21,17 @@ _ULTRA_CONFLICT_S = 8.0     # 超短版冲突画面时长
 
 
 def build_cross(
-    episode_id: str,
-    scenes: list[ConflictScore],
+    scenes: list[EpisodeScene],
     strategy: StrategySpec,
 ) -> PlanData:
     """交叉解说：场景原声与旁白交替；旁白压住下一场景开头，承担串联与悬念。
 
     时间轴：场景1(原声) → 旁白1 → 场景2(原声) → 旁白2 → …（旁白段画面延续下一场景）。
+    跨集时"下一场景"可能在另一集，旁白段因此盖的是那一集的开场画面——这是有意的：
+    旁白的职责就是串联，串到别的集去正是跨集方案的形状。
     """
-    ranked = sorted(scenes, key=lambda s: -s.score)
-    picked = sorted(ranked[:6], key=lambda s: s.start)  # 取 top 6 按时间线
+    ranked = sorted(scenes, key=score_order)
+    picked = sorted(ranked[:6], key=episode_order)  # 取 top 6 按叙事顺序
     if not picked:
         return PlanData(mode="cross_narration", strategy=strategy)
 
@@ -41,7 +43,7 @@ def build_cross(
         duration = min(scene.end - scene.start, _CROSS_SCENE_S)
         segments.append(
             TimelineSegment(
-                episode_id=episode_id,
+                episode_id=scene.episode_id,
                 start=round(scene.start, 3),
                 end=round(scene.start + duration, 3),
                 audio="original",
@@ -62,7 +64,10 @@ def build_cross(
         )
         segments.append(
             TimelineSegment(
-                episode_id=episode_id,
+                # 集号跟**锚点**走，不跟上一段的 scene 走：这一段画面就是 anchor 的开头。
+                # 沿用 scene.episode_id 会让渲染去另一集的同一秒取画面（`export_plan`
+                # 按 segment.episode_id 查 episode_paths），出错片而不报错。
+                episode_id=anchor.episode_id,
                 start=round(anchor.start, 3),
                 end=round(anchor.start + narration_seconds, 3),
                 audio="narration",
@@ -76,14 +81,21 @@ def build_cross(
 
 
 def build_ultra_short(
-    episode_id: str,
-    scenes: list[ConflictScore],
+    scenes: list[EpisodeScene],
     strategy: StrategySpec,
 ) -> PlanData:
-    """超短悬念版（10-20s）：钩子旁白 → 最高冲突原声画面 → 收尾引导。"""
+    """超短悬念版（10-20s）：钩子旁白 → 最高冲突原声画面 → 收尾引导。
+
+    跨集只改变**在哪一集**找那个最高冲突场景：本模式的三个段压在同一个场景上，
+    它天然是单场景片，取材集因此恒为一集——规格 §1 要的是"一条方案**可以**跨集取画面"，
+    不是"每条方案必须≥2 集"，故这里不为跨集而跨集。
+    """
     if not scenes:
         return PlanData(mode="ultra_short_hook", strategy=strategy)
-    best = max(scenes, key=lambda s: s.score)
+    # `min(score_order)` 而不是 `max(key=score)`：后者在同分时取**输入顺序**的第一个，
+    # 而输入顺序来自 episodes_repo.list_by_project，没有契约（活库实测 333 个场景只有
+    # 19 个不同分值）。score_order 已带 (集号, 起点, scene_index) 三个次键。
+    best = min(scenes, key=score_order)
     scene_span = min(best.end - best.start, _ULTRA_CONFLICT_S)
     texts = [
         NarrationText(id="hook-1", brief="开场钩子：一句，最大反差或最狠的悬念，不超过 20 字"),
@@ -94,20 +106,20 @@ def build_ultra_short(
     ]
     timeline = [
         TimelineSegment(
-            episode_id=episode_id,
+            episode_id=best.episode_id,
             start=round(best.start, 3),
             end=round(best.start + _HOOK_TTS_FALLBACK_S, 3),
             audio="narration",
             narration_id=texts[0].id,
         ),
         TimelineSegment(
-            episode_id=episode_id,
+            episode_id=best.episode_id,
             start=round(best.start, 3),
             end=round(best.start + scene_span, 3),
             audio="original",
         ),
         TimelineSegment(
-            episode_id=episode_id,
+            episode_id=best.episode_id,
             start=round(best.end - _HOOK_TTS_FALLBACK_S, 3),
             end=round(best.end, 3),
             audio="narration",

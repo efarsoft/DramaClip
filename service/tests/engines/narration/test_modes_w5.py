@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dramaclip.engines.narration.casting import stamp
 from dramaclip.engines.narration.models import StrategySpec
 from dramaclip.engines.narration.modes_w5 import build_cross, build_ultra_short
 from dramaclip.engines.semantic.models import ConflictScore
@@ -18,7 +19,7 @@ def _scenes() -> list[ConflictScore]:
 
 
 def test_cross_alternates_original_and_narration() -> None:
-    plan = build_cross("ep1", _scenes(), _STRATEGY)
+    plan = build_cross(stamp([(1, "ep1", _scenes())]), _STRATEGY)
     assert plan.mode == "cross_narration"
     audios = [segment.audio for segment in plan.timeline]
     assert audios[0] == "original"
@@ -34,13 +35,13 @@ def test_cross_alternates_original_and_narration() -> None:
 
 def test_cross_respects_duration_budget() -> None:
     strategy = StrategySpec(min_duration_s=10, max_duration_s=60)
-    plan = build_cross("ep1", _scenes(), strategy)
+    plan = build_cross(stamp([(1, "ep1", _scenes())]), strategy)
     total = sum(segment.end - segment.start for segment in plan.timeline)
     assert total <= 60 + 4 * 6, "预算截断（含旁白估算段）"
 
 
 def test_ultra_short_structure() -> None:
-    plan = build_ultra_short("ep1", _scenes(), _STRATEGY)
+    plan = build_ultra_short(stamp([(1, "ep1", _scenes())]), _STRATEGY)
     assert plan.mode == "ultra_short_hook"
     assert [segment.audio for segment in plan.timeline] == ["narration", "original", "narration"]
     assert [t.id for t in plan.narration_texts] == ["hook-1", "cta-1"]
@@ -52,5 +53,5 @@ def test_ultra_short_structure() -> None:
 
 
 def test_ultra_short_empty_scenes() -> None:
-    plan = build_ultra_short("ep1", [], _STRATEGY)
+    plan = build_ultra_short([], _STRATEGY)
     assert plan.timeline == []

@@ -2,17 +2,18 @@
 
 编排只产出画面结构与旁白槽位，文案一律由 narration.copywriter 生成（无模板兜底）；
 旁白时长在 TTS 合成后回填（机制同 intro/cross），段长随旁白实际时长伸缩。
+场景表带集身份（`casting.EpisodeScene`），故一条解说弧可以横跨多集。
 """
 
 from __future__ import annotations
 
+from dramaclip.engines.narration.casting import EpisodeScene, episode_order, score_order
 from dramaclip.engines.narration.models import (
     NarrationText,
     PlanData,
     StrategySpec,
     TimelineSegment,
 )
-from dramaclip.engines.semantic.models import ConflictScore
 
 _MAX_SCENES = 8           # 旁白段数上限（TTS 次数约束）
 _FULL_SCENE_S = 10.0      # 单场景基准时长（TTS 回填前）
@@ -30,13 +31,16 @@ def _slot_brief(index: int, count: int, score: int) -> str:
 
 
 def build_full(
-    episode_id: str,
-    scenes: list[ConflictScore],
+    scenes: list[EpisodeScene],
     strategy: StrategySpec,
 ) -> PlanData:
-    """全片解说编排：场景按时间线全程覆盖，全部原声压低（ducked）。"""
-    ranked = sorted(scenes, key=lambda s: -s.score)[:_MAX_SCENES]
-    picked = sorted(ranked, key=lambda s: s.start)
+    """全片解说编排：场景按叙事顺序全程覆盖，全部原声压低（ducked）。
+
+    `_slot_brief` 的位置语义在跨集之后仍然成立：位置是**这条解说弧**里的位置，
+    不是"第几集的第几场"。开篇/推进/高潮/收尾由弧内位次决定，弧本身可以横跨三集。
+    """
+    ranked = sorted(scenes, key=score_order)[:_MAX_SCENES]
+    picked = sorted(ranked, key=episode_order)
     if not picked:
         return PlanData(mode="full_narration", strategy=strategy)
 
@@ -48,7 +52,7 @@ def build_full(
         end = round(min(scene.start + _FULL_SCENE_S, scene.end), 3)
         timeline.append(
             TimelineSegment(
-                episode_id=episode_id,
+                episode_id=scene.episode_id,
                 start=round(scene.start, 3),
                 end=end,
                 audio="ducked",

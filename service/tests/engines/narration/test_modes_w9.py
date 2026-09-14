@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dramaclip.engines.analysis.models import AsrSegment
+from dramaclip.engines.narration import casting
+from dramaclip.engines.narration.casting import stamp
 from dramaclip.engines.narration.models import StrategySpec
 from dramaclip.engines.narration.modes_w9 import build_subtitle_flow
 from dramaclip.engines.semantic.models import ConflictScore
@@ -28,8 +30,12 @@ def _segments() -> list[AsrSegment]:
     ]
 
 
+def _material() -> casting.MaterialByEpisode:
+    return {"ep1": casting.EpisodeMaterial(number=1, asr=_segments())}
+
+
 def test_picks_strongest_line_per_scene() -> None:
-    plan = build_subtitle_flow("ep1", _scenes(), _segments(), _STRATEGY)
+    plan = build_subtitle_flow(stamp([(1, "ep1", _scenes())]), _material(), _STRATEGY)
     assert plan.mode == "subtitle_flow"
     scenes_texts = [
         segment.subtitle_text
@@ -42,19 +48,19 @@ def test_picks_strongest_line_per_scene() -> None:
 
 
 def test_cta_card_appended() -> None:
-    plan = build_subtitle_flow("ep1", _scenes(), _segments(), _STRATEGY)
+    plan = build_subtitle_flow(stamp([(1, "ep1", _scenes())]), _material(), _STRATEGY)
     cta = plan.timeline[-1]
     assert cta.subtitle_text is not None and "全集" in cta.subtitle_text
     assert cta.start == 59.0 and cta.end == 62.0, "CTA 复用最后场景尾部"
 
 
 def test_scene_cap_and_original_audio() -> None:
-    plan = build_subtitle_flow("ep1", _scenes(), _segments(), _STRATEGY)
+    plan = build_subtitle_flow(stamp([(1, "ep1", _scenes())]), _material(), _STRATEGY)
     body = plan.timeline[:-1]
     assert len(body) <= 6
     assert all(segment.audio == "original" for segment in plan.timeline)
 
 
 def test_empty_scenes_safe() -> None:
-    plan = build_subtitle_flow("ep1", [], _segments(), _STRATEGY)
+    plan = build_subtitle_flow([], _material(), _STRATEGY)
     assert plan.timeline == []

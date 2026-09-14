@@ -10,6 +10,7 @@ import pytest
 
 from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import copywriter
+from dramaclip.engines.narration.casting import stamp
 from dramaclip.engines.narration.models import StrategySpec
 from dramaclip.engines.narration.modes_w8 import build_full
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
@@ -56,7 +57,7 @@ class FakeLlm:
 
 
 def _plan():
-    return build_full("ep1", _SCENES, StrategySpec(min_duration_s=10))
+    return build_full(stamp([(1, "ep1", _SCENES)]), StrategySpec(min_duration_s=10))
 
 
 def _lines() -> dict[str, Any]:
