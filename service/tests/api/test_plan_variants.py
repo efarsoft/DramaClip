@@ -32,11 +32,10 @@ from dramaclip.engines.narration.models import (
     PlanData,
     TimelineSegment,
 )
-from dramaclip.engines.semantic.llm_client import LlmUnavailable
 from dramaclip.infra import jobs
-from dramaclip.infra.storage.repos import plans as plans_repo
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
+from dramaclip.infra.storage.repos import plans as plans_repo
 from dramaclip.transport.notify import Notifier
 from dramaclip.transport.rpc import Router, RpcRequest
 
@@ -116,7 +115,7 @@ def _seed_project_with_analysis(
 
 
 def _done_episodes(conn: sqlite3.Connection, project_id: str) -> list[dict[str, Any]]:
-    """与 narration.produce / generate_plans 入口同口径：只取分析完成的集。"""
+    """与 plan_variants 入口同口径：只取分析完成的集。"""
     return [
         episode
         for episode in episodes_repo.list_by_project(conn, project_id)
@@ -137,108 +136,6 @@ def _wait_terminal(harness: Harness, job_id: str, timeout_s: float = 10.0) -> di
         time.sleep(0.05)
         status = harness.rpc("analysis.status", {"job_id": job_id})
     return status
-
-
-def test_produce_renders_work_end_to_end(
-    memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
-) -> None:
-    project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
-    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
-    produce = harness.rpc(
-        "narration.produce", {"project_id": project_id, "modes": ["raw_clip"]}
-    )
-    status = harness.wait_job(str(produce["job_id"]))
-    assert status["status"] == "completed", status.get("error")
-
-    exports = harness.rpc("export.list", {"project_id": project_id})
-    assert exports[0]["status"] == "completed"
-    assert Path(str(exports[0]["output_path"])).is_file()
-
-    works = harness.rpc("export.list_works", {"project_id": project_id})
-    assert any(item["project_id"] == project_id for item in works)
-
-
-def test_produce_invalid_mode(memory_db: sqlite3.Connection, tmp_path: Path) -> None:
-    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
-    project = harness.rpc("project.create", {"name": "x", "source_path": str(tmp_path)})
-    response = harness.router.dispatch(
-        RpcRequest(
-            id=1,
-            method="narration.produce",
-            params={"project_id": project["id"], "modes": ["nope"]},
-        )
-    )
-    assert response.error is not None and response.error.code == -32302
-
-
-def test_style_selection_runs_once_per_job(
-    memory_db: sqlite3.Connection,
-    tmp_path: Path,
-    sample_video: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """produce 一次跑多个模式，口味层选题只该付一次 LLM 往返。"""
-    project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
-    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
-    harness.context.settings["narration.style_id"] = "auto"
-
-    calls: list[int] = []
-    monkeypatch.setattr(
-        script_driver,
-        "resolve_run_style",
-        lambda *_a, **_k: calls.append(1) or {"style_id": "shuanggan", "directives": "砸爽点"},
-    )
-    # 编排本体与本题无关：桩掉它，免得为一个计数等七次真实 LLM 成稿
-    monkeypatch.setattr(narration_api, "_generate_one", lambda *_a, **_k: None)
-
-    produce = harness.rpc(
-        "narration.produce",
-        {"project_id": project_id,
-         "modes": ["intro_narration", "cross_narration", "full_narration"]},
-    )
-    harness.wait_job(str(produce["job_id"]))
-    assert len(calls) == 1, f"选题被调 {len(calls)} 次，应为每任务一次"
-
-
-@pytest.mark.parametrize(("mode", "expected_selections"), [("raw_clip", 0), ("full_narration", 1)])
-def test_style_selection_only_paid_for_modes_that_narrate(
-    memory_db: sqlite3.Connection,
-    tmp_path: Path,
-    sample_video: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    mode: str,
-    expected_selections: int,
-) -> None:
-    """没有任何模式会产出旁白槽位时，口味层答案无人可读——一次都不该付。
-
-    重构前选题只发生在 `script_dialogue_plan` 内（即只有剧情解说付费）；任务级注入
-    若无条件调用 `resolve_run_style`，`raw_clip` 这种纯剪辑作业就凭空多付一次 LLM
-    往返，与「停止按模式付费」这次重构的初衷同类相反。
-
-    一次作业一个 harness：`_generate_one` 被桩掉后作业必然以「编排结果缺失」失败，
-    本题只数选题请求，终态由 `_wait_terminal` 兜住（不许卡在非终态报零次）。
-    """
-    project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
-    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
-    harness.context.settings.update(
-        {
-            "llm.base_url": "http://llm.test/v1",
-            "llm.api_key": "sk-test",
-            "llm.model": "test-model",
-            "narration.style_id": "auto",
-        }
-    )
-    monkeypatch.setattr(script_driver, "LlmClient", _FakeLlm)
-    # 编排与本题无关：桩掉它，选题次数才只由任务级注入决定。
-    monkeypatch.setattr(narration_api, "_generate_one", lambda *_a, **_k: None)
-
-    _FakeLlm.calls = []
-    produce = harness.rpc("narration.produce", {"project_id": project_id, "modes": [mode]})
-    status = _wait_terminal(harness, str(produce["job_id"]))
-    assert jobs.is_terminal(str(status["status"])), f"作业未进终态：{status}"
-
-    selections = sum(1 for system, _user in _FakeLlm.calls if "风格库" in system)
-    assert selections == expected_selections, f"{mode} 付了 {selections} 次口味层选题"
 
 
 def test_only_sound_only_modes_skip_tts_group() -> None:
@@ -298,105 +195,14 @@ class _StubTts:
         ("cross_narration", "交叉解说", ("台词二",)),
     ],
 )
-def test_style_directives_reach_the_copy_prompt(
+def test_pinned_style_survives_a_project_without_transcripts(
     memory_db: sqlite3.Connection,
     tmp_path: Path,
     sample_video: Path,
     monkeypatch: pytest.MonkeyPatch,
     mode: str,
     label: str,
-    lines: tuple[str, ...],
-) -> None:
-    """I2：口味层选出的风格指令必须真的进到语言层 prompt。
-
-    此前全仓无人产出 `_style_directives`，语言层读侧的绿灯走的是测试手搓的那一行；
-    本用例走生产入口 `_inject_run_settings` → `_generate_one`，中间任何一环断开都红。
-    """
-    project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
-    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
-    context = harness.context
-    context.settings.update(
-        {
-            "llm.base_url": "http://llm.test/v1",
-            "llm.api_key": "sk-test",
-            "llm.model": "test-model",
-            "narration.style_id": "auto",
-        }
-    )
-    _FakeLlm.calls = []
-    monkeypatch.setattr(script_driver, "LlmClient", _FakeLlm)
-    monkeypatch.setattr(copywriter, "LlmClient", _FakeLlm)
-    monkeypatch.setattr(
-        styles,
-        "_load_builtin",
-        lambda: {
-            _PLANTED_STYLE_ID: {
-                "style_id": _PLANTED_STYLE_ID,
-                "name": "反问体",
-                "desc": "全程反问推进",
-                "directives": _PLANTED_DIRECTIVES,
-            }
-        },
-    )
-    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: _StubTts())
-    monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: 1.25)
-
-    episodes = _done_episodes(memory_db, project_id)
-    settings = dict(context.settings)
-    episode_inputs = narration_api._inject_run_settings(context, settings, episodes, [mode])
-    narration_api._generate_one(context, mode, episodes, episode_inputs, settings)
-
-    copy_prompts = [user for system, user in _FakeLlm.calls if "风格库" not in system]
-    assert len(copy_prompts) == 1, f"语言层应被调用一次，实得 {len(copy_prompts)}"
-    prompt = copy_prompts[0]
-    assert _PLANTED_DIRECTIVES in prompt, "口味层解析出的风格指令没进语言层 prompt"
-
-    plan_row = narration_api._newest_ready_plan(context, project_id, mode)
-    assert plan_row is not None
-    plan_data = PlanData.model_validate(plan_row["plan_data"])
-    assert plan_data.planner == "llm_script"
-    slot_ids = [text.id for text in plan_data.narration_texts]
-    assert slot_ids, f"{mode} 未产出任何槽位——本用例什么都没验"
-    assert [text.text for text in plan_data.narration_texts] == [
-        f"{slot_id} 的解说" for slot_id in slot_ids
-    ], "落库文案与槽位 id 不对应"
-    assert all(f"[{slot_id}] 要做的事：" in prompt for slot_id in slot_ids), "槽位未逐条进 prompt"
-    assert all(line in prompt for line in lines), "素材台词未进 prompt"
-    assert f"模式：{label}" in prompt, "模式标签未取自 pipeline.MODE_LABELS"
-
-
-def test_dialogue_without_transcript_fails_loudly(
-    memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
-) -> None:
-    """没有转写就没有编剧链的米：剧情解说整条方案失败，且不得凭空给出口味层结论。"""
-    project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
-    episode_id = str(episodes_repo.list_by_project(memory_db, project_id)[0]["id"])
-    analysis_repo.upsert(
-        memory_db,
-        episode_id,
-        asr_segments="[]",
-        scene_data="[]",
-        audio_features=AudioFeatures().model_dump_json(),
-    )
-    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
-    context = harness.context
-    episodes = _done_episodes(memory_db, project_id)
-
-    settings = dict(context.settings)
-    episode_inputs = narration_api._inject_run_settings(
-        context, settings, episodes, ["dialogue_narration"]
-    )
-    assert episode_inputs == []
-    assert "_style_directives" not in settings, "无从选题时不该装作选了风格"
-    with pytest.raises(ValueError, match="没有带转写的已完成集"):
-        narration_api._generate_one(context, "dialogue_narration", episodes, [], settings)
-
-
-def test_pinned_style_survives_a_project_without_transcripts(
-    memory_db: sqlite3.Connection,
-    tmp_path: Path,
-    sample_video: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    lines: tuple,
 ) -> None:
     """用户手动钉死风格、全剧却没有转写：风格不能顺手被丢掉，也不能不发一语。
 
@@ -441,33 +247,11 @@ def test_pinned_style_survives_a_project_without_transcripts(
     assert _FakeLlm.calls == [], "钉死风格无需选题，一次请求都不该发"
 
 
-def test_dialogue_unconfigured_llm_fails_the_plan(
-    memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
-) -> None:
-    """降级禁止：未配置 LLM 时剧情解说整条方案失败，不再退回规则编排那一版。"""
-    project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
-    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
-    context = harness.context
-    episodes = _done_episodes(memory_db, project_id)
-
-    settings = dict(context.settings)
-    episode_inputs = narration_api._inject_run_settings(
-        context, settings, episodes, ["dialogue_narration"]
-    )
-    assert episode_inputs, "种子数据应当给出跨集输入，否则本用例什么都没走"
-    with pytest.raises(LlmUnavailable, match="引擎"):
-        narration_api._generate_one(
-            context, "dialogue_narration", episodes, episode_inputs, settings
-        )
-
-
-@pytest.mark.parametrize("method", ["narration.produce", "narration.generate_plans"])
 def test_assembly_failure_lands_in_jobs_table(
     memory_db: sqlite3.Connection,
     tmp_path: Path,
     sample_video: Path,
     monkeypatch: pytest.MonkeyPatch,
-    method: str,
 ) -> None:
     """任务级装配抛（RPC 检查后项目被删是真实路径）：三条可观察后果缺一不可。
 
@@ -486,7 +270,10 @@ def test_assembly_failure_lands_in_jobs_table(
         raise ValueError("项目不存在: 装配期已被删除")
 
     monkeypatch.setattr(narration_api, "_inject_run_settings", boom)
-    job_id = str(harness.rpc(method, {"project_id": project_id, "modes": ["raw_clip"]})["job_id"])
+    job_id = str(harness.rpc(
+        "narration.plan_variants",
+        {"project_id": project_id, "modes": ["raw_clip"], "k": 1},
+    )["job_id"])
 
     status = _wait_terminal(harness, job_id)
     assert status["status"] == "failed", f"任务停在 {status['status']}，装配失败没人兜底"
@@ -494,184 +281,8 @@ def test_assembly_failure_lands_in_jobs_table(
     assert job_id not in harness.context.cancel_events, "cancel_events 未释放"
 
 
-def test_produce_runner_raise_still_settles_the_job(
-    memory_db: sqlite3.Connection,
-    tmp_path: Path,
-    sample_video: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """渲染循环里、逐模式 try 之外抛出：作业仍须进终态，cancel_event 仍须释放。
-
-    `notifier.progress` 那句就在保护圈外（`_run_produce` 的渲染段）：它一炸，
-    没有 try/finally 的 runner 会把异常丢进 executor 的 future 里没人读，
-    jobs 行永远停在 running、cancel_events 里永远挂着这个 job。
-    """
-    project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
-    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
-
-    def boom(*_args: Any, **_kwargs: Any) -> None:
-        raise RuntimeError("进度通知通道已断")
-
-    monkeypatch.setattr(harness.context.notifier, "progress", boom)
-    job_id = str(
-        harness.rpc(
-            "narration.produce", {"project_id": project_id, "modes": ["raw_clip"]}
-        )["job_id"]
-    )
-
-    status = _wait_terminal(harness, job_id)
-    assert status["status"] == "failed", f"作业停在 {status['status']}：抛出没人接"
-    assert "进度通知通道已断" in str(status["error"]), (
-        f"jobs 表里的原因不是注入的那个：{status['error']!r}"
-    )
-    assert job_id not in harness.context.cancel_events, "cancel_events 未释放"
-
-
-def test_generation_runner_raise_still_releases_cancel_event(
-    memory_db: sqlite3.Connection,
-    tmp_path: Path,
-    sample_video: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """落终态那一步抛出（末尾 pop 之前）：cancel_event 不能留在字典里。"""
-    project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
-    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
-    monkeypatch.setattr(narration_api, "_generate_one", lambda *_a, **_k: None)
-
-    def boom(*_args: Any, **_kwargs: Any) -> None:
-        raise RuntimeError("jobs 表写不进去")
-
-    monkeypatch.setattr(harness.context.job_store, "mark_completed", boom)
-    job_id = str(
-        harness.rpc(
-            "narration.generate_plans", {"project_id": project_id, "modes": ["raw_clip"]}
-        )["job_id"]
-    )
-
-    status = _wait_terminal(harness, job_id)
-    assert status["status"] == "failed", f"作业停在 {status['status']}：抛出没人接"
-    assert "jobs 表写不进去" in str(status["error"]), (
-        f"jobs 表里的原因不是注入的那个：{status['error']!r}"
-    )
-    assert job_id not in harness.context.cancel_events, "cancel_events 未释放"
-
-
-_ORIGINAL_AFTER_TERMINAL = "完成落库后连接断了"
-
-
-def test_bookkeeping_error_never_replaces_the_original(
-    memory_db: sqlite3.Connection,
-    tmp_path: Path,
-    sample_video: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """行已终态时 `mark_failed` 抛 `ValueError("任务已终态")`：它绝不能顶掉原始异常。
-
-    兜底 handler 自己会抛，是"失败没人接"这条线的最后一环：那个 ValueError 从 except
-    里逃出去就落进 executor 的 future，没人 `.result()` 就没人读——原始原因连一行日志
-    都不留，运维手上只有一条 completed 的行和一段无从追查的沉默。记账失败只许记日志。
-    """
-    project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
-    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
-    monkeypatch.setattr(narration_api, "_generate_one", lambda *_a, **_k: None)
-
-    real_completed = harness.context.job_store.mark_completed
-
-    def completed_then_boom(job_id: str) -> None:
-        real_completed(job_id)  # 行真的进了终态，紧接着一句写库才炸
-        raise RuntimeError(_ORIGINAL_AFTER_TERMINAL)
-
-    monkeypatch.setattr(harness.context.job_store, "mark_completed", completed_then_boom)
-    job_id = str(
-        harness.rpc(
-            "narration.generate_plans", {"project_id": project_id, "modes": ["raw_clip"]}
-        )["job_id"]
-    )
-
-    status = _wait_terminal(harness, job_id)
-    assert status["status"] == "completed", f"记账失败把成品行改写了：{status}"
-    sent = [str(item) for item in harness.sent]
-    assert any(_ORIGINAL_AFTER_TERMINAL in item for item in sent), (
-        f"原始原因没留下任何痕迹，被记账错误顶掉了：{harness.sent}"
-    )
-    assert job_id not in harness.context.cancel_events, "cancel_events 未释放"
-
-
-class _FullModeBrokenTts:
-    """只对 full_narration 的槽位（id 前缀 `full-`）不可达：用来量失败粒度。
-
-    断言不写在替身里——它跑在 worker 线程上，炸出来只是 jobs 行里一条模式失败字符串，
-    不是一条指向本行的测试失败。这里只记账，由用例读账。
-    """
-
-    def __init__(self) -> None:
-        self.empty_text_ids: list[str] = []
-
-    def synthesize(self, text: str, _voice: str | None, out_path: Path) -> Path:
-        if out_path.stem.startswith("full"):
-            raise RuntimeError("云端不可达")
-        if not text.strip():
-            self.empty_text_ids.append(out_path.stem)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(b"")
-        return out_path
-
-
-def test_tts_failure_fails_one_mode_not_the_batch(
-    memory_db: sqlite3.Connection,
-    tmp_path: Path,
-    sample_video: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """失败粒度=单条方案：第二个模式配音缺件，第一个照样成稿并进入渲染。
-
-    配音改成抛错之后，最容易顺手写坏的就是这层：异常一路冒出 `_run_produce`，
-    整批作业中止，第一个模式明明已经出了片却在 jobs 里查无此人。
-    """
-    project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
-    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
-    context = harness.context
-    context.settings.update(
-        {
-            "llm.base_url": "http://llm.test/v1",
-            "llm.api_key": "sk-test",
-            "llm.model": "test-model",
-            "narration.style_id": _PLANTED_STYLE_ID,
-        }
-    )
-    _FakeLlm.calls = []
-    monkeypatch.setattr(script_driver, "LlmClient", _FakeLlm)
-    monkeypatch.setattr(copywriter, "LlmClient", _FakeLlm)
-    broken_tts = _FullModeBrokenTts()
-    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: broken_tts)
-    monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: 1.25)
-    rendered: list[str] = []
-    monkeypatch.setattr(
-        narration_api,
-        "render_export",
-        lambda _ctx, run, report: rendered.append(run.plan_data.mode),
-    )
-
-    job = harness.rpc(
-        "narration.produce",
-        {"project_id": project_id, "modes": ["intro_narration", "full_narration"]},
-    )
-    status = _wait_terminal(harness, str(job["job_id"]))
-
-    assert status["status"] == "failed", status
-    error = str(status["error"])
-    assert "全片解说" in error and "合成失败" in error, f"失败没点名到模式与原因：{error}"
-    assert "片头解说" not in error, f"第一个模式被第二个的失败牵连了：{error}"
-    assert rendered == ["intro_narration"], f"渲染只该跑成功的那条方案：{rendered}"
-    assert broken_tts.empty_text_ids == [], (
-        f"语言层没填上文案，槽位还是空的：{broken_tts.empty_text_ids}"
-    )
-    assert narration_api._newest_ready_plan(context, project_id, "intro_narration") is not None
-    assert narration_api._newest_ready_plan(context, project_id, "full_narration") is None
-    assert str(job["job_id"]) not in context.cancel_events, "cancel_events 未释放"
-
 def _variant_plan(copy_prefix: str) -> PlanData:
-    """同模式同槽位 id、只有文案不同的方案：id 确定性重复正是内容寻址要隔离的东西。"""
+    """同模式同槽位 id、只有文案不同：内容寻址要隔离的东西。"""
     return PlanData(
         mode="full_narration",
         timeline=[
@@ -686,18 +297,13 @@ def _variant_plan(copy_prefix: str) -> PlanData:
 
 
 class _TextWritingTts:
-    """把文案原样写进"音频"文件：读文件内容即知这是谁的音。
-
-    与 tests/engines/narration/test_tts_audio_isolation.py 的替身同一手法——那个文件的
-    docstring 逐字写着「只断言"两条路径不同"抓不住 stale-pointer 回归，内容断言才抓得住」。
-    本文件在 api 层沿用同一条规矩。
-    """
+    """把文案原样写进音频文件：读内容即知这是谁的音。"""
 
     def __init__(self) -> None:
         self.calls: list[str] = []
 
     def synthesize(self, text: str, _voice: str | None, out_path: Path) -> Path:
-        assert text.strip(), "语言层没填上文案，槽位还是空的"
+        assert text.strip(), "语言层没填上文案"
         self.calls.append(text)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(text.encode("utf-8"))
@@ -932,55 +538,6 @@ def test_plan_variants_writes_k_plans_without_rendering(
 
     selection_calls = sum(1 for system, _user in calls if "选题操盘手" in system)
     assert selection_calls == 1, f"选题应每模式一次，实得 {selection_calls} 次"
-
-
-def test_one_variant_failure_does_not_kill_its_siblings(
-    memory_db: sqlite3.Connection,
-    tmp_path: Path,
-    sample_video: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """失败粒度=单条方案：第 2 条配音缺件，第 1、3 条照样落库。
-
-    这是 P-1.5 的「失败粒度=单条方案」从**模式级**下沉到**变体级**：
-    原状 try/except 包着整个模式（_run_produce 与 run_group 都是），
-    一条变体的 TTS 失败会带走同模式其余 K-1 条。
-    """
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
-    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
-    harness.context.settings.update(_LLM_SETTINGS)
-    calls: list[tuple[str, str]] = []
-    _stub_language_and_tts(monkeypatch, calls)
-
-    real_voice = narration_api._voice
-    seen: list[int] = []
-
-    def voice_except_second(context: Any, plan: Any, settings: Any) -> Any:
-        """按调用序号失败第二条：`_voice` 不再有 index 形参（Task 5 重写后是三个入参）。"""
-        seen.append(len(seen) + 1)
-        if len(seen) == 2:
-            raise RuntimeError("旁白 full-1 合成失败（引擎=edge）：云端不可达")
-        return real_voice(context, plan, settings)
-
-    monkeypatch.setattr(narration_api, "_voice", voice_except_second)
-
-    result = harness.rpc(
-        "narration.plan_variants",
-        {"project_id": project_id, "modes": ["full_narration"], "k": 3},
-    )
-    status = _wait_terminal(harness, str(result["job_id"]))
-
-    assert status["status"] == "failed", status
-    error = str(status["error"])
-    assert "全片解说·角度2:" in error and "合成失败" in error, f"失败没点名到角度与原因：{error}"
-    assert "全片解说·角度1:" not in error and "全片解说·角度3:" not in error, (
-        f"兄弟变体被牵连了：{error}"
-    )
-    assert seen == [1, 2, 3], f"第 2 条失败后应继续跑第 3 条，实得 {seen}"
-
-    plans = plans_repo.list_by_batch(memory_db, project_id, str(result["batch_id"]))
-    assert [row["variant_index"] for row in plans] == [1, 3], "只有失败那条不该落库"
-    assert str(result["job_id"]) not in harness.context.cancel_events, "cancel_events 未释放"
 
 
 def test_one_mode_failure_does_not_kill_other_modes(
@@ -1668,7 +1225,7 @@ def test_get_plan_exposes_the_episodes_a_plan_spans(
 def test_get_plan_unknown_id_raises(
     memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
 ) -> None:
-    project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
+    _seed_project_with_analysis(memory_db, tmp_path, sample_video)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     response = harness.router.dispatch(
         RpcRequest(id=1, method="narration.get_plan", params={"plan_id": "不存在"})

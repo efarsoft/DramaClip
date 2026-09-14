@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from dramaclip.infra.storage.repos import plans as plans_repo
 from tests.api.test_plan_variants import Harness, _seed_project_with_analysis
 
 _SERVICE_ROOT = Path(__file__).resolve().parents[2] / "dramaclip"
@@ -15,9 +16,16 @@ def test_export_output_lands_under_data_dir(
 ) -> None:
     project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
-    produce = harness.rpc("narration.produce", {"project_id": project_id, "modes": ["raw_clip"]})
+    produce = harness.rpc(
+        "narration.plan_variants",
+        {"project_id": project_id, "modes": ["raw_clip"], "k": 1},
+    )
     status = harness.wait_job(str(produce["job_id"]))
     assert status["status"] == "completed", status.get("error")
+
+    plan_id = str(plans_repo.list_by_batch(memory_db, project_id, produce["batch_id"])[0]["id"])
+    submit = harness.rpc("export.submit", {"plan_ids": [plan_id]})
+    harness.wait_job(str(submit["exports"][0]["job_id"]))
 
     exported = harness.rpc("export.list", {"project_id": project_id})
     out = Path(str(exported[0]["output_path"]))
