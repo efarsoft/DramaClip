@@ -157,7 +157,7 @@ def _transcript_note(
     )
 
 
-def _format_transcript_episodes(
+def format_transcript_episodes(
     episode_inputs: list[dict[str, Any]],
     *,
     total_cap: int = _TOTAL_LINE_CAP,
@@ -217,14 +217,14 @@ def write_script_episodes(
 
     episode_inputs 每项：{"number": 集号, "duration": 集时长秒,
     "segments": [{"start", "end", "text"}]}。失败抛异常；降级被禁止（规格 §3.3.1）。
-    喂给模型的转写由 `_format_transcript_episodes` 按集分配额取样（超预算时
+    喂给模型的转写由 `format_transcript_episodes` 按集分配额取样（超预算时
     每集等距摘录并在块尾标注），不再按集号头部截断。
     """
     durations = {
         int(episode["number"]): float(episode.get("duration") or 0.0)
         for episode in episode_inputs
     }
-    transcript_block = _format_transcript_episodes(episode_inputs)
+    transcript_block = format_transcript_episodes(episode_inputs)
     if not transcript_block:
         raise ValueError("编剧无米下锅：所有集都没有台词转写")
     cross_block = (
