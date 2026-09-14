@@ -210,6 +210,7 @@ def write_script_episodes(
     target_min_s: float,
     target_max_s: float,
     project_name: str,
+    angle_block: str,
     style_directives: str = "",
     trace_path: Path | None = None,
 ) -> Script:
@@ -244,6 +245,7 @@ def write_script_episodes(
         f"最高优先级是剧情完整与吸引力：铺垫果断压缩，冲突和反转给足戏份；"
         f"宁可略长，也不要为凑时长删掉关键冲突。\n"
         f"{cross_block}\n"
+        f"{angle_block}\n"
         f"台词转写：\n" + transcript_block
         + f"{style_block}"
     )

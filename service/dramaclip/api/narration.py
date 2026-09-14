@@ -11,7 +11,7 @@ from typing import Any
 
 from dramaclip.api.context import AppContext
 from dramaclip.api.export import ExportRun, render_export
-from dramaclip.engines.narration import copywriter, script_driver, scriptwriter
+from dramaclip.engines.narration import casting, copywriter, script_driver, scriptwriter
 from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration import styles as styles_lib
 from dramaclip.engines.narration.models import PlanData
@@ -229,6 +229,7 @@ def _generate_one(
         plan, used_ids = script_driver.script_dialogue_plan(
             episode_inputs,
             settings,
+            angle_block="",
             trace_dir=context.data_dir / "logs" / "llm",
         )
     else:
@@ -240,22 +241,29 @@ def _generate_one(
         conflicts = _parse_conflicts(record["conflict_scores"])
         highlights = _parse_highlights(record["highlights"])
         asr_segments = narration_pipeline.parse_asr_segments(record["asr_segments"])
-        audio = narration_pipeline.parse_audio_features(record["audio_features"])
+        material = {
+            episode_id: casting.EpisodeMaterial(
+                number=int(episodes[0]["episode_number"]), asr=asr_segments
+            )
+        }
         plan = narration_pipeline.build_plan(
             mode,
-            episode_id,
-            conflicts,
+            casting.stamp([(int(episodes[0]["episode_number"]), episode_id, conflicts)]),
             highlights,
-            asr_segments,
-            audio,
+            {
+                episode_id: casting.EpisodeMaterial(
+                    number=int(episodes[0]["episode_number"]), asr=asr_segments
+                )
+            },
             settings,
         )
         if plan.narration_texts:
             plan = copywriter.write_plan_copy(
                 plan,
-                asr_segments,
+                material,
                 settings,
                 mode_label=narration_pipeline.MODE_LABELS.get(mode, mode),
+                angle_block="",
                 trace_dir=context.data_dir / "logs" / "llm",
             )
 

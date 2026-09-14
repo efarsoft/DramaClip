@@ -25,6 +25,16 @@ _SETTINGS: dict[str, str] = {
     "strategy.max_duration_s": "300",
 }
 
+_VALID_PAYLOAD: dict[str, Any] = {
+    "hook": "开场钩子",
+    "segments": [
+        {"episode": 1, "start": 1.0, "end": 10.0, "text": "第一段解说"},
+        {"episode": 1, "start": 10.0, "end": 20.0, "text": "第二段解说"},
+        {"episode": 2, "start": 5.0, "end": 15.0, "text": "第三段解说"},
+    ],
+    "cta": "点我看完结",
+}
+
 _EPISODES: list[dict[str, Any]] = [
     {
         "number": 1,
@@ -53,16 +63,14 @@ _SCRIPT_PAYLOAD: dict[str, Any] = {
 class FakeLlmClient:
     """按队列响应 chat_json；记录 system/user 供断言哪一层被调用。"""
 
-    calls: list[str] = []
-    systems: list[str] = []
+    calls: list[tuple[str, str]] = []
     queue: list[Any] = []
 
     def __init__(self, _config: Any, timeout_s: float = 60.0) -> None:
         self.timeout_s = timeout_s
 
     def chat_json(self, system: str, user: str) -> Any:
-        FakeLlmClient.systems.append(system)
-        FakeLlmClient.calls.append(user)
+        FakeLlmClient.calls.append((system, user))
         queue = FakeLlmClient.queue
         item = queue.pop(0) if len(queue) > 1 else queue[0]
         if isinstance(item, Exception):
@@ -84,14 +92,14 @@ def test_unconfigured_llm_raises_not_none() -> None:
     settings = dict(_SETTINGS)
     settings["llm.base_url"] = ""
     with pytest.raises(LlmUnavailable, match="引擎"):
-        script_driver.script_dialogue_plan(_EPISODES, settings)
+        script_driver.script_dialogue_plan(_EPISODES, settings, angle_block="")
 
 
 def test_no_script_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(script_driver, "LlmClient", FakeLlmClient)
     FakeLlmClient.queue = [{"hook": "", "segments": []}]
     with pytest.raises(ValueError, match="剧本"):
-        script_driver.script_dialogue_plan(_EPISODES, dict(_SETTINGS))
+        script_driver.script_dialogue_plan(_EPISODES, dict(_SETTINGS), angle_block="")
 
 
 def test_resolve_run_style_uses_llm_choice(driver: Any) -> None:
@@ -136,9 +144,23 @@ def test_script_plan_injects_directives_without_selection(driver: Any) -> None:
     settings = dict(_SETTINGS)
     settings["_style_directives"] = planted
     FakeLlmClient.queue = [dict(_SCRIPT_PAYLOAD)]
-    plan, used = script_driver.script_dialogue_plan(_EPISODES, settings)
+    plan, used = script_driver.script_dialogue_plan(_EPISODES, settings, angle_block="")
     assert plan.planner == "llm_script"
     assert used == ["ep-1", "ep-2"]
     assert len(FakeLlmClient.calls) == 1, f"剧本装配不该再发选题请求：{FakeLlmClient.calls}"
     assert not any("风格库" in system for system in FakeLlmClient.systems)
-    assert planted in FakeLlmClient.calls[0], "注入的风格指令未进编剧 prompt"
+    assert planted in FakeLlmClient.calls[0][1], "注入的风格指令未进编剧 prompt"
+
+
+def test_angle_block_is_forwarded_to_the_script_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """跨集链的角度注入：与单集链共用 angles.prompt_block 的措辞，不得各写一份。"""
+    monkeypatch.setattr(script_driver, "LlmClient", FakeLlmClient)
+    FakeLlmClient.queue = [dict(_VALID_PAYLOAD)]
+    script_driver.script_dialogue_plan(
+        _EPISODES, dict(_SETTINGS), angle_block="\n本条片的取材角度：复仇线"
+    )
+    assert any("复仇线" in call[1] for call in FakeLlmClient.calls), (
+        "角度块没转交到编剧 prompt"
+    )

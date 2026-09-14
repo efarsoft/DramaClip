@@ -53,7 +53,9 @@ _EPISODE_INPUTS = [
 def test_write_script_episodes_multi() -> None:
     fake = FakeLLM(_payload())
     script = scriptwriter.write_script_episodes(
-        fake, _EPISODE_INPUTS, target_min_s=30, target_max_s=120, project_name="剧"
+        fake, _EPISODE_INPUTS, target_min_s=30, target_max_s=120,
+        angle_block="",
+        project_name="剧"
     )
     episodes = [segment.episode for segment in script.segments]
     assert episodes == [1, 2]  # 未知集号（9）被丢弃
@@ -66,7 +68,9 @@ def test_write_script_episodes_empty_transcript_raises() -> None:
     empty = [{"number": 1, "duration": 60.0, "segments": []}]
     with pytest.raises(ValueError, match="无米下锅"):
         scriptwriter.write_script_episodes(
-            fake, empty, target_min_s=30, target_max_s=60, project_name="剧"
+            fake, empty, target_min_s=30, target_max_s=60,
+            angle_block="",
+            project_name="剧"
         )
 
 
@@ -141,7 +145,9 @@ def test_prompt_keeps_raw_segments_by_episode() -> None:
         }
     ]
     scriptwriter.write_script_episodes(
-        fake, inputs, target_min_s=30, target_max_s=60, project_name="剧"
+        fake, inputs, target_min_s=30, target_max_s=60,
+            angle_block="",
+            project_name="剧"
     )
     user = fake.prompts[0]
     assert "【第1集】" in user

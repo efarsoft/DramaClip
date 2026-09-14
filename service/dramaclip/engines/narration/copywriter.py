@@ -6,8 +6,11 @@
 降级禁止（规格 §3.3.1）：LLM 未配置、槽位漏答、答非所问、句子超长、槽位没有配对画面段，
 一律抛出，不再有模板池。失败粒度是单条方案——api 层逐模式捕获，其余模式继续出片。
 
-单集槽位模式（intro/cross/ultra_short/full/dual_host/inner_monologue）共用本模块；
-跨集剧本驱动（dialogue_narration）走 scriptwriter，两条链共享 FUNDAMENTALS。
+槽位模式（intro/cross/ultra_short/full/dual_host/inner_monologue）共用本模块；
+剧本驱动（dialogue_narration）走 scriptwriter，两条链共享 FUNDAMENTALS。
+两类的方案都可以跨集取材（规格 §1）：本模块按 `segment.episode_id` 逐槽取台词，
+scriptwriter 那边则把整份跨集转写按集分组喂给模型、由模型自己排集号。
+卖点角度由 `angles.prompt_block` 措辞、经 `angle_block` 注入；两条链共用那一段字。
 """
 
 from __future__ import annotations
@@ -16,8 +19,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from dramaclip.engines.analysis.models import AsrSegment
-from dramaclip.engines.narration import scriptwriter
+from dramaclip.engines.narration import casting, scriptwriter
 from dramaclip.engines.narration.models import NarrationText, PlanData, TimelineSegment
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
 
@@ -40,19 +42,38 @@ _SYSTEM_PROMPT = (
 def _slot_block(
     texts: list[NarrationText],
     segments: list[TimelineSegment],
-    asr_segments: list[AsrSegment],
+    material: casting.MaterialByEpisode,
 ) -> str:
-    """每个槽位一段：职责 + 它压在的画面区间 + 区间内台词。台词为编剧唯一的事实来源。"""
+    """每个槽位一段：职责 + 它压在的画面区间 + **它那一集**区间内的台词。
+
+    台词必须按 `segment.episode_id` 取，不能拿一张摊平的 ASR 表按秒过滤：区间是
+    **集内相对秒**，活库实测十集的场景起点全部从 `0.0` 开始，集与集的秒轴互相覆盖，
+    于是第 3 集 12-20s 的槽位会捞到第 7 集 12-20s 的对白。而 system prompt 明写
+    「情节、细节、称谓只能来自给定台词，禁止编造台词之外的事件」——模型会老老实实照着
+    **错的台词**写出一段通顺、可信、说的却不是这段画面的解说。不报错、不降级、
+    成片看着正常，正是本仓最贵的那一类缺陷。跨集时间轴（规格 §1）让这个缺陷从
+    "不可能发生"变成"必然发生"，故按集取台词是跨集的前置条件，不是可选优化。
+
+    集名（`casting.EpisodeMaterial.label`）也进块：跨集时间轴上「画面区间 12.0-20.0s」
+    不说是哪一集就等于没说，模型无从判断相邻两槽是不是同一条线。
+    """
     by_id = {segment.narration_id: segment for segment in segments if segment.narration_id}
     lines: list[str] = []
     for text in texts:
         segment = by_id.get(text.id)
         if segment is None:
             raise ValueError(f"槽位 {text.id} 没有配对画面段：编排器漏写 narration_id")
+        try:
+            pool = casting.dialogue_of(material, segment.episode_id)
+            label = casting.label_of(material, segment.episode_id)
+        except ValueError as exc:
+            # 缺键是装配漏了一集，不是"这一集没台词"：点名到槽位，否则错误串里只有
+            # 一个 uuid，运维看不出是哪一条片的哪一段。
+            raise ValueError(f"槽位 {text.id}：{exc}") from exc
         lines.append(f"[{text.id}] 要做的事：{text.brief}")
-        lines.append(f"  画面区间：{segment.start:.1f}-{segment.end:.1f}s")
+        lines.append(f"  取材：{label}，画面区间：{segment.start:.1f}-{segment.end:.1f}s")
         inside = [
-            seg for seg in asr_segments if seg.start < segment.end and seg.end > segment.start
+            seg for seg in pool if seg.start < segment.end and seg.end > segment.start
         ]
         if inside:
             lines.append("  区间内台词：")
@@ -92,13 +113,19 @@ def _sanitize(raw: Any, texts: list[NarrationText]) -> dict[str, str]:
 
 def write_plan_copy(
     plan: PlanData,
-    asr_segments: list[AsrSegment],
+    material: casting.MaterialByEpisode,
     settings: dict[str, str],
     *,
     mode_label: str,
+    angle_block: str,
     trace_dir: Path | None = None,
 ) -> PlanData:
-    """填满 plan 的全部旁白槽位并置 planner=llm_script；任何不合格都抛异常。"""
+    """填满 plan 的全部旁白槽位并置 planner=llm_script；任何不合格都抛异常。
+
+    `material` 按集分开（episode_id → 集号 + 该集台词表）：一条方案的时间轴可以横跨
+    多集（规格 §1），而槽位区间是**集内相对秒**，故每个槽位只能读它自己那一集的台词。
+    理由与实测数字见 `_slot_block`。
+    """
     if not plan.narration_texts:
         return plan
     config = LlmConfig.from_settings(settings)
@@ -115,8 +142,9 @@ def write_plan_copy(
         f"项目：{project_name}"
         + (f"（题材：{genre}）" if genre else "")
         + f"\n模式：{mode_label}"
+        + angle_block
         + "\n文案槽位：\n"
-        + _slot_block(plan.narration_texts, plan.timeline, asr_segments)
+        + _slot_block(plan.narration_texts, plan.timeline, material)
         + (f"\n\n解说风格要求：{directives}" if directives else "")
     )
     llm = LlmClient(config, timeout_s=COPY_LLM_TIMEOUT_S)
@@ -132,9 +160,9 @@ def write_plan_copy(
         attempts.append({"raw": raw, "accepted": True})
         break
     if trace_dir is not None:
-        stamp = time.strftime("%m%d_%H%M%S")
+        stamp_time = time.strftime("%m%d_%H%M%S")
         scriptwriter.dump_trace(
-            Path(trace_dir) / f"llm_copy_{plan.mode}_{stamp}.json",
+            Path(trace_dir) / f"llm_copy_{plan.mode}_{stamp_time}.json",
             {"system": _SYSTEM_PROMPT, "user": user_prompt, "attempts": attempts},
         )
     if filled is None:

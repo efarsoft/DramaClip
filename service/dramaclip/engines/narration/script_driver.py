@@ -63,11 +63,13 @@ def script_dialogue_plan(
     episode_inputs: list[dict[str, Any]],
     settings: dict[str, str],
     *,
+    angle_block: str,
     trace_dir: Any = None,
 ) -> tuple[PlanData, list[str]]:
     """跨集剧本驱动的对话解说。LLM 未配置或剧本不合格一律抛（降级已禁止）。
 
     口味层由调用方经 resolve_run_style 注入 settings["_style_directives"]，
+    卖点角度经 angle_block 注入编剧 prompt，措辞由 angles.prompt_block 独家持有。
     本函数不再自行选题——一个任务只该付一次选题成本。
 
     episode_inputs 每项：{"number", "episode_id", "duration",
@@ -97,6 +99,7 @@ def script_dialogue_plan(
         target_min_s=strategy.min_duration_s,
         target_max_s=strategy.max_duration_s,
         project_name=str(settings.get("_project_name") or "这部剧"),
+        angle_block=angle_block,
         style_directives=str(settings.get("_style_directives") or ""),
         trace_path=trace_path,
     )

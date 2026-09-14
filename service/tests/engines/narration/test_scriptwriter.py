@@ -58,6 +58,7 @@ def _run(llm: FakeLLM) -> Script:
         target_min_s=30,
         target_max_s=300,
         project_name="测试剧",
+        angle_block="",
     )
 
 
@@ -148,4 +149,5 @@ def test_no_transcript_raises() -> None:
         write_script_episodes(
             FakeLLM([dict(_VALID_PAYLOAD)]), empty,
             target_min_s=30, target_max_s=300, project_name="测试剧",
+        angle_block="",
         )
