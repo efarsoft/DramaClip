@@ -1,10 +1,17 @@
 # P-2a 规划/渲染解耦 实施计划
 
+> ⚠️ **执行前必读（2026-09-12 状态）**：本文件正在按业主「P-2a 做真跨集」的裁决重构，重构代理在写到 **Task 6** 时中断。
+> 已确认重构完成的：**《定案二》改写、《P-2c 取消记录》、Task 3c（`casting.py` + 六个编排器跨集化）、Task 4（成稿链 + 槽位台词按集取用）、Task 5**，以及顶部《修订记录（2026-09-12 跨集裁决后）》的 C1–C13。
+> **尚未复核的：Task 6 至 Task 11**——它们可能仍按「单条方案限一集」的旧前提书写（旧前提已被裁决作废）。
+> **因此：Task 6 及之后不得直接执行**，必须先做一次针对跨集前提的审计（重点：`_plan_one` 的取数是否按集、重叠度量是否按 `(episode, start, end)` 三元组、Task 9 的门禁阈值是否仍成立、Task 11 的期望数字是否要求 ≥2 集已分析）。
+> 审计完成前，本计划的可执行范围是 Task 1–5。
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把 `narration.produce` 拆成 `narration.plan_variants`（只规划）与 `export.submit`（只渲染），让阶段③ 能"只看方案、反复重掷、不付渲染成本"，并让一个模式的 K 条方案真的是 K 个互异的卖点角度。
 
-**Architecture:** 三层切分——**选题层**（新增 `engines/narration/angles.py`：一个模式一次 LLM 调用产出 K 条卖点互异的取材角度，每条带角度名/理由/钩子首句/取材集）、**成稿层**（既有 `copywriter` / `scriptwriter`，本批次只多接一个"卖点角度"输入，不改其降级禁令）、**度量层**（新增 `engines/narration/overlap.py`：按源素材秒算 Jaccard 取材重叠，超 60% 的角度当场不出）。配音留在规划侧，故一条 `ready` 的方案行就是可渲染的成品输入，`export.submit` / `export.retry` 只读库、不做任何规划。
+**Architecture:** 四层切分——**选题层**（新增 `engines/narration/angles.py`：一个模式一次 LLM 调用产出 K 条卖点互异的取材角度，每条带角度名/理由/钩子首句/取材集）、**取材层**（新增 `engines/narration/casting.py`：给场景盖上集身份、给出跨集叙事顺序、按集分开台词表——**一条方案的时间轴因此可以横跨多集**，规格 §1 的「跨集方案」）、**成稿层**（既有 `copywriter` / `scriptwriter`，本批次多接一个"卖点角度"输入，并把槽位台词改成**按集取用**，不改其降级禁令）、**度量层**（新增 `engines/narration/overlap.py`：按源素材秒算 Jaccard 取材重叠，超 60% 的角度当场不出）。配音留在规划侧，故一条 `ready` 的方案行就是可渲染的成品输入，`export.submit` / `export.retry` 只读库、不做任何规划。
 
 **Tech Stack:** Python 3.12 / pydantic v2 / SQLite（迁移 010）/ stdlib urllib（ADR-005 统一 OpenAI 协议）/ pytest / ruff / mypy strict；契约侧 JSON Schema + TypeScript（`protocol/`）。
 
@@ -75,6 +82,37 @@ Task 5 原本的存在理由是"给每个作业单独一个 TTS 目录，免得 
 1. **Task 3 Step 1 的 grep 门禁会假红**：它要求 `grep -rn "_format_transcript_episodes" . --include=*.py` **无输出**，但 `scriptwriter.py:220` 的 docstring 里也写着这个名字，而 Step 1 明说"函数体与 docstring 一字不动"。同时 `tests/engines/narration/test_script_input_budget.py` **确实**引用旧名 5 次（`:25,32,38,47,53`），Step 1 却写成"**若**引用了旧名"。已改成确定语气并把 docstring 那处一并改掉（与 B9 同一类）。
 2. **`api/export.py` 的两处 docstring 会随 Task 8 过期**：`ExportRun`（`:53,56`）写着 `start/retry/produce → _run_export → render_export` 与"三处调用点"、"produce 路径复用 render_export"；`_submit_export`（`:76`）写着"start 与 retry 曾各写一遍这四步"。Task 8 之后调用点是 `submit`/`retry` 两处、且不再有 produce 路径。已加进 Task 8 Step 3。
 3. **Task 9 Step 4 的 `useProduceJob.ts` 改写会让进度条在规划期冻在 0**，而它的 docstring 声称"进度条、文案、成功/失败提示全部沿用原样"。原实现每 1.5 s 读 `status.progress` 并 `setPercent`；改写后的 `waitJob` 把进度丢了。三模式 × K=3 的规划期是数分钟量级，冻结的进度条正是 §3.3 要消灭的静默。已给 `waitJob` 加 `onTick` 回调，两阶段都驱动 percent/stageText，并把 docstring 改成如实描述。
+
+---
+
+### 修订记录（2026-09-12 跨集裁决后）
+
+**触发**：业主**拒绝**给《定案二》那次对规格 §1 的收窄签字，裁决 P-2a 就做真跨集——一条方案可以从多集取画面拼在同一条时间轴上。本节记的是这次裁决引起的全部改动、每条改动据以成立的实测/代码证据、以及它**作废**了本文件里的哪些原文。证据标准与上一节相同：每条都能被复核，不接受"看起来对"。
+
+实测环境：活库 `data/data.db` 只读查询（1 个项目、`status='done'` **10 集**、`narration_plans` 52 行、`episode_analysis` 十行齐全）；代码基线 `9b42f24`；lint/类型读数出自本仓 `.venv/Scripts/ruff.exe`（`select = ["E","F","W","I","UP","B","SIM"]`、`line-length = 100`）与 `mypy --strict`，跑在 `D:/tmp` 的 scratch 装配上（整份 `dramaclip` 包 + 改动后的测试树），跑完已删。
+
+| # | 改了什么 | 实测/代码证据 | 作废了本文件里的什么 |
+|---|---|---|---|
+| **C1** | **《定案二》末段整段重写**：从"本批次不做单条方案内跨集 + ⚠️ 须业主签字"改成"业主拒绝签字，P-2a 做真跨集"，并把原计划给推迟的三条技术理由逐条交代处置 | 规格 §1 逐字：「一次提交（剧 × 模式）→ 每模式产出 1..K 条**卖点角度互异**的**跨集**方案」——"跨集"是**方案**的定语。§4.3 卡片四要素之一是「取材集**区间**」，单集方案给不出区间 | 《定案二》的「本批次不做的事」段与整块 ⚠️ 引用；《P-2c 交接规格》整节（改成《P-2c 取消记录》）；《已知不做》里"跨集化"那条；《自查》表里没有 §1 那一行（本轮补上） |
+| **C2** | **新增 Task 3c（取材层 + 六编排器跨集化）**，插在 Task 3b 与 Task 4 之间。**用 `3c` 这个后缀是有意的**：本文件已经在用 `3b`，沿用后缀可以让 Task 4–11 的编号与全部 `Task N Step M` 交叉引用一个都不用改 | `_plan_one` 在 Task 6，它消费取材层，故新任务必须排在 Task 6 之前；Task 3b 的 `top_conflict_windows` 也是它的同类（编排器**之外**的取材决定），排在一起 | 无（纯新增）。但《文件结构》的"**不动**"清单里"六个模式编排器 `modes/__init__.py`、`modes_w5.py`、`modes_w8.py`、`modes_p2.py`、`modes_w9.py`"那一条**作废**，五个文件全部移到"修改"栏 |
+| **C3** | **集身份不加数据库列、不动 `ConflictScore`**，改为规划期由 `casting.stamp` 注入到一个 `ConflictScore` 的**子类** `EpisodeScene` 上 | ① `episode_analysis.conflict_scores` 是**按集一行**的 JSON（`migrations/001_init.sql:41` 逐字 `conflict_scores TEXT, -- JSON`，经 `analysis_repo.get(conn, episode_id)` 取）→ 集身份就是那一行的主键，**无需迁移、无需重跑分析**；② 加字段的代价是真的：`api/analysis.py:260` 与 `:411` 都用 `json.dumps([s.model_dump() for s in ...])` 落库，而分析层按集被调用、**不知道自己在为哪一集打分**，于是新行会带上 `episode_number: 0` / `episode_id: ""` 这种"长得像有值"的假值（正是 `loudnorm` 键名那次的失败形态），且 `api/analysis.py:290-298,319` 会把这份 JSON 原样回给前端；③ `engines/semantic/models.py` 的模块 docstring 逐字写着「落库结构对齐 docs/service/04 episode_analysis 列」 | 《定案四》第 1 点里"所以跨集排序只能在编排器**之外**做"这句**半作废**：排序确实在编排器之外定键（`casting.episode_order`），但**执行**回到编排器内部——因为六个编排器全都自己重排（见 C4） |
+| **C4** | **`dict[int, list[ConflictScore]]` 这个方案被否掉**（设计问题 1 的选项 b）。改为把身份**放进场景对象**，六个编排器的排序键与盖章处一起改 | 光靠"外面排好序再喂进去"不成立：六个编排器**全都自己重排**——`modes/__init__.py:41,60`（`sorted(..., key=lambda s: s.start)`）、`modes_w5.py:31-32`（先按 `-score` 取 top6 再按 `start` 排）、`modes_w8.py:38-39`、`modes_p2.py:27-28`、`modes_w9.py:53-54`。而"排完再按 `(start,end)` 把集号贴回段上"更不行：**活库实测十集的场景起点全部从 `0.0` 开始**（ep1 前四个起点 `0.0/5.2/9.9/13.4`、ep2 `0.0/7.9/12.6/19.7`、ep3 `0.0/2.8/5.4/11.0`、ep4 `0.0/2.9/7.8/12.7`），集与集的秒轴互相覆盖，按 `(start,end)` 反查集号是**歧义**的 → 会静默把段盖成另一集，而 `export_plan` 按 `segment.episode_id` 查 `episode_paths` 查得到、只是查错了，于是不报错地出错片 | 《P-2c 交接规格》里"得让 `ConflictScore` 带上集身份、或让编排器接受『每集一组场景』"这个二选一**作废**：两条都不选，选的是第三条（子类盖章） |
+| **C5** | **跨集叙事顺序定为 `(集号, 集内起点, scene_index)`**，由 `casting.episode_order` 独家持有；`casting.score_order` = `(-score, 集号, 起点, scene_index)` 同理 | 剧本驱动模式的顺序来自模型写的剧本（`build_from_script_episodes` 逐 `script.segments` 装配、`cursors: dict[int, float]` 按集各持一个游标），规则选取的场景**没有模型**，唯一不武断的顺序就是播出序；`episode_number` 已经是这个语义（`api/narration.py::_collect_episode_inputs` 逐字 `sorted(episodes, key=lambda ep: int(ep["episode_number"]))`）。次键不是洁癖：**活库实测 333 个场景只有 19 个不同分值**（最热的一档出现 45 次），只按 `-score` 排时结果稳定于输入顺序，而输入顺序来自 `episodes_repo.list_by_project`，那个顺序没有契约 | 无（纯新增）。但与 Task 3b 的 `top_conflict_windows` 排序键 `(-score, 集号, scene_index)` 是**同一条理由的两个实例**，两处都补了次键 |
+| **C6** | **`_fit_duration` 的末场景预算豁免删掉**，且 `intro_first=True` 时从预算里**预留** `_INTRO_MAX_S`。门禁的时长阈值**一个字都不改** | 豁免的上界是"一个最长场景"，单集时代它是**死的**：活库实测最大的一集只有 **204.2** 场景秒 < `strategy.max_duration_s`=**300**（活库 settings 实测值），故 `used + duration > budget` 恒不成立。跨集之后两集就到 **405.8** 场景秒，豁免开始生效：活库最长单场景 **7.9s** → 最坏 **307.9s**，而门禁断言是 `duration_s > strategy.max_duration_s` 即失败。引子槽位另算：`synthesize_narration_texts` 把段 `end` 改成 `start + 实测音频时长`，ep1 的引子编排期只给 **5.17s**、实测音频 **22.48s**（由 P-1.5 实测成片 209.51s − planned 192.20s + 5.17s 反推），故四集一手 planned **298.80s** 的成片约 **313s** → **顶穿 300**。预留之后同一手 planned **269.06s**、成片约 **283.6s**，落回窗口；而 ep1 单集仍是 planned 192.20s / 成片 209.5s，与 P-1.5 实测的 **209.51s** 逐位对上（预留不改变单集行为，因为 192.20 < 270） | Task 3b 的 docstring 里"重分时长预算（`_fit_duration` 现在按 `strategy.max_duration_s` 截断单集场景）…归 P-2c"那句**作废**——重分就在本批次做完了。既有测试 `test_modes.py::test_raw_clip_opens_with_highest_conflict` 的断言消息「截断预算（**含首尾豁免**）」随之过期，改成「只有首场景豁免」（B9 同类：过期散文） |
+| **C7** | **`copywriter` 的槽位台词改成按集取用**：`write_plan_copy(plan, material, …)` 的第二参从一张摊平的 `list[AsrSegment]` 换成 `casting.MaterialByEpisode`（`episode_id → 集号 + 该集台词表`），`_slot_block` 按 `segment.episode_id` 查；缺键**抛**，不退回"该区间无台词" | 这是裁决逼出来的**真缺陷**，不是整洁癖：`_slot_block` 逐字是 `[seg for seg in asr_segments if seg.start < segment.end and seg.end > segment.start]`，而区间是**集内相对秒**、十集的秒轴互相覆盖（C4 的实测数字）。单集时代这个过滤不可能错；跨集之后它**必然**把别的集的对白喂给编剧，而 system prompt 明写「情节、细节、称谓只能来自给定台词，禁止编造台词之外的事件」→ 模型会照着错的台词写出一段通顺、可信、说的却不是这段画面的解说。不报错、不降级、成片看着正常。同类第二处：`modes_w9.strongest_line(scene, segments)` 也吃一张摊平表，金句会串集 | Task 4 的 `write_plan_copy` 签名与全部调用点（含 Step 5 那张"逐个补 `angle_block=""`"的清单）；《自查》表里"`plan_data` 无 `window` 字段这一事实被沿用（`copywriter._slot_block` 从配对段读区间，Task 4 未改）"那句**半作废**——区间仍从配对段读，但**台词**改成按集读 |
+| **C8** | **`angles.select_angles` 的 `cross_episode` 形参删掉**，七个解说模式一律要"每条角度给出全部取材集（至少一个，可多个）" | 该形参存在的唯一理由是"六个模式一条片只吃一集"（`_episode_rule(False)` 逐字是「本模式一条片只取一集素材：每条角度的 `episode_numbers` 恰好一个集号」，`_sanitize` 里 `if not cross_episode and len(numbers) != 1: raise`）。裁决之后这个前提没了，留着它就是一个恒为 True 的开关 | Task 3 Step 2 的 `test_single_episode_mode_rejects_multi_episode_angle` 整条用例删除；`test_cross_episode_mode_asks_for_a_set` 改名 `test_prompt_asks_for_an_episode_set`；`test_prompt_carries_mode_k_and_transcript` 的 `assert "恰好一个集号" in prompt` 改成 `"至少一个"`；Step 4 的 `_episode_rule` 与 `_sanitize` 那条 raise 删掉；Step 6 的变异表从 **18** 行降到 **17** 行、`_sanitize` 的抛出点从 **13** 降到 **12**；R8 与《文件结构》里"18 条变异检查"的计数同步改成 17（**上一节那张表里的 18 不改，它是当时的真数**） |
+| **C9** | **规则类两模式的 K 条改成"轮转发窗"**：`top_conflict_windows` 给全集排名，新增纯函数 `pipeline.deal_windows(windows, hands)` 把窗轮转发成 K 手、每手若干集，一手一条方案 | 规格 §4.3 ④ 定的是**条数**（「规则类 = 全剧 top-K 冲突窗」），§1 定的是**每条方案的形状**（「跨集方案」）：一集一条满足前者、违反后者。轮转同时满足两者，且手与手**不共集** ⇒ 取材重叠恒为 0（《定案四》第 2 点原本靠"按集去重"换来的那条性质，由"手间不共集"接着保证）。实测（scratch）：活库十集排名 `[6,7,8,2,3,4,9,10,1,5]`、K=3 → `[[2,5,6,9],[3,7,10],[1,4,8]]`，三手互不相交、每手都拿到一个高分窗。轮转而不是切块：切块会让第 1 手独占 6/7/8 三集，三条片强弱差一个量级 | 《定案四》第 2 点「按集去重，**一集一条**」改成「按集去重，**轮转发成 K 手**」；Task 3b Step 3 docstring 里"本批次做不到的那一半"整段重写；Task 6 Step 7 第 11 点的 `_rule_variants` 整函数重写；`test_rule_mode_yields_fewer_than_k_and_leaves_a_trace` 的留痕断言文案（原断 `"top-3 冲突窗" in item`）随之改 |
+| **C10** | **`_CROSS_EPISODE_MODES` 改名 `_SCRIPT_DRIVEN_MODES`**，值仍是 `frozenset({"dialogue_narration"})`，但注释与它豁免 `_reject_same_episode_sibling` 的**理由换了** | 原注释逐字是「只有剧情解说能在一条方案里跨集取画面…其余模式的编排器签名是 `(episode_id, scenes, strategy)`，一条片只吃一集」——裁决之后这是**假话**。豁免仍然成立，但理由变成"它的剧本由模型按角度现写，同一组集也能写出两条压在同一段画面上的剧本"，成稿前无从判定。前置闸门的证明随之从 `(mode, episode_id)` 改成 `(mode, 取材集组合)`：`build_plan(mode, scenes, highlights, material, settings)` 五个入参没有一个来自角度名或理由 | Task 6 Step 7 第 4 点的常量与注释、第 10 点 `_reject_same_episode_sibling` 的 docstring、Step 10 变异 #14 的说明；`test_post_copy_overlap_gate_still_guards_cross_episode_modes` 的 docstring（它说"生产上 `dialogue_narration` 只剩它"——结论不变，理由要换） |
+| **C11** | **`build_plan` 的死参数 `audio: AudioFeatures` 删掉**，`pipeline.parse_audio_features` 随之成为死码、一并删 | 原函数体（`pipeline.py:48-85`）**从头到尾没有一处引用 `audio`**：九个分派分支只往下传 `conflict_scores` / `highlights` / `asr_segments` / `strategy`。全仓唯一使用点是 `api/narration.py:243` 为它专门调的一次 `parse_audio_features`；`parse_audio_features` 全仓也**只有那一个调用点**（实测 grep）。在一个刚被重写的签名里留着一个没人读的 `audio` 形参，等于告诉下一个人"音频特征参与编排" | Task 6 Step 7 第 11 点 `_plan_one` 里那行 `narration_pipeline.parse_audio_features(record["audio_features"])`；`tests/engines/narration/test_modes.py:7` 的 `AudioFeatures` import 与 `:69` 的 `pipeline.build_plan(...)` 实参（少两个位置参数，照抄会 `TypeError`） |
+| **C12** | **门禁新增一列 `集数` 与一个 `--require-cross-episode` 旗标**，Task 11 用它作为规格 §1 的机器判据 | 门禁今天**没有任何一条断言能区分"跨集"与"单集"**：它量时长/响度/真峰/冻结/planner/插桩覆盖，全部与集数无关。不加这一条，《完成判据》里"覆盖规格 §1"就是一句自我声明。集数从落库的 `plan_data.timeline` 直接数（`len({seg["episode_id"] for seg in timeline})`），不需要新查询 | Task 9 Step 2.4 的停机分支散文（原文「解说类模式一条片只取一集（dialogue_narration 除外）」在裁决之后是**假话**，整段重写）；Task 9 Step 2.7 的"保持不动的部分"清单（表格列宽表 `columns` 现在要动）；Task 11 Step 2/3b 的判据 |
+| **C13** | **`ultra_short_hook` 明确豁免跨集**，写进 `build_ultra_short` 的 docstring 与《定案二》，不做"为跨集而跨集" | 它三个段全压在 `best = 全剧最高分场景` 上（`modes_w5.py:86-116`），是 10-20s 的单镜头悬念版。活库实测：单集 ep1 planned **14.77s**、跨集一手 planned **14.40s**、**集数恒为 1**、段数恒为 3 | 《定案二》新增一句豁免说明（原文没有，因为原文假定"六个模式都单集"）；Task 11 Step 3b 若加跑 `ultra_short_hook`，其 `集数` 列的期望值是 **1** 而不是 ≥2 |
+
+**本轮另外查出、裁决清单里没有的四处**（都是跨集才暴露的，单集时代不可能发生）：
+
+1. **`scene_index` 只在**一集内**唯一，`build_raw_clip` 拿它当身份用**。原代码逐字是 `if ordered[0].scene_index != best.scene_index:`（`modes/__init__.py:43`）——跨集时第 1 集的第 4 个场景与第 5 集的第 4 个场景 `scene_index` 相同，于是"开场是不是最高冲突"会判错、该前置的不前置。改成 `if ordered[0] is not best:`（身份比较），配 `test_raw_clip_best_first_swap_survives_a_scene_index_collision`（夹具刻意让两集都有一个 `scene_index=1`）。变异实测：改回按 `scene_index` 比较 → 该用例红。
+2. **`build_cross` 的旁白段盖的是"上一个原声段"的集，不是锚点的集**。原代码两段都写 `episode_id=episode_id`（同一个入参，单集时无所谓），而旁白段的 `start/end` 取的是 **`anchor`**（`modes_w5.py:54,65-70`）——跨集时画面在下一集、集号写的是上一集，`export_plan` 会去**上一集的同一秒**切画面。改成 `episode_id=anchor.episode_id`，配 `test_cross_narration_segment_carries_the_anchor_episode`。变异实测：改回 `scene.episode_id` → 该用例红。
+3. **`max(scenes, key=lambda s: s.score)` 在同分时取输入顺序的第一个**（`modes_w5.py:86`）。单集时输入顺序来自一份 JSON，稳定；跨集时输入顺序来自 `episodes_repo.list_by_project`，**没有契约**，于是"整组重规划两次取到不同的集"。活库实测 333 个场景只有 19 个不同分值，同分是常态不是边角。改成 `min(scenes, key=casting.score_order)`，配 `test_ultra_short_breaks_a_cross_episode_score_tie_by_episode_number`（夹具把 ep2 排在输入第一位、两集同为 95 分）。变异实测：改回 `max(key=score)` → 该用例红。
+4. **预算会在后面的集拿到任何画面之前就被吃光**，于是"取材集"会缩水。活库实测 `intro_narration` 一手四集 `[2,5,6,9]`：planned 269.06s，但时间轴上**只出现 2 集**（ep2、ep5），ep6/ep9 一帧都没有——因为 `_fit_duration` 按播出序填充、预算 270s 在 ep5 就用完了。这不是缺陷（`intro_narration` 本来就没有场景条数上限，与其余五个模式的 `_MAX_SCENES` 不同），但**落库的 `episode_ids` 必须从建好的时间轴反推**，不能抄角度点名的那份，否则卡片的「取材集区间」会列两集没出现的集（§9.5 假文案类）。`script_driver.script_dialogue_plan` 早就是这么做的（`used_ids = sorted({seg.episode_id for seg in plan.timeline})`），`_plan_one` 沿用同一口径，配 Task 6 的 `test_episode_ids_come_from_the_timeline_not_the_brief`。
 
 ---
 
@@ -174,17 +212,38 @@ Expected: 两条都无输出、退出码 0。
 - **只读 `plan_data.timeline` 的 `episode_id` / `start` / `end` 三个字段**，不读 `audio` 角色：`original` / `narration` / `ducked` 三种角色占的是同一段源画面，取材就是取材。**每集内先合并区间再算**：编排器会产出首尾相接的段（`full_narration` 逐场景、`dialogue_narration` 逐句吸附），不合并会把同一秒数出两次，重叠率能超过 1.0。
 - **阈值语义**：候选角度与**同一模式内已接受的兄弟方案**逐条比，取最大值 `overlap_max`；`overlap_max > 0.60` 即抛错、这条角度不落库，其余角度不受影响（失败粒度=单条方案）。`overlap_max` 落库，因为**被拦掉的角度不留行**，事后无从重算当时那个数——存下来才有审计链。
 
-**本批次不做的事（明确记下来，别当遗漏）**：一条方案内跨集拼画面。今天只有 `dialogue_narration` 具备（`pipeline.build_from_script_episodes` 按集号取素材，`engines/narration/pipeline.py` 函数体实测 `:88-174`），其余六个模式的编排器签名是 `(episode_id, scenes, strategy)`，一条片只吃一集。所以本批次让**角度之间**跨集（不同角度取不同集，于是 K 条合起来覆盖全剧），而**单条方案内**仍限于一集。
+**本批次做的事（2026-09-12 业主裁决后改写，见下）**：一条方案内跨集拼画面。规格 §1 的原话是「一次提交（剧 × 模式）→ 每模式产出 1..K 条**卖点角度互异**的**跨集**方案」——**跨集写在方案的定义里**，不是写在批次之间的比较里。本定案原先把它收窄成"角度之间跨集、单条方案内仍限一集"，并把真正的跨集拼接推给一个假想的 P-2c、标注"须业主签字"。
 
-> ⚠️ **这一条是对规格的收窄，不是计划自己能定的事，须业主签字（R2）。**
+> ✅ **业主拒绝签字。裁决：P-2a 就做真跨集——一条方案可以从多集取画面拼在同一条时间轴上。**
 >
-> 规格 §1 的原话是「一次提交（剧 × 模式）→ 每模式产出 1..K 条**卖点角度互异**的**跨集**方案」——**跨集写在方案的定义里**，不是写在批次之间的比较里。本计划把它读成"角度之间跨集"，是一次**收窄**，签字之前不得当作已决。
->
-> 收窄的技术理由（站得住，但不等于业主同意）：改六个编排器的取材结构会改**成片形态**，而九模式真机门禁的出口判据（时长窗、响度窗、冻结帧）正压在这个形态上；P-1.5 Task 10 尚未闭环时动它，两批的验收证据会混在一起、出问题无法归因。
->
-> **要业主回答的问题**（见《开放问题》#1）：§1 的"跨集"是指 ① K 条合起来覆盖全剧（本计划的做法，P-2a 可交付），还是 ② 每条方案自己就跨集取画面（需要 P-2c 先给 `ConflictScore` 加集身份、再重分时长预算）？若是 ②，P-2a 的出口判据要重写，且必须排在 P-1.5 出口闭环之后。
->
-> 真正的跨集拼接归 P-2c（见末尾《P-2c 交接规格》）。P-1.5 的《已知不做》把跨集化记成了 P-2 的事，这里如实收窄并说明理由。
+> 于是原先的推迟作废，P-2c 不再存在（末尾那一节已改成《P-2c 取消记录》）。原计划给推迟的三条技术理由都是真的，逐条交代它们现在怎么了——**这三条正是本轮全部新增工作的来源**：
+
+| 原推迟理由（都是事实） | 裁决之后怎么办 | 落在哪 |
+|---|---|---|
+| ① 只有 `dialogue_narration` 能跨集拼（`pipeline.build_from_script_episodes` 按集号取素材），其余六个编排器签名是 `(episode_id, scenes, strategy)`，一条片只吃一集 | **给场景盖上集身份**：新增取材层 `engines/narration/casting.py`，六个编排器的第一个入参从 `episode_id: str` 换成 `scenes: list[EpisodeScene]`，段的 `episode_id` 由**每个场景自己**带。渲染侧一行不用改（见下面"渲染侧本来就跨集"那条证据） | **Task 3c** |
+| ② `ConflictScore`（`engines/semantic/models.py`）只有 `scene_index/start/end/score/reason`，**不带集身份**，所以跨集排序只能在编排器之外做 | **不动 `ConflictScore`、不加数据库列**：集身份是**规划期注入**的，因为 `episode_analysis.conflict_scores` 本来就是**按集一行**的 JSON，集身份就是那一行的主键。`casting.stamp` 在解析时盖章，活库已有的十集分析结果一行都不用改、不用重跑分析、不需要任何迁移 | **Task 3c Step 1/3** |
+| ③ 九模式门禁的时长/响度/冻结窗正压在现有单集成片形态上 | **响度与冻结窗不受影响**（Phase C 归一的是整片、段级天花板与格式滤镜逐段作用、`dialogue_narration` 早就出多集成片并且实测过门）；**时长窗会被顶穿，故改的是代码不是阈值**——`_fit_duration` 的末场景预算豁免与 `intro_narration` 的引子槽位余量。逐条推导与实测数字见 Task 9 Step 2.8 | **Task 3c Step 4 + Task 9 Step 2.8** |
+
+**渲染侧本来就跨集，这是"改动只在规划侧"的静态证据**（三处，逐一核过）：
+
+1. `TimelineSegment.episode_id` **逐段存在**（`engines/narration/models.py`），所以一条多集时间轴今天就能表示，模型一行不用改；
+2. `api/export.py::render_export` 的 `episode_paths` 取自 `episodes_repo.list_by_project(conn, project_id)`——项目**全部**集，不是方案点名的那几集；`dialogue_zones` 逐段按 `segment.episode_id` 预取；
+3. `engines/exporter/encoder.py::export_plan` 逐段 `episode_paths.get(segment.episode_id)` 取源、`zones_cache` 按 `episode_id` 分键；`overlap.source_spans` 也是按 `episode_id` 分组合并区间的（Task 2 的 `test_same_seconds_in_different_episodes_do_not_overlap` 已经钉住"第 3 集的 0-10s 与第 7 集的 0-10s 是两段不同画面"）。
+
+生产上已经有多集成片在跑：`dialogue_narration` 走 `build_from_script_episodes`，P-1.5 Task 10 的九模式实测表里它那一行是 **56.10s / −14.1 LUFS / −2.20 dBTP / 冻结 0.0s / 段 7 插桩 7**——**同一套门禁、同一组阈值、全过**。所以《文件结构》的"不动"清单继续覆盖 `engines/exporter/*` 与 `api/export.py` 的渲染路径。
+
+**§1 的"跨集"到底要求什么（本定案的读法，写下来备查）**：要求的是**一条方案的时间轴含来自多集的段**，不是"一个旁白槽位横跨两集"。后者不可能：一个槽位压在一段源画面上（`NarrationText` 没有区间字段，区间由配对段的 `start/end` 给出，P-1.5《实现定案修正》定的），而一段源画面只能来自一个源文件、按 `-ss/-to` 从那一集切。所以"跨集"= 一条解说弧的**若干个槽位分别落在不同集**，成片在集与集之间硬切。六个规则编排器改完之后就是这个形状（`full_narration` 活库实测一手 4 集 → 8 个槽位落在 3 集上，见 Task 3c Step 7 的实测表）。**唯一例外是 `ultra_short_hook`**：它三个段压在同一个场景上（`modes_w5.build_ultra_short` 的 `best`），是 15 秒的单镜头悬念版，跨集只会毁掉它全部的卖点，故它恒为一集——但"哪一集"现在是**全剧**最高分那一集，不再是 `episodes[0]`。§1 要的是一条方案**可以**跨集取画面，不是每条方案**必须** ≥2 集。
+
+**跨集之后新长出来的四条失败模式，逐条给处置**（失败粒度仍是单条方案，`_run_plan_variants` 的内层 try/except 一条不变；每一条新的拒绝分支都配了变异检查，见 Task 3c Step 6 与 Task 6 Step 10）：
+
+| 新的失败形态 | 处置 | 变异检查 |
+|---|---|---|
+| 角度点名的集**不在**已完成分析的集里 | `_casting_for` 一次点名**全部**缺号再抛（逐个抛会让第一条掩盖其余的，运维补完一集再跑又炸一集）。绝不悄悄换一集顶上 | Task 6 Step 10 #10 |
+| 角度点名的集**没有 `episode_analysis` 行** | 同上，抛错点名到集号（「第 N 集分析记录缺失（本条方案点名要取它）」） | Task 6 Step 10 #10b |
+| 点名的集**分析过但一个冲突场景都没出** | 不抛——其余集照样能出片。但必须 `notifier.log` 留痕（规格 §3.3），且落库的 `episode_ids` **从建好的时间轴反推**，不抄角度点名的那份，否则卡片的「取材集区间」会列一集一帧都没出现的集（§9.5 假文案类） | Task 6 Step 10 #16 |
+| 槽位的 `segment.episode_id` **不在**按集分开的台词表里 | `casting.dialogue_of` / `label_of` 抛，点名到槽位 id。**绝不退回"这一集没有台词"**：`_slot_block` 本来就有"该区间无台词转写"那一支（素材事实，合法），缺键走那一条会让编剧对着别的集的画面写一段什么都不说的解说 | Task 4 Step 7 #4/#5 |
+
+**成本账的口径差不变，但可判定的那一半扩大了一圈**（R7 的后续）：`_reject_same_episode_sibling` 这道成稿**前**的闸门原先按"同模式同集"判，跨集之后按"同模式**同一组集**"判——证明仍然成立，因为 `_plan_one` 的非剧本分支里 `variant` 只进 `copywriter` 的 `angle_block`、**不进** `build_plan`（新签名 `build_plan(mode, scenes, highlights, material, settings)` 的五个入参没有一个来自角度名或理由），故时间轴是 `(mode, 取材集组合)` 的纯函数：同一组集 ⇒ 同一份场景表 ⇒ 同一条时间轴 ⇒ Jaccard = 1.0。豁免的只剩 `dialogue_narration` 一个模式，而且理由**换了**——不再是"只有它能跨集"（现在九个都能），而是"它的剧本由模型按角度现写，同一组集也能写出两条压在几乎同一段画面上的剧本"，成稿前无从判定。常量因此从 `_CROSS_EPISODE_MODES` 改名为 `_SCRIPT_DRIVEN_MODES`（Task 6 Step 7 第 4 点）。
 
 ### 定案三：job 与库的形状
 
@@ -231,13 +290,17 @@ Expected: 两条都无输出、退出码 0。
 
 **规则类（`raw_clip` / `subtitle_flow`）**：K 条来自**全剧 top-K 冲突窗**，实现在 Task 3b 的 `pipeline.top_conflict_windows`。设计要点与它们各自的依据：
 
-1. **榜单必须跨集**。今天两个编排器吃的都是**单集**的 `ConflictScore` 列表（`build_raw_clip(episode_id, scenes, highlights, strategy)`、`build_subtitle_flow(episode_id, scenes, asr_segments, strategy)`），而 `ConflictScore`（`engines/semantic/models.py`）只有 `scene_index/start/end/score/reason`，**不带集身份**。所以跨集排序只能在编排器**之外**做，并且必须把 `(集号, 场景)` 成对喂进、成对取出——否则排完就不知道那一窗属于谁。
-2. **按集去重，一集一条**。`build_raw_clip` 与 `build_subtitle_flow` 都是 `(episode_id, 该集场景表)` 的**确定性纯函数**：同一集的两个不同窗口喂进去会得到**逐字节相同**的方案。那不是 K 条互异，是 1 条复制 K 份，而且会被重叠闸门判成 100% 重叠、把 K-1 条报成失败。故"窗"在这里的作用是把**集**排出名次。
-3. **条数可以少于 K，但必须留痕**。去重后不足 K 时（极端例子：全剧只分析完 1 集）返回 1..K-1 条。规格 §1 的原话是「每模式产出 **1..K** 条」，所以少出是合法形状；但 §3.3 禁止静默，故 `_rule_variants` 在少出时打一行 `notifier.log`，说明"top-K 窗去重后只落在 N 集"。
+1. **榜单必须跨集**。今天两个编排器吃的都是**带集身份**的场景表（Task 3c 之后是 `list[EpisodeScene]`），而 `ConflictScore`（`engines/semantic/models.py`）只有 `scene_index/start/end/score/reason`，**不带集身份**——身份是 Task 3c 的 `casting.stamp` 在规划期盖上去的。所以**排名**这一步仍然只能在编排器**之外**做，并且必须把 `(集号, 场景)` 成对喂进、成对取出——否则排完就不知道那一窗属于谁。
+2. **按集去重，再轮转发成 K 手**（2026-09-12 裁决后改，原状是"一集一条"）。`build_raw_clip` 与 `build_subtitle_flow` 都是 `(取材集, 该集场景表)` 的**确定性纯函数**：同一组的两个不同窗口喂进去会得到**逐字节相同**的方案。那不是 K 条互异，是 1 条复制 K 份，而且会被重叠闸门判成 100% 重叠、把 K-1 条报成失败。故"窗"在这里的作用是把**集**排出名次；排完由 `pipeline.deal_windows` **轮转**发成 K 手（第 j 手拿排名 j, j+K, j+2K…），每手若干集、手与手**不共集**。"一集一条"满足规格 §4.3 ④ 的条数要求但违反 §1 的「跨集方案」，轮转两个都满足，而且"手间不共集"接着保证了原先靠"按集去重"换来的那条零重叠性质。**实测**（活库十集、K=3）：排名 `[6,7,8,2,3,4,9,10,1,5]` → 三手 `[[2,5,6,9],[3,7,10],[1,4,8]]`。轮转而不是切块，是因为切块会让第 1 手独占 6/7/8 三个最高分集，三条片的强弱差一个量级。
+3. **条数可以少于 K，但必须留痕**。发窗之后不足 K 手时（极端例子：全剧只分析完 1 集）返回 1..K-1 条。规格 §1 的原话是「每模式产出 **1..K** 条」，所以少出是合法形状；但 §3.3 禁止静默，故 `_rule_variants` 在少出时打一行 `notifier.log`。**另有一条新的留痕义务**：互不相交的多集手至少需要 `2 × K` 集，所以**集数 < 2K 时必有手退化成一集**（3 集发 3 手就是 1/1/1）。那是算术不是缺陷，但界面卡片写着"跨集方案"，实际只取一集时必须说清楚——`_rule_variants` 为此单独打一行日志，点名"其中 N 手只取到一集"。
 4. **`angle` 与 `angle_reason` 一律留空串**。规则类没有模型自选的卖点角度，也没有旁白槽位去读钩子。这与 `protocol/schemas/narration.json` 里 `NarrationPlan.angle` 的描述「无解说的模式为空串」逐字对应，也与 Task 1 的 `test_angle_columns_default_to_the_migration_defaults` 一致。界面卡片靠**四要素里的「取材集区间」**（`episode_ids` + `plan_data.timeline`）加 `variant_index` 区分。
 5. **`planner` 仍是 `"rule"`**。两个编排器都不写 `planner`，`PlanData.planner` 的默认值就是 `"rule"`（`engines/narration/models.py:60`），而成稿链一次都不跑——所以 `verify_modes.py` 的 `EXPECT_PLANNER` 无需改动。**这是"规则类没被拖进 LLM"最便宜的一道真机证据。**
 
-**本批次做不到、且必须说清楚的那一半**：让**每条方案的内容真的等于它那一窗**。那需要 `ConflictScore` 带上集身份、或让编排器接受"每集一组场景"，并重分时长预算（`modes/__init__.py::_fit_duration` 现在按 `strategy.max_duration_s` 截断单集场景）——这既改**编排器签名**又改**成片形态**，正是《定案二》末段与《P-2c 交接规格》推迟的那件事。**所以 P-2a 交付的是"用全剧 top-K 冲突窗决定规则类的条数与取材集"，不是"每条规则类方案就是一窗"**。这个差别写进 Task 3b 的 docstring，不藏在代码里。
+**仍然做不到、且必须说清楚的那一半**（2026-09-12 裁决后**换了理由**）：让**每条方案的内容真的等于它那一窗**。原先的理由是技术的——「`ConflictScore` 不带集身份、`_fit_duration` 按单集截断」。**那个前提已经被 Task 3c 拆掉了**：集身份有了（`casting.EpisodeScene`），预算也重分了（`_fit_duration` 的末场景豁免删掉、引子槽位预留 `_INTRO_MAX_S`，实测数字见《修订记录》C6）。所以剩下的理由是**产品**的，需要业主回答（《开放问题》#1）：
+
+- 一个"窗"是 3-25s（`modes/__init__.py` 的 `_RAW_CLIP_MIN_S` / `_RAW_CLIP_MAX_S`）。若"内容 = 一窗"，`raw_clip` 的每条方案就是一部 **3-25 秒**的片；而活库实测今天的 `raw_clip` 是 **15.13s**（三个场景，走的是"分数不足放宽到 top-3"那一支）。把 K 条方案压成 K 个单窗，条均时长会掉到今天的一半以下，而且 `subtitle_flow` 的 CTA 卡片段（`_CTA_FALLBACK_S = 3.0`）会比正片还长。
+- 本批次因此交付的是：**用全剧冲突窗排名决定规则类的条数与每一条的取材集组合，再让编排器在这些集的全部场景上照常选**。实测（活库、K=3、第一手 `[2,5,6,9]`）：`raw_clip` planned **117.89s / 21 段 / 4 集**（单集 ep1 是 15.13s / 3 段 / 1 集），`subtitle_flow` planned **36.24s / 7 段 / 3 集**。
+- 这个差别写进 Task 3b 的 docstring，不藏在代码里。
 
 **两个待业主回答的问题**（见《开放问题》#3、#4）：
 
@@ -253,11 +316,14 @@ Expected: 两条都无输出、退出码 0。
 | 路径 | 职责 |
 |---|---|
 | `service/dramaclip/engines/narration/angles.py` | 选题层（**解说类七模式**）：一个模式一次 LLM 调用 → K 条卖点互异的 `AngleBrief`；逐条验收、不合格即抛 |
+| `service/dramaclip/engines/narration/casting.py` | **取材层（2026-09-12 裁决新增）**：`EpisodeScene`（场景 + 集身份）、`EpisodeMaterial`（一集的集号与台词表）、`stamp`（逐集盖章）、`episode_order` / `score_order`（跨集叙事序与确定性分数序）、`dialogue_of` / `label_of`（按集取台词，缺键即抛）。纯数据层，不触 IO、不发网络请求 |
 | `service/dramaclip/engines/narration/overlap.py` | 度量层：源素材秒的 Jaccard 取材重叠 + 60% 阈值常量。纯函数，不触 IO |
 | `service/dramaclip/infra/storage/migrations/010_plan_angles.sql` | `narration_plans` 五列 + batch 索引 |
-| `service/tests/engines/narration/test_angles.py` | 选题层的验收分支逐条钉住（**18 条变异检查**，对应 `_sanitize` 的 13 处 raise + `select_angles` 的 5 处） |
+| `service/tests/engines/narration/test_angles.py` | 选题层的验收分支逐条钉住（**17 条变异检查**，对应 `_sanitize` 的 12 处 raise + `select_angles` 的 5 处；原为 18/13，`cross_episode` 那条分支随裁决删除，见《修订记录》C8） |
+| `service/tests/engines/narration/test_casting.py` | 取材层：盖章不丢字段、播出序而非钟表序、同分确定性、按集取台词、缺键即抛（9 条） |
+| `service/tests/engines/narration/test_cross_episode_arrangement.py` | **六个编排器的跨集性质**（10 条）：逐段盖自己场景的集号、播出序装配、预算不被顶穿、引子槽位预留、`scene_index` 跨集碰撞、`cross` 的旁白段盖锚点的集、`subtitle_flow` 的金句不串集、`ultra_short` 同分按集号定序 |
 | `service/tests/engines/narration/test_overlap.py` | 合并、交集、Jaccard、阈值边界 |
-| `service/tests/engines/narration/test_conflict_windows.py` | 规则类的"选题"：全剧 top-K 冲突窗排序、按集去重、同分确定性、`limit < 1` 即抛 |
+| `service/tests/engines/narration/test_conflict_windows.py` | 规则类的"选题"：全剧 top-K 冲突窗排序、按集去重、同分确定性、`limit < 1` 即抛；**外加 `deal_windows` 的轮转发窗（手间不共集、每手都拿一个高分窗、集不够少发、`hands < 1` 即抛）**，共 12 条 |
 | `service/tests/infra/storage/test_plans.py` | 五个新列的落库与读回、`list_by_batch`（两模式交错夹具）、`list_by_project` 的并列兜底 |
 | `service/tests/api/test_plan_variants.py` | 由 `tests/api/test_produce.py` 改名而来（`git mv`）：`Harness` 与种子函数留在此文件，`test_data_paths.py:8` 的 import 随之改 |
 | `service/tests/api/test_export_submit.py` | `export.submit` 的接受/拒绝两路、可渲染性守卫、与 `retry` 的同形 |
@@ -266,10 +332,15 @@ Expected: 两条都无输出、退出码 0。
 
 | 路径 | 改什么 |
 |---|---|
-| `service/dramaclip/api/narration.py` | 删 `produce`/`_run_produce`/`generate_plans`/`_run_generation_parallel`/`_generate_one`/`_newest_ready_plan`；加 `plan_variants`/`_run_plan_variants`/`_angle_variants`/`_rule_variants`/`_plan_one`/`_pick_episode`/`_voice`/`get_plan`/`plan_cost`/`_effective_settings`/`_worst_overlap`/`_excluded_angle_names` + `_Variant`/`_OverlapHit` 两个内部 dataclass；删三个随之失去引用的 import（含 `exports as exports_repo`） |
-| `service/dramaclip/api/export.py` | `start` → `submit(plan_ids)`；加 `_assert_renderable` 并被 `submit`/`retry` 共用；两个新错误码；**并修 `ExportRun`（`:49-63`）与 `_submit_export`（`:66-94`）的 docstring**——它们写着 `start/retry/produce` 三处调用点，Task 6/8 之后只剩 `submit`/`retry` 两处 |
-| `service/dramaclip/engines/narration/pipeline.py` | 加纯函数 `top_conflict_windows`（Task 3b，规则类的条数来源）；改 `_synthesize_into` 的 docstring（Task 5 Step 5——它点名了 Task 6 要删的三个函数）。**渲染与合成逻辑一行不动** |
-| `service/dramaclip/engines/narration/copywriter.py` | `write_plan_copy` 增必填关键字 `angle_block`，进 user prompt |
+| `service/dramaclip/api/narration.py` | 删 `produce`/`_run_produce`/`generate_plans`/`_run_generation_parallel`/`_generate_one`/`_newest_ready_plan`；加 `plan_variants`/`_run_plan_variants`/`_angle_variants`/`_rule_variants`/`_plan_one`/**`_casting_for`**/`_voice`/`get_plan`/`plan_cost`/`_effective_settings`/`_worst_overlap`/`_excluded_angle_names` + `_Variant`/`_OverlapHit` 两个内部 dataclass；删三个随之失去引用的 import（含 `exports as exports_repo`）；`_CROSS_EPISODE_MODES` → `_SCRIPT_DRIVEN_MODES`（《修订记录》C10） |
+| `service/dramaclip/api/export.py` | `start` → `submit(plan_ids)`；加 `_assert_renderable` 并被 `submit`/`retry` 共用；两个新错误码；**并修 `ExportRun`（`:49-63`）与 `_submit_export`（`:66-94`）的 docstring**——它们写着 `start/retry/produce` 三处调用点，Task 6/8 之后只剩 `submit`/`retry` 两处。**渲染路径本身一行不动**（它本来就跨集，证据见《定案二》） |
+| `service/dramaclip/engines/narration/pipeline.py` | 加纯函数 `top_conflict_windows`（Task 3b）与 **`deal_windows`**（Task 3b Step 3b）；**`build_plan` 换签名**（`episode_id: str` → `scenes: list[EpisodeScene]`、`asr_segments` → `material: MaterialByEpisode`，并删死参数 `audio: AudioFeatures` 与随之成为死码的 `parse_audio_features`，Task 3c Step 5）；改 `_synthesize_into` 的 docstring（Task 5 Step 5）。**渲染与合成逻辑一行不动** |
+| `service/dramaclip/engines/narration/modes/__init__.py` | **（原在"不动"清单，2026-09-12 裁决后移出）** `build_raw_clip` / `build_intro` 的首参 `episode_id: str` → `scenes: list[EpisodeScene]`；`_fit_duration` 去掉首参、删末场景预算豁免、`intro_first` 时预留 `_INTRO_MAX_S`；排序改走 `casting.episode_order` / `score_order`；`best` 的身份比较从 `scene_index` 改成 `is not`（Task 3c Step 4） |
+| `service/dramaclip/engines/narration/modes_w5.py` | 同上（`build_cross` / `build_ultra_short`）；**`build_cross` 的旁白段集号改跟锚点走**（`episode_id=anchor.episode_id`）；`build_ultra_short` 的 `max(key=score)` 改成 `min(key=score_order)`（Task 3c Step 4） |
+| `service/dramaclip/engines/narration/modes_w8.py` | 同上（`build_full`）；`_slot_brief` 与 `_MAX_SCENES` 一字不动——槽位职责是**弧内位次**，跨集之后语义不变（Task 3c Step 4） |
+| `service/dramaclip/engines/narration/modes_p2.py` | 同上（`build_dual_host` / `build_monologue` / `_pick`）；双音色交替按弧内位次，跨集之后语义不变（Task 3c Step 4） |
+| `service/dramaclip/engines/narration/modes_w9.py` | `build_subtitle_flow` 的第二参从摊平的 `asr_segments: list[AsrSegment]` 换成 `material: casting.MaterialByEpisode`，`strongest_line` 因此只会看到**该场景自己那一集**的台词（Task 3c Step 4） |
+| `service/dramaclip/engines/narration/copywriter.py` | `write_plan_copy` 增必填关键字 `angle_block`（Task 4），**第二参从 `asr_segments: list[AsrSegment]` 换成 `material: casting.MaterialByEpisode`**；`_slot_block` 按 `segment.episode_id` 取台词并把集名写进槽位块；缺键抛、不退回"该区间无台词"（Task 4 Step 3b，《修订记录》C7） |
 | `service/dramaclip/engines/narration/scriptwriter.py` | `write_script_episodes` 增必填关键字 `angle_block`；`_format_transcript_episodes` → `format_transcript_episodes`（公开给 `angles.py` 复用，与 P-1.5 公开 `FUNDAMENTALS`/`clock`/`dump_trace` 同一套路），**并同步改 `:220` docstring 里对旧名的引用** |
 | `service/dramaclip/engines/narration/script_driver.py` | `script_dialogue_plan` 增必填关键字 `angle_block` 并转交 |
 | `service/dramaclip/infra/storage/repos/plans.py` | `_COLUMNS` 加五列；`create` 加五个关键字参数；新增 `list_by_batch`；`list_by_project` 补 `created_at, id` 兜底排序 |
@@ -280,13 +351,16 @@ Expected: 两条都无输出、退出码 0。
 | `protocol/ts/index.ts` | `METHOD_NAMES` 同步（删 2 加 2，净 0）；`NarrationPlan` 加字段；新增 `PlanCost`/`PlanDetail`/`PlanVariantsResult`/`ExportSubmission`/`ExportRejection`/`ExportSubmitResult` |
 | `desktop/src/services/client.ts` | 删 `narrationApi.produce`/`generatePlans`、`exportApi.start`；加 `planVariants`/`getPlan`/`submit`/`retry`。**按内容锚点定位，不按行号**（见 Task 8 Step 6 与 Task 9 Step 4 的实测行号附注） |
 | `desktop/src/features/narration/useProduceJob.ts` | 唯一的生产调用点（`:31` 的 `narrationApi.produce`）：改成 `plan_variants` → 等作业 → `list_plans` 取本 batch → `export.submit` → 等全部 export job。**这是保住既有页面可用，不是做 UI**；`waitJob` 带 `onTick` 回调，两阶段的进度条都照常动 |
-| `scripts/verify_modes.py` | ① `:39` 的 import 区加 `export as export_api`、`:456-457` 的 Router 装配加 `export_api.register(router, ctx)`（**B1：不加这两行，九个模式全拿 `-32601`，门禁 exit 1**）；② `:459` 的单次派发 → 规划 + 提交两步；③ argparse 加 `--variants`（默认 1）与 `--plan-only`；④ `done` 计数之后加前置条件停机分支；⑤ `:75-85` 的 `EXPECT_PLANNER` 推导散文与 `:382` 的注释改指新函数名 |
+| `scripts/verify_modes.py` | ① `:39` 的 import 区加 `export as export_api`、`:456-457` 的 Router 装配加 `export_api.register(router, ctx)`（**B1：不加这两行，九个模式全拿 `-32601`，门禁 exit 1**）；② `:459` 的单次派发 → 规划 + 提交两步；③ argparse 加 `--variants`（默认 1）、`--plan-only` 与 **`--require-cross-episode`**；④ `done` 计数之后加前置条件停机分支（**散文按裁决重写**）；⑤ `:75-85` 的 `EXPECT_PLANNER` 推导散文与 `:382` 的注释改指新函数名；⑥ **新增 `集数` 列与跨集断言**（Task 9 Step 2.8） |
 | `service/tests/api/test_data_paths.py` | `:8` 的 import 源改名；`:18-23` 的 `narration.produce` → 规划 + 提交两步 |
+| `service/tests/engines/narration/test_modes.py`、`test_modes_w5.py`、`test_modes_w8.py`、`test_modes_p2.py`、`test_modes_w9.py`、`test_ducked_narration.py`、`test_copywriter.py`、`tests/api/test_narration_audio_chain.py`、`tests/api/test_narration_no_downgrade.py` | **九个既有测试文件的编排器/成稿调用点跟随换签名**（实测共 24 处 `build_*` 调用 + 10 处 `write_plan_copy` 调用）。Task 3c Step 6 与 Task 4 Step 5 逐文件给出替换后的字面行；`test_modes.py:7` 的 `AudioFeatures` import 与 `:61` 那行的折行、`test_ducked_narration.py:150` 的折行都是 ruff 实跑出来的（E501 / I001） |
 | `docs/03-IPC协议规范.md` | §5.2 错误码表加 `-32303/-32304/-32406/-32407`、**改 `:86` 那一行**（`-32401` 不再覆盖"编排时间轴为空"）；§6 的「46 个方法」重数、`narration.*`（`:118`）与 `export.*`（`:119`）条目改写、删掉「`narration.get_plan` 从未实现」那句（`:131`，本批次实现它） |
 | `docs/service/01-传输与API层设计.md` | §4 的方法清单（`:66-67`）与合计数（`:75`）、§6 的「`projects.settings` 尚无消费端」（`:132`）改成已接线并登记覆盖键名 |
 | `docs/service/04-数据模型.md` | `narration_plans` 的 DDL（`:108-` ）加五列、迁移清单（`:305`，"实测 8 个文件"已过期，实为 9）加 `010` 行并补上漏登记的 `009`、§3 登记实际使用的项目级覆盖键名 |
 
-**不动**：`docs/05-开发路线图.md`（用户自维护）；另一位工程师的 `scripts/verify_e2e.mjs`（**它有两处会随本批次失效的派发，P-2a 不改它，改为书面移交属主，见 Task 9 Step 1b**）、`scratch/`、`tests/api/test_analysis.py`、`tests/engines/analysis/*`、`hotwords.py`、`docs/07-*`；`data/data.db`（只读，实测含 52 行方案）；六个模式编排器 `modes/__init__.py`、`modes_w5.py`、`modes_w8.py`、`modes_p2.py`、`modes_w9.py`（《定案四》：规则类的 K 条在编排器**之外**决定，不改它们的签名与成片形态）；`engines/exporter/*`（渲染侧一行不动，这是拆分干净的证明）；`engines/narration/pipeline.py` 的合成与编排逻辑（本批次只加一个纯函数、改一段 docstring）。
+**不动**：`docs/05-开发路线图.md`（用户自维护）；另一位工程师的 `scripts/verify_e2e.mjs`（**它有两处会随本批次失效的派发，P-2a 不改它，改为书面移交属主，见 Task 9 Step 1b**）、`scratch/`、`tests/api/test_analysis.py`、`tests/engines/analysis/*`、`hotwords.py`、`docs/07-*`；`data/data.db`（只读，实测含 52 行方案、10 集已分析）；**`engines/semantic/models.py`（`ConflictScore` 一个字段都不加——集身份是规划期注入的，理由与"加字段会往落库 JSON 里写进 `episode_number: 0` 这种假值"的实测见《修订记录》C3）**；**`engines/narration/models.py`（`TimelineSegment.episode_id` 逐段已存在，多集时间轴今天就能表示）**；`engines/exporter/*`（渲染侧一行不动——它本来就按 `segment.episode_id` 逐段取源，这是拆分干净的证明，也是"跨集只改规划侧"的证明）；`api/export.py` 的渲染路径（同上）；`engines/narration/pipeline.py` 的**合成与剧本装配逻辑**（`build_from_script_episodes` / `synthesize_narration_texts` / `_content_addressed_audio` / `_synthesize_into` 一行不动，本批次只加两个纯函数、改 `build_plan` 的签名与一段 docstring）。
+
+**从"不动"清单移出的**：五个模式编排器文件（`modes/__init__.py`、`modes_w5.py`、`modes_w8.py`、`modes_p2.py`、`modes_w9.py`）。原清单的理由是《定案四》那句「规则类的 K 条在编排器**之外**决定，不改它们的签名与成片形态」——**裁决之后前半句仍成立（排名与发窗都在编排器之外），后半句不成立了**（规格 §1 的「跨集方案」必须改它们的取材结构与盖章处）。`modes_w9.py` 也在其中：它的 `build_subtitle_flow` 吃一张摊平的 ASR 表，跨集之后金句会串集。
 
 ---
 
@@ -1018,7 +1092,6 @@ def _select(**overrides: Any) -> list[angles.AngleBrief]:
         "k": 3,
         "episode_inputs": _EPISODES,
         "settings": _SETTINGS,
-        "cross_episode": False,
         "excluded": [],
     }
     kwargs.update(overrides)
@@ -1040,17 +1113,21 @@ def test_prompt_carries_mode_k_and_transcript(llm: Any) -> None:
     assert "透视眼" in prompt and "全片解说" in prompt
     assert "需要 3 条卖点互异的取材角度" in prompt
     assert "第 1 集台词一" in prompt and "第 3 集台词二" in prompt, "跨集转写未进 prompt"
-    assert "恰好一个集号" in prompt, "单集模式的取材约束没交代给模型"
+    assert "至少一个" in prompt, "「一条方案可以取多集」这条约束没交代给模型（规格 §1）"
 
 
-def test_cross_episode_mode_asks_for_a_set(llm: Any) -> None:
+def test_prompt_asks_for_an_episode_set(llm: Any) -> None:
+    """规格 §1 的「跨集方案」：每条角度给出**全部**取材集，可以是一个也可以是多个。
+
+    2026-09-12 裁决之后不再有"单集模式"这回事，故 `select_angles` 也没有 `cross_episode`
+    这个形参了——留着它就是一个恒为 True 的开关，而开关的注释会作为一句关于代码的假话
+    被提交（「其余模式的编排器一条片只吃一集」，裁决之后不成立）。
+    """
     llm.queue = [{"angles": [dict(_angle(1, 1), episode_numbers=[1, 3])]}]
-    briefs = _select(
-        mode="dialogue_narration", mode_label="剧情解说", k=1, cross_episode=True
-    )
+    briefs = _select(mode="dialogue_narration", mode_label="剧情解说", k=1)
     assert briefs[0].episode_numbers == [1, 3]
     assert "至少一个" in FakeLlm.calls[0]
-    assert "恰好一个集号" not in FakeLlm.calls[0]
+    assert "恰好一个集号" not in FakeLlm.calls[0], "单集约束的措辞还留着"
 
 
 def test_excluded_angles_are_listed_in_the_prompt(llm: Any) -> None:
@@ -1113,15 +1190,6 @@ def test_empty_field_raises(llm: Any) -> None:
 def test_unknown_episode_number_raises(llm: Any) -> None:
     llm.queue = [{"angles": [_angle(1, 9), _angle(2, 2), _angle(3, 3)]}, {"angles": []}]
     with pytest.raises(ValueError, match="取材集不存在"):
-        _select()
-
-
-def test_single_episode_mode_rejects_multi_episode_angle(llm: Any) -> None:
-    payload = {
-        "angles": [dict(_angle(1, 1), episode_numbers=[1, 2]), _angle(2, 2), _angle(3, 3)]
-    }
-    llm.queue = [payload, {"angles": []}]
-    with pytest.raises(ValueError, match="本模式一条片只取一集"):
         _select()
 
 
@@ -1290,21 +1358,11 @@ def prompt_block(brief: AngleBrief) -> str:
     )
 
 
-def _episode_rule(cross_episode: bool) -> str:
-    if cross_episode:
-        return (
-            "本模式可跨集取材：每条角度的 episode_numbers 给出这条片要用到的全部集号"
-            "（至少一个，可多个）。"
-        )
-    return "本模式一条片只取一集素材：每条角度的 episode_numbers 恰好一个集号。"
-
-
 def _sanitize(
     raw: Any,
     *,
     k: int,
     known_numbers: set[int],
-    cross_episode: bool,
     excluded: list[str],
 ) -> list[AngleBrief]:
     """逐条验收；任何一条不合格即整批不合格（重试或抛），绝不拿残缺的凑够 K 条。
@@ -1347,10 +1405,6 @@ def _sanitize(
         unknown = [number for number in numbers if number not in known_numbers]
         if unknown:
             raise ValueError(f"角度「{name}」取材集不存在：{unknown}")
-        if not cross_episode and len(numbers) != 1:
-            raise ValueError(
-                f"角度「{name}」给了 {len(numbers)} 集，本模式一条片只取一集"
-            )
         seen.add(name)
         briefs.append(
             AngleBrief(name=name, reason=reason, hook=hook, episode_numbers=numbers)
@@ -1365,11 +1419,15 @@ def select_angles(
     k: int,
     episode_inputs: list[dict[str, Any]],
     settings: dict[str, str],
-    cross_episode: bool,
     excluded: list[str],
     trace_dir: Path | None = None,
 ) -> list[AngleBrief]:
-    """为一个模式选出 K 条互异角度；答不出互异就抛，不凑数。"""
+    """为一个模式选出 K 条互异角度；答不出互异就抛，不凑数。
+
+    **没有 `cross_episode` 这个形参**（2026-09-12 裁决后删掉的，别顺手加回来）：
+    规格 §1 的「跨集方案」是**每个模式**的定义性属性，不是某几个模式的开关。
+    一个恒为 True 的开关会把"其余模式一条片只吃一集"这句已经作废的话留在注释里。
+    """
     if k < 1:
         raise ValueError(f"方案数 k 必须 ≥ 1，实得 {k}")
     config = LlmConfig.from_settings(settings)
@@ -1391,7 +1449,8 @@ def select_angles(
         f"项目：{str(settings.get('_project_name') or '')}"
         f"\n模式：{mode_label}（{mode}）\n"
         f"需要 {k} 条卖点互异的取材角度。\n"
-        f"{_episode_rule(cross_episode)}"
+        "每条角度的 episode_numbers 给出这条片要用到的全部集号（至少一个，可多个）："
+        "一条方案可以从多集取画面拼在同一条时间轴上。\n"
         f"{excluded_block}\n"
         f"台词转写：\n{transcript}"
     )
@@ -1405,7 +1464,6 @@ def select_angles(
                 raw,
                 k=k,
                 known_numbers=known_numbers,
-                cross_episode=cross_episode,
                 excluded=excluded,
             )
         except (LlmUnavailable, ValueError, TypeError, KeyError) as exc:
@@ -1429,11 +1487,11 @@ def select_angles(
 
 Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/engines/narration/test_angles.py tests/engines/narration/test_script_input_budget.py tests/engines/narration/test_scriptwriter.py -q`
 
-Expected: PASS（`test_angles.py` **24** 条 + 另两个文件既有用例全绿）
+Expected: PASS（`test_angles.py` **23** 条 + 另两个文件既有用例全绿。原为 24 条，`test_single_episode_mode_rejects_multi_episode_angle` 随 `cross_episode` 形参一起删除——它钉的那条分支已经不存在，留着它就是一条永远绿、却什么也没守着的用例）
 
 - [ ] **Step 6: 变异检查（本任务的重点，一条都不许省）**
 
-**抛出点实数：`_sanitize` 13 条 + `select_angles` 5 条 = 18 条**（原计划写"十三条拒绝分支"，漏数了 `select_angles` 里的 `k < 1`、`LlmUnavailable` 未配置守卫、无已完成集、无转写、重试耗尽汇总，也漏了 `_MAX_REASON_CHARS` 那条**连用例都没有**的分支——R8）。上一批的实测修正是这么写的：「新增拒绝分支的用例必须当场做『删掉这行分支看它红不红』的验证，否则它只是把 happy path 又跑了一遍」。逐条破坏、逐条跑 Step 5 的命令、逐条按字节还原：
+**抛出点实数：`_sanitize` 12 条 + `select_angles` 5 条 = 17 条**（上一轮审查把 `_sanitize` 数成 13、合计 18；2026-09-12 裁决删掉了 `if not cross_episode and len(numbers) != 1` 那条，故为 12/17。R8 补的 `_MAX_REASON_CHARS` 那条**连用例都没有**的分支仍在表里，第 7 行）。上一批的实测修正是这么写的：「新增拒绝分支的用例必须当场做『删掉这行分支看它红不红』的验证，否则它只是把 happy path 又跑了一遍」。逐条破坏、逐条跑 Step 5 的命令、逐条按字节还原：
 
 | # | 破坏（所在函数） | 必须红的用例 |
 |---|---|---|
@@ -1449,16 +1507,15 @@ Expected: PASS（`test_angles.py` **24** 条 + 另两个文件既有用例全绿
 | 10 | `if name in excluded: raise`（`_sanitize`） | `test_excluded_name_reproposed_raises` |
 | 11 | `if not numbers: raise`（`_sanitize`） | `test_empty_episode_list_raises` |
 | 12 | `if unknown: raise`（`_sanitize`） | `test_unknown_episode_number_raises` |
-| 13 | `if not cross_episode and len(numbers) != 1` 改成 `if False`（`_sanitize`） | `test_single_episode_mode_rejects_multi_episode_angle` |
-| 14 | `if k < 1: raise`（`select_angles`） | `test_k_below_one_raises` |
-| 15 | `if not config.configured: raise LlmUnavailable(...)`（`select_angles`） | `test_unconfigured_llm_raises_before_prompt`（**含 `FakeLlm.calls == []` 那半条断言**：守卫删掉之后请求就发出去了） |
-| 16 | `if not episode_inputs: raise`（`select_angles`） | `test_no_episodes_raises` |
-| 17 | `if not transcript: raise`（`select_angles`） | `test_no_transcript_raises` |
-| 18 | `if briefs is None: raise` 改成 `return []`（`select_angles` 末尾的汇总抛出） | `test_gateway_failure_retries_then_raises`（改成 `return []` 而不是整块删：删掉会让 mypy 报"缺少返回语句"，那是类型检查红，不是用例红，证不出这条分支被测着） |
+| 13 | `if k < 1: raise`（`select_angles`） | `test_k_below_one_raises` |
+| 14 | `if not config.configured: raise LlmUnavailable(...)`（`select_angles`） | `test_unconfigured_llm_raises_before_prompt`（**含 `FakeLlm.calls == []` 那半条断言**：守卫删掉之后请求就发出去了） |
+| 15 | `if not episode_inputs: raise`（`select_angles`） | `test_no_episodes_raises` |
+| 16 | `if not transcript: raise`（`select_angles`） | `test_no_transcript_raises` |
+| 17 | `if briefs is None: raise` 改成 `return []`（`select_angles` 末尾的汇总抛出） | `test_gateway_failure_retries_then_raises`（改成 `return []` 而不是整块删：删掉会让 mypy 报"缺少返回语句"，那是类型检查红，不是用例红，证不出这条分支被测着） |
 
 **第 3 条的陷阱**（上一批踩过同类）：删掉 `isinstance(item, dict)` 之后 `AngleBrief.model_validate("一条字符串")` 会抛 `ValidationError`，被下一行转成 `ValueError("角度项字段不合法")`——用例仍然红，但红的已经不是这条分支（第 4 条顶着）。所以 `test_non_object_item_raises` 的 `match` 必须写死「非对象项」这个词：**变异后它要因为消息对不上而红，才算真的守着这一行**。同理第 4 条的 `match` 写死「字段不合法」。
 
-**第 13 条的陷阱**：`numbers` 在该分支之前已经 `sorted(set(...))`，若把去重删掉，`[1, 1]` 会被判成"给了 2 集"而误红——去重与单集判定是一对，破坏其一时要看清红的是哪条断言。
+**原第 13 条已删除**（`if not cross_episode and len(numbers) != 1` 随裁决消失），后续行号上移，全部 17 行。**`numbers = sorted(set(candidate.episode_numbers))` 那行的去重仍然必须留着**，只是它的用途换了：不再是"单集判定"的前置，而是 Task 6 那道成稿**前**的重叠闸门（`_reject_same_episode_sibling` 按 `frozenset(variant.episode_numbers)` 比）与落库 `episode_numbers` 的规范形。把 `set(...)` 删掉不会让本文件任何用例红（`[1, 1]` 与 `[1]` 在剩下的 12 条分支上表现相同），它由 Task 6 Step 10 的 #13 守着——**这类"本文件测不到、由下游守"的分支必须在此写明落点，否则下一个人会当它是死的而删掉**。
 
 **第 7 条为什么单列一行**：三个长度上限共用"超出长度上限"这个措辞，`match` 只写这一段时三条分支会互相顶包。原计划正是因此漏掉了 reason 那条——它没有用例，删掉 raise 全套照绿。
 
@@ -1475,12 +1532,12 @@ git commit -m "feat(narration): angles 选题层，一个模式一次调用产�
 
 规格 §4.3 ④：「条数按模式族分别算：**解说类 = K，规则类 = 全剧 top-K 冲突窗**（两者不同源，已由用户定案）」。Task 3 做的是解说类那一半；本任务做规则类那一半。设计依据全部在《定案四》，这里只落代码。
 
-**为什么放在 `pipeline.py` 而不是新开一个模块**：`pipeline.py` 已经是"编排层"的入口（`build_plan` 的模式分派就在这里），而这个榜单的唯一用途就是决定"喂给哪个 `build_*` 的 `episode_id`"。为一个函数新开文件会让编排知识分两处。
+**为什么放在 `pipeline.py` 而不是新开一个模块**：`pipeline.py` 已经是"编排层"的入口（`build_plan` 的模式分派就在这里），而这个榜单与它的发窗结果的唯一用途就是决定"喂给 `build_plan` 的是哪几集的场景"。为一个函数新开文件会让编排知识分两处。（Task 3c 新增的 `casting.py` 是**另一件事**：它管"场景怎么带上集身份、按什么顺序装配"，是数据层；本任务管"取哪几集"，是决定层。两层不合并。）
 
-**为什么不放进 `modes/__init__.py` 或 `modes_w9.py`**：那两个文件在《文件结构》的**不动**清单里——本批次不改任何编排器的签名与成片形态（《定案二》末段、《P-2c 交接规格》）。榜单在编排器**之外**算，正是为了不动它们。
+**为什么不放进 `modes/__init__.py` 或 `modes_w9.py`**：本批次确实要改这两个文件（Task 3c，2026-09-12 裁决后从"不动"清单移出），但改的是**取材结构与盖章处**，不是"取哪几集"这个决定。榜单在编排器**之外**算，是为了让"条数与取材集由全剧冲突榜定"这条规格 §4.3 ④ 的用户定案有一个**唯一**的落点——塞进编排器就会变成九个模式各判一次。
 
 **Files:**
-- Modify: `service/dramaclip/engines/narration/pipeline.py`（在 `build_plan` 之后、`build_from_script_episodes` 之前插入一个纯函数）
+- Modify: `service/dramaclip/engines/narration/pipeline.py`（在 `build_plan` 之后、`build_from_script_episodes` 之前插入**两个**纯函数：`top_conflict_windows` 与 `deal_windows`）
 - Create: `service/tests/engines/narration/test_conflict_windows.py`
 
 - [ ] **Step 1: 写失败测试**
@@ -1488,18 +1545,22 @@ git commit -m "feat(narration): angles 选题层，一个模式一次调用产�
 新建 `service/tests/engines/narration/test_conflict_windows.py`：
 
 ```python
-"""规则类两模式的条数来源：全剧 top-K 冲突窗（规格 §4.3 ④）。
+"""规则类两模式的条数来源：全剧 top-K 冲突窗（规格 §4.3 ④）+ 轮转发窗成 K 手。
 
-夹具手搓 ConflictScore，不跑分析层也不跑编排器：本函数是纯函数，把上游拉进来
+夹具手搓 ConflictScore，不跑分析层也不跑编排器：这两个函数都是纯函数，把上游拉进来
 只会让"榜单排错了"与"冲突分算错了"两种失败混在一起。
 
-这里钉的四件事，每件都对应一个真实的坏法：
+`top_conflict_windows` 钉四件事，每件都对应一个真实的坏法：
 ① 跨集排序（`ConflictScore` 不带集身份，排完不知道那一窗属于谁就没法用）；
 ② 按集去重（同一集的两窗喂进 `build_raw_clip` 会得到逐字节相同的方案，
    那不是 K 条互异，是 1 条复制 K 份，还会被重叠闸门判成 100% 重叠）；
-③ 同分时的确定性（分析层给的是 0-100 的**整数**分，全剧尺度上同分很常见；
-   不确定就意味着"整组重规划"两次取到不同的集）；
+③ 同分时的确定性（分析层给的是 0-100 的**整数**分，全剧尺度上同分很常见——
+   活库实测 333 个场景只有 19 个不同分值；不确定就意味着"整组重规划"两次取到不同的集）；
 ④ limit < 1 即抛（与 `angles.select_angles` 的 `k < 1` 同一口径）。
+
+`deal_windows` 钉的是**规格 §1 的跨集要求与 §4.3 ④ 的条数要求怎么同时成立**：
+一集一条满足条数、违反跨集；把窗轮转发成 K 手、每手若干集，两者都满足，
+而且手与手不共集 ⇒ 取材重叠恒为 0。
 """
 
 from __future__ import annotations
@@ -1576,13 +1637,47 @@ def test_no_episodes_at_all_gives_an_empty_list() -> None:
 def test_limit_below_one_raises() -> None:
     with pytest.raises(ValueError, match="limit 必须"):
         pipeline.top_conflict_windows([(1, [_scene(0, 90)])], 0)
+
+
+def test_deal_windows_deals_round_robin_into_disjoint_hands() -> None:
+    """轮转发窗：第 j 手拿排名 j, j+hands, j+2·hands…，手与手**不共集**。
+
+    不共集是这条设计的承重点：规则类两模式的编排器是 (取材集, 该集场景表) 的确定性
+    纯函数，两手共集就会共画面，取材重叠直接顶到 60% 阈值上，K 条里只有第一条能落库。
+    夹具的输入名次刻意打乱（4,1,9,2,7,3），断言的是**发完之后每手内部升序**。
+    """
+    windows = [(number, _scene(0, 90 - number)) for number in (4, 1, 9, 2, 7, 3)]
+    assert pipeline.deal_windows(windows, 3) == [[2, 4], [1, 7], [3, 9]]
+
+
+def test_deal_windows_gives_every_hand_a_strong_episode() -> None:
+    """轮转而不是切块：切块会让第 1 手独占全剧最狠的几集，三条片的强弱差一个量级。"""
+    windows = [(number, _scene(0, 90 - number)) for number in range(1, 7)]
+    hands = pipeline.deal_windows(windows, 3)
+    assert [hand[0] for hand in hands] == [1, 2, 3], "每手都该拿到一个高分窗"
+
+
+def test_deal_windows_returns_fewer_hands_than_asked_when_episodes_run_out() -> None:
+    """规格 §1 允许「每模式产出 1..K 条」：集不够就少发几手，不许凑数、也不许抛。"""
+    windows = [(1, _scene(0, 90)), (2, _scene(0, 80))]
+    assert pipeline.deal_windows(windows, 5) == [[1], [2]]
+
+
+def test_deal_windows_on_an_empty_ranking_is_empty() -> None:
+    """空榜是"无从取窗"，由调用方决定怎么响；纯函数不发明错误语义（与上面同一条口径）。"""
+    assert pipeline.deal_windows([], 3) == []
+
+
+def test_deal_windows_below_one_hand_raises() -> None:
+    with pytest.raises(ValueError, match="手数 hands 必须"):
+        pipeline.deal_windows([(1, _scene(0, 90))], 0)
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
 
 Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/engines/narration/test_conflict_windows.py -q`
 
-Expected: FAIL —— 七条全红，`AttributeError: module 'dramaclip.engines.narration.pipeline' has no attribute 'top_conflict_windows'`
+Expected: FAIL —— **十二条**全红。前七条报 `AttributeError: module 'dramaclip.engines.narration.pipeline' has no attribute 'top_conflict_windows'`，后五条（`test_deal_windows_*`）报 `… has no attribute 'deal_windows'`。两种形态都算"如期失败"；若看到的是 `ImportError` 或 `SyntaxError`，那是测试文件本身写坏了，先修它。
 
 - [ ] **Step 3: 写实现**
 
@@ -1600,16 +1695,18 @@ def top_conflict_windows(
     不经选题模型（规格 §4.2「仅「纯原片剪辑」「字幕金句流」不依赖 LLM」），
     它们的条数因此必须另有一个来源，就是这个榜单。**本函数不发任何网络请求。**
 
-    为什么按集去重：`build_raw_clip` 与 `build_subtitle_flow` 的签名都是
-    `(episode_id, 该集的场景表, …)`，且都是**确定性纯函数**——同一集的两个不同窗口
-    喂进去会得到逐字节相同的方案。那不是 K 条互异，是 1 条复制 K 份，而且会被
-    `overlap` 判成 100% 重叠、把 K-1 条报成失败。所以"窗"在这里的作用是把**集**排出名次。
+    为什么按集去重：`build_raw_clip` 与 `build_subtitle_flow` 都是**确定性纯函数**——
+    同一组的两个不同窗口喂进去会得到逐字节相同的方案。那不是 K 条互异，是 1 条复制 K 份，
+    而且会被 `overlap` 判成 100% 重叠、把 K-1 条报成失败。所以"窗"在这里的作用是把
+    **集**排出名次；排完由下面的 `deal_windows` 轮转发成 K 手，一手一条方案。
 
-    **本批次做不到的那一半，写在这里而不是藏在代码里**：让每条方案的内容真的等于它那一窗。
-    那需要 `ConflictScore` 带上集身份（`engines/semantic/models.py` 今天只有
-    scene_index/start/end/score/reason）、或让编排器接受"每集一组场景"，并重分时长预算
-    （`modes/__init__.py::_fit_duration` 现在按 `strategy.max_duration_s` 截断单集场景）。
-    两者都改**成片形态**，而九模式真机门禁的时长窗与响度窗正压在这个形态上——归 P-2c。
+    **仍然做不到的那一半，写在这里而不是藏在代码里**：让每条方案的内容真的等于它那一窗。
+    原先的理由是技术的（`ConflictScore` 不带集身份、`_fit_duration` 按单集截断），
+    **那个前提已经被 Task 3c 拆掉了**：集身份有了（`casting.EpisodeScene`），预算也重分了
+    （末场景豁免删掉、引子槽位预留 `_INTRO_MAX_S`）。剩下的理由是**产品**的：一个窗是
+    3-25s，"内容 = 一窗"会让 `raw_clip` 的每条方案掉到 3-25 秒，而活库实测今天它是
+    15.13s（三个场景）。所以本函数交付的是"用全剧冲突榜决定**条数与每条的取材集组合**"，
+    不是"每条方案就是一窗"。这个差别记在计划《定案四》末段与《开放问题》#1，不藏在这里。
 
     排序键 `(-score, 集号, scene_index)`：分析层给的是 0-100 的**整数**分，同分在全剧
     尺度上是常态；只按 -score 排时结果稳定于**输入顺序**，而输入顺序来自
@@ -1642,11 +1739,48 @@ def top_conflict_windows(
 
 （`ConflictScore` 在该文件已 import：`from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment`，不需要新增 import。）
 
+- [ ] **Step 3b: 写 `deal_windows`（2026-09-12 裁决新增）**
+
+紧接 `top_conflict_windows` 之后插入。**这一步是规格 §1 的「跨集方案」与 §4.3 ④ 的「规则类 = 全剧 top-K 冲突窗」同时成立的唯一办法**：一集一条满足条数、违反跨集；轮转发成 K 手、每手若干集，两者都满足，而且手间不共集 ⇒ 取材重叠恒为 0。
+
+```python
+def deal_windows(
+    windows: list[tuple[int, ConflictScore]], hands: int
+) -> list[list[int]]:
+    """把排名后的冲突窗**轮转**发成 hands 手，每手是它拿到的集号（升序、手间互不相交）。
+
+    规格 §4.3 ④ 定的是**条数**（「规则类 = 全剧 top-K 冲突窗」），规格 §1 定的是
+    **每条方案的形状**（「跨集方案」）。一集一条满足前者、违反后者；把窗轮转发成 K 手
+    同时满足两者，而且手与手拿到的是**互不相交的集**，于是取材重叠恒为 0——不必等
+    `overlap` 事后拦（《定案四》第 2 点原本靠"按集去重"换来的那条性质，跨集之后由
+    "手间不共集"接着保证）。
+
+    轮转（第 j 手拿排名 j, j+hands, j+2·hands …）而不是切块（前几集全给第 1 手）：
+    切块会让第 1 手独占全剧最狠的几集，三条片的强弱差一个量级；轮转让每手都拿到
+    一个高分窗，强弱可比。**实测**（活库十集、K=3）：排名 `[6,7,8,2,3,4,9,10,1,5]`
+    → `[[2,5,6,9],[3,7,10],[1,4,8]]`。
+
+    返回条数可以少于 hands（集不够）：规格 §1 允许「每模式产出 1..K 条」，
+    少出由调用方留痕（`api/narration.py::_rule_variants`），不在这里发明错误语义。
+    **集数 < 2 × hands 时每手会退化成一集**（3 集发 3 手就是 1/1/1），
+    那不是缺陷是算术：互不相交的多集手至少需要 2 × hands 集。调用方必须留痕。
+    `hands < 1` 抛，与 `top_conflict_windows` 的 `limit < 1` 同一口径。
+    """
+    if hands < 1:
+        raise ValueError(f"手数 hands 必须 ≥ 1，实得 {hands}")
+    dealt: list[list[int]] = [[] for _ in range(min(hands, len(windows)))]
+    for rank, (number, _scene) in enumerate(windows):
+        dealt[rank % len(dealt)].append(number)
+    return [sorted(hand) for hand in dealt]
+```
+
+（`dealt` 的长度取 `min(hands, len(windows))` 而不是 `hands`：这一行同时兜住了"集不够"与"空榜"两种情况，且让下面的 `rank % len(dealt)` 不可能除零——空榜时 `dealt` 是空表、`for` 一次都不进。把 `min(...)` 写成 `hands` 会在空榜上抛 `ZeroDivisionError`，而空榜是合法输入（`test_deal_windows_on_an_empty_ranking_is_empty` 钉着它）。）
+
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/engines/narration/test_conflict_windows.py tests/engines/narration -q`
 
-Expected: PASS（新增 7 条 + `tests/engines/narration` 既有用例全绿——本任务是**纯新增**，不该碰红任何既有用例；若有红的，说明插函数的位置切断了什么，就地修）
+Expected: PASS（新增 **12** 条 + `tests/engines/narration` 既有用例全绿——本任务是**纯新增**，不该碰红任何既有用例；若有红的，说明插函数的位置切断了什么，就地修）
 
 - [ ] **Step 5: 变异检查**
 
@@ -1660,6 +1794,9 @@ Expected: PASS（新增 7 条 + `tests/engines/narration` 既有用例全绿—�
 | 4 | `if len(picked) == limit: break` 改成 `if len(picked) > limit: break`（或整行删掉——两者实测同效） | `test_picks_the_highest_scoring_window_across_episodes` | `[(1,95),(3,90)]` → `[(1,95),(3,90),(2,85)]`（多出 limit 之外的第三条）。**这条变异只有在"集数 > limit"的夹具上才可见**，所以 Step 1 的第一条用例是三集配 limit=2 |
 | 5 | `if limit < 1: raise` 整块删掉 | `test_limit_below_one_raises` | 抛 `ValueError("窗口数 limit 必须 ≥ 1，实得 0")` → 静默返回 `[]` |
 | 6 | 生成式改成 `for number, scenes in episodes for scene in scenes[:1]`（每集只看首个场景） | `test_picks_the_highest_scoring_window_across_episodes` | `[(1,95),(3,90)]` → `[(3,90),(2,85)]`。**注意它不红 `test_one_window_per_episode…`**（那条夹具里 95 分本来就是首个场景，实测输出不变）——所以第一条用例把最高分窗放在场景表第二位是刻意的 |
+| **7** | **`dealt[rank % len(dealt)]` 改成切块：`dealt[min(rank * len(dealt) // max(len(windows), 1), len(dealt) - 1)]`（`deal_windows`）** | **`test_deal_windows_deals_round_robin_into_disjoint_hands` 与 `test_deal_windows_gives_every_hand_a_strong_episode` 两条都红**（实测：两条同时进 FAILED 清单） | 见左。切块仍然给出不相交的手，所以第一条红的是**具体分组**（`[[2,4],[1,7],[3,9]]` → `[[4,1],[9,2],[7,3]]` 排序后 `[[1,4],[2,9],[3,7]]`），第二条红的是"每手都拿到一个高分窗"（切块把 1/2/3 三个最高分集全塞进第 1 手） |
+| **8** | **`if hands < 1: raise` 改成 `return []`（`deal_windows`）** | **`test_deal_windows_below_one_hand_raises`** | 抛 `ValueError("手数 hands 必须 ≥ 1，实得 0")` → 静默返回 `[]`。改成 `return []` 而不是整块删：删掉会让 `min(hands, len(windows))` 给出 `range(0)`、函数照样返回 `[]`，mypy 与用例都不红，只有"条数契约被静默吃掉"这件事没人知道 |
+| **9** | **`return [sorted(hand) for hand in dealt]` 改成 `return [hand for hand in dealt]`（`deal_windows`）** | **`test_deal_windows_deals_round_robin_into_disjoint_hands`** | `[[2,4],[1,7],[3,9]]` → `[[4,2],[1,7],[9,3]]`（轮转顺序，不是升序）。**这一条不是整洁癖**：`_Variant.episode_numbers` 会原样进 `_reject_same_episode_sibling` 的 `frozenset` 比较（那里无所谓）与 `_casting_for` 的 `sorted(set(...))`（那里也无所谓），但**留痕日志**会按这个顺序念集号，"取第 4、2 集"读起来像排错了 |
 
 Run（每轮）: `cd service && ../.venv/Scripts/python.exe -m pytest tests/engines/narration/test_conflict_windows.py -q`
 
@@ -1667,21 +1804,1276 @@ Run（每轮）: `cd service && ../.venv/Scripts/python.exe -m pytest tests/engi
 
 ```bash
 git add service/dramaclip/engines/narration/pipeline.py service/tests/engines/narration/test_conflict_windows.py
-git commit -m "feat(narration): 全剧 top-K 冲突窗排序——规则类两模式的条数来源（规格 §4.3 ④）"
+git commit -m "feat(narration): 全剧冲突窗排名 + 轮转发窗——规则类两模式的条数与取材集来源（规格 §4.3 ④ + §1）"
 ```
 
 ---
 
-## Task 4: 卖点角度进成稿 prompt（两条链同形）
+## Task 3c: 取材层——`casting.py` + 六个编排器跨集化（**2026-09-12 裁决新增**）
+
+**这个任务整个是裁决的产物。** 规格 §1「每模式产出 1..K 条卖点角度互异的**跨集**方案」里的"跨集"是**方案**的定语；业主拒绝给《定案二》那次收窄签字，所以一条方案的时间轴必须能含来自多集的段。今天只有 `dialogue_narration` 做得到（`pipeline.build_from_script_episodes`），其余六个编排器的首参是 `episode_id: str`、段上的集号一律盖这同一个值。
+
+**为什么改的是编排器而不是在编排器之外"贴集号"**（这是本任务最重要的一个设计决定，证据在《修订记录》C4）：
+
+- **贴不回去。** 段上只有 `start`/`end`，而它们是**集内相对秒**——活库实测十集的场景起点全部从 `0.0` 开始（ep1 前四个 `0.0/5.2/9.9/13.4`、ep2 `0.0/7.9/12.6/19.7`、ep3 `0.0/2.8/5.4/11.0`、ep4 `0.0/2.9/7.8/12.7`）。按 `(start,end)` 反查集号是**歧义**的，而 `export_plan` 拿 `segment.episode_id` 去查 `episode_paths` **查得到、只是查错了**，于是不报错地切出另一集的同一秒。这是本仓最贵的那一类缺陷。
+- **排不进去。** 六个编排器**全都自己重排**：`modes/__init__.py:41,60`、`modes_w5.py:31-32`、`modes_w8.py:38-39`、`modes_p2.py:27-28`、`modes_w9.py:53-54` 都有 `sorted(..., key=lambda s: s.start)` 或按 `-score`。外面排好序再喂进去，进去就被按钟表序打散。
+- **不动 `ConflictScore`、不加数据库列。** 集身份是**规划期注入**的：`episode_analysis.conflict_scores` 本来就是**按集一行**的 JSON（`migrations/001_init.sql:41`），集身份就是那一行的主键，所以活库已有的十集分析结果一行都不用改、不用重跑分析、不需要迁移。反过来，给 `ConflictScore` 加字段的代价是真的：`api/analysis.py:260` 与 `:411` 都用 `json.dumps([s.model_dump() for s in ...])` 落库，而分析层按集被调用、**不知道自己在为哪一集打分**，新行于是会带上 `episode_number: 0` / `episode_id: ""` 这种"长得像有值"的假值——正是 `loudnorm` 键名那次的失败形态；而且 `api/analysis.py:290-298,319` 会把这份 JSON 原样回给前端。
+- **用子类而不是包装类。** 六个编排器里读的全是 `scene.start` / `scene.end` / `scene.score` / `scene.scene_index`；包一层会把这几十处读点改成 `item.scene.start`，而它们与跨集毫无关系。继承之后只有两类点要动：**排序键**与 **`episode_id=` 的盖章处**（实测：12 处盖章 + 8 处排序键）。
+
+**Files:**
+- Create: `service/dramaclip/engines/narration/casting.py`
+- Create: `service/tests/engines/narration/test_casting.py`
+- Create: `service/tests/engines/narration/test_cross_episode_arrangement.py`
+- Modify: `service/dramaclip/engines/narration/modes/__init__.py`（`build_raw_clip` / `build_intro` / `_fit_duration` 三个函数整块替换 + import 区）
+- Modify: `service/dramaclip/engines/narration/modes_w5.py`（`build_cross` / `build_ultra_short` + import 区）
+- Modify: `service/dramaclip/engines/narration/modes_w8.py`（`build_full` + import 区；`_slot_brief` 与两个常量一字不动）
+- Modify: `service/dramaclip/engines/narration/modes_p2.py`（`_pick` / `build_dual_host` / `build_monologue` + import 区；四个常量一字不动）
+- Modify: `service/dramaclip/engines/narration/modes_w9.py`（`strongest_line` / `build_subtitle_flow` + import 区；`_CTA_TEXT` 等四个常量一字不动）
+- Modify: `service/dramaclip/engines/narration/pipeline.py`（`build_plan` 整函数替换；删 `parse_audio_features` 与 `AudioFeatures` import）
+- Modify: `service/tests/engines/narration/test_modes.py`、`test_modes_w5.py`、`test_modes_w8.py`、`test_modes_p2.py`、`test_modes_w9.py`、`test_ducked_narration.py`、`tests/api/test_narration_audio_chain.py`、`tests/api/test_narration_no_downgrade.py`（跟随换签名）
+- **不改**：`service/dramaclip/api/narration.py`（它的调用点由 Task 6 Step 7 第 11 点整体重写；本任务结束时那个文件会**暂时红**，见 Step 8 的交代）
+
+- [ ] **Step 1: 写失败测试（取材层）**
+
+新建 `service/tests/engines/narration/test_casting.py`：
+
+```python
+"""取材层：集身份注入、跨集叙事排序、按集取台词。
+
+夹具全手搓，不跑分析层：本模块是纯函数，把上游拉进来只会让"身份盖错了"与
+"冲突分算错了"两种失败混在一起。
+
+这里钉的四件事各对应一个真实的坏法：
+① 盖章（`stamp`）——身份丢了，段的 episode_id 就只能是调用方随手给的那一集；
+② 叙事排序（`episode_order`）——活库实测十集的场景起点全部从 0.0 开始，
+   跨集仍按 start 排会把十集交错成一条谁也不是的时间线；
+③ 分数排序的确定性（`score_order`）——活库 333 个场景只有 19 个不同分值，
+   同分不补次键就稳定于输入顺序，而输入顺序没有契约；
+④ 按集取台词（`dialogue_of`）——摊平一张表按秒过滤会把别的集的对白喂给编剧，
+   而编剧被 §3.3.1 要求"只能来自给定台词"，于是它照着错的台词写出一段通顺的假解说。
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from dramaclip.engines.analysis.models import AsrSegment
+from dramaclip.engines.narration import casting
+from dramaclip.engines.semantic.models import ConflictScore
+
+
+def _scene(index: int, start: float, score: int) -> ConflictScore:
+    return ConflictScore(
+        scene_index=index, start=start, end=start + 6.0, score=score, reason="冲突"
+    )
+
+
+def _line(start: float, text: str) -> AsrSegment:
+    return AsrSegment(start=start, end=start + 2.0, text=text)
+
+
+def test_stamp_attaches_the_episode_identity_of_the_row_it_came_from() -> None:
+    stamped = casting.stamp(
+        [
+            (3, "ep-three", [_scene(0, 0.0, 90)]),
+            (7, "ep-seven", [_scene(0, 0.0, 80), _scene(1, 12.0, 70)]),
+        ]
+    )
+    assert [(item.number, item.episode_id) for item in stamped] == [
+        (3, "ep-three"),
+        (7, "ep-seven"),
+        (7, "ep-seven"),
+    ]
+    # 原有五个字段一个都不能丢（reason 尤其容易在"逐字段抄"的写法里被漏掉）
+    assert [(item.scene_index, item.start, item.score, item.reason) for item in stamped] == [
+        (0, 0.0, 90, "冲突"),
+        (0, 0.0, 80, "冲突"),
+        (1, 12.0, 70, "冲突"),
+    ]
+
+
+def test_stamp_survives_a_new_field_on_conflictscore() -> None:
+    """盖章走 model_dump/model_validate，不走逐字段抄。
+
+    逐字段抄在 `ConflictScore` 加字段那天会**静默丢掉**新字段：pydantic 默认忽略未知
+    kwargs，照抄旧字段名不报错，只会少一个值（P-1.5《实现定案修正》正是为这件事写的）。
+    这条用例把"不丢字段"钉成可执行的断言，而不是注释里的一句提醒。
+    """
+    payload = _scene(0, 0.0, 90).model_dump()
+    assert set(casting.stamp([(1, "ep1", [_scene(0, 0.0, 90)])])[0].model_dump()) >= set(payload)
+
+
+def test_episode_order_is_broadcast_order_not_clock_order() -> None:
+    """两集的 0.0s 是两段不同画面：先按集号、再按集内起点。"""
+    late = casting.stamp([(7, "ep7", [_scene(0, 0.0, 90)])])[0]
+    early = casting.stamp([(3, "ep3", [_scene(0, 0.0, 40)])])[0]
+    ordered = sorted([late, early], key=casting.episode_order)
+    assert [item.number for item in ordered] == [3, 7], "按 start 排会把两集的 0.0s 混在一起"
+
+
+def test_episode_order_breaks_ties_by_scene_index() -> None:
+    """同集同起点（零长场景与舍入会让 start 相等）时补 scene_index，才有可复现的顺序。"""
+    a = casting.stamp([(1, "ep1", [_scene(5, 0.0, 90)])])[0]
+    b = casting.stamp([(1, "ep1", [_scene(2, 0.0, 40)])])[0]
+    assert casting.episode_order(b) < casting.episode_order(a)
+
+
+def test_score_order_is_deterministic_across_input_order() -> None:
+    """同分不补次键就稳定于输入顺序，而输入顺序来自 list_by_project，没有契约。"""
+    first = casting.stamp([(2, "ep2", [_scene(1, 5.0, 85)]), (1, "ep1", [_scene(9, 5.0, 85)])])
+    second = casting.stamp([(1, "ep1", [_scene(9, 5.0, 85)]), (2, "ep2", [_scene(1, 5.0, 85)])])
+    assert [min(first, key=casting.score_order).number] == [1]
+    assert [min(second, key=casting.score_order).number] == [1]
+
+
+def test_score_order_puts_the_highest_score_first() -> None:
+    scenes = casting.stamp([(1, "ep1", [_scene(0, 0.0, 60), _scene(1, 10.0, 95)])])
+    assert min(scenes, key=casting.score_order).score == 95
+
+
+def test_dialogue_of_returns_only_that_episodes_lines() -> None:
+    material = {
+        "ep3": casting.EpisodeMaterial(number=3, asr=[_line(12.0, "第三集的话")]),
+        "ep7": casting.EpisodeMaterial(number=7, asr=[_line(12.0, "第七集的话")]),
+    }
+    assert [seg.text for seg in casting.dialogue_of(material, "ep3")] == ["第三集的话"]
+
+
+def test_dialogue_of_raises_on_a_missing_episode_instead_of_looking_silent() -> None:
+    """缺键 ≠ 这一集没有台词：静默返回空表会让编剧写出一段什么都不说的解说。"""
+    material = {"ep3": casting.EpisodeMaterial(number=3, asr=[_line(12.0, "第三集的话")])}
+    with pytest.raises(ValueError, match="没有装配进来"):
+        casting.dialogue_of(material, "ep7")
+
+
+def test_label_of_names_the_episode_for_the_copy_prompt() -> None:
+    material = {"ep3": casting.EpisodeMaterial(number=3, asr=[])}
+    assert casting.label_of(material, "ep3") == "第3集"
+    with pytest.raises(ValueError, match="无从给出集名"):
+        casting.label_of(material, "ep7")
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/engines/narration/test_casting.py -q`
+
+Expected: FAIL —— 九条全红，`ModuleNotFoundError: No module named 'dramaclip.engines.narration.casting'`
+
+- [ ] **Step 3: 写 `casting.py`**
+
+新建 `service/dramaclip/engines/narration/casting.py`：
+
+```python
+"""取材层：把「哪几集的场景」变成编排器能直接吃的、带集身份的场景表。
+
+规格 §1「一次提交（剧 × 模式）→ 每模式产出 1..K 条**卖点角度互异**的**跨集**方案」——
+"跨集"写在**方案**的定义里，不是写在批次之间的比较里，所以一条方案的时间轴可以
+（并且通常会）含来自多集的段。
+
+链路上只缺一层身份，其余早就跨集了：`TimelineSegment.episode_id` 逐段存在
+（`engines/narration/models.py`）、`api/export.py::render_export` 的 `episode_paths`
+覆盖项目**全部**集、`exporter/encoder.py::export_plan` 的 `zones_cache` 与 `dialogue_zones`
+都按 `episode_id` 分键、`overlap.source_spans` 按 `episode_id` 分组合并区间，
+而 `dialogue_narration` 已经在生产上出多集成片（`pipeline.build_from_script_episodes`）。
+缺的是六个规则编排器：它们吃的是一集的 `ConflictScore` 表，而 `ConflictScore`
+（`engines/semantic/models.py`）只有 scene_index/start/end/score/reason，**不带集身份**。
+本模块补的就是这一层。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from dramaclip.engines.analysis.models import AsrSegment
+from dramaclip.engines.semantic.models import ConflictScore
+
+# episode_id → 该集的取材原料。全链只用**一种**集键（episode_id）：
+# `TimelineSegment.episode_id`、`episode_paths`、`zones_cache`、`overlap.source_spans`
+# 都是它，再引入"按集号索引"的第二种键只会让两侧各查一半。
+MaterialByEpisode = dict[str, "EpisodeMaterial"]
+
+
+class EpisodeScene(ConflictScore):
+    """一个冲突场景 + 它的取材身份（集号用于叙事排序，集 id 用于盖进时间轴段）。
+
+    **继承 `ConflictScore` 而不是包一层**：六个编排器里读的全是 `scene.start` /
+    `scene.end` / `scene.score` / `scene.scene_index`，包一层会把这几十处读点改成
+    `item.scene.start`，而它们与跨集毫无关系。继承之后只有两类点要动——排序键与
+    `episode_id=` 的盖章处。
+
+    **为什么不把这两个字段直接加到 `ConflictScore` 上**（那是最省事的写法，也是错的）：
+    `ConflictScore` 是**落库结构**——`engines/semantic/models.py` 的模块 docstring 逐字写着
+    「落库结构对齐 docs/service/04 episode_analysis 列」，而 `api/analysis.py` 两处用
+    `json.dumps([s.model_dump() for s in ...])` 把它写进 `episode_analysis.conflict_scores`。
+    加字段之后新写入的行会带上 `episode_number: 0` / `episode_id: ""`——分析层根本不知道
+    自己在为哪一集打分（它按集被调用），于是这两个值恒为假的默认值，而 `0` 与 `""`
+    都长得像"有值"。这正是 `loudnorm` 键名那次的失败形态：一个说得通的值被烤进存储，
+    下游所有人都会信它。集身份属于**规划期的取材决定**，故落在本模块、由 `stamp` 注入。
+    """
+
+    number: int
+    episode_id: str
+
+
+@dataclass(frozen=True)
+class EpisodeMaterial:
+    """一集的取材原料：集号（人读标签 + 叙事排序）与台词表（编剧的唯一事实来源）。
+
+    台词表**按集分开**是硬要求，不是整洁癖：`start`/`end` 是集内相对秒，活库实测十集的
+    场景起点全部从 `0.0` 开始，集与集的秒轴互相覆盖。摊平成一张表之后按秒过滤，
+    第 3 集 12-20s 的槽位会捞到第 7 集 12-20s 的对白。
+    """
+
+    number: int
+    asr: list[AsrSegment]
+
+    @property
+    def label(self) -> str:
+        """人读集名。进编剧 prompt：跨集时间轴上「画面区间 12.0-20.0s」不说是哪一集
+        就等于没说，模型无从判断两个相邻槽位是不是同一条线。"""
+        return f"第{self.number}集"
+
+
+def episode_order(scene: EpisodeScene) -> tuple[int, float, int]:
+    """跨集叙事顺序：集号（播出序）→ 集内起点 → scene_index。
+
+    单集时代六个编排器一律 `sorted(scenes, key=lambda s: s.start)`；跨集之后这个键
+    **没有意义**：活库实测十集的场景起点全部从 `0.0` 开始，按 start 排会把十集交错成
+    一条谁也不是的时间线。剧本驱动模式的叙事顺序来自模型写的剧本
+    （`pipeline.build_from_script_episodes` 逐 `script.segments` 顺序装配、按集各持一个
+    cursor）；规则选取的场景没有模型，于是唯一不武断的顺序就是**播出序**——
+    `episode_number` 已经是这个语义，`api/narration.py::_collect_episode_inputs`
+    就按它排（`sorted(episodes, key=lambda ep: int(ep["episode_number"]))`）。
+
+    第三个键 `scene_index` 只为确定性：同集同起点（零长场景与舍入会让 start 相等）时
+    不补次键，结果就稳定于输入顺序，而输入顺序来自 `episodes_repo.list_by_project`，
+    那个顺序没有契约——与 `pipeline.top_conflict_windows` 补两个次键是同一条理由。
+    """
+    return (scene.number, scene.start, scene.scene_index)
+
+
+def score_order(scene: EpisodeScene) -> tuple[int, int, float, int]:
+    """冲突分降序 + 确定性次键（集号、集内起点、scene_index）。
+
+    同分在全剧尺度上不是边角情况而是常态：活库实测十集共 **333** 个场景、
+    只有 **19** 个不同的分值（平均一个分值上压着 17.5 个场景），最热的分值出现 **45** 次。
+    只按 `-score` 排时 Python 的 sorted 虽然稳定，但稳定于**输入顺序**，于是
+    「整组重规划两次取到不同的集」——而取材集正是界面卡片四要素之一。
+    """
+    return (-scene.score, scene.number, scene.start, scene.scene_index)
+
+
+def stamp(
+    scenes_by_episode: list[tuple[int, str, list[ConflictScore]]],
+) -> list[EpisodeScene]:
+    """逐集盖章：把 (集号, 集 id, 该集场景表) 摊平成带集身份的场景表。
+
+    集身份在这里注入，而不是从库里读：`episode_analysis.conflict_scores` 是**按集一行**的
+    JSON（`migrations/001_init.sql` 的 `conflict_scores TEXT -- JSON`，经
+    `analysis_repo.get(conn, episode_id)` 取），集身份就是那一行的主键。于是活库里已有的
+    十集分析结果**一行都不用改、也不用重跑分析、不需要任何迁移**。
+
+    用 `model_dump()` + `model_validate` 而不是逐字段抄：`ConflictScore` 将来加字段时，
+    逐字段抄会**静默丢掉**新字段（pydantic 默认忽略未知 kwargs，照抄旧字段名不报错，
+    只会少一个值——P-1.5 的《实现定案修正》就是为这件事写的）。
+    """
+    stamped: list[EpisodeScene] = []
+    for number, episode_id, scenes in scenes_by_episode:
+        for scene in scenes:
+            payload: dict[str, Any] = scene.model_dump()
+            payload["number"] = number
+            payload["episode_id"] = episode_id
+            stamped.append(EpisodeScene.model_validate(payload))
+    return stamped
+
+
+def dialogue_of(material: MaterialByEpisode, episode_id: str) -> list[AsrSegment]:
+    """某一集的台词表。**缺键即抛**，绝不退回"这一集没有台词"。
+
+    缺键与"该集这一区间没有台词"是两件事：后者是素材事实（`modes_w9.strongest_line`
+    回 `None`、`copywriter._slot_block` 明写「该区间无台词转写」），前者是装配漏了一集。
+    静默当成"没台词"会让编剧对着**别的集**的画面写这一段，而它拿到的台词是空的，
+    于是它按 §3.3.1 的禁令「不得编造台词之外的事件」产出一段什么都不说的解说——
+    不报错、不降级、成片看着正常，正是本仓最贵的那一类缺陷。
+    """
+    try:
+        return material[episode_id].asr
+    except KeyError:
+        raise ValueError(
+            f"集 {episode_id} 的台词转写没有装配进来：跨集取材的槽位必须按集取台词，"
+            "缺键不是「这一集没有台词」"
+        ) from None
+
+
+def label_of(material: MaterialByEpisode, episode_id: str) -> str:
+    """某一集的人读集名（进编剧 prompt）。缺键即抛，与 `dialogue_of` 同一口径。"""
+    try:
+        return material[episode_id].label
+    except KeyError:
+        raise ValueError(f"集 {episode_id} 没有装配进取材原料表，无从给出集名") from None
+```
+
+Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/engines/narration/test_casting.py -q`
+
+Expected: PASS（**9** 条）
+
+- [ ] **Step 4: 六个编排器换签名（逐文件整块替换）**
+
+**改法只有三类点，其余一行不动**：① 首参 `episode_id: str` 删掉、场景表类型换成 `list[EpisodeScene]`；② `sorted(..., key=lambda s: s.start)` → `key=episode_order`、`sorted(..., key=lambda s: -s.score)` → `key=score_order`；③ `episode_id=episode_id` → `episode_id=<该段真正取画的那个场景>.episode_id`。**第 ③ 类是全部风险所在**：盖错一个就是"去另一集的同一秒切画面"，而它不报错。
+
+`service/dramaclip/engines/narration/modes/__init__.py` —— 模块 docstring、import 区、`build_raw_clip`、`build_intro`、`_fit_duration` 五处整块替换（`RAW_CLIP_MIN_SCORE` 等五个常量一字不动）：
+
+```python
+"""九种解说模式的编排器（原案第六章）。W4：raw_clip + intro_narration。
+
+场景表带集身份（`casting.EpisodeScene`），故一条方案的时间轴可以含多集的段
+（规格 §1 的「跨集方案」）；段的 `episode_id` 由场景自己带，编排器不再有
+"这一条片属于哪一集"这个入参。
+"""
+
+from __future__ import annotations
+
+from dramaclip.engines.narration.casting import EpisodeScene, episode_order, score_order
+from dramaclip.engines.narration.models import (
+    NarrationText,
+    PlanData,
+    StrategySpec,
+    TimelineSegment,
+)
+from dramaclip.engines.semantic.models import HighlightSegment
+```
+
+（**`ConflictScore` 从这一行里消失了**——它在本文件已无引用，留着就是 ruff F401，而 Step 10 的门禁写着"Expected: 无输出"。`HighlightSegment` 仍被 `build_raw_clip` 的 `len(highlights)` 用着，保留。）
+
+```python
+def build_raw_clip(
+    scenes: list[EpisodeScene],
+    highlights: list[HighlightSegment],
+    strategy: StrategySpec,
+) -> PlanData:
+    """纯原片剪辑编排（原案 6.7）：开场最高冲突 → 时间线 → 截断。零加工（不遮罩）。"""
+    if not scenes:
+        return PlanData(mode="raw_clip", strategy=strategy)
+    candidates = [
+        scene
+        for scene in scenes
+        if scene.score >= RAW_CLIP_MIN_SCORE
+        and _RAW_CLIP_MIN_S <= scene.end - scene.start <= _RAW_CLIP_MAX_S
+    ]
+    # 分数不足时放宽到全部场景（按冲突分取头部，保证可用性）
+    if len(candidates) < 3:
+        ranked = sorted(scenes, key=score_order)[: max(3, len(highlights))]
+        candidates = ranked
+
+    ordered = sorted(candidates, key=episode_order)
+    best = max(ordered, key=lambda s: s.score)
+    # 身份比较用 `is`，不用 `scene_index`：scene_index 只在**一集内**唯一，
+    # 第 1 集的第 4 个场景与第 5 集的第 4 个场景 index 相同，跨集时按 index 判
+    # 会认定"开场已经是最高冲突"而不前置。
+    if ordered[0] is not best:
+        ordered.remove(best)
+        ordered.insert(0, best)
+
+    timeline = _fit_duration(ordered, strategy)
+    return PlanData(mode="raw_clip", timeline=timeline, strategy=strategy)
+
+
+def build_intro(
+    body_scenes: list[EpisodeScene],
+    strategy: StrategySpec,
+) -> PlanData:
+    """片头解说编排（原案 6.4）：引子旁白段（画面为正文首镜）+ 正片高光（原声）。
+
+    引子文案由编剧层填充；槽位压在哪一段画面即本时间轴首段，段时长在导出阶段由 TTS 实际时长回填。
+    正文可跨集：首镜是叙事顺序（`casting.episode_order`）最前的那一集的第一个场景，
+    其余高光逐集接在后面，每段的集号各自随场景走。
+    """
+    ordered = sorted(body_scenes, key=episode_order)
+    timeline = _fit_duration(ordered, strategy, intro_first=True)
+    if not timeline:
+        return PlanData(mode="intro_narration", timeline=timeline, strategy=strategy)
+    timeline[0] = timeline[0].model_copy(update={"narration_id": _INTRO_SLOT_ID})
+    return PlanData(
+        mode="intro_narration",
+        timeline=timeline,
+        narration_texts=[
+            NarrationText(
+                id=_INTRO_SLOT_ID,
+                brief="片头钩子：两三句把最大冲突抛出来，收尾留悬念，不要复述剧情梗概",
+            )
+        ],
+        strategy=strategy,
+    )
+
+
+def _fit_duration(
+    ordered: list[EpisodeScene],
+    strategy: StrategySpec,
+    *,
+    intro_first: bool = False,
+) -> list[TimelineSegment]:
+    """按时长目标截断：首场景无条件保留，其余在预算内按叙事顺序填充（不打乱顺序）。
+
+    入参必须已按 `casting.episode_order` 排好，本函数不再重排：跨集之后"按 start 排"
+    会把十集交错成一条谁也不是的时间线。
+
+    **末场景不再享受预算豁免**（原状是首尾都豁免）。豁免的上界是"一个最长场景"，
+    单集时代它够不到预算，所以那条豁免是死的：活库实测十集里最大的一集只有 **204.2**
+    场景秒，而 `strategy.max_duration_s` 是 **300**，于是 `used + duration > budget`
+    恒不成立。跨集之后两集就能到 **405.8** 场景秒，豁免会把成片推过 `max_duration_s`
+    （活库最长单场景 **7.9s** → 最坏 **307.9s**），而九模式真机门禁的时长断言正是
+    `duration_s > strategy.max_duration_s`（`scripts/verify_modes.py`）。
+
+    首场景仍然无条件保留：`intro_narration` 的旁白槽位挂在它上面（`build_intro` 的
+    `timeline[0]`），丢掉它等于丢掉那条片唯一的解说。
+    """
+    # 片头解说要在预算里**预留**引子槽位的最坏长度：段长是 TTS 回填时才定的
+    # （`pipeline.synthesize_narration_texts` 把段 end 改成 start + 实测音频时长），
+    # 编排期只知道 `_INTRO_MAX_S` 这个保守估计。不预留就会两头都吃满预算：
+    # 活库实测四集的一手给出 planned 298.80s，而 ep1 的引子实测音频 22.48s
+    # （编排期只给它 5.17s），成片因此约 313s——顶穿 `strategy.max_duration_s`=300，
+    # 而九模式门禁的时长断言正是 `duration_s > strategy.max_duration_s`。
+    budget = strategy.max_duration_s - (_INTRO_MAX_S if intro_first else 0.0)
+    kept: list[EpisodeScene] = []
+    used = 0.0
+    for index, scene in enumerate(ordered):
+        duration = scene.end - scene.start
+        if index != 0 and used + duration > budget:
+            continue
+        kept.append(scene)
+        used += duration
+
+    segments = [
+        TimelineSegment(
+            episode_id=scene.episode_id,
+            start=round(scene.start, 3),
+            end=round(scene.end, 3),
+            audio="narration" if intro_first and index == 0 else "original",
+        )
+        for index, scene in enumerate(kept)
+    ]
+    if intro_first and segments:
+        first = segments[0]
+        segments[0] = first.model_copy(
+            update={"end": round(min(first.end, first.start + _INTRO_MAX_S), 3)}
+        )
+    return segments
+```
+
+`service/dramaclip/engines/narration/modes_w5.py` —— 模块 docstring、import 区、`build_cross`、`build_ultra_short` 四处整块替换（四个常量一字不动）：
+
+```python
+"""W5 模式编排：交叉解说（原案 6.3）与超短悬念版（原案 6.9）。
+
+编排只产出画面结构与旁白槽位，文案一律由 narration.copywriter 生成（无模板兜底）。
+场景表带集身份（`casting.EpisodeScene`），一条方案的时间轴可以含多集的段。
+"""
+
+from __future__ import annotations
+
+from dramaclip.engines.narration.casting import EpisodeScene, episode_order, score_order
+from dramaclip.engines.narration.models import (
+    NarrationText,
+    PlanData,
+    StrategySpec,
+    TimelineSegment,
+)
+```
+
+（**`from dramaclip.engines.semantic.models import ConflictScore` 整行删掉**：本文件改完之后不再有裸 `ConflictScore` 的引用，留着就是 F401。）
+
+```python
+def build_cross(
+    scenes: list[EpisodeScene],
+    strategy: StrategySpec,
+) -> PlanData:
+    """交叉解说：场景原声与旁白交替；旁白压住下一场景开头，承担串联与悬念。
+
+    时间轴：场景1(原声) → 旁白1 → 场景2(原声) → 旁白2 → …（旁白段画面延续下一场景）。
+    跨集时"下一场景"可能在另一集，旁白段因此盖的是那一集的开场画面——这是有意的：
+    旁白的职责就是串联，串到别的集去正是跨集方案的形状。
+    """
+    ranked = sorted(scenes, key=score_order)
+    picked = sorted(ranked[:6], key=episode_order)  # 取 top 6 按叙事顺序
+    if not picked:
+        return PlanData(mode="cross_narration", strategy=strategy)
+
+    segments: list[TimelineSegment] = []
+    texts: list[NarrationText] = []
+    budget = min(strategy.max_duration_s, _CROSS_MAX_S)
+    used = 0.0
+    for index, scene in enumerate(picked):
+        duration = min(scene.end - scene.start, _CROSS_SCENE_S)
+        segments.append(
+            TimelineSegment(
+                episode_id=scene.episode_id,
+                start=round(scene.start, 3),
+                end=round(scene.start + duration, 3),
+                audio="original",
+            )
+        )
+        used += duration
+        if used >= budget:
+            break
+        # 场景间插入旁白段（画面延续到下一场景开头；末尾场景后用本场景尾部）
+        anchor = picked[index + 1] if index + 1 < len(picked) else scene
+        narration_seconds = _HOOK_TTS_FALLBACK_S
+        slot_id = f"cross-{index + 1}"
+        texts.append(
+            NarrationText(
+                id=slot_id,
+                brief="原声片段之间的串联：承接上一幕，给下一幕留半句钩",
+            )
+        )
+        segments.append(
+            TimelineSegment(
+                # 集号跟**锚点**走，不跟上一段的 scene 走：这一段画面就是 anchor 的开头。
+                # 沿用 scene.episode_id 会让渲染去另一集的同一秒取画面（`export_plan`
+                # 按 segment.episode_id 查 episode_paths），出错片而不报错。
+                episode_id=anchor.episode_id,
+                start=round(anchor.start, 3),
+                end=round(anchor.start + narration_seconds, 3),
+                audio="narration",
+                narration_id=slot_id,
+            )
+        )
+        used += narration_seconds
+    return PlanData(
+        mode="cross_narration", timeline=segments, narration_texts=texts, strategy=strategy
+    )
+
+
+def build_ultra_short(
+    scenes: list[EpisodeScene],
+    strategy: StrategySpec,
+) -> PlanData:
+    """超短悬念版（10-20s）：钩子旁白 → 最高冲突原声画面 → 收尾引导。
+
+    跨集只改变**在哪一集**找那个最高冲突场景：本模式的三个段压在同一个场景上，
+    它天然是单场景片，取材集因此恒为一集——规格 §1 要的是"一条方案**可以**跨集取画面"，
+    不是"每条方案必须≥2 集"，故这里不为跨集而跨集。
+    """
+    if not scenes:
+        return PlanData(mode="ultra_short_hook", strategy=strategy)
+    # `min(score_order)` 而不是 `max(key=score)`：后者在同分时取**输入顺序**的第一个，
+    # 而输入顺序来自 episodes_repo.list_by_project，没有契约（活库实测 333 个场景只有
+    # 19 个不同分值）。score_order 已带 (集号, 起点, scene_index) 三个次键。
+    best = min(scenes, key=score_order)
+    scene_span = min(best.end - best.start, _ULTRA_CONFLICT_S)
+    texts = [
+        NarrationText(id="hook-1", brief="开场钩子：一句，最大反差或最狠的悬念，不超过 20 字"),
+        NarrationText(
+            id="cta-1",
+            brief="收尾引导：一句，指向「结局更狠」并引导点击，不超过 15 字",
+        ),
+    ]
+    timeline = [
+        TimelineSegment(
+            episode_id=best.episode_id,
+            start=round(best.start, 3),
+            end=round(best.start + _HOOK_TTS_FALLBACK_S, 3),
+            audio="narration",
+            narration_id=texts[0].id,
+        ),
+        TimelineSegment(
+            episode_id=best.episode_id,
+            start=round(best.start, 3),
+            end=round(best.start + scene_span, 3),
+            audio="original",
+        ),
+        TimelineSegment(
+            episode_id=best.episode_id,
+            start=round(best.end - _HOOK_TTS_FALLBACK_S, 3),
+            end=round(best.end, 3),
+            audio="narration",
+            narration_id=texts[1].id,
+        ),
+    ]
+    return PlanData(
+        mode="ultra_short_hook", timeline=timeline, narration_texts=texts, strategy=strategy
+    )
+```
+
+`service/dramaclip/engines/narration/modes_w8.py` —— docstring 末补一行、import 区替换、`build_full` 整块替换。**`_slot_brief` 与 `_MAX_SCENES` / `_FULL_SCENE_S` 一字不动**：槽位职责是**弧内位次**（开篇/推进/高潮/收尾），跨集之后语义完全不变——变的只是"这条弧横跨几集"。
+
+```python
+场景表带集身份（`casting.EpisodeScene`），故一条解说弧可以横跨多集。
+```
+
+（上面这一行接在模块 docstring 的 `旁白时长在 TTS 合成后回填（机制同 intro/cross），段长随旁白实际时长伸缩。` 之后。）
+
+```python
+from dramaclip.engines.narration.casting import EpisodeScene, episode_order, score_order
+from dramaclip.engines.narration.models import (
+    NarrationText,
+    PlanData,
+    StrategySpec,
+    TimelineSegment,
+)
+```
+
+（`from dramaclip.engines.semantic.models import ConflictScore` 整行删掉，理由同上。）
+
+```python
+def build_full(
+    scenes: list[EpisodeScene],
+    strategy: StrategySpec,
+) -> PlanData:
+    """全片解说编排：场景按叙事顺序全程覆盖，全部原声压低（ducked）。
+
+    `_slot_brief` 的位置语义在跨集之后仍然成立：位置是**这条解说弧**里的位置，
+    不是"第几集的第几场"。开篇/推进/高潮/收尾由弧内位次决定，弧本身可以横跨三集。
+    """
+    ranked = sorted(scenes, key=score_order)[:_MAX_SCENES]
+    picked = sorted(ranked, key=episode_order)
+    if not picked:
+        return PlanData(mode="full_narration", strategy=strategy)
+
+    count = len(picked)
+    timeline: list[TimelineSegment] = []
+    texts: list[NarrationText] = []
+    for index, scene in enumerate(picked):
+        slot_id = f"full-{index + 1}"
+        end = round(min(scene.start + _FULL_SCENE_S, scene.end), 3)
+        timeline.append(
+            TimelineSegment(
+                episode_id=scene.episode_id,
+                start=round(scene.start, 3),
+                end=end,
+                audio="ducked",
+                narration_id=slot_id,
+            )
+        )
+        texts.append(NarrationText(id=slot_id, brief=_slot_brief(index, count, scene.score)))
+    return PlanData(
+        mode="full_narration", timeline=timeline, narration_texts=texts, strategy=strategy
+    )
+```
+
+`service/dramaclip/engines/narration/modes_p2.py` —— docstring 末补一行、import 区替换、`_pick` / `build_dual_host` / `build_monologue` 三处整块替换（四个常量与两段 `brief` 文案一字不动）：
+
+```python
+场景表带集身份（`casting.EpisodeScene`），故一条对谈/独白弧可以横跨多集。
+```
+
+```python
+from dramaclip.engines.narration.casting import EpisodeScene, episode_order, score_order
+from dramaclip.engines.narration.models import (
+    NarrationText,
+    PlanData,
+    StrategySpec,
+    TimelineSegment,
+)
+```
+
+（`from dramaclip.engines.semantic.models import ConflictScore` 整行删掉。）
+
+```python
+def _pick(scenes: list[EpisodeScene]) -> list[EpisodeScene]:
+    ranked = sorted(scenes, key=score_order)[:_MAX_SCENES]
+    return sorted(ranked, key=episode_order)
+
+
+def build_dual_host(
+    scenes: list[EpisodeScene],
+    strategy: StrategySpec,
+) -> PlanData:
+    """双人对谈（原案 6.10）：A 抛话题、B 推剧情，交替对谈 + 原声压低。"""
+    picked = _pick(scenes)
+    if not picked:
+        return PlanData(mode="dual_host_chat", strategy=strategy)
+
+    count = len(picked)
+    timeline: list[TimelineSegment] = []
+    texts: list[NarrationText] = []
+    for index, scene in enumerate(picked):
+        slot_id = f"dual-{index + 1}"
+        voice = _VOICE_A if index % 2 == 0 else _VOICE_B
+        speaker = "主持人 A" if index % 2 == 0 else "嘉宾 B"
+        if index == 0:
+            brief = f"{speaker} 开场抛话题：用剧名点出这片为什么值得看"
+        elif index == count - 1:
+            brief = f"{speaker} 收尾：放狠话评结局并引导看全集"
+        elif index % 2 == 1:
+            brief = f"{speaker} 接话：情绪反应 + 补一个刚才没说的细节"
+        else:
+            brief = f"{speaker} 抛下一层：把冲突往更狠处推一句"
+        end = round(min(scene.start + _SCENE_S, scene.end), 3)
+        timeline.append(
+            TimelineSegment(
+                episode_id=scene.episode_id,
+                start=round(scene.start, 3),
+                end=end,
+                audio="narration",
+                narration_id=slot_id,
+            )
+        )
+        texts.append(NarrationText(id=slot_id, brief=brief, voice=voice))
+    return PlanData(
+        mode="dual_host_chat", timeline=timeline, narration_texts=texts, strategy=strategy
+    )
+
+
+def build_monologue(
+    scenes: list[EpisodeScene],
+    strategy: StrategySpec,
+) -> PlanData:
+    """角色内心独白（原案 6.11）：主角第一人称 OS 贯穿，情绪内收。"""
+    picked = _pick(scenes)
+    if not picked:
+        return PlanData(mode="inner_monologue", strategy=strategy)
+
+    count = len(picked)
+    timeline: list[TimelineSegment] = []
+    texts: list[NarrationText] = []
+    for index, scene in enumerate(picked):
+        slot_id = f"mono-{index + 1}"
+        if index == 0:
+            brief = "第一人称开场：主角此刻的处境与误判，一句话"
+        elif index == count - 1:
+            brief = "第一人称收尾：态度反转落定 + 一句点击引导"
+        elif scene.score >= 85:
+            brief = "第一人称高潮：这一刻主角想明白了什么，短促、带情绪"
+        else:
+            brief = "第一人称推进：忍让如何一点点失效"
+        end = round(min(scene.start + _SCENE_S, scene.end), 3)
+        timeline.append(
+            TimelineSegment(
+                episode_id=scene.episode_id,
+                start=round(scene.start, 3),
+                end=end,
+                audio="narration",
+                narration_id=slot_id,
+            )
+        )
+        texts.append(NarrationText(id=slot_id, brief=brief, voice=_VOICE_A))
+    return PlanData(
+        mode="inner_monologue", timeline=timeline, narration_texts=texts, strategy=strategy
+    )
+```
+
+⚠️ **`build_dual_host` 的四段 `brief` 字面值必须用 `git diff` 逐字核对**（「开场抛话题」/「收尾」/「接话」/「抛下一层」）。这四句是直接进 LLM prompt 的文案，而 `test_modes_p2.py` 只断言 `text.brief` **非空**与音色交替，**不断言措辞**——改错一个字不会有任何用例红，只会让成片的对谈悄悄变味。本任务对它们一字未改；这一行提醒是给"照抄代码块时手滑"的人准备的（P-1.5 Task 2 的实测修正里就有一条同类：一个中文引号被写成 ASCII 引号，`ast.parse` 当场炸，那是运气好；文案改字不会炸）。
+
+`service/dramaclip/engines/narration/modes_w9.py` —— docstring 末补一行、import 区替换、`strongest_line` 与 `build_subtitle_flow` 整块替换（四个常量一字不动）：
+
+```python
+场景表带集身份（`casting.EpisodeScene`），台词表按集分开（`casting.MaterialByEpisode`）。
+```
+
+```python
+from dramaclip.engines.analysis.models import AsrSegment
+from dramaclip.engines.narration import casting
+from dramaclip.engines.narration.casting import EpisodeScene, episode_order, score_order
+from dramaclip.engines.narration.line_scoring import score_line
+from dramaclip.engines.narration.models import (
+    PlanData,
+    StrategySpec,
+    TimelineSegment,
+)
+```
+
+（`from dramaclip.engines.semantic.models import ConflictScore` 整行删掉。`AsrSegment` **保留**——`strongest_line` 的第二参仍是 `list[AsrSegment]`，只是调用方现在按集传。）
+
+```python
+def strongest_line(
+    scene: EpisodeScene,
+    segments: list[AsrSegment],
+) -> str | None:
+    """场景内最强金句：冲突/情绪词密度最高的对白；无对白返回 None。
+
+    `segments` 必须是**这一集**的台词表：start/end 是集内相对秒，活库实测十集的场景
+    起点全部从 0.0 开始，拿摊平的表按秒过滤会捞到别的集的句子——字幕上出现一句
+    这一集没人说过的话，而它逐字来自本剧，肉眼与耳朵都查不出来。
+    """
+    inside = [
+        segment
+        for segment in segments
+        if segment.start < scene.end and segment.end > scene.start
+    ]
+    if not inside:
+        return None
+    best_text, best_score = None, -1
+    for segment in inside:
+        duration = segment.end - segment.start
+        score = score_line(segment.text, duration)
+        if score > best_score:
+            best_text, best_score = segment.text, score
+    return best_text
+
+
+def build_subtitle_flow(
+    scenes: list[EpisodeScene],
+    material: casting.MaterialByEpisode,
+    strategy: StrategySpec,
+) -> PlanData:
+    """金句流编排：top 场景按叙事顺序，每段字幕=该场景最强金句，结尾 CTA 卡片。"""
+    ranked = sorted(scenes, key=score_order)[:_MAX_SCENES]
+    picked = sorted(ranked, key=episode_order)
+
+    segments: list[TimelineSegment] = []
+    for scene in picked:
+        duration = min(scene.end - scene.start, _FLOW_SCENE_S)
+        segments.append(
+            TimelineSegment(
+                episode_id=scene.episode_id,
+                start=round(scene.start, 3),
+                end=round(scene.start + duration, 3),
+                audio="original",
+                subtitle_text=strongest_line(
+                    scene, casting.dialogue_of(material, scene.episode_id)
+                ),
+            )
+        )
+
+    # 结尾 CTA 卡片段（复用最后场景尾部画面，climax 居中字幕）
+    if picked:
+        last = picked[-1]
+        segments.append(
+            TimelineSegment(
+                episode_id=last.episode_id,
+                start=round(max(last.end - _CTA_FALLBACK_S, last.start), 3),
+                end=round(last.end, 3),
+                audio="original",
+                subtitle_text=_CTA_TEXT,
+            )
+        )
+    return PlanData(mode="subtitle_flow", timeline=segments, strategy=strategy)
+```
+
+- [ ] **Step 5: `pipeline.build_plan` 换签名，并删掉两个死物**
+
+`service/dramaclip/engines/narration/pipeline.py`：
+
+1. import 区改两行（`AudioFeatures` 与 `AsrSegment` 原本同一行，现在只剩后者；新增 casting 那一行，isort 位置在 `from dramaclip.engines.narration import (…)` 之后、`from dramaclip.engines.narration.models import (…)` 之前）：
+
+```python
+from dramaclip.engines.analysis.models import AsrSegment
+from dramaclip.engines.narration import (
+    modes,
+    modes_p2,
+    modes_w5,
+    modes_w8,
+    modes_w9,
+)
+from dramaclip.engines.narration.casting import EpisodeScene, MaterialByEpisode
+```
+
+2. `build_plan` 整函数替换：
+
+```python
+def build_plan(
+    mode: str,
+    scenes: list[EpisodeScene],
+    highlights: list[HighlightSegment],
+    material: MaterialByEpisode,
+    settings: dict[str, str],
+) -> PlanData:
+    """按模式生成编排方案（纯计算，不触 IO）。
+
+    场景表带集身份（`casting.EpisodeScene`），故一条方案的时间轴可以含多集的段
+    （规格 §1「每模式产出 1..K 条卖点角度互异的**跨集**方案」）；段的 `episode_id`
+    由场景自己带，不再有"这一条片属于哪一集"这个入参。
+
+    **原签名的 `episode_id: str` 与 `audio: AudioFeatures` 两个入参都随本次改写消失**：
+    前者被逐场景的集身份取代；后者是**死参数**——原函数体从头到尾没有一处引用 `audio`
+    （九个分派分支只往下传 conflict_scores / highlights / asr_segments / strategy），
+    而它唯一的调用点为它专门调了一次 `parse_audio_features`。在一个刚被重写的签名里
+    留着一个没人读的 `audio` 形参，等于告诉下一个人"音频特征参与编排"。
+    """
+    strategy = StrategySpec(
+        platform="douyin",
+        min_duration_s=float(settings.get("strategy.min_duration_s", "30")),
+        max_duration_s=float(settings.get("strategy.max_duration_s", "120")),
+    )
+    if mode == "raw_clip":
+        return modes.build_raw_clip(scenes, highlights, strategy)
+    if mode == "intro_narration":
+        return modes.build_intro(scenes, strategy)
+    if mode == "cross_narration":
+        return modes_w5.build_cross(scenes, strategy)
+    if mode == "ultra_short_hook":
+        return modes_w5.build_ultra_short(scenes, strategy)
+    if mode == "dialogue_narration":
+        raise ValueError(
+            "剧情解说为剧本驱动，不经规则编排（走 script_driver.script_dialogue_plan）"
+        )
+    if mode == "full_narration":
+        return modes_w8.build_full(scenes, strategy)
+    if mode == "subtitle_flow":
+        return modes_w9.build_subtitle_flow(scenes, material, strategy)
+    if mode == "dual_host_chat":
+        return modes_p2.build_dual_host(scenes, strategy)
+    if mode == "inner_monologue":
+        return modes_p2.build_monologue(scenes, strategy)
+    raise ValueError(f"模式暂未支持: {mode}（{MODE_LABELS.get(mode, mode)} 将随后续阶段启用）")
+```
+
+3. **删掉 `parse_audio_features` 整个函数**（实测 `pipeline.py:177-180`，四行）。它随 `audio` 形参一起失去唯一调用点（`api/narration.py:243`，那一行由 Task 6 Step 7 第 11 点的 `_plan_one` 重写带走）。留着它就是一个"看起来还有人会用"的公开助手。
+
+Run: `cd service && grep -rn "parse_audio_features\|AudioFeatures" dramaclip/engines/narration/ --include=*.py`
+
+Expected: **无输出**。（`AudioFeatures` 在 `engines/narration/` 下的唯一两处引用是 `pipeline.py:15` 的 import 与 `:54` 的形参，两者都随本步消失。`engines/analysis/models.py` 的定义、`engines/semantic/ranker.py` 与 `api/analysis.py` 的使用**都不在这个 grep 的路径里**，它们照旧。）
+
+- [ ] **Step 6: 迁既有测试调用点（实测 24 处 `build_*` + 3 处 `build_plan`）**
+
+逐个文件给字面替换。**每个文件的 import 区都是 ruff 的 isort 实跑结果**（上一批为 B7b 付过账：给"新增一行"这种指令，执行者照做就会 I001，而门禁写着"Expected: 无输出"）。
+
+| 文件 | import 区（整块替换后的字面内容） | 调用点替换 |
+|---|---|---|
+| `tests/engines/narration/test_modes.py` | 删 `from dramaclip.engines.analysis.models import AudioFeatures` 整行；在 `from dramaclip.engines.narration import pipeline` 之后加 `from dramaclip.engines.narration.casting import stamp` | 5 处 `build_raw_clip("ep1", …)` / `build_intro("ep1", …)` → `build_raw_clip(stamp([(1, "ep1", _scenes())]), …)`；`build_intro("ep1", [], _STRATEGY)` → `build_intro([], _STRATEGY)`；`test_highlights_not_required` 那行**必须折成四行**（实测 114 字符 → E501）：<br>`    plan = build_raw_clip(`<br>`        stamp([(1, "ep1", _scenes())]),`<br>`        [HighlightSegment(start=0, end=6, score=80)],`<br>`        _STRATEGY,`<br>`    )`；`test_build_plan_refuses_dialogue_rule_arrangement` 的实参从 `("dialogue_narration", "ep1", _scenes(), [], [], AudioFeatures(), {})` 改成 `("dialogue_narration", stamp([(1, "ep1", _scenes())]), [], {}, {})`；**并把 `test_raw_clip_opens_with_highest_conflict` 的断言消息从「截断预算（含首尾豁免）」改成「截断预算（只有首场景豁免）」、上界从 `max_duration_s + 12` 收紧到 `max_duration_s`**（豁免已删，留着 `+12` 就是一条松掉的断言，而那句散文会作为关于代码的假话被提交——B9 同类） |
+| `tests/engines/narration/test_modes_w5.py` | 加 `from dramaclip.engines.narration.casting import stamp`（isort 位置：`models` 那行**之前**） | 4 处：`build_cross("ep1", _scenes(), X)` → `build_cross(stamp([(1, "ep1", _scenes())]), X)`（两处）；`build_ultra_short("ep1", _scenes(), _STRATEGY)` 同法；`build_ultra_short("ep1", [], _STRATEGY)` → `build_ultra_short([], _STRATEGY)` |
+| `tests/engines/narration/test_modes_w8.py` | 同上 | 4 处 `build_full("ep1", _scenes(), _STRATEGY)` → `build_full(stamp([(1, "ep1", _scenes())]), _STRATEGY)`；`build_full("ep1", [], _STRATEGY)` → `build_full([], _STRATEGY)` |
+| `tests/engines/narration/test_modes_p2.py` | 同上 | 3 处：`build_dual_host` 两处、`build_monologue` 一处；空表那处 → `build_dual_host([], _STRATEGY)` |
+| `tests/engines/narration/test_modes_w9.py` | 加 `from dramaclip.engines.narration import casting` 与 `from dramaclip.engines.narration.casting import stamp`（两行，isort 顺序：`import casting` 在 `from … import stamp` 之前；`models` 那行排在两者之后） | 4 处 `build_subtitle_flow("ep1", _scenes(), _segments(), _STRATEGY)` → `build_subtitle_flow(stamp([(1, "ep1", _scenes())]), _material(), _STRATEGY)`；空场景那处 → `build_subtitle_flow([], _material(), _STRATEGY)`。**并在 `_segments()` 之后新增**：<br>`def _material() -> casting.MaterialByEpisode:`<br>`    return {"ep1": casting.EpisodeMaterial(number=1, asr=_segments())}` |
+| `tests/engines/narration/test_ducked_narration.py` | 加 `from dramaclip.engines.narration.casting import stamp` | `:149` 那行**必须折成三行**（实测 103 字符 → E501）：<br>`    plan = build_full(`<br>`        stamp([(1, "ep1", scenes)]), StrategySpec(min_duration_s=10, max_duration_s=120)`<br>`    )` |
+| `tests/api/test_narration_audio_chain.py` | 加 `from dramaclip.engines.narration.casting import stamp` | `_full_plan` 里 `build_full(episode_id, _scenes(), StrategySpec(min_duration_s=10))` → `build_full(stamp([(1, episode_id, _scenes())]), StrategySpec(min_duration_s=10))`（**保留 `episode_id` 这个形参名**，它由夹具传入，只是现在当集 id 用） |
+| `tests/api/test_narration_no_downgrade.py` | 加 `from dramaclip.engines.narration.casting import stamp` | 两处 `build_full("ep1", _SCENES, StrategySpec(min_duration_s=10))` → `build_full(stamp([(1, "ep1", _SCENES)]), StrategySpec(min_duration_s=10))` |
+
+- [ ] **Step 7: 写跨集性质测试**
+
+新建 `service/tests/engines/narration/test_cross_episode_arrangement.py`（**单集行为由各 `test_modes*.py` 守着，本文件只钉跨集才存在的性质**）：
+
+```python
+"""六个规则编排器的跨集取材（规格 §1「每模式产出 1..K 条…跨集方案」）。
+
+单集行为由各 `test_modes*.py` 守着；本文件只钉**跨集才存在**的那些性质。
+每一条都对应一个真实的坏法，且每条都做过变异检查（见 Step 9）：
+
+① 段的集号必须来自**它自己的场景**，不来自某个"这一条片属于哪一集"的入参
+   ——否则渲染会去另一集的同一秒取画面（`export_plan` 按 `segment.episode_id`
+   查 `episode_paths`），出错片而不报错；
+② 叙事顺序是播出序（集号 → 集内起点），不是钟表序——活库实测十集的场景起点
+   全部从 `0.0` 开始，按 start 排会把十集交错；
+③ `_fit_duration` 的预算不得被末场景豁免顶穿——单集时代够不到预算（活库最大
+   单集 204.2 场景秒 < `strategy.max_duration_s` 300），跨集两集就到 405.8；
+④ `scene_index` 只在**一集内**唯一，跨集时用它做身份比较会认错场景；
+⑤ `subtitle_flow` 的金句必须取自该场景**自己那一集**的台词表。
+"""
+
+from __future__ import annotations
+
+from dramaclip.engines.analysis.models import AsrSegment
+from dramaclip.engines.narration import casting
+from dramaclip.engines.narration.casting import stamp
+from dramaclip.engines.narration.models import StrategySpec
+from dramaclip.engines.narration.modes import build_intro, build_raw_clip
+from dramaclip.engines.narration.modes_p2 import build_dual_host, build_monologue
+from dramaclip.engines.narration.modes_w5 import build_cross, build_ultra_short
+from dramaclip.engines.narration.modes_w8 import build_full
+from dramaclip.engines.narration.modes_w9 import build_subtitle_flow
+from dramaclip.engines.semantic.models import ConflictScore
+from tests.engines.narration.conftest import assert_slots_paired
+
+# 预算刻意给小：让"顶穿预算"这条在两三个场景上就能观察到，不必造几十集夹具
+_STRATEGY = StrategySpec(min_duration_s=10, max_duration_s=30)
+# intro 要另给一档：`_fit_duration` 在 intro_first 时会从预算里**预留** _INTRO_MAX_S=30s
+# 给引子槽位（段长要等 TTS 回填才知道），30s 的预算会被预留吃光、只剩首场景。
+_STRATEGY_INTRO = StrategySpec(min_duration_s=10, max_duration_s=90)
+
+
+def _scene(index: int, start: float, score: int) -> ConflictScore:
+    return ConflictScore(scene_index=index, start=start, end=start + 6.0, score=score)
+
+
+def _two_episodes() -> list[casting.EpisodeScene]:
+    """两集，**集内起点完全重合**（都从 0.0 开始）：这是活库的真实形状，不是刁钻构造。"""
+    return stamp(
+        [
+            (1, "ep1", [_scene(0, 0.0, 60), _scene(1, 10.0, 90)]),
+            (2, "ep2", [_scene(0, 0.0, 95), _scene(1, 10.0, 40)]),
+        ]
+    )
+
+
+def _material() -> casting.MaterialByEpisode:
+    return {
+        "ep1": casting.EpisodeMaterial(number=1, asr=[]),
+        "ep2": casting.EpisodeMaterial(number=2, asr=[]),
+    }
+
+
+def test_every_builder_stamps_the_episode_of_each_segment() -> None:
+    """六个编排器逐段盖自己场景的集号；两集都必须在时间轴上出现。"""
+    scenes = _two_episodes()
+    plans = {
+        "raw_clip": build_raw_clip(scenes, [], _STRATEGY),
+        "intro_narration": build_intro(scenes, _STRATEGY_INTRO),
+        "cross_narration": build_cross(scenes, _STRATEGY),
+        "ultra_short_hook": build_ultra_short(scenes, _STRATEGY),
+        "full_narration": build_full(scenes, _STRATEGY),
+        "dual_host_chat": build_dual_host(scenes, _STRATEGY),
+        "inner_monologue": build_monologue(scenes, _STRATEGY),
+        "subtitle_flow": build_subtitle_flow(scenes, _material(), _STRATEGY),
+    }
+    for mode, plan in plans.items():
+        assert plan.timeline, f"{mode} 出了个空时间轴"
+        used = {segment.episode_id for segment in plan.timeline}
+        assert used <= {"ep1", "ep2"}, f"{mode} 盖了个不存在的集号：{used}"
+        if mode == "ultra_short_hook":
+            continue  # 单场景片，恒为一集；它自己的用例钉"取的是全剧最高分那一集"
+        assert "ep2" in used, (
+            f"{mode} 的时间轴里没有第 2 集——那不是跨集方案，是单集方案换了个说法"
+        )
+
+
+def test_ultra_short_is_a_single_scene_film_and_says_which_episode() -> None:
+    """超短悬念版三个段压在同一个场景上，故恒为一集——但那一集必须是**全剧**最高分那集。
+
+    规格 §1 要的是一条方案**可以**跨集取画面，不是每条方案**必须** ≥2 集。
+    为跨集而把 15 秒的悬念版拆成两集，会毁掉这个模式的全部卖点（一个镜头一个反差）。
+    """
+    plan = build_ultra_short(_two_episodes(), _STRATEGY)
+    assert {segment.episode_id for segment in plan.timeline} == {"ep2"}, (
+        "95 分在 ep2，取的却是别的集"
+    )
+    assert len(plan.timeline) == 3
+
+
+def test_ultra_short_breaks_a_cross_episode_score_tie_by_episode_number() -> None:
+    """同分取**集号小**的那一集，而不是取输入顺序里的第一个。
+
+    夹具把 ep2 排在输入的第一位、两集同为 95 分：`max(scenes, key=lambda s: s.score)`
+    会返回输入顺序里的第一个（ep2），于是"整组重规划"两次可能取到不同的集——
+    而输入顺序来自 `episodes_repo.list_by_project`，那个顺序没有契约。
+    活库实测 333 个场景只有 19 个不同分值，同分不是边角情况。
+    """
+    tied = stamp(
+        [
+            (2, "ep2", [_scene(0, 0.0, 95)]),
+            (1, "ep1", [_scene(0, 0.0, 95)]),
+        ]
+    )
+    plan = build_ultra_short(tied, _STRATEGY)
+    assert {segment.episode_id for segment in plan.timeline} == {"ep1"}, (
+        "同分该按集号定序（取 ep1），实取的是输入顺序里的第一个"
+    )
+
+
+def test_segments_follow_broadcast_order_not_clock_order() -> None:
+    """两集的 0.0s 是两段不同画面：先按集号、再按集内起点。
+
+    按 start 排会得到 ep1@0、ep2@0、ep1@10、ep2@10 —— 十集这么交错出来的时间线
+    谁也不是，而它不报错、不降级，成片看着像"剪得很碎"。
+    """
+    plan = build_full(_two_episodes(), _STRATEGY)
+    assert [(segment.episode_id, segment.start) for segment in plan.timeline] == [
+        ("ep1", 0.0),
+        ("ep1", 10.0),
+        ("ep2", 0.0),
+        ("ep2", 10.0),
+    ]
+
+
+def test_fit_duration_never_overshoots_the_budget() -> None:
+    """末场景不再享受预算豁免：跨集之后豁免会把成片顶过 `strategy.max_duration_s`。
+
+    夹具按活库的量级造：每集 20 个 7.9s 的场景（活库实测最长单场景就是 7.9s），
+    三集共 474 场景秒，预算 30s。**实测**：新实现给出 23.7s（≤30），恢复末场景豁免
+    给出 **31.6s**（>30）——而九模式门禁的时长断言是 `duration_s > strategy.max_duration_s`
+    即失败。活库尺度上同一个差值是 300 → **307.9s**。
+    """
+    scenes = stamp(
+        [
+            (
+                number,
+                f"ep{number}",
+                [_scene(index, index * 8.0, 90) for index in range(20)],
+            )
+            for number in (1, 2, 3)
+        ]
+    )
+    strategy = StrategySpec(min_duration_s=10, max_duration_s=30)
+    for mode, plan in (
+        ("raw_clip", build_raw_clip(scenes, [], strategy)),
+        ("intro_narration", build_intro(scenes, strategy)),
+    ):
+        total = sum(segment.end - segment.start for segment in plan.timeline)
+        assert total <= strategy.max_duration_s, f"{mode} 顶穿了预算：{total}s > 30s"
+
+
+def test_intro_reserves_headroom_for_the_hook_slot() -> None:
+    """引子槽位的段长是 TTS 回填时才定的，故编排期必须给它**预留**预算。
+
+    不预留就两头都吃满：活库实测四集的一手 planned 298.80s、引子实测音频 22.48s
+    （编排期只给它 5.17s）⇒ 成片约 313s，顶穿 `strategy.max_duration_s`=300，
+    而九模式门禁的时长断言正是 `duration_s > strategy.max_duration_s`。
+    预留 `_INTRO_MAX_S` 之后同一手 planned 269.06s ⇒ 成片约 283.6s，落回窗口内。
+    """
+    scenes = stamp(
+        [
+            (number, f"ep{number}", [_scene(index, index * 8.0, 90) for index in range(20)])
+            for number in (1, 2, 3)
+        ]
+    )
+    strategy = StrategySpec(min_duration_s=10, max_duration_s=300)
+    plan = build_intro(scenes, strategy)
+    total = sum(segment.end - segment.start for segment in plan.timeline)
+    assert total <= strategy.max_duration_s - 30.0, (
+        f"引子没预留槽位余量：正文吃掉了 {total}s，预算只有 {strategy.max_duration_s}s"
+    )
+
+
+def test_intro_keeps_its_slot_when_the_first_scene_alone_exceeds_the_budget() -> None:
+    """首场景仍然无条件保留：`intro_narration` 的旁白槽位挂在它上面，丢了就没有解说。"""
+    scenes = stamp([(1, "ep1", [ConflictScore(scene_index=0, start=0.0, end=90.0, score=90)])])
+    plan = build_intro(scenes, StrategySpec(min_duration_s=10, max_duration_s=30))
+    assert len(plan.timeline) == 1
+    assert plan.timeline[0].narration_id == "intro-1"
+    assert_slots_paired(plan, "intro_narration")
+
+
+def test_raw_clip_best_first_swap_survives_a_scene_index_collision() -> None:
+    """`scene_index` 只在一集内唯一：跨集时按 index 判"开场是不是最高分"会认错场景。
+
+    夹具让两集都有一个 `scene_index=1` 的场景，且最高分那个在 ep2：
+    按 index 比较的实现会认定"开场已经是最高分"而不前置，按身份比较才会换。
+    """
+    scenes = stamp(
+        [
+            (1, "ep1", [_scene(1, 0.0, 72), _scene(2, 10.0, 75)]),
+            (2, "ep2", [_scene(1, 0.0, 99)]),
+        ]
+    )
+    plan = build_raw_clip(scenes, [], _STRATEGY)
+    first = plan.timeline[0]
+    assert first.episode_id == "ep2" and first.start == 0.0, (
+        f"开场应为全剧最高冲突（ep2@0.0，99 分），实得 {first.episode_id}@{first.start}"
+    )
+
+
+def test_cross_narration_segment_carries_the_anchor_episode() -> None:
+    """旁白段的画面延续到**下一个场景**，故它的集号必须是锚点的集号。
+
+    沿用上一个原声段的集号会让渲染去另一集的同一秒取画面——`export_plan` 按
+    `segment.episode_id` 查 `episode_paths`，查得到、只是查错了，于是不报错地出错片。
+    """
+    scenes = stamp(
+        [
+            (1, "ep1", [_scene(0, 0.0, 95)]),
+            (2, "ep2", [_scene(0, 0.0, 90)]),
+        ]
+    )
+    plan = build_cross(scenes, _STRATEGY)
+    narration_segments = [s for s in plan.timeline if s.audio == "narration"]
+    assert narration_segments, "夹具前提塌了：交叉解说必须有旁白段"
+    for segment in narration_segments:
+        assert segment.episode_id in {"ep1", "ep2"}
+    # picked 按播出序是 [ep1@0, ep2@0]，故第一个旁白段的锚点是 ep2
+    assert narration_segments[0].episode_id == "ep2", (
+        f"旁白段该盖锚点（ep2）的画面，实得 {narration_segments[0].episode_id}"
+    )
+
+
+def test_subtitle_flow_takes_each_line_from_its_own_episode() -> None:
+    """金句必须取自该场景**自己那一集**的台词表：两集秒轴重合时会捞到别集的句子。"""
+    scenes = stamp(
+        [
+            (1, "ep1", [_scene(0, 0.0, 95)]),
+            (2, "ep2", [_scene(0, 0.0, 90)]),
+        ]
+    )
+    material: casting.MaterialByEpisode = {
+        "ep1": casting.EpisodeMaterial(
+            number=1, asr=[AsrSegment(start=1.0, end=4.0, text="第一集的金句")]
+        ),
+        "ep2": casting.EpisodeMaterial(
+            number=2, asr=[AsrSegment(start=1.0, end=4.0, text="第二集的金句")]
+        ),
+    }
+    plan = build_subtitle_flow(scenes, material, _STRATEGY)
+    # 按**段序号**取值，不按集号：末尾还有一个 CTA 卡片段复用最后一集的尾部画面，
+    # 用 {episode_id: text} 收会把两个 ep2 段压成一个，断言就在读错的对象。
+    lines = [(segment.episode_id, segment.subtitle_text) for segment in plan.timeline]
+    assert lines == [
+        ("ep1", "第一集的金句"),
+        ("ep2", "第二集的金句"),
+        ("ep2", "结局太爽了！点下方看全集 →"),
+    ], lines
+```
+
+- [ ] **Step 8: 跑测试确认通过（含活库实测）**
+
+Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/engines/narration tests/api/test_narration_audio_chain.py tests/api/test_narration_no_downgrade.py -q`
+
+Expected: PASS（`test_casting.py` 9 条 + `test_cross_episode_arrangement.py` 10 条 + `test_conflict_windows.py` 12 条 + `tests/engines/narration` 既有用例全绿；scratch 实测这一组共 **127** 条通过）
+
+Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/api -q 2>&1 | tail -20`
+
+Expected: **红，且红的地方全部可预期**——`tests/api/test_produce.py`（以及 Task 6 改名后的 `test_plan_variants.py`）里打 `narration.produce` / `generate_plans` 的用例，因为 `api/narration.py` 还在用**旧签名**调 `build_plan`（`_generate_one` 传七个位置参数，新签名只收五个）。**这不是本任务要修的**：`api/narration.py` 的调用点由 Task 6 Step 7 第 11 点整体重写。逐条核对红的用例都落在 `tests/api/test_produce.py`、`tests/api/test_data_paths.py` 与 `tests/api/test_narration_*` 之外的**编排调用点**上；若红在别处，那是本任务改坏了什么，就地修掉。
+
+**活库实测（只读 `data/data.db`，用真编排器算 planned 源秒，不渲染、不写库）**——这张表是本任务唯一能证明"跨集真的发生了、且没有顶穿预算"的证据，落地后照抄一遍填进《Task N 落地后的实测修正》。取材集用规则类的第一手 `[2,5,6,9]`（活库十集按 top 窗排名 `[6,7,8,2,3,4,9,10,1,5]`、`deal_windows(…, 3)` 的第一手）；`strategy.max_duration_s` 取活库 settings 实测值 **300**：
+
+| 模式 | ep1 单集 planned(s) | 跨集一手 planned(s) | 段数（单集→跨集） | 时间轴上的集数 |
+|---|---|---|---|---|
+| `raw_clip` | 15.13 | **117.89** | 3 → 21 | **4** |
+| `intro_narration` | 192.20 | **269.06**（预留前是 298.80） | 46 → 58 | **2**（见下） |
+| `cross_narration` | 51.57 | 57.24 | 12 → 12 | **3** |
+| `ultra_short_hook` | 14.77 | 14.40 | 3 → 3 | **1**（设计如此，C13） |
+| `full_narration` | 34.50 | 42.04 | 8 → 8 | **3** |
+| `subtitle_flow` | 30.57 | 36.24 | 7 → 7 | **3** |
+| `dual_host_chat` | 34.50 | 42.04 | 8 → 8 | **3** |
+| `inner_monologue` | 34.50 | 42.04 | 8 → 8 | **3** |
+
+**读这张表的三件事**：
+
+1. **`intro_narration` 一手点了 4 集，时间轴上只出现 2 集**。不是 bug：它没有场景条数上限（与其余五个模式的 `_MAX_SCENES` 不同），`_fit_duration` 按播出序填充、预算 270s 在 ep5 就用完了，ep6/ep9 一帧都拿不到。**后果是落库的 `episode_ids` 必须从建好的时间轴反推**，不能抄角度点名的那份，否则卡片的「取材集区间」会列两集没出现的集（§9.5 假文案类）。Task 6 Step 7 第 11 点的 `_plan_one` 因此写 `used_ids = sorted({segment.episode_id for segment in plan.timeline})`——与 `script_driver.script_dialogue_plan` 同一个口径（它的 `used_ids` 逐字就是这么算的），配 `test_episode_ids_come_from_the_timeline_not_the_brief`。
+2. **planned 源秒 ≠ 成片秒**：`synthesize_narration_texts` 会把每个旁白/ducked 段的 `end` 改成 `start + 实测音频时长`。P-1.5 Task 10 的实测比值（成片/planned）是 `intro_narration` 1.09、`full_narration` 1.44、`dual_host_chat` 1.71、`inner_monologue` 1.45、`cross_narration` 1.25、`ultra_short_hook` 1.05、`raw_clip`/`subtitle_flow` 1.02–1.06。按这些比值推跨集成片：最长的 `intro_narration` ≈ 269.06 × 1.09 ≈ **293s**（预留前是 313s，**顶穿 300**），其余全部 ≤ 120s。这就是 Step 4 那两处预算改动的全部理由，也是 Task 9 Step 2.8 断言"门禁时长阈值一个字都不用改"的依据。
+3. **`raw_clip` 从 15s 变成 118s**（7.8 倍）。这是本裁决最容易被低估的一条产品后果：它不再是一条"三镜头爽点剪辑"，而是一条两分钟的多集混剪。阈值上合法（≤300）、门禁上会过，但**形态变了**。已写进《开放问题》#1 与交付报告，交业主定夺。
+
+- [ ] **Step 9: 变异检查**
+
+下表每一行的"必须红的用例"都是把破坏后的代码真跑一遍得到的（`D:/tmp` scratch 装配，非推断；跑完已还原并复跑基线确认全绿）：
+
+| # | 破坏 | 必须红的用例（实测） |
+|---|---|---|
+| 1 | `_fit_duration` 恢复末场景豁免：`if index != 0 and …` 改成 `is_edge = index == 0 or index == len(ordered) - 1` + `if not is_edge and …` | `test_fit_duration_never_overshoots_the_budget` |
+| 2 | `_fit_duration` 的预算预留去掉：`- (_INTRO_MAX_S if intro_first else 0.0)` 改成 `- 0.0` | `test_intro_reserves_headroom_for_the_hook_slot` |
+| 3 | `_fit_duration` 的首场景豁免也去掉（`if index != 0` 改成 `if True`） | `test_intro_keeps_its_slot_when_the_first_scene_alone_exceeds_the_budget` |
+| 4 | `casting.episode_order` 退化成钟表序：返回式改成 `(scene.start, scene.number, scene.scene_index)` | `test_segments_follow_broadcast_order_not_clock_order` |
+| 5 | `casting.score_order` 去掉三个次键：返回式改成 `(-scene.score,)` | `test_ultra_short_breaks_a_cross_episode_score_tie_by_episode_number` **与** `test_score_order_is_deterministic_across_input_order`（实测两条同时红） |
+| 6 | `build_raw_clip` 的身份比较改回按 `scene_index`：`if ordered[0] is not best` → `if ordered[0].scene_index != best.scene_index` | `test_raw_clip_best_first_swap_survives_a_scene_index_collision` |
+| 7 | `build_cross` 的旁白段沿用上一个原声段的集号：`episode_id=anchor.episode_id` → `episode_id=scene.episode_id` | `test_cross_narration_segment_carries_the_anchor_episode` |
+| 8 | `build_ultra_short` 改回 `max(scenes, key=lambda s: s.score)` | `test_ultra_short_breaks_a_cross_episode_score_tie_by_episode_number` |
+| 9 | `build_subtitle_flow` 的金句摊平取台词：`casting.dialogue_of(material, scene.episode_id)` → `[a for m in material.values() for a in m.asr]` | `test_subtitle_flow_takes_each_line_from_its_own_episode` |
+| 10 | `casting.stamp` 改成逐字段抄（漏掉 `reason`） | `test_stamp_attaches_the_episode_identity_of_the_row_it_came_from`（第二个断言，实测报 `reason` 缺失）。**`test_stamp_survives_a_new_field_on_conflictscore` 抓不到这一条**——它比的是**键集合**，逐字段抄只要把五个键都写上就过；两条用例各守一半，别删任何一条 |
+| 11 | `casting.dialogue_of` 的 `except KeyError: raise` 改成 `return []` | `test_dialogue_of_raises_on_a_missing_episode_instead_of_looking_silent` |
+| 12 | `casting.label_of` 的 `except KeyError: raise` 改成 `return ""` | `test_label_of_names_the_episode_for_the_copy_prompt` |
+| 13 | `deal_windows` 改成切块（见 Task 3b Step 5 #7） | Task 3b 的两条用例（本文件不红——发窗不在这里测，**别为此在本文件加用例**，那只是把同一条不变量抄两遍） |
+| 14 | `_fit_duration` 里 `episode_id=scene.episode_id` 改成 `episode_id=ordered[0].episode_id`（即"整条片属于第一集"的老写法） | `test_every_builder_stamps_the_episode_of_each_segment`（`intro_narration` 与 `raw_clip` 两格都红）。**这一条是整张表里最贵的**：它模拟的正是"编排器仍然认为一条片只属于一集"这个旧假设，而它不报错、只出错片 |
+
+Run（每轮）: `cd service && ../.venv/Scripts/python.exe -m pytest tests/engines/narration/test_casting.py tests/engines/narration/test_cross_episode_arrangement.py -q`
+
+- [ ] **Step 10: lint / 类型门禁 + 提交**
+
+Run: `cd service && ../.venv/Scripts/ruff.exe check . && ../.venv/Scripts/mypy.exe dramaclip`
+
+Expected: **两条都无输出、退出码 0**。（scratch 实测：`ruff check .` → `All checks passed!`；`mypy --strict dramaclip` → `Success: no issues found in 95 source files`。这一条门禁**此时就能跑通**，因为本任务不改 `api/narration.py`——它仍然用旧签名调 `build_plan`，mypy 会报它；**若 mypy 报了 `api/narration.py` 的 `build_plan` 调用，那是预期的，记下来留给 Task 6，不要在本任务里去改那个文件**。除 `api/narration.py` 之外任何一处报错都要就地修掉。）
+
+```bash
+git add service/dramaclip/engines/narration/casting.py service/dramaclip/engines/narration/modes/__init__.py service/dramaclip/engines/narration/modes_w5.py service/dramaclip/engines/narration/modes_w8.py service/dramaclip/engines/narration/modes_p2.py service/dramaclip/engines/narration/modes_w9.py service/dramaclip/engines/narration/pipeline.py service/tests/engines/narration/test_casting.py service/tests/engines/narration/test_cross_episode_arrangement.py service/tests/engines/narration/test_modes.py service/tests/engines/narration/test_modes_w5.py service/tests/engines/narration/test_modes_w8.py service/tests/engines/narration/test_modes_p2.py service/tests/engines/narration/test_modes_w9.py service/tests/engines/narration/test_ducked_narration.py service/tests/api/test_narration_audio_chain.py service/tests/api/test_narration_no_downgrade.py
+git commit -m "feat(narration): 取材层 casting + 六编排器跨集化，一条方案可从多集取画面（规格 §1）"
+```
+
+（**逐路径 add，禁止 `git add service/tests/engines/narration`**：那是整个目录，会卷走同树另一位工程师/另一个代理新加的文件，违反《开工前置》末段的提交纪律。上面 17 个路径就是本任务真改的全部。）
+
+**本任务不能独立构建**：`api/narration.py::_generate_one` 仍在用旧签名调 `build_plan`，所以这一次提交之后 `mypy` 与 `tests/api` 是红的，直到 Task 6 Step 7 重写它。这与 Task 6 Step 9 的处境同类（那里是契约两侧与前端调用点），**故本任务的提交信息里必须写明"调用点由 Task 6 接手"**，否则中间任何一个提交点上看树的人都会以为坏了。若不接受一个红的中间提交，就把 Step 10 改成"只暂存不提交"，与 Task 6 Step 10 一起在 Task 9 Step 8 提交。
+
+---
+
+## Task 4: 成稿链——卖点角度进 prompt + **槽位台词按集取用**（两条链同形）
 
 角度只影响选题是不够的：`copywriter` 若不知道这条片的卖点，K 条方案的**文案**会趋同，而重叠度量只看取材、拦不住"同一批画面配三段同义解说"。本任务把角度块接进两条成稿链。
 
+**本任务还有第二半，是 2026-09-12 裁决逼出来的真缺陷（《修订记录》C7）**：`write_plan_copy` 今天只收**一张摊平的** `asr_segments`，`_slot_block` 用它逐槽做 `seg.start < segment.end and seg.end > segment.start` 过滤。区间是**集内相对秒**，而活库实测十集的场景起点全部从 `0.0` 开始——集与集的秒轴互相覆盖。单集时代这个过滤不可能错；**跨集时间轴上它必然把别的集的对白喂给编剧**，而 system prompt 明写「情节、细节、称谓只能来自给定台词，禁止编造台词之外的事件」，于是模型会照着错的台词写出一段通顺、可信、说的却不是这段画面的解说。不报错、不降级、成片看着正常。两半合在一个任务里做，是因为它们改的是同一个签名、同一批调用点、同一个测试文件——分两步会把 `write_plan_copy` 的签名改两遍、把 Step 5 那张"逐个补调用点"的清单跑两遍。
+
 **Files:**
-- Modify: `service/dramaclip/engines/narration/copywriter.py:93-121`（`write_plan_copy` 的签名 + `user_prompt` 块）
+- Modify: `service/dramaclip/engines/narration/copywriter.py`（`write_plan_copy` 的签名 + `user_prompt` 块；**`_slot_block` 整函数替换**；import 区）
 - Modify: `service/dramaclip/engines/narration/scriptwriter.py:206-249`（`write_script_episodes` 的签名 + `user_prompt` 块）
 - Modify: `service/dramaclip/engines/narration/script_driver.py:62-116`（`script_dialogue_plan` 整函数：签名 `:62-67`、docstring `:68-76`、`write_script_episodes(...)` 调用 `:94-102`）
 - Modify: `service/dramaclip/api/narration.py:229-260`（临时补 `angle_block=""`，Task 6 整体重写）
 - Modify: `service/tests/engines/narration/test_copywriter.py`、`test_scriptwriter.py`、`test_script_driver.py`、`test_script_episodes.py`
+- **不动**：`service/dramaclip/engines/narration/casting.py`（Task 3c 已建，本任务只消费它的 `MaterialByEpisode` / `dialogue_of` / `label_of`）
 
 - [ ] **Step 1: 写失败测试**
 
@@ -1736,36 +3128,179 @@ def test_angle_block_is_forwarded_to_the_script_prompt(
 
 该文件若尚无 `_VALID_PAYLOAD`（它目前在 `test_scriptwriter.py`），把它连同其构造所需的最小字段复制到 `test_script_driver.py` 顶部并同名；若 `FakeLlmClient.calls` 目前只存 user 串，改成存 `(system, user)` 二元组并同步该文件里所有 `calls[0]` 断言——**两条成稿链的替身必须同形**，否则角度块的断言在两侧写法不一致，将来只有一侧会被发现坏了。
 
+- [ ] **Step 1b: 写"台词串集"的失败测试（2026-09-12 裁决新增，本任务最关键的两条用例）**
+
+`service/tests/engines/narration/test_copywriter.py`：先把夹具迁到新签名（**三处，逐字给**），再在文件末尾追加两条用例。
+
+1. import 区加 `casting`（isort 位置：`from dramaclip.engines.analysis.models import AsrSegment` 之后、`from dramaclip.engines.narration import copywriter` 那一行合并进去）：
+
+```python
+from dramaclip.engines.narration import casting, copywriter
+```
+
+2. `_SEGMENTS` 之后新增单集夹具（**`_SEGMENTS` 本身保留**，它是 `EpisodeMaterial.asr` 的值）：
+
+```python
+# 单集夹具：一张只有一集的取材原料表。跨集的用例在下面自己搭两集。
+_MATERIAL: casting.MaterialByEpisode = {
+    "ep1": casting.EpisodeMaterial(number=1, asr=_SEGMENTS)
+}
+```
+
+3. `_plan()` 整函数替换（`build_full` 的首参在 Task 3c 已换）：
+
+```python
+def _plan():
+    return build_full(casting.stamp([(1, "ep1", _SCENES)]), StrategySpec(min_duration_s=10))
+```
+
+4. **全部既有 `write_plan_copy(...)` 调用的第二个实参从 `_SEGMENTS` 改成 `_MATERIAL`**（实测 9 处）。其中 `test_slot_without_transcript_forbids_invention` 原来传的是**空表 `[]`**，它要改成一张"有集、没台词"的表——**不能改成 `{}`**：`{}` 会撞上 `dialogue_of` 的缺键抛错，那条用例测的本来是"该区间无台词"这个**合法**分支，两个分支必须分开（这正是 Step 3b 的 `dialogue_of` 抛错与本用例的分界）：
+
+```python
+def test_slot_without_transcript_forbids_invention(llm: Any) -> None:
+    """无转写可依据时（该区间一句台词没有）必须明写"不得编造"：每个槽位都得看到这句。"""
+    llm.queue = [_lines()]
+    silent = {"ep1": casting.EpisodeMaterial(number=1, asr=[])}
+    copywriter.write_plan_copy(_plan(), silent, _SETTINGS, mode_label=_MODE_LABEL)
+    prompt = llm.calls[0]
+    assert prompt.count("（该区间无台词转写") == len(_SCENES), "每个空区间槽位都要有禁止编造的提示"
+```
+
+5. 文件末尾追加两条用例：
+
+```python
+def _two_episode_plan() -> tuple[Any, casting.MaterialByEpisode]:
+    """跨集夹具：两个槽位压在**同样的 12.0-22.0s**，只是分属两集。
+
+    秒轴刻意重合，因为活库实测十集的场景起点全部从 `0.0` 开始——集与集的集内相对秒
+    互相覆盖是常态而不是边角情况。摊平一张 ASR 表按秒过滤的实现，在这里会把两集的
+    对白都塞进每一个槽位。
+    """
+    scenes = casting.stamp(
+        [
+            (1, "ep1", [ConflictScore(scene_index=0, start=12.0, end=22.0, score=90)]),
+            (2, "ep2", [ConflictScore(scene_index=0, start=12.0, end=22.0, score=88)]),
+        ]
+    )
+    plan = build_full(scenes, StrategySpec(min_duration_s=10))
+    material: casting.MaterialByEpisode = {
+        "ep1": casting.EpisodeMaterial(
+            number=1, asr=[AsrSegment(start=13.0, end=16.0, text="第一集的原话")]
+        ),
+        "ep2": casting.EpisodeMaterial(
+            number=2, asr=[AsrSegment(start=13.0, end=16.0, text="第二集的原话")]
+        ),
+    }
+    return plan, material
+
+
+def test_a_slot_is_grounded_in_its_own_episodes_dialogue(llm: Any) -> None:
+    """跨集时间轴上，槽位只能读**它那一集**的台词（规格 §1 跨集的前置条件）。
+
+    这是本轮最关键的一条用例：错的取材不会报错、不会降级，成片看着完全正常，
+    而解说讲的是另一集的事。system prompt 明写「情节、细节、称谓只能来自给定台词」，
+    所以模型会老老实实照着**喂错的那份台词**写——缺陷在喂料侧，不在模型侧。
+
+    前两个断言钉的是**夹具前提**：两集的秒轴必须重合，否则摊平实现也能碰巧答对，
+    这条用例就变成一条永远绿、什么也没守着的断言（B6 同一类）。
+    """
+    plan, material = _two_episode_plan()
+    assert [seg.episode_id for seg in plan.timeline] == ["ep1", "ep2"], "夹具前提塌了"
+    assert [(seg.start, seg.end) for seg in plan.timeline] == [(12.0, 22.0)] * 2, (
+        "夹具前提塌了：两集的秒轴必须重合，否则摊平实现也能碰巧答对"
+    )
+    llm.queue = [
+        {
+            "lines": [
+                {"id": text.id, "text": f"{text.id} 的解说"}
+                for text in plan.narration_texts
+            ]
+        }
+    ]
+    copywriter.write_plan_copy(
+        plan, material, _SETTINGS, mode_label=_MODE_LABEL, angle_block=""
+    )
+    prompt = FakeLlm.calls[0]
+    head, _, tail = prompt.partition("[full-2]")
+    assert "第一集的原话" in head and "第二集的原话" not in head, (
+        "第一个槽位读到了别的集的台词"
+    )
+    assert "第二集的原话" in tail and "第一集的原话" not in tail, (
+        "第二个槽位读到了别的集的台词"
+    )
+    assert "第1集" in head and "第2集" in tail, (
+        "跨集时间轴上槽位不报集名，等于没报区间——模型无从判断相邻两槽是不是同一条线"
+    )
+
+
+def test_a_slot_whose_episode_is_missing_from_the_material_raises(llm: Any) -> None:
+    """缺键 ≠「这一集没有台词」：静默当成没台词会让编剧写出一段什么都不说的解说。
+
+    `_slot_block` 本来就有"该区间无台词转写"这一支（素材事实，合法，见上面那条
+    `test_slot_without_transcript_forbids_invention`），所以缺键必须走**另一条**路。
+    `match` 只写到「槽位 full-2：集 ep2」为止，不写后半句：`dialogue_of` 与 `label_of`
+    各有一句自己的消息，写死后半句会让这条用例绑死"哪个查找先抛"，而两者都抛才对。
+    两条消息各自由 `test_casting.py` 钉住。
+    """
+    plan, material = _two_episode_plan()
+    del material["ep2"]
+    llm.queue = [_lines()]
+    with pytest.raises(ValueError, match=r"槽位 full-2：集 ep2"):
+        copywriter.write_plan_copy(
+            plan, material, _SETTINGS, mode_label=_MODE_LABEL, angle_block=""
+        )
+    assert llm.calls == [], "缺料就该在发请求之前拦住，不该先付一次成稿"
+```
+
+（`AsrSegment` / `ConflictScore` / `pytest` / `Any` 该文件已 import，直接复用；`build_full` 与 `StrategySpec` 也已有。**不要新增 `from dramaclip.engines.narration.modes_w8 import build_full` 这类重复 import**，ruff 会报 F811。）
+
 - [ ] **Step 2: 跑测试确认失败**
 
 Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/engines/narration/test_copywriter.py -q -k angle_block`
 
 Expected: FAIL —— `TypeError: write_plan_copy() got an unexpected keyword argument 'angle_block'`
 
+Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/engines/narration/test_copywriter.py -q -k "own_episodes_dialogue or missing_from_the_material"`
+
+Expected: FAIL —— 同样报 `unexpected keyword argument 'angle_block'`（Step 1b 的两条用例都传了它）。**此时它们还没有真正测到"台词串集"**：先让签名过，再在 Step 3b 之后看它们是否真的能抓住摊平实现（Step 7 的变异 #4 就是这件事）。
+
 Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/engines/narration/test_script_driver.py -q -k angle_block`
 
 Expected: FAIL —— `TypeError: script_dialogue_plan() got an unexpected keyword argument 'angle_block'`
 
-- [ ] **Step 3: `copywriter.write_plan_copy` 接角度块**
+- [ ] **Step 3: `copywriter.write_plan_copy` 接角度块 + 换成按集取料**
 
 `service/dramaclip/engines/narration/copywriter.py`：
 
-1. 签名整块替换（`angle_block` 与 `mode_label` 同为**必填**关键字，理由与 P-1.5 把 `mode_label` 定为必填一致：可省的卖点等于可省的差异化）：
+1. import 区改一行（`AsrSegment` 在本文件将**不再有引用**——`_slot_block` 的第二参换成了 `MaterialByEpisode`，留着就是 F401）：
+
+```python
+from dramaclip.engines.narration import casting, scriptwriter
+```
+
+（原状是两行：`from dramaclip.engines.analysis.models import AsrSegment` 与 `from dramaclip.engines.narration import scriptwriter`。**删掉 `AsrSegment` 那一行**，把 `casting` 合并进 `scriptwriter` 那一行——分两行写 ruff 会报 I001，而 Step 8 的门禁写着"Expected: 无输出"，B7b 同一类。）
+
+2. 签名整块替换（`angle_block` 与 `mode_label` 同为**必填**关键字，理由与 P-1.5 把 `mode_label` 定为必填一致：可省的卖点等于可省的差异化）：
 
 ```python
 def write_plan_copy(
     plan: PlanData,
-    asr_segments: list[AsrSegment],
+    material: casting.MaterialByEpisode,
     settings: dict[str, str],
     *,
     mode_label: str,
     angle_block: str,
     trace_dir: Path | None = None,
 ) -> PlanData:
-    """填满 plan 的全部旁白槽位并置 planner=llm_script；任何不合格都抛异常。"""
+    """填满 plan 的全部旁白槽位并置 planner=llm_script；任何不合格都抛异常。
+
+    `material` 按集分开（episode_id → 集号 + 该集台词表）：一条方案的时间轴可以横跨
+    多集（规格 §1），而槽位区间是**集内相对秒**，故每个槽位只能读它自己那一集的台词。
+    理由与实测数字见 `_slot_block`。
+    """
 ```
 
-2. `user_prompt` 整块替换（角度块紧跟模式行、在风格行之前——卖点是"写什么"，风格是"怎么写"，前者约束更强）：
+3. `user_prompt` 整块替换（角度块紧跟模式行、在风格行之前——卖点是"写什么"，风格是"怎么写"，前者约束更强）：
 
 ```python
     user_prompt = (
@@ -1774,16 +3309,79 @@ def write_plan_copy(
         + f"\n模式：{mode_label}"
         + angle_block
         + "\n文案槽位：\n"
-        + _slot_block(plan.narration_texts, plan.timeline, asr_segments)
+        + _slot_block(plan.narration_texts, plan.timeline, material)
         + (f"\n\n解说风格要求：{directives}" if directives else "")
     )
 ```
 
-3. 模块 docstring 末尾（`跨集剧本驱动（dialogue_narration）走 scriptwriter，两条链共享 FUNDAMENTALS。` 之后）补一行：
+4. 模块 docstring 末尾（`单集槽位模式（intro/cross/…）共用本模块；跨集剧本驱动（dialogue_narration）走 scriptwriter，两条链共享 FUNDAMENTALS。` 那两行**整块替换**——"单集槽位模式"这个说法在裁决之后是假话）：
 
 ```python
-卖点角度由 `angles.prompt_block` 措辞、经 `angle_block` 注入；单集链与跨集链共用那一段字。
+槽位模式（intro/cross/ultra_short/full/dual_host/inner_monologue）共用本模块；
+剧本驱动（dialogue_narration）走 scriptwriter，两条链共享 FUNDAMENTALS。
+两类的方案都可以跨集取材（规格 §1）：本模块按 `segment.episode_id` 逐槽取台词，
+scriptwriter 那边则把整份跨集转写按集分组喂给模型、由模型自己排集号。
+卖点角度由 `angles.prompt_block` 措辞、经 `angle_block` 注入；两条链共用那一段字。
 ```
+
+- [ ] **Step 3b: `_slot_block` 整函数替换（2026-09-12 裁决新增）**
+
+这是 C7 那个真缺陷的修法本体。**`_sanitize` 与 `_SYSTEM_PROMPT` 一字不动**——缺陷不在"模型答得对不对"，在"我们喂给它的料对不对"。
+
+```python
+def _slot_block(
+    texts: list[NarrationText],
+    segments: list[TimelineSegment],
+    material: casting.MaterialByEpisode,
+) -> str:
+    """每个槽位一段：职责 + 它压在的画面区间 + **它那一集**区间内的台词。
+
+    台词必须按 `segment.episode_id` 取，不能拿一张摊平的 ASR 表按秒过滤：区间是
+    **集内相对秒**，活库实测十集的场景起点全部从 `0.0` 开始，集与集的秒轴互相覆盖，
+    于是第 3 集 12-20s 的槽位会捞到第 7 集 12-20s 的对白。而 system prompt 明写
+    「情节、细节、称谓只能来自给定台词，禁止编造台词之外的事件」——模型会老老实实照着
+    **错的台词**写出一段通顺、可信、说的却不是这段画面的解说。不报错、不降级、
+    成片看着正常，正是本仓最贵的那一类缺陷。跨集时间轴（规格 §1）让这个缺陷从
+    "不可能发生"变成"必然发生"，故按集取台词是跨集的前置条件，不是可选优化。
+
+    集名（`casting.EpisodeMaterial.label`）也进块：跨集时间轴上「画面区间 12.0-20.0s」
+    不说是哪一集就等于没说，模型无从判断相邻两槽是不是同一条线。
+    """
+    by_id = {segment.narration_id: segment for segment in segments if segment.narration_id}
+    lines: list[str] = []
+    for text in texts:
+        segment = by_id.get(text.id)
+        if segment is None:
+            raise ValueError(f"槽位 {text.id} 没有配对画面段：编排器漏写 narration_id")
+        try:
+            pool = casting.dialogue_of(material, segment.episode_id)
+            label = casting.label_of(material, segment.episode_id)
+        except ValueError as exc:
+            # 缺键是装配漏了一集，不是"这一集没台词"：点名到槽位，否则错误串里只有
+            # 一个 uuid，运维看不出是哪一条片的哪一段。
+            raise ValueError(f"槽位 {text.id}：{exc}") from exc
+        lines.append(f"[{text.id}] 要做的事：{text.brief}")
+        lines.append(f"  取材：{label}，画面区间：{segment.start:.1f}-{segment.end:.1f}s")
+        inside = [
+            seg for seg in pool if seg.start < segment.end and seg.end > segment.start
+        ]
+        if inside:
+            lines.append("  区间内台词：")
+            lines.extend(
+                f"    {scriptwriter.clock(seg.start)}-{scriptwriter.clock(seg.end)} "
+                f"{seg.text.strip()}"
+                for seg in inside
+            )
+        else:
+            lines.append("    （该区间无台词转写：只按职责与前后槽位写，不得编造具体情节）")
+    return "\n".join(lines)
+```
+
+**三处必须逐字核对的地方**（每一处都是一个静默坏法）：
+
+1. `f"  取材：{label}，画面区间：…"` —— 行首**两个空格**、`取材：` 与 `画面区间：` 之间是**全角逗号**。Step 1b 的 `test_a_slot_is_grounded_in_its_own_episodes_dialogue` 断言 `"第1集" in head`，靠的就是这一行；格式改了断言会红，那是好事，但别为了过断言把集名塞到别处去。
+2. `except ValueError` **只包两个查找**，不包 `inside` 的过滤与后面的拼装。把 `try` 扩到整个循环体会让"该区间无台词"那一支也被当成缺键吞掉——两个分支必须分得开（Step 1b 第 4 点为此专门留了 `test_slot_without_transcript_forbids_invention`）。
+3. `raise ValueError(f"槽位 {text.id}：{exc}") from exc` —— `from exc` 不能省：省了之后 traceback 里看不到 `dialogue_of` 那句原文，运维只会看到"槽位 full-2：…"半句话。
 
 - [ ] **Step 4: `scriptwriter` 与 `script_driver` 接角度块**
 
@@ -1844,44 +3442,61 @@ def script_dialogue_plan(
 
 - [ ] **Step 5: 补齐所有既有调用点**
 
-`angle_block` 在三处都是必填，故所有调用点必须显式给值。先找齐：
+`angle_block` 在三处都是必填、`material` 换了类型，故所有调用点必须显式改。先找齐：
 
 Run: `cd service && grep -rn "write_plan_copy(\|write_script_episodes(\|script_dialogue_plan(" . --include=*.py`
 
 Expected: 命中 `dramaclip/api/narration.py` 两处、`dramaclip/engines/narration/script_driver.py` 一处，以及 `tests/engines/narration/test_copywriter.py`、`test_scriptwriter.py`、`test_script_driver.py`、`test_script_episodes.py`。逐个补：
 
-- `service/dramaclip/api/narration.py` 的 `copywriter.write_plan_copy(...)` 与 `script_driver.script_dialogue_plan(...)` 两处调用各加 `angle_block="",`，并在其上方加一行注释：
+- `service/dramaclip/api/narration.py` 的 `copywriter.write_plan_copy(plan, asr_segments, settings, …)`：第二个实参改成 `material`，并加 `angle_block="",`。**这个文件里此时没有 `material` 这个变量**——`_generate_one` 只有一张摊平的 `asr_segments`。就地拼一张单集表顶上（Task 6 Step 7 第 11 点会把它换成 `_casting_for` 的真装配）：
 
 ```python
-        # Task 6 重写为按角度注入；此处的空串只在本任务与下一次提交之间存活。
+        # Task 6 重写为按角度注入 + 按集装配；这两行只在本任务与下一次提交之间存活。
+        material = {
+            episode_id: casting.EpisodeMaterial(
+                number=int(episodes[0]["episode_number"]), asr=asr_segments
+            )
+        }
 ```
 
-- `service/tests/engines/narration/test_copywriter.py`：所有既有 `write_plan_copy(...)` 调用加 `angle_block=""`（Step 1 新增的两条传 `_ANGLE_BLOCK`）。
+  同时在该文件的 import 区把 `casting` 合并进既有那一行（isort：`casting` < `copywriter`）：
+
+```python
+from dramaclip.engines.narration import casting, copywriter, script_driver, scriptwriter
+```
+
+  `script_driver.script_dialogue_plan(...)` 那一处只加 `angle_block="",`（它不吃 `material`，跨集转写走 `episode_inputs`）。
+- `service/tests/engines/narration/test_copywriter.py`：所有既有 `write_plan_copy(...)` 调用加 `angle_block=""`（Step 1 新增的两条传 `_ANGLE_BLOCK`，Step 1b 新增的两条已在代码块里写好）。**第二个实参已在 Step 1b 第 4 点全部迁到 `_MATERIAL`，本步不要再动。**
 - `service/tests/engines/narration/test_scriptwriter.py`：`_run()` 助手加 `angle_block=""`。
 - `service/tests/engines/narration/test_script_driver.py`、`test_script_episodes.py`：所有 `script_dialogue_plan(...)` 调用加 `angle_block=""`（Step 1 新增的那条除外）。
-- `service/tests/api/test_produce.py`：`_FakeLlm.chat_json` 的槽位正则 `r"^\[([^\]]+)\] 要做的事："` 不受影响；若该文件有直接调 `write_plan_copy` 的用例，同法补 `angle_block=""`。
+- `service/tests/api/test_produce.py`：`_FakeLlm.chat_json` 的槽位正则 `r"^\[([^\]]+)\] 要做的事："` **不受影响**——Step 3b 只改了它**下面**那一行（`画面区间：` → `取材：…，画面区间：…`），槽位头一行的格式一个字没动。若该文件有直接调 `write_plan_copy` 的用例，同法补 `angle_block=""` 并把第二参改成单集 `material` 表。
 
 - [ ] **Step 6: 跑测试确认通过**
 
 Run: `cd service && ../.venv/Scripts/python.exe -m pytest tests/engines/narration tests/api -q`
 
-Expected: PASS（`tests/api/test_analysis.py` 的既有隔离 flake 除外——它属另一位工程师，不修不碰）
+Expected: PASS（`tests/api/test_analysis.py` 的既有隔离 flake 除外——它属另一位工程师，不修不碰）。scratch 实测 `test_copywriter.py` 从 11 条增到 **13** 条全绿。
 
 - [ ] **Step 7: 变异检查**
+
+下表 4/5/6 三行是 2026-09-12 裁决新增的，"必须红的用例"都是 scratch 实跑结果（非推断）：
 
 | # | 破坏 | 必须红的用例 |
 |---|---|---|
 | 1 | `copywriter` 的 user_prompt 里删掉 `+ angle_block` | `test_angle_block_reaches_the_prompt` |
 | 2 | `scriptwriter` 的 user_prompt 里删掉 `f"{angle_block}\n"` | `test_angle_block_is_forwarded_to_the_script_prompt` |
 | 3 | `copywriter` 把 `angle_block` 挪到 `_slot_block(...)` 之后（塞进槽位块尾部） | **不红**——说明"角度块在 prompt 里的位置"不是被测行为。不必为此加用例：位置只影响模型注意力，不影响任何可观察输出，钉住它等于把测试写成实现的镜像 |
+| **4** | **`_slot_block` 的 `pool = casting.dialogue_of(material, segment.episode_id)` 改成摊平：`pool = [a for m in material.values() for a in m.asr]`** | **`test_a_slot_is_grounded_in_its_own_episodes_dialogue`（实测红，报"第一个槽位读到了别的集的台词"）。这是 C7 那个真缺陷的唯一守卫——它红，说明"跨集时间轴上编剧读的是别的集的台词"这条已经回来了** |
+| **5** | **`casting.dialogue_of` 的 `except KeyError: raise` 改成 `return []`，且 `casting.label_of` 的同样改成 `return ""`（两处必须一起改）** | **`test_a_slot_whose_episode_is_missing_from_the_material_raises` + `test_casting.py` 的两条（`test_dialogue_of_raises_…` / `test_label_of_…`）。⚠️ 只改一处不会红：另一处的 `except KeyError: raise` 会顶包，实测（scratch）单独改 `dialogue_of` 时 `test_copywriter.py` 全绿、只有 `test_casting.py` 红一条。这类"两个守卫互相顶包"的变异必须一起破坏才测得出，写在这里免得下一个人以为用例失效了** |
+| **6** | **`_slot_block` 里 `label = casting.label_of(...)` 与那一行 `f"  取材：{label}，…"` 一起删掉** | **`test_a_slot_is_grounded_in_its_own_episodes_dialogue` 的第三个断言（`"第1集" in head`）。它守的不是正确性而是可写性：跨集时间轴上槽位不报集名，模型就无从判断相邻两槽是不是同一条线，"相邻两条要能连读成一条故事线"那句 system prompt 会失效** |
 
-Run（每轮）: `cd service && ../.venv/Scripts/python.exe -m pytest tests/engines/narration/test_copywriter.py tests/engines/narration/test_script_driver.py -q`
+Run（每轮）: `cd service && ../.venv/Scripts/python.exe -m pytest tests/engines/narration/test_copywriter.py tests/engines/narration/test_casting.py tests/engines/narration/test_script_driver.py -q`
 
 - [ ] **Step 8: 提交**
 
 ```bash
 git add service/dramaclip/engines/narration/copywriter.py service/dramaclip/engines/narration/scriptwriter.py service/dramaclip/engines/narration/script_driver.py service/dramaclip/api/narration.py service/tests/engines/narration/test_copywriter.py service/tests/engines/narration/test_scriptwriter.py service/tests/engines/narration/test_script_driver.py service/tests/engines/narration/test_script_episodes.py service/tests/api/test_produce.py
-git commit -m "feat(narration): 卖点角度注入两条成稿链，措辞由 angles.prompt_block 独家持有"
+git commit -m "feat(narration): 卖点角度注入两条成稿链；槽位台词改为按集取用（跨集时间轴的前置条件）"
 ```
 
 （**不许写 `service/tests/engines/narration`**：那是整个目录，会卷走同树另一位工程师/另一个代理新加的文件，违反《开工前置》末段的提交纪律。上面九个路径就是本任务真改的全部——`tests/engines/narration` 下另有 13 个文件（`test_modes*.py`、`test_tts_audio_isolation.py`、`conftest.py` 等），本任务一个都不碰。`service/tests/api/test_produce.py` 只在 Step 5 真补了 `angle_block=""` 时才 add；没改就从命令里去掉，别 add 一个没有变更的路径。）
@@ -2163,7 +3778,7 @@ from tests.api.test_plan_variants import Harness, _seed_project_with_analysis
 
 - [ ] **Step 3: 写失败测试**
 
-在 `service/tests/api/test_plan_variants.py` 里，`_seed_project_with_analysis` 之后新增多集种子（K 条角度需要多集才有互异取材可挑；单集种子上 K=3 会被重叠度量全拦掉——那是正确行为，但不是这些用例要验的）：
+在 `service/tests/api/test_plan_variants.py` 里，`_seed_project_with_analysis` 之后新增多集种子（**2026-09-12 裁决后种子从 3 集改成 6 集**：选题替身给每条角度两集且各条互不相交，K=3 就需要 2K=6 集；3 集时三条角度会是 `{1,2}/{2,3}/{1,3}`，两两共集 ⇒ 取材重叠 1/3，`overlap_max == 0.0` 那条断言就假红了）：
 
 ```python
 def _seed_project_with_episodes(
@@ -2175,8 +3790,11 @@ def _seed_project_with_episodes(
     """建项目 + count 集，每集直种**时间区间互不相交**的分析数据，全部标 done。
 
     集与集的场景时间刻意错开（第 i 集从 100*i 秒起）：这样「两条角度取不同集」的
-    取材重叠恒为 0，用例才不必去猜编排器会挑中哪几段。源文件是同一个 sample_video
-    复制 count 份——本种子只服务规划路径，不渲染。
+    取材重叠恒为 0，用例才不必去猜编排器会挑中哪几段。**注意这与生产形状相反**——
+    活库实测十集的场景起点全部从 0.0 开始，集与集的秒轴互相覆盖；错开是为了让
+    `overlap` 的读数可预期，跨集秒轴重合那条性质由 `test_casting.py` 与
+    `test_cross_episode_arrangement.py` 在引擎层单独钉。
+    源文件是同一个 sample_video 复制 count 份——本种子只服务规划路径，不渲染。
     """
     for index in range(1, count + 1):
         shutil.copy(sample_video, tmp_path / f"ep{index}.mp4")
@@ -2237,14 +3855,18 @@ def _stub_language_and_tts(
             llm_calls.append((system, user))
             if "选题操盘手" in system:  # angles._SYSTEM_PROMPT
                 wanted = int(re.search(r"需要 (\d+) 条", user).group(1))  # type: ignore[union-attr]
-                single = "恰好一个集号" in user
+                # 每条角度给**两集、且各条互不相交**（{1,2} / {3,4} / {5,6}）：
+                # ① 每条方案因此真的是跨集（规格 §1），用例才测得到裁决要的东西；
+                # ② 互不相交 ⇒ 取材重叠恒为 0，`overlap_max == 0.0` 那条断言才成立；
+                # ③ 各条的集组合互不相同 ⇒ 成稿前那道 `_reject_same_episode_sibling`
+                #    不会误拦。**这三条一起要求种子至少 2K 集**，故本文件的种子是 6 集。
                 return {
                     "angles": [
                         {
                             "name": f"角度{i}",
-                            "reason": f"第 {i} 集这条线最狠",
-                            "hook": f"第 {i} 集的开场钩子",
-                            "episode_numbers": [i] if single else [i, i + 1],
+                            "reason": f"第 {2 * i - 1}、{2 * i} 集这条线最狠",
+                            "hook": f"第 {2 * i - 1} 集的开场钩子",
+                            "episode_numbers": [2 * i - 1, 2 * i],
                         }
                         for i in range(1, wanted + 1)
                     ]
@@ -2275,7 +3897,7 @@ def test_plan_variants_writes_k_plans_without_rendering(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """出口判据本身：阶段③ 只看方案不渲染——K 条方案落库，一条 export 记录都不建。"""
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     harness.context.settings.update(_LLM_SETTINGS)
     calls: list[tuple[str, str]] = []
@@ -2322,7 +3944,7 @@ def test_one_variant_failure_does_not_kill_its_siblings(
     原状 try/except 包着整个模式（_run_produce 与 run_group 都是），
     一条变体的 TTS 失败会带走同模式其余 K-1 条。
     """
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     harness.context.settings.update(_LLM_SETTINGS)
     calls: list[tuple[str, str]] = []
@@ -2375,7 +3997,7 @@ def test_one_mode_failure_does_not_kill_other_modes(
     另一族既不该被牵连、也不该被拖去调 LLM。原计划用这一条同时验两件事，
     但没写明，故这里把意图钉进 docstring。
     """
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     harness.context.settings.update(_LLM_SETTINGS)
     calls: list[tuple[str, str]] = []
@@ -2422,7 +4044,7 @@ def test_rule_modes_never_construct_an_llm_client(
     顺带钉住 `planner == "rule"`：`scripts/verify_modes.py` 的 `EXPECT_PLANNER`
     把这两个模式钉在 `"rule"`，规划侧一旦把它们拖进成稿链，九模式门禁会一起红。
     """
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
 
     class _NoLlm:
@@ -2505,7 +4127,7 @@ def test_rejected_angle_does_not_pay_for_copy(
     成稿调用数按 copywriter 的 system prompt 认（`_SYSTEM_PROMPT` 首句是
     「你是短剧推广解说编剧」），与选题（「选题操盘手」）、口味层（「风格库」）三者互不混淆。
     """
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     harness.context.settings.update(_LLM_SETTINGS)
     calls: list[tuple[str, str]] = []
@@ -2549,7 +4171,7 @@ def test_unknown_episode_in_a_brief_fails_only_that_variant(
     raise 改成 `return episodes[0]` 全套照绿——而那正是「K 条其实是同一部片切 K 次」
     的根源之一（每条角度都被悄悄换成第 1 集）。
     """
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     harness.context.settings.update(_LLM_SETTINGS)
     calls: list[tuple[str, str]] = []
@@ -2595,7 +4217,7 @@ def test_post_copy_overlap_gate_still_guards_cross_episode_modes(
     于是前置闸门必然不触发、红的必然是成稿后那一道。
     **没有这条用例，Task 6 Step 10 的变异 #3 就再也红不了**（前置闸门会顶包）。
     """
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     harness.context.settings.update(_LLM_SETTINGS)
     calls: list[tuple[str, str]] = []
@@ -2638,7 +4260,7 @@ def test_overlapping_angle_is_dropped_not_stored(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """取材重叠超 60% 的角度当场不出（规格 §4.3）：不落库、点名到撞了谁。"""
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     harness.context.settings.update(_LLM_SETTINGS)
     calls: list[tuple[str, str]] = []
@@ -2680,7 +4302,7 @@ def test_exclude_plan_ids_reaches_the_selection_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """重掷此条：被排除方案的角度名必须进选题 prompt，否则模型会再提同一个卖点。"""
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     harness.context.settings.update(_LLM_SETTINGS)
     calls: list[tuple[str, str]] = []
@@ -2718,7 +4340,7 @@ def test_k_defaults_to_the_settings_value(
     memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
 ) -> None:
     """不传 k 时读 narration.variants_per_mode；RPC 回显实际用的 K，界面才不必自己猜。"""
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     harness.context.settings["narration.variants_per_mode"] = "2"
     result = harness.rpc(
@@ -2731,7 +4353,7 @@ def test_project_override_beats_the_global_default(
     memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
 ) -> None:
     """projects.settings 的第一个消费端（docs/service/01 §6 的已知限制在此关掉）。"""
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     harness.context.settings["narration.variants_per_mode"] = "3"
     harness.rpc(
@@ -2749,7 +4371,7 @@ def test_k_out_of_range_is_rejected_at_the_rpc_boundary(
     memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path, k: int
 ) -> None:
     """K 越界必须在派发作业之前拦下：进了作业就只是一条 failed 行，界面拿不到错误码。"""
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     response = harness.router.dispatch(
         RpcRequest(
@@ -2764,7 +4386,7 @@ def test_k_out_of_range_is_rejected_at_the_rpc_boundary(
 def test_unknown_excluded_plan_is_rejected_at_the_rpc_boundary(
     memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
 ) -> None:
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     response = harness.router.dispatch(
         RpcRequest(
@@ -2784,7 +4406,7 @@ def test_unknown_excluded_plan_is_rejected_at_the_rpc_boundary(
 def test_empty_modes_is_rejected(
     memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
 ) -> None:
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     response = harness.router.dispatch(
         RpcRequest(
@@ -2803,7 +4425,7 @@ def test_plan_variants_cancel_releases_the_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """作业被取消：cancel_events 必须释放，且已产出的方案行留着（规划成果不因取消而回滚）。"""
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     harness.context.settings.update(_LLM_SETTINGS)
     calls: list[tuple[str, str]] = []
@@ -3044,7 +4666,7 @@ export interface PlanVariantsResult {
 """
 ```
 
-2. import 区**整块替换**（不是"加两行"——那样 ruff 会报 I001，而 Step 9 的门禁写着"Expected: 无输出"）。实测：本仓 `.venv/Scripts/ruff.exe` 的 isort 要求 ① `from dataclasses import dataclass` 落在 stdlib 块里、`from typing import Any` **之前**（同块内 `import x` 先于 `from x import y`，且 dataclasses < typing）；② `angles`/`overlap` **合并进**既有的 `from dramaclip.engines.narration import …` 那一行（合并后 96 字符，未超 `line-length = 100`）；③ 带 `as` 别名的导入不合并，各自一行；④ `from dramaclip.infra import config` 排在 `from dramaclip.infra.storage.repos import …` 之前：
+2. import 区**整块替换**（不是"加两行"——那样 ruff 会报 I001，而 Step 9 的门禁写着"Expected: 无输出"）。实测：本仓 `.venv/Scripts/ruff.exe` 的 isort 要求 ① `from dataclasses import dataclass` 落在 stdlib 块里、`from typing import Any` **之前**（同块内 `import x` 先于 `from x import y`，且 dataclasses < typing）；② `angles`/`casting`/`overlap` **合并进**既有的 `from dramaclip.engines.narration import …` 那一行；③ 带 `as` 别名的导入不合并，各自一行；④ `from dramaclip.engines.narration.casting import …`（无别名）排在 `… import pipeline as narration_pipeline`（有别名）**之前**；⑤ `from dramaclip.infra import config` 排在 `from dramaclip.infra.storage.repos import …` 之前：
 
 ```python
 from __future__ import annotations
@@ -3055,9 +4677,17 @@ from dataclasses import dataclass
 from typing import Any
 
 from dramaclip.api.context import AppContext
-from dramaclip.engines.narration import angles, copywriter, overlap, script_driver, scriptwriter
+from dramaclip.engines.narration import (
+    angles,
+    casting,
+    copywriter,
+    overlap,
+    script_driver,
+    scriptwriter,
+)
 from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration import styles as styles_lib
+from dramaclip.engines.narration.casting import EpisodeScene, MaterialByEpisode
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from dramaclip.infra import config
@@ -3068,7 +4698,7 @@ from dramaclip.infra.storage.repos import projects as projects_repo
 from dramaclip.transport.rpc import Router, RpcDomainError
 ```
 
-（上面这块**不含第 1 点的 docstring**，从 `from __future__` 起接到 docstring 之后即可。与现状逐行对比，只动了三处：新增 `from dataclasses import dataclass`；`copywriter, script_driver, scriptwriter` 那行扩成 `angles, copywriter, overlap, script_driver, scriptwriter`；新增 `from dramaclip.infra import config`。**`from dramaclip.api.export import ExportRun, render_export` 与 `from dramaclip.infra.storage.repos import exports as exports_repo` 这两行在本点仍然保留**——`_run_produce` 还在用它们，第 12 点删函数时才一起删；提前删会让本步骤之后的树连 import 都过不去。）
+（上面这块**不含第 1 点的 docstring**，从 `from __future__` 起接到 docstring 之后即可。与现状逐行对比，动了四处：新增 `from dataclasses import dataclass`；`copywriter, script_driver, scriptwriter` 那行扩成六个名字并**因超过 100 字符而折成括号形**（合并成一行是 `from dramaclip.engines.narration import angles, casting, copywriter, overlap, script_driver, scriptwriter`，实测 **105 字符** → E501，故必须折行（上一轮 B7b 记的 96 字符是**没有 `casting`** 的那一版，加了它就过线了））；新增 `from dramaclip.engines.narration.casting import EpisodeScene, MaterialByEpisode`（`_casting_for` 的返回类型注解要用）；新增 `from dramaclip.infra import config`。**`from dramaclip.api.export import ExportRun, render_export` 与 `from dramaclip.infra.storage.repos import exports as exports_repo` 这两行在本点仍然保留**——`_run_produce` 还在用它们，第 12 点删函数时才一起删；提前删会让本步骤之后的树连 import 都过不去。）
 
 3. 错误码常量区（`_ERR_MODE_UNSUPPORTED` 之后）加：
 
@@ -3080,11 +4710,13 @@ _ERR_PLAN_NOT_FOUND = -32304
 4. 模式集合区（`_NARRATION_MODES` 之后）加：
 
 ```python
-# 只有剧情解说能在一条方案里跨集取画面（pipeline.build_from_script_episodes 按集号取素材）；
-# 其余模式的编排器签名是 (episode_id, scenes, strategy)，一条片只吃一集。
-# 于是本批次让**角度之间**跨集（不同角度取不同集，K 条合起来覆盖全剧），
-# 单条方案内的跨集拼接归 P-2c（见计划《定案二》末段，那里同时记了它须业主签字）。
-_CROSS_EPISODE_MODES = frozenset({"dialogue_narration"})
+# 剧本驱动的唯一模式。2026-09-12 裁决之后**九个模式都能在一条方案里跨集取画面**
+# （Task 3c 的 casting 层给六个规则编排器补上了集身份），所以这个集合不再表示
+# "只有它能跨集"——那是一句已经作废的话，留着它就是留下一句关于代码的假话。
+# 它现在只表示一件事：**这条方案的时间轴不是 (mode, 取材集) 的纯函数**，
+# 因为剧本由模型按角度现写（script_driver.script_dialogue_plan）。于是成稿**前**那道
+# 重叠闸门（_reject_same_episode_sibling）对它无效，只能靠成稿**后**的 _worst_overlap 兜。
+_SCRIPT_DRIVEN_MODES = frozenset({"dialogue_narration"})
 
 # 界面 K 选择器的上限。再往上选题 prompt 会退化成让模型凑数，
 # 而凑出来的角度正是重叠度量要拦的东西——不如在这里就拦掉。
@@ -3230,22 +4862,28 @@ def _worst_overlap(
 def _reject_same_episode_sibling(
     mode: str, variant: _Variant, accepted: list[tuple[_Variant, PlanData]]
 ) -> None:
-    """成稿**之前**的重叠闸门（R7）：同模式同集的两条角度，取材必然逐秒相同。
+    """成稿**之前**的重叠闸门（R7）：同模式、**同一组取材集**的两条角度，取材必然逐秒相同。
 
-    这不是启发式，是可证的：`_plan_one` 的非剧情解说分支里，`variant` 只进
-    `copywriter` 的 `angle_block`，**不进 `build_plan`**——
-    `build_plan(mode, episode_id, conflicts, highlights, asr, audio, settings)` 的
-    七个入参没有一个来自角度。故时间轴是 `(mode, episode_id)` 的纯函数：
-    同集 ⇒ 同时间轴 ⇒ Jaccard = 1.0，必然超过 60% 阈值。
+    这不是启发式，是可证的：`_plan_one` 的非剧本分支里，`variant` 只进 `copywriter` 的
+    `angle_block`，**不进 `build_plan`**——Task 3c 之后 `build_plan(mode, scenes,
+    highlights, material, settings)` 的五个入参没有一个来自角度名或理由，而 `scenes` 与
+    `material` 都由 `_casting_for` 从 `variant.episode_numbers` 确定性装配。故时间轴是
+    `(mode, 取材集组合)` 的纯函数：同一组集 ⇒ 同一份场景表 ⇒ 同一条时间轴 ⇒
+    Jaccard = 1.0，必然超过 60% 阈值。
+
+    **跨集之后这道闸门不但没失效，覆盖面还大了**：原先它按"同集"判（`episode_id` 相等），
+    现在按"同一组集"判（`frozenset` 相等）。两条角度都点 `{3, 7}` 与都点 `{3}` 一样必拦；
+    点 `{3, 7}` 与点 `{3, 8}` 则放过去，交给成稿后的 `_worst_overlap` 实量。
 
     既然成稿前就可判，就不该先付一次 LLM 成稿再拦：被拦的角度不落库，
     那笔钱在 narration_plans 里也无从重算（《定案二》的 R7 段）。
 
-    `dialogue_narration` 走不到这里（它在 `_CROSS_EPISODE_MODES` 里，且剧本由模型
-    按角度现写、成稿前无从判定），那条残余由成稿后的 `_worst_overlap` 兜住——
+    `dialogue_narration` 走不到这里（它在 `_SCRIPT_DRIVEN_MODES` 里：剧本由模型按角度
+    现写，**同一组集**也能写出两条压在几乎同一段画面上的剧本，成稿前无从判定），
+    那条残余由成稿后的 `_worst_overlap` 兜住——
     `test_post_copy_overlap_gate_still_guards_cross_episode_modes` 钉住那道兜底没被拆掉。
     """
-    if mode in _CROSS_EPISODE_MODES:
+    if mode in _SCRIPT_DRIVEN_MODES:
         return
     wanted = frozenset(variant.episode_numbers)
     for index, (sibling, _plan) in enumerate(accepted, start=1):
@@ -3253,7 +4891,7 @@ def _reject_same_episode_sibling(
             raise ValueError(
                 f"取材与「{_slot_label(sibling, index)}」重叠 100%，"
                 f"超过 {overlap.OVERLAP_LIMIT:.0%}"
-                "——同模式同集的两条角度取材逐秒相同，这条角度不出（规格 §4.3）"
+                "——同模式同取材集的两条角度逐秒相同，这条角度不出（规格 §4.3）"
             )
 ```
 
@@ -3463,6 +5101,9 @@ def _angle_variants(
 
     选题失败即整个模式失败（按 K 条记账，见 runner）：不许拿残缺的凑数，
     那是 §3.3.1 禁止级「假装有 K 条」。
+
+    **没有 `cross_episode` 这个入参**（2026-09-12 裁决后从 `angles.select_angles` 删掉了）：
+    规格 §1 的「跨集方案」是每个模式的定义性属性，不是某几个模式的开关。
     """
     briefs = angles.select_angles(
         mode,
@@ -3470,7 +5111,6 @@ def _angle_variants(
         k=k,
         episode_inputs=episode_inputs,
         settings=settings,
-        cross_episode=mode in _CROSS_EPISODE_MODES,
         excluded=excluded_angles,
         trace_dir=context.data_dir / "logs" / "llm",
     )
@@ -3493,12 +5133,13 @@ def _rule_variants(
     *,
     rerolled: bool,
 ) -> list[_Variant]:
-    """规则类（raw_clip / subtitle_flow）：全剧 top-K 冲突窗 → 按集去重 → 一集一条。
+    """规则类（raw_clip / subtitle_flow）：全剧冲突窗排名 → 轮转发成 K 手，一手一条方案。
 
-    规格 §4.3 ④「规则类 = 全剧 top-K 冲突窗（两者不同源，已由用户定案）」、
-    §4.2「仅「纯原片剪辑」「字幕金句流」不依赖 LLM」。
-    **本函数不发任何网络请求**：把它们拖进 `angles.select_angles` 就等于把
-    "不依赖 LLM"改成"依赖 LLM"，而 select_angles 对未配置抛 LlmUnavailable——
+    规格 §4.3 ④「规则类 = 全剧 top-K 冲突窗（两者不同源，已由用户定案）」定的是**条数**，
+    规格 §1「跨集方案」定的是**每条的形状**；轮转发窗同时满足两者（《定案四》第 2 点、
+    `pipeline.deal_windows` 的 docstring）。§4.2「仅「纯原片剪辑」「字幕金句流」不依赖 LLM」
+    照旧：**本函数不发任何网络请求**——把它们拖进 `angles.select_angles` 就等于把
+    "不依赖 LLM"改成"依赖 LLM"，而 select_angles 对未配置抛 LlmUnavailable，
     纯剪辑作业会整族失败（B2/R1）。`test_rule_modes_never_construct_an_llm_client` 钉住。
 
     name/reason/angle_block 一律空串（《定案四》第 4 点）：规则类没有模型自选的卖点角度，
@@ -3514,16 +5155,29 @@ def _rule_variants(
         scored.append(
             (int(episode["episode_number"]), _parse_conflicts(record["conflict_scores"]))
         )
-    windows = narration_pipeline.top_conflict_windows(scored, k)
+    # limit 给"全部集数"：榜单在这里的用途是**给全集排名**，条数由下面的发窗决定。
+    # max(..., 1) 只为让 scored 为空时落到下面那句"无从取窗"，而不是 limit<1 的抛错——
+    # 两条都是失败，但前者说的是产品事实，后者说的是调用方传错了参数。
+    windows = narration_pipeline.top_conflict_windows(scored, max(len(scored), 1))
     if not windows:
         raise ValueError(f"{label}：全剧没有任何带冲突分的场景，无从取窗")
-    if len(windows) < k:
+    hands = narration_pipeline.deal_windows(windows, k)
+    if len(hands) < k:
         # 规格 §1 允许「每模式产出 1..K 条」，但 §3.3 禁止静默：少出必须留痕，
         # 否则界面会把「这个模式只出了 N 条」显示成「这个模式本来就只能出 N 条」。
         context.notifier.log(
             "info",
-            f"{label}：全剧 top-{k} 冲突窗按集去重后只落在 {len(windows)} 集，"
-            f"本模式出 {len(windows)} 条（规格 §1 的 1..K 条）",
+            f"{label}：全剧只有 {len(windows)} 集带冲突窗，轮转发窗只够 {len(hands)} 手，"
+            f"本模式出 {len(hands)} 条（规格 §1 的 1..K 条）",
+        )
+    thin = sum(1 for hand in hands if len(hand) < 2)
+    if thin:
+        # 集数 < 2 × K 时必有手退化成一集：互不相交的多集手至少需要 2 × K 集。
+        # 这是算术不是缺陷，但界面卡片写着"跨集方案"，实际只取一集时必须说清楚。
+        context.notifier.log(
+            "info",
+            f"{label}：全剧只有 {len(windows)} 集带冲突窗、不足 2×{k} 集，"
+            f"其中 {thin} 手只取到一集（跨集需要至少 2×K 集才发得开）",
         )
     if rerolled:
         # 窗口榜是确定性的，且规则类的 angle 是空串（贡献不出排除项）：
@@ -3533,15 +5187,15 @@ def _rule_variants(
             f"{label}：规则类方案由全剧冲突榜确定性推导，「重掷此条」不会改变结果；"
             "要换方案请改方案数或补素材（《定案四》）",
         )
-    for rank, (number, scene) in enumerate(windows, start=1):
+    for rank, hand in enumerate(hands, start=1):
         context.notifier.log(
             "info",
-            f"{label}·第 {rank} 条：第 {number} 集 {scene.start:.0f}-{scene.end:.0f}s、"
-            f"冲突分 {scene.score}（全剧冲突榜，不经选题模型）",
+            f"{label}·第 {rank} 条：取第 {'、'.join(str(number) for number in hand)} 集"
+            "（全剧冲突窗轮转发窗，不经选题模型）",
         )
     return [
-        _Variant(name="", reason="", episode_numbers=[number], angle_block="")
-        for number, _scene in windows
+        _Variant(name="", reason="", episode_numbers=hand, angle_block="")
+        for hand in hands
     ]
 
 
@@ -3553,10 +5207,18 @@ def _plan_one(
     settings: dict[str, str],
     variant: _Variant,
 ) -> tuple[PlanData, list[str]]:
-    """按取材意图产出一条方案（未配音、未落库）。
+    """按取材意图产出一条方案（未配音、未落库）。返回 (方案, **实际用到**的集 id)。
 
-    取材集由意图决定，不再恒取 episodes[0]——那是「K 条其实是同一部片切 K 次」的
-    根源之一。返回 (方案, 用到的集 id)。
+    取材集由意图决定、且一条方案可以横跨多集（规格 §1），不再恒取 episodes[0]——
+    那是「K 条其实是同一部片切 K 次」的根源之一。
+
+    返回的集 id 从**建好的时间轴**反推，不用意图点名的那份：编排器可能一帧都没用上
+    某一集（活库实测 `intro_narration` 一手点了 4 集、时间轴上只出现 2 集，因为
+    `_fit_duration` 按播出序填充、预算在第 2 集就用完了），照点名写进
+    `narration_plans.episode_ids` 会让卡片的「取材集区间」列一集没出现的集——
+    那是 §9.5 的假文案类。`script_driver.script_dialogue_plan` 早就是这么做的
+    （它的 used_ids 逐字是 `sorted({seg.episode_id for seg in plan.timeline})`），
+    这里沿用同一个口径。
 
     **不落库**：`plans_repo.create` 只在 runner 里发生一次，那里才有 batch_id /
     variant_index / overlap_max 三个只有 runner 知道的值。
@@ -3579,46 +5241,72 @@ def _plan_one(
             scoped, settings, angle_block=variant.angle_block, trace_dir=trace_dir
         )
 
-    episode = _pick_episode(episodes, variant)
-    record = analysis_repo.get(context.conn, str(episode["id"]))
-    if record is None:
-        raise ValueError(f"第 {episode['episode_number']} 集分析记录缺失")
-    asr_segments = narration_pipeline.parse_asr_segments(record["asr_segments"])
-    plan = narration_pipeline.build_plan(
-        mode,
-        str(episode["id"]),
-        _parse_conflicts(record["conflict_scores"]),
-        _parse_highlights(record["highlights"]),
-        asr_segments,
-        narration_pipeline.parse_audio_features(record["audio_features"]),
-        settings,
-    )
+    scenes, highlights, material = _casting_for(context, episodes, variant)
+    plan = narration_pipeline.build_plan(mode, scenes, highlights, material, settings)
     if not plan.timeline:
         # 空时间轴的方案渲染出来是一部 0 秒的片；规划期就该说清楚，不留到导出
-        raise ValueError(f"第 {episode['episode_number']} 集没有可用素材，这条角度出不了片")
+        raise ValueError(
+            f"取材集 {sorted(set(variant.episode_numbers))} 没有可用素材，这条角度出不了片"
+        )
     if plan.narration_texts:
         # 规则类两个模式走不到这里（它们的编排器不产槽位），故 angle_block 恒为空串
         # 也不会被任何人读到——这不是"悄悄留了个空值"，是两族的会合点本来就用不上它。
+        # material 按集分开传：跨集时间轴上每个槽位只能读它自己那一集的台词（Task 4 Step 3b）。
         plan = copywriter.write_plan_copy(
             plan,
-            asr_segments,
+            material,
             settings,
             mode_label=narration_pipeline.MODE_LABELS.get(mode, mode),
             angle_block=variant.angle_block,
             trace_dir=trace_dir,
         )
-    return plan, [str(episode["id"])]
+    used_ids = sorted({segment.episode_id for segment in plan.timeline})
+    return plan, used_ids
 
 
-def _pick_episode(
-    episodes: list[dict[str, Any]], variant: _Variant
-) -> dict[str, Any]:
-    """意图点名的那一集。点名集不在已完成集里就抛——绝不悄悄换一集顶上。"""
-    wanted = set(variant.episode_numbers)
-    for episode in episodes:
-        if int(episode["episode_number"]) in wanted:
-            return episode
-    raise ValueError(f"取材集 {sorted(wanted)} 不在已完成分析的集里")
+def _casting_for(
+    context: AppContext,
+    episodes: list[dict[str, Any]],
+    variant: _Variant,
+) -> tuple[list[EpisodeScene], list[HighlightSegment], MaterialByEpisode]:
+    """把意图点名的那几集装配成编排器要吃的三样东西（场景表 / 高光表 / 逐集台词）。
+
+    集身份在这里注入（`casting.stamp`）：`episode_analysis.conflict_scores` 是**按集一行**
+    的 JSON，集身份就是那一行的主键，所以活库已有的分析结果一行都不用改、
+    不需要迁移、也不需要重跑分析（《修订记录》C3）。
+
+    点名集不在已完成集里时**一次点名全部缺号**再抛：逐个抛会让第一条缺号掩盖其余的，
+    运维补完一集再跑又炸一集。绝不悄悄换一集顶上——那是「K 条其实是同一部片切 K 次」
+    的根源之一（`_pick_episode` 时代的老毛病，本函数取代了它）。
+    """
+    wanted = sorted(set(variant.episode_numbers))
+    by_number = {int(episode["episode_number"]): episode for episode in episodes}
+    missing = [number for number in wanted if number not in by_number]
+    if missing:
+        raise ValueError(f"取材集 {missing} 不在已完成分析的集里")
+
+    scenes_by_episode: list[tuple[int, str, list[ConflictScore]]] = []
+    highlights: list[HighlightSegment] = []
+    material: MaterialByEpisode = {}
+    for number in wanted:
+        episode_id = str(by_number[number]["id"])
+        record = analysis_repo.get(context.conn, episode_id)
+        if record is None:
+            raise ValueError(f"第 {number} 集分析记录缺失（本条方案点名要取它）")
+        conflicts = _parse_conflicts(record["conflict_scores"])
+        if not conflicts:
+            # 分析过但一个冲突场景都没出：这一集对时间轴贡献为零。留痕而不是静默剔除，
+            # 否则卡片上的「取材集区间」会列一集实际上一帧都没出现的集（规格 §3.3）。
+            context.notifier.log(
+                "info", f"第 {number} 集没有冲突场景，本条方案取不到它的画面"
+            )
+        scenes_by_episode.append((number, episode_id, conflicts))
+        highlights.extend(_parse_highlights(record["highlights"]))
+        material[episode_id] = casting.EpisodeMaterial(
+            number=number,
+            asr=narration_pipeline.parse_asr_segments(record["asr_segments"]),
+        )
+    return casting.stamp(scenes_by_episode), highlights, material
 ```
 
 12. 删掉 `_generate_one`（原 `:211-272`）、`produce`（原 `:310-333`）、`_run_produce`（原 `:336-413`）、`_newest_ready_plan`（原 `:416-423`）四个函数，**以及随之失去引用的三行 import**：
@@ -3723,7 +5411,7 @@ def test_get_plan_returns_row_and_cost(
     于是断言**字面整数**才有意义。原计划的 `tts_calls == len(plan.narration_texts)`
     是把实现自己的公式又算了一遍，那是实现的镜子，不是测试。
     """
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     harness.context.settings.update(_LLM_SETTINGS)
     calls: list[tuple[str, str]] = []
@@ -3784,7 +5472,7 @@ def test_list_plans_can_filter_by_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """阶段③ 按组显示：给了 batch_id 就只回那一组，不给就回项目全部。"""
-    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 3)
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     harness.context.settings.update(_LLM_SETTINGS)
     calls: list[tuple[str, str]] = []
