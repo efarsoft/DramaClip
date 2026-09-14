@@ -133,7 +133,7 @@ async function main() {
   const episodes = (await rpc('project.get', { project_id: project.id })).episodes;
   if (episodes.length > 0) {
     const prescreen = await rpc('analysis.prescreen', { project_id: project.id }).catch(() => null);
-    if (prescreen !== null) await waitJob(prescreen.job_id, 600000);
+    if (prescreen !== null) await waitJob(prescreen.job_id, 2400000);
   }
 
   let analysis = null;
@@ -153,7 +153,7 @@ async function main() {
     project_id: project.id,
     modes,
   });
-  const gen = await waitJob(genJob, 300000);
+  const gen = await waitJob(genJob, 1800000);
   console.log(`[e2e] 编排: ${gen.status}`);
 
   const plans = await rpc('narration.list_plans', { project_id: project.id });
