@@ -1,7 +1,4 @@
 """阶段一：轻量预筛（原案 3附）：每集 1-3s，纯 FFmpeg/既有信号，不用 GPU/模型。
-
-预筛分 = 30×切镜密度 + 25×人声活跃度 + 25×能量峰值密度 + 20×运动幅度（各归一化 0-1）。
-复用第一层引擎信号（audio_analyzer / scene_detector）；运动幅度用 FFmpeg signalstats 采样。
 """
 
 from __future__ import annotations
@@ -64,10 +61,6 @@ def prescreen_episode(
     threshold: float,
 ) -> dict[str, float]:
     """预筛单集，返回四项信号 + prescreen_score + recommended。调用方负责落库。
-
-    `threshold` 必填且不在这里给默认值：推荐线的唯一真相源是设置项
-    `analysis.prescreen_threshold`（源 infra.config.DEFAULTS，设置页可调），
-    引擎自带第二份 70 会让"改了设置不生效"这类问题无法被发现。
     """
     from dramaclip.engines.analysis import pipeline as analysis_pipeline
 

@@ -1,7 +1,4 @@
 """W5 模式编排：交叉解说（原案 6.3）与超短悬念版（原案 6.9）。
-
-编排只产出画面结构与旁白槽位，文案一律由 narration.copywriter 生成（无模板兜底）。
-场景表带集身份（`casting.EpisodeScene`），一条方案的时间轴可以含多集的段。
 """
 
 from __future__ import annotations
@@ -25,10 +22,6 @@ def build_cross(
     strategy: StrategySpec,
 ) -> PlanData:
     """交叉解说：场景原声与旁白交替；旁白压住下一场景开头，承担串联与悬念。
-
-    时间轴：场景1(原声) → 旁白1 → 场景2(原声) → 旁白2 → …（旁白段画面延续下一场景）。
-    跨集时"下一场景"可能在另一集，旁白段因此盖的是那一集的开场画面——这是有意的：
-    旁白的职责就是串联，串到别的集去正是跨集方案的形状。
     """
     ranked = sorted(scenes, key=score_order)
     picked = sorted(ranked[:6], key=episode_order)  # 取 top 6 按叙事顺序
@@ -85,10 +78,6 @@ def build_ultra_short(
     strategy: StrategySpec,
 ) -> PlanData:
     """超短悬念版（10-20s）：钩子旁白 → 最高冲突原声画面 → 收尾引导。
-
-    跨集只改变**在哪一集**找那个最高冲突场景：本模式的三个段压在同一个场景上，
-    它天然是单场景片，取材集因此恒为一集——规格 §1 要的是"一条方案**可以**跨集取画面"，
-    不是"每条方案必须≥2 集"，故这里不为跨集而跨集。
     """
     if not scenes:
         return PlanData(mode="ultra_short_hook", strategy=strategy)

@@ -1,7 +1,4 @@
 """ASS 字幕生成器（原案 6A）：预设四维度 → ASS 文件，供 FFmpeg `ass` 滤镜烧录。
-
-W7 范围：整句弹出节奏 + 淡入/弹入动画 + 底部条/居中布局 + 情绪配色。
-逐字/逐词节奏与卡拉OK属 P2（方案 6A.2 评估项）。
 """
 
 from __future__ import annotations
@@ -108,8 +105,6 @@ def _event_line(line: dict[str, Any], preset: dict[str, Any]) -> str | None:
 
 def _karaoke_body(text: str, duration_s: float, overrides: str, primary: str) -> str:
     """卡拉OK逐字高亮：ASS \\k 标签（厘秒），每字均分时长。
-
-    行内覆盖 \1c(已唱=情绪主色) 与 \2c(未唱=暗灰)，\\k 逐字推进填充。
     """
     chars = [ch for ch in text if not ch.isspace()]
     if not chars:
@@ -123,8 +118,6 @@ def _karaoke_body(text: str, duration_s: float, overrides: str, primary: str) ->
 
 def build_ass(lines: list[dict[str, Any]], preset: dict[str, Any]) -> str:
     """生成 ASS 字幕全文。
-
-    lines: [{start, end, text, emotion_label?}]（秒；相对本 ass 文件的时间轴）。
     """
     events = [event for line in lines if (event := _event_line(line, preset)) is not None]
     return "\n".join([_header(preset), *events]) + "\n"

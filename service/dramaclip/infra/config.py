@@ -1,6 +1,4 @@
 """设置：代码默认值 + DB 覆盖。DB 为唯一读取源（docs/service/03 第 2 节）。
-
-键清单与 docs/service/04-数据模型.md §3 settings 表一致。
 """
 
 from __future__ import annotations
@@ -69,12 +67,6 @@ def get_int(settings: Settings, key: str) -> int:
 
 def get_float(settings: Settings, key: str) -> float:
     """按 float 读取；settings 里缺失或脏值回退 DEFAULTS。
-
-    与 `get_int` **不是**同一约定，而且这个分歧是有意的：`get_int` 对 DEFAULTS 里也没有的键
-    回 0（`DEFAULTS.get(key, "0")`），这里 `DEFAULTS[key]` 直接抛 KeyError。响度目标这类键
-    写错一个字母时，静默回 0.0 会把整片推到 0 LUFS 并顺带炸掉真峰值门限，比当场报错难查得多。
-    真要"把两个 getter 弄一致"，往严的方向统一，别往回 0 的方向统一
-    （`tests/infra/test_config.py::test_get_float_raises_for_key_outside_defaults` 钉住这条）。
     """
     try:
         return float(settings[key])

@@ -1,6 +1,4 @@
 """解说风格库：内置只读风格（resources，随版本走）。
-
-风格只注入编剧链（scriptwriter / copywriter）；纯剪辑两模式不产文案，与风格无关。
 """
 
 from __future__ import annotations
@@ -62,10 +60,6 @@ def get_style(style_id: str | None) -> dict[str, Any]:
 
 def resolve_style_id(preferred: str | None, genre: str | None = None) -> str:
     """解析最终风格 id。
-
-    用户显式选择的风格优先；auto（或未选/未知值）按分析题材映射：
-    悬疑→悬疑反转、复仇/逆袭→爽感逆袭、甜宠→甜宠撒糖、家庭伦理→情感催泪、
-    古装→沉浸叙事、其余→通用爽感。
     """
     styles = _load_builtin()
     if preferred is not None and preferred != AUTO_STYLE_ID and preferred in styles:
@@ -90,8 +84,6 @@ def select_style_with_reason(
     max_lines: int = 40,
 ) -> tuple[str, str] | None:
     """口味层：LLM 读转写从风格库自选风格，返回 (style_id, reason)。
-
-    失败（LLM 不可用/输出非法/选了库外风格/转写为空）返回 None，由调用方降级。
     """
     styles = _load_builtin()
     if not styles:

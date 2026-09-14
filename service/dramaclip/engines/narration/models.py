@@ -27,9 +27,6 @@ class TimelineSegment(BaseModel):
 
 class NarrationText(BaseModel):
     """旁白槽位：编排器定"这段画面要说什么"，编剧填 `text`，配音回填音频与时长。
-
-    槽位压在成片哪一段时间里没有第二个真相源：它就是要它的那个 `TimelineSegment`
-    （按 `narration_id` 配对）的 start/end。这里再存一份必然与回填后的段长打架。
     """
 
     id: str

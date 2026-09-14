@@ -1,6 +1,4 @@
 """服务日志轮转落盘：rotating file handler（10MB × 5 份）。
-
-logs 写 <data>/logs/，stderr 依旧转发主进程（renderer/服务两级日志链路不变）。
 """
 
 from __future__ import annotations

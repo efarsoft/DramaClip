@@ -94,12 +94,3 @@ def set_enabled(conn: sqlite3.Connection, domain: str, config_id: str) -> None:
             "UPDATE engine_configs SET enabled = 1 WHERE id = ? AND domain = ?",
             (config_id, domain),
         )
-
-
-def get_enabled(conn: sqlite3.Connection, domain: str) -> dict[str, Any] | None:
-    row = conn.execute(
-        "SELECT id, domain, name, base_url, api_key, model, enabled, created_at"
-        " FROM engine_configs WHERE domain = ? AND enabled = 1 LIMIT 1",
-        (domain,),
-    ).fetchone()
-    return _row_to_dict(row) if row else None

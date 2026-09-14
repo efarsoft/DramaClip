@@ -1,8 +1,4 @@
 """解说剧本装配：口味层选题（每任务一次）+ 跨集剧本驱动的对话解说。
-
-由 api 层注入 log 回调；本模块不 import transport。
-口味层降级链：选题 LLM 自选 → genre 静态映射 → 通用（`resolve_run_style`，允许但留痕）；
-编剧失败一律抛异常，不再退回规则编排（规格 §3.3.1）。
 """
 
 from __future__ import annotations
@@ -32,9 +28,6 @@ def resolve_run_style(
     log: LogFn,
 ) -> dict[str, Any]:
     """口味层解析，每个任务只跑一次（原状是每模式一次，produce 白付 6 次 LLM 往返）。
-
-    auto + 已配置 LLM 才让模型选题；未配置时静默走题材映射——真正的失败留给
-    文案层报（那里才是非有 LLM 不可的地方，报两次只会混淆原因）。
     """
     preferred = settings.get("narration.style_id")
     genre = settings.get("_genre")
@@ -67,14 +60,6 @@ def script_dialogue_plan(
     trace_dir: Any = None,
 ) -> tuple[PlanData, list[str]]:
     """跨集剧本驱动的对话解说。LLM 未配置或剧本不合格一律抛（降级已禁止）。
-
-    口味层由调用方经 resolve_run_style 注入 settings["_style_directives"]，
-    卖点角度经 angle_block 注入编剧 prompt，措辞由 angles.prompt_block 独家持有。
-    本函数不再自行选题——一个任务只该付一次选题成本。
-
-    episode_inputs 每项：{"number", "episode_id", "duration",
-    "segments": [{"start", "end", "text"}]}，按集号升序。
-    返回 (编排方案, 使用的集 id 列表)。
     """
     config = LlmConfig.from_settings(settings)
     if not config.configured:

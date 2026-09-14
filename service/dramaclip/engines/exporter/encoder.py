@@ -1,13 +1,4 @@
 """导出编码器：滤镜链编排与两阶段执行（原案 7.1）。
-
-Phase A 逐段：精确切割 → 竖屏 1080x1920 裁切 → 消重（微缩放/eq/微变速）
-        → 遮罩（非纯原片模式）→ 段级混音（narration/ducked 段旁白 + 原声压低 + 求和限幅）
-        → 段级真峰天花板（**混音与原声直通两条分支都挂**，见 `_SEGMENT_PEAK_CEILING_DBFS`）
-        → 重编码。
-Phase B 拼接：concat demuxer（-c copy）+ `-map_metadata -1` 指纹擦除。
-Phase C 响度：整片归一到 settings 目标——优先确定性纯增益，素材真需要动态压缩时才走
-        两遍 loudnorm（见 loudness.py）。
-进度：Phase A 按段数、Phase B 占 10%。
 """
 
 from __future__ import annotations
@@ -120,10 +111,6 @@ _SEGMENT_CHANNEL_LAYOUT = "stereo"
 
 def _audio_format_filter() -> str:
     """段级音频格式滤镜串——两条分支（含 amix 的两路输入）共用的**唯一**一处构造。
-
-    做成函数而不是把串抄三遍：与 `_peak_ceiling_filter` 同一个理由——抄开之后改布局
-    只会改一半，而"只改一半"恰恰是本用例要消灭的那个缺陷本身。
-    `sample_rates` 与输出侧的 `-ar` 同源读 `_SEGMENT_SAMPLE_RATE`，两处不许各写各的。
     """
     return (
         f"aformat=sample_rates={_SEGMENT_SAMPLE_RATE}"
@@ -133,21 +120,6 @@ def _audio_format_filter() -> str:
 
 def _peak_ceiling_filter() -> str:
     """段级天花板滤镜串——两条分支共用的**唯一**一处构造。
-
-    选 alimiter 不选 acompressor/dynaudnorm：前者是**前瞻**限幅器，`limit` 就是硬天花板，
-    而 acompressor 无前瞻（attack 期间瞬时峰照过）、dynaudnorm 是电平器（又会归一化，
-    正是 Task 7 要消灭的东西）。
-
-    `level=disabled` 必须显式给——alimiter 的 `level` 默认 true，会按 1/limit 把输出抬回去
-    （自动电平，行为等同 maximizer），天花板等于没设；真机实测（0 dBFS 正弦过
-    `alimiter=limit=0.7079`）默认 `level=true` → `max_volume 0.0 dB`，`level=disabled`
-    → `-3.0 dB`。而且它对根本没碰到天花板的素材照样抬（-38.1 dBFS 的安静信号过默认参数
-    变成 -35.1 dB，凭空 +3.0 dB）——那正是 Task 7 刚消灭的"声明值 ≠ 实际值"。
-
-    `latency=true` 补掉前瞻带来的 4.98 ms 音画错位（实测数字见 test_mix）。
-
-    做成函数而不是模块常量：常量在 import 时就把数字烘进串里，改 `_SEGMENT_PEAK_CEILING_DBFS`
-    不会生效，`test_ceiling_constant_drives_both_branches` 也就守不住"单一来源"这件事。
     """
     return (
         f"alimiter=limit={10 ** (_SEGMENT_PEAK_CEILING_DBFS / 20):.4f}"
@@ -174,13 +146,6 @@ def cut_segment_args(
     out_size: tuple[int, int] = _DEFAULT_OUT_SIZE,
 ) -> list[str]:
     """构建单段切割命令（Phase A）。
-
-    audio 角色语义：narration 与 ducked 在携带旁白音频时渲染等价（旁白为主 + 原声压低，
-    前者原声 20%、后者 12% 衬底）；任一角色拿不到旁白音频时回退纯原声。original 恒原声。
-    **两条分支都过 `_SEGMENT_PEAK_CEILING_DBFS` 那道前瞻限幅**：混音分支是因为 Task 7
-    关掉 amix 的默认归一化时也关掉了它顺带白送的 6 dB 余量，求和可以直接冲过 0 dBFS；
-    原声直通分支是因为源素材自己就在削顶（九模式门禁实测 +1.88/+3.38 dBTP 的两部成片
-    都漏在这里），限幅不能反削顶，但少漏一点就少一点，剩下的账 Phase C 负责。
     """
     out_w, out_h = out_size
     dedup = dedup_params.generate(rng)
@@ -333,18 +298,6 @@ def export_plan(
     loudness_target: loudness.LoudnessTarget | None = None,
 ) -> Path:
     """执行两阶段导出，返回成片路径。
-
-    Phase A：段级并行切割（竖屏 + 消重 + 遮罩 + 字幕烧录 + 混音）；
-    Phase B：concat 拼接 + `-map_metadata -1` 元数据擦除。
-    段间无依赖，线程池并行（ffmpeg 自身多线程，2 并发已接近 IO/CPU 饱和）。
-
-    `loudness_target=None` 是测试缝，不是兼容垫片：今天唯一的生产调用点
-    （`api/export.py:255`）无条件传值，没有任何生产路径去看模式。
-    它也**不是**"零加工模式不做归一"的开关——本仓的"零加工"指的一直是视频包装
-    （`docs/service/02-引擎设计.md:57` 不加字幕不遮罩、`api/export.py:31`、
-    `modes/__init__.py:27`），raw_clip 照样要过 scale/crop/eq/atempo 抖动 + x264 全量重编码；
-    而且 Task 9 的出口判据要求**九个模式全部**落在响度窗口内，给它开口子会直接打破那条。
-    生产调用点必传（Phase C 是成片响度的唯一负责人）。
     """
     segments = plan.timeline
     if not segments:

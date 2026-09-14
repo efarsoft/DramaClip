@@ -1,7 +1,4 @@
 """engine_configs 命名空间：云端/服务端点配置的多实例管理（单启用）。
-
-启用即生效：LLM 域启用时把 base_url/api_key/model 镜像写入
-settings 的 llm.* 三键（现有消费方零改动）。
 """
 
 from __future__ import annotations

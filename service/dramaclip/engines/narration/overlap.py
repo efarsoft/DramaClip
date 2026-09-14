@@ -1,11 +1,4 @@
 """取材重叠度量：两条方案共用了多少秒的同一批画面。
-
-规格 §4.3 的安全阀——K 条角度必须是 K 个不同卖点，而不是同一部片切 K 次。
-度量单位是**源素材秒**而非场景条数：段长不等，按条数会把「共用两个 25 秒长镜」
-算得比「共用五个 3 秒短镜」还轻，而观感上恰恰相反。
-
-只认画面来源（timeline 的 episode_id + start/end），不认音频角色：
-original / narration / ducked 三种角色占的是同一段源画面，取材就是取材。
 """
 
 from __future__ import annotations
@@ -21,10 +14,6 @@ Spans = dict[str, list[tuple[float, float]]]
 
 def source_spans(plan: PlanData) -> Spans:
     """方案取材 → 每集的**已合并**区间列表（升序、互不重叠）。
-
-    合并是必须的：编排器会产出首尾相接甚至互相覆盖的段（full_narration 逐场景、
-    dialogue_narration 逐句吸附台词边界），不合并就会把同一秒源画面数出两次，
-    重叠率因此能超过 1.0。零长段直接丢——它不占素材。
     """
     grouped: dict[str, list[tuple[float, float]]] = {}
     for segment in plan.timeline:
@@ -36,11 +25,6 @@ def source_spans(plan: PlanData) -> Spans:
 
 def overlap(left: PlanData, right: PlanData) -> float:
     """Jaccard：共用秒数 / 两者并集秒数。0=取材全异，1=同一部片。
-
-    取 Jaccard 而非包含率（交集 / 较短一方）：包含率会把「一条 20 秒短片完全落在
-    一条 100 秒长片里」报成 100%，而那条短片只占长片五分之一——真正要拦的是
-    「两条看起来是同一部片」，Jaccard 量的正是这个。
-    并集为空（两条都没有可用画面）时回 0.0：无素材可比重，不该判成同一部片。
     """
     a = source_spans(left)
     b = source_spans(right)

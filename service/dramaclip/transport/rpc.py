@@ -20,8 +20,6 @@ Handler = Callable[[dict[str, Any]], Any]
 
 class RpcDomainError(Exception):
     """业务域错误：携带分段错误码（docs/03-IPC协议规范.md §5）。
-
-    api 层抛出，Router.dispatch 转为对应错误响应（未捕获的其他异常仍兜底 -32603）。
     """
 
     def __init__(self, code: int, message: str) -> None:

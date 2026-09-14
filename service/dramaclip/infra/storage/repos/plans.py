@@ -40,10 +40,6 @@ def create(
     batch_id: str | None = None,
 ) -> dict[str, Any]:
     """建一条方案行并原样返回（含五个角度字段）。
-
-    默认值与迁移 010 的列默认逐字对应，不是兼容垫片：raw_clip / subtitle_flow
-    这类无解说的模式确实没有角度可言，`overlap_max=None` 也确实表示「首条无兄弟、
-    无从比」，与 0.0（比过、完全不重叠）是两件事。
     """
     plan_id = uuid4().hex
     created_at = _now_ms()
@@ -85,12 +81,6 @@ def create(
 
 def list_by_project(conn: sqlite3.Connection, project_id: str) -> list[dict[str, Any]]:
     """项目全部方案，最近优先。
-
-    排序补 `created_at, id` 兜底，与 `infra/jobs.py::list_recent` 同一理由：
-    `created_at` 是毫秒精度，背靠背插入实测 2000/2000 撞同一个值，而并列时
-    单键排序的顺序由 SQLite 的扫描顺序决定——阶段③ 每次刷新可能跳行。
-    兜底之后顺序是**总序**（id 是 uuid4 hex，并列时按字典序升序），可复现。
-    组内顺序请用 `list_by_batch`（它按 (模式, 变体号) 排），不要依赖本函数的顺序。
     """
     rows = conn.execute(
         f"SELECT {', '.join(_COLUMNS)} FROM narration_plans WHERE project_id = ?"
@@ -104,9 +94,6 @@ def list_by_batch(
     conn: sqlite3.Connection, project_id: str, batch_id: str
 ) -> list[dict[str, Any]]:
     """一次 plan_variants 调用产出的整组方案，按 (模式, 变体号) 升序。
-
-    排序键带 narration_mode：一个 batch 通常覆盖多个模式，阶段③ 要按模式分组显示；
-    只按 variant_index 排会把不同模式的第 1 条混在一起。
     """
     rows = conn.execute(
         f"SELECT {', '.join(_COLUMNS)} FROM narration_plans"
@@ -115,16 +102,6 @@ def list_by_batch(
         (project_id, batch_id),
     ).fetchall()
     return [_row_to_dict(row) for row in rows]
-
-
-def update_plan_data(conn: sqlite3.Connection, plan_id: str, plan_data_json: str) -> bool:
-    if conn.execute("SELECT 1 FROM narration_plans WHERE id = ?", (plan_id,)).fetchone() is None:
-        return False
-    conn.execute(
-        "UPDATE narration_plans SET plan_data = ? WHERE id = ?", (plan_data_json, plan_id)
-    )
-    conn.commit()
-    return True
 
 
 def get(conn: sqlite3.Connection, plan_id: str) -> dict[str, Any] | None:

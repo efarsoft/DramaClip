@@ -1,6 +1,4 @@
 """场景切割：PySceneDetect（懒加载）+ 场景规整洁函数。
-
-参数依据 docs/06-经验参数表 §3：ContentDetector 阈值 30，场景规整 2-8s。
 """
 
 from __future__ import annotations

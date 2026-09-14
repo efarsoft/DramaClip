@@ -1,6 +1,4 @@
 """字幕风格预设：内置（resources，只读随版本走）+ 用户自定义（DB，P2）。
-
-解析序 用户>内置（ADR-008）。
 """
 
 from __future__ import annotations

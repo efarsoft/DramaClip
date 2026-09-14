@@ -1,8 +1,4 @@
 """Kokoro 本地 TTS 引擎（82M v1.1-zh，24kHz）。
-
-模型放置：models/tts/kokoro/Kokoro-82M-v1.1-zh/（config.json + kokoro-v1_1-zh.pth + voices/*.pt），
-可在线下载或手动导入（registry 探测）。
-推理懒加载单例；音色 = voices/<voice>.pt（zf_001/zf_003/zm_001…）。
 """
 
 from __future__ import annotations

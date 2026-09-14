@@ -1,8 +1,4 @@
 """本地套接字客户端：127.0.0.1 环回 TCP + NDJSON 分帧（ADR-002 修订版）。
-
-为何放弃命名管道：Python CRT 文件句柄在 Windows 管道上并发「阻塞读 + 跨线程写」
-会死锁写方（实测 20 条 0 投递）。环回 TCP 两端实现均成熟、跨平台同码，
-安全由 hello 阶段的 token 认证保证（不经外网栈、环回绑定无防火墙弹窗）。
 """
 
 from __future__ import annotations
@@ -51,9 +47,6 @@ class LineAssembler:
 
 class ServiceConnection:
     """连接 Electron 主进程（服务端），后台线程读取入站消息。
-
-    读/写使用 socket 的两个独立 makefile 对象，天然支持跨线程并发。
-    EOF/断开 → on_disconnect → 由上层决定退出进程。
     """
 
     def __init__(

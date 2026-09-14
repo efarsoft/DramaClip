@@ -1,8 +1,4 @@
 """模型多源下载：ModelScope / HF 镜像 / HF 官方，所选源优先 + 国内优先降级。
-
-逐文件管线：列文件树 → 逐个直链下载（.download 续传 + size 校验），
-不依赖 huggingface_hub / modelscope 运行库。faster-whisper 落盘保持
-HF 缓存布局（models--*--*/snapshots/），与手动放置的模型互相兼容。
 """
 
 from __future__ import annotations

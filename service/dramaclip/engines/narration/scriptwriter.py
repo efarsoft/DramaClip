@@ -1,8 +1,4 @@
 """LLM 编剧：读取带时间戳的台词转写，产出结构化推广解说剧本。
-
-剧本驱动模式（用户提案）：时长由文案与叙事完整度决定，预算仅作为
-提示词里的目标区间；LLM 不可用或输出非法一律抛异常——降级到模板文案
-已被 P-1.5 取消（规格 §3.3.1）。
 """
 
 from __future__ import annotations
@@ -111,10 +107,6 @@ def transcript_sampling_quota(
     episode_cap: int = _EPISODE_LINE_CAP,
 ) -> int:
     """跨集转写的每集摘录配额。
-
-    总预算在「有转写的集」之间均分：下限 `_MIN_LINES_PER_EPISODE`（集数再多也集集露面），
-    上限 `episode_cap`（集数再少也不无限堆量）。公开给调用方打日志复用，
-    避免 api 层另抄一遍常量后与真实取样口径漂移。
     """
     if episode_count <= 0:
         return 0
@@ -123,9 +115,6 @@ def transcript_sampling_quota(
 
 def _pick_across(segments: list[dict[str, Any]], quota: int) -> list[dict[str, Any]]:
     """单集内跨头尾均匀取 quota 段（必含首段与尾段）。
-
-    短剧的钩子与反转多落在集尾，只取开头等于把每集的卖点丢掉；
-    等距索引天然覆盖 0 与末位，重复索引去重后保持时间升序。
     """
     if quota <= 0 or not segments:
         return []
@@ -164,13 +153,6 @@ def format_transcript_episodes(
     episode_cap: int = _EPISODE_LINE_CAP,
 ) -> str:
     """把多集转写拼成带集号与时间戳的输入块：预算内每集都有代表，绝不按集号头部截断。
-
-    块结构：每集一行 `【第N集】` 标题 + 该集被选中的 `MM:SS-MM:SS 台词` 行，
-    末尾附取样说明。只保留真正有转写的集；一集最终一行都没进就不留孤立标题。
-
-    诚实的能力边界：配额取样是**过渡方案，不是终点**。80 集时每集只剩约 6 段，
-    模型看得见每集的「形状」，但不足以挖出各集差异化的卖点角度；
-    真正的解法是批次一规划的逐集摘要层（此处不建）。
     """
     usable = [ep for ep in episode_inputs if ep.get("segments")]
     if not usable:
@@ -215,11 +197,6 @@ def write_script_episodes(
     trace_path: Path | None = None,
 ) -> Script:
     """跨集剧本：读多集转写（每集一个「【第N集】」分组），产出带集号的跨集故事剧本。
-
-    episode_inputs 每项：{"number": 集号, "duration": 集时长秒,
-    "segments": [{"start", "end", "text"}]}。失败抛异常；降级被禁止（规格 §3.3.1）。
-    喂给模型的转写由 `format_transcript_episodes` 按集分配额取样（超预算时
-    每集等距摘录并在块尾标注），不再按集号头部截断。
     """
     durations = {
         int(episode["number"]): float(episode.get("duration") or 0.0)

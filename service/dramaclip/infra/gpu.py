@@ -1,7 +1,4 @@
 """GPU 探测：nvidia-smi 异步探测 + 宽容判定 + 会话缓存 + 启动预热。
-
-探测永不阻塞请求路径——缓存未就绪时 health 立即返回 ready=false 并后台补测；
-解析失败不误判为「不支持」（宽容判定）。Windows 用 CREATE_NO_WINDOW 防闪窗。
 """
 
 from __future__ import annotations

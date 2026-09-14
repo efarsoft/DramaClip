@@ -1,7 +1,4 @@
 """Edge TTS 引擎：微软云端免费合成，无需本地模型（依赖准入：edge-tts，纯 Python）。
-
-同步封装：edge-tts 为 asyncio 库，在线程内 asyncio.run 执行。
-带硬超时——云端服务不可达时不允许挂死任务（调用方降级为原声段）。
 """
 
 from __future__ import annotations

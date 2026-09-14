@@ -426,9 +426,6 @@ def _fuse_ocr(
     ocr_bars: list[OcrSegment] | None = None,
 ) -> tuple[list[AsrSegment], list[OcrSegment] | None]:
     """硬字幕 OCR 通道 + 融合（analysis.ocr_enabled 默认开）。
-
-    ocr_bars：全剧 OCR 阶段预提取的字幕条；缺省时单集现抽（兼容直跑路径）。
-    依赖缺失（ml extras 未装）静默回退纯 ASR；运行失败留痕不阻塞分析。
     """
     if context.settings.get("analysis.ocr_enabled", "1") != "1":
         return asr, None

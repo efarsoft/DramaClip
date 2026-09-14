@@ -1,9 +1,4 @@
 """字幕金句流模式（原案 6.8）：原声保留 + 动态金句字幕为核心视觉元素。
-
-双通道信息传递——有声听对白，静音看字幕。每入选场景取最强一句金句作为该段字幕
-（高潮句触发 climax 居中大字 + 情绪配色），结尾追加 CTA 卡片段。
-原片字幕遮罩自动施加（非零加工模式）。
-场景表带集身份（`casting.EpisodeScene`），台词表按集分开（`casting.MaterialByEpisode`）。
 """
 
 from __future__ import annotations
@@ -29,10 +24,6 @@ def strongest_line(
     segments: list[AsrSegment],
 ) -> str | None:
     """场景内最强金句：冲突/情绪词密度最高的对白；无对白返回 None。
-
-    `segments` 必须是**这一集**的台词表：start/end 是集内相对秒，活库实测十集的场景
-    起点全部从 0.0 开始，拿摊平的表按秒过滤会捞到别的集的句子——字幕上出现一句
-    这一集没人说过的话，而它逐字来自本剧，肉眼与耳朵都查不出来。
     """
     inside = [
         segment

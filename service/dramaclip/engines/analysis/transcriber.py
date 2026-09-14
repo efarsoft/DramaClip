@@ -1,7 +1,4 @@
 """ASR 双引擎：faster-whisper（默认，已实测）/ SenseVoice（funasr，懒加载）。
-
-引擎依赖属 ml extras（pyproject [project.optional-dependencies]），
-import 一律发生在引擎方法内部——未装依赖时仅在真正调用才报错，不影响其余功能。
 """
 
 from __future__ import annotations

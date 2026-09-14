@@ -1,8 +1,4 @@
 """narration 命名空间：规划（plan_variants / list_plans / get_plan）与风格清单。
-
-规划与渲染在此分开（规格 §6 的拆分）：本模块只产出方案行，一条 status='ready' 的行
-就是可渲染的成品输入（含配音音频路径），渲染归 export.submit。
-任务级上下文（项目名、题材、跨集转写、口味层风格）统一在 `_inject_run_settings` 装配一次。
 """
 
 from __future__ import annotations
@@ -90,9 +86,6 @@ def list_plans(context: AppContext, params: dict[str, Any]) -> list[dict[str, An
 
 def get_plan(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     """单条方案详情 + 成本账（规格 §5 #18 阶段③ 详情、#33 成品库跳回方案）。
-
-    list_plans 一次返回项目全部方案连同整份 plan_data；K×模式条数上来之后它不再是
-    「看一条」的合理入口，故单条走这里。
     """
     plan_id = str(params.get("plan_id", ""))
     row = plans_repo.get(context.conn, plan_id)
@@ -103,21 +96,6 @@ def get_plan(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
 
 def plan_cost(row: dict[str, Any]) -> dict[str, int]:
     """一条方案的成本账（规格 §4.4 成本预估卡的数据源）。
-
-    两个数都是恒等推导，故不落库：存下来只多一处会漂的副本（docs/04 §5.2）。
-    成稿次数是「有旁白槽位即 1」——§3.3.1 之后不存在「零次 LLM 的解说方案」，
-    而 raw_clip / subtitle_flow 没有槽位、确实零次。配音段数就是槽位数。
-    **选题往返不在此账上**：它是模式级共担，一个 batch 的选题次数
-    = 该 batch 里 DISTINCT narration_mode 的数量。
-
-    **这是"落库口径"，不是"花销口径"，两者可以差**：被成稿后那道重叠闸门拦掉的角度
-    已经付了一次成稿，却**不留行**，所以把一个 batch 的 plan_cost 逐条相加会得到
-    比真实 LLM 花销**小**的数（最多差 K − 已落库条数）。P-2a 把可判定的那一半前置了
-    （`_reject_same_episode_sibling`：同模式同集的两条角度，其时间轴是 (mode, episode_id)
-    的纯函数，故重叠必然 100%，成稿前即可拦，一次成稿都不付）；剩下的残余只在
-    `dialogue_narration` 上——它的剧本由模型按角度现写，成稿前无从判定。
-    详见《定案二》的 R7 段。规格 §4.4 的成本卡是**提交前的预估**（渲染成本），
-    与本函数的口径不同，两者不要互相顶替。
     """
     plan = PlanData.model_validate(row["plan_data"])
     voiced = len(plan.narration_texts)
@@ -130,11 +108,6 @@ def list_styles(context: AppContext, _params: dict[str, Any] | None = None) -> l
 
 def _effective_settings(context: AppContext, project_id: str) -> dict[str, str]:
     """全局默认 + 项目级覆盖（规格 §4.3 的「默认 + 覆盖」）。
-
-    覆盖值一律 str() 后叠加：Settings 的值类型是 str，而 projects.settings 是 JSON，
-    里面的 K 会是 int——不转就在 config.get_int 的 int() 上侥幸通过、
-    在别处的字符串拼接上炸。value 为 None 表示「恢复默认」（P-1 的 update_settings
-    语义），故跳过而不是写成字符串 "None"。
     """
     settings = dict(context.settings)
     for key, value in projects_repo.get_settings(context.conn, project_id).items():
@@ -146,15 +119,6 @@ def _effective_settings(context: AppContext, project_id: str) -> dict[str, str]:
 @dataclass(frozen=True)
 class _Variant:
     """一条待产出的方案：取材意图（名字/理由/集号）+ 成稿时注入的角度块。
-
-    **两个模式族在这个形状上会合**（《定案四》）：解说类的 name/reason 出自选题模型
-    （`angles.AngleBrief`）、angle_block 出自 `angles.prompt_block`；规则类
-    （raw_clip / subtitle_flow）的三者一律空串，只有 episode_numbers 有值——
-    它来自全剧 top-K 冲突窗的确定性推导，不经任何模型。
-
-    会合的收益是失败粒度、进度记账、重叠闸门、配音、落库这五件事**只写一遍**：
-    分流只发生在"这条方案从哪来"，不发生在"这条方案怎么落库"。
-    name 为空时点名一律退回「第 N 条」（见 `_slot_label`），不许把空串拼进错误文案。
     """
 
     name: str
@@ -180,10 +144,6 @@ def _worst_overlap(
     plan: PlanData, accepted: list[tuple[_Variant, PlanData]]
 ) -> _OverlapHit | None:
     """与同模式已接受兄弟里最像的那条比；没有兄弟时回 None（不是 0.0）。
-
-    None 与 0.0 是两件事，落库时必须分得开：前者是「无从比」，后者是「比过、全异」。
-    点名走 `_slot_label`：规则类的 name 是空串，直接把空串拼进错误文案会得到
-    「取材与「」重叠 …」这种半句话。
     """
     worst: _OverlapHit | None = None
     for index, (variant, other) in enumerate(accepted, start=1):
@@ -197,25 +157,6 @@ def _reject_same_episode_sibling(
     mode: str, variant: _Variant, accepted: list[tuple[_Variant, PlanData]]
 ) -> None:
     """成稿**之前**的重叠闸门（R7）：同模式、**同一组取材集**的两条角度，取材必然逐秒相同。
-
-    这不是启发式，是可证的：`_plan_one` 的非剧本分支里，`variant` 只进 `copywriter` 的
-    `angle_block`，**不进 `build_plan`**——Task 3c 之后 `build_plan(mode, scenes,
-    highlights, material, settings)` 的五个入参没有一个来自角度名或理由，而 `scenes` 与
-    `material` 都由 `_casting_for` 从 `variant.episode_numbers` 确定性装配。故时间轴是
-    `(mode, 取材集组合)` 的纯函数：同一组集 ⇒ 同一份场景表 ⇒ 同一条时间轴 ⇒
-    Jaccard = 1.0，必然超过 60% 阈值。
-
-    **跨集之后这道闸门不但没失效，覆盖面还大了**：原先它按"同集"判（`episode_id` 相等），
-    现在按"同一组集"判（`frozenset` 相等）。两条角度都点 `{3, 7}` 与都点 `{3}` 一样必拦；
-    点 `{3, 7}` 与点 `{3, 8}` 则放过去，交给成稿后的 `_worst_overlap` 实量。
-
-    既然成稿前就可判，就不该先付一次 LLM 成稿再拦：被拦的角度不落库，
-    那笔钱在 narration_plans 里也无从重算（《定案二》的 R7 段）。
-
-    `dialogue_narration` 走不到这里（它在 `_SCRIPT_DRIVEN_MODES` 里：剧本由模型按角度
-    现写，**同一组集**也能写出两条压在几乎同一段画面上的剧本，成稿前无从判定），
-    那条残余由成稿后的 `_worst_overlap` 兜住——
-    `test_post_copy_overlap_gate_still_guards_cross_episode_modes` 钉住那道兜底没被拆掉。
     """
     if mode in _SCRIPT_DRIVEN_MODES:
         return
@@ -231,14 +172,6 @@ def _reject_same_episode_sibling(
 
 def plan_variants(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     """阶段③：为选中模式各产出 K 条方案，只规划不渲染（规格 §6 的拆分）。
-
-    K 的取值顺序：入参 > 项目级覆盖 > 全局默认。回显实际用的 K，界面不必自己算一遍。
-    所有可同步判定的错都在派发作业之前抛——进了作业就只是一条 failed 行，
-    界面拿不到错误码（docs/service/01 §4 长任务模式第 1 步）。
-
-    **条数按模式族分别算**（规格 §4.3 ④，用户定案）：解说类 = K 条角度，
-    规则类 = 全剧 top-K 冲突窗（按集去重后可少于 K，规格 §1 允许 1..K 条）。
-    分流在 runner 里，本入口对两族一视同仁：它只管把 K 与模式收下来、把错抛在派发前。
     """
     project_id = str(params.get("project_id", ""))
     if projects_repo.get(context.conn, project_id) is None:
@@ -292,10 +225,6 @@ def plan_variants(context: AppContext, params: dict[str, Any]) -> dict[str, Any]
 
 def _excluded_angle_names(context: AppContext, exclude_plan_ids: list[str]) -> list[str]:
     """重掷此条：把被替换方案的角度名交给选题，别再提同一个卖点。
-
-    方案不存在在此抛（RPC 边界），不留到作业里——那只会变成一条 failed 行。
-    规则类方案的 angle 是空串，故它贡献不出排除项（《定案四》：规则类的重掷是空操作，
-    由 runner 如实留痕，不在这里假装排除了什么）。
     """
     names: list[str] = []
     for plan_id in exclude_plan_ids:
@@ -319,16 +248,6 @@ def _run_plan_variants(
     cancel_event: threading.Event,
 ) -> None:
     """逐模式取 K 条方案意图 → 逐条 成稿+配音+落库。
-
-    **两族分流只发生在下面那个 `if mode in _NARRATION_MODES`**（《定案四》）：
-    解说类的 K 条来自 `angles.select_angles`（一次 LLM 调用），规则类
-    （raw_clip / subtitle_flow）的 K 条来自全剧 top-K 冲突窗（**零 LLM**，
-    规格 §4.2「仅「纯原片剪辑」「字幕金句流」不依赖 LLM」）。分流之后，
-    失败粒度、进度记账、重叠闸门、配音、落库五件事走同一段代码（`_Variant` 是会合点）。
-
-    失败粒度是**单条方案**：try/except 包在变体循环**内**，一条的 LLM/TTS 失败
-    既不带走它的 K-1 个兄弟，也不带走别的模式。这是 P-1.5「失败粒度=单条方案」
-    从模式级下沉到变体级。
     """
     try:
         context.job_store.mark_running(job_id)
@@ -429,12 +348,6 @@ def _angle_variants(
     excluded_angles: list[str],
 ) -> list[_Variant]:
     """解说类：一次选题调用 → K 条卖点互异的角度（《定案二》）。
-
-    选题失败即整个模式失败（按 K 条记账，见 runner）：不许拿残缺的凑数，
-    那是 §3.3.1 禁止级「假装有 K 条」。
-
-    **没有 `cross_episode` 这个入参**（2026-09-12 裁决后从 `angles.select_angles` 删掉了）：
-    规格 §1 的「跨集方案」是每个模式的定义性属性，不是某几个模式的开关。
     """
     briefs = angles.select_angles(
         mode,
@@ -465,18 +378,6 @@ def _rule_variants(
     rerolled: bool,
 ) -> list[_Variant]:
     """规则类（raw_clip / subtitle_flow）：全剧冲突窗排名 → 轮转发成 K 手，一手一条方案。
-
-    规格 §4.3 ④「规则类 = 全剧 top-K 冲突窗（两者不同源，已由用户定案）」定的是**条数**，
-    规格 §1「跨集方案」定的是**每条的形状**；轮转发窗同时满足两者（《定案四》第 2 点、
-    `pipeline.deal_windows` 的 docstring）。§4.2「仅「纯原片剪辑」「字幕金句流」不依赖 LLM」
-    照旧：**本函数不发任何网络请求**——把它们拖进 `angles.select_angles` 就等于把
-    "不依赖 LLM"改成"依赖 LLM"，而 select_angles 对未配置抛 LlmUnavailable，
-    纯剪辑作业会整族失败（B2/R1）。`test_rule_modes_never_construct_an_llm_client` 钉住。
-
-    name/reason/angle_block 一律空串（《定案四》第 4 点）：规则类没有模型自选的卖点角度，
-    也没有旁白槽位去读钩子；界面卡片靠「取材集区间」+ variant_index 区分。
-    窗口出处改走 notifier 逐条留痕——那是 §3.3 要求的可见性通道，也是"为什么是这几集"
-    唯一可核对的记录。
     """
     scored: list[tuple[int, list[ConflictScore]]] = []
     for episode in episodes:
@@ -539,27 +440,6 @@ def _plan_one(
     variant: _Variant,
 ) -> tuple[PlanData, list[str]]:
     """按取材意图产出一条方案（未配音、未落库）。返回 (方案, **实际用到**的集 id)。
-
-    取材集由意图决定、且一条方案可以横跨多集（规格 §1），不再恒取 episodes[0]——
-    那是「K 条其实是同一部片切 K 次」的根源之一。
-
-    返回的集 id 从**建好的时间轴**反推，不用意图点名的那份：编排器可能一帧都没用上
-    某一集（活库实测 `intro_narration` 一手点了 4 集、时间轴上只出现 2 集，因为
-    `_fit_duration` 按播出序填充、预算在第 2 集就用完了），照点名写进
-    `narration_plans.episode_ids` 会让卡片的「取材集区间」列一集没出现的集——
-    那是 §9.5 的假文案类。`script_driver.script_dialogue_plan` 早就是这么做的
-    （它的 used_ids 逐字是 `sorted({seg.episode_id for seg in plan.timeline})`），
-    这里沿用同一个口径。
-
-    **不落库**：`plans_repo.create` 只在 runner 里发生一次，那里才有 batch_id /
-    variant_index / overlap_max 三个只有 runner 知道的值。
-
-    **两个分支的缺号守卫不对称，是有意的**：非剧本分支经 `_casting_for` 自己校验缺号
-    （它从 `episodes`——全部 done 集——装配，那份清单比选题看到的宽）；剧本分支直接过滤
-    `episode_inputs`，不再校验一遍，因为 `angles._sanitize` 的 `known_numbers` 逐字就是
-    `{int(ep["number"]) for ep in episode_inputs}`——**同一份清单**。在这里再抄一道守卫，
-    就是 docs/04 §5.2 禁止的"同一概念双处定义"，而且两处一旦漂移（例如 `_collect_episode_inputs`
-    将来放宽成"没有转写也收进来"），先炸的是那条抄来的。
     """
     trace_dir = context.data_dir / "logs" / "llm"
 
@@ -608,15 +488,6 @@ def _casting_for(
     variant: _Variant,
 ) -> tuple[list[EpisodeScene], list[HighlightSegment], MaterialByEpisode]:
     """把意图点名的那几集装配成编排器要吃的三样东西（场景表 / 高光表 / 逐集台词）。
-
-    集身份在这里注入（`casting.stamp`）：`episode_analysis.conflict_scores` 是**按集一行**
-    的 JSON，集身份就是那一行的主键，所以活库已有的分析结果一行都不用改、
-    不需要迁移、也不需要重跑分析（《修订记录》C3）。
-
-    点名集不在已完成集里时**一次点名全部缺号**再抛：逐个抛会让第一条缺号掩盖其余的，
-    运维补完一集再跑又炸一集。绝不悄悄换一集顶上，也绝不只用点得到的那几集——被本函数
-    取代的老写法是 `_generate_one` 里无条件的一句 `episode_id = str(episodes[0]["id"])`，
-    那正是「K 条其实是同一部片切 K 次」的根源之一（每条方案都取第 1 集）。
     """
     wanted = sorted(set(variant.episode_numbers))
     by_number = {int(episode["episode_number"]): episode for episode in episodes}
@@ -655,10 +526,6 @@ def _inject_run_settings(
     modes: list[str],
 ) -> list[dict[str, Any]]:
     """任务级一次性注入：项目名、题材、跨集转写、口味层风格。返回跨集输入。
-
-    风格指令只有会产出旁白槽位的模式才读得到，故按 `modes` 设闸：纯剪辑作业
-    一次选题都不付。转写只是 **AI 自选**风格的原料——用户钉死了风格就没有自选
-    这回事，没有转写也照样要把用户选的风格注进去（否则既丢风格又丢那句留痕）。
     """
     project_id = str(episodes[0]["project_id"])
     project = projects_repo.get(context.conn, project_id)
@@ -682,10 +549,6 @@ def _inject_run_settings(
 
 def _settle_failed(context: AppContext, job_id: str, error: str) -> None:
     """失败落库；行已终态时只记日志，绝不用记账错误顶掉原始异常。
-
-    `JobStore._transition` 对终态行抛 `ValueError("任务已终态")`。它从兜底 handler 里
-    逃出去就落进 executor 的 future——没人 `.result()` 就没人读，原始原因连一行日志都
-    不留。兜底路径自己会抛，等于"失败没人接"这条线断在最后一环。
     """
     try:
         context.job_store.mark_failed(job_id, error)
@@ -697,25 +560,6 @@ def _settle_failed(context: AppContext, job_id: str, error: str) -> None:
 
 def _voice(context: AppContext, plan: PlanData, settings: dict[str, str]) -> PlanData:
     """配音：plan_variants 唯一的配音出口，只负责给出 tts 目录与 models 目录。
-
-    **路径隔离不是本函数的事**：文件名由 `pipeline._content_addressed_audio` 按
-    `(slot_id, text, voice, engine)` 内容寻址（commit 9b42f24），同名 即同内容，
-    所以 K 条同模式变体、并发的两个作业、重规划的两轮都不可能互相覆盖。
-    本函数**不得**给这个目录加作业号/变体号/随机数——那会让 pipeline 的缓存优先
-    在 api 层失效（`test_tts_audio_isolation.py::test_identical_copy_is_synthesised_once`
-    钉的"同文案不二次付费"），而换不来任何正确性收益；`test_voice_keeps_the_cross_call_cache`
-    守着这一条。
-
-    **无条件调用，不要包一层 `if plan.narration_texts`**：无槽位时（raw_clip /
-    subtitle_flow）`synthesize_narration_texts` 自己早退，但它先跑 `_assert_voiceable`——
-    那是"带旁白段却没有文案表"的静音片唯一会被拦下的地方，跳过它等于把 §3.3.1 的
-    禁止级降级从后门放回。
-
-    这些音频文件因此是承重存储：《定案一》让配音归规划侧，方案可能在几小时后、
-    几次重启后才被 `export.submit` 渲染，届时读的就是这里回填的 `audio_path`。
-    全仓没有任何路径清理 work_dir（`shutil.rmtree` 只出现在 `api/models.py:119`，
-    删的是模型目录），这个事实就此成为契约。**并且内容寻址意味着文案相同的两条方案
-    共用同一个文件**，所以将来的回收站不能按作业或按时间删——见《P-3 交接规格》第 1 条。
     """
     return narration_pipeline.synthesize_narration_texts(
         plan, settings, context.work_dir / "tts", context.data_dir / "models"

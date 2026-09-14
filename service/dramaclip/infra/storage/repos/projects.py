@@ -124,9 +124,6 @@ def rename(conn: sqlite3.Connection, project_id: str, name: str) -> bool:
 
 def duplicate(conn: sqlite3.Connection, project_id: str, new_name: str) -> dict[str, Any] | None:
     """复制项目元数据与集列表（分析结果不复制，副本需重新分析）。
-
-    settings 覆盖值要复制：复制剧的典型动机是"换素材、按同一套调好的参数再产一批"，
-    丢掉 K/档位/风格/字幕预设会逼用户重配一遍。
     """
     source = get(conn, project_id)
     if source is None:

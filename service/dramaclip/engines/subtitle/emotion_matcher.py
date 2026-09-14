@@ -1,6 +1,4 @@
 """情绪智能匹配（原案 6A.7）：文本/标签 → 情绪键（预设 emotion_style 的键）。
-
-LLM/SenseVoice 情绪标签优先（AsrSegment.emotion）；缺失时关键词降级。
 """
 
 from __future__ import annotations

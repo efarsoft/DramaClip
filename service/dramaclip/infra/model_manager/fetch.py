@@ -1,7 +1,4 @@
 """下载原语：JSON API 拉取 + 单文件 Range 续传下载（stdlib，零第三方依赖）。
-
-续传规则：<dest>.download 临时文件 + Range 请求；响应非 206 视为服务端忽略
-Range（镜像常见行为），覆盖写重下而非追加。完成后按期望大小校验。
 """
 
 from __future__ import annotations
@@ -36,8 +33,6 @@ def download_file(
     on_progress: Callable[[int], None] | None = None,
 ) -> None:
     """下载单文件到 dest（.download 续传 + 大小校验 + 原子改名落位）。
-
-    expected_size <= 0 表示未知大小（跳过校验）；on_progress 收到已写字节数。
     """
     tmp = dest.with_name(dest.name + ".download")
     dest.parent.mkdir(parents=True, exist_ok=True)

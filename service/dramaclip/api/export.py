@@ -51,10 +51,6 @@ def register(router: Router, context: AppContext) -> None:
 @dataclass(frozen=True)
 class ExportRun:
     """一次导出渲染的不变输入（export_id 之外全部只读，渲染期间不会改写）。
-
-    收成对象前这些值以位置参数在 submit/retry → _submit_export → _run_export →
-    render_export 链路上传递，`export_id` 与 `project_id` 同为 str 且相邻——传颠倒
-    不会报错，只会把成片渲染进另一个项目。两处调用点共用一个名字即是收益。
     """
 
     export_id: str
@@ -73,9 +69,6 @@ def _submit_export(
     plan_data: PlanData,
 ) -> str:
     """建 export 任务 → 注册取消事件 → 投递执行池，返回 job_id。
-
-    取消事件的注册与 _run_export finally 里的回收
-    必须成对，两处各写时漏掉一半就留下 cancel_events 无界增长。
     """
     job_id = context.job_store.create("export", ref_id=export_id)
     cancel_event = threading.Event()
@@ -135,9 +128,6 @@ def submit(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
 
 def _assert_renderable(plan_row: dict[str, Any], plan_data: PlanData) -> None:
     """提交/重试前的可渲染性守卫：方案行必须是拿去就能渲的成品输入。
-
-    配音音频是规划期落在 cache 里的文件，提交可能在几次重启之后，
-    所以文件在不在也在这里问一次。submit 与 retry 共用本函数。
     """
     if plan_row["status"] != "ready":
         raise RpcDomainError(_ERR_PLAN_NOT_RENDERABLE, f"方案状态为 {plan_row['status']}，不可渲染")
@@ -207,10 +197,6 @@ def list_works(context: AppContext, params: dict[str, Any]) -> list[dict[str, An
 
 def tts_audio_by_segment(plan: PlanData) -> dict[int, str]:
     """段序号 → 旁白音频路径。按 segment.narration_id 显式取用，绝不按位置推断。
-
-    位置推断在两条路上都会静默错音：`ducked`（全片解说每段都是）从来不算 narration 段，
-    整片旁白因此丢失；TTS 失败被 `kept_texts` 过滤后，「第 N 条 narration 段」与
-    「第 N 条文案」也不再同号。id 缺失或对不上号的段就是没有旁白，直接不给条目。
     """
     by_id = {
         text.id: text.audio_path for text in plan.narration_texts if text.audio_path is not None
@@ -224,9 +210,6 @@ def tts_audio_by_segment(plan: PlanData) -> dict[int, str]:
 
 def _output_size(settings: config.Settings) -> tuple[int, int]:
     """输出分辨率：读设置键 export.width/height（默认值源在 infra.config），偶数化并钳制最小 480。
-
-    走 config.get_int 而非本地字面量兜底：本文件不得再抄一份 1080/1920（docs/04 §5.2），
-    且该函数对缺失与非法值统一回退默认，不像 int(settings.get(...)) 那样被脏值炸穿。
     """
     width = max(config.get_int(settings, "export.width"), 480)
     height = max(config.get_int(settings, "export.height"), 480)
@@ -240,8 +223,6 @@ def render_export(
     report: Callable[[float, str], None],
 ) -> Path:
     """渲染核心：剪辑→遮罩→字幕→编码→写成品记录（失败抛异常，不管理 job）。
-
-    入参收成 ExportRun 后本函数不再关心 job 与取消事件的注册，只按 run 渲染。
     """
     export_id = run.export_id
     project_id = run.project_id
@@ -322,9 +303,6 @@ def render_export(
 
 def _run_export(context: AppContext, job_id: str, run: ExportRun) -> None:
     """执行池入口：把一次 ExportRun 跑成 jobs 表里的一条终态记录。
-
-    进度双写（jobs + export_jobs）是有意的：前者给队列页、后者给出片记录页。
-    渲染失败只记不抛——异常已写进两条记录，再抛给未来得及看的调用方没有意义。
     """
     context.job_store.mark_running(job_id)
 

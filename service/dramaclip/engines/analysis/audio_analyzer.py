@@ -1,7 +1,4 @@
 """音频特征分析：stdlib wave + numpy 核心；BPM 可选 librosa（懒加载，缺省 None）。
-
-语音区/静音判定参数沿用 v1 实测（docs/06-经验参数表 §1）：
-80ms chunk RMS，阈值 max(均值×1.65, 120/int16满量程)，最短语音段 0.28s。
 """
 
 from __future__ import annotations

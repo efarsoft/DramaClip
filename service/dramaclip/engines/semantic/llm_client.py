@@ -1,7 +1,4 @@
 """OpenAI 兼容 LLM 客户端（ADR-005）：stdlib urllib 实现，零第三方依赖。
-
-只需 chat/completions 一个端点；本地端点（Ollama/LM Studio）与云端同协议。
-未配置 base_url+model 时抛 LlmUnavailable，调用方走关键词降级（W3 DoD）。
 """
 
 from __future__ import annotations

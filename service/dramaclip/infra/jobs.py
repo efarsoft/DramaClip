@@ -90,10 +90,6 @@ class JobStore:
 
     def list_recent(self, *, limit: int = 50, active_only: bool = False) -> list[dict[str, Any]]:
         """队列页数据源：按最近变更倒序取任务，可只要未终态。
-
-        排序补 `created_at, id` 兜底：`updated_at` 为毫秒精度，同毫秒内变更的任务
-        否则顺序随机，队列页每次刷新可能跳行。
-        过滤用 NOT IN(终态集) 而非 IN(活跃集)：将来新增非终态状态时不会静默消失。
         """
         where = ""
         params: tuple[Any, ...] = (limit,)
@@ -110,11 +106,6 @@ class JobStore:
 
     def sweep_interrupted(self) -> int:
         """启动清扫：上一会话遗留的 running / pending 任务标记失败（崩溃重入协议）。
-
-        无服务运行即无任务在飞，故 pending 与 running 同一条理由成立：`executor.submit`
-        不挂 done-callback，入队而 worker 始终没跑起来的行原本会永远停在 pending，
-        队列页挂着一只永不推进的任务。与 `exports.reset_stale_pending` 同构——
-        认非终态即复位，终态行不动，进度保留原值，两表不得互相矛盾。
         """
         cursor = self._conn.execute(
             "UPDATE jobs SET status = 'failed', error = '服务中断', updated_at = ?"

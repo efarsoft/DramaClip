@@ -66,10 +66,6 @@ def run(
     on_progress: ProgressCallback | None = None,
 ) -> FfmpegResult:
     """执行一次 ffmpeg。
-
-    - `cancel` 置位即 kill（FfmpegError.cancelled=True）；
-    - `timeout_s` 到期即 kill；
-    - 传 `total_duration_s` 时按 `-progress` 的 out_time 换算 0~1 进度回调。
     """
     if on_progress is not None and total_duration_s is not None:
         args = ["-progress", "pipe:1", "-nostats", *args]
@@ -125,8 +121,6 @@ def _drain_stderr(process: subprocess.Popen[str], sink: list[str]) -> None:
 
 def _parse_out_time(line: str) -> float | None:
     """`out_time_us=…` / `out_time_ms=…` / `out_time=HH:MM:SS.mmm` → 秒。
-
-    注意：ffmpeg 的 out_time_ms 字段实际单位是微秒（上游历史怪癖），按微秒处理。
     """
     for prefix in ("out_time_us=", "out_time_ms="):
         if line.startswith(prefix):

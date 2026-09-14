@@ -53,11 +53,6 @@ def create(
     return export_id
 
 
-def set_output(conn: sqlite3.Connection, export_id: str, output_path: str) -> None:
-    conn.execute("UPDATE export_jobs SET output_path = ? WHERE id = ?", (output_path, export_id))
-    conn.commit()
-
-
 def set_progress(conn: sqlite3.Connection, export_id: str, percent: float) -> None:
     conn.execute("UPDATE export_jobs SET progress = ? WHERE id = ?", (percent, export_id))
     conn.commit()
@@ -96,10 +91,6 @@ def mark_failed(conn: sqlite3.Connection, export_id: str, error: str) -> None:
 
 def reset_stale_pending(conn: sqlite3.Connection) -> int:
     """启动清扫：崩溃残留的 pending 导出记为失败。
-
-    无服务运行即无导出在跑，故恒安全；已完成/已失败记录不动。
-    进度保留原值——与 JobStore.sweep_interrupted 对 jobs 的处理一致，两表不得互相矛盾。
-    认残留的依据就是 STATUS_PENDING：凡新建/复位重试都写回该值，故这里无需再认 'running'。
     """
     cursor = conn.execute(
         "UPDATE export_jobs SET status = ?, error = '服务中断' WHERE status = ?",
@@ -111,12 +102,6 @@ def reset_stale_pending(conn: sqlite3.Connection) -> int:
 
 def reset_for_retry(conn: sqlite3.Connection, export_id: str) -> bool:
     """重试前复位（CAS）：仅当仍为 failed 才清 error/产物路径、进度归零、回 pending。
-
-    复位到 STATUS_PENDING 而非引入 'running'：启动清扫 reset_stale_pending 正是按
-    该值认崩溃残留，重试中途再次崩溃时该记录仍会被正确复位。
-    WHERE 带 STATUS_FAILED 是为并发重试：两个 export.retry 同时通过"是否 failed"的
-    Python 检查时，只有一个能复位成功，另一个据返回值被判为不可重试，避免双双渲染进
-    同一文件。该 SQL 条件与 api/export.py 的比较读的是同一个常量，不会再各说各话。
     """
     cursor = conn.execute(
         "UPDATE export_jobs SET status = ?, error = NULL, output_path = NULL,"

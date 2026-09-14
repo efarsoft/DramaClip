@@ -1,8 +1,4 @@
 """高光综合排序（原案 4.3 简化版）：
-
-高光分 = 0.5×冲突分 + 0.3×音频能量 + 0.2×台词情绪密度
-画质维度（原案 γ）待 engines/analysis/quality.py（P1）后并入。
-产出排序后的高光片段列表（供前端看板与 W4 编排消费）。
 """
 
 from __future__ import annotations

@@ -1,13 +1,4 @@
 """角度选题：一个模式一次 LLM 调用，产出 K 条**卖点互异**的取材角度。
-
-规格 §4.3 定案「用户不能挑角度，角度归模型」，所以「K 条是不是 K 个不同卖点」
-完全取决于这一步问得够不够狠。本模块的职责有两半：把「互异」写成模型的硬约束，
-以及**在模型答不出互异时判不合格（抛）而不是凑数放行**——凑出来的 K 张卡里有几张
-是同一部片换个说法，正是 §4.3 那句「防 K 变成老虎机」要拦的东西。
-
-选题每模式一次、不是每条角度一次：规格 §4.4 的成本账按「每条方案 = 一次成稿 + N 次
-配音」记，选题是模式级的固定开销。一个 batch 的选题次数 = 该 batch 里不同模式的数量，
-由 narration_plans 的 batch_id + DISTINCT narration_mode 直接数出，不落库。
 """
 
 from __future__ import annotations
@@ -42,16 +33,6 @@ _SYSTEM_PROMPT = (
 
 class AngleBrief(BaseModel):
     """一条取材角度：界面卡片四要素里的三项（角度名/理由/钩子）+ 取材集。
-
-    第四项「取材集区间」由落库后的 episode_ids 与 plan_data.timeline 给出，不在此重复；
-    hook 只是模型的**声明**，卡片上展示的是成稿后的 plan_data.narration_texts[0].text
-    （实际说出口的那句），两者不必一致，故 hook 不落库。
-
-    **本类型也被规则类两模式复用**（`raw_clip` / `subtitle_flow`，见《定案四》与
-    Task 6 的 `_rule_variants`）：那两族的条数来自全剧 top-K 冲突窗、不经选题模型，
-    但它们同样需要"取材集 + 一个能进 `_plan_one` 的意图"这个形状，于是 `name`/`reason`/
-    `hook` 一律为空串、只填 `episode_numbers`。**`_sanitize` 不适用于它们**（它会因
-    空 name 抛错），构造方直接实例化。读这个类型时不要假设它一定出自 LLM。
     """
 
     name: str
@@ -62,9 +43,6 @@ class AngleBrief(BaseModel):
 
 def prompt_block(brief: AngleBrief) -> str:
     """卖点角度进成稿 prompt 的措辞。
-
-    copywriter 与 scriptwriter 两条成稿链共用这一段字：措辞分家会让同一个角度在
-    单集模式与跨集模式里被理解成两件事，而角度是本批次唯一的差异化来源。
     """
     return (
         f"\n本条片的取材角度：{brief.name}"
@@ -81,9 +59,6 @@ def _sanitize(
     excluded: list[str],
 ) -> list[AngleBrief]:
     """逐条验收；任何一条不合格即整批不合格（重试或抛），绝不拿残缺的凑够 K 条。
-
-    多答不算不合格：K 是用户的旋钮，取前 K 条即可。少答必须抛——悄悄把 K 降成 2
-    会让界面显示「这个模式只有 2 个卖点」，而真相是模型没答出来。
     """
     items = raw.get("angles") if isinstance(raw, dict) else None
     if not isinstance(items, list):
@@ -138,10 +113,6 @@ def select_angles(
     trace_dir: Path | None = None,
 ) -> list[AngleBrief]:
     """为一个模式选出 K 条互异角度；答不出互异就抛，不凑数。
-
-    **没有 `cross_episode` 这个形参**（2026-09-12 裁决后删掉的，别顺手加回来）：
-    规格 §1 的「跨集方案」是**每个模式**的定义性属性，不是某几个模式的开关。
-    一个恒为 True 的开关会把"其余模式一条片只吃一集"这句已经作废的话留在注释里。
     """
     if k < 1:
         raise ValueError(f"方案数 k 必须 ≥ 1，实得 {k}")

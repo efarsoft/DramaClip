@@ -1,8 +1,4 @@
 """切点安全抖动（Smart Jitter）：台词保护区避让 + 静音间隙抖动。
-
-保护区双路（W8 完整化）：
-- SRT 优先：源视频同名 .srt 的每行字幕扩展为禁区（docs/06-经验参数表 §1）；
-- 能量降级：无 SRT 时用第一层分析的 speech_zones。
 """
 
 from __future__ import annotations

@@ -1,10 +1,4 @@
 """硬字幕 OCR 通道：短剧自带人工校对字幕，是台词文本的视觉金标准。
-
-抽取流程：定位字幕带（每集前 4 个探针帧全帧检测，取台词文本密集高度带）→
-按 1fps 抽帧裁剪字幕带 → 逐帧识别 → 相邻同文本帧合并为字幕条。
-持续占据固定位置的横幅（免责声明等）在定位阶段排除，不进结果。
-
-依赖属 ml extras：rapidocr 懒加载，未安装时调用方降级为纯 ASR 路径。
 """
 
 from __future__ import annotations
@@ -91,8 +85,6 @@ def _probe_frames(
 
 def _pick_band(probes: list[FrameResult]) -> _Band | None:
     """定位台词字幕带：探针帧中出现最多的纵向位置簇，排除常驻横幅。
-
-    常驻横幅（免责声明等）特征 = 文本在多数探针帧中重复出现于同一位置。
     """
     if not probes:
         return None
@@ -158,8 +150,6 @@ def _sample_frames(video_path: Path, work_dir: Path, band: _Band) -> list[Path]:
 
 def _merge_runs(results: list[tuple[float, FrameResult]]) -> list[OcrSegment]:
     """相邻帧同文本合并为字幕条：时间取首末帧（前后补采样间隔），文本取最长。
-
-    帧内多行（两行字幕）按纵向位置序拼接为一条；坐标已在裁剪带内，无需再过滤。
     """
     frame_texts: list[tuple[float, str, float]] = []
     for t0, boxes in results:

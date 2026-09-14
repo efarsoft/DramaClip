@@ -1,8 +1,4 @@
 """全片解说模式（原案 6.5）：全程旁白覆盖（"X 分钟看完"），原声压低至背景。
-
-编排只产出画面结构与旁白槽位，文案一律由 narration.copywriter 生成（无模板兜底）；
-旁白时长在 TTS 合成后回填（机制同 intro/cross），段长随旁白实际时长伸缩。
-场景表带集身份（`casting.EpisodeScene`），故一条解说弧可以横跨多集。
 """
 
 from __future__ import annotations
@@ -35,9 +31,6 @@ def build_full(
     strategy: StrategySpec,
 ) -> PlanData:
     """全片解说编排：场景按叙事顺序全程覆盖，全部原声压低（ducked）。
-
-    `_slot_brief` 的位置语义在跨集之后仍然成立：位置是**这条解说弧**里的位置，
-    不是"第几集的第几场"。开篇/推进/高潮/收尾由弧内位次决定，弧本身可以横跨三集。
     """
     ranked = sorted(scenes, key=score_order)[:_MAX_SCENES]
     picked = sorted(ranked, key=episode_order)

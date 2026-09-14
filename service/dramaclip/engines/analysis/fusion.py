@@ -1,11 +1,4 @@
 """OCR×ASR 文本融合：时间窗聚合 → 序列对齐 → 冲突消解决策表。
-
-硬字幕是人工校对文本（视觉金标准），ASR 覆盖旁白/画外音/无字幕段。
-融合规则（docs/06-经验参数表 §7）：
-- 双通道一致 → 直接采用；
-- 不一致 → 默认信 OCR；仅当 ASR 字概率 ≥0.92 且 OCR 置信 <0.75 时翻案；
-- 仅 OCR 有（BGM 段/气声）→ OCR；仅 ASR 有（旁白/无字幕）→ ASR；
-- 双低置信 → 标记 review，进工作台人工复核。
 """
 
 from __future__ import annotations
@@ -34,9 +27,6 @@ def fuse(
     ocr_segments: list[OcrSegment],
 ) -> list[AsrSegment]:
     """融合主入口：返回与 asr_segments 同构的新段列表（text/source 已按决策表改写）。
-
-    OCR 条按「条中点落在段区间内」归属到唯一 ASR 段（防止相邻条跨段串文本）；
-    与 OCR 无交集的 ASR 段原样保留（source=None）。
     """
     if not ocr_segments:
         return asr_segments

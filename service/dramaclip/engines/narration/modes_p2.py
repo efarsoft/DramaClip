@@ -1,11 +1,4 @@
 """P2 模式编排（原案 6.10/6.11）：双人对谈式与角色内心独白式。
-
-两模式都基于「全程 TTS 旁白」骨架（同 full），差异在音色与文案视角：
-- dual_host_chat：双音色 A/B 交替对谈（主持人 x 嘉宾），原声压低；
-- inner_monologue：单一角色第一人称内心 OS，情绪更内收。
-配音用 edge 多音色（zh-CN-YunxiNeural 男 / zh-CN-XiaoyiNeural 女）；
-kokoro/IndexTTS-2 本地引擎接入后仅需替换 voice 参数与引擎工厂。
-场景表带集身份（`casting.EpisodeScene`），故一条对谈/独白弧可以横跨多集。
 """
 
 from __future__ import annotations

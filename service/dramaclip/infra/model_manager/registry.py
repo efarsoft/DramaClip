@@ -1,7 +1,4 @@
 """模型清单与状态解析（registry v2）。
-
-清单 = 引擎所需的已知模型（id/kind/repo/放置目录/档位与评级元数据）；
-状态 = placement 目录探测（installed / not_installed），手动放置即生效。
 """
 
 from __future__ import annotations

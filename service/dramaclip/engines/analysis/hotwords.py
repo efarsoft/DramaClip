@@ -1,8 +1,4 @@
 """热词挖掘：全剧 OCR 字幕条 → ASR hotwords 表（事前注入，专名错误率的主降手段）。
-
-短剧人物/设定/地名高度固定，字幕（人工校对）里反复出现的词就是 ASR 最容易
-写错的词。取词法：jieba 分词 → 长度≥2 的普通词/人名 → 频次排序取 TopN。
-纯词表输出，逗号分隔（faster-whisper hotwords 参数格式）。
 """
 
 from __future__ import annotations
