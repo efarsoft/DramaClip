@@ -40,6 +40,7 @@ def test_migrate_idempotent() -> None:
             "007_engine_configs.sql",
             "008_jobs_label_and_project_settings.sql",
             "009_ocr_segments.sql",
+            "010_plan_angles.sql",
         ]
         assert db.migrate(conn) == expected_migrations
         assert db.migrate(conn) == []  # 第二次全量跳过

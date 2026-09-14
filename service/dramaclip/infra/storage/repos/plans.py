@@ -9,7 +9,8 @@ from typing import Any
 from uuid import uuid4
 
 _COLUMNS = (
-    "id", "project_id", "narration_mode", "episode_ids", "plan_data", "status", "created_at"
+    "id", "project_id", "narration_mode", "episode_ids", "plan_data", "status", "created_at",
+    "angle", "angle_reason", "variant_index", "overlap_max", "batch_id",
 )
 
 
@@ -32,11 +33,24 @@ def create(
     plan_data: dict[str, Any],
     *,
     status: str = "ready",
+    angle: str = "",
+    angle_reason: str = "",
+    variant_index: int = 1,
+    overlap_max: float | None = None,
+    batch_id: str | None = None,
 ) -> dict[str, Any]:
+    """建一条方案行并原样返回（含五个角度字段）。
+
+    默认值与迁移 010 的列默认逐字对应，不是兼容垫片：raw_clip / subtitle_flow
+    这类无解说的模式确实没有角度可言，`overlap_max=None` 也确实表示「首条无兄弟、
+    无从比」，与 0.0（比过、完全不重叠）是两件事。
+    """
     plan_id = uuid4().hex
+    created_at = _now_ms()
     conn.execute(
         "INSERT INTO narration_plans (id, project_id, narration_mode, episode_ids, plan_data,"
-        " status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        " status, created_at, angle, angle_reason, variant_index, overlap_max, batch_id)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             plan_id,
             project_id,
@@ -44,20 +58,61 @@ def create(
             json.dumps(episode_ids),
             json.dumps(plan_data, ensure_ascii=False),
             status,
-            _now_ms(),
+            created_at,
+            angle,
+            angle_reason,
+            variant_index,
+            overlap_max,
+            batch_id,
         ),
     )
     conn.commit()
-    return {"id": plan_id, "project_id": project_id, "narration_mode": narration_mode,
-            "episode_ids": episode_ids, "plan_data": plan_data, "status": status,
-            "created_at": _now_ms()}
+    return {
+        "id": plan_id,
+        "project_id": project_id,
+        "narration_mode": narration_mode,
+        "episode_ids": episode_ids,
+        "plan_data": plan_data,
+        "status": status,
+        "created_at": created_at,
+        "angle": angle,
+        "angle_reason": angle_reason,
+        "variant_index": variant_index,
+        "overlap_max": overlap_max,
+        "batch_id": batch_id,
+    }
 
 
 def list_by_project(conn: sqlite3.Connection, project_id: str) -> list[dict[str, Any]]:
+    """项目全部方案，最近优先。
+
+    排序补 `created_at, id` 兜底，与 `infra/jobs.py::list_recent` 同一理由：
+    `created_at` 是毫秒精度，背靠背插入实测 2000/2000 撞同一个值，而并列时
+    单键排序的顺序由 SQLite 的扫描顺序决定——阶段③ 每次刷新可能跳行。
+    兜底之后顺序是**总序**（id 是 uuid4 hex，并列时按字典序升序），可复现。
+    组内顺序请用 `list_by_batch`（它按 (模式, 变体号) 排），不要依赖本函数的顺序。
+    """
     rows = conn.execute(
         f"SELECT {', '.join(_COLUMNS)} FROM narration_plans WHERE project_id = ?"
-        " ORDER BY created_at DESC",
+        " ORDER BY created_at DESC, id",
         (project_id,),
+    ).fetchall()
+    return [_row_to_dict(row) for row in rows]
+
+
+def list_by_batch(
+    conn: sqlite3.Connection, project_id: str, batch_id: str
+) -> list[dict[str, Any]]:
+    """一次 plan_variants 调用产出的整组方案，按 (模式, 变体号) 升序。
+
+    排序键带 narration_mode：一个 batch 通常覆盖多个模式，阶段③ 要按模式分组显示；
+    只按 variant_index 排会把不同模式的第 1 条混在一起。
+    """
+    rows = conn.execute(
+        f"SELECT {', '.join(_COLUMNS)} FROM narration_plans"
+        " WHERE project_id = ? AND batch_id = ?"
+        " ORDER BY narration_mode, variant_index",
+        (project_id, batch_id),
     ).fetchall()
     return [_row_to_dict(row) for row in rows]
 
