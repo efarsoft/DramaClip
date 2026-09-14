@@ -5,7 +5,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -207,6 +210,43 @@ def _assert_voiceable(plan: PlanData) -> None:
             )
 
 
+def _content_addressed_audio(
+    work_dir: Path, slot_id: str, text: str, voice: str, engine: str
+) -> Path:
+    """音频文件名内容寻址：影响成品的输入 (text, voice, engine) 全部进哈希。
+
+    槽位 id 按模式确定性生成（full-1…、intro-1、n0…），只作前缀便于溯源，
+    不再单独决定路径——`{id}.mp3` 会让同模式的两份方案必然互相覆盖，而
+    audio_path 随 plan_data 落库、export.retry 之后还按 stored path 渲染：
+    文件被覆盖等于旧方案的字幕配上新方案的旁白，无声出错。同名 ⟺ 同内容，
+    内容相同的两轮合成复用同一文件也就安全（缓存优先，docs/service/02 §6）。
+    """
+    digest = hashlib.sha1(
+        f"{text}|{voice}|{engine}".encode(), usedforsecurity=False
+    ).hexdigest()[:12]
+    return work_dir / f"{slot_id}-{digest}.mp3"
+
+
+def _synthesize_into(
+    engine: tts_base.TtsEngine, text: str, voice: str, final_path: Path
+) -> None:
+    """缓存优先 + 暂存落位：命中即复用，未命中先写临时名、成功后原子搬进最终路径。
+
+    临时名把两种脏产物挡在最终路径之外：合成失败留下的半截 mp3（当场清掉，
+    否则下一轮会把它当缓存命中）与并发写同名文件（`_run_generation_parallel`
+    双线程、produce 与 generate_plans 重叠）——os.replace 原子换入，读者
+    永远只见完整文件。
+    """
+    if final_path.is_file() and final_path.stat().st_size > 0:
+        return
+    staging = final_path.with_name(f"{final_path.stem}.{uuid.uuid4().hex}.part")
+    try:
+        engine.synthesize(text, voice, staging)
+        os.replace(staging, final_path)
+    finally:
+        staging.unlink(missing_ok=True)
+
+
 def synthesize_narration_texts(
     plan: PlanData,
     settings: dict[str, str],
@@ -217,19 +257,22 @@ def synthesize_narration_texts(
 
     降级禁止（规格 §3.3.1）：任一段没有合格音频，整条方案失败——
     半条旁白的片子不可交付。上游契约由 `_assert_voiceable` 先一次性验完，
-    本函数只管合成与回填。
+    本函数只管合成与回填。音频路径由本层内容寻址（见 `_content_addressed_audio`），
+    调用方传哪个目录都不可能让两份方案踩到同一个文件。
     """
     _assert_voiceable(plan)
     if not plan.narration_texts:
         return plan
-    engine = create_tts(settings.get("tts.engine", "edge"), models_dir)
+    engine_name = settings.get("tts.engine", "edge")
+    engine = create_tts(engine_name, models_dir)
     default_voice = settings.get("tts.voice", "")
     voiced: dict[str, tuple[str, str, float]] = {}  # id → (audio_path, text, duration)
     for item in plan.narration_texts:
         # 段级 voice 优先（双人对谈的双音色），缺省用全局设置
         voice = item.voice or default_voice
+        audio_path = _content_addressed_audio(work_dir, item.id, item.text, voice, engine_name)
         try:
-            audio_path = engine.synthesize(item.text, voice, work_dir / f"{item.id}.mp3")
+            _synthesize_into(engine, item.text, voice, audio_path)
             duration = tts_base.audio_duration_s(audio_path)
         except Exception as exc:  # noqa: BLE001 - 任何配音失败都是方案失败，原因要原样带出
             raise RuntimeError(

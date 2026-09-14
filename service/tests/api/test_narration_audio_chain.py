@@ -35,13 +35,18 @@ _TTS_DURATION_S = 1.25
 
 
 class _StubTts:
-    """每段旁白落成各自的 mp3（文件名即文案 id）；时长探测已被打桩。"""
+    """每段旁白落成各自的 mp3，文件内容即文案；时长探测已被打桩。
+
+    内容寻址后文件名不再恰为 `{id}.mp3`（见 pipeline._content_addressed_audio），
+    「哪段挂了谁的音」改由文件内容直接证明——比文件名更强：文件名对而内容错
+    （覆盖/串音）也能被抓住。
+    """
 
     def synthesize(self, text: str, voice: str | None, out_path: Path) -> Path:
         if text.strip() == "":  # 真引擎对空文案会失败（ffprobe check=True）：替身必须一样
             raise RuntimeError("TTS 空文案：槽位未被语言层填充")
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(b"")
+        out_path.write_bytes(text.encode("utf-8"))
         return out_path
 
 
@@ -164,8 +169,13 @@ def test_full_narration_every_segment_mixes_its_own_narration(
         assert "volume=0.12" in joined, "ducked 段原声应压到 12% 衬底"
         assert segment.subtitle_text, "解说字幕未回填 → 成片有音无字"
         tts_input = _second_input(cmd)
-        assert tts_input.endswith(f"{segment.narration_id}.mp3"), (
-            f"第 {index} 段挂到了 {Path(tts_input).name} —— 旁白取音按位置错位了"
+        # 内容寻址后文件名是 `{id}-{hash}.mp3`：id 前缀仍在，但「取对音」的铁证是内容——
+        # 该段混进去的音频必须恰好装着该段解说字幕的文案（按 narration_id 配对，不按位置）。
+        assert Path(tts_input).name.startswith(f"{segment.narration_id}-"), (
+            f"第 {index} 段挂到了 {Path(tts_input).name} —— 旁白取音没按 narration_id 走"
+        )
+        assert Path(tts_input).read_text(encoding="utf-8") == segment.subtitle_text, (
+            f"第 {index} 段的旁白音频装着别人的文案 —— 段↔音按位置错位或被覆盖"
         )
     # 每段只多挂一路输入（旁白），且各段互不相同
     assert len({_second_input(cmd) for cmd in commands}) == len(commands)
@@ -180,9 +190,12 @@ def test_full_narration_map_covers_every_index(
 
     mapping = export_api.tts_audio_by_segment(plan_data)
     assert set(mapping) == set(range(len(plan_data.timeline)))
-    assert [Path(mapping[i]).name for i in range(len(plan_data.timeline))] == [
-        f"{segment.narration_id}.mp3" for segment in plan_data.timeline
-    ]
+    texts_by_id = {text.id: text for text in plan_data.narration_texts}
+    for index, segment in enumerate(plan_data.timeline):
+        # 映射必须等于「按 narration_id 查文案表」拿到的那条 audio_path（绝不按位置），
+        # 且文件内容就是该段字幕的文案——两条合起来才是「id 取音」的完整证明。
+        assert mapping[index] == texts_by_id[str(segment.narration_id)].audio_path
+        assert Path(mapping[index]).read_text(encoding="utf-8") == segment.subtitle_text
 
 
 def test_failed_tts_fails_the_plan(
