@@ -166,8 +166,13 @@ async function main() {
   for (const mode of modes) {
     const plan = byMode.get(mode);
     if (plan === undefined) continue;
-    const { job_id: exportJobId } = await rpc('export.submit', { plan_ids: [plan.id] });
-    const result = await waitJob(exportJobId, 600000);
+    const submitted = await rpc('export.submit', { plan_ids: [plan.id] });
+    if (submitted.rejected.length > 0) {
+      console.log(`[e2e] 导出 ${mode}: 拒绝 —— ${submitted.rejected[0].reason}`);
+      failures += 1;
+      continue;
+    }
+    const result = await waitJob(submitted.exports[0].job_id, 600000);
     console.log(`[e2e] 导出 ${mode}: ${result.status}`);
   }
 
