@@ -4,18 +4,52 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Any
 
+import pytest
+
+from dramaclip.engines.narration import angles
 from dramaclip.infra.storage.repos import plans as plans_repo
-from tests.api.test_plan_variants import Harness, _seed_project_with_analysis
+from tests.api.test_plan_variants import _LLM_SETTINGS, Harness, _seed_project_with_analysis
 
 _SERVICE_ROOT = Path(__file__).resolve().parents[2] / "dramaclip"
 
 
+def _stub_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """单集种子的选题替身：共享替身固定产出两集角度，这里给唯一合法集。"""
+
+    class _Llm:
+        def __init__(self, _config: Any, timeout_s: float = 60.0) -> None:
+            self.timeout_s = timeout_s
+
+        def chat_json(self, system: str, user: str) -> dict[str, Any]:
+            if "选题操盘手" in system:  # angles._SYSTEM_PROMPT
+                return {
+                    "angles": [
+                        {
+                            "name": "单集角度",
+                            "reason": "全剧仅此一集",
+                            "hook": "开场钩子",
+                            "episode_numbers": [1],
+                        }
+                    ]
+                }
+            return {}
+
+    monkeypatch.setattr(angles, "LlmClient", _Llm)
+
+
 def test_export_output_lands_under_data_dir(
-    memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
+    # 统一选题后 raw_clip 产出同样要求 LLM（57ac5a1）；替身给单集合法角度
+    harness.context.settings.update(_LLM_SETTINGS)
+    _stub_llm(monkeypatch)
     produce = harness.rpc(
         "narration.plan_variants",
         {"project_id": project_id, "modes": ["raw_clip"], "k": 1},
