@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 from collections.abc import Callable
@@ -328,7 +329,8 @@ def render_export(
         )
     except (ValueError, OSError):
         pass  # 元信息回填失败不影响导出成功
-    _extract_cover(context, export_id, out_path)
+    with contextlib.suppress(OSError, ValueError):
+        _extract_cover(context, export_id, out_path)  # 封面失败不影响导出成功
     return out_path
 
 
