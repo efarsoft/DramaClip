@@ -11,6 +11,7 @@ export function Rail() {
   const groups: ReactNode[] = [];
   for (let gi = 0; gi < NAV_GROUPS.length; gi++) {
     const group = NAV_GROUPS[gi];
+    if (group === undefined) continue;
     if (gi > 0) {
       groups.push(
         <div
