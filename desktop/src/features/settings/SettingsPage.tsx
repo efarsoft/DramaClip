@@ -52,7 +52,7 @@ export function SettingsPage() {
 
   if (draft === null || original === null) {
     return (
-      <PageShell>
+      <PageShell narrow>
         <PageSection>加载中…</PageSection>
       </PageShell>
     );
@@ -130,7 +130,7 @@ function SettingsBody({
   return (
     <>
       {buildSections().map((section) => (
-        <PageSection key={section.id} title={`${section.icon} ${section.title}`}>
+        <PageSection key={section.id} title={section.title}>
           {section.fields.map((field, index, all) => (
             <FieldRow
               key={field.key}

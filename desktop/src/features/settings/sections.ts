@@ -23,14 +23,12 @@ export interface FieldSpec {
 
 export interface SectionSpec {
   readonly id: string;
-  readonly icon: string;
   readonly title: string;
   readonly fields: readonly FieldSpec[];
 }
 
 const ANALYSIS_SECTION: SectionSpec = {
   id: 'analysis',
-  icon: '🎯',
   title: '智能分析',
   fields: [
     {
@@ -53,7 +51,6 @@ const ANALYSIS_SECTION: SectionSpec = {
 
 const EXPORT_SECTION: SectionSpec = {
   id: 'export',
-  icon: '🎬',
   title: '出片',
   fields: [
     {
@@ -92,7 +89,6 @@ const EXPORT_SECTION: SectionSpec = {
 
 const DOWNLOAD_SECTION: SectionSpec = {
   id: 'download',
-  icon: '⬇️',
   title: '下载加速',
   fields: [
     {
@@ -113,7 +109,6 @@ const DOWNLOAD_SECTION: SectionSpec = {
 
 const HARDWARE_SECTION: SectionSpec = {
   id: 'hardware',
-  icon: '⚙️',
   title: '硬件',
   fields: [
     {

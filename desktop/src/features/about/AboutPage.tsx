@@ -19,7 +19,7 @@ const COMPLIANCE =
 
 export function AboutPage(): ReactElement {
   return (
-    <PageShell>
+    <PageShell narrow>
       <PageHeader title="关于" desc="项目信息 · 版本 · 本地数据 · 许可与声明" />
       <ProjectBlock />
       <VersionBlock />

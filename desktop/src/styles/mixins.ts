@@ -63,19 +63,18 @@ export function cardBody(dense = false): CSSProperties {
 export function fieldRow(): CSSProperties {
   return {
     display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spaceXl,
+    alignItems: 'flex-start',
+    gap: tokens.space2xl,
     padding: `${String(tokens.spaceMd)} 0`,
-    borderBottom: `1px solid ${tokens.borderSecondary}`,
   };
 }
 
 export function fieldLabelCol(): CSSProperties {
-  return { width: 200, flexShrink: 0 };
+  return { width: 250, flexShrink: 0, paddingTop: 6 };
 }
 
 export function fieldControlCol(): CSSProperties {
-  return { width: 280, flexShrink: 0 };
+  return { width: 320, flexShrink: 0 };
 }
 
 /** 通用列表行（素材/能力/出片记录同构）。 */
