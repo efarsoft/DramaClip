@@ -36,6 +36,7 @@ from typing import Any
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "service"))
 
+from dramaclip.api import export as export_api
 from dramaclip.api import narration as narration_api
 from dramaclip.api.context import AppContext
 from dramaclip.engines.analysis.runtime import AnalysisRuntime
@@ -455,14 +456,30 @@ def main() -> int:
         warns_before = LOUDNESS_WARNS.count
         router = Router()
         narration_api.register(router, ctx)
+        export_api.register(router, ctx)
         started = time.time()
-        resp = router.dispatch(RpcRequest(id=mode, method="narration.produce",
-                                          params={"project_id": project_id, "modes": [mode]}))
+        resp = router.dispatch(RpcRequest(id=mode, method="narration.plan_variants",
+                                          params={"project_id": project_id, "modes": [mode], "k": 1}))
         if resp.error is not None:
             failures.append(f"{mode}: RPC 失败 {resp.error.message}")
             rows.append({"mode": mode, "status": "rpc-error", "error": resp.error.message})
             continue
-        job = wait_job(ctx.job_store, str(resp.result["job_id"]), args.job_timeout)
+        plan_job = wait_job(ctx.job_store, str(resp.result["job_id"]), args.job_timeout)
+        if plan_job["status"] != "completed":
+            failures.append(f"{mode}: 规划失败（{plan_job['status']} · {plan_job.get('error')}）")
+            rows.append({"mode": mode, "status": "plan-error", "error": plan_job.get("error")})
+            continue
+        plan_row = ctx.conn.execute(
+            "SELECT id FROM narration_plans WHERE project_id = ? AND narration_mode = ?"
+            " ORDER BY created_at DESC LIMIT 1", (project_id, mode)
+        ).fetchone()
+        resp = router.dispatch(RpcRequest(id=mode, method="export.submit",
+                                          params={"plan_ids": [plan_row[0]]}))
+        if resp.error is not None:
+            failures.append(f"{mode}: submit 失败 {resp.error.message}")
+            rows.append({"mode": mode, "status": "submit-error", "error": resp.error.message})
+            continue
+        job = wait_job(ctx.job_store, str(resp.result["exports"][0]["job_id"]), args.job_timeout)
         rec: dict[str, Any] = {"mode": mode, "status": job["status"],
                                "elapsed_s": round(time.time() - started, 1),
                                "loudness_retry_hints": LOUDNESS_WARNS.count - warns_before}

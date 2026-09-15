@@ -149,9 +149,10 @@ async function main() {
   }
   if (analysis !== null) console.log(`[e2e] 分析: ${analysis.status}`);
 
-  const { job_id: genJob } = await rpc('narration.generate_plans', {
+  const { job_id: genJob } = await rpc('narration.plan_variants', {
     project_id: project.id,
     modes,
+    k: 1,
   });
   const gen = await waitJob(genJob, 1800000);
   console.log(`[e2e] 编排: ${gen.status}`);
@@ -165,7 +166,7 @@ async function main() {
   for (const mode of modes) {
     const plan = byMode.get(mode);
     if (plan === undefined) continue;
-    const { job_id: exportJobId } = await rpc('export.start', { plan_id: plan.id });
+    const { job_id: exportJobId } = await rpc('export.submit', { plan_ids: [plan.id] });
     const result = await waitJob(exportJobId, 600000);
     console.log(`[e2e] 导出 ${mode}: ${result.status}`);
   }
