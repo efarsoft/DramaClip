@@ -16,20 +16,26 @@ export function HomePage() {
   return <HomeContent />;
 }
 
-function HomeContent() {
-  const navigate = useNavigate();
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [allProjects, setAllProjects] = useState<Project[]>([]);
-  const [models, setModels] = useState<ModelInfo[] | null>(null);
-  const [llmBaseUrl, setLlmBaseUrl] = useState('');
-  const [llmModel, setLlmModel] = useState('');
-  const [ttsEngine, setTtsEngine] = useState('edge');
-  const [works, setWorks] = useState<WorkItem[]>([]);
-  const [failedJobs, setFailedJobs] = useState<JobInfo[]>([]);
+interface HomeData {
+  summary: DashboardSummary | null;
+  allProjects: Project[];
+  models: ModelInfo[] | null;
+  llmBaseUrl: string;
+  llmModel: string;
+  ttsEngine: string;
+  works: WorkItem[];
+  failedJobs: JobInfo[];
+}
+
+function useHomeData(): HomeData {
+  const [data, setData] = useState<HomeData>({
+    summary: null, allProjects: [], models: null, llmBaseUrl: '',
+    llmModel: '', ttsEngine: 'edge', works: [], failedJobs: [],
+  });
   const serviceState = useUiStore((state) => state.serviceState);
 
   const load = useCallback(async () => {
-    const [summaryData, projectList, modelList, settings, workItems, jobs] = await Promise.all([
+    const [summary, allProjects, models, settings, works, jobs] = await Promise.all([
       projectApi.dashboardSummary(),
       projectApi.list(),
       rpc<ModelInfo[]>('models.list').catch(() => null),
@@ -37,20 +43,31 @@ function HomeContent() {
       listWorks(6).catch((): WorkItem[] => []),
       jobsApi.list().catch((): JobInfo[] => []),
     ]);
-    setSummary(summaryData);
-    setAllProjects(projectList);
-    setModels(modelList);
-    setLlmBaseUrl(settings?.['llm.base_url'] ?? '');
-    setLlmModel(settings?.['llm.model'] ?? '');
-    setTtsEngine(settings?.['tts.engine'] ?? 'edge');
-    setWorks(workItems);
-    setFailedJobs(jobs.filter((job) => job.status === 'failed'));
+    setData({
+      summary,
+      allProjects,
+      models,
+      llmBaseUrl: settings?.['llm.base_url'] ?? '',
+      llmModel: settings?.['llm.model'] ?? '',
+      ttsEngine: settings?.['tts.engine'] ?? 'edge',
+      works,
+      failedJobs: jobs.filter((job) => job.status === 'failed'),
+    });
   }, []);
 
   // 服务就绪前发起的 RPC 会失败；ready 后重载一次（修复启动时序竞争）
   useEffect(() => {
     if (serviceState === 'ready') void load();
   }, [load, serviceState]);
+
+  return data;
+}
+
+function HomeContent() {
+  const navigate = useNavigate();
+  const { summary, allProjects, models, llmBaseUrl, llmModel, ttsEngine, works, failedJobs } =
+    useHomeData();
+  const serviceState = useUiStore((state) => state.serviceState);
 
   const dramas = useMemo(() => buildDramas(allProjects, works), [allProjects, works]);
   const todos = useMemo(

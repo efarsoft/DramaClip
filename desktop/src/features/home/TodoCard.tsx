@@ -31,7 +31,7 @@ export function TodoCard({ items }: { items: TodoItem[] }) {
                   size="small"
                   danger={item.severity === 'error'}
                   onClick={() => {
-                    if (item.action?.kind === 'navigate' && item.action.path) navigate(item.action.path);
+                    if (item.action?.kind === 'navigate' && item.action.path) void navigate(item.action.path);
                     else void restartService();
                   }}
                 >

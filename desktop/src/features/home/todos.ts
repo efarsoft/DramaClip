@@ -100,7 +100,7 @@ export function buildTodos(input: TodoInput): TodoItem[] {
     if (age < STALLED_DAYS) continue;
     items.push({
       key: `stalled-${drama.id}`,
-      text: `${drama.name}：${drama.episodeCount} 集已就位 ${Math.floor(age)} 天，还没有成品`,
+      text: `${drama.name}：${String(drama.episodeCount)} 集已就位 ${String(Math.floor(age))} 天，还没有成品`,
       severity: 'info',
       action: { kind: 'navigate', label: '去出片', path: `/projects/${drama.id}/produce` },
     });
@@ -119,7 +119,7 @@ function capStalled(items: TodoItem[]): TodoItem[] {
   const rest = items.filter((item) => !stalled.includes(item));
   const last = kept[kept.length - 1];
   if (last !== undefined) {
-    rest.push({ ...last, text: `${last.text}（另有 ${overflow} 部同样停滞）` });
+    rest.push({ ...last, text: `${last.text}（另有 ${String(overflow)} 部同样停滞）` });
   }
   return rest;
 }
