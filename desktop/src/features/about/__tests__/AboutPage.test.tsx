@@ -1,6 +1,5 @@
-/** 关于覆盖层（规格 §4.8）：内容四块 + Esc/遮罩关闭 + 不自动弹出。 */
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+/** 关于独立页面：内容分区齐全、版本取数、「打开」入口渲染。 */
+import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../services/client', () => ({
@@ -16,42 +15,24 @@ import { AboutPage } from '../AboutPage';
 
 afterEach(cleanup);
 
-function LocationProbe(): React.ReactElement {
-  const location = useLocation();
-  return <span data-testid="location">{location.pathname}</span>;
-}
-
-function renderAbout() {
-  render(
-    <MemoryRouter initialEntries={['/about']}>
-      <Routes>
-        <Route path="/about" element={<AboutPage />} />
-        <Route path="*" element={<LocationProbe />} />
-      </Routes>
-    </MemoryRouter>,
-  );
-}
-
 describe('AboutPage', () => {
-  it('四块信息齐全：版本/本地数据/开源许可/授权声明', () => {
-    renderAbout();
-    for (const text of ['版本', '本地数据', '开源许可', '授权与合规声明', '成品目录']) {
+  it('五个分区齐全：项目信息/版本/本地数据/开源许可/授权声明', () => {
+    render(<AboutPage />);
+    for (const text of [
+      '项目信息', '版本', '本地数据', '开源许可', '授权与合规声明',
+      'DramaClip', '成品目录', '日志（含 LLM 留痕）',
+    ]) {
       expect(screen.getByText(text), `缺 ${text}`).toBeTruthy();
     }
+  });
+
+  it('本地数据四行各带「打开」入口', () => {
+    render(<AboutPage />);
     expect(screen.getAllByText('打开')).toHaveLength(4);
   });
 
-  it('点遮罩关闭并回到首页（深链 /about 的关闭落点）', async () => {
-    renderAbout();
-    screen.getByRole('presentation').click();
-    await waitFor(() => {
-      expect(screen.getByTestId('location').textContent).toBe('/');
-    });
-  });
-
-  it('内容卡片点击不冒泡关闭（点「打开」等控件不得误关）', () => {
-    renderAbout();
-    screen.getByText('DramaClip').click();
-    expect(screen.getByRole('presentation')).toBeTruthy();
+  it('版权行在页尾', () => {
+    render(<AboutPage />);
+    expect(screen.getByText(/© 2026 DramaClip/)).toBeTruthy();
   });
 });
