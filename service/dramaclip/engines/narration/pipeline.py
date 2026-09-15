@@ -207,7 +207,9 @@ def _synthesize_into(
     """
     if final_path.is_file() and final_path.stat().st_size > 0:
         return
-    staging = final_path.with_name(f"{final_path.stem}.{uuid.uuid4().hex}.part")
+    # uuid 插进主干、保留最终扩展名：soundfile/edge 都靠扩展名推断音频格式，
+    # 以 .part 结尾会让 sf.write 直接抛 TypeError。
+    staging = final_path.with_name(f"{final_path.stem}.{uuid.uuid4().hex}{final_path.suffix}")
     try:
         engine.synthesize(text, voice, staging)
         os.replace(staging, final_path)
