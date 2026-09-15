@@ -1,5 +1,4 @@
-"""OpenAI 兼容 LLM 客户端（ADR-005）：stdlib urllib 实现，零第三方依赖。
-"""
+"""OpenAI 兼容 LLM 客户端（ADR-005）：stdlib urllib 实现，零第三方依赖。"""
 
 from __future__ import annotations
 
@@ -12,6 +11,9 @@ from dataclasses import dataclass
 from typing import Any
 
 _REQUEST_TIMEOUT_S = 60
+_429_BACKOFF = [30, 60, 120]
+
+logger = logging.getLogger(__name__)
 
 
 class LlmUnavailable(Exception):
@@ -51,7 +53,6 @@ class LlmClient:
         return self._config.model
 
     def chat_json(self, system: str, user: str) -> dict[str, Any] | list[Any]:
-        """请求模型返回 JSON 对象/数组；解析失败或 HTTP 错误抛 LlmUnavailable。"""
         if not self._config.configured:
             raise LlmUnavailable("LLM 未配置（需要 base_url 与 model）")
         payload = {
@@ -66,52 +67,52 @@ class LlmClient:
         return parse_json_blob(content)
 
     def ping(self) -> float:
-        """连通性探测：max_tokens=1 最小往返，返回耗时秒；异常抛 LlmUnavailable。"""
         start = time.monotonic()
-        self._post(
-            {
-                "model": self._config.model,
-                "messages": [{"role": "user", "content": "ping"}],
-                "max_tokens": 1,
-            }
-        )
+        self._post({
+            "model": self._config.model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1,
+        })
         return time.monotonic() - start
 
     def _post(self, payload: dict) -> str:  # type: ignore[type-arg]
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if self._config.api_key:
             headers["Authorization"] = f"Bearer {self._config.api_key}"
-        request = urllib.request.Request(
-            f"{self._config.base_url}/chat/completions",
-            data=json.dumps(payload).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
-        max_retries = 3
-        for attempt in range(max_retries):
+        body = self._urlopen_with_429_backoff(headers, json.dumps(payload).encode("utf-8"))
+        try:
+            return str(body["choices"][0]["message"]["content"])
+        except (KeyError, IndexError, TypeError) as exc:
+            raise LlmUnavailable(f"LLM 响应格式异常: {exc}") from exc
+
+    def _urlopen_with_429_backoff(
+        self, headers: dict[str, str], data: bytes
+    ) -> dict[str, Any]:
+        for attempt, wait in enumerate(_429_BACKOFF):
+            req = urllib.request.Request(
+                f"{self._config.base_url}/chat/completions",
+                data=data,
+                headers=headers,
+                method="POST",
+            )
             try:
-                with urllib.request.urlopen(request, timeout=self._timeout_s) as response:
-                    body = json.loads(response.read().decode("utf-8"))
-                break
+                with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:
+                    raw = json.loads(resp.read().decode("utf-8"))
+                    return dict(raw)
             except urllib.error.HTTPError as exc:
-                if exc.code == 429 and attempt < max_retries - 1:
-                    wait = 5 * (attempt + 1)
-                    logging.getLogger(__name__).warning(
-                        "LLM 429 限流，%ds 后重试 (%d/%d)", wait, attempt + 1, max_retries
+                if exc.code == 429 and attempt < len(_429_BACKOFF) - 1:
+                    logger.warning(
+                        "LLM 429 限流，%ds 后重试 (%d/%d)", wait, attempt + 1, len(_429_BACKOFF)
                     )
                     time.sleep(wait)
                     continue
                 raise LlmUnavailable(f"LLM 请求失败: {exc}") from exc
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
                 raise LlmUnavailable(f"LLM 请求失败: {exc}") from exc
-        try:
-            return str(body["choices"][0]["message"]["content"])
-        except (KeyError, IndexError, TypeError) as exc:
-            raise LlmUnavailable(f"LLM 响应格式异常: {exc}") from exc
+        raise LlmUnavailable("LLM 请求失败: 重试耗尽")
 
 
 def parse_json_blob(content: str) -> dict[str, Any] | list[Any]:
-    """从模型回复中提取 JSON（容忍 markdown 围栏与前后缀文本）。"""
     text = content.strip()
     for candidate in _json_candidates(text):
         try:

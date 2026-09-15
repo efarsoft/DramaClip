@@ -584,7 +584,7 @@ def test_one_mode_failure_does_not_kill_other_modes(
     plans = plans_repo.list_by_batch(memory_db, project_id, str(result["batch_id"]))
     assert {row["narration_mode"] for row in plans} == {"raw_clip"}, "另一个模式被牵连了"
     assert len(plans) == 3
-    assert all(row["angle"] == "" for row in plans), "规则类没有模型选的卖点角度"
+    assert all(row["angle"] for row in plans), "统一选题后规则类也有角度名"
 
 
 def test_rejected_angle_does_not_pay_for_copy(

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -317,6 +318,8 @@ def _run_plan_variants(
                 context.job_store.set_progress(
                     job_id, round(done_count / total * 100, 1), tag
                 )
+                # 模式间间隔：九模式同时发选题会触发 QPS 上限
+                time.sleep(3)
 
         if cancel_event.is_set():
             context.job_store.mark_cancelled(job_id)
