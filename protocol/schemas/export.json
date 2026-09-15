@@ -78,6 +78,9 @@
         },
         "completed_at": {
           "type": "integer"
+        },
+        "cover_path": {
+          "type": "string"
         }
       }
     }
@@ -161,6 +164,25 @@
         "type": "array",
         "items": {
           "$ref": "#/x-models/WorkItem"
+        }
+      }
+    },
+    {
+      "name": "export.ensure_covers",
+      "summary": "作品库逐片封面补拍（幂等）：只处理已完成且无封面的成片",
+      "params": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean" },
+          "generated": { "type": "integer" }
         }
       }
     }

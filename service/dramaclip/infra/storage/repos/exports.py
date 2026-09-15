@@ -20,6 +20,7 @@ _COLUMNS = (
     "size_bytes",
     "created_at",
     "completed_at",
+    "cover_path",
 )
 
 
@@ -125,7 +126,7 @@ def list_completed_works(conn: sqlite3.Connection, limit: int = 60) -> list[dict
     """跨项目已完成成片（作品库），按完成时间倒序并附带项目名。"""
     rows = conn.execute(
         "SELECT e.id, e.project_id, p.name AS project_name, e.narration_mode, e.output_path,"
-        " e.duration_s, e.size_bytes, e.completed_at"
+        " e.duration_s, e.size_bytes, e.completed_at, e.cover_path"
         " FROM export_jobs e JOIN projects p ON p.id = e.project_id"
         " WHERE e.status = ? AND e.output_path IS NOT NULL"
         " ORDER BY COALESCE(e.completed_at, e.created_at) DESC LIMIT ?",
@@ -140,8 +141,28 @@ def list_completed_works(conn: sqlite3.Connection, limit: int = 60) -> list[dict
         "duration_s",
         "size_bytes",
         "completed_at",
+        "cover_path",
     )
     return [dict(zip(keys, row, strict=True)) for row in rows]
+
+
+def set_cover(conn: sqlite3.Connection, export_id: str, cover_path: str) -> None:
+    conn.execute(
+        "UPDATE export_jobs SET cover_path = ? WHERE id = ?", (cover_path, export_id)
+    )
+    conn.commit()
+
+
+def list_missing_covers(conn: sqlite3.Connection, limit: int = 200) -> list[dict[str, Any]]:
+    """已完成但封面缺失的成片：ensure_covers 的补拍队列。"""
+    rows = conn.execute(
+        "SELECT id, output_path FROM export_jobs"
+        " WHERE status = ? AND output_path IS NOT NULL"
+        " AND (cover_path IS NULL OR cover_path = '')"
+        " ORDER BY COALESCE(completed_at, created_at) DESC LIMIT ?",
+        (STATUS_COMPLETED, limit),
+    ).fetchall()
+    return [dict(zip(("id", "output_path"), row, strict=True)) for row in rows]
 
 
 def get(conn: sqlite3.Connection, export_id: str) -> dict[str, Any] | None:

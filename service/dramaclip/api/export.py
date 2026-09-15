@@ -16,6 +16,7 @@ from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle import presets as subtitle_presets
 from dramaclip.engines.subtitle.ass_generator import build_ass
 from dramaclip.infra import config
+from dramaclip.infra.ffmpeg import cover as ffmpeg_cover
 from dramaclip.infra.ffmpeg import probe
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -46,6 +47,7 @@ def register(router: Router, context: AppContext) -> None:
     router.register("export.retry", lambda params: retry(context, params))
     router.register("export.list", lambda params: list_exports(context, params))
     router.register("export.list_works", lambda params: list_works(context, params))
+    router.register("export.ensure_covers", lambda params: ensure_covers(context, params))
 
 
 @dataclass(frozen=True)
@@ -189,6 +191,34 @@ def list_exports(context: AppContext, params: dict[str, Any]) -> list[dict[str, 
     return exports_repo.list_by_project(context.conn, str(params.get("project_id", "")))
 
 
+def _extract_cover(context: AppContext, export_id: str, out_path: Path) -> None:
+    """成品逐片钩帧：失败静默（封面缺失退化为占位图，不影响导出成功）。"""
+    covers_dir = context.data_dir / "covers" / "exports"
+    covers_dir.mkdir(parents=True, exist_ok=True)
+    cover_path = covers_dir / f"{export_id}.jpg"
+    if cover_path.is_file():
+        return
+    if ffmpeg_cover.extract_cover(out_path, cover_path):
+        exports_repo.set_cover(context.conn, export_id, str(cover_path))
+
+
+def ensure_covers(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """补拍历史成片的封面（幂等）：只处理已完成且 cover_path 为空的记录。"""
+    limit = max(min(int(params.get("limit", 200)), 500), 1)
+    generated = 0
+    for row in exports_repo.list_missing_covers(context.conn, limit):
+        out_path = Path(str(row["output_path"]))
+        if not out_path.is_file():
+            continue
+        covers_dir = context.data_dir / "covers" / "exports"
+        covers_dir.mkdir(parents=True, exist_ok=True)
+        cover_path = covers_dir / f"{row['id']}.jpg"
+        if ffmpeg_cover.extract_cover(out_path, cover_path):
+            exports_repo.set_cover(context.conn, str(row["id"]), str(cover_path))
+            generated += 1
+    return {"ok": True, "generated": generated}
+
+
 def list_works(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:
     """作品库：跨项目已完成成片（附项目名），limit 可调。"""
     limit = int(params.get("limit", 60))
@@ -298,6 +328,7 @@ def render_export(
         )
     except (ValueError, OSError):
         pass  # 元信息回填失败不影响导出成功
+    _extract_cover(context, export_id, out_path)
     return out_path
 
 

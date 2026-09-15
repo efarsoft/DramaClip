@@ -6,6 +6,7 @@
 import { useNavigate } from 'react-router-dom';
 import type { WorkItem } from '@dramaclip/protocol';
 import { PageSection } from '../../components/layout/PageKit';
+import { mediaUrl } from '../../services/client';
 import { MODE_INFO } from '../../components/modeMeta';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
@@ -70,7 +71,8 @@ function WorkRow({ work, onClick }: { work: WorkItem; onClick: () => void }): Re
       onClick={onClick}
       style={{
         ...mixins.listRow(),
-        padding: `${String(tokens.spaceMd)} ${String(tokens.spaceLg)}`,
+        padding: `${String(tokens.spaceSm)} ${String(tokens.spaceLg)}`,
+        gap: tokens.spaceMd,
         cursor: 'pointer',
       }}
       onMouseEnter={(event) => {
@@ -80,6 +82,30 @@ function WorkRow({ work, onClick }: { work: WorkItem; onClick: () => void }): Re
         event.currentTarget.style.background = 'transparent';
       }}
     >
+      <span style={{ position: 'relative', flexShrink: 0, width: 56, height: 32, borderRadius: 4, overflow: 'hidden' }}>
+        {work.cover_path ? (
+          <img
+            src={mediaUrl(work.cover_path)}
+            alt=""
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        ) : (
+          <span
+            style={{
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: tokens.accentSoft,
+              color: tokens.colorPrimary,
+              fontSize: tokens.fontIcon,
+            }}
+          >
+            ▶
+          </span>
+        )}
+      </span>
       <span
         style={{
           fontSize: tokens.fontCaption,

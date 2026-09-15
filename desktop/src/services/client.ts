@@ -138,6 +138,8 @@ export const exportApi = {
     rpc<{ job_id: string; export_id: string }>('export.retry', { export_id: exportId }),
   list: (projectId: string): Promise<ExportJob[]> =>
     rpc<ExportJob[]>('export.list', { project_id: projectId }),
+  ensureCovers: (limit = 200): Promise<{ ok: boolean; generated: number }> =>
+    rpc<{ ok: boolean; generated: number }>('export.ensure_covers', { limit }),
 } as const;
 
 export const modelsApi = {

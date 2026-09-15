@@ -77,7 +77,7 @@ export function WorksPage() {
             <WorkCard
               key={work.id}
               work={work}
-              cover={covers.get(work.project_id) ?? undefined}
+              cover={work.cover_path ?? covers.get(work.project_id) ?? undefined}
               onPreview={() => {
                 setPreview(work);
               }}

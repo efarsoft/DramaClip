@@ -284,6 +284,8 @@ export interface WorkItem {
   readonly duration_s?: number;
   readonly size_bytes?: number;
   readonly completed_at?: number;
+  /** 逐片钩帧封面（渲染完成时生成；历史成片由 export.ensure_covers 补拍）。 */
+  readonly cover_path?: string;
 }
 
 /** 模型下载源（kind ∈ modelscope | hf_mirror | huggingface）。 */
@@ -414,6 +416,7 @@ export const METHOD_NAMES = [
   'export.retry',
   'export.list',
   'export.list_works',
+  'export.ensure_covers',
   'jobs.list',
   'jobs.get',
   'jobs.cancel',

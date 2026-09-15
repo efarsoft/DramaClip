@@ -11,11 +11,11 @@
  */
 import { FolderAddOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button } from 'antd';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { JobInfo } from '@dramaclip/protocol';
 import { PageHeader, PageShell } from '../../components/layout/PageKit';
-import { restartService } from '../../services/client';
+import { exportApi, restartService } from '../../services/client';
 import { tokens } from '../../styles/theme';
 import { ContinueCard } from './ContinueCard';
 import { createDramaFromFolder } from './createDrama';
@@ -67,8 +67,23 @@ function useHomeActions() {
 }
 
 export function HomePage() {
-  const { data, ready } = useWorkbench();
+  const { data, ready, reload } = useWorkbench();
   const { creating, onCreate, onRestart } = useHomeActions();
+
+  // 逐片封面补拍（幂等）：历史成片缺封面时后台补，完成刷新一次
+  useEffect(() => {
+    if (!ready || data.works.length === 0) return;
+    let cancelled = false;
+    void exportApi
+      .ensureCovers()
+      .then((result) => {
+        if (!cancelled && result.generated > 0) void reload();
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, reload, data.works.length]);
 
   const dramas = buildDramas(data.projects, data.works);
   const todos = buildTodos({
