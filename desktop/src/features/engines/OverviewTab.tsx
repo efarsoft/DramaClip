@@ -71,7 +71,7 @@ function buildCapabilities(models: ModelInfo[], settings: SettingsMap): Capabili
       name: '文案 LLM',
       tab: 'llm',
       icon: '✍️',
-      current: llmReady ? `云端 · ${settings['llm.model'] ?? ''}` : '未配置（关键词降级）',
+      current: llmReady ? `云端 · ${settings['llm.model'] ?? ''}` : '未配置 · 解说模式不可用',
       ok: llmReady,
     },
   ];
