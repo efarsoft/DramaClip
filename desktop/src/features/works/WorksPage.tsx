@@ -1,4 +1,4 @@
-/** 作品库：跨项目已完成的成片（卡片网格 + 预览 + 定位文件）。 */
+/** 成品库：跨项目已完成的成片（卡片网格 + 预览 + 定位文件）。 */
 import { useCallback, useEffect, useState } from 'react';
 import { App as AntdApp, Card, Empty, Modal, Tag } from 'antd';
 import { FolderOpenOutlined, PlayCircleOutlined } from '@ant-design/icons';
@@ -38,7 +38,7 @@ function formatDate(ms: number | undefined): string {
   return `${String(date.getMonth() + 1)}/${String(date.getDate())} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
-/** 作品库页（导航「作品」）。 */
+/** 成品库页（导航「成品」）。 */
 export function WorksPage() {
   const [works, setWorks] = useState<WorkItem[] | null>(null);
   const [preview, setPreview] = useState<WorkItem | null>(null);
@@ -60,7 +60,7 @@ export function WorksPage() {
   return (
     <PageShell>
       <PageHeader
-        title="作品库"
+        title="成品库"
         chip={`共 ${String(works?.length ?? 0)} 个`}
         desc="全部项目制作完成的成片；点击卡片可预览"
       />
