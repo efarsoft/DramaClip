@@ -1,6 +1,6 @@
 /** 路由清单：与 navItems.ts 一起构成信息架构的两份数据真相源。 */
 
-export const TOP_LEVEL_ROUTES = ['/', '/projects', '/works', '/engines', '/settings'] as const;
+export const TOP_LEVEL_ROUTES = ['/', '/projects', '/works', '/engines', '/settings', '/about'] as const;
 
 export const DETAIL_ROUTES = [
   '/projects/:projectId/analysis',

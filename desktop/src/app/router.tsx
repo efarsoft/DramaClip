@@ -7,6 +7,7 @@ import { ProductionPage } from '../features/narration/ProductionPage';
 import { EnginesPage } from '../features/engines/EnginesPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
 import { WorksPage } from '../features/works/WorksPage';
+import { AboutPage } from '../features/about/AboutPage';
 import { LEGACY_PARAM_REDIRECTS, LEGACY_REDIRECTS } from './routes';
 
 export function Router() {
@@ -20,6 +21,7 @@ export function Router() {
           <Route path="/engines" element={<EnginesPage />} />
           <Route path="/engines/:tab" element={<EnginesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/about" element={<AboutPage />} />
           <Route path="/projects/:projectId/analysis" element={<WorkbenchPage />} />
           <Route path="/projects/:projectId/produce" element={<ProductionPage />} />
           {Object.entries(LEGACY_REDIRECTS).map(([from, to]) => (

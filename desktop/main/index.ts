@@ -2,7 +2,7 @@
 import { app, BrowserWindow, nativeTheme, protocol, shell } from 'electron';
 import { promises as fsPromises } from 'node:fs';
 import path from 'node:path';
-import { registerIpc, broadcastEvent, type IpcContext } from './ipc';
+import { registerIpc, broadcastEvent, resolveDataPaths, type IpcContext } from './ipc';
 import { ServiceManager, type ServiceManagerOptions } from './services/service-manager';
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
@@ -85,10 +85,14 @@ function createMainWindow(): void {
 }
 
 function buildIpcContext(managerInstance: ServiceManager): IpcContext {
+  const dataDir = app.isPackaged
+    ? path.join(app.getPath('userData'), 'data')
+    : path.join(REPO_ROOT, 'data');
   return {
     rpc: (method, params) => managerInstance.rpc(method, params),
     restartService: () => { managerInstance.restart(); },
     appVersion: () => app.getVersion(),
+    dataPaths: () => resolveDataPaths(dataDir),
     windows: () => (mainWindow === null ? [] : [mainWindow]),
   };
 }

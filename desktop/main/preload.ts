@@ -1,11 +1,12 @@
 /** preload：contextBridge 暴露 window.dramaclip（渲染层唯一入口，docs/desktop/00 §3）。 */
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { DramaClipBridge, ServiceEvent } from '@dramaclip/protocol';
+import type { DataPaths, DramaClipBridge, ServiceEvent } from '@dramaclip/protocol';
 
 const api = {
   rpc: (method: string, params: Record<string, unknown> = {}): Promise<unknown> =>
     ipcRenderer.invoke('rpc', method, params),
   appVersion: (): Promise<string> => ipcRenderer.invoke('app:version') as Promise<string>,
+  appPaths: (): Promise<DataPaths> => ipcRenderer.invoke('app:paths') as Promise<DataPaths>,
   restartService: (): Promise<void> => ipcRenderer.invoke('service:restart') as Promise<void>,
   pickFolder: (): Promise<string | null> =>
     ipcRenderer.invoke('dialog:pickFolder') as Promise<string | null>,

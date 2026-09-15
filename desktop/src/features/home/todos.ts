@@ -112,20 +112,25 @@ export function buildTodos(input: TodoInput): TodoItem[] {
   }
 
   for (const drama of input.dramas) {
-    if (drama.episodeCount === 0 || drama.workCount > 0) continue;
-    const age = (input.serverTimeMs - drama.createdAtMs) / DAY;
-    if (age < STALLED_DAYS) continue;
-    items.push({
-      key: `stalled-${drama.id}`,
-      text: `${drama.name}：${String(drama.episodeCount)} 集已就位 ${String(Math.floor(age))} 天，还没有成品`,
-      severity: 'info',
-      action: { kind: 'navigate', label: '去出片', path: `/projects/${drama.id}/produce` },
-    });
+    pushIfStalled(items, drama, input.serverTimeMs);
   }
 
   return capStalled(items).sort(
     (a, b) => (SEVERITY_RANK[a.severity] ?? 2) - (SEVERITY_RANK[b.severity] ?? 2) || (a.key < b.key ? -1 : 1),
   );
+}
+
+/** 停滞剧催办：有集数、无成品、超过阈值天数才催（info 级）。 */
+function pushIfStalled(items: TodoItem[], drama: DramaState, serverTimeMs: number): void {
+  if (drama.episodeCount === 0 || drama.workCount > 0) return;
+  const age = (serverTimeMs - drama.createdAtMs) / DAY;
+  if (age < STALLED_DAYS) return;
+  items.push({
+    key: `stalled-${drama.id}`,
+    text: `${drama.name}：${String(drama.episodeCount)} 集已就位 ${String(Math.floor(age))} 天，还没有成品`,
+    severity: 'info',
+    action: { kind: 'navigate', label: '去出片', path: `/projects/${drama.id}/produce` },
+  });
 }
 
 function capStalled(items: TodoItem[]): TodoItem[] {

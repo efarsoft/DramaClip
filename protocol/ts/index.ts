@@ -362,6 +362,8 @@ export type ServiceState = 'starting' | 'ready' | 'restarting' | 'unavailable';
 export interface DramaClipBridge {
   rpc(method: string, params?: Record<string, unknown>): Promise<unknown>;
   appVersion(): Promise<string>;
+  /** 本地数据目录锚点（关于页「本地数据」入口）。 */
+  appPaths(): Promise<DataPaths>;
   restartService(): Promise<void>;
   /** 原生目录选择；用户取消返回 null。 */
   pickFolder(): Promise<string | null>;
@@ -372,6 +374,14 @@ export interface DramaClipBridge {
   /** 自定义标题栏窗口控制（frame:false）。 */
   windowControl(action: 'minimize' | 'maximize-toggle' | 'close'): Promise<void>;
   onServiceEvent(callback: (event: ServiceEvent) => void): () => void;
+}
+
+/** 本地数据目录（主进程 dataDir 锚点 + 服务端 _SUBDIRS 同名约定）。 */
+export interface DataPaths {
+  readonly root: string;
+  readonly outputs: string;
+  readonly models: string;
+  readonly logs: string;
 }
 
 export const METHOD_NAMES = [

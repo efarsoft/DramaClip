@@ -12,10 +12,14 @@ export function Rail() {
   for (let gi = 0; gi < NAV_GROUPS.length; gi++) {
     const group = NAV_GROUPS[gi];
     if (group === undefined) continue;
-    if (gi > 0) {
+    // 上组贴顶、下组钉底（规格 §2.1：配置与元信息沉底，桌面软件惯例）；
+    // 分隔线随下组走在钉底块之前。
+    const pinnedBottom = gi > 0;
+    if (pinnedBottom) {
+      groups.push(<div key="spacer" style={{ flex: 1 }} />);
       groups.push(
         <div
-          key={`divider-${group}`}
+          key="divider"
           style={{ width: 40, height: 1, background: tokens.borderSecondary, margin: '4px 0' }}
         />,
       );

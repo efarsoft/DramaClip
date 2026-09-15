@@ -4,6 +4,7 @@ import {
   CloudServerOutlined,
   DashboardOutlined,
   FolderOutlined,
+  InfoOutlined,
   PlaySquareOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
@@ -25,6 +26,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { path: '/works', label: '成品', icon: PlaySquareOutlined, group: 'loop' },
   { path: '/engines', label: '引擎', icon: CloudServerOutlined, group: 'config' },
   { path: '/settings', label: '设置', icon: SettingOutlined, group: 'config' },
+  { path: '/about', label: '关于', icon: InfoOutlined, group: 'config' },
 ];
 
 export function navByGroup(group: NavGroup): readonly NavItem[] {

@@ -8,6 +8,7 @@ import type {
   AnalysisResults,
   DashboardSummary,
   DramaClipBridge,
+  DataPaths,
   ExportJob,
   ExportSubmitResult,
   JobsListResult,
@@ -31,6 +32,10 @@ export function rpc<T>(method: string, params: Record<string, unknown> = {}): Pr
 
 export function appVersion(): Promise<string> {
   return bridge().appVersion();
+}
+
+export function appPaths(): Promise<DataPaths> {
+  return bridge().appPaths();
 }
 
 export function restartService(): Promise<void> {
