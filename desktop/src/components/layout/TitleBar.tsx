@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { BorderOutlined, CloseOutlined, MinusOutlined, SearchOutlined } from '@ant-design/icons';
 import { projectApi, windowControl } from '../../services/client';
 import { tokens } from '../../styles/theme';
+import { dramaEntryPath } from '../../app/routes';
 
 export function TitleBar(): React.ReactElement {
   const location = useLocation();
@@ -172,7 +173,7 @@ function SearchResults({
         <div
           key={item.id}
           onMouseDown={() => {
-            onPick(`/projects/${item.id}/analysis`);
+            onPick(dramaEntryPath(item.id));
           }}
           style={{
             padding: '8px 12px',
