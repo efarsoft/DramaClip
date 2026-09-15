@@ -14,7 +14,7 @@
  * 失败任务的 error 原文改从 jobs.list 拿——一次 RPC，jobs 行里有 error。
  */
 import { useCallback, useEffect, useState } from 'react';
-import type { JobInfo, ModelInfo, Project, WorkItem } from '@dramaclip/protocol';
+import type { JobInfo, JobsListResult, ModelInfo, Project, WorkItem } from '@dramaclip/protocol';
 import { jobsApi, listWorks, projectApi, rpc } from '../../services/client';
 import { useUiStore } from '../../stores/ui';
 import { WORKS_SCAN_LIMIT } from './stats';
@@ -29,6 +29,9 @@ export interface WorkbenchData {
   readonly llmBaseUrl: string;
   readonly ttsEngine: string;
   readonly jobs: JobInfo[];
+  /** jobs.list 是否取到；取不到时 jobsError 是原因原文。 */
+  readonly jobsAvailable: boolean;
+  readonly jobsError: string | null;
   readonly serverTimeMs: number;
   readonly works: WorkItem[];
 }
@@ -39,6 +42,8 @@ const EMPTY: WorkbenchData = {
   llmBaseUrl: '',
   ttsEngine: 'edge',
   jobs: [],
+  jobsAvailable: false,
+  jobsError: null,
   serverTimeMs: 0,
   works: [],
 };
@@ -59,17 +64,24 @@ export function useWorkbench(): Workbench {
       rpc<ModelInfo[]>('models.list').catch(() => null),
       rpc<Record<string, string>>('settings.get').catch(() => null),
       listWorks(WORKS_SCAN_LIMIT).catch((): WorkItem[] => []),
-      jobsApi.list(JOBS_SCAN_LIMIT).catch(() => null),
+      jobsApi
+        .list(JOBS_SCAN_LIMIT)
+        .then((result): JobsListResult | Error => result)
+        .catch((error: unknown): JobsListResult | Error =>
+          error instanceof Error ? error : new Error(String(error)),
+        ),
     ]);
     setData({
       projects,
       models,
       llmBaseUrl: settings?.['llm.base_url'] ?? '',
       ttsEngine: settings?.['tts.engine'] ?? 'edge',
-      jobs: jobs?.jobs ?? [],
+      jobs: jobs instanceof Error ? [] : jobs.jobs,
+      jobsAvailable: !(jobs instanceof Error),
+      jobsError: jobs instanceof Error ? `${jobs.name}: ${jobs.message}` : null,
       // 服务端时钟优先：ETA 与周增都要与 created_at/completed_at 同量纲同源。
       // jobs.list 取不到时退回本机时钟——次优，但比拿 0 当"现在"好。
-      serverTimeMs: jobs?.server_time_ms ?? Date.now(),
+      serverTimeMs: jobs instanceof Error ? Date.now() : jobs.server_time_ms,
       works,
     });
   }, []);

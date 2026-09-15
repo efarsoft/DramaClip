@@ -31,12 +31,17 @@ export interface StatsInput {
   readonly dramaCount: number;
   readonly running: readonly RunningJob[];
   readonly serverTimeMs: number;
+  /** jobs.list 是否取到。取不到时"在跑"必须显示不可用——0 是谎报（规格 §3.3 同一逻辑）。 */
+  readonly jobsAvailable: boolean;
   readonly works: readonly WorkItem[];
 }
 
 export interface WorkbenchStats {
   readonly dramaCount: number;
   readonly runningCount: number;
+  /** 芯片上直接显示的值：取得到是条数，取不到是 '—'。 */
+  readonly runningValue: string;
+  readonly jobsAvailable: boolean;
   /** '' = 不显示 ETA 那一行（无在跑任务）。 */
   readonly runningEtaLabel: string;
   readonly workCount: number;
@@ -83,7 +88,10 @@ export function buildStats(input: StatsInput): WorkbenchStats {
   return {
     dramaCount: input.dramaCount,
     runningCount: input.running.length,
-    runningEtaLabel: etaLabel(input.running, input.serverTimeMs),
+    runningValue: input.jobsAvailable ? String(input.running.length) : '—',
+    jobsAvailable: input.jobsAvailable,
+    // 取不到任务状态时不给 ETA：一个基于空样本的外推比不给更糟。
+    runningEtaLabel: input.jobsAvailable ? etaLabel(input.running, input.serverTimeMs) : '',
     workCount: input.works.length,
     workCountOverflow: overflow,
     workWeekDelta: overflow ? null : weekDelta,

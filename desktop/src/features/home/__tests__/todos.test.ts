@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { buildDramas, buildTodos, type DramaState, type FailedJob, type TodoInput } from '../todos';
-
+import type { TodoItem } from '../todos';
 const NOW = 1_760_000_000_000;
 const DAY = 86_400_000;
 
@@ -27,9 +27,12 @@ function job(over: Partial<FailedJob> = {}): FailedJob {
 function base(over: Partial<TodoInput> = {}): TodoInput {
   return {
     serviceDown: false, models: [model()], llmConfigured: true,
-    dramas: [], failedJobs: [], serverTimeMs: NOW, ...over,
+    dramas: [], failedJobs: [], serverTimeMs: NOW,
+    jobsAvailable: true, jobsError: null, ...over,
   };
 }
+
+const keys = (items: readonly TodoItem[]): string[] => items.map((item) => item.key);
 
 describe('buildTodos', () => {
   it('全就绪返回空数组', () => {
@@ -90,6 +93,25 @@ describe('buildTodos', () => {
 
   it('有成品的不催', () => {
     expect(buildTodos(base({ dramas: [drama({ id: 'p1', workCount: 3 })] }))).toEqual([]);
+  });
+});
+
+describe('buildTodos：任务状态取不到', () => {
+  it('必须有一条 error 待办说明"在跑与失败待办不可用"，并带上原因原文', () => {
+    const items = buildTodos(base({ jobsAvailable: false, jobsError: 'RpcError -32601: 方法未注册' }));
+    expect(items[0]?.key).toBe('jobs-unavailable');
+    expect(items[0]?.severity).toBe('error');
+    expect(items[0]?.detail).toBe('RpcError -32601: 方法未注册');
+    expect(items[0]?.action).toEqual({ kind: 'restart-service', label: '重启服务' });
+  });
+
+  it('服务本来就不可用时不重复报（那条已经说了重启）', () => {
+    const items = buildTodos(base({ serviceDown: true, jobsAvailable: false, jobsError: 'x' }));
+    expect(keys(items)).toEqual(['svc']);
+  });
+
+  it('取得到时不出这条', () => {
+    expect(keys(buildTodos(base({ jobsAvailable: true })))).toEqual([]);
   });
 });
 

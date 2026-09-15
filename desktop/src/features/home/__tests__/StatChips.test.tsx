@@ -10,7 +10,9 @@ function stats(over: Partial<WorkbenchStats> = {}): WorkbenchStats {
   return {
     dramaCount: 12,
     runningCount: 3,
+    runningValue: '3',
     runningEtaLabel: '预计还需 8 分',
+    jobsAvailable: true,
     workCount: 45,
     workCountOverflow: false,
     workWeekDelta: 6,
@@ -45,5 +47,11 @@ describe('StatChips', () => {
   it('本周零增显示 +0，不隐藏（隐藏会让人以为没算）', () => {
     render(<StatChips stats={stats({ workWeekDelta: 0 })} />);
     expect(screen.getByText('本周 +0')).toBeTruthy();
+  });
+
+  it('任务状态取不到时在跑显示 —，不显示 0', () => {
+    render(<StatChips stats={stats({ jobsAvailable: false, runningCount: 0, runningValue: '—', runningEtaLabel: '' })} />);
+    expect(screen.getByText('—')).toBeTruthy();
+    expect(screen.queryByText('0')).toBeNull();
   });
 });

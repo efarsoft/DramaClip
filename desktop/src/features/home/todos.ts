@@ -36,6 +36,10 @@ export interface TodoInput {
   readonly llmConfigured: boolean;
   readonly dramas: readonly DramaState[];
   readonly failedJobs: readonly FailedJob[];
+  /** jobs.list 是否取到。取不到 = 在跑条数与失败待办双双不可用，必须说出来。 */
+  readonly jobsAvailable: boolean;
+  /** 取不到时的原因原文，进 detail 不截断。 */
+  readonly jobsError: string | null;
   readonly serverTimeMs: number;
 }
 
@@ -58,6 +62,19 @@ export function buildTodos(input: TodoInput): TodoItem[] {
   if (input.serviceDown) {
     items.push({
       key: 'svc', text: 'Python 服务不可用，功能暂不可用', severity: 'error',
+      action: { kind: 'restart-service', label: '重启服务' },
+    });
+  }
+
+  // 服务在跑但 jobs.list 取不到：在跑条数与失败待办都成了盲区。
+  // 不报的话界面会显示"0 条在跑、没有失败"，那是把"不知道"说成"没有"（规格 §3.3）。
+  // serviceDown 时不重复报——那一条已经给了同一个动作。
+  if (!input.serviceDown && !input.jobsAvailable) {
+    items.push({
+      key: 'jobs-unavailable',
+      text: '任务状态取不到：在跑条数与失败待办不可用',
+      detail: input.jobsError ?? '',
+      severity: 'error',
       action: { kind: 'restart-service', label: '重启服务' },
     });
   }

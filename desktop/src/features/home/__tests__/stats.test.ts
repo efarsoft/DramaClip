@@ -22,7 +22,7 @@ function work(id: string, completedAt: number | undefined): WorkItem {
 }
 
 function input(over: Partial<StatsInput> = {}): StatsInput {
-  return { dramaCount: 0, running: [], serverTimeMs: NOW, works: [], ...over };
+  return { dramaCount: 0, running: [], serverTimeMs: NOW, works: [], jobsAvailable: true, ...over };
 }
 
 describe('etaLabel', () => {
@@ -120,5 +120,28 @@ describe('buildStats', () => {
     const stats = buildStats(input({ works }));
     expect(stats.workCountOverflow).toBe(false);
     expect(stats.workWeekDelta).toBe(WORKS_SCAN_LIMIT - 1);
+  });
+});
+
+describe('buildStats：任务状态取不到', () => {
+  it('在跑值显示为不可用，且不显示任何 ETA', () => {
+    const stats = buildStats(
+      input({ jobsAvailable: false, running: [{ id: 'j', progress: 50, createdAtMs: NOW - MINUTE }] }),
+    );
+    expect(stats.jobsAvailable).toBe(false);
+    expect(stats.runningValue).toBe('—');
+    expect(stats.runningEtaLabel).toBe('');
+  });
+
+  it('取得到时在跑值就是条数', () => {
+    const stats = buildStats(input({ running: [{ id: 'j', progress: 50, createdAtMs: NOW - MINUTE }] }));
+    expect(stats.jobsAvailable).toBe(true);
+    expect(stats.runningValue).toBe('1');
+  });
+
+  it('成品数与周增不受任务状态影响（它们来自 export.list_works）', () => {
+    const stats = buildStats(input({ jobsAvailable: false, works: [work('w1', NOW)] }));
+    expect(stats.workCount).toBe(1);
+    expect(stats.workWeekDelta).toBe(1);
   });
 });

@@ -77,6 +77,8 @@ export function HomePage() {
     llmConfigured: data.llmBaseUrl !== '',
     dramas,
     failedJobs: failedJobs(data.jobs),
+    jobsAvailable: data.jobsAvailable,
+    jobsError: data.jobsError,
     serverTimeMs: data.serverTimeMs,
   });
   const stats = buildStats({
@@ -85,6 +87,7 @@ export function HomePage() {
       .filter((job) => job.status === 'running' || job.status === 'pending')
       .map((job) => ({ id: job.id, progress: job.progress, createdAtMs: job.created_at })),
     serverTimeMs: data.serverTimeMs,
+    jobsAvailable: data.jobsAvailable,
     works: data.works,
   });
   const hasDramas = data.projects.length > 0;

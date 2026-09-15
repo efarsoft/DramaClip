@@ -19,7 +19,12 @@ interface Chip {
 export function StatChips({ stats }: { stats: WorkbenchStats }): ReactElement {
   const chips: Chip[] = [
     { key: 'dramas', value: String(stats.dramaCount), label: '部剧', note: '' },
-    { key: 'running', value: String(stats.runningCount), label: '条在跑', note: stats.runningEtaLabel },
+    {
+      key: 'running',
+      value: stats.runningValue,
+      label: stats.jobsAvailable ? '条在跑' : '条在跑 · 状态取不到',
+      note: stats.runningEtaLabel,
+    },
     {
       key: 'works',
       value: stats.workCountOverflow ? `${String(stats.workCount)}+` : String(stats.workCount),

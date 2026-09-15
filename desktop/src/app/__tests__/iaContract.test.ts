@@ -86,3 +86,30 @@ describe('信息架构一致性', () => {
     expect(new Set(froms).size).toBe(froms.length);
   });
 });
+
+const NAVITEMS_SOURCE = readFileSync(
+  path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..', 'navItems.ts'),
+  'utf8',
+);
+const ROUTES_SOURCE = readFileSync(
+  path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..', 'routes.ts'),
+  'utf8',
+);
+
+describe('IA 数据层的分层纪律', () => {
+  // navItems.ts / routes.ts 被 components/layout、features/*、app/router 三方消费，
+  // 所以它们自己绝不能反向 import features 或 components——否则 app→features→app 成环。
+  // eslint 只挡了 components/ 反向依赖 features/，挡不到这条。
+  it('navItems.ts 与 routes.ts 不得 import features 或 components', () => {
+    for (const [name, source] of [['navItems.ts', NAVITEMS_SOURCE], ['routes.ts', ROUTES_SOURCE]] as const) {
+      const imports = [...source.matchAll(/from\s+'([^']+)'/g)].map((match) => match[1] ?? '');
+      for (const specifier of imports) {
+        expect(specifier, `${name} 反向依赖了 ${specifier}`).not.toMatch(/features|components/);
+      }
+    }
+  });
+
+  it('routes.ts 完全不依赖任何本地模块（它是叶子）', () => {
+    expect(ROUTES_SOURCE).not.toMatch(/^\s*import\s/m);
+  });
+});
