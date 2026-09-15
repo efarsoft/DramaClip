@@ -57,14 +57,14 @@ function EnvItem({ row, onAction }: { row: EnvRow; onAction: (path: string) => v
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 8,
+        gap: tokens.spaceSm,
         padding: '9px 0',
         borderBottom: `1px solid ${tokens.borderSecondary}`,
         fontSize: tokens.fontCaption,
       }}
     >
       <span style={{ width: 110, flexShrink: 0, color: tokens.textSecondary }}>{row.name}</span>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: tokens.textTertiary }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, color: tokens.textTertiary }}>
         <span style={{ width: 6, height: 6, borderRadius: tokens.radiusDot, background: dot }} />
         {row.status}
       </span>
@@ -104,7 +104,7 @@ export function TipsPanel(): ReactElement {
   return (
     <RightPanel title="快速上手">
       {TIPS.map((tip) => (
-        <div key={tip.text} style={{ display: 'flex', gap: 10, padding: '7px 0', alignItems: 'flex-start' }}>
+        <div key={tip.text} style={{ display: 'flex', gap: tokens.spaceSm, padding: '7px 0', alignItems: 'flex-start' }}>
           <span style={{ color: tokens.colorPrimary, fontSize: tokens.fontBodyLg, marginTop: 1 }}>{tip.icon}</span>
           <span style={{ fontSize: tokens.fontCaption, lineHeight: '19px', color: tokens.textTertiary }}>{tip.text}</span>
         </div>

@@ -133,7 +133,7 @@ function ProjectGrid({
 }) {
   if (projects === null) return <Card loading />;
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(236px, 1fr))', gap: 16 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(236px, 1fr))', gap: tokens.spaceLg }}>
       {projects.map((project) => (
         <ProjectCard
           key={project.id}
@@ -160,8 +160,8 @@ function CreateProjectForm({
   onPick: () => void;
 }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
         <span style={{ fontSize: tokens.fontBody, color: tokens.textSecondary }}>项目名称</span>
         <Input
           value={name}
@@ -171,9 +171,9 @@ function CreateProjectForm({
           placeholder="如：复仇千金"
         />
       </label>
-      <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
         <span style={{ fontSize: tokens.fontBody, color: tokens.textSecondary }}>剧集文件夹</span>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: tokens.spaceSm }}>
           <Input value={folder} readOnly placeholder="选择包含视频文件的文件夹" />
           <Button onClick={onPick}>选择文件夹</Button>
         </div>

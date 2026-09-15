@@ -27,7 +27,7 @@ export function StepFooter({
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
-        gap: 12,
+        gap: tokens.spaceMd,
         padding: '0 16px',
         background: tokens.bgSidebar,
         borderTop: `1px solid ${tokens.borderSecondary}`,

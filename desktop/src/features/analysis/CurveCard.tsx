@@ -60,7 +60,7 @@ export function CurveCard({
         </ResponsiveContainer>
       </div>
       {peak > 0 && (
-        <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginTop: 4 }}>
+        <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginTop: tokens.spaceXs }}>
           峰值 {String(peak)} 分 · 点击曲线可定位播放
         </div>
       )}

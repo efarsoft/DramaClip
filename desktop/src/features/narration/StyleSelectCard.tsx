@@ -74,7 +74,7 @@ export function StyleSelectCard(): React.ReactElement {
       styles={{ body: { padding: '10px 14px' } }}
       loading={styles.length === 0 && !saving}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceMd }}>
         <Select
           style={{ width: 220 }}
           value={styleId}
@@ -92,7 +92,7 @@ export function StyleSelectCard(): React.ReactElement {
           </span>
         )}
       </div>
-      <div style={{ marginTop: 8, fontSize: tokens.fontMicro, color: tokens.textTertiary }}>
+      <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.fontMicro, color: tokens.textTertiary }}>
         自动匹配按分析阶段的题材判定（如 悬疑→悬疑反转、逆袭→爽感逆袭）；风格注入 AI 编剧，对话解说模式生效，仅 LLM 已配置时可用。
       </div>
     </Card>

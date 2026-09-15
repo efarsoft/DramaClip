@@ -49,7 +49,7 @@ export function Rail() {
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: 6,
+        gap: tokens.spaceSm,
         paddingTop: 12,
         background: tokens.bgSidebar,
         borderRight: `1px solid ${tokens.borderSecondary}`,

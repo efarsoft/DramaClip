@@ -1,4 +1,5 @@
 /** 右栏·复合面板：播放器(高光标记) → 高光列表 → 转写编辑 → 操作。 */
+import { tokens } from '../../styles/theme';
 import { App as AntdApp, Card, Empty } from 'antd';
 import { useMemo } from 'react';
 import type { AnalysisResults, AsrSegment, Episode } from '@dramaclip/protocol';
@@ -49,7 +50,7 @@ export function EpisodeDetail({
 
     if (episode === null) return <EmptyDetail />;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
       <PlayerHighlightsRow
         episode={episode}
         highlights={highlights}

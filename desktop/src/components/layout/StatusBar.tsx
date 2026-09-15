@@ -50,7 +50,7 @@ export function StatusBar(): React.ReactElement {
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
-        gap: 16,
+        gap: tokens.spaceLg,
         padding: '0 14px',
         background: tokens.bgSidebar,
         borderTop: `1px solid ${tokens.borderSecondary}`,
@@ -58,7 +58,7 @@ export function StatusBar(): React.ReactElement {
         color: tokens.textTertiary,
       }}
     >
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
         <span
           style={{
             width: 6,

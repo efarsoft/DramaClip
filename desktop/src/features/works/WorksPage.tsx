@@ -72,7 +72,7 @@ export function WorksPage() {
           <Empty description="还没有完成的成片——去项目里生成并导出第一个作品吧" />
         </Card>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: tokens.spaceLg }}>
           {works.map((work) => (
             <WorkCard
               key={work.id}
@@ -101,7 +101,7 @@ function PreviewModal({ work, onClose }: { work: WorkItem | null; onClose: () =>
       title={work === null ? '' : `${work.project_name} · ${modeLabel(work.narration_mode)}`}
     >
       {work !== null && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
           <video
             src={mediaUrl(work.output_path)}
             controls
@@ -145,7 +145,7 @@ function WorkMeta({ work }: { work: WorkItem }): React.ReactElement {
           marginLeft: 'auto',
           display: 'flex',
           alignItems: 'center',
-          gap: 4,
+          gap: tokens.spaceXs,
           background: 'none',
           border: 'none',
           color: tokens.colorPrimary,
@@ -176,8 +176,8 @@ function WorkCard({
     <Card hoverable styles={{ body: { padding: 0, height: '100%' } }}>
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <Poster cover={cover} tint={tint} onPreview={onPreview} />
-        <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: tokens.spaceSm, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
             <Tag
               color={tint}
               style={{ marginInlineEnd: 0, fontSize: tokens.fontMicro, borderRadius: tokens.radiusChip }}
@@ -216,7 +216,7 @@ function Poster({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
+        gap: tokens.spaceSm,
         cursor: 'pointer',
         background: `linear-gradient(135deg, ${tint}26 0%, ${tokens.bgElevated} 100%)`,
         borderTopLeftRadius: 8,
@@ -242,7 +242,7 @@ function Poster({
       <PlayCircleOutlined
         style={{ fontSize: tokens.fontPoster, color: cover === undefined ? tint : '#FFFFFF', zIndex: 1 }}
       />
-      <span style={{ fontSize: tokens.fontCaption, color: '#FFFFFF', zIndex: 1, textShadow: '0 1px 4px rgba(0,0,0,0.6)' }}>
+      <span style={{ fontSize: tokens.fontCaption, color: tokens.colorWhite, zIndex: 1, textShadow: '0 1px 4px rgba(0,0,0,0.6)' }}>
         点击预览
       </span>
     </div>

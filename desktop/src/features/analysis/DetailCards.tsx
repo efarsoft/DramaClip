@@ -16,7 +16,7 @@ export function HighlightsCard({
       {highlights.length === 0 ? (
         <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>暂无高光</span>
       ) : (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: tokens.spaceSm }}>
           {highlights.map((highlight, index) => (
             <Button
               key={`${String(highlight.start)}-${String(index)}`}
@@ -38,7 +38,7 @@ export function HighlightsCard({
 export function ActionsCard({ onReanalyze }: { onReanalyze: () => void }): React.ReactElement {
   return (
     <Card size="small" title="操作">
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: tokens.spaceSm, alignItems: 'center' }}>
         <Button size="small" onClick={onReanalyze}>
           重新分析本集（重转写）
         </Button>
@@ -63,7 +63,7 @@ export function PlayerHighlightsRow({
   onSeek: (seconds: number) => void;
 }): React.ReactElement {
   return (
-    <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
+    <div style={{ display: 'flex', gap: tokens.spaceLg, alignItems: 'stretch' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <PlayerCard
           videoPath={episode.source_path}

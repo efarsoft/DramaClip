@@ -79,7 +79,7 @@ export function GpuCard({
       {meta !== '' && (
         <div
           style={{
-            marginTop: 4,
+            marginTop: tokens.spaceXs,
             marginLeft: tokens.spaceLg,
             fontSize: tokens.fontMicro,
             color: tokens.textTertiary,

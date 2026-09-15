@@ -56,7 +56,7 @@ export function AsrTab({
       <PageSection title="识别参数（即改即存）">
         <div style={{ display: 'flex', gap: tokens.space2xl, flexWrap: 'wrap' }}>
           {Object.entries(OPTIONS).map(([key, spec]) => (
-            <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
               <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>{spec.label}</span>
               <Select
                 style={{ width: 180 }}

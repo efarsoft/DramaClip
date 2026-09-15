@@ -66,7 +66,7 @@ function TierGroup({
           <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>{tier.hint}</span>
         )}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
         {group.map((model) => (
           <ModelRow key={model.model_id} model={model} onChanged={onChanged} />
         ))}
@@ -128,7 +128,7 @@ function ModelRow({ model, onChanged }: { model: ModelInfo; onChanged: () => voi
 function RatingDots({ label, level }: { label: string; level: number }): ReactElement {
   return (
     <span
-      style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}
+      style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceXs, flexShrink: 0 }}
       title={`${label} ${String(level)}/5`}
     >
       <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>{label}</span>
@@ -183,7 +183,7 @@ function RowActions({
   const { message } = AntdApp.useApp();
   if (!installed) return <DownloadButton model={model} onChanged={onChanged} />;
   return (
-    <span style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+    <span style={{ display: 'flex', gap: tokens.spaceSm, flexShrink: 0 }}>
       {path !== undefined && (
         <Button
           size="small"

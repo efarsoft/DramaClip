@@ -82,7 +82,7 @@ function DragShell({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 8,
+        gap: tokens.spaceSm,
         padding: '6px 10px',
         cursor: 'grab',
         borderLeft: active ? `3px solid ${tokens.colorPrimary}` : '3px solid transparent',
@@ -239,7 +239,7 @@ function RowMeta({
         ? { label: '分析失败', color: tokens.colorError }
         : { label: '待分析', color: tokens.textTertiary };
   return (
-    <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary, display: 'flex', gap: 8 }}>
+    <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary, display: 'flex', gap: tokens.spaceSm }}>
       <span>{Math.round(duration)}s</span>
       <span style={{ color: state.color }}>● {state.label}</span>
       {highlightCount > 0 && (

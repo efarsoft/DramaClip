@@ -75,7 +75,7 @@ export function EpisodeListPanel(props: ListProps): React.ReactElement {
         );
       })}
       {props.orderedIds.length === 0 && (
-        <div style={{ padding: 16, fontSize: tokens.fontCaption, color: tokens.textTertiary }}>暂无剧集</div>
+        <div style={{ padding: tokens.spaceLg, fontSize: tokens.fontCaption, color: tokens.textTertiary }}>暂无剧集</div>
       )}
     </Card>
   );
@@ -91,7 +91,7 @@ function ListHeader({
   onToggleAll: (checked: boolean) => void;
 }): React.ReactElement {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px 8px' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, padding: '4px 12px 8px' }}>
       <Checkbox
         checked={allChecked}
         onChange={(event) => {

@@ -55,7 +55,7 @@ export function ProductionPage() {
   };
 
   return (
-    <div style={{ maxWidth: 1080, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ maxWidth: 1080, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: tokens.spaceXl }}>
       <PageHeader projectName={project?.name} />
 
       <StyleSelectCard />
@@ -115,7 +115,7 @@ function ModeSelectCard({
 }) {
   return (
     <Card size="small" title="选择出片模式">
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: tokens.spaceMd }}>
         {MODE_INFO.map((item) => (
           <ModeTile
             key={item.mode}
@@ -129,11 +129,11 @@ function ModeSelectCard({
           />
         ))}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', marginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginTop: tokens.spaceLg }}>
         <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
           已选 {String(selected.length)} / {String(MODE_INFO.length)} 个模式
         </span>
-        <Button size="small" style={{ marginLeft: 12 }} disabled={running} onClick={onSelectAll}>
+        <Button size="small" style={{ marginLeft: tokens.spaceMd }} disabled={running} onClick={onSelectAll}>
           全选
         </Button>
         <Button
@@ -173,8 +173,8 @@ function ModeTile({
         background: checked ? tokens.accentSoft : undefined,
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
           <strong style={{ color: tokens.textPrimary, fontSize: tokens.fontBody }}>{label}</strong>
           {checked && (
             <Tag color="blue" style={{ marginRight: 0 }}>
@@ -183,7 +183,7 @@ function ModeTile({
           )}
         </div>
         <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>{desc}</span>
-        <span style={{ display: 'flex', gap: 6, marginTop: 'auto' }}>
+        <span style={{ display: 'flex', gap: tokens.spaceSm, marginTop: 'auto' }}>
           {needs.includes('copy') ? (
             <NeedBadge text="含 AI 文案" />
           ) : (
@@ -223,7 +223,7 @@ function ExportsCard({ exports }: { exports: ExportJob[] | null }) {
       {exports === null ? null : exports.length === 0 ? (
         <Empty description="还没有出片记录——选择模式开始出片" styles={{ image: { height: 60 } }} />
       ) : (
-        <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
           {exports.map((job) => <ExportRow key={job.id} job={job} />)}
         </div>
       )}
@@ -239,7 +239,7 @@ function ExportRow({ job }: { job: ExportJob }) {
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 12,
+        gap: tokens.spaceMd,
         padding: '8px 0',
         borderBottom: `1px solid ${tokens.borderSecondary}`,
         fontSize: tokens.fontBody,
@@ -248,7 +248,7 @@ function ExportRow({ job }: { job: ExportJob }) {
       <Tag color={color}>{label}</Tag>
       {job.status === 'failed' && job.error !== undefined ? (
         <Tooltip title={job.error}>
-          <span style={{ color: tokens.colorWarning, fontSize: tokens.fontMicro, marginLeft: 6 }}>原因</span>
+          <span style={{ color: tokens.colorWarning, fontSize: tokens.fontMicro, marginLeft: tokens.spaceSm }}>原因</span>
         </Tooltip>
       ) : null}
       <span style={{ color: tokens.textPrimary }}>{modeLabel(job.narration_mode ?? '')}</span>

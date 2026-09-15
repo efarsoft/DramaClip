@@ -36,7 +36,7 @@ export function TranscriptCard({
             overflowY: 'auto',
             display: 'flex',
             flexDirection: 'column',
-            gap: 6,
+            gap: tokens.spaceSm,
           }}
         >
           {segments.map((segment, index) => (
@@ -81,7 +81,7 @@ function SegmentRow({
 
   if (!editing) {
     return (
-      <div style={{ display: 'flex', gap: 10, fontSize: tokens.fontCaption, alignItems: 'baseline' }}>
+      <div style={{ display: 'flex', gap: tokens.spaceSm, fontSize: tokens.fontCaption, alignItems: 'baseline' }}>
         <SeekButton seconds={segment.start} onSeek={onSeek} />
         <span style={{ fontFamily: tokens.fontFamilyMono, fontSize: tokens.fontMicro, color: tokens.textTertiary, flexShrink: 0 }}>
           -{formatClock(segment.end)}
@@ -100,7 +100,7 @@ function SegmentRow({
     );
   }
   return (
-    <div style={{ display: 'flex', gap: 8 }}>
+    <div style={{ display: 'flex', gap: tokens.spaceSm }}>
       <input
         value={draft}
         autoFocus

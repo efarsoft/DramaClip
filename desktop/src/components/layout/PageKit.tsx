@@ -58,7 +58,7 @@ export function PageHeader({
           {chip !== undefined && <span style={mixins.chip()}>{chip}</span>}
         </div>
         {desc !== undefined && (
-          <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginTop: 6 }}>
+          <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginTop: tokens.spaceSm }}>
             {desc}
           </div>
         )}

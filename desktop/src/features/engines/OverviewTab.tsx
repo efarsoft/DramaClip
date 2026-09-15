@@ -88,13 +88,13 @@ export function OverviewTab({
   const navigate = useNavigate();
   const capabilities = buildCapabilities(models, settings);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: tokens.spaceLg }}>
         {capabilities.map((item) => (
           <CapabilityCard key={item.name} item={item} onGo={() => void navigate(`/engines/${item.tab}`)} />
         ))}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: tokens.spaceLg }}>
         <PathCard
           title="本地优先 · 免费离线"
           desc="下载语音识别与配音模型，数据不出本机，速度取决于电脑性能"
@@ -120,8 +120,8 @@ function CapabilityCard({ item, onGo }: { item: Capability; onGo: () => void }):
   const tint = item.ok ? tokens.colorSuccess : tokens.colorWarning;
   return (
     <SectionCard onClick={onGo}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm, height: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
           <span style={{ fontSize: tokens.fontBody, fontWeight: 600, color: tokens.textPrimary }}>{item.name}</span>
           <span
             style={{
@@ -140,7 +140,7 @@ function CapabilityCard({ item, onGo }: { item: Capability; onGo: () => void }):
             marginTop: 'auto',
             display: 'flex',
             alignItems: 'center',
-            gap: 4,
+            gap: tokens.spaceXs,
             fontSize: tokens.fontCaption,
             color: tokens.colorPrimary,
           }}
@@ -166,7 +166,7 @@ function PathCard({
 }): React.ReactElement {
   return (
     <SectionCard onClick={onClick}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceLg }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: tokens.fontBody, fontWeight: 600, color: tokens.textPrimary }}>{title}</div>
           <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginTop: 3 }}>{desc}</div>
@@ -176,7 +176,7 @@ function PathCard({
             marginLeft: 'auto',
             display: 'flex',
             alignItems: 'center',
-            gap: 4,
+            gap: tokens.spaceXs,
             padding: '6px 14px',
             borderRadius: tokens.radiusControl,
             border: `1px solid ${tokens.border}`,

@@ -32,7 +32,7 @@ export function PlayerCard({
         style={{
           position: 'relative',
           height: 16,
-          marginTop: 10,
+          marginTop: tokens.spaceSm,
           borderRadius: tokens.radiusThumb,
           background: tokens.bgInput,
           overflow: 'hidden',

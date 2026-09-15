@@ -52,7 +52,7 @@ function ProjectBlock(): ReactElement {
             height: 40,
             borderRadius: tokens.radiusControl,
             background: tokens.gradientAccent,
-            color: '#ffffff',
+            color: tokens.colorWhite,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -88,7 +88,7 @@ function VersionBlock(): ReactElement {
   }, []);
   return (
     <PageSection title="版本">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}>
         <span style={{ fontSize: tokens.fontCaption, color: tokens.textSecondary }}>
           应用 {app === '' ? '…' : `v${app}`}
         </span>
@@ -148,7 +148,7 @@ function DataPathRow({
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
-          gap: 4,
+          gap: tokens.spaceXs,
         }}
       >
         <InfoOutlined style={{ fontSize: tokens.fontIcon }} />

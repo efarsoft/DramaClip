@@ -35,8 +35,8 @@ export function TtsTab({
   const kokoro = ttsModels.find((m) => m.model_id.includes('kokoro'));
   const voices = engine === 'kokoro' ? KOKORO_VOICES : EDGE_VOICES;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: tokens.spaceLg }}>
         <EngineCard
           title="本地 · Kokoro 82M 中文"
           desc="模型下载到本机运行，免费、离线、数据不出本机；速度取决于 CPU。"
@@ -67,7 +67,7 @@ export function TtsTab({
         />
       </PageSection>
       <PageSection title="本地模型库">
-        <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginBottom: 14 }}>
+        <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginBottom: tokens.spaceLg }}>
           可提前下载大模型；合成引擎接入前仅 Kokoro / Edge 可选为当前引擎。
         </div>
         <ModelList models={ttsModels} onChanged={onChanged} />
@@ -99,7 +99,7 @@ function EngineCard({
         background: active ? tokens.accentSoft : undefined,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
         <strong style={{ fontSize: tokens.fontBody, color: tokens.textPrimary }}>{title}</strong>
         {active && (
           <Tag color="blue" style={{ marginRight: 0 }}>
@@ -110,7 +110,7 @@ function EngineCard({
           ● {ok ? '就绪' : '缺模型'}
         </span>
       </div>
-      <div style={{ marginTop: 8, fontSize: tokens.fontCaption, lineHeight: '19px', color: tokens.textTertiary }}>
+      <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.fontCaption, lineHeight: '19px', color: tokens.textTertiary }}>
         {desc}
       </div>
     </StyledCard>

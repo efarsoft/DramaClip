@@ -17,14 +17,14 @@ export function TitleBar(): React.ReactElement {
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
-        gap: 16,
+        gap: tokens.spaceLg,
         paddingLeft: 14,
         background: tokens.bgSidebar,
         borderBottom: `1px solid ${tokens.borderSecondary}`,
         WebkitAppRegion: 'drag',
       } as CSSProperties}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
         <span
           style={{
             width: 22,
@@ -35,7 +35,7 @@ export function TitleBar(): React.ReactElement {
             alignItems: 'center',
             justifyContent: 'center',
             fontSize: tokens.fontIcon,
-            color: '#FFFFFF',
+            color: tokens.colorWhite,
           }}
         >
           ▶

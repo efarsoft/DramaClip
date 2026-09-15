@@ -31,7 +31,7 @@ export function ProjectCard({
         <div style={{ fontSize: tokens.fontBodyLg, fontWeight: 600, color: tokens.textPrimary }}>{project.name}</div>
         <div
           style={{
-            marginTop: 4,
+            marginTop: tokens.spaceXs,
             fontSize: tokens.fontMicro,
             color: tokens.textTertiary,
             whiteSpace: 'nowrap',
@@ -95,7 +95,7 @@ function CoverArea({
           padding: '2px 8px',
           borderRadius: tokens.radiusChip,
           background: 'rgba(0,0,0,0.55)',
-          color: '#FFFFFF',
+          color: tokens.colorWhite,
         }}
       >
         {String(project.episode_count)} 集
@@ -109,7 +109,7 @@ function MoreButton(props: React.ComponentProps<typeof Button>): ReactElement {
     <Button
       type="text"
       size="small"
-      style={{ background: 'rgba(0,0,0,0.45)', color: '#FFFFFF' }}
+      style={{ background: 'rgba(0,0,0,0.45)', color: tokens.colorWhite }}
       {...props}
     >
       ⋯

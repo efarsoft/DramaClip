@@ -15,6 +15,7 @@ export const tokens = {
   colorWarning: '#FBBF24',
   colorError: '#F87171',
   colorInfo: '#60A5FA',
+  colorWhite: '#FFFFFF',
   bgSidebar: '#0A0F1E',
   bgLayout: '#0F1526',
   bgContainer: '#161E33',

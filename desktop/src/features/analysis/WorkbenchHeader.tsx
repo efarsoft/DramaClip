@@ -25,8 +25,8 @@ export function WorkbenchHeader({
 }): React.ReactElement {
   const navigate = useNavigate();
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceMd }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
         <Button size="small" icon={<LeftOutlined />} onClick={() => { void navigate('/projects'); }}>
           项目
         </Button>

@@ -23,7 +23,7 @@ export function WorkbenchPage() {
   const running = workspace.job?.status === 'running' || workspace.job?.status === 'pending';
   const doneCount = workspace.episodes.filter((episode) => episode.status === 'done').length;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg, height: '100%' }}>
       <WorkbenchHeader
         projectId={projectId}
         project={project}
