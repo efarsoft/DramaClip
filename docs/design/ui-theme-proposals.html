@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>DramaClip 界面优化提案 · 三方向对比</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif; }
+  body { background:#05070c; color:#EAEEF5; padding:32px; }
+  h1 { font-size:22px; margin-bottom:4px; }
+  .sub { color:#9BA3B4; font-size:13px; margin-bottom:28px; }
+  .grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:28px; }
+  .proposal h2 { font-size:16px; margin-bottom:2px; }
+  .proposal h2 em { font-style:normal; opacity:.55; font-size:12px; margin-left:8px; }
+  .proposal p.note { font-size:12px; color:#9BA3B4; line-height:1.7; margin-bottom:10px; min-height:60px; }
+
+  /* ---- 每个方案是一个 token 作用域，内部结构完全同构 ---- */
+  .board { display:flex; height:430px; border-radius:12px; overflow:hidden; font-size:12px;
+           background:var(--bg); color:var(--text); border:1px solid var(--border); }
+  .rail { width:52px; flex-shrink:0; background:var(--rail); display:flex; flex-direction:column;
+          align-items:center; padding:12px 0; gap:4px; }
+  .rail .logo { width:22px; height:22px; border-radius:7px; background:var(--accent-grad); margin-bottom:10px;
+                display:flex; align-items:center; justify-content:center; color:#fff; font-size:11px; }
+  .rail .item { width:44px; padding:7px 0; border-radius:var(--r-ctl); text-align:center;
+                color:var(--text-3); font-size:10px; }
+  .rail .item .ic { font-size:15px; display:block; margin-bottom:2px; }
+  .rail .item.on { color:var(--accent); background:var(--accent-soft); font-weight:600; }
+  .rail .sp { flex:1; }
+  .rail .sep { width:28px; height:1px; background:var(--border); margin:4px 0; }
+  .main { flex:1; min-width:0; padding:16px 18px; display:flex; gap:14px; }
+  .col-l { flex:1.5; min-width:0; display:flex; flex-direction:column; gap:12px; }
+  .col-r { width:158px; flex-shrink:0; display:flex; flex-direction:column; gap:12px; }
+  .hd { display:flex; align-items:center; }
+  .hd h3 { font-size:17px; font-weight:700; letter-spacing:.2px; }
+  .hd .btn { margin-left:auto; background:var(--accent-grad); color:#fff; border-radius:var(--r-ctl);
+             padding:6px 12px; font-size:11px; font-weight:600; box-shadow:var(--shadow-accent); }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:var(--r-card); box-shadow:var(--shadow); }
+  .card .tt { padding:9px 12px; font-weight:600; display:flex; align-items:center; gap:7px; border-bottom:1px solid var(--border); }
+  .card .tt::before { content:''; width:3px; height:12px; border-radius:2px; background:var(--accent-grad); }
+  .card .bd { padding:4px 0; }
+  .row { display:flex; align-items:center; gap:8px; padding:7px 12px; color:var(--text-2); }
+  .row .dot { width:6px; height:6px; border-radius:50%; background:var(--warn); flex-shrink:0; }
+  .row .go { margin-left:auto; color:var(--accent); font-size:11px; }
+  .chips { display:flex; gap:10px; }
+  .chip { flex:1; padding:10px 12px; background:var(--card); border:1px solid var(--border);
+          border-radius:var(--r-card); box-shadow:var(--shadow); }
+  .chip b { font-size:22px; font-family:Consolas,monospace; }
+  .chip small { display:block; color:var(--text-3); font-size:10px; margin-top:2px; }
+  .panel { background:var(--card); border:1px solid var(--border); border-radius:var(--r-card);
+           box-shadow:var(--shadow); padding:10px 12px; }
+  .panel .pt { font-weight:600; margin-bottom:8px; }
+  .panel .pr { display:flex; align-items:center; gap:7px; padding:5px 0; color:var(--text-2); font-size:11px; }
+  .panel .pr i { width:6px; height:6px; border-radius:50%; background:var(--ok); }
+  .works .row { border-bottom:1px solid var(--border2); }
+  .works .row:last-child { border-bottom:none; }
+  .thumb { width:34px; height:22px; border-radius:4px; background:var(--accent-soft); flex-shrink:0; }
+</style>
+</head>
+<body>
+<h1>DramaClip 界面统一优化 · 三方向提案</h1>
+<div class="sub">同一工作台骨架 × 四套 token。方向确认后全部落在 theme.ts，组件零重构、可随时回退。</div>
+<div class="grid">
+
+<!-- 现状 -->
+<div class="proposal" style="--bg:#10141C;--rail:#0B0E14;--card:#171C26;--border:#212736;--border2:#1B2130;--text:#EAEEF5;--text-2:#9BA3B4;--text-3:#626B7D;--accent:#4D9FFF;--accent-soft:rgba(77,159,255,.08);--accent-grad:linear-gradient(135deg,#4D9FFF,#7C5CFF);--warn:#FBBF24;--ok:#34D399;--r-card:10px;--r-ctl:8px;--shadow:none">
+  <h2>现状基准<em>Deep Navy v1</em></h2>
+  <p class="note">蓝紫渐变 + 深海军蓝。问题：卡片与背景亮度差仅 3%，层次靠 1px 硬边框撑；渐变只出现在小元素，整页观感发闷；字号层级（13/12/11）过密，标题没有存在感。</p>
+  <div class="board">
+    <div class="rail"><div class="logo">▶</div>
+      <div class="item on"><span class="ic">◉</span>工作台</div><div class="item"><span class="ic">▤</span>项目</div>
+      <div class="item"><span class="ic">▷</span>成品</div><div class="sp"></div><div class="sep"></div>
+      <div class="item"><span class="ic">☁</span>引擎</div><div class="item"><span class="ic">⚙</span>设置</div><div class="item"><span class="ic">i</span>关于</div>
+    </div>
+    <div class="main"><div class="col-l">
+      <div class="hd"><h3>工作台</h3><div class="btn">＋ 新增项目</div></div>
+      <div class="card"><div class="tt">今日待办</div><div class="bd">
+        <div class="row"><span class="dot"></span>任务失败: 服务中断<span class="go">去处理</span></div>
+        <div class="row"><span class="dot"></span>LLM 未配置<span class="go">去配置</span></div></div></div>
+      <div class="chips">
+        <div class="chip"><b>1</b><small>部剧</small></div>
+        <div class="chip"><b>0</b><small>条在跑</small></div>
+        <div class="chip"><b>45</b><small>条成品 · 本周 +45</small></div></div>
+      <div class="card works"><div class="tt">最近成品</div>
+        <div class="row"><span class="thumb"></span>内心独白 · 0:44<span class="go">查看</span></div>
+        <div class="row"><span class="thumb"></span>交叉解说 · 1:11<span class="go">查看</span></div>
+        <div class="row"><span class="thumb"></span>剧情解说 · 0:34<span class="go">查看</span></div></div>
+    </div>
+    <div class="col-r">
+      <div class="panel"><div class="pt">环境就绪度</div>
+        <div class="pr"><i></i>LLM · 已配置</div><div class="pr"><i></i>ASR · 已安装</div>
+        <div class="pr"><i></i>TTS · Kokoro 就绪</div></div>
+      <div class="panel"><div class="pt">快速上手</div><div class="pr">转写有误？直接改对白流</div></div>
+    </div></div>
+  </div>
+</div>
+
+<!-- 方案A -->
+<div class="proposal" style="--bg:#0F1526;--rail:#0A0F1E;--card:#161E33;--border:#243050;--border2:#1D2740;--text:#F0F4FF;--text-2:#A8B4CE;--text-3:#5E6C8C;--accent:#7C9CFF;--accent-soft:rgba(124,156,255,.12);--accent-grad:linear-gradient(135deg,#6D9BFF,#9B7BFF);--warn:#FFCF5C;--ok:#4ADE9C;--r-card:14px;--r-ctl:10px;--shadow:0 8px 24px rgba(0,0,0,.35)">
+  <h2>方案 A · 靛青雾面<em>Refined Indigo</em></h2>
+  <p class="note">保持深色，但把"硬边框盒子"换成"亮度分层 + 柔和投影"：卡片比背景亮一档、14px 大圆角、外阴影替代部分描边。主色往靛青偏移更贵气；标题字号加大、芯片数字改 22px 等宽——层级感是这一版的关键词。气质参照 Linear / Raycast。</p>
+  <div class="board">
+    <div class="rail"><div class="logo">▶</div>
+      <div class="item on"><span class="ic">◉</span>工作台</div><div class="item"><span class="ic">▤</span>项目</div>
+      <div class="item"><span class="ic">▷</span>成品</div><div class="sp"></div><div class="sep"></div>
+      <div class="item"><span class="ic">☁</span>引擎</div><div class="item"><span class="ic">⚙</span>设置</div><div class="item"><span class="ic">i</span>关于</div>
+    </div>
+    <div class="main"><div class="col-l">
+      <div class="hd"><h3 style="font-size:19px">工作台</h3><div class="btn">＋ 新增项目</div></div>
+      <div class="card"><div class="tt">今日待办</div><div class="bd">
+        <div class="row"><span class="dot"></span>任务失败: 服务中断<span class="go">去处理</span></div>
+        <div class="row"><span class="dot"></span>LLM 未配置<span class="go">去配置</span></div></div></div>
+      <div class="chips">
+        <div class="chip"><b>1</b><small>部剧</small></div>
+        <div class="chip"><b>0</b><small>条在跑</small></div>
+        <div class="chip"><b>45</b><small>条成品 · 本周 +45</small></div></div>
+      <div class="card works"><div class="tt">最近成品</div>
+        <div class="row"><span class="thumb"></span>内心独白 · 0:44<span class="go">查看</span></div>
+        <div class="row"><span class="thumb"></span>交叉解说 · 1:11<span class="go">查看</span></div>
+        <div class="row"><span class="thumb"></span>剧情解说 · 0:34<span class="go">查看</span></div></div>
+    </div>
+    <div class="col-r">
+      <div class="panel"><div class="pt">环境就绪度</div>
+        <div class="pr"><i></i>LLM · 已配置</div><div class="pr"><i></i>ASR · 已安装</div>
+        <div class="pr"><i></i>TTS · Kokoro 就绪</div></div>
+      <div class="panel"><div class="pt">快速上手</div><div class="pr">转写有误？直接改对白流</div></div>
+    </div></div>
+  </div>
+</div>
+
+<!-- 方案B -->
+<div class="proposal" style="--bg:#101216;--rail:#0B0C0F;--card:#17191F;--border:#262A33;--border2:#1F232B;--text:#F2F4F8;--text-2:#A0A6B3;--text-3:#5F6570;--accent:#2DD4BF;--accent-soft:rgba(45,212,191,.10);--accent-grad:linear-gradient(135deg,#2DD4BF,#38BDF8);--warn:#FBBF24;--ok:#4ADE80;--r-card:8px;--r-ctl:6px;--shadow:none">
+  <h2>方案 B · 石墨专业台<em>Graphite Pro</em></h2>
+  <p class="note">去蓝取灰：背景全部转中性石墨，蓝色只留给内容与状态——视频缩略图在这样的底上最显色。8px 小圆角 + 更紧凑的密度，专业剪辑台（Resolve / Premiere）的冷静气质。主色换青绿以拉开与竞品的辨识度（也可保守回退蓝色）。</p>
+  <div class="board">
+    <div class="rail"><div class="logo">▶</div>
+      <div class="item on"><span class="ic">◉</span>工作台</div><div class="item"><span class="ic">▤</span>项目</div>
+      <div class="item"><span class="ic">▷</span>成品</div><div class="sp"></div><div class="sep"></div>
+      <div class="item"><span class="ic">☁</span>引擎</div><div class="item"><span class="ic">⚙</span>设置</div><div class="item"><span class="ic">i</span>关于</div>
+    </div>
+    <div class="main"><div class="col-l">
+      <div class="hd"><h3>工作台</h3><div class="btn">＋ 新增项目</div></div>
+      <div class="card"><div class="tt">今日待办</div><div class="bd">
+        <div class="row"><span class="dot"></span>任务失败: 服务中断<span class="go">去处理</span></div>
+        <div class="row"><span class="dot"></span>LLM 未配置<span class="go">去配置</span></div></div></div>
+      <div class="chips">
+        <div class="chip"><b>1</b><small>部剧</small></div>
+        <div class="chip"><b>0</b><small>条在跑</small></div>
+        <div class="chip"><b>45</b><small>条成品 · 本周 +45</small></div></div>
+      <div class="card works"><div class="tt">最近成品</div>
+        <div class="row"><span class="thumb"></span>内心独白 · 0:44<span class="go">查看</span></div>
+        <div class="row"><span class="thumb"></span>交叉解说 · 1:11<span class="go">查看</span></div>
+        <div class="row"><span class="thumb"></span>剧情解说 · 0:34<span class="go">查看</span></div></div>
+    </div>
+    <div class="col-r">
+      <div class="panel"><div class="pt">环境就绪度</div>
+        <div class="pr"><i></i>LLM · 已配置</div><div class="pr"><i></i>ASR · 已安装</div>
+        <div class="pr"><i></i>TTS · Kokoro 就绪</div></div>
+      <div class="panel"><div class="pt">快速上手</div><div class="pr">转写有误？直接改对白流</div></div>
+    </div></div>
+  </div>
+</div>
+
+<!-- 方案C -->
+<div class="proposal" style="--bg:#F3F5F9;--rail:#FFFFFF;--card:#FFFFFF;--border:#E4E8F0;--border2:#EDF0F5;--text:#1A2233;--text-2:#5A6478;--text-3:#98A1B3;--accent:#2563EB;--accent-soft:rgba(37,99,235,.08);--accent-grad:linear-gradient(135deg,#2563EB,#7C3AED);--warn:#D97706;--ok:#059669;--r-card:12px;--r-ctl:9px;--shadow:0 2px 10px rgba(15,23,42,.06)">
+  <h2>方案 C · 晨雾浅色<em>Daylight</em></h2>
+  <p class="note">整体翻白：白卡 + 浅灰蓝底 + 深蓝主色。白天的可读性最好，缩略图在浅底上同样显色，气质更像"Notion / 飞书"，对非技术出身的 CPS 操盘手最友好。代价：背离剪辑软件的深色惯例，且后续做媒体播放页时浅色环境观感需单独调。</p>
+  <div class="board">
+    <div class="rail"><div class="logo">▶</div>
+      <div class="item on"><span class="ic">◉</span>工作台</div><div class="item"><span class="ic">▤</span>项目</div>
+      <div class="item"><span class="ic">▷</span>成品</div><div class="sp"></div><div class="sep"></div>
+      <div class="item"><span class="ic">☁</span>引擎</div><div class="item"><span class="ic">⚙</span>设置</div><div class="item"><span class="ic">i</span>关于</div>
+    </div>
+    <div class="main"><div class="col-l">
+      <div class="hd"><h3>工作台</h3><div class="btn">＋ 新增项目</div></div>
+      <div class="card"><div class="tt">今日待办</div><div class="bd">
+        <div class="row"><span class="dot"></span>任务失败: 服务中断<span class="go">去处理</span></div>
+        <div class="row"><span class="dot"></span>LLM 未配置<span class="go">去配置</span></div></div></div>
+      <div class="chips">
+        <div class="chip"><b>1</b><small>部剧</small></div>
+        <div class="chip"><b>0</b><small>条在跑</small></div>
+        <div class="chip"><b>45</b><small>条成品 · 本周 +45</small></div></div>
+      <div class="card works"><div class="tt">最近成品</div>
+        <div class="row"><span class="thumb"></span>内心独白 · 0:44<span class="go">查看</span></div>
+        <div class="row"><span class="thumb"></span>交叉解说 · 1:11<span class="go">查看</span></div>
+        <div class="row"><span class="thumb"></span>剧情解说 · 0:34<span class="go">查看</span></div></div>
+    </div>
+    <div class="col-r">
+      <div class="panel"><div class="pt">环境就绪度</div>
+        <div class="pr"><i></i>LLM · 已配置</div><div class="pr"><i></i>ASR · 已安装</div>
+        <div class="pr"><i></i>TTS · Kokoro 就绪</div></div>
+      <div class="panel"><div class="pt">快速上手</div><div class="pr">转写有误？直接改对白流</div></div>
+    </div></div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>
