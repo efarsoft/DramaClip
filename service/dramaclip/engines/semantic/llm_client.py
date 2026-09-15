@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import urllib.error
 import urllib.request
@@ -86,11 +87,23 @@ class LlmClient:
             headers=headers,
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self._timeout_s) as response:
-                body = json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
-            raise LlmUnavailable(f"LLM 请求失败: {exc}") from exc
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with urllib.request.urlopen(request, timeout=self._timeout_s) as response:
+                    body = json.loads(response.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as exc:
+                if exc.code == 429 and attempt < max_retries - 1:
+                    wait = 5 * (attempt + 1)
+                    logging.getLogger(__name__).warning(
+                        "LLM 429 限流，%ds 后重试 (%d/%d)", wait, attempt + 1, max_retries
+                    )
+                    time.sleep(wait)
+                    continue
+                raise LlmUnavailable(f"LLM 请求失败: {exc}") from exc
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+                raise LlmUnavailable(f"LLM 请求失败: {exc}") from exc
         try:
             return str(body["choices"][0]["message"]["content"])
         except (KeyError, IndexError, TypeError) as exc:
