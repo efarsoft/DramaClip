@@ -34,7 +34,6 @@ export function pageShell(fullbleed = false): CSSProperties {
     width: '100%',
     margin: '0 auto',
     gap: tokens.space2xl,
-    paddingBottom: tokens.space2xl,
   };
 }
 
