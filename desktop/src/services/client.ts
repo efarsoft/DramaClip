@@ -10,6 +10,7 @@ import type {
   DramaClipBridge,
   ExportJob,
   ExportSubmitResult,
+  JobInfo,
   HealthResult,
   NarrationMode,
   NarrationPlan,
@@ -145,6 +146,11 @@ export const modelsApi = {
     rpc<{ installed: ModelInfo[]; total: number }>('models.scan_local'),
   remove: (modelId: string): Promise<{ ok: boolean }> =>
     rpc<{ ok: boolean }>('models.delete', { model_id: modelId }),
+} as const;
+
+export const jobsApi = {
+  list: (): Promise<JobInfo[]> =>
+    rpc<JobInfo[]>('jobs.list', {}),
 } as const;
 
 export const settingsApi = {

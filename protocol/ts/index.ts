@@ -148,6 +148,24 @@ export interface AnalysisJobStatus {
   readonly episodes?: ReadonlyArray<{ episode_id: string; status: string }>;
 }
 
+export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export interface JobInfo {
+  readonly id: string;
+  readonly type: string;
+  readonly ref_id: string | null;
+  readonly status: JobStatus;
+  readonly progress: number;
+  readonly error?: string | null;
+  readonly created_at: number;
+  readonly updated_at: number;
+}
+
+export interface JobsListResult {
+  readonly jobs: JobInfo[];
+  readonly total: number;
+}
+
 export interface AnalysisResults {
   readonly episodes: EpisodeAnalysisResult[];
   readonly asr_segments?: Readonly<Record<string, AsrSegment[]>>;
