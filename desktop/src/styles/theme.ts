@@ -7,26 +7,26 @@ import { theme as antdTheme, type ThemeConfig } from 'antd';
 
 export const tokens = {
   // ---- 色彩 ----
-  colorPrimary: '#4D9FFF',
-  colorPrimaryHover: '#6BB3FF',
-  colorPrimaryActive: '#3A8AE6',
-  colorAccent: '#7C5CFF',
+  colorPrimary: '#7C9CFF',
+  colorPrimaryHover: '#93AEFF',
+  colorPrimaryActive: '#6A8AE8',
+  colorAccent: '#9B7BFF',
   colorSuccess: '#34D399',
   colorWarning: '#FBBF24',
   colorError: '#F87171',
   colorInfo: '#60A5FA',
-  bgSidebar: '#0B0E14',
-  bgLayout: '#10141C',
-  bgContainer: '#171C26',
-  bgElevated: '#1F2634',
-  bgInput: '#141922',
-  border: '#2A3140',
-  borderSecondary: '#212736',
-  accentSoft: 'rgba(77,159,255,0.08)',
-  gradientAccent: 'linear-gradient(135deg, #4D9FFF 0%, #7C5CFF 100%)',
-  textPrimary: '#EAEEF5',
-  textSecondary: '#9BA3B4',
-  textTertiary: '#626B7D',
+  bgSidebar: '#0A0F1E',
+  bgLayout: '#0F1526',
+  bgContainer: '#161E33',
+  bgElevated: '#1C2540',
+  bgInput: '#131A2E',
+  border: '#2A3550',
+  borderSecondary: '#1F2942',
+  accentSoft: 'rgba(124,156,255,0.12)',
+  gradientAccent: 'linear-gradient(135deg, #6D9BFF 0%, #9B7BFF 100%)',
+  textPrimary: '#F0F4FF',
+  textSecondary: '#A8B4CE',
+  textTertiary: '#5E6C8C',
   fontFamilyMono: "'JetBrains Mono', 'Cascadia Mono', Consolas, monospace",
 
   // ---- 间距（4 的倍数） ----
@@ -52,12 +52,13 @@ export const tokens = {
   fontPoster: '34px',   // 封面占位图标
 
   // ---- 圆角 / 层级 ----
-  radiusCard: 10,
-  radiusControl: 8,
+  radiusCard: 14,
+  radiusControl: 10,
   radiusChip: 999,
   radiusThumb: 6,
   radiusDot: 3,         // 圆点/竖条装饰
-  shadowPop: '0 8px 24px rgba(0,0,0,0.45)',
+  shadowPop: '0 12px 32px rgba(0,0,0,0.45)',
+  shadowCard: '0 6px 20px rgba(4,8,20,0.35)',
 
   // ---- 布局 ----
   pageMaxWidth: 1080,
@@ -70,7 +71,7 @@ export const layout = {
   fullbleed: { paddingBlock: tokens.spaceXl, gap: tokens.spaceXl },
   card: { padding: tokens.spaceLg },
   listSection: { padding: 0, rowPadding: tokens.spaceMd },
-  field: { labelWidth: 200, controlWidth: 280 },
+  field: { labelWidth: 250, controlWidth: 320 },
   controlHeight: { sm: 28, md: 32 },
 } as const;
 

@@ -1,5 +1,6 @@
 /** 出片中心：选模式 → 一键出片（后端组合任务异步执行），成品入作品库。 */
 import { Button, Card, Empty, Progress, Tag, Tooltip } from 'antd';
+import { PageHeader as PageKitHeader } from '../../components/layout/PageKit';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { ExportJob, NarrationMode, Project } from '@dramaclip/protocol';
@@ -87,19 +88,15 @@ export function ProductionPage() {
 
 function PageHeader({ projectName }: { projectName?: string }): React.ReactElement {
   return (
-    <header style={{ display: 'flex', alignItems: 'flex-end' }}>
-      <div>
-        <h1 style={{ margin: 0, fontSize: tokens.fontTitleLg, fontWeight: 700, color: tokens.textPrimary }}>
-          {projectName ?? '…'} · 出片中心
-        </h1>
-        <div style={{ fontSize: tokens.fontBody, color: tokens.textTertiary, marginTop: 6 }}>
-          选择模式一键出片：AI 编排、配音、渲染自动完成，成品在「作品库」查看
-        </div>
-      </div>
-      <Link to="/works" style={{ marginLeft: 'auto', fontSize: tokens.fontBody, color: tokens.colorPrimary }}>
-        前往作品库 →
-      </Link>
-    </header>
+    <PageKitHeader
+      title={`${projectName ?? '…'} · 出片中心`}
+      desc="选择模式一键出片：AI 编排、配音、渲染自动完成，成品在「作品库」查看"
+      actions={
+        <Link to="/works" style={{ fontSize: tokens.fontBody, color: tokens.colorPrimary }}>
+          前往作品库 →
+        </Link>
+      }
+    />
   );
 }
 

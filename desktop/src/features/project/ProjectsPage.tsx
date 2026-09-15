@@ -5,6 +5,8 @@ import type { Project } from '@dramaclip/protocol';
 import { dramaEntryPath } from '../../app/routes';
 import { rememberDrama } from '../../stores/lastDrama';
 import { pickFolder, projectApi } from '../../services/client';
+import { PageHeader, PageShell } from '../../components/layout/PageKit';
+import { FolderAddOutlined } from '@ant-design/icons';
 import { tokens } from '../../styles/theme';
 import { useProjects } from './useProjects';
 import { ProjectCard } from './ProjectCard';
@@ -37,11 +39,15 @@ export function ProjectsPage() {
   };
 
   return (
-    <div style={{ maxWidth: 1080, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <PageShell>
       <PageHeader
-        onOpenCreate={() => {
-          setCreateOpen(true);
-        }}
+        title="项目管理"
+        desc="素材已在本地：选文件夹建剧，分析完成后进入出片"
+        actions={
+          <Button type="primary" icon={<FolderAddOutlined />} onClick={() => setCreateOpen(true)}>
+            新建项目
+          </Button>
+        }
       />
       <ProjectGrid
         projects={controller.projects}
@@ -74,24 +80,11 @@ export function ProjectsPage() {
           setRenameTarget(null);
         }}
       />
-    </div>
+    </PageShell>
   );
 }
 
-function PageHeader({ onOpenCreate }: { onOpenCreate: () => void }) {
-  return (
-    <header style={{ display: 'flex', alignItems: 'center', marginBottom: 20 }}>
-      <h1 style={{ margin: 0, fontSize: tokens.fontHeading, color: tokens.textPrimary }}>项目管理</h1>
-      <Button
-        type="primary"
-        style={{ marginLeft: 'auto' }}
-        onClick={onOpenCreate}
-      >
-        新建项目
-      </Button>
-    </header>
-  );
-}
+
 
 function RenameModal({
   target,

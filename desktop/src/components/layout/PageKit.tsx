@@ -92,6 +92,7 @@ export function PageSection({
         background: tokens.bgContainer,
         border: `1px solid ${tokens.borderSecondary}`,
         borderRadius: tokens.radiusCard,
+        boxShadow: tokens.shadowCard,
         ...style,
       }}
     >
