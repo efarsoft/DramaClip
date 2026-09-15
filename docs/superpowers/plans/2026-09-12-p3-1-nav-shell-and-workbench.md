@@ -1,6 +1,6 @@
 # P-3.1 导航壳与工作台开工页 · 结题记录
 
-> **状态**：Task 1-9 ✅ 完成（2026-09-11）；**Task 10 手工验收 ⏸ 待执行**——前置：九模式真机门禁先跑完（起 dev server 与门禁抢 CPU，计划明确禁止提前执行）。
+> **状态**：Task 1-9 ✅ 完成（2026-09-11）；**Task 10 手工验收 ✅ 已执行**（2026-09-15，实测见 §3 末尾「落地后的实测」；M4/M8 局部与 M9 按计划口径由单测覆盖记录，发现①移交分析域）。
 >
 > 本文件已由 4008 行分步实施计划**清理为结题记录**（2026-09-11）：分步代码样例使命已尽，代码与测试即事实源。
 > 清理前完整原文：`git show 7bb9f3a:docs/superpowers/plans/2026-09-12-p3-1-nav-shell-and-workbench.md`。
@@ -74,7 +74,7 @@ Task 8 Step 1 的三处：`failedJobs` 形参缺 `status` 且带恒真废过滤�
 2. **同一行为的全部用例先交叉对账**——A1 的"同一输入两种期望"在写完时对比一遍即可发现。
 3. **验收断言写增量、不写绝对值**——A9/A10 均因拿假设基线当事实；凡代表真实工具输出的夹具一律现场捕获（沿 P-1.5 计划纪律）。
 
-## 3. Task 10 手工验收清单（⏸ 待执行；产出=证据，不产新代码）
+## 3. Task 10 手工验收清单（✅ 已执行 2026-09-15）
 
 **前置**：九模式真机门禁跑完。`npm run dev`（Vite 固定端口 5180，Electron 自动拉起；若状态栏红点，待办首条会是「Python 服务不可用」+ 重启按钮——那是 M7 的真实样本，先记录再排查）。
 
@@ -95,13 +95,13 @@ Task 8 Step 1 的三处：`failedJobs` 形参缺 `status` 且带恒真废过滤�
 - **Step 12 实测写回**：M6 三个数、M7 验到与否、M10 不达标页、被证伪的假设（"计划说 X，实测是 Y，改成了 Z"），追加到本文件末尾；关 dev server、确认无残留 Electron 进程。
 - **Step 13 提交**：`git add docs/superpowers/plans/2026-09-12-p3-1-nav-shell-and-workbench.md && git commit -m "docs(plan): 记录 P-3.1 手工验收实测与偏差"`。
 
-## 4. 完成判据（1-4 已满足；5 待 Task 10）
+## 4. 完成判据（1-5 全部满足；P-3.1 收口）
 
 1. ✅ vitest 全绿（实际基线：17 文件 / 114 条；原计划按假设基线写 18/127，见 A9）。
 2. ✅ typecheck 与 lint 零输出、退出码 0。
 3. ✅ `contract.test.ts` 仍绿——本片未动 `METHOD_NAMES`。
 4. ✅ 死引用四条 grep 符合期望（死组件仅注释提及、dashboardSummary 仅剩定义行、restartService 有唯一消费者、竖条标题收敛为 PageSection 一份）。
-5. ⏸ Task 10 的 M1-M11 逐条走完并把读数写回本文件；无法手工验证的项写明原因，不接受"应该没问题"。
+5. ✅ Task 10 已执行（2026-09-15，§6）：M1-M3/M5-M7/M8 上半/M10 真机通过；M4/M9/M8 局部按计划口径由单测覆盖记录；M11 的两条报错全部归因于发现①（分析域启动时序，移交），非本片回归。
 6. ✅ `git status --short` 干净，全程只用显式路径 `git add`。
 
 ## 5. 已知不做 / 归属账本
@@ -115,3 +115,33 @@ Task 8 Step 1 的三处：`failedJobs` 形参缺 `status` 且带恒真废过滤�
 - `ProjectsPage`/`ProductionPage` 手写页头收敛与 `folderName` 上提共享：P-3.2。
 - §4.2 首启三步空态（属剧库页）：P-3.2；§9.7 规模实测（无造数脚本）：建议 P-3.2 Task 0。
 - 导轨/状态栏运行中角标：落点队列页，P-2.5（本片不预留 badge 字段——没有消费者的字段是投机设计）。
+
+## 6. Task 10 落地后的实测（2026-09-15，dev 栈真机）
+
+环境：`npm run dev`（Vite 5180 + Electron + Python ready），启动清扫正确处理 1 个中断任务与 1 个未完成导出。验收素材：小小球神不好惹（10 集全 done、45 条成品）。
+
+**逐项结果**：
+
+| 项 | 结果 | 证据 |
+|---|---|---|
+| M1 导轨形态 | ✅ | 5 项图标上/标签下；成品与引擎之间浅色分隔线；无「作品」、无队列/工具箱/关于 |
+| M2 引擎深链高亮 | ✅ | `#/engines` 高亮；页内点「文案 LLM」→ `#/engines/llm` 「引擎」保持高亮且 tab 选中 |
+| M3 单剧详情高亮 | ✅ | 剧卡 → `#/projects/:id/analysis` 「项目」保持高亮 |
+| M4 旧路径重定向 | ⚠️ 未真机演练 | DevTools 在 frameless 窗口无法以合成键打开；由 routes 单测（LEGACY_REDIRECTS/LEGACY_PARAM_REDIRECTS + iaContract）覆盖 |
+| M5 工作台结构 | ✅ | 页头唯一 primary；待办→三芯片→最近成品→继续上次；无工具箱面板/开始创作三卡/最近项目列表 |
+| M6 三芯片对账 | ✅ | 芯片 1 部剧 / 0 条在跑 / 45 条成品·本周+45 ≡ SQL `projects=1` / `works=45`；**`export_jobs_all=48 ≠ 45` 实证不用 export_count 的理由**；启动清扫后 0 在跑、无 ETA 行符合预期 |
+| M7 待办逐条点 | ✅ | 待办 6 条 ≡ DB failed 明细（3 条 narration 429 + 3 条服务中断；export 3 条失败正确排除）；title 挂完整 error 原文（a11y 全文核对）；narration「去处理」正确落到出片中心（出片记录含失败行+原因徽标）；引擎总览 LLM 卡「云端 · qwen3.7-plus」无「关键词降级」；LLM tab 金色说明段**逐字核对通过**（该段原系 Task 3 遗漏，本次验收发现并补上，964385f） |
+| M8 继续上次 | ✅ | 进剧→回工作台出现「继续上次 / 小小球神不好惹 / 刚刚」，href 指向分析页；localStorage 形状由 lastDrama 单测覆盖（DevTools 同 M4 未开） |
+| M9 空态 | ⚠️ 免演练 | 按计划记「由 EmptyWorkbench.test.tsx 4 条覆盖」 |
+| M10 同构对照 | ✅（含预期内不达标） | 工作台/引擎/成品/设置四页页头与竖条标题同形、每屏 primary≤1；ProjectsPage 与 ProductionPage 手写页头不达标——预期内，归 P-3.2 |
+| M11 控制台 | ❌ 已归因 | 两条 `Uncaught (in promise)`（-32603 / -32101），全部来自发现①的启动时序窗口，非本片回归 |
+
+**发现与处置**：
+
+1. **分析工作台首进偶发空态（移交分析域，非本片回归）**：服务启动早期窗口内 `project.get` 曾抛 `-32101 项目不存在` / `-32603`（一次性；重进即恢复；同刻 DB 直查与 repo 层复现均正常、10 集俱在）。根因在 `useAnalysisWorkspace` 的加载 effect 只依赖 `serviceState`——失败后不再重试，页面停留在「共 0 集 / 暂无剧集」。属 `features/analysis/**`（他人域），登记 P-3.2 / 分析域负责人处置（失败重试或 entered-route 重载）。
+2. **Task 3 遗漏补齐（964385f）**：7002d23 删假文案时未按计划补 `UnconfiguredNotice` 常驻说明段，M7 验收抓出，已补并逐字核对。
+3. 计划假设证伪记录：「DevTools 可开」不成立（frameless 窗口合成按键被拒）→ M4/M8 的 hash/localStorage 细节按计划既有口径转由单测覆盖；其余无新增（A1-A11 见 §2）。
+
+**M6 对账读数**：projects 1 / works 45 / export_jobs_all 48（48≠45 即 `dashboard_summary.export_count` 不可用的真机实证）。
+
+**收尾**：dev 栈已停，无残留 Electron 进程。本节即 Step 12/13 的提交内容。
