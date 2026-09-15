@@ -48,6 +48,7 @@ export const tokens = {
   fontIcon: '10px',     // 小图标/角标
   fontHeading: '20px',  // 页面级标题
   fontDisplay: '24px',  // 问候语等大号展示
+  fontEmptyIcon: '48px', // 空态图标（DSS §3.5）
   fontPoster: '34px',   // 封面占位图标
 
   // ---- 圆角 / 层级 ----
