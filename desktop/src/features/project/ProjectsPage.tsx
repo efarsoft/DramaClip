@@ -2,6 +2,8 @@ import { App as AntdApp, Button, Card, Input, Modal } from 'antd';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Project } from '@dramaclip/protocol';
+import { dramaEntryPath } from '../../app/routes';
+import { rememberDrama } from '../../stores/lastDrama';
 import { pickFolder, projectApi } from '../../services/client';
 import { tokens } from '../../styles/theme';
 import { useProjects } from './useProjects';
@@ -44,7 +46,8 @@ export function ProjectsPage() {
       <ProjectGrid
         projects={controller.projects}
         onOpen={(project) => {
-          void navigate(`/projects/${project.id}/analysis`);
+          rememberDrama(project.id, project.name);
+          void navigate(dramaEntryPath(project.id));
         }}
         onRename={setRenameTarget}
         onDuplicate={(project) => {

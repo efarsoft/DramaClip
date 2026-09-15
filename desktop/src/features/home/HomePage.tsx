@@ -1,179 +1,191 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+/** 工作台（规格 §4.1）：回答"今天该干什么"。
+ *
+ * 主区 = 今日待办（首要）+ 3 统计芯片 + 最近成品 6 条 + 继续上次
+ * 右栏 = 环境就绪度 + 快速上手
+ *
+ * 右栏的「工具箱」槽位缺席：今天那个叫工具箱的面板里一个工具都没有，三项全是
+ * 导轨已有目的地的重复跳转，已随本任务删除。真工具箱属 P-3.4。缺席而非假控件。
+ *
+ * 「最近成品」不出缩略图：逐片封面不存在（repos/exports.py 无 cover_path），
+ * 拿项目封面冒充逐片封面正是 §4.5 要治的"同剧 9 条片共用一张封面"。缩略图归 P-3.3。
+ */
+import { FolderAddOutlined } from '@ant-design/icons';
+import { App as AntdApp, Button } from 'antd';
+import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { DashboardSummary, JobInfo, ModelInfo, Project, WorkItem } from '@dramaclip/protocol';
-import { jobsApi, listWorks, projectApi, rpc } from '../../services/client';
-import { useUiStore } from '../../stores/ui';
+import type { JobInfo } from '@dramaclip/protocol';
+import { PageHeader, PageShell } from '../../components/layout/PageKit';
+import { restartService } from '../../services/client';
 import { tokens } from '../../styles/theme';
-import { EnvPanel, TipsPanel, ToolboxPanel } from './EnvPanel';
-import { RecentProjects } from './RecentProjects';
+import { ContinueCard } from './ContinueCard';
+import { createDramaFromFolder } from './createDrama';
+import { EmptyWorkbench } from './EmptyWorkbench';
+import { EnvPanel, TipsPanel } from './EnvPanel';
 import { RecentWorks } from './RecentWorks';
-import { StartCards } from './StartCards';
-import { TodoCard } from './TodoCard';
-import { buildDramas, buildTodos } from './todos';
+import { StatChips } from './StatChips';
+import { TodoList } from './TodoList';
+import { buildStats, type WorkbenchStats } from './stats';
+import { buildDramas, buildTodos, type FailedJob, type TodoItem } from './todos';
+import { useWorkbench, type WorkbenchData } from './useWorkbench';
 
-/** 工作台：问候 + 开始创作 + 最近项目（左）｜环境/工具/上手（右）。 */
-export function HomePage() {
-  return <HomeContent />;
-}
+/** 主区最近成品的条数（规格 §4.1：6 条）。 */
+const RECENT_WORKS = 6;
+/** ref_id 是 project_id 的任务类型——与 todos.ts 的 JOB_ROUTES 同一批。
+ *  这里再判一次是因为 ref_id 语义异构（export 的是 export_id、model_download 的是
+ *  model_id），把它们的 ref_id 当 project_id 拼路径会跳错剧。 */
+const PROJECT_JOB_TYPES = new Set(['prescreen', 'analysis', 'narration']);
 
-interface HomeData {
-  summary: DashboardSummary | null;
-  allProjects: Project[];
-  models: ModelInfo[] | null;
-  llmBaseUrl: string;
-  llmModel: string;
-  ttsEngine: string;
-  works: WorkItem[];
-  failedJobs: JobInfo[];
-}
-
-function useHomeData(): HomeData {
-  const [data, setData] = useState<HomeData>({
-    summary: null, allProjects: [], models: null, llmBaseUrl: '',
-    llmModel: '', ttsEngine: 'edge', works: [], failedJobs: [],
-  });
-  const serviceState = useUiStore((state) => state.serviceState);
-
-  const load = useCallback(async () => {
-    const [summary, allProjects, models, settings, works, jobs] = await Promise.all([
-      projectApi.dashboardSummary(),
-      projectApi.list(),
-      rpc<ModelInfo[]>('models.list').catch(() => null),
-      rpc<Record<string, string>>('settings.get').catch(() => null),
-      listWorks(6).catch((): WorkItem[] => []),
-      jobsApi.list(200).then((result) => result.jobs).catch((): JobInfo[] => []),
-    ]);
-    setData({
-      summary,
-      allProjects,
-      models,
-      llmBaseUrl: settings?.['llm.base_url'] ?? '',
-      llmModel: settings?.['llm.model'] ?? '',
-      ttsEngine: settings?.['tts.engine'] ?? 'edge',
-      works,
-      failedJobs: jobs.filter((job) => job.status === 'failed'),
-    });
-  }, []);
-
-  // 服务就绪前发起的 RPC 会失败；ready 后重载一次（修复启动时序竞争）
-  useEffect(() => {
-    if (serviceState === 'ready') void load();
-  }, [load, serviceState]);
-
-  return data;
-}
-
-function HomeContent() {
+/** 建剧与重启服务两个动作：状态 + 回调收拢，让 HomePage 只剩编排。 */
+function useHomeActions() {
   const navigate = useNavigate();
-  const { summary, allProjects, models, llmBaseUrl, llmModel, ttsEngine, works, failedJobs } =
-    useHomeData();
-  const serviceState = useUiStore((state) => state.serviceState);
+  const { message } = AntdApp.useApp();
+  const [creating, setCreating] = useState(false);
 
-  const dramas = useMemo(() => buildDramas(allProjects, works), [allProjects, works]);
-  const todos = useMemo(
-    () =>
-      buildTodos({
-        serviceDown: serviceState === 'unavailable',
-        models,
-        llmConfigured: llmBaseUrl !== '' && llmModel !== '',
-        dramas,
-        failedJobs: failedJobs.map((job) => ({
-          id: job.id,
-          type: job.type,
-          refId: job.ref_id,
-          error: job.error ?? null,
-        })),
-        serverTimeMs: Date.now(),
-      }),
-    [dramas, failedJobs, llmBaseUrl, llmModel, models, serviceState],
-  );
-  const needsModel = (models ?? []).some((m) => m.required && m.status !== 'installed');
-  const recentProjects = useMemo(() => allProjects.slice(0, 6), [allProjects]);
+  const onCreate = useCallback(() => {
+    setCreating(true);
+    createDramaFromFolder()
+      .then((created) => {
+        if (created === null) return;
+        message.success(`已创建「${created.name}」`);
+        void navigate(created.entryPath);
+      })
+      .catch((error: unknown) => {
+        message.error(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        setCreating(false);
+      });
+  }, [message, navigate]);
+
+  const onRestart = useCallback(() => {
+    restartService().catch((error: unknown) => {
+      message.error(error instanceof Error ? error.message : String(error));
+    });
+  }, [message]);
+
+  return { creating, onCreate, onRestart };
+}
+
+export function HomePage() {
+  const { data, ready } = useWorkbench();
+  const { creating, onCreate, onRestart } = useHomeActions();
+
+  const dramas = buildDramas(data.projects, data.works);
+  const todos = buildTodos({
+    serviceDown: !ready,
+    models: data.models,
+    llmConfigured: data.llmBaseUrl !== '',
+    dramas,
+    failedJobs: failedJobs(data.jobs),
+    serverTimeMs: data.serverTimeMs,
+  });
+  const stats = buildStats({
+    dramaCount: data.projects.length,
+    running: data.jobs
+      .filter((job) => job.status === 'running' || job.status === 'pending')
+      .map((job) => ({ id: job.id, progress: job.progress, createdAtMs: job.created_at })),
+    serverTimeMs: data.serverTimeMs,
+    works: data.works,
+  });
+  const hasDramas = data.projects.length > 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <GreetingHeader summary={summary} />
-      {todos.length > 0 && <TodoCard items={todos} />}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 330px', gap: 16, alignItems: 'start' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
-          <StartCards
-            needsAsrModel={needsModel}
-            onCreated={(projectId) => {
-              void navigate(`/projects/${projectId}/analysis`);
-            }}
-          />
-          <RecentProjects projects={recentProjects} />
-          <RecentWorks works={works} />
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <EnvPanel models={models} llmBaseUrl={llmBaseUrl} ttsEngine={ttsEngine} />
-          <ToolboxPanel />
-          <TipsPanel />
-        </div>
+    <PageShell>
+      <PageHeader
+        title="工作台"
+        desc={greetingLine()}
+        actions={
+          // 空态下 primary 归 EmptyWorkbench，这里不给——DSS §3.1「每屏 primary 至多 1 个」
+          hasDramas ? (
+            <Button type="primary" icon={<FolderAddOutlined />} loading={creating} disabled={creating} onClick={onCreate}>
+              新增项目
+            </Button>
+          ) : undefined
+        }
+      />
+      <HomeBody
+        data={data}
+        todos={todos}
+        stats={stats}
+        hasDramas={hasDramas}
+        creating={creating}
+        onCreate={onCreate}
+        onRestart={onRestart}
+      />
+    </PageShell>
+  );
+}
+
+/** 双栏主体：左 = 待办 + 芯片/成品/继续上次（或空态引导），右 = 环境 + 上手。 */
+function HomeBody({
+  data,
+  todos,
+  stats,
+  hasDramas,
+  creating,
+  onCreate,
+  onRestart,
+}: {
+  data: WorkbenchData;
+  todos: TodoItem[];
+  stats: WorkbenchStats;
+  hasDramas: boolean;
+  creating: boolean;
+  onCreate: () => void;
+  onRestart: () => void;
+}): React.ReactElement {
+  const navigate = useNavigate();
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0,1fr) 330px',
+        gap: tokens.spaceLg,
+        alignItems: 'start',
+      }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXl, minWidth: 0 }}>
+        <TodoList
+          items={todos}
+          onNavigate={(path) => {
+            void navigate(path);
+          }}
+          onRestartService={onRestart}
+        />
+        {hasDramas ? (
+          <>
+            <StatChips stats={stats} />
+            <RecentWorks works={data.works.slice(0, RECENT_WORKS)} />
+            <ContinueCard nowMs={data.serverTimeMs} />
+          </>
+        ) : (
+          <EmptyWorkbench creating={creating} onCreate={onCreate} />
+        )}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
+        <EnvPanel models={data.models} llmBaseUrl={data.llmBaseUrl} ttsEngine={data.ttsEngine} />
+        <TipsPanel />
       </div>
     </div>
   );
 }
 
-function greetingText(): string {
-  const hour = new Date().getHours();
-  if (hour < 6) return '夜深了';
-  if (hour < 12) return '上午好';
-  if (hour < 14) return '中午好';
-  if (hour < 18) return '下午好';
-  return '晚上好';
+function failedJobs(jobs: readonly JobInfo[]): FailedJob[] {
+  return jobs
+    .filter((job) => job.status === 'failed' && PROJECT_JOB_TYPES.has(job.type))
+    .map((job) => ({
+      id: job.id,
+      type: job.type,
+      refId: job.ref_id ?? null,
+      error: job.error ?? '',
+    }));
 }
 
-function GreetingHeader({ summary }: { summary: DashboardSummary | null }) {
+function greetingLine(): string {
   const now = new Date();
   const week = ['日', '一', '二', '三', '四', '五', '六'][now.getDay()] ?? '';
-  const chips = [
-    { label: '项目', value: summary?.project_count },
-    { label: '剧集', value: summary?.episode_count },
-    { label: '已分析', value: summary?.analyzed_episodes },
-    { label: '已导出', value: summary?.export_count },
-  ];
-  return (
-    <header style={{ display: 'flex', alignItems: 'flex-end' }}>
-      <div>
-        <h1 style={{ margin: 0, fontSize: tokens.fontDisplay, fontWeight: 700, color: tokens.textPrimary }}>
-          {greetingText()}
-        </h1>
-        <div style={{ fontSize: tokens.fontBody, color: tokens.textTertiary, marginTop: 6 }}>
-          {String(now.getMonth() + 1)}月{String(now.getDate())}日 星期{week} ·
-          选择一个方式开始，或选择素材所在文件夹
-        </div>
-      </div>
-      <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
-        {chips.map((chip) => (
-          <span
-            key={chip.label}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 2,
-              padding: '6px 14px',
-              borderRadius: tokens.fontIcon,
-              background: tokens.bgContainer,
-              border: `1px solid ${tokens.borderSecondary}`,
-            }}
-          >
-            <span
-              style={{
-                fontSize: tokens.fontTitle,
-                fontWeight: 700,
-                color: tokens.textPrimary,
-                fontFamily: tokens.fontFamilyMono,
-                textShadow: '0 0 12px rgba(77, 159, 255, 0.35)',
-              }}
-            >
-              {chip.value ?? '…'}
-            </span>
-            <span style={{ fontSize: tokens.fontIcon, color: tokens.textTertiary }}>{chip.label}</span>
-          </span>
-        ))}
-      </div>
-    </header>
-  );
+  const hour = now.getHours();
+  const greeting =
+    hour < 6 ? '夜深了' : hour < 12 ? '上午好' : hour < 14 ? '中午好' : hour < 18 ? '下午好' : '晚上好';
+  return `${greeting} · ${String(now.getMonth() + 1)}月${String(now.getDate())}日 星期${week}`;
 }

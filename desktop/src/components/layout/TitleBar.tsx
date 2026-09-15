@@ -3,6 +3,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { BorderOutlined, CloseOutlined, MinusOutlined, SearchOutlined } from '@ant-design/icons';
 import { projectApi, windowControl } from '../../services/client';
+import { rememberDrama } from '../../stores/lastDrama';
 import { tokens } from '../../styles/theme';
 import { dramaEntryPath } from '../../app/routes';
 
@@ -138,8 +139,9 @@ function ProjectSearch(): React.ReactElement {
       {open && items.length > 0 && (
         <SearchResults
           items={items}
-          onPick={(path) => {
-            void navigate(path);
+          onPick={(picked) => {
+            rememberDrama(picked.id, picked.name);
+            void navigate(dramaEntryPath(picked.id));
           }}
         />
       )}
@@ -152,7 +154,7 @@ function SearchResults({
   onPick,
 }: {
   items: readonly ProjectOption[];
-  onPick: (path: string) => void;
+  onPick: (item: ProjectOption) => void;
 }) {
   return (
     <div
@@ -173,7 +175,7 @@ function SearchResults({
         <div
           key={item.id}
           onMouseDown={() => {
-            onPick(dramaEntryPath(item.id));
+            onPick(item);
           }}
           style={{
             padding: '8px 12px',

@@ -1,15 +1,8 @@
-/** 右栏：环境就绪度 + 工具箱 + 快速上手（工作台）。 */
+/** 右栏：环境就绪度 + 快速上手（工作台）。 */
 import type { ReactElement, ReactNode } from 'react';
 import { Card } from 'antd';
 import { useNavigate } from 'react-router-dom';
-import {
-  BookOutlined,
-  CloudServerOutlined,
-  EditOutlined,
-  FolderOutlined,
-  RightOutlined,
-  SettingOutlined,
-} from '@ant-design/icons';
+import { BookOutlined, EditOutlined, RightOutlined } from '@ant-design/icons';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
 
@@ -99,56 +92,6 @@ function EnvItem({ row, onAction }: { row: EnvRow; onAction: (path: string) => v
         </button>
       )}
     </div>
-  );
-}
-
-const TOOLS = [
-  { key: 'engines', icon: <CloudServerOutlined />, tint: tokens.colorPrimary, title: '引擎中心', desc: '下载或导入语音/转写模型' },
-  { key: 'settings', icon: <SettingOutlined />, tint: tokens.colorWarning, title: '系统设置', desc: '预筛阈值、出片时长与下载镜像' },
-  { key: 'projects', icon: <FolderOutlined />, tint: tokens.colorAccent, title: '项目管理', desc: '全部项目、剧集与出片记录' },
-] as const;
-
-export function ToolboxPanel(): ReactElement {
-  const navigate = useNavigate();
-  return (
-    <RightPanel title="工具箱">
-      {TOOLS.map((tool) => (
-        <div
-          key={tool.key}
-          onClick={() => {
-            void navigate(`/${tool.key}`);
-          }}
-          style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0', cursor: 'pointer' }}
-          onMouseEnter={(event) => {
-            event.currentTarget.style.opacity = '0.85';
-          }}
-          onMouseLeave={(event) => {
-            event.currentTarget.style.opacity = '1';
-          }}
-        >
-          <span
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: tokens.radiusControl,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: tokens.fontTitle,
-              color: tool.tint,
-              background: `${tool.tint}1A`,
-            }}
-          >
-            {tool.icon}
-          </span>
-          <span style={{ display: 'flex', flexDirection: 'column' }}>
-            <span style={{ fontSize: tokens.fontBody, fontWeight: 600, color: tokens.textPrimary }}>{tool.title}</span>
-            <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>{tool.desc}</span>
-          </span>
-          <RightOutlined style={{ marginLeft: 'auto', fontSize: tokens.fontIcon, color: tokens.textTertiary }} />
-        </div>
-      ))}
-    </RightPanel>
   );
 }
 

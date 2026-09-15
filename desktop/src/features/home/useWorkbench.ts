@@ -26,7 +26,8 @@ export interface WorkbenchData {
   readonly projects: Project[];
   /** null = 还没取回来或取失败。buildTodos 据此区分"加载中"与"缺模型"。 */
   readonly models: ModelInfo[] | null;
-  readonly llmConfigured: boolean;
+  readonly llmBaseUrl: string;
+  readonly ttsEngine: string;
   readonly jobs: JobInfo[];
   readonly serverTimeMs: number;
   readonly works: WorkItem[];
@@ -35,7 +36,8 @@ export interface WorkbenchData {
 const EMPTY: WorkbenchData = {
   projects: [],
   models: null,
-  llmConfigured: false,
+  llmBaseUrl: '',
+  ttsEngine: 'edge',
   jobs: [],
   serverTimeMs: 0,
   works: [],
@@ -62,7 +64,8 @@ export function useWorkbench(): Workbench {
     setData({
       projects,
       models,
-      llmConfigured: (settings?.['llm.base_url'] ?? '') !== '',
+      llmBaseUrl: settings?.['llm.base_url'] ?? '',
+      ttsEngine: settings?.['tts.engine'] ?? 'edge',
       jobs: jobs?.jobs ?? [],
       // 服务端时钟优先：ETA 与周增都要与 created_at/completed_at 同量纲同源。
       // jobs.list 取不到时退回本机时钟——次优，但比拿 0 当"现在"好。

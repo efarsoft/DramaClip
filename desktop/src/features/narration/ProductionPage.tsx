@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { ExportJob, NarrationMode, Project } from '@dramaclip/protocol';
 import { exportApi, projectApi } from '../../services/client';
+import { rememberDrama } from '../../stores/lastDrama';
 import { useUiStore } from '../../stores/ui';
 import { tokens } from '../../styles/theme';
 import { MODE_INFO } from '../../components/modeMeta';
@@ -29,6 +30,7 @@ export function ProductionPage() {
     setCurrentProjectId(projectId === '' ? null : projectId);
     void projectApi.get(projectId).then((detail) => {
       setProject(detail.project);
+      rememberDrama(detail.project.id, detail.project.name);
     });
     return () => {
       setCurrentProjectId(null);
