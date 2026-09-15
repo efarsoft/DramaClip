@@ -163,7 +163,7 @@ export interface JobInfo {
 
 export interface JobsListResult {
   readonly jobs: JobInfo[];
-  readonly total: number;
+  readonly server_time_ms: number;
 }
 
 export interface AnalysisResults {

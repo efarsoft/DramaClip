@@ -41,7 +41,7 @@ function useHomeData(): HomeData {
       rpc<ModelInfo[]>('models.list').catch(() => null),
       rpc<Record<string, string>>('settings.get').catch(() => null),
       listWorks(6).catch((): WorkItem[] => []),
-      jobsApi.list().catch((): JobInfo[] => []),
+      jobsApi.list(200).then((result) => result.jobs).catch((): JobInfo[] => []),
     ]);
     setData({
       summary,

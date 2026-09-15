@@ -10,7 +10,7 @@ import type {
   DramaClipBridge,
   ExportJob,
   ExportSubmitResult,
-  JobInfo,
+  JobsListResult,
   HealthResult,
   NarrationMode,
   NarrationPlan,
@@ -149,8 +149,8 @@ export const modelsApi = {
 } as const;
 
 export const jobsApi = {
-  list: (): Promise<JobInfo[]> =>
-    rpc<JobInfo[]>('jobs.list', {}),
+  list: (limit: number): Promise<JobsListResult> =>
+    rpc<JobsListResult>('jobs.list', { limit }),
 } as const;
 
 export const settingsApi = {
