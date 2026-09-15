@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { DashboardSummary, ModelInfo, Project, WorkItem } from '@dramaclip/protocol';
-import { listWorks, projectApi, rpc } from '../../services/client';
+import type { DashboardSummary, JobInfo, ModelInfo, Project, WorkItem } from '@dramaclip/protocol';
+import { jobsApi, listWorks, projectApi, rpc } from '../../services/client';
 import { useUiStore } from '../../stores/ui';
 import { tokens } from '../../styles/theme';
 import { EnvPanel, TipsPanel, ToolboxPanel } from './EnvPanel';
@@ -9,7 +9,7 @@ import { RecentProjects } from './RecentProjects';
 import { RecentWorks } from './RecentWorks';
 import { StartCards } from './StartCards';
 import { TodoCard } from './TodoCard';
-import { useTodos } from './useTodos';
+import { buildDramas, buildTodos } from './todos';
 
 /** 工作台：问候 + 开始创作 + 最近项目（左）｜环境/工具/上手（右）。 */
 export function HomePage() {
@@ -19,27 +19,32 @@ export function HomePage() {
 function HomeContent() {
   const navigate = useNavigate();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [allProjects, setAllProjects] = useState<Project[]>([]);
   const [models, setModels] = useState<ModelInfo[] | null>(null);
   const [llmBaseUrl, setLlmBaseUrl] = useState('');
+  const [llmModel, setLlmModel] = useState('');
   const [ttsEngine, setTtsEngine] = useState('edge');
   const [works, setWorks] = useState<WorkItem[]>([]);
+  const [failedJobs, setFailedJobs] = useState<JobInfo[]>([]);
   const serviceState = useUiStore((state) => state.serviceState);
 
   const load = useCallback(async () => {
-    const [summaryData, projectList, modelList, settings, workItems] = await Promise.all([
+    const [summaryData, projectList, modelList, settings, workItems, jobs] = await Promise.all([
       projectApi.dashboardSummary(),
       projectApi.list(),
       rpc<ModelInfo[]>('models.list').catch(() => null),
       rpc<Record<string, string>>('settings.get').catch(() => null),
       listWorks(6).catch((): WorkItem[] => []),
+      jobsApi.list().catch((): JobInfo[] => []),
     ]);
     setSummary(summaryData);
-    setProjects(projectList.slice(0, 6));
+    setAllProjects(projectList);
     setModels(modelList);
     setLlmBaseUrl(settings?.['llm.base_url'] ?? '');
+    setLlmModel(settings?.['llm.model'] ?? '');
     setTtsEngine(settings?.['tts.engine'] ?? 'edge');
     setWorks(workItems);
+    setFailedJobs(jobs.filter((job) => job.status === 'failed'));
   }, []);
 
   // 服务就绪前发起的 RPC 会失败；ready 后重载一次（修复启动时序竞争）
@@ -47,8 +52,26 @@ function HomeContent() {
     if (serviceState === 'ready') void load();
   }, [load, serviceState]);
 
-  const todos = useTodos(models, llmBaseUrl !== '', serviceState === 'unavailable');
+  const dramas = useMemo(() => buildDramas(allProjects, works), [allProjects, works]);
+  const todos = useMemo(
+    () =>
+      buildTodos({
+        serviceDown: serviceState === 'unavailable',
+        models,
+        llmConfigured: llmBaseUrl !== '' && llmModel !== '',
+        dramas,
+        failedJobs: failedJobs.map((job) => ({
+          id: job.id,
+          type: job.type,
+          refId: job.ref_id,
+          error: job.error ?? null,
+        })),
+        serverTimeMs: Date.now(),
+      }),
+    [dramas, failedJobs, llmBaseUrl, llmModel, models, serviceState],
+  );
   const needsModel = (models ?? []).some((m) => m.required && m.status !== 'installed');
+  const recentProjects = useMemo(() => allProjects.slice(0, 6), [allProjects]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -62,7 +85,7 @@ function HomeContent() {
               void navigate(`/projects/${projectId}/analysis`);
             }}
           />
-          <RecentProjects projects={projects} />
+          <RecentProjects projects={recentProjects} />
           <RecentWorks works={works} />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
