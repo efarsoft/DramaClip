@@ -25,7 +25,7 @@ from dramaclip.engines.narration.models import (
     TimelineSegment,
 )
 from dramaclip.engines.narration.scriptwriter import Script, estimate_duration
-from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
+from dramaclip.engines.semantic.models import HighlightSegment
 from dramaclip.engines.tts import base as tts_base
 from dramaclip.engines.tts.factory import create as create_tts
 
@@ -77,43 +77,6 @@ def build_plan(
     if mode == "inner_monologue":
         return modes_p2.build_monologue(scenes, strategy)
     raise ValueError(f"模式暂未支持: {mode}（{MODE_LABELS.get(mode, mode)} 将随后续阶段启用）")
-
-
-def top_conflict_windows(
-    episodes: list[tuple[int, list[ConflictScore]]],
-    limit: int,
-) -> list[tuple[int, ConflictScore]]:
-    """全剧 top-K 冲突窗，**按集去重**（每集只留它排名最高的那一窗），按窗口名次返回。
-    """
-    if limit < 1:
-        raise ValueError(f"窗口数 limit 必须 ≥ 1，实得 {limit}")
-    ranked = sorted(
-        ((number, scene) for number, scenes in episodes for scene in scenes),
-        key=lambda item: (-item[1].score, item[0], item[1].scene_index),
-    )
-    picked: list[tuple[int, ConflictScore]] = []
-    seen: set[int] = set()
-    for number, scene in ranked:
-        if number in seen:
-            continue
-        seen.add(number)
-        picked.append((number, scene))
-        if len(picked) == limit:
-            break
-    return picked
-
-
-def deal_windows(
-    windows: list[tuple[int, ConflictScore]], hands: int
-) -> list[list[int]]:
-    """把排名后的冲突窗**轮转**发成 hands 手，每手是它拿到的集号（升序、手间互不相交）。
-    """
-    if hands < 1:
-        raise ValueError(f"手数 hands 必须 ≥ 1，实得 {hands}")
-    dealt: list[list[int]] = [[] for _ in range(min(hands, len(windows)))]
-    for rank, (number, _scene) in enumerate(windows):
-        dealt[rank % len(dealt)].append(number)
-    return [sorted(hand) for hand in dealt]
 
 
 def build_from_script_episodes(

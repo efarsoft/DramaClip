@@ -267,14 +267,9 @@ def _run_plan_variants(
                 break
             label = narration_pipeline.MODE_LABELS.get(mode, mode)
             try:
-                if mode in _NARRATION_MODES:
-                    variants = _angle_variants(
-                        context, mode, label, episode_inputs, settings, k, excluded_angles
-                    )
-                else:
-                    variants = _rule_variants(
-                        context, label, episodes, k, rerolled=rerolled
-                    )
+                variants = _angle_variants(
+                    context, mode, label, episode_inputs, settings, k, excluded_angles
+                )
             except Exception as exc:  # noqa: BLE001 - 取意图失败 = 这个模式的 K 条全没了
                 # 按 K 条记账：界面才不会把「这个模式一条都没出」显示成「这个模式本来就没有方案」
                 failures.extend(f"{label}·第{i}条: {exc}" for i in range(1, k + 1))
@@ -367,70 +362,6 @@ def _angle_variants(
         )
         for brief in briefs
     ]
-
-
-def _rule_variants(
-    context: AppContext,
-    label: str,
-    episodes: list[dict[str, Any]],
-    k: int,
-    *,
-    rerolled: bool,
-) -> list[_Variant]:
-    """规则类（raw_clip / subtitle_flow）：全剧冲突窗排名 → 轮转发成 K 手，一手一条方案。
-    """
-    scored: list[tuple[int, list[ConflictScore]]] = []
-    for episode in episodes:
-        record = analysis_repo.get(context.conn, str(episode["id"]))
-        if record is None:
-            continue
-        scored.append(
-            (int(episode["episode_number"]), _parse_conflicts(record["conflict_scores"]))
-        )
-    # limit 给"全部集数"：榜单在这里的用途是**给全集排名**，条数由下面的发窗决定。
-    # max(..., 1) 只为让 scored 为空时落到下面那句"无从取窗"，而不是 limit<1 的抛错——
-    # 两条都是失败，但前者说的是产品事实，后者说的是调用方传错了参数。
-    windows = narration_pipeline.top_conflict_windows(scored, max(len(scored), 1))
-    if not windows:
-        raise ValueError(f"{label}：全剧没有任何带冲突分的场景，无从取窗")
-    hands = narration_pipeline.deal_windows(windows, k)
-    if len(hands) < k:
-        # 规格 §1 允许「每模式产出 1..K 条」，但 §3.3 禁止静默：少出必须留痕，
-        # 否则界面会把「这个模式只出了 N 条」显示成「这个模式本来就只能出 N 条」。
-        context.notifier.log(
-            "info",
-            f"{label}：全剧只有 {len(windows)} 集带冲突窗，轮转发窗只够 {len(hands)} 手，"
-            f"本模式出 {len(hands)} 条（规格 §1 的 1..K 条）",
-        )
-    thin = sum(1 for hand in hands if len(hand) < 2)
-    if thin:
-        # 集数 < 2 × K 时必有手退化成一集：互不相交的多集手至少需要 2 × K 集。
-        # 这是算术不是缺陷，但界面卡片写着"跨集方案"，实际只取一集时必须说清楚。
-        context.notifier.log(
-            "info",
-            f"{label}：全剧只有 {len(windows)} 集带冲突窗、不足 2×{k} 集，"
-            f"其中 {thin} 手只取到一集（跨集需要至少 2×K 集才发得开）",
-        )
-    if rerolled:
-        # 窗口榜是确定性的，且规则类的 angle 是空串（贡献不出排除项）：
-        # 「重掷此条」对规则类必然原样再出同一条方案。如实说出来，别让用户以为生效了。
-        context.notifier.log(
-            "info",
-            f"{label}：规则类方案由全剧冲突榜确定性推导，「重掷此条」不会改变结果；"
-            "要换方案请改方案数或补素材（《定案四》）",
-        )
-    for rank, hand in enumerate(hands, start=1):
-        context.notifier.log(
-            "info",
-            f"{label}·第 {rank} 条：取第 {'、'.join(str(number) for number in hand)} 集"
-            "（全剧冲突窗轮转发窗，不经选题模型）",
-        )
-    return [
-        _Variant(name="", reason="", episode_numbers=hand, angle_block="")
-        for hand in hands
-    ]
-
-
 def _plan_one(
     context: AppContext,
     mode: str,
