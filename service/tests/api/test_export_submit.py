@@ -23,6 +23,7 @@ from dramaclip.infra.storage.repos import plans as plans_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
 from dramaclip.transport.notify import Notifier
 from dramaclip.transport.rpc import Router, RpcRequest
+from tests.conftest import register_job_executor
 
 
 def _harness(memory_db: sqlite3.Connection, tmp_path: Path) -> SimpleNamespace:
@@ -32,7 +33,7 @@ def _harness(memory_db: sqlite3.Connection, tmp_path: Path) -> SimpleNamespace:
         work_dir=tmp_path / "cache" / "analysis",
         settings={},
         notifier=Notifier(lambda _m: None),
-        executor=ThreadPoolExecutor(max_workers=2),
+        executor=register_job_executor(ThreadPoolExecutor(max_workers=2)),
         job_store=jobs_mod.JobStore(memory_db),
         cancel_events={},
     )

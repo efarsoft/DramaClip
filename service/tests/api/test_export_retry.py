@@ -19,6 +19,7 @@ from dramaclip.infra.storage.repos import plans as plans_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
 from dramaclip.transport.notify import Notifier
 from dramaclip.transport.rpc import Router, RpcRequest
+from tests.conftest import register_job_executor
 
 
 def _context(memory_db: sqlite3.Connection, tmp_path: Path) -> SimpleNamespace:
@@ -120,6 +121,7 @@ def test_inprocess_failure_still_records_error(
 def _export_router(memory_db: sqlite3.Connection, tmp_path: Path) -> tuple[Router, SimpleNamespace]:
     context = _context(memory_db, tmp_path)
     context.executor = ThreadPoolExecutor(max_workers=2)
+    register_job_executor(context.executor)
     router = Router()
     export_api.register(router, context)  # type: ignore[arg-type]
     return router, context

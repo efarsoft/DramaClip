@@ -20,6 +20,7 @@ from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.transport.notify import Notifier
 from dramaclip.transport.rpc import Router, RpcRequest
+from tests.conftest import register_job_executor
 
 
 class FakeTranscriber:
@@ -49,6 +50,7 @@ class Harness:
     ) -> None:
         self.sent: list[dict[str, Any]] = []
         self.executor = ThreadPoolExecutor(max_workers=2)
+        register_job_executor(self.executor)
         from types import SimpleNamespace
 
         prescreen_repo_stub = SimpleNamespace(get=lambda _episode_id: None)

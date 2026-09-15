@@ -38,12 +38,14 @@ from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
 from dramaclip.transport.notify import Notifier
 from dramaclip.transport.rpc import Router, RpcRequest
+from tests.conftest import register_job_executor
 
 
 class Harness:
     def __init__(self, conn: sqlite3.Connection, work_dir: Path, *, data_dir: Path) -> None:
         self.sent: list[dict[str, Any]] = []
         self.executor = ThreadPoolExecutor(max_workers=4)
+        register_job_executor(self.executor)
         self.context = SimpleNamespace(
             conn=conn,
             work_dir=work_dir,
