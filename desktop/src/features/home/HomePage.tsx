@@ -163,6 +163,7 @@ function HomeBody({
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXl, minWidth: 0 }}>
+        {hasDramas && <StatChips stats={stats} />}
         <TodoList
           items={todos}
           onNavigate={(path) => {
@@ -172,7 +173,6 @@ function HomeBody({
         />
         {hasDramas ? (
           <>
-            <StatChips stats={stats} />
             <RecentWorks works={data.works.slice(0, RECENT_WORKS)} />
             <ContinueCard projects={data.projects} nowMs={data.serverTimeMs} />
           </>
