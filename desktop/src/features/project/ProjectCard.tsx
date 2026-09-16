@@ -27,7 +27,7 @@ export function ProjectCard({
       }}
     >
       <CoverArea project={project} handlers={{ onRename, onDuplicate, onDelete }} />
-      <div style={{ padding: '12px 14px 14px' }}>
+      <div style={{ padding: `${String(tokens.spaceSm)} ${String(tokens.spaceLg)} ${String(tokens.spaceMd)}` }}>
         <div style={{ fontSize: tokens.fontBodyLg, fontWeight: 600, color: tokens.textPrimary }}>{project.name}</div>
         <div
           style={{
@@ -59,12 +59,12 @@ function CoverArea({
         <img
           src={mediaUrl(project.cover_path)}
           alt={project.name}
-          style={{ width: '100%', height: 140, objectFit: 'cover', display: 'block' }}
+          style={{ width: '100%', aspectRatio: '9 / 16', objectFit: 'cover', display: 'block' }}
         />
       ) : (
         <div
           style={{
-            height: 140,
+            aspectRatio: '9 / 16',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
