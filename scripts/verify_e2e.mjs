@@ -131,8 +131,11 @@ async function main() {
 
   // 预筛 + 全量分析（跳过已完成集）
   const episodes = (await rpc('project.get', { project_id: project.id })).episodes;
-  // 预筛只在长剧（>15 集，选集才有意义）时跑；≤15 直接全量，避免白扫 10 分钟
-  if (episodes.length > 15) {
+  // 预筛只在长剧时跑（选集才有意义）；阈值关联设置页「全量分析推荐阈值」
+  const settingsAll = await rpc('settings.get', {}).catch(() => ({}));
+  const fullThreshold = Number(settingsAll['analysis.full_threshold']) || 15;
+  console.log(`[e2e] 全量分析推荐阈值: ${fullThreshold} 集`);
+  if (episodes.length > fullThreshold) {
     const prescreen = await rpc('analysis.prescreen', { project_id: project.id }).catch(() => null);
     if (prescreen !== null) await waitJob(prescreen.job_id, 2400000);
   }
