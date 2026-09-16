@@ -9,20 +9,24 @@
  */
 import { RightOutlined } from '@ant-design/icons';
 import type { ReactElement } from 'react';
+import type { Project } from '@dramaclip/protocol';
 import { dramaEntryPath } from '../../app/routes';
 import { mixins } from '../../styles/mixins';
+import { mediaUrl } from '../../services/client';
 import { tokens } from '../../styles/theme';
 import { whenLabel } from './relativeTime';
 import { readLastDrama } from '../../stores/lastDrama';
 
-export function ContinueCard({ nowMs }: { nowMs: number }): ReactElement | null {
+export function ContinueCard({ projects, nowMs }: { projects: Project[]; nowMs: number }): ReactElement | null {
   const last = readLastDrama();
   if (last === null) return null;
+  const cover = projects.find((project) => project.id === last.id)?.cover_path;
   return (
     <a
       href={`#${dramaEntryPath(last.id)}`}
       style={{
         ...mixins.listRow(),
+        gap: tokens.spaceMd,
         borderRadius: tokens.radiusCard,
         border: `1px solid ${tokens.borderSecondary}`,
         background: tokens.bgContainer,
@@ -30,6 +34,19 @@ export function ContinueCard({ nowMs }: { nowMs: number }): ReactElement | null 
         textDecoration: 'none',
       }}
     >
+      <span
+        style={{
+          width: 72, height: 44, borderRadius: tokens.radiusThumb, overflow: 'hidden',
+          flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: tokens.accentSoft, color: tokens.colorPrimary,
+        }}
+      >
+        {cover !== undefined ? (
+          <img src={mediaUrl(cover)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        ) : (
+          <span style={{ fontSize: tokens.fontBody }}>▶</span>
+        )}
+      </span>
       <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 2 }}>
         <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>继续上次</span>
         <span

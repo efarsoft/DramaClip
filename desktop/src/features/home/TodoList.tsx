@@ -53,7 +53,7 @@ function TodoRow({
   onRestartService: () => void;
 }): ReactElement {
   return (
-    <div style={{ ...mixins.listRow(), padding: `${String(tokens.spaceMd)} ${String(tokens.spaceLg)}` }}>
+    <div style={{ ...mixins.listRow(), padding: `${String(tokens.spaceSm)} ${String(tokens.spaceLg)}` }}>
       <span data-testid="severity-dot" style={mixins.statusDot(DOT_COLOR[item.severity])} />
       <span
         title={item.detail === '' ? undefined : item.detail}

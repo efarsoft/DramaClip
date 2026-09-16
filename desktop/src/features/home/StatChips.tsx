@@ -56,18 +56,19 @@ function ChipView({ chip }: { chip: Chip }): ReactElement {
         padding: `${String(tokens.spaceXs)} ${String(tokens.spaceLg)}`,
       }}
     >
-      <span
-        style={{
-          fontSize: tokens.fontDisplay,
-          fontWeight: 700,
-          lineHeight: '26px',
-          color: tokens.textPrimary,
-          fontFamily: tokens.fontFamilyMono,
-        }}
-      >
-        {chip.value}
+      <span style={{ display: 'flex', alignItems: 'baseline', gap: tokens.spaceSm }}>
+        <span
+          style={{
+            fontSize: tokens.fontDisplay,
+            fontWeight: 700,
+            color: tokens.textPrimary,
+            fontFamily: tokens.fontFamilyMono,
+          }}
+        >
+          {chip.value}
+        </span>
+        <span style={{ fontSize: tokens.fontCaption, color: tokens.textSecondary }}>{chip.label}</span>
       </span>
-      <span style={{ fontSize: tokens.fontCaption, color: tokens.textSecondary }}>{chip.label}</span>
       {chip.note !== '' && (
         <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>{chip.note}</span>
       )}

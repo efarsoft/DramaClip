@@ -174,7 +174,7 @@ function HomeBody({
           <>
             <StatChips stats={stats} />
             <RecentWorks works={data.works.slice(0, RECENT_WORKS)} />
-            <ContinueCard nowMs={data.serverTimeMs} />
+            <ContinueCard projects={data.projects} nowMs={data.serverTimeMs} />
           </>
         ) : (
           <EmptyWorkbench creating={creating} onCreate={onCreate} />
