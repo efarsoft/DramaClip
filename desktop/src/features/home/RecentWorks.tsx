@@ -1,14 +1,9 @@
-/** 最近成品：跨项目最新出片（点击进作品库）。
- *
- * 不出缩略图：逐片封面不存在，拿项目封面冒充逐片封面正是 §4.5 要治的
- * "同剧 9 条片共用一张封面"。缩略图归 P-3.3。
- */
+/** 最近成品：海报卡片网格（16:9 逐片封面 + 时长角标 + 模式标签）。 */
 import { useNavigate } from 'react-router-dom';
 import type { WorkItem } from '@dramaclip/protocol';
 import { PageSection } from '../../components/layout/PageKit';
-import { mediaUrl } from '../../services/client';
 import { MODE_INFO } from '../../components/modeMeta';
-import { mixins } from '../../styles/mixins';
+import { mediaUrl } from '../../services/client';
 import { tokens } from '../../styles/theme';
 
 function modeLabel(mode: string | undefined): string {
@@ -19,7 +14,14 @@ function modeLabel(mode: string | undefined): string {
 function formatDate(ms: number | undefined): string {
   if (ms === undefined) return '';
   const date = new Date(ms);
-  return `${String(date.getMonth() + 1)}/${String(date.getDate())} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  return `${String(date.getMonth() + 1)}/${String(date.getDate())}`;
+}
+
+function durationLabel(s: number | undefined): string {
+  if (s === undefined || s <= 0) return '';
+  const m = Math.floor(s / 60);
+  const sec = Math.round(s % 60);
+  return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
 export function RecentWorks({ works }: { works: readonly WorkItem[] }): React.ReactElement {
@@ -29,15 +31,21 @@ export function RecentWorks({ works }: { works: readonly WorkItem[] }): React.Re
       title="最近成品"
       extra={
         works.length > 0 ? (
-          <GhostLink
-            label="查看全部"
+          <button
+            type="button"
             onClick={() => {
               void navigate('/works');
             }}
-          />
+            style={{
+              background: 'none', border: 'none', padding: 0,
+              color: tokens.colorPrimary, fontSize: tokens.fontCaption, cursor: 'pointer',
+            }}
+          >
+            查看全部
+          </button>
         ) : undefined
       }
-      dense
+      style={{ background: 'transparent', border: 'none', boxShadow: 'none' }}
     >
       {works.length === 0 ? (
         <div
@@ -46,43 +54,45 @@ export function RecentWorks({ works }: { works: readonly WorkItem[] }): React.Re
             fontSize: tokens.fontCaption,
             color: tokens.textTertiary,
             textAlign: 'center',
+            border: `1px dashed ${tokens.borderSecondary}`,
+            borderRadius: tokens.radiusCard,
           }}
         >
           还没有成片——出片完成后会出现在这里
         </div>
       ) : (
-        works.map((work) => (
-          <WorkRow
-            key={work.id}
-            work={work}
-            onClick={() => {
-              void navigate('/works');
-            }}
-          />
-        ))
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: tokens.spaceMd }}>
+          {works.map((work) => (
+            <WorkPoster
+              key={work.id}
+              work={work}
+              onClick={() => {
+                void navigate('/works');
+              }}
+            />
+          ))}
+        </div>
       )}
     </PageSection>
   );
 }
 
-function WorkRow({ work, onClick }: { work: WorkItem; onClick: () => void }): React.ReactElement {
+function WorkPoster({ work, onClick }: { work: WorkItem; onClick: () => void }): React.ReactElement {
   return (
     <div
       onClick={onClick}
-      style={{
-        ...mixins.listRow(),
-        padding: `${String(tokens.spaceSm)} ${String(tokens.spaceLg)}`,
-        gap: tokens.spaceMd,
-        cursor: 'pointer',
-      }}
-      onMouseEnter={(event) => {
-        event.currentTarget.style.background = tokens.bgElevated;
-      }}
-      onMouseLeave={(event) => {
-        event.currentTarget.style.background = 'transparent';
-      }}
+      style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}
     >
-      <span style={{ position: 'relative', flexShrink: 0, width: 56, height: 32, borderRadius: 4, overflow: 'hidden' }}>
+      <div
+        style={{
+          position: 'relative',
+          aspectRatio: '16 / 9',
+          borderRadius: tokens.radiusCard,
+          overflow: 'hidden',
+          background: tokens.bgElevated,
+          border: `1px solid ${tokens.borderSecondary}`,
+        }}
+      >
         {work.cover_path ? (
           <img
             src={mediaUrl(work.cover_path)}
@@ -90,63 +100,48 @@ function WorkRow({ work, onClick }: { work: WorkItem; onClick: () => void }): Re
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
           />
         ) : (
-          <span
+          <div
             style={{
               width: '100%',
               height: '100%',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              background: tokens.accentSoft,
               color: tokens.colorPrimary,
-              fontSize: tokens.fontIcon,
+              background: tokens.accentSoft,
             }}
           >
-            ▶
-          </span>
+            <span style={{ fontSize: tokens.fontHeading }}>▶</span>
+          </div>
         )}
-      </span>
-      <span
+        <span
+          style={{
+            position: 'absolute', right: 6, bottom: 6,
+            background: 'rgba(0,0,0,0.72)', color: tokens.colorWhite,
+            fontSize: tokens.fontMicro, padding: '1px 6px',
+            borderRadius: tokens.radiusChip, fontFamily: tokens.fontFamilyMono,
+          }}
+        >
+          {durationLabel(work.duration_s)}
+        </span>
+        <span
+          style={{
+            position: 'absolute', left: 6, top: 6,
+            background: 'rgba(0,0,0,0.72)', color: tokens.colorWhite,
+            fontSize: tokens.fontMicro, padding: '1px 6px', borderRadius: tokens.radiusChip,
+          }}
+        >
+          {modeLabel(work.narration_mode)}
+        </span>
+      </div>
+      <div
         style={{
-          fontSize: tokens.fontCaption,
-          color: tokens.textPrimary,
-          minWidth: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
+          fontSize: tokens.fontCaption, color: tokens.textSecondary,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         }}
       >
-        {work.project_name} · {modeLabel(work.narration_mode)}
-      </span>
-      <span
-        style={{
-          marginLeft: 'auto',
-          flexShrink: 0,
-          fontSize: tokens.fontMicro,
-          color: tokens.textTertiary,
-        }}
-      >
-        {formatDate(work.completed_at)}
-      </span>
+        {`${work.project_name} · ${formatDate(work.completed_at)}`}
+      </div>
     </div>
-  );
-}
-
-function GhostLink({ label, onClick }: { label: string; onClick: () => void }): React.ReactElement {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        background: 'none',
-        border: 'none',
-        padding: 0,
-        color: tokens.colorPrimary,
-        fontSize: tokens.fontCaption,
-        cursor: 'pointer',
-      }}
-    >
-      {label}
-    </button>
   );
 }
