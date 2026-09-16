@@ -32,6 +32,13 @@ function formatDuration(seconds: number | undefined): string {
   return `${String(Math.floor(total / 60))}:${String(total % 60).padStart(2, '0')}`;
 }
 
+function durationLabel(s: number | undefined): string {
+  if (s === undefined || s <= 0) return '';
+  const m = Math.floor(s / 60);
+  const sec = Math.round(s % 60);
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+
 function formatDate(ms: number | undefined): string {
   if (ms === undefined) return '';
   const date = new Date(ms);
@@ -175,23 +182,15 @@ function WorkCard({
   return (
     <Card hoverable styles={{ body: { padding: 0, height: '100%' } }}>
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <Poster cover={cover} tint={tint} onPreview={onPreview} />
-        <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: tokens.spaceSm, flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
-            <Tag
-              color={tint}
-              style={{ marginInlineEnd: 0, fontSize: tokens.fontMicro, borderRadius: tokens.radiusChip }}
-            >
-              {modeLabel(work.narration_mode)}
-            </Tag>
-            <span style={{ marginLeft: 'auto', fontSize: tokens.fontMicro, color: tokens.textTertiary }}>
-              {formatDate(work.completed_at)}
-            </span>
-          </div>
-          <div style={{ fontSize: tokens.fontBodyLg, fontWeight: 600, color: tokens.textPrimary }}>
+        <Poster work={work} cover={cover} tint={tint} onPreview={onPreview} />
+        <div style={{ padding: `${String(tokens.spaceSm)} ${String(tokens.spaceLg)} ${String(tokens.spaceMd)}`, display: 'flex', flexDirection: 'column', gap: tokens.spaceXs, flex: 1 }}>
+          <div style={{ fontSize: tokens.fontBodyLg, fontWeight: 600, color: tokens.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {work.project_name}
           </div>
-          <WorkMeta work={work} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, fontSize: tokens.fontMicro, color: tokens.textTertiary }}>
+            <span>{formatDate(work.completed_at)}</span>
+            <WorkMeta work={work} />
+          </div>
         </div>
       </div>
     </Card>
@@ -200,10 +199,12 @@ function WorkCard({
 
 
 function Poster({
+  work,
   cover,
   tint,
   onPreview,
 }: {
+  work: WorkItem;
   cover?: string;
   tint: string;
   onPreview: () => void;
@@ -225,7 +226,7 @@ function Poster({
         position: 'relative',
       }}
     >
-      {cover !== undefined && (
+      {cover !== undefined ? (
         <img
           src={mediaUrl(cover)}
           alt=""
@@ -235,15 +236,37 @@ function Poster({
             width: '100%',
             height: '100%',
             objectFit: 'cover',
-            opacity: 0.8,
           }}
         />
+      ) : (
+        <PlayCircleOutlined
+          style={{ fontSize: tokens.fontPoster, color: tint, zIndex: 1 }}
+        />
       )}
-      <PlayCircleOutlined
-        style={{ fontSize: tokens.fontPoster, color: cover === undefined ? tint : '#FFFFFF', zIndex: 1 }}
+      <span
+        style={{
+          position: 'absolute', inset: 0,
+          background: 'linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,0.6) 100%)',
+        }}
       />
-      <span style={{ fontSize: tokens.fontCaption, color: tokens.colorWhite, zIndex: 1, textShadow: '0 1px 4px rgba(0,0,0,0.6)' }}>
-        点击预览
+      <span
+        style={{
+          position: 'absolute', left: 6, top: 6,
+          background: 'rgba(0,0,0,0.72)', color: tokens.colorWhite,
+          fontSize: tokens.fontMicro, padding: '1px 6px', borderRadius: tokens.radiusChip,
+        }}
+      >
+        {modeLabel(work.narration_mode)}
+      </span>
+      <span
+        style={{
+          position: 'absolute', right: 6, bottom: 6,
+          background: 'rgba(0,0,0,0.72)', color: tokens.colorWhite,
+          fontSize: tokens.fontMicro, padding: '1px 6px', borderRadius: tokens.radiusChip,
+          fontFamily: tokens.fontFamilyMono,
+        }}
+      >
+        {durationLabel(work.duration_s)}
       </span>
     </div>
   );
