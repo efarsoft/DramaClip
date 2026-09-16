@@ -1,6 +1,6 @@
 /** 出片中心：选模式 → 一键出片（后端组合任务异步执行），成品入作品库。 */
 import { Button, Card, Empty, Progress, Tag, Tooltip } from 'antd';
-import { PageHeader as PageKitHeader } from '../../components/layout/PageKit';
+import { PageHeader as PageKitHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { ExportJob, NarrationMode, Project } from '@dramaclip/protocol';
@@ -55,7 +55,7 @@ export function ProductionPage() {
   };
 
   return (
-    <div style={{ maxWidth: 1080, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: tokens.spaceXl }}>
+    <PageShell>
       <PageHeader projectName={project?.name} />
 
       <StyleSelectCard />
@@ -73,16 +73,16 @@ export function ProductionPage() {
       />
 
       {producing && (
-        <Card size="small" title="出片进度">
+        <PageSection title="出片进度">
           <Progress percent={Math.round(percent)} status="active" />
-          <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
+          <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginTop: tokens.spaceSm }}>
             {stageText === '' ? '排队中' : stageText} · 可离开本页面，任务在后台继续
           </div>
-        </Card>
+        </PageSection>
       )}
 
       <ExportsCard exports={exports} />
-    </div>
+    </PageShell>
   );
 }
 
@@ -114,7 +114,7 @@ function ModeSelectCard({
   onStart: () => void;
 }) {
   return (
-    <Card size="small" title="选择出片模式">
+    <PageSection title="选择出片模式">
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: tokens.spaceMd }}>
         {MODE_INFO.map((item) => (
           <ModeTile
@@ -146,7 +146,7 @@ function ModeSelectCard({
           {running ? '出片中…' : '开始出片'}
         </Button>
       </div>
-    </Card>
+    </PageSection>
   );
 }
 
@@ -219,15 +219,15 @@ function NeedBadge({ text, muted = false }: { text: string; muted?: boolean }): 
 
 function ExportsCard({ exports }: { exports: ExportJob[] | null }) {
   return (
-    <Card size="small" title="出片记录">
+    <PageSection title="出片记录" dense>
       {exports === null ? null : exports.length === 0 ? (
         <Empty description="还没有出片记录——选择模式开始出片" styles={{ image: { height: 60 } }} />
       ) : (
-        <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
+        <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
           {exports.map((job) => <ExportRow key={job.id} job={job} />)}
         </div>
       )}
-    </Card>
+    </PageSection>
   );
 }
 
