@@ -14,6 +14,7 @@ from dramaclip.api.context import AppContext
 from dramaclip.engines.analysis.runtime import AnalysisRuntime
 from dramaclip.infra import config, gpu, jobs, paths
 from dramaclip.infra import logging as logging_setup
+from dramaclip.infra.model_manager import cuda_runtime
 from dramaclip.infra.storage import backup, db
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import exports as exports_repo
@@ -49,6 +50,7 @@ class ServiceApp:
             print(f"[backup] 备份失败: {exc}")
         conn = db.connect(paths.db_path(data_dir))
         db.migrate(conn)
+        cuda_runtime.inject_dll_dirs(data_dir)
         settings = config.load(conn)
         job_store = jobs.JobStore(conn)
         interrupted = job_store.sweep_interrupted()

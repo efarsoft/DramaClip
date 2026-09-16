@@ -162,6 +162,30 @@
           }
         }
       }
+    },
+    {
+      "name": "models.runtime_status",
+      "summary": "CUDA 运行库安装态",
+      "params": { "type": "object" },
+      "result": {
+        "type": "object",
+        "properties": {
+          "cublas": { "type": "boolean" },
+          "cudnn": { "type": "boolean" },
+          "installed": { "type": "boolean" }
+        }
+      }
+    },
+    {
+      "name": "models.install_runtime",
+      "summary": "下载并启用 CUDA 运行库（作业）",
+      "params": { "type": "object" },
+      "result": {
+        "type": "object",
+        "properties": {
+          "job_id": { "type": "string" }
+        }
+      }
     }
   ]
 }

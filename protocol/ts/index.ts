@@ -417,6 +417,8 @@ export const METHOD_NAMES = [
   'export.list',
   'export.list_works',
   'export.ensure_covers',
+  'models.runtime_status',
+  'models.install_runtime',
   'jobs.list',
   'jobs.get',
   'jobs.cancel',

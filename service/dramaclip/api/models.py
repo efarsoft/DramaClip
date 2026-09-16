@@ -35,6 +35,8 @@ def register(router: Router, context: AppContext) -> None:
     router.register("models.list", lambda _params: list_models(context))
     router.register("models.download", lambda params: download(context, params))
     router.register("models.scan_local", lambda params: scan_local(context))
+    router.register("models.runtime_status", lambda params: runtime_status(context, params))
+    router.register("models.install_runtime", lambda params: install_runtime(context, params))
     router.register("models.delete", lambda params: delete(context, params))
 
 
@@ -88,6 +90,52 @@ def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     )
     threading.Thread(target=_watch, daemon=True, name=f"dl-watch-{model_id}").start()
     return {"job_id": job_id}
+
+
+def runtime_status(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """CUDA 运行库安装态（GpuCard 状态机第四档的判据）。"""
+    from dramaclip.infra.model_manager import cuda_runtime
+
+    return cuda_runtime.status(context.data_dir)
+
+
+def install_runtime(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """下载并启用 CUDA 运行库（作业模式：进度走 set_progress，可取消）。"""
+    from dramaclip.infra.model_manager import cuda_runtime
+
+    if cuda_runtime.status(context.data_dir)["installed"]:
+        raise RpcDomainError(_ERR_MODEL_STATE, "CUDA 运行库已安装")
+    job_id = context.job_store.create("cuda_runtime", ref_id="cuda-runtime")
+    context.job_store.mark_running(job_id)
+    cancel_event = threading.Event()
+    context.cancel_events[job_id] = cancel_event
+    done_event = threading.Event()
+
+    def _run() -> None:
+        try:
+            cuda_runtime.install(
+                context.data_dir,
+                cancel=cancel_event,
+                on_progress=lambda percent: context.job_store.set_progress(
+                    job_id, float(percent), "下载 CUDA 运行库"
+                ),
+            )
+            context.notifier.log("info", "CUDA 运行库安装完成，重启服务后对已运行进程生效")
+        except Exception as exc:  # noqa: BLE001 - 作业失败原样落 error
+            context.job_store.mark_failed(job_id, str(exc))
+        finally:
+            done_event.set()
+
+    def _watch() -> None:
+        done_event.wait()
+        job = context.job_store.get(job_id)
+        if job is not None and job["status"] == "running":
+            context.job_store.mark_completed(job_id)
+        context.cancel_events.pop(job_id, None)
+
+    threading.Thread(target=_watch, daemon=True, name="cuda-runtime-watch").start()
+    return {"job_id": job_id}
+
 
 
 def scan_local(context: AppContext) -> dict[str, Any]:

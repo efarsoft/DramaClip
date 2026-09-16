@@ -142,6 +142,13 @@ export const exportApi = {
     rpc<{ ok: boolean; generated: number }>('export.ensure_covers', { limit }),
 } as const;
 
+export const runtimeApi = {
+  status: (): Promise<{ cublas: boolean; cudnn: boolean; installed: boolean }> =>
+    rpc<{ cublas: boolean; cudnn: boolean; installed: boolean }>('models.runtime_status', {}),
+  install: (): Promise<{ job_id: string }> =>
+    rpc<{ job_id: string }>('models.install_runtime', {}),
+} as const;
+
 export const modelsApi = {
   list: (): Promise<ModelInfo[]> => rpc<ModelInfo[]>('models.list'),
   download: (modelId: string, source?: string): Promise<{ job_id: string }> =>

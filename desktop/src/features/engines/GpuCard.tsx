@@ -3,6 +3,8 @@ import type { ReactElement } from 'react';
 import { Button, Tooltip } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import type { GpuInfo } from '@dramaclip/protocol';
+import { useEffect, useState } from 'react';
+import { runtimeApi } from '../../services/client';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 
@@ -46,6 +48,37 @@ export function GpuCard({
 }): ReactElement {
   const status = statusOf(info, device);
   const meta = metaOf(info);
+  const [runtimeMissing, setRuntimeMissing] = useState(false);
+  const [installing, setInstalling] = useState(false);
+
+  useEffect(() => {
+    let stopped = false;
+    const probe = (): void => {
+      void runtimeApi
+        .status()
+        .then((s) => {
+          if (!stopped) setRuntimeMissing(!s.installed);
+          if (s.installed && installing) setInstalling(false);
+        })
+        .catch(() => undefined);
+    };
+    probe();
+    if (!installing) return () => {
+      stopped = true;
+    };
+    const timer = setInterval(probe, 2000);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [installing]);
+
+  const onInstall = (): void => {
+    void runtimeApi.install().then(() => setInstalling(true)).catch(() => undefined);
+  };
+
+  const showRuntime =
+    info?.ready === true && info.vendor === 'nvidia' && device !== 'cpu' && runtimeMissing;
   return (
     <div
       style={{
@@ -86,6 +119,26 @@ export function GpuCard({
           }}
         >
           {meta}
+        </div>
+      )}
+      {showRuntime && (
+        <div
+          style={{
+            marginTop: tokens.spaceSm,
+            marginLeft: tokens.spaceLg,
+            display: 'flex',
+            alignItems: 'center',
+            gap: tokens.spaceSm,
+          }}
+        >
+          <span style={{ fontSize: tokens.fontMicro, color: tokens.colorWarning }}>
+            {installing ? 'CUDA 运行库下载中…（约 600MB，完成后重启服务生效）' : 'CUDA 运行库未安装 · 转写将以 CPU 运行'}
+          </span>
+          {!installing && (
+            <Button size="small" type="primary" onClick={onInstall}>
+              下载运行库
+            </Button>
+          )}
         </div>
       )}
     </div>
