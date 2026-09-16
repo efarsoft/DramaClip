@@ -48,10 +48,12 @@ class FasterWhisperEngine:
         *,
         device: str = "auto",
         models_dir: Path | None = None,
+        compute_type: str = "int8",
     ) -> None:
         self._model_size = model_size
         self._device = device
         self._models_dir = models_dir
+        self._compute_type = compute_type
         self._model: WhisperModel | None = None
 
     @property
@@ -115,6 +117,7 @@ class FasterWhisperEngine:
             return cls(
                 self._model_size,
                 device=device,
+                compute_type=self._compute_type,
                 download_root=str(self._models_dir) if self._models_dir else None,
             )
         except Exception as exc:  # noqa: BLE001 - CUDA 运行库问题统一按关键字识别
@@ -124,6 +127,7 @@ class FasterWhisperEngine:
                 return cls(
                     self._model_size,
                     device="cpu",
+                    compute_type=self._compute_type,
                     download_root=str(self._models_dir) if self._models_dir else None,
                 )
             raise

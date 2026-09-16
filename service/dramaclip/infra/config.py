@@ -21,6 +21,7 @@ DEFAULTS: dict[str, str] = {
     "asr.engine": "faster_whisper",
     "asr.model": "small",
     "asr.device": "auto",
+    "asr.compute_type": "int8",
     "asr.language": "zh",
     "subtitle.default_preset": "conflict-impact",
     "subtitle.smart_match": "true",
