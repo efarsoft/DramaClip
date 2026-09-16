@@ -62,7 +62,7 @@ export const tokens = {
   shadowCard: '0 6px 20px rgba(4,8,20,0.35)',
 
   // ---- 布局 ----
-  pageMaxWidth: 1180,
+  pageMaxWidth: 1320,
   railWidth: 68,
 } as const;
 

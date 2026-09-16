@@ -61,7 +61,7 @@ export function RecentWorks({ works }: { works: readonly WorkItem[] }): React.Re
           还没有成片——出片完成后会出现在这里
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: tokens.spaceMd }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: tokens.spaceMd }}>
           {works.map((work) => (
             <WorkPoster
               key={work.id}
@@ -84,13 +84,21 @@ function WorkPoster({ work, onClick }: { work: WorkItem; onClick: () => void }):
       style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}
     >
       <div
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'scale(1.02)';
+          e.currentTarget.style.boxShadow = tokens.shadowPop;
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'scale(1)';
+          e.currentTarget.style.boxShadow = 'none';
+        }}
         style={{
           position: 'relative',
           aspectRatio: '16 / 9',
           borderRadius: tokens.radiusCard,
           overflow: 'hidden',
           background: tokens.bgElevated,
-          border: `1px solid ${tokens.borderSecondary}`,
+          transition: 'transform 0.15s ease, boxShadow 0.15s ease',
         }}
       >
         {work.cover_path ? (
@@ -114,6 +122,12 @@ function WorkPoster({ work, onClick }: { work: WorkItem; onClick: () => void }):
             <span style={{ fontSize: tokens.fontHeading }}>▶</span>
           </div>
         )}
+        <span
+          style={{
+            position: 'absolute', inset: 0,
+            background: 'linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%)',
+          }}
+        />
         <span
           style={{
             position: 'absolute', right: 6, bottom: 6,
