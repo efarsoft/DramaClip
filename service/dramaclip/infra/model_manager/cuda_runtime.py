@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
+import urllib.parse
+import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Any
 
-from dramaclip.infra.model_manager.fetch import download_file, fetch_json
+from dramaclip.infra.model_manager.fetch import _UA, download_file, fetch_json
 
 # 钉版本：ctranslate2 4.x 配 cu12；这对组合在 CTranslate2 官方矩阵内。
 _PACKAGES = [
@@ -55,7 +58,21 @@ def inject_dll_dirs(data_dir: Path) -> int:
 
 
 def _wheel_meta(pkg: str, version: str) -> dict[str, Any]:
-    """从 PyPI JSON API 取 win_amd64 wheel 的 {url, size}。"""
+    """取 win_amd64 wheel 的 {url, size}：清华 simple 索引直取（国内可达），
+    pypi.org JSON API 仅兜底——其 DNS 在国内网络常挂起且 socket 超时管不到。
+    wheel 文件名用规范化下划线包名；镜像 href 带 #sha256 锚点与相对路径。"""
+    filename = f"{pkg.replace('-', '_')}-{version}-py3-none-win_amd64.whl"
+    simple = f"{_MIRRORS[0]}/simple/{pkg}/"
+    try:
+        req = urllib.request.Request(simple, headers={"User-Agent": _UA})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            text = resp.read().decode("utf-8")
+        match = re.search(r'href="([^"]*' + re.escape(filename) + r'[^"]*)"', text)
+        if match:
+            url = urllib.parse.urljoin(simple, match.group(1))
+            return {"url": url, "size": _content_length(url), "filename": filename}
+    except Exception:  # noqa: BLE001 - 镜像失败落 pypi.org 兜底
+        pass
     data: dict[str, Any] = json.loads(
         json.dumps(fetch_json(f"{_PYPI}/pypi/{pkg}/{version}/json"))
     )
@@ -64,6 +81,12 @@ def _wheel_meta(pkg: str, version: str) -> dict[str, Any]:
         if name.endswith(".whl") and "win_amd64" in name:
             return {"url": str(item["url"]), "size": int(item["size"]), "filename": name}
     raise ValueError(f"{pkg} {version} 无 win_amd64 wheel")
+
+
+def _content_length(url: str) -> int:
+    request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": _UA})
+    with urllib.request.urlopen(request, timeout=30) as resp:
+        return int(resp.headers.get("Content-Length") or 0)
 
 
 def _mirror_url(url: str, mirror: str) -> str:
