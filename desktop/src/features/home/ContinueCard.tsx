@@ -30,7 +30,7 @@ export function ContinueCard({ projects, nowMs }: { projects: Project[]; nowMs: 
         borderRadius: tokens.radiusCard,
         border: `1px solid ${tokens.borderSecondary}`,
         background: tokens.bgContainer,
-        padding: `${String(tokens.spaceMd)} ${String(tokens.spaceLg)}`,
+        padding: `${tokens.spaceMd}px ${tokens.spaceLg}px`,
         textDecoration: 'none',
       }}
     >

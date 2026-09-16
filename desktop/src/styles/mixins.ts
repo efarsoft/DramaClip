@@ -62,7 +62,7 @@ export function fieldRow(): CSSProperties {
     display: 'flex',
     alignItems: 'flex-start',
     gap: tokens.space2xl,
-    padding: `${String(tokens.spaceMd)} 0`,
+    padding: `${tokens.spaceMd}px 0`,
   };
 }
 
@@ -80,7 +80,7 @@ export function listRow(active = false): CSSProperties {
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spaceMd,
-    padding: `0 ${String(tokens.spaceMd)}`,
+    padding: `0 ${tokens.spaceMd}px`,
     borderBottom: `1px solid ${tokens.borderSecondary}`,
     background: active ? tokens.accentSoft : 'transparent',
   };
@@ -105,7 +105,7 @@ export function statusDot(color: string): CSSProperties {
 export function chip(): CSSProperties {
   return {
     fontSize: tokens.fontMicro,
-    padding: `2px ${String(tokens.spaceSm)}`,
+    padding: `2px ${tokens.spaceSm}px`,
     borderRadius: tokens.radiusChip,
     background: tokens.bgElevated,
     color: tokens.textSecondary,

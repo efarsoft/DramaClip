@@ -245,7 +245,7 @@ function FieldRow({
     ? { ...mixins.fieldRow(), borderBottom: 'none' }
     : mixins.fieldRow();
   return (
-    <div style={{ ...rowStyle, padding: `0 ${String(tokens.spaceLg)}` }}>
+    <div style={{ ...rowStyle, padding: `0 ${tokens.spaceLg}px` }}>
       <div style={mixins.fieldLabelCol()}>
         <div style={{ fontSize: tokens.fontBody, color: tokens.textPrimary }}>{spec.label}</div>
         {spec.help !== undefined && (

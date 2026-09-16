@@ -15,7 +15,7 @@ function SectionCard({
       hoverable
       onClick={onClick}
       styles={{
-        body: { padding: `${String(tokens.spaceMd)} ${String(tokens.spaceLg)}`, height: '100%' },
+        body: { padding: `${tokens.spaceMd}px ${tokens.spaceLg}px`, height: '100%' },
       }}
     >
       {children}

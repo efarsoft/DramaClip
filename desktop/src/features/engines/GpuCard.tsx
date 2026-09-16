@@ -82,7 +82,7 @@ export function GpuCard({
   return (
     <div
       style={{
-        padding: `${String(tokens.spaceMd)} ${String(tokens.spaceLg)}`,
+        padding: `${tokens.spaceMd}px ${tokens.spaceLg}px`,
         borderRadius: tokens.radiusCard,
         border: `1px solid ${tokens.borderSecondary}`,
         background: tokens.bgContainer,

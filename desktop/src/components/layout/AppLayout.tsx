@@ -11,7 +11,7 @@ export function AppLayout() {
       <TitleBar />
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <Rail />
-        <main style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: `${String(tokens.spaceXl)} ${String(tokens.space2xl)}` }}>
+        <main style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: `${tokens.spaceXl}px ${tokens.space2xl}px` }}>
           <Outlet />
         </main>
       </div>

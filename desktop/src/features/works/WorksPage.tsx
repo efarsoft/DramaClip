@@ -183,7 +183,7 @@ function WorkCard({
     <Card hoverable styles={{ body: { padding: 0, height: '100%' } }}>
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <Poster work={work} cover={cover} tint={tint} onPreview={onPreview} />
-        <div style={{ padding: `${String(tokens.spaceSm)} ${String(tokens.spaceLg)} ${String(tokens.spaceMd)}`, display: 'flex', flexDirection: 'column', gap: tokens.spaceXs, flex: 1 }}>
+        <div style={{ padding: `${tokens.spaceSm}px ${tokens.spaceLg}px ${tokens.spaceMd}px`, display: 'flex', flexDirection: 'column', gap: tokens.spaceXs, flex: 1 }}>
           <div style={{ fontSize: tokens.fontBodyLg, fontWeight: 600, color: tokens.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {work.project_name}
           </div>

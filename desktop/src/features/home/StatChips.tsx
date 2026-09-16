@@ -56,7 +56,7 @@ function ChipView({ chip }: { chip: Chip }): ReactElement {
         flexDirection: 'row',
         alignItems: 'center',
         gap: tokens.spaceMd,
-        padding: `${String(tokens.spaceMd)} ${String(tokens.spaceLg)}`,
+        padding: `${tokens.spaceMd}px ${tokens.spaceLg}px`,
         background: tokens.bgContainer,
         border: `1px solid ${tokens.borderSecondary}`,
         borderRadius: tokens.radiusCard,

@@ -53,7 +53,7 @@ function RecommendCard({ model, onChanged }: { model: ModelInfo; onChanged: () =
         display: 'flex',
         alignItems: 'center',
         gap: tokens.spaceMd,
-        padding: `${String(tokens.spaceSm)} ${String(tokens.spaceMd)}`,
+        padding: `${tokens.spaceSm}px ${tokens.spaceMd}px`,
         borderRadius: tokens.radiusCard,
         border: `1px solid ${tokens.border}`,
         background: tokens.accentSoft,

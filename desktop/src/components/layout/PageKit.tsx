@@ -14,7 +14,7 @@ export function PageShell({
   fullbleed?: boolean;
 }): React.ReactElement {
   const style = fullbleed
-    ? { ...mixins.pageShell(true), gap: tokens.spaceXl, padding: `${String(tokens.spaceXl)} 0` }
+    ? { ...mixins.pageShell(true), gap: tokens.spaceXl, padding: `${tokens.spaceXl}px 0` }
     : mixins.pageShell();
   return <div style={style}>{children}</div>;
 }
@@ -97,7 +97,7 @@ export function PageSection({
         <div
           style={{
             ...mixins.sectionTitleRow(),
-            padding: `${String(tokens.spaceMd)} ${String(tokens.spaceLg)}`,
+            padding: `${tokens.spaceMd}px ${tokens.spaceLg}px`,
             borderBottom: `1px solid ${tokens.borderSecondary}`,
           }}
         >
@@ -148,7 +148,7 @@ export function PageFooter({
         display: 'flex',
         alignItems: 'center',
         gap: tokens.spaceMd,
-        padding: `0 ${String(tokens.spaceLg)}`,
+        padding: `0 ${tokens.spaceLg}px`,
         background: tokens.bgSidebar,
         borderTop: `1px solid ${tokens.borderSecondary}`,
       }}
