@@ -9,16 +9,13 @@ import { tokens } from '../../styles/theme';
 export function PageShell({
   children,
   fullbleed = false,
-  narrow = false,
 }: {
   children: ReactNode;
   fullbleed?: boolean;
-  /** 表单/文本型页面的内容宽度收敛（880），避免长行空旷。 */
-  narrow?: boolean;
 }): React.ReactElement {
   const style = fullbleed
     ? { ...mixins.pageShell(true), gap: tokens.spaceXl, padding: `${String(tokens.spaceXl)} 0` }
-    : { ...mixins.pageShell(), ...(narrow ? { maxWidth: 880 } : {}) };
+    : mixins.pageShell();
   return <div style={style}>{children}</div>;
 }
 

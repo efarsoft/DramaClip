@@ -30,9 +30,7 @@ export function pageShell(fullbleed = false): CSSProperties {
   if (fullbleed) return base;
   return {
     ...base,
-    maxWidth: tokens.pageMaxWidth,
     width: '100%',
-    margin: '0 auto',
     gap: tokens.space2xl,
   };
 }

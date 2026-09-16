@@ -62,13 +62,12 @@ export const tokens = {
   shadowCard: '0 6px 20px rgba(4,8,20,0.35)',
 
   // ---- 布局 ----
-  pageMaxWidth: 1440,
   railWidth: 68,
 } as const;
 
 /** 语义化布局度量（DSS §2）。 */
 export const layout = {
-  page: { maxWidth: tokens.pageMaxWidth, paddingBlock: tokens.space2xl, gap: tokens.space2xl },
+  page: { paddingBlock: tokens.space2xl, gap: tokens.space2xl },
   fullbleed: { paddingBlock: tokens.spaceXl, gap: tokens.spaceXl },
   card: { padding: tokens.spaceLg },
   listSection: { padding: 0, rowPadding: tokens.spaceMd },

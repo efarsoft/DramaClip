@@ -52,7 +52,7 @@ export function SettingsPage() {
 
   if (draft === null || original === null) {
     return (
-      <PageShell narrow>
+      <PageShell>
         <PageSection>加载中…</PageSection>
       </PageShell>
     );
