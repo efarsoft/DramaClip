@@ -50,7 +50,7 @@ def inject_dll_dirs(data_dir: Path) -> int:
     root = runtime_dir(data_dir)
     injected = 0
     for p in _PACKAGES:
-        d = root / p["name"]
+        d = (root / p["name"]).resolve()
         if d.is_dir():
             os.add_dll_directory(str(d))
             injected += 1
