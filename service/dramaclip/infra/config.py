@@ -40,6 +40,7 @@ DEFAULTS: dict[str, str] = {
     # 成片响度目标（EBU R128）：Phase C 整片两遍 loudnorm 收口，见 engines/exporter/loudness.py
     "export.loudness_target_lufs": "-14",
     "export.loudness_true_peak_dbtp": "-1.5",
+    "export.encoder": "auto",
     "export.width": str(EXPORT_WIDTH),
     "export.height": str(EXPORT_HEIGHT),
     "hardware.max_parallel_jobs": "2",

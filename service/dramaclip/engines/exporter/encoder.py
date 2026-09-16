@@ -144,6 +144,7 @@ def cut_segment_args(
     transition: str = "cut",
     ass_path: str | None = None,
     out_size: tuple[int, int] = _DEFAULT_OUT_SIZE,
+    video_codec: str = "libx264",
 ) -> list[str]:
     """构建单段切割命令（Phase A）。
     """
@@ -231,13 +232,12 @@ def cut_segment_args(
             "-map",
             "0:a:0?",
         ]
+    nvenc = video_codec == "h264_nvenc"
     args += [
         "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "20",
+        video_codec,
+        *(["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", "22"] if nvenc
+          else ["-preset", "veryfast", "-crf", "20"]),
         "-c:a",
         "aac",
         "-b:a",
@@ -277,6 +277,26 @@ def _escape_filter_path(path: str) -> str:
     return normalized.replace(":", r"\\:").replace("'", r"\'")
 
 
+_NVENC_LOCK = threading.Lock()
+_NVENC_CACHE: bool | None = None
+
+
+def nvenc_available() -> bool:
+    """NVENC 可用性真编码探针：编码器存在≠可用，黑帧实编一次验证；进程内缓存。"""
+    global _NVENC_CACHE
+    with _NVENC_LOCK:
+        if _NVENC_CACHE is None:
+            try:
+                _run_cut([
+                    "-f", "lavfi", "-i", "color=black:s=256x256:d=0.1",
+                    "-c:v", "h264_nvenc", "-f", "null", "-",
+                ])
+                _NVENC_CACHE = True
+            except Exception:  # noqa: BLE001 - 驱动/会话异常一律按不可用
+                _NVENC_CACHE = False
+        return _NVENC_CACHE
+
+
 def _run_cut(args: list[str]) -> None:
     runner.run(args, timeout_s=600)
 
@@ -296,6 +316,7 @@ def export_plan(
     dialogue_zones: dict[str, list[SpeechZone]] | None = None,
     out_size: tuple[int, int] = _DEFAULT_OUT_SIZE,
     loudness_target: loudness.LoudnessTarget | None = None,
+    video_codec: str = "libx264",
 ) -> Path:
     """执行两阶段导出，返回成片路径。
     """
@@ -347,6 +368,7 @@ def export_plan(
                 transition=segment.transition,
                 ass_path=ass_path,
                 out_size=out_size,
+                video_codec=video_codec,
             )
         )
 

@@ -84,6 +84,19 @@ const EXPORT_SECTION: SectionSpec = {
       max: 0,
       help: '防爆音的天花板，一般不用改',
     },
+    {
+      key: 'export.encoder',
+      label: '视频编码',
+      type: 'select',
+      help: '自动=检测到 NVIDIA 显卡时 GPU 编码（NVENC），否则纯 CPU',
+      options: () => [
+        { label: '自动（推荐）', value: 'auto' },
+        { label: 'NVIDIA GPU（NVENC）', value: 'h264_nvenc' },
+        { label: '纯 CPU（libx264）', value: 'libx264' },
+      ],
+    },
+    { key: 'export.width', label: '输出宽度 (px)', type: 'number', min: 480, max: 2160 },
+    { key: 'export.height', label: '输出高度 (px)', type: 'number', min: 480, max: 2160 },
   ],
 };
 

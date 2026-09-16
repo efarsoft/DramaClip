@@ -307,11 +307,18 @@ def render_export(
         )
         return str(ass_path)
 
+    # 输出编码：auto=探测到 NVENC 可用即 GPU 编码（黑帧实编验证），失败/关闭回退 libx264
+    codec_setting = str(context.settings.get("export.encoder", "auto") or "auto").lower()
+    if codec_setting == "auto":
+        video_codec = "h264_nvenc" if encoder.nvenc_available() else "libx264"
+    else:
+        video_codec = codec_setting
     encoder.export_plan(
         plan_data,
         episode_paths,
         out_path,
         context.work_dir / "export" / export_id,
+        video_codec=video_codec,
         tts_audio_by_segment=tts_segments or None,
         mask=mask,
         cancel=cancel_event,
