@@ -139,6 +139,7 @@ def install_runtime(context: AppContext, params: dict[str, Any]) -> dict[str, An
             context.job_store.mark_completed(job_id)
         context.cancel_events.pop(job_id, None)
 
+    threading.Thread(target=_run, daemon=True, name="cuda-runtime-install").start()
     threading.Thread(target=_watch, daemon=True, name="cuda-runtime-watch").start()
     return {"job_id": job_id}
 
