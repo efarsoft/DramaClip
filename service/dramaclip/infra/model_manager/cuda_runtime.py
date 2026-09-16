@@ -46,14 +46,22 @@ def status(data_dir: Path) -> dict[str, Any]:
 
 
 def inject_dll_dirs(data_dir: Path) -> int:
-    """服务启动调用：把已安装的 DLL 目录加入进程搜索路径。返回注入数。"""
+    """服务启动调用：把 CUDA DLL 目录注入进程搜索路径。返回注入数。
+
+    必须同时做两件事：ctranslate2 用普通 LoadLibrary 加载 cublas/cudnn——
+    只搜 PATH（add_dll_directory 对它不生效）；其余依赖用 add_dll_directory
+    兜底。PATH 前置保证优先于系统目录。"""
     root = runtime_dir(data_dir)
     injected = 0
+    dirs: list[str] = []
     for p in _PACKAGES:
         d = (root / p["name"]).resolve()
         if d.is_dir():
             os.add_dll_directory(str(d))
+            dirs.append(str(d))
             injected += 1
+    if dirs:
+        os.environ["PATH"] = os.pathsep.join(dirs) + os.pathsep + os.environ.get("PATH", "")
     return injected
 
 
