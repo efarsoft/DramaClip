@@ -131,7 +131,8 @@ async function main() {
 
   // 预筛 + 全量分析（跳过已完成集）
   const episodes = (await rpc('project.get', { project_id: project.id })).episodes;
-  if (episodes.length > 0) {
+  // 预筛只在长剧（>15 集，选集才有意义）时跑；≤15 直接全量，避免白扫 10 分钟
+  if (episodes.length > 15) {
     const prescreen = await rpc('analysis.prescreen', { project_id: project.id }).catch(() => null);
     if (prescreen !== null) await waitJob(prescreen.job_id, 2400000);
   }
