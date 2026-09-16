@@ -23,8 +23,8 @@ from dramaclip.infra.model_manager.fetch import _UA, download_file, fetch_json
 _PACKAGES = [
     {"name": "cublas", "pkg": "nvidia-cublas-cu12", "version": "12.4.5.8",
      "dll": "cublas64_12.dll"},
-    {"name": "cudnn", "pkg": "nvidia-cudnn-cu12", "version": "9.1.0.70",
-     "dll": "cudnn64_9.dll"},
+    {"name": "cudnn", "pkg": "nvidia-cudnn-cu12", "version": "8.9.7.29",
+     "dll": "cudnn64_8.dll"},
 ]
 
 _PYPI = "https://pypi.org"
