@@ -105,6 +105,12 @@ def install_runtime(context: AppContext, params: dict[str, Any]) -> dict[str, An
 
     if cuda_runtime.status(context.data_dir)["installed"]:
         raise RpcDomainError(_ERR_MODEL_STATE, "CUDA 运行库已安装")
+    _active = [
+        j for j in context.job_store.list_recent(limit=50, active_only=True)
+        if j["type"] == "cuda_runtime"
+    ]
+    if _active:
+        raise RpcDomainError(_ERR_MODEL_STATE, "已有安装任务进行中，请等待完成或取消")
     job_id = context.job_store.create("cuda_runtime", ref_id="cuda-runtime")
     context.job_store.mark_running(job_id)
     cancel_event = threading.Event()
