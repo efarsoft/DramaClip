@@ -212,7 +212,7 @@ function Poster({
     <div
       onClick={onPreview}
       style={{
-        height: 120,
+        aspectRatio: '9 / 16',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',

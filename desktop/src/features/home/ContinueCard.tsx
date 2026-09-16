@@ -36,7 +36,7 @@ export function ContinueCard({ projects, nowMs }: { projects: Project[]; nowMs: 
     >
       <span
         style={{
-          width: 72, height: 44, borderRadius: tokens.radiusThumb, overflow: 'hidden',
+          width: 45, height: 80, borderRadius: tokens.radiusThumb, overflow: 'hidden',
           flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: tokens.accentSoft, color: tokens.colorPrimary,
         }}

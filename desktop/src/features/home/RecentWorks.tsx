@@ -61,7 +61,7 @@ export function RecentWorks({ works }: { works: readonly WorkItem[] }): React.Re
           还没有成片——出片完成后会出现在这里
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: tokens.spaceMd }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: tokens.spaceMd }}>
           {works.map((work) => (
             <WorkPoster
               key={work.id}
@@ -94,7 +94,7 @@ function WorkPoster({ work, onClick }: { work: WorkItem; onClick: () => void }):
         }}
         style={{
           position: 'relative',
-          aspectRatio: '16 / 9',
+          aspectRatio: '9 / 16',
           borderRadius: tokens.radiusCard,
           overflow: 'hidden',
           background: tokens.bgElevated,
