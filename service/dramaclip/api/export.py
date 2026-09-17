@@ -16,7 +16,7 @@ from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.exporter import encoder, loudness
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle import presets as subtitle_presets
-from dramaclip.engines.subtitle.ass_generator import build_ass
+from dramaclip.engines.subtitle.ass_generator import build_ass, split_subtitle_text
 from dramaclip.infra import config
 from dramaclip.infra.ffmpeg import cover as ffmpeg_cover
 from dramaclip.infra.ffmpeg import probe
@@ -308,14 +308,22 @@ def render_export(
     out_size = _output_size(context.settings)
 
     def burn_subtitle(segment_index: int, text: str, duration_s: float) -> str:
-        """生成段级 ass 文件并返回路径（相对时间轴 0→duration）。"""
+        """生成段级 ass 文件并返回路径（相对时间轴 0→duration）。
+
+        长文案按标点/字数拆成多行字幕，时长按字数比例分配——整段一行会溢出画面。
+        """
         ass_dir = context.work_dir / "export" / export_id
         ass_dir.mkdir(parents=True, exist_ok=True)
         ass_path = ass_dir / f"seg_{segment_index:03d}.ass"
-        ass_path.write_text(
-            build_ass([{"start": 0.0, "end": duration_s, "text": text}], preset),
-            encoding="utf-8",
-        )
+        chunks = split_subtitle_text(text)
+        total_chars = sum(len(c) for c in chunks)
+        lines: list[dict[str, Any]] = []
+        cursor = 0.0
+        for chunk in chunks:
+            span = duration_s * len(chunk) / total_chars
+            lines.append({"start": cursor, "end": cursor + span, "text": chunk})
+            cursor += span
+        ass_path.write_text(build_ass(lines, preset), encoding="utf-8")
         return str(ass_path)
 
     # 输出编码：auto=探测到 NVENC 可用即 GPU 编码（黑帧实编验证），失败/关闭回退 libx264

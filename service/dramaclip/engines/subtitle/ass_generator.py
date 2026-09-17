@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from dramaclip.engines.subtitle.emotion_matcher import match_emotion
@@ -114,6 +115,32 @@ def _karaoke_body(text: str, duration_s: float, overrides: str, primary: str) ->
     for ch in chars:
         parts.append(f"{{\\k{per_cs}}}{_escape(ch)}")
     return "".join(parts)
+
+
+_SUBTITLE_MAX_CHARS = 16
+
+_PUNCT_SPLIT = re.compile(r"(?<=[，。！？；：、…——])")
+
+
+def split_subtitle_text(text: str, max_len: int = _SUBTITLE_MAX_CHARS) -> list[str]:
+    """长解说文案拆成字幕级短句：标点优先断句，超长句硬切，短段回并。"""
+    pieces: list[str] = []
+    for sentence in _PUNCT_SPLIT.split(text.strip()):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        while len(sentence) > max_len:
+            pieces.append(sentence[:max_len])
+            sentence = sentence[max_len:]
+        if sentence:
+            pieces.append(sentence)
+    merged: list[str] = []
+    for piece in pieces:
+        if merged and len(merged[-1]) + len(piece) <= max_len:
+            merged[-1] += piece
+        else:
+            merged.append(piece)
+    return merged or [text.strip()]
 
 
 def build_ass(lines: list[dict[str, Any]], preset: dict[str, Any]) -> str:
