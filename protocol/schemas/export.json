@@ -43,6 +43,9 @@
         },
         "completed_at": {
           "type": "integer"
+        },
+        "narration_plan_id": {
+          "type": "string"
         }
       }
     },
@@ -91,25 +94,36 @@
       "summary": "阶段4：把已规划好的方案排队渲染（一条方案一个 export job）",
       "params": {
         "type": "object",
-        "required": ["plan_ids"],
+        "required": [
+          "plan_ids"
+        ],
         "properties": {
           "plan_ids": {
             "type": "array",
             "minItems": 1,
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           }
         },
         "additionalProperties": false
       },
       "result": {
         "type": "object",
-        "required": ["exports", "rejected"],
+        "required": [
+          "exports",
+          "rejected"
+        ],
         "properties": {
           "exports": {
             "type": "array",
-            "items": {"type": "object" }
+            "items": {
+              "type": "object"
+            }
           },
-          "rejected": {"type": "array" }
+          "rejected": {
+            "type": "array"
+          }
         }
       }
     },
@@ -118,14 +132,30 @@
       "summary": "重试失败导出：复用原 export_id 覆盖写，不新建记录",
       "params": {
         "type": "object",
-        "required": ["export_id"],
-        "properties": { "export_id": { "type": "string" } },
+        "required": [
+          "export_id"
+        ],
+        "properties": {
+          "export_id": {
+            "type": "string"
+          }
+        },
         "additionalProperties": false
       },
       "result": {
         "type": "object",
-        "required": ["job_id", "export_id"],
-        "properties": { "job_id": { "type": "string" }, "export_id": { "type": "string" } }
+        "required": [
+          "job_id",
+          "export_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "export_id": {
+            "type": "string"
+          }
+        }
       }
     },
     {
@@ -181,9 +211,31 @@
       "result": {
         "type": "object",
         "properties": {
-          "ok": { "type": "boolean" },
-          "generated": { "type": "integer" }
+          "ok": {
+            "type": "boolean"
+          },
+          "generated": {
+            "type": "integer"
+          }
         }
+      }
+    },
+    {
+      "name": "export.get",
+      "summary": "单条导出记录（成片详情页数据源）",
+      "params": {
+        "type": "object",
+        "required": [
+          "export_id"
+        ],
+        "properties": {
+          "export_id": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/x-models/ExportJob"
       }
     }
   ]

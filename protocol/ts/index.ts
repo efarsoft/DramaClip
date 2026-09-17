@@ -161,6 +161,10 @@ export interface JobInfo {
   readonly updated_at: number;
 }
 
+export interface TitleCandidate {
+  readonly text: string;
+  readonly selected: boolean;
+}
 export interface JobsListResult {
   readonly jobs: JobInfo[];
   readonly server_time_ms: number;
@@ -272,6 +276,8 @@ export interface ExportJob {
   readonly error?: string;
   readonly created_at: number;
   readonly completed_at?: number;
+  /** 关联的编排方案（成片详情页据此取文案与标题）。 */
+  readonly narration_plan_id?: string;
 }
 
 /** 作品库条目（跨项目已完成成片，export.list_works）。 */
@@ -419,6 +425,9 @@ export const METHOD_NAMES = [
   'export.ensure_covers',
   'models.runtime_status',
   'models.install_runtime',
+  'narration.generate_titles',
+  'narration.update_titles',
+  'export.get',
   'jobs.list',
   'jobs.get',
   'jobs.cancel',

@@ -51,18 +51,27 @@
           "description": "1..K 的槽位号；不靠 created_at 推，毫秒精度下同批会撞"
         },
         "overlap_max": {
-          "type": ["number", "null"],
+          "type": [
+            "number",
+            "null"
+          ],
           "description": "与同 batch 同模式已接受兄弟方案的最大取材重叠（Jaccard，源素材秒）；null=首条无兄弟"
         },
         "batch_id": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "一次 plan_variants 调用产出全组的标识，取该作业 job_id"
         }
       }
     },
     "PlanCost": {
       "type": "object",
-      "required": ["copy_llm_calls", "tts_calls"],
+      "required": [
+        "copy_llm_calls",
+        "tts_calls"
+      ],
       "properties": {
         "copy_llm_calls": {
           "type": "integer",
@@ -76,13 +85,19 @@
     },
     "PlanDetail": {
       "type": "object",
-      "required": ["plan", "cost"],
+      "required": [
+        "plan",
+        "cost"
+      ],
       "properties": {
-        "plan": { "$ref": "#/x-models/NarrationPlan" },
-        "cost": { "$ref": "#/x-models/PlanCost" }
+        "plan": {
+          "$ref": "#/x-models/NarrationPlan"
+        },
+        "cost": {
+          "$ref": "#/x-models/PlanCost"
+        }
       }
     },
-
     "PlanMode": {
       "type": "string",
       "enum": [
@@ -118,6 +133,20 @@
           "type": "string"
         }
       }
+    },
+    "TitleCandidate": {
+      "type": "object",
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "selected": {
+          "type": "boolean"
+        }
+      }
     }
   },
   "x-methods": [
@@ -150,13 +179,20 @@
       "summary": "阶段3：为选中模式各产出 K 条卖点互异的方案，只规划不渲染（job）",
       "params": {
         "type": "object",
-        "required": ["project_id", "modes"],
+        "required": [
+          "project_id",
+          "modes"
+        ],
         "properties": {
-          "project_id": { "type": "string" },
+          "project_id": {
+            "type": "string"
+          },
           "modes": {
             "type": "array",
             "minItems": 1,
-            "items": { "$ref": "#/x-models/PlanMode" }
+            "items": {
+              "$ref": "#/x-models/PlanMode"
+            }
           },
           "k": {
             "type": "integer",
@@ -166,7 +202,9 @@
           },
           "exclude_plan_ids": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "重掷此条：被替换的方案，其角度名进选题排除清单。方案行永不覆写"
           }
         },
@@ -174,10 +212,18 @@
       },
       "result": {
         "type": "object",
-        "required": ["job_id", "k", "batch_id"],
+        "required": [
+          "job_id",
+          "k",
+          "batch_id"
+        ],
         "properties": {
-          "job_id": { "type": "string" },
-          "k": { "type": "integer" },
+          "job_id": {
+            "type": "string"
+          },
+          "k": {
+            "type": "integer"
+          },
           "batch_id": {
             "type": "string",
             "description": "本组方案的 batch_id（等于 job_id），供 narration.list_plans 按组取"
@@ -190,11 +236,19 @@
       "summary": "单条方案详情 + 成本账（阶段3 只读详情、成品库跳回方案）",
       "params": {
         "type": "object",
-        "required": ["plan_id"],
-        "properties": { "plan_id": { "type": "string" } },
+        "required": [
+          "plan_id"
+        ],
+        "properties": {
+          "plan_id": {
+            "type": "string"
+          }
+        },
         "additionalProperties": false
       },
-      "result": { "$ref": "#/x-models/PlanDetail" }
+      "result": {
+        "$ref": "#/x-models/PlanDetail"
+      }
     },
     {
       "name": "narration.list_styles",
@@ -204,6 +258,65 @@
         "type": "array",
         "items": {
           "$ref": "#/x-models/StyleInfo"
+        }
+      }
+    },
+    {
+      "name": "narration.generate_titles",
+      "summary": "LLM 生成候选标题并落库（手动触发）",
+      "params": {
+        "type": "object",
+        "required": [
+          "plan_id"
+        ],
+        "properties": {
+          "plan_id": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "titles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/x-models/TitleCandidate"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "narration.update_titles",
+      "summary": "保存候选标题（整表替换）",
+      "params": {
+        "type": "object",
+        "required": [
+          "plan_id",
+          "titles"
+        ],
+        "properties": {
+          "plan_id": {
+            "type": "string"
+          },
+          "titles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/x-models/TitleCandidate"
+            }
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "titles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/x-models/TitleCandidate"
+            }
+          }
         }
       }
     }

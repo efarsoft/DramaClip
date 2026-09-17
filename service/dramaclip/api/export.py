@@ -48,6 +48,7 @@ def register(router: Router, context: AppContext) -> None:
     router.register("export.retry", lambda params: retry(context, params))
     router.register("export.list", lambda params: list_exports(context, params))
     router.register("export.list_works", lambda params: list_works(context, params))
+    router.register("export.get", lambda params: get_export(context, params))
     router.register("export.ensure_covers", lambda params: ensure_covers(context, params))
 
 
@@ -218,6 +219,15 @@ def ensure_covers(context: AppContext, params: dict[str, Any]) -> dict[str, Any]
             exports_repo.set_cover(context.conn, str(row["id"]), str(cover_path))
             generated += 1
     return {"ok": True, "generated": generated}
+
+
+def get_export(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """单条导出记录（成片详情页数据源）。"""
+    export_id = str(params.get("export_id", ""))
+    row = exports_repo.get(context.conn, export_id)
+    if row is None:
+        raise RpcDomainError(_ERR_EXPORT_NOT_FOUND, f"导出记录不存在: {export_id}")
+    return row
 
 
 def list_works(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:

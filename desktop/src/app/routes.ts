@@ -6,6 +6,7 @@ export const DETAIL_ROUTES = [
   '/projects/:projectId/analysis',
   '/projects/:projectId/produce',
   '/engines/:tab',
+  '/works/:exportId',
 ] as const;
 
 export const LEGACY_REDIRECTS: Readonly<Record<string, string>> = {

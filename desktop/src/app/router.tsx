@@ -7,6 +7,7 @@ import { ProductionPage } from '../features/narration/ProductionPage';
 import { EnginesPage } from '../features/engines/EnginesPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
 import { WorksPage } from '../features/works/WorksPage';
+import { WorksDetailPage } from '../features/works/WorksDetailPage';
 import { AboutPage } from '../features/about/AboutPage';
 import { LEGACY_PARAM_REDIRECTS, LEGACY_REDIRECTS } from './routes';
 
@@ -18,6 +19,7 @@ export function Router() {
           <Route path="/" element={<HomePage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/works" element={<WorksPage />} />
+          <Route path="/works/:exportId" element={<WorksDetailPage />} />
           <Route path="/engines" element={<EnginesPage />} />
           <Route path="/engines/:tab" element={<EnginesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
