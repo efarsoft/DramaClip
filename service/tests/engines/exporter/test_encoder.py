@@ -58,7 +58,7 @@ def test_cut_segment_args_narration_mixes_tts() -> None:
     )
     joined = " ".join(args)
     assert "amix=inputs=2" in joined
-    assert "volume=0.2" in joined, "旁白段原声压低"
+    assert "volume=0.1" in joined, "旁白段原声压低"
     assert "intro.mp3" in joined
 
 

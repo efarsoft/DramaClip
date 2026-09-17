@@ -189,7 +189,7 @@ def cut_segment_args(
         # 求和之后必须挂限幅器：normalize=0 也把 amix 那 6 dB 的意外余量一起去掉了，
         # 旁白 + 原声可以直接冲过 0 dBFS。滤镜选型与 `level=disabled` / `latency=true`
         # 为什么不可省，见 `_peak_ceiling_filter`；实测数字见 test_mix。
-        bg_volume = "0.2" if audio == "narration" else "0.12"
+        bg_volume = "0.1" if audio == "narration" else "0.08"
         args += ["-i", tts_audio]
         args += [
             "-filter_complex",

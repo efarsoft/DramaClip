@@ -32,13 +32,13 @@ def test_ducked_segment_mixes_tts() -> None:
     args = _args("ducked", "tts.mp3")
     assert "-filter_complex" in args, "ducked 段未走混音分支，旁白会整条丢失"
     assert "tts.mp3" in args
-    assert "volume=0.12" in " ".join(args), "全片解说底噪压到 12%"
+    assert "volume=0.08" in " ".join(args), "全片解说底噪压到 8%"
 
 
 def test_narration_segment_mixes_tts() -> None:
     args = _args("narration", "tts.mp3")
     assert "-filter_complex" in args
-    assert "volume=0.2" in " ".join(args), "旁白段原声压低 20%"
+    assert "volume=0.1" in " ".join(args), "旁白段原声压低 10%"
 
 
 def test_original_segment_keeps_source_audio() -> None:
@@ -52,12 +52,12 @@ def test_narration_without_audio_falls_back_to_plain() -> None:
 
 
 def test_amix_does_not_normalize_inputs() -> None:
-    """amix 默认把每路除以输入数（此处各砍 6dB），声明的 0.2/0.12 会变成假数字。"""
+    """amix 默认把每路除以输入数（此处各砍 6dB），声明的 0.1/0.08 会变成假数字。"""
     joined = " ".join(_args("narration", "n1.mp3"))
     assert "amix=inputs=2:duration=first:normalize=0" in joined
-    assert "volume=0.2," in joined, "narration 段原声须真压到 20%"
+    assert "volume=0.1," in joined, "narration 段原声须真压到 10%"
     joined_ducked = " ".join(_args("ducked", "n1.mp3"))
-    assert "volume=0.12," in joined_ducked and "normalize=0" in joined_ducked
+    assert "volume=0.08," in joined_ducked and "normalize=0" in joined_ducked
 
 
 # ---- 求和的天花板：关掉 amix 归一化的同时，把它顺带的"削顶保护"也关掉了 ----
