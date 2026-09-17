@@ -79,6 +79,9 @@ def build_plan(
     raise ValueError(f"模式暂未支持: {mode}（{MODE_LABELS.get(mode, mode)} 将随后续阶段启用）")
 
 
+_NEAR_GAP_S = 1.0  # 近邻衔接阈值：段间隔小于此值视为同镜头连续推进
+
+
 def build_from_script_episodes(
     episode_map: dict[int, tuple[str, list[AsrSegment]]],
     durations: dict[int, float],
@@ -128,7 +131,13 @@ def build_from_script_episodes(
     for order, segment in enumerate(script.segments, start=1):
         ep = segment.episode
         limit = durations.get(ep, 0.0) + 5
-        start = max(snap(ep, segment.start), cursors.get(ep, 0.0))
+        cursor = cursors.get(ep, 0.0)
+        start_candidate = snap(ep, segment.start)
+        # 近邻衔接：与上一段结尾间隔 <1s 时贴合，消除微跳跃观感（≥1s 的
+        # 场景跳转是叙事需要，保留）
+        if 0.0 < start_candidate - cursor < _NEAR_GAP_S:
+            start_candidate = cursor
+        start = max(start_candidate, cursor)
         end = min(max(snap(ep, segment.end), start + 0.5), limit)
         if end <= start:
             continue

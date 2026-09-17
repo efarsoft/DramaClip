@@ -154,3 +154,27 @@ def test_prompt_keeps_raw_segments_by_episode() -> None:
     assert "00:00-00:01 據最新消息" in user
     assert "00:01-00:02 昨日發生在" in user
     assert "00:02-00:04 京海大道的實車連撞" in user
+
+
+def test_near_adjacent_segments_bridge_without_stutter() -> None:
+    """#3 跳帧修复：同集近邻段（间隔 <1s）贴合为连续播放，消除微跳跃。"""
+    script = scriptwriter.Script(
+        hook="钩子",
+        segments=[
+            scriptwriter.ScriptSegment(episode=1, start=0.08, end=5.58, text="第一段解说文案超过时长"),
+            scriptwriter.ScriptSegment(episode=1, start=6.03, end=13.155, text="第二段解说文案也超过时长"),
+        ],
+        cta="点我看结局",
+    )
+    episode_map = {1: ("ep-a", _asr([(0.0, 20.0), (5.5, 14.0)]))}
+    durations = {1: 100.0}
+    plan = build_from_script_episodes(episode_map, durations, script, StrategySpec())
+
+    same_ep = [
+        (round(seg.start, 2), round(seg.end, 2))
+        for seg in plan.timeline
+        if seg.episode_id == "ep-a"
+    ]
+    for (_prev_start, prev_end), (next_start, _next_end) in zip(same_ep, same_ep[1:]):
+        gap = round(next_start - prev_end, 2)
+        assert gap == 0.0, f"近邻段出现 {gap}s 微跳跃（应为连续衔接）"
