@@ -38,23 +38,46 @@ class _Band:
     bottom: float
 
 
-def extract_subtitles(
+def detect_band(
     video_path: Path,
     work_dir: Path,
     *,
     duration_s: float,
     ocr: OcrCallable | None = None,
-) -> list[OcrSegment]:
-    """抽取全集硬字幕条。ocr 可注入（测试）；缺省懒加载 RapidOCR。"""
+) -> tuple[float, float] | None:
+    """探测台词字幕带位置（top/bottom 占帧高比例），供导出遮罩定位。"""
     work_dir.mkdir(parents=True, exist_ok=True)
     if ocr is None:
         ocr = _rapidocr()
     probes = _probe_frames(video_path, work_dir, duration_s, ocr)
     band = _pick_band([boxes for _t, boxes in probes])
     if band is None:
+        return None
+    return (band.top, band.bottom)
+
+
+def extract_subtitles(
+    video_path: Path,
+    work_dir: Path,
+    *,
+    duration_s: float,
+    ocr: OcrCallable | None = None,
+    band: tuple[float, float] | None = None,
+) -> list[OcrSegment]:
+    """抽取全集硬字幕条。ocr 可注入（测试）；band 可传入已探测的字幕带。"""
+    work_dir.mkdir(parents=True, exist_ok=True)
+    if ocr is None:
+        ocr = _rapidocr()
+    picked_band: _Band | None = None
+    if band is not None:
+        picked_band = _Band(top=band[0], bottom=band[1])
+    if picked_band is None:
+        probes = _probe_frames(video_path, work_dir, duration_s, ocr)
+        picked_band = _pick_band([boxes for _t, boxes in probes])
+    if picked_band is None:
         _LOGGER.info("未定位到字幕带，跳过 OCR 通道：%s", video_path.name)
         return []
-    frames = _sample_frames(video_path, work_dir, band)
+    frames = _sample_frames(video_path, work_dir, picked_band)
     results: list[tuple[float, FrameResult]] = []
     for index, frame in enumerate(frames):
         boxes = [(t, top, bottom, c) for t, top, bottom, c in ocr(str(frame))]

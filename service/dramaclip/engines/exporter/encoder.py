@@ -145,6 +145,7 @@ def cut_segment_args(
     ass_path: str | None = None,
     out_size: tuple[int, int] = _DEFAULT_OUT_SIZE,
     video_codec: str = "libx264",
+    band: tuple[float, float] | None = None,
 ) -> list[str]:
     """构建单段切割命令（Phase A）。
     """
@@ -317,9 +318,25 @@ def export_plan(
     out_size: tuple[int, int] = _DEFAULT_OUT_SIZE,
     loudness_target: loudness.LoudnessTarget | None = None,
     video_codec: str = "libx264",
+    band_detector: Callable[[str], tuple[float, float] | None] | None = None,
 ) -> Path:
     """执行两阶段导出，返回成片路径。
     """
+
+    band_cache: dict[str, tuple[float, float] | None] = {}
+    lock = threading.Lock()
+
+    def _band_for_source(source: str) -> tuple[float, float] | None:
+        if band_detector is None:
+            return None
+        with lock:
+            if source in band_cache:
+                return band_cache[source]
+        band = band_detector(source)
+        with lock:
+            band_cache[source] = band
+        return band
+
     segments = plan.timeline
     if not segments:
         raise ValueError("编排时间轴为空")
@@ -369,6 +386,7 @@ def export_plan(
                 ass_path=ass_path,
                 out_size=out_size,
                 video_codec=video_codec,
+                band=_band_for_source(episode_paths.get(segment.episode_id, "")),
             )
         )
 

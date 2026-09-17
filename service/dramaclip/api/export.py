@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext
+from dramaclip.engines.analysis import subtitle_ocr
 from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.exporter import encoder, loudness
 from dramaclip.engines.narration.models import PlanData
@@ -323,12 +324,36 @@ def render_export(
         video_codec = "h264_nvenc" if encoder.nvenc_available() else "libx264"
     else:
         video_codec = codec_setting
+    # 逐集字幕带探测回调：遮罩按 OCR 探测到的实际字幕位置盖（band 缓存按源视频）
+    durations = {
+        str(ep["id"]): float(ep["duration"] or 0)
+        for ep in episodes_repo.list_by_project(context.conn, project_id)
+    }
+    band_cache: dict[str, tuple[float, float] | None] = {}
+
+    def band_detector(source: str) -> tuple[float, float] | None:
+        if source in band_cache:
+            return band_cache[source]
+        ep_id = next((eid for eid, path in episode_paths.items() if path == source), None)
+        if ep_id is None:
+            return None
+        work_sub = context.work_dir / f"band_{ep_id}"
+        try:
+            band = subtitle_ocr.detect_band(
+                Path(source), work_sub, duration_s=durations.get(ep_id, 0.0)
+            )
+        except Exception:  # noqa: BLE001 - 探测失败回退静态底部遮罩
+            band = None
+        band_cache[source] = band
+        return band
+
     encoder.export_plan(
         plan_data,
         episode_paths,
         out_path,
         context.work_dir / "export" / export_id,
         video_codec=video_codec,
+        band_detector=band_detector,
         tts_audio_by_segment=tts_segments or None,
         mask=mask,
         cancel=cancel_event,
