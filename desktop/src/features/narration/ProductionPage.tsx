@@ -2,7 +2,7 @@
 import { Button, Card, Empty, Progress, Tag, Tooltip } from 'antd';
 import { PageHeader as PageKitHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { ExportJob, NarrationMode, Project } from '@dramaclip/protocol';
 import { exportApi, projectApi } from '../../services/client';
 import { rememberDrama } from '../../stores/lastDrama';
@@ -232,10 +232,12 @@ function ExportsCard({ exports }: { exports: ExportJob[] | null }) {
 }
 
 function ExportRow({ job }: { job: ExportJob }) {
+  const navigate = useNavigate();
   const label = job.status === 'completed' ? '完成' : job.status === 'failed' ? '失败' : '进行中';
   const color = job.status === 'completed' ? 'success' : job.status === 'failed' ? 'error' : 'processing';
   return (
     <div
+      onClick={() => { void navigate(`/works/${job.id}`); }}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -243,6 +245,7 @@ function ExportRow({ job }: { job: ExportJob }) {
         padding: '8px 0',
         borderBottom: `1px solid ${tokens.borderSecondary}`,
         fontSize: tokens.fontBody,
+        cursor: 'pointer',
       }}
     >
       <Tag color={color}>{label}</Tag>
