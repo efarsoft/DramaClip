@@ -10,7 +10,7 @@ from uuid import uuid4
 
 _COLUMNS = (
     "id", "project_id", "narration_mode", "episode_ids", "plan_data", "status", "created_at",
-    "angle", "angle_reason", "variant_index", "overlap_max", "batch_id",
+    "angle", "angle_reason", "variant_index", "overlap_max", "batch_id", "titles",
 )
 
 
@@ -22,7 +22,13 @@ def _row_to_dict(row: tuple) -> dict[str, Any]:  # type: ignore[type-arg]
     data = dict(zip(_COLUMNS, row, strict=True))
     data["episode_ids"] = json.loads(data["episode_ids"])
     data["plan_data"] = json.loads(data["plan_data"])
+    data["titles"] = json.loads(data["titles"]) if data["titles"] else []
     return data
+
+
+def set_titles(conn: sqlite3.Connection, plan_id: str, titles: str) -> None:
+    conn.execute("UPDATE narration_plans SET titles = ? WHERE id = ?", (titles, plan_id))
+    conn.commit()
 
 
 def create(

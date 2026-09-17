@@ -22,6 +22,7 @@ from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration import styles as styles_lib
 from dramaclip.engines.narration.casting import EpisodeScene, MaterialByEpisode
 from dramaclip.engines.narration.models import PlanData
+from dramaclip.engines.semantic.llm_client import LlmUnavailable
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from dramaclip.infra import config
 from dramaclip.infra.storage.repos import analysis as analysis_repo
@@ -35,6 +36,8 @@ _ERR_NO_ANALYSIS = -32301
 _ERR_MODE_UNSUPPORTED = -32302
 _ERR_VARIANTS_OUT_OF_RANGE = -32303
 _ERR_PLAN_NOT_FOUND = -32304
+_ERR_LLM = -32305
+_ERR_PLAN_NOT_RENDERABLE = -32407
 
 SUPPORTED_MODES = (
     "raw_clip",
@@ -74,6 +77,8 @@ def register(router: Router, context: AppContext) -> None:
     router.register("narration.list_plans", lambda params: list_plans(context, params))
     router.register("narration.get_plan", lambda params: get_plan(context, params))
     router.register("narration.list_styles", lambda _params: list_styles(context))
+    router.register("narration.generate_titles", lambda params: generate_titles(context, params))
+    router.register("narration.update_titles", lambda params: update_titles(context, params))
 
 
 def list_plans(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:
@@ -83,6 +88,45 @@ def list_plans(context: AppContext, params: dict[str, Any]) -> list[dict[str, An
     if batch_id is not None:
         return plans_repo.list_by_batch(context.conn, project_id, str(batch_id))
     return plans_repo.list_by_project(context.conn, project_id)
+
+
+def generate_titles(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """LLM 生成候选标题并落库（手动触发，不随出片自动生成）。"""
+    from dramaclip.engines.narration import titles as titles_engine
+
+    plan_id = str(params.get("plan_id", ""))
+    row = plans_repo.get(context.conn, plan_id)
+    if row is None:
+        raise RpcDomainError(_ERR_PLAN_NOT_FOUND, f"编排方案不存在: {plan_id}")
+    try:
+        titles = titles_engine.generate(row["plan_data"], context.settings)
+    except LlmUnavailable as exc:
+        raise RpcDomainError(_ERR_LLM, str(exc)) from exc
+    except ValueError as exc:
+        raise RpcDomainError(_ERR_LLM, str(exc)) from exc
+    plans_repo.set_titles(context.conn, plan_id, json.dumps(titles, ensure_ascii=False))
+    return {"titles": titles}
+
+
+def update_titles(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """保存候选标题（整表替换：文本/采用标记由详情页编辑后提交）。"""
+    plan_id = str(params.get("plan_id", ""))
+    row = plans_repo.get(context.conn, plan_id)
+    if row is None:
+        raise RpcDomainError(_ERR_PLAN_NOT_FOUND, f"编排方案不存在: {plan_id}")
+    titles = params.get("titles")
+    if not isinstance(titles, list) or not all(
+        isinstance(t, dict) and isinstance(t.get("text"), str) and t["text"].strip()
+        for t in titles
+    ):
+        raise RpcDomainError(_ERR_PLAN_NOT_RENDERABLE, "titles 格式无效")
+    cleaned = [
+        {"text": str(t["text"]).strip(), "selected": bool(t.get("selected"))}
+        for t in titles
+    ]
+    plans_repo.set_titles(context.conn, plan_id, json.dumps(cleaned, ensure_ascii=False))
+    return {"titles": cleaned}
+
 
 
 def get_plan(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
