@@ -12,6 +12,8 @@ import type {
   ExportJob,
   ExportSubmitResult,
   JobsListResult,
+  PlanDetail,
+  TitleCandidate,
   HealthResult,
   NarrationMode,
   NarrationPlan,
@@ -118,6 +120,8 @@ export const narrationApi = {
   produce: (projectId: string, modes: string[]): Promise<{ job_id: string }> =>
     rpc<{ job_id: string }>('narration.produce', { project_id: projectId, modes }),
   listStyles: (): Promise<StyleInfo[]> => rpc<StyleInfo[]>('narration.list_styles', {}),
+  getPlan: (planId: string): Promise<PlanDetail> =>
+    rpc<PlanDetail>('narration.get_plan', { plan_id: planId }),
   generatePlans: (
     projectId: string,
     modes: NarrationMode[],
@@ -140,6 +144,15 @@ export const exportApi = {
     rpc<ExportJob[]>('export.list', { project_id: projectId }),
   ensureCovers: (limit = 200): Promise<{ ok: boolean; generated: number }> =>
     rpc<{ ok: boolean; generated: number }>('export.ensure_covers', { limit }),
+  get: (exportId: string): Promise<ExportJob> =>
+    rpc<ExportJob>('export.get', { export_id: exportId }),
+} as const;
+
+export const titlesApi = {
+  generate: (planId: string): Promise<{ titles: TitleCandidate[] }> =>
+    rpc<{ titles: TitleCandidate[] }>('narration.generate_titles', { plan_id: planId }),
+  update: (planId: string, titles: TitleCandidate[]): Promise<{ titles: TitleCandidate[] }> =>
+    rpc<{ titles: TitleCandidate[] }>('narration.update_titles', { plan_id: planId, titles }),
 } as const;
 
 export const runtimeApi = {
