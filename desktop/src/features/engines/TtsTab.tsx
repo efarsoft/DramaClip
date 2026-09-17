@@ -67,8 +67,9 @@ export function TtsTab({
         />
       </PageSection>
       <PageSection title="本地模型库">
-        <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginBottom: tokens.spaceLg }}>
-          可提前下载大模型；合成引擎接入前仅 Kokoro / Edge 可选为当前引擎。
+        <div style={{ fontSize: tokens.fontCaption, color: tokens.colorWarning, marginBottom: tokens.spaceLg }}>
+          注意：IndexTTS2 / VibeVoice 当前仅支持下载存储，合成引擎尚未接入（排期 P-2）——
+          当前可用的配音引擎为上方 Kokoro（本地）与 Edge（云端）。
         </div>
         <ModelList models={ttsModels} onChanged={onChanged} />
       </PageSection>
