@@ -36,7 +36,10 @@ def test_detect_reports_cpu_when_smi_missing(monkeypatch) -> None:
 class _FakeWhisper:
     created: list[str] = []
 
-    def __init__(self, size: str, device: str = "cpu", download_root: str | None = None) -> None:
+    def __init__(
+        self, size: str, device: str = "cpu", download_root: str | None = None,
+        compute_type: str = "float32",
+    ) -> None:
         _FakeWhisper.created.append(device)
         if device == "cuda":
             raise RuntimeError("Library cublas64_12.dll is not found")
@@ -73,7 +76,10 @@ class _FakeLazyWhisper:
 
     created: list[str] = []
 
-    def __init__(self, _size: str, device: str = "cpu", download_root: str | None = None) -> None:
+    def __init__(
+        self, _size: str, device: str = "cpu", download_root: str | None = None,
+        compute_type: str = "float32",
+    ) -> None:
         self.device = device
         _FakeLazyWhisper.created.append(device)
 
