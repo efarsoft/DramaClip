@@ -119,11 +119,13 @@ def _render(
         "normalize_in_place",
         lambda _path, **kw: loudness_targets.append(kw["target"]),
     )
+    merged_settings = dict(settings or {})
+    merged_settings.setdefault("export.encoder", "libx264")  # 探针命令不进断言集
     context = SimpleNamespace(
         conn=conn,
         data_dir=tmp_path,
         work_dir=tmp_path / "cache",
-        settings=dict(settings or {}),
+        settings=merged_settings,
     )
     export_api.render_export(
         context,  # type: ignore[arg-type]
@@ -167,7 +169,7 @@ def test_full_narration_every_segment_mixes_its_own_narration(
             f"第 {index} 段（{segment.audio}）没走混音分支 —— 旁白会整条丢失"
         )
         assert "amix=inputs=2" in joined
-        assert "volume=0.12" in joined, "ducked 段原声应压到 12% 衬底"
+        assert "volume=0.08" in joined, "ducked 段原声应压到 8% 衬底（0d761d3 加深避让）"
         assert segment.subtitle_text, "解说字幕未回填 → 成片有音无字"
         tts_input = _second_input(cmd)
         # 内容寻址后文件名是 `{id}-{hash}.mp3`：id 前缀仍在，但「取对音」的铁证是内容——
