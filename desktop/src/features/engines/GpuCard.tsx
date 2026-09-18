@@ -37,17 +37,8 @@ function metaOf(info: GpuInfo | null): string {
   return parts.join(' · ');
 }
 
-export function GpuCard({
-  info,
-  device,
-  onRefresh,
-}: {
-  info: GpuInfo | null;
-  device: string;
-  onRefresh: () => void;
-}): ReactElement {
-  const status = statusOf(info, device);
-  const meta = metaOf(info);
+/** CUDA 运行库安装状态探测：未装标记 + 安装中 2s 轮询直到装好。 */
+function useRuntimeProbe(): { runtimeMissing: boolean; installing: boolean; onInstall: () => void } {
   const [runtimeMissing, setRuntimeMissing] = useState(false);
   const [installing, setInstalling] = useState(false);
 
@@ -74,15 +65,30 @@ export function GpuCard({
   }, [installing]);
 
   const onInstall = (): void => {
-    void runtimeApi.install().then(() => setInstalling(true)).catch(() => undefined);
+    void runtimeApi.install().then(() => { setInstalling(true); }).catch(() => undefined);
   };
+  return { runtimeMissing, installing, onInstall };
+}
+
+export function GpuCard({
+  info,
+  device,
+  onRefresh,
+}: {
+  info: GpuInfo | null;
+  device: string;
+  onRefresh: () => void;
+}): ReactElement {
+  const status = statusOf(info, device);
+  const meta = metaOf(info);
+  const { runtimeMissing, installing, onInstall } = useRuntimeProbe();
 
   const showRuntime =
     info?.ready === true && info.vendor === 'nvidia' && device !== 'cpu' && runtimeMissing;
   return (
     <div
       style={{
-        padding: `${tokens.spaceMd}px ${tokens.spaceLg}px`,
+        padding: `${tokens.spaceMd} ${tokens.spaceLg}`,
         borderRadius: tokens.radiusCard,
         border: `1px solid ${tokens.borderSecondary}`,
         background: tokens.bgContainer,
@@ -121,25 +127,29 @@ export function GpuCard({
           {meta}
         </div>
       )}
-      {showRuntime && (
-        <div
-          style={{
-            marginTop: tokens.spaceSm,
-            marginLeft: tokens.spaceLg,
-            display: 'flex',
-            alignItems: 'center',
-            gap: tokens.spaceSm,
-          }}
-        >
-          <span style={{ fontSize: tokens.fontMicro, color: tokens.colorWarning }}>
-            {installing ? 'CUDA 运行库下载中…（约 600MB，完成后重启服务生效）' : 'CUDA 运行库未安装 · 转写将以 CPU 运行'}
-          </span>
-          {!installing && (
-            <Button size="small" type="primary" onClick={onInstall}>
-              下载运行库
-            </Button>
-          )}
-        </div>
+      {showRuntime && <RuntimeRow installing={installing} onInstall={onInstall} />}
+    </div>
+  );
+}
+
+function RuntimeRow({ installing, onInstall }: { installing: boolean; onInstall: () => void }): ReactElement {
+  return (
+    <div
+      style={{
+        marginTop: tokens.spaceSm,
+        marginLeft: tokens.spaceLg,
+        display: 'flex',
+        alignItems: 'center',
+        gap: tokens.spaceSm,
+      }}
+    >
+      <span style={{ fontSize: tokens.fontMicro, color: tokens.colorWarning }}>
+        {installing ? 'CUDA 运行库下载中…（约 600MB，完成后重启服务生效）' : 'CUDA 运行库未安装 · 转写将以 CPU 运行'}
+      </span>
+      {!installing && (
+        <Button size="small" type="primary" onClick={onInstall}>
+          下载运行库
+        </Button>
       )}
     </div>
   );

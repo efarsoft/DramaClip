@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import struct
 from pathlib import Path
+from typing import Any
 
 _MODEL_FILE = "model.onnx"  # float32（int8 版 protobuf 解析失败不可用）
 
@@ -35,10 +36,11 @@ class SherpaTtsEngine:
             f.setnchannels(1)
             f.setsampwidth(2)
             f.setframerate(tts.sample_rate)
-            f.writeframes(b"".join(struct.pack("<h", max(-32768, min(32767, int(s * 32767)))) for s in samples))
+            frames = (struct.pack("<h", max(-32768, min(32767, int(s * 32767)))) for s in samples)
+            f.writeframes(b"".join(frames))
         return out_path
 
-    def _ensure_tts(self):
+    def _ensure_tts(self) -> Any:
         if self._tts is None:
             import sherpa_onnx
 

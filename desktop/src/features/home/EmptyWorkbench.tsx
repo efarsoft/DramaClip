@@ -30,7 +30,7 @@ export function EmptyWorkbench({
         flexDirection: 'column',
         alignItems: 'center',
         gap: tokens.spaceLg,
-        padding: `${tokens.space3xl * 2}px ${tokens.space2xl}px`,
+        padding: `${tokens.space4xl} ${tokens.space2xl}`,
         background: tokens.bgContainer,
         border: `1px solid ${tokens.borderSecondary}`,
         borderRadius: tokens.radiusCard,

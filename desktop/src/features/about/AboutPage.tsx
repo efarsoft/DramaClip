@@ -133,7 +133,7 @@ function DataPathRow({
       .catch(() => undefined);
   };
   return (
-    <div style={{ ...mixins.listRow(), padding: `${tokens.spaceSm}px ${tokens.spaceLg}px` }}>
+    <div style={{ ...mixins.listRow(), padding: `${tokens.spaceSm} ${tokens.spaceLg}` }}>
       <span style={{ fontSize: tokens.fontCaption, color: tokens.textSecondary }}>{label}</span>
       <button
         type="button"

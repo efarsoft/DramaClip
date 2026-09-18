@@ -27,7 +27,7 @@ export function ProjectCard({
       }}
     >
       <CoverArea project={project} handlers={{ onRename, onDuplicate, onDelete }} />
-      <div style={{ padding: `${tokens.spaceSm}px ${tokens.spaceLg}px ${tokens.spaceMd}px` }}>
+      <div style={{ padding: `${tokens.spaceSm} ${tokens.spaceLg} ${tokens.spaceMd}` }}>
         <div style={{ fontSize: tokens.fontBodyLg, fontWeight: 600, color: tokens.textPrimary }}>{project.name}</div>
         <div
           style={{

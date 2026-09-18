@@ -17,4 +17,10 @@ def create(engine: str, models_dir: Path | None = None) -> TtsEngine:
         if models_dir is None:
             raise ValueError("kokoro 引擎需要 models_dir")
         return KokoroEngine(models_dir / "tts" / "kokoro" / "Kokoro-82M-v1.1-zh")
-    raise ValueError(f"未知 TTS 引擎: {engine}（可用: edge / kokoro；indextts 于后续阶段）")
+    if engine == "sherpa_melo":
+        from dramaclip.engines.tts.engines.sherpa import SherpaTtsEngine
+
+        if models_dir is None:
+            raise ValueError("sherpa_melo 引擎需要 models_dir")
+        return SherpaTtsEngine(models_dir / "tts" / "sherpa-onnx" / "melo" / "vits-melo-tts-zh_en")
+    raise ValueError(f"未知 TTS 引擎: {engine}（可用: edge / kokoro / sherpa_melo）")

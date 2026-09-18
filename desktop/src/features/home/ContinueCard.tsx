@@ -30,23 +30,11 @@ export function ContinueCard({ projects, nowMs }: { projects: Project[]; nowMs: 
         borderRadius: tokens.radiusCard,
         border: `1px solid ${tokens.borderSecondary}`,
         background: tokens.bgContainer,
-        padding: `${tokens.spaceMd}px ${tokens.spaceLg}px`,
+        padding: `${tokens.spaceMd} ${tokens.spaceLg}`,
         textDecoration: 'none',
       }}
     >
-      <span
-        style={{
-          width: 45, height: 80, borderRadius: tokens.radiusThumb, overflow: 'hidden',
-          flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: tokens.accentSoft, color: tokens.colorPrimary,
-        }}
-      >
-        {cover !== undefined ? (
-          <img src={mediaUrl(cover)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-        ) : (
-          <span style={{ fontSize: tokens.fontBody }}>▶</span>
-        )}
-      </span>
+      <CoverThumb cover={cover} />
       <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 2 }}>
         <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>继续上次</span>
         <span
@@ -77,5 +65,23 @@ export function ContinueCard({ projects, nowMs }: { projects: Project[]; nowMs: 
         <RightOutlined style={{ fontSize: tokens.fontIcon }} />
       </span>
     </a>
+  );
+}
+
+function CoverThumb({ cover }: { cover: string | undefined }): ReactElement {
+  return (
+    <span
+      style={{
+        width: 45, height: 80, borderRadius: tokens.radiusThumb, overflow: 'hidden',
+        flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: tokens.accentSoft, color: tokens.colorPrimary,
+      }}
+    >
+      {cover !== undefined ? (
+        <img src={mediaUrl(cover)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+      ) : (
+        <span style={{ fontSize: tokens.fontBody }}>▶</span>
+      )}
+    </span>
   );
 }

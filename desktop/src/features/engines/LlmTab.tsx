@@ -42,7 +42,7 @@ function UnconfiguredNotice(): React.ReactElement {
         border: `1px solid ${tokens.colorWarning}66`,
         background: `${tokens.colorWarning}14`,
         borderRadius: tokens.radiusControl,
-        padding: `${tokens.spaceSm}px ${tokens.spaceMd}px`,
+        padding: `${tokens.spaceSm} ${tokens.spaceMd}`,
         marginBottom: tokens.spaceMd,
       }}
     >

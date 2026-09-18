@@ -13,6 +13,18 @@ import { ProjectCard } from './ProjectCard';
 import { useEffect } from 'react';
 
 /** 项目管理页（docs/desktop/03 §7.2）：卡片网格 + 新建 + 重命名/复制/删除。 */
+type AppModal = ReturnType<typeof AntdApp.useApp>['modal'];
+
+function confirmDeleteProject(modal: AppModal, project: Project, remove: () => Promise<void>): void {
+  modal.confirm({
+    title: `删除项目「${project.name}」？`,
+    content: '将删除项目与分析记录（不删除源视频文件），操作不可撤销。',
+    okButtonProps: { danger: true },
+    okText: '删除',
+    onOk: remove,
+  });
+}
+
 export function ProjectsPage() {
   const navigate = useNavigate();
   const { modal } = AntdApp.useApp();
@@ -26,16 +38,8 @@ export function ProjectsPage() {
   }, []);
   const [renameTarget, setRenameTarget] = useState<Project | null>(null);
 
-  const confirmDelete = (project: Project) => {
-    modal.confirm({
-      title: `删除项目「${project.name}」？`,
-      content: '将删除项目与分析记录（不删除源视频文件），操作不可撤销。',
-      okButtonProps: { danger: true },
-      okText: '删除',
-      onOk: async () => {
-        await controller.remove(project);
-      },
-    });
+  const confirmDelete = (project: Project): void => {
+    confirmDeleteProject(modal, project, () => controller.remove(project));
   };
 
   return (
@@ -44,7 +48,7 @@ export function ProjectsPage() {
         title="项目管理"
         desc="素材已在本地：选文件夹建剧，分析完成后进入出片"
         actions={
-          <Button type="primary" icon={<FolderAddOutlined />} onClick={() => setCreateOpen(true)}>
+          <Button type="primary" icon={<FolderAddOutlined />} onClick={() => { setCreateOpen(true); }}>
             新建项目
           </Button>
         }

@@ -56,7 +56,7 @@ function ChipView({ chip }: { chip: Chip }): ReactElement {
         flexDirection: 'row',
         alignItems: 'center',
         gap: tokens.spaceMd,
-        padding: `${tokens.spaceMd}px ${tokens.spaceLg}px`,
+        padding: `${tokens.spaceMd} ${tokens.spaceLg}`,
         background: tokens.bgContainer,
         border: `1px solid ${tokens.borderSecondary}`,
         borderRadius: tokens.radiusCard,
@@ -68,7 +68,7 @@ function ChipView({ chip }: { chip: Chip }): ReactElement {
           style={{
             width: 38, height: 38, borderRadius: tokens.radiusControl,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: tokens.accentSoft, color: tokens.colorPrimary, fontSize: 17,
+            background: tokens.accentSoft, color: tokens.colorPrimary, fontSize: tokens.fontChipIcon,
           }}
         >
           {chip.icon}
@@ -76,7 +76,7 @@ function ChipView({ chip }: { chip: Chip }): ReactElement {
         <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
           <span
             style={{
-              fontSize: '26px',
+              fontSize: tokens.fontStat,
               fontWeight: 700,
               lineHeight: '28px',
               color: tokens.textPrimary,

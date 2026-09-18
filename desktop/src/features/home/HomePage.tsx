@@ -96,15 +96,7 @@ export function HomePage() {
     jobsError: data.jobsError,
     serverTimeMs: data.serverTimeMs,
   });
-  const stats = buildStats({
-    dramaCount: data.projects.length,
-    running: data.jobs
-      .filter((job) => job.status === 'running' || job.status === 'pending')
-      .map((job) => ({ id: job.id, progress: job.progress, createdAtMs: job.created_at })),
-    serverTimeMs: data.serverTimeMs,
-    jobsAvailable: data.jobsAvailable,
-    works: data.works,
-  });
+  const stats = buildStatsFromData(data);
   const hasDramas = data.projects.length > 0;
 
   return (
@@ -197,6 +189,18 @@ function failedJobs(jobs: readonly JobInfo[]): FailedJob[] {
       refId: job.ref_id ?? null,
       error: job.error ?? '',
     }));
+}
+
+function buildStatsFromData(data: WorkbenchData): WorkbenchStats {
+  return buildStats({
+    dramaCount: data.projects.length,
+    running: data.jobs
+      .filter((job) => job.status === 'running' || job.status === 'pending')
+      .map((job) => ({ id: job.id, progress: job.progress, createdAtMs: job.created_at })),
+    serverTimeMs: data.serverTimeMs,
+    jobsAvailable: data.jobsAvailable,
+    works: data.works,
+  });
 }
 
 function greetingLine(): string {

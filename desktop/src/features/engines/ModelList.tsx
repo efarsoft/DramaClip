@@ -57,7 +57,7 @@ function TierGroup({
   return (
     <div>
       <div
-        style={{ display: 'flex', alignItems: 'baseline', gap: tokens.spaceSm, margin: `0 2px ${tokens.spaceSm}px` }}
+        style={{ display: 'flex', alignItems: 'baseline', gap: tokens.spaceSm, margin: `0 2px ${tokens.spaceSm}` }}
       >
         <span style={{ fontSize: tokens.fontCaption, fontWeight: 600, color: tokens.textSecondary }}>
           {tier.label}
@@ -84,7 +84,7 @@ function ModelRow({ model, onChanged }: { model: ModelInfo; onChanged: () => voi
         display: 'flex',
         alignItems: 'center',
         gap: tokens.spaceMd,
-        padding: `${tokens.spaceSm}px ${tokens.spaceMd}px`,
+        padding: `${tokens.spaceSm} ${tokens.spaceMd}`,
         borderRadius: tokens.radiusControl,
         border: `1px solid ${tokens.borderSecondary}`,
         background: tokens.bgContainer,

@@ -5,6 +5,9 @@ import { theme as antdTheme, type ThemeConfig } from 'antd';
  * 组件禁止裸写 fontSize / borderRadius / 间距数值——一律引用本 token。
  */
 
+/** 间距基础值：antd 组件 token 只收 number，px 字符串 token 由此派生（单一真相源）。 */
+const SPACING = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32, xxxxl: 64 } as const;
+
 export const tokens = {
   // ---- 色彩 ----
   colorPrimary: '#7C9CFF',
@@ -30,14 +33,15 @@ export const tokens = {
   textTertiary: '#5E6C8C',
   fontFamilyMono: "'JetBrains Mono', 'Cascadia Mono', Consolas, monospace",
 
-  // ---- 间距（4 的倍数） ----
-  spaceXs: 4,
-  spaceSm: 8,
-  spaceMd: 12,
-  spaceLg: 16,
-  spaceXl: 20,
-  space2xl: 24,
-  space3xl: 32,
+  // ---- 间距（px 字符串，模板插值安全） ----
+  spaceXs: `${String(SPACING.xs)}px`,
+  spaceSm: `${String(SPACING.sm)}px`,
+  spaceMd: `${String(SPACING.md)}px`,
+  spaceLg: `${String(SPACING.lg)}px`,
+  spaceXl: `${String(SPACING.xl)}px`,
+  space2xl: `${String(SPACING.xxl)}px`,
+  space3xl: `${String(SPACING.xxxl)}px`,
+  space4xl: `${String(SPACING.xxxxl)}px`,
 
   // ---- 字号 ----
   fontTitleLg: '22px',
@@ -49,6 +53,9 @@ export const tokens = {
   fontIcon: '10px',     // 小图标/角标
   fontHeading: '20px',  // 页面级标题
   fontDisplay: '24px',  // 问候语等大号展示
+  fontStat: '26px',     // 统计芯片大数字
+  fontChipIcon: '17px', // 统计芯片图标
+  fontPlayGlyph: '28px', // 海报占位播放图标
   fontEmptyIcon: '48px', // 空态图标（DSS §3.5）
   fontPoster: '34px',   // 封面占位图标
 
@@ -95,7 +102,7 @@ export const dramaTheme: ThemeConfig = {
     fontSize: 13,
   },
   components: {
-    Card: { colorBorderSecondary: tokens.borderSecondary, paddingLG: tokens.spaceLg },
+    Card: { colorBorderSecondary: tokens.borderSecondary, paddingLG: SPACING.lg },
     Layout: { siderBg: tokens.bgSidebar, headerBg: tokens.bgLayout, bodyBg: tokens.bgLayout },
     Button: { fontWeight: 600, controlHeight: 32 },
     Table: { headerBg: tokens.bgElevated },

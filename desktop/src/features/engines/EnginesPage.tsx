@@ -142,7 +142,7 @@ function TabNav({ tab, onPick }: { tab: EngineTab; onPick: (key: EngineTab) => v
       })}
       <div
         style={{
-          padding: `${tokens.spaceSm}px ${tokens.spaceMd}px`,
+          padding: `${tokens.spaceSm} ${tokens.spaceMd}`,
           fontSize: tokens.fontMicro,
           color: tokens.textTertiary,
         }}

@@ -239,7 +239,10 @@ def synthesize_narration_texts(
         return plan
     engine_name = settings.get("tts.engine", "edge")
     engine = create_tts(engine_name, models_dir)
-    default_voice = settings.get("tts.voice", "")
+    # 音色按引擎独立成键；兼容升级前仅存全局 tts.voice 的旧库
+    default_voice = (
+        settings.get(f"tts.voice.{engine_name}") or settings.get("tts.voice") or ""
+    )
     voiced: dict[str, tuple[str, str, float]] = {}  # id → (audio_path, text, duration)
     for item in plan.narration_texts:
         # 段级 voice 优先（双人对谈的双音色），缺省用全局设置

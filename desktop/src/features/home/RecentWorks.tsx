@@ -21,7 +21,7 @@ function durationLabel(s: number | undefined): string {
   if (s === undefined || s <= 0) return '';
   const m = Math.floor(s / 60);
   const sec = Math.round(s % 60);
-  return `${m}:${String(sec).padStart(2, '0')}`;
+  return `${String(m)}:${String(sec).padStart(2, '0')}`;
 }
 
 export function RecentWorks({ works }: { works: readonly WorkItem[] }): React.ReactElement {
@@ -83,71 +83,7 @@ function WorkPoster({ work, onClick }: { work: WorkItem; onClick: () => void }):
       onClick={onClick}
       style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}
     >
-      <div
-        onMouseEnter={(e) => {
-          e.currentTarget.style.transform = 'scale(1.02)';
-          e.currentTarget.style.boxShadow = tokens.shadowPop;
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.transform = 'scale(1)';
-          e.currentTarget.style.boxShadow = 'none';
-        }}
-        style={{
-          position: 'relative',
-          aspectRatio: '9 / 16',
-          borderRadius: tokens.radiusCard,
-          overflow: 'hidden',
-          background: tokens.bgElevated,
-          transition: 'transform 0.15s ease, boxShadow 0.15s ease',
-        }}
-      >
-        {work.cover_path ? (
-          <img
-            src={mediaUrl(work.cover_path)}
-            alt=""
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-          />
-        ) : (
-          <div
-            style={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: tokens.colorPrimary,
-              background: tokens.accentSoft,
-            }}
-          >
-            <span style={{ fontSize: tokens.fontHeading }}>▶</span>
-          </div>
-        )}
-        <span
-          style={{
-            position: 'absolute', inset: 0,
-            background: 'linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%)',
-          }}
-        />
-        <span
-          style={{
-            position: 'absolute', right: 6, bottom: 6,
-            background: 'rgba(0,0,0,0.72)', color: tokens.colorWhite,
-            fontSize: tokens.fontMicro, padding: '1px 6px',
-            borderRadius: tokens.radiusChip, fontFamily: tokens.fontFamilyMono,
-          }}
-        >
-          {durationLabel(work.duration_s)}
-        </span>
-        <span
-          style={{
-            position: 'absolute', left: 6, top: 6,
-            background: 'rgba(0,0,0,0.72)', color: tokens.colorWhite,
-            fontSize: tokens.fontMicro, padding: '1px 6px', borderRadius: tokens.radiusChip,
-          }}
-        >
-          {modeLabel(work.narration_mode)}
-        </span>
-      </div>
+      <PosterMedia work={work} />
       <div
         style={{
           fontSize: tokens.fontCaption, color: tokens.textSecondary,
@@ -157,5 +93,83 @@ function WorkPoster({ work, onClick }: { work: WorkItem; onClick: () => void }):
         {`${work.project_name} · ${formatDate(work.completed_at)}`}
       </div>
     </div>
+  );
+}
+
+function PosterMedia({ work }: { work: WorkItem }): React.ReactElement {
+  return (
+    <div
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = 'scale(1.02)';
+        e.currentTarget.style.boxShadow = tokens.shadowPop;
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = 'scale(1)';
+        e.currentTarget.style.boxShadow = 'none';
+      }}
+      style={{
+        position: 'relative',
+        aspectRatio: '9 / 16',
+        borderRadius: tokens.radiusCard,
+        overflow: 'hidden',
+        background: tokens.bgElevated,
+        transition: 'transform 0.15s ease, boxShadow 0.15s ease',
+      }}
+    >
+      {work.cover_path ? (
+        <img
+          src={mediaUrl(work.cover_path)}
+          alt=""
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
+      ) : (
+        <div
+          style={{
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: tokens.colorPrimary,
+            background: tokens.accentSoft,
+          }}
+        >
+          <span style={{ fontSize: tokens.fontHeading }}>▶</span>
+        </div>
+      )}
+      <span
+        style={{
+          position: 'absolute', inset: 0,
+          background: 'linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%)',
+        }}
+      />
+      <PosterBadges work={work} />
+    </div>
+  );
+}
+
+function PosterBadges({ work }: { work: WorkItem }): React.ReactElement {
+  return (
+    <>
+      <span
+        style={{
+          position: 'absolute', right: 6, bottom: 6,
+          background: 'rgba(0,0,0,0.72)', color: tokens.colorWhite,
+          fontSize: tokens.fontMicro, padding: '1px 6px',
+          borderRadius: tokens.radiusChip, fontFamily: tokens.fontFamilyMono,
+        }}
+      >
+        {durationLabel(work.duration_s)}
+      </span>
+      <span
+        style={{
+          position: 'absolute', left: 6, top: 6,
+          background: 'rgba(0,0,0,0.72)', color: tokens.colorWhite,
+          fontSize: tokens.fontMicro, padding: '1px 6px', borderRadius: tokens.radiusChip,
+        }}
+      >
+        {modeLabel(work.narration_mode)}
+      </span>
+    </>
   );
 }
