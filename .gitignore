@@ -50,3 +50,4 @@ resources/dramaclip-service/
 build/
 desktop/release/
 desktop/release2/
+data/models/sherpa-onnx/
