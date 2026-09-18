@@ -16,7 +16,11 @@ const EDGE_VOICES = [
   { label: '晓北 · 女声（东北）', value: 'zh-CN-liaoning-XiaobeiNeural' },
   { label: '晓妮 · 女声（陕西）', value: 'zh-CN-shaanxi-XiaoniNeural' },
   { label: '曉佳 · 女声（粤语）', value: 'zh-HK-HiuGaaiNeural' },
+  { label: '曉曼 · 女声（粤语）', value: 'zh-HK-HiuMaanNeural' },
   { label: '雲龍 · 男声（粤语）', value: 'zh-HK-WanLungNeural' },
+  { label: '曉臻 · 女声（台湾）', value: 'zh-TW-HsiaoChenNeural' },
+  { label: '雲哲 · 男声（台湾）', value: 'zh-TW-YunJheNeural' },
+  { label: '曉雨 · 女声（台湾）', value: 'zh-TW-HsiaoYuNeural' },
 ];
 
 const KOKORO_VOICES = [
