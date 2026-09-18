@@ -30,6 +30,10 @@ def _build_transcriber(settings: config.Settings, models_dir: Path) -> AsrEngine
     engine = settings.get("asr.engine", "faster_whisper")
     if engine == "sensevoice":
         return SenseVoiceEngine(models_dir=models_dir)
+    if engine == "paraformer":
+        from dramaclip.engines.analysis.transcriber import ParaformerEngine
+
+        return ParaformerEngine(models_dir=models_dir)
     model_size = settings.get("asr.model", "base")
     device = settings.get("asr.device", "cpu")
     return FasterWhisperEngine(
