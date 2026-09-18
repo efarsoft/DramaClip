@@ -37,13 +37,15 @@ export function TtsTab({
   onSave: (values: SettingsMap) => void;
   onChanged: () => void;
 }): React.ReactElement {
-  const engine = settings['tts.engine'] === 'kokoro' ? 'kokoro' : 'edge';
+  const engine = ['kokoro', 'sherpa_melo'].includes(settings['tts.engine'] ?? '')
+    ? settings['tts.engine']
+    : 'edge';
   const ttsModels = models.filter((m) => m.kind === 'tts');
   const kokoro = ttsModels.find((m) => m.model_id.includes('kokoro'));
-  const voices = engine === 'kokoro' ? KOKORO_VOICES : EDGE_VOICES;
+  const voices = engine === 'kokoro' || engine === 'sherpa_melo' ? KOKORO_VOICES : EDGE_VOICES;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: tokens.spaceLg }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: tokens.spaceLg }}>
         <EngineCard
           title="本地 · Kokoro 82M 中文"
           desc="模型下载到本机运行，免费、离线、数据不出本机；速度取决于 CPU。"
@@ -51,6 +53,15 @@ export function TtsTab({
           ok={kokoro?.status === 'installed'}
           onClick={() => {
             onSave({ 'tts.engine': 'kokoro' });
+          }}
+        />
+        <EngineCard
+          title="本地 · sherpa-onnx melo-zh"
+          desc="VITS melo 中文模型，CPU 推理 RTF~0.69，44.1kHz 高音质。"
+          active={engine === 'sherpa_melo'}
+          ok={true}
+          onClick={() => {
+            onSave({ 'tts.engine': 'sherpa_melo' });
           }}
         />
         <EngineCard
@@ -76,7 +87,7 @@ export function TtsTab({
       <PageSection title="本地模型库">
         <div style={{ fontSize: tokens.fontCaption, color: tokens.colorWarning, marginBottom: tokens.spaceLg }}>
           注意：IndexTTS2 / VibeVoice 当前仅支持下载存储，合成引擎尚未接入（排期 P-2）——
-          当前可用的配音引擎为上方 Kokoro（本地）与 Edge（云端）。
+          当前可用的配音引擎为上方 Kokoro / sherpa / Edge。
         </div>
         <ModelList models={ttsModels} onChanged={onChanged} />
       </PageSection>
