@@ -1,14 +1,15 @@
 """真机成片回归门禁：真实素材 → 真实编排 → 真实 ffmpeg 渲染 → 实测音轨/时长/冻结帧。
 
 与单元测试的分界线：这里不 mock ffmpeg、不 mock TTS。桩测证明"代码按参数生成命令"，
-本脚本证明"命令跑出来的片子真的有声音、响度打到 R128 目标、时长合理、没有静止画面"，
-以及"文案确实是编剧模型写的"（逐模式验 `planner`）。
+本脚本证明"命令跑出来的片子真的有声音、响度打到 R128 目标、时长与规划的各段之和
+对得上、没有静止画面"，以及"文案确实是编剧模型写的"（逐模式验 `planner`）。
 
 用法：
   .venv/Scripts/python scripts/verify_modes.py --modes full_narration
   .venv/Scripts/python scripts/verify_modes.py --modes all --out D:/tmp/dc-report
 
-隔离：把 data/data.db 复制进临时目录再跑，产物写临时目录，绝不写开发者的真实 data/。
+隔离：用 sqlite 备份 API 把 data/data.db 快照进临时目录再跑（源库只读打开），产物写临时
+目录，绝不写开发者的真实 data/。
 
 退出码（两档必须分清，否则运维会把环境问题读成产品崩了）：
   0 = 全部断言通过
@@ -24,7 +25,7 @@ import json
 import logging
 import math
 import os
-import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -73,6 +74,14 @@ EXPECT_NARRATION = {
 
 MIN_MEAN_VOLUME_DB = -70.0  # 近乎静音的判据：旁白整条丢失会落在这里
 MAX_FREEZE_S = 2.0  # 任一静止段超过这么久即判失败
+
+# 成片时长与「Σ 各段 Phase A 产物时长」对账的容差（业主立案⑤：上限重定义为规划时长）。
+# 不是抄来的 0.1，是真机量的两段漂移之和（bundled ffmpeg 8.1.1，素材「小小球神不好惹」
+# `1.mp4`，命令全部由生产 `cut_segment_args` 生成，详见 `_check_duration_reconciliation`）：
+#   · concat `-c copy`：3 / 8 / 20 段（narration 与 original 混排）逐次 **0.000s**；
+#   · Phase C `loudnorm` 原地重编码：**+0.032s**（20 段那支：音频轨 40.427→40.458，视频轨不动）。
+# 三倍余量仍低于最短一段（安全切点下限 `jitter._MIN_SEGMENT_S` 0.45s），丢一段不会被吃掉。
+DURATION_RECONCILE_TOL_S = 0.10
 
 # 设计上"全程压底"的模式：`engines/narration/modes_w8.py::build_full` 给每一段都写
 # `audio="ducked"`，所以这个模式的时间轴里不该出现原声直通段。业主立案④的排查项原话是
@@ -547,6 +556,82 @@ def _check_source_fit(
     }
 
 
+def _check_duration_reconciliation(
+    mode: str, captured: list[dict[str, Any]], film_duration_s: float
+) -> tuple[list[str], dict[str, Any]]:
+    """成片时长必须等于「各段 Phase A 产物时长之和」（业主立案⑤，裁决＝把上限重定义为规划时长）。
+
+    原先这条是 `duration_s > strategy.max_duration_s`——量的是「成片有没有顶穿 300s」。
+    那个数从一开始就管不到立案的病灶（成片 16s～4:46 太**短**），而 300s 的预算在编排层
+    已经有人管：`modes/__init__.py` 的 `budget = strategy.max_duration_s - intro`，加上
+    `test_cross_episode_arrangement` / `test_modes` 两条 `total <= max_duration_s` 单测。
+    门禁拿成片去比预算，等于用一把量错对象的尺子——短到十几秒的片子照样绿。
+
+    换成两侧对账之后，容差得是先从真机量出来的数：
+      * `concat -c copy` 的累计漂移 = **0.000s**（bundled ffmpeg 8.1.1，真素材 `1.mp4`
+        切 3 / 8 / 20 段、narration 与 original 两条分支混排，Σ段产物 vs 成片逐次为零；
+        `-avoid_negative_ts make_zero` 正是历史上 195s→416s 双倍累计那次的补丁）；
+      * Phase C `loudnorm` 原地重编码 = **+0.032s**（同一支 20 段片：音频轨 40.427→40.458，
+        视频轨不变——AAC 预卷的固定零头，与段数无关）。
+    取 0.10s：实测最坏的三倍，又远小于最短一段可交付产物（`jitter._MIN_SEGMENT_S`=0.45s
+    是安全切点下限，场景合并下限 2.0s），所以"少拼一段"必然落在容差之外而不是被吃掉。
+
+    两个方向分开报：少一截＝段在 concat 阶段丢了；多一截＝上一轮残留的 `seg_*.mp4` 被
+    `sorted(work_dir.glob("seg_*.mp4"))` 一起拼了进来（`export_id` 复用时会发生）。
+    """
+    failures: list[str] = []
+    outputs = [Path(str(record["out_path"])) for record in captured]
+    on_disk = [path for path in outputs if path.is_file()]
+    if not on_disk:
+        # 零覆盖必须自己响：没有产物可加时 Σ=0，拿 0 去对账会得出"成片比规划长了整片"
+        # 这种看着像结论的假数。
+        return [f"{mode}: {len(outputs)} 段没有一段量到产物时长 —— 本行时长对账无效"], {
+            "planned_output_s": None, "planned_segments_measured": 0,
+            "duration_vs_planned_s": None,
+        }
+    per_segment: dict[str, float] = {}
+    for path in on_disk:
+        # 按**整条路径**去重，不按文件名：重试会重复下发同一个路径，那是磁盘上的同一个
+        # 文件（加一次才对）；而不同目录下的同名产物是两个文件，加两次才对。
+        per_segment[str(path)] = probe_duration_s(path)
+    unmeasured = [Path(name).name for name, seconds in per_segment.items() if seconds <= 0]
+    if unmeasured:
+        # `probe_duration_s` 探不到就返回 0：那是一条静默少算的加数，会把"量不到"
+        # 演成"段在 concat 阶段丢了"——结论看着成立，来源却是坏的。
+        return [(f"{mode}: {len(unmeasured)} 段产物量不到时长（{', '.join(unmeasured[:3])}）"
+                 "—— Σ 不可信，时长对账无效")], {
+            "planned_output_s": None, "planned_segments_measured": len(on_disk) - len(unmeasured),
+            "duration_vs_planned_s": None,
+        }
+    planned = round(sum(per_segment.values()), 2)
+    if len(on_disk) != len(outputs):
+        # Σ 只加在册的产物上：漏一条就少算一条，对账立刻变成"成片比规划长"——
+        # 那是量具缺齿，不是编排的问题，直接报这一条并把对账让位给它。
+        missing = [path.name for path in outputs if not path.is_file()]
+        return [(f"{mode}: {len(outputs)} 段命令只有 {len(on_disk)} 段的产物文件还在"
+                 f"（缺 {', '.join(missing[:3])}）—— Σ 段产物静默少算，时长对账无效")], {
+            "planned_output_s": planned, "planned_segments_measured": len(on_disk),
+            "duration_vs_planned_s": None,
+        }
+    drift = round(float(film_duration_s) - planned, 2)
+    if drift == 0.0:
+        # round 会留下 -0.0：这一列印的是带符号数，"-0.00" 读起来像"少了点什么"。
+        drift = 0.0
+    if abs(drift) > DURATION_RECONCILE_TOL_S:
+        why = ("段在 concat 阶段丢了" if drift < 0
+               else "有多出的段被拼了进去（残留的 seg_*.mp4？）")
+        failures.append(
+            f"{mode}: 成片 {film_duration_s:.2f}s 对不上规划 {planned:.2f}s"
+            f"（{len(on_disk)} 段产物，差 {drift:+.2f}s > 容差 {DURATION_RECONCILE_TOL_S}s）"
+            f" —— {why}"
+        )
+    return failures, {
+        "planned_output_s": planned,
+        "planned_segments_measured": len(on_disk),
+        "duration_vs_planned_s": drift,
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--media", default=r"D:\BaiduNetdiskDownload\小小球神不好惹")
@@ -580,10 +665,18 @@ def main() -> int:
         print("缺少 data/data.db，无法复用已完成的分析结果", file=sys.stderr)
         return 2
     work = _same_drive_temp("tmp_dc-verify-data")
-    for suffix in ("", "-wal", "-shm"):
-        f = src_db.with_name(src_db.name + suffix)
-        if f.is_file():
-            shutil.copy2(f, work / ("data.db" + suffix))
+    # 快照走 sqlite 备份 API，不再 `copy2` 主库 + `-wal` + `-shm` 三个文件。
+    # 真机依据：此刻库里全部内容都在 WAL 里（只复制主文件的副本实测 `projects=0`、
+    # `episodes=0`，带上 `-wal` 才看得见），而"这一份到底带没带上 WAL"取决于三个文件
+    # 各自的复制瞬时——开发者的桌面应用此刻正在写这个库（WAL 常驻上百 KB）。门禁就在这
+    # 上面踩过一次：副本读成空库，然后以「库里没有项目」退出 2，一次十几分钟的回归白跑。
+    # 备份 API 是在一把读锁下按页拷出的单个时间点，不存在"两个文件互相矛盾"这种状态；
+    # 源以 `mode=ro` 打开，我们连把写回落到开发者真库上的能力都没有。
+    src_conn = sqlite3.connect(f"file:{src_db.as_posix()}?mode=ro", uri=True)
+    try:
+        src_conn.backup(sqlite3.connect(work / "data.db"))
+    finally:
+        src_conn.close()
     # 模型目录必须是 <data_dir>/models —— _generate_one 就是这么拼路径的。
     # 用目录联接（mklink /J）而非符号链接：后者在 Windows 需要管理员特权。
     models_dir = (REPO / "data" / "models").resolve()
@@ -806,8 +899,10 @@ def main() -> int:
             failures.append(f"{mode}: 近乎静音（mean_volume={rec['mean_volume_db']} dB）")
         if rec["duration_s"] <= 0:
             failures.append(f"{mode}: 成片时长为 0")
-        if rec["duration_s"] > float(ctx.settings.get("strategy.max_duration_s", "300")):
-            failures.append(f"{mode}: 时长 {rec['duration_s']}s 超上限")
+        # 曾经这里是一条 `duration_s > strategy.max_duration_s`。业主立案⑤的裁决是
+        # 「不修，把上限重定义为规划时长」：300s 那条量的是"有没有顶穿预算"，而立案的病灶
+        # 是成片短到十几秒——量错对象；预算本身在编排层有人守（modes 的 budget + 两条单测）。
+        # 现在量的是"交出来的这一条，是不是规划的那一条"，见 `_check_duration_reconciliation`。
         # 不在此 enforce 最小时长：超短悬念版本就该十几秒、金句流随句数浮动，
         # 每模式的目标区间是产品参数（生产线默认值），门禁不该发明它。
         if rec["max_freeze_s"] >= MAX_FREEZE_S:
@@ -846,6 +941,11 @@ def main() -> int:
         fit_failures, fit_rec = _check_source_fit(mode, CAPTURED)
         failures.extend(fit_failures)
         rec.update(fit_rec)
+        # 立案⑤：成片时长必须等于 Σ 各段 Phase A 产物时长（容差是实测出来的，见函数文档）。
+        dur_failures, dur_rec = _check_duration_reconciliation(
+            mode, CAPTURED, float(rec["duration_s"]))
+        failures.extend(dur_failures)
+        rec.update(dur_rec)
         rows.append(rec)
 
     executor.shutdown(wait=True, cancel_futures=True)
@@ -855,7 +955,7 @@ def main() -> int:
         ("模式", 18, "<"), ("状态", 11, "<"), ("时长s", 8, ">"), ("均量dB", 9, ">"),
         ("LUFS", 8, ">"), ("峰dB", 8, ">"), ("冻结s", 7, ">"), ("来源", 11, ">"),
         ("段", 4, ">"), ("插桩", 5, ">"), ("TTS", 5, ">"), ("带旁白", 7, ">"),
-        ("已混音", 7, ">"), ("压底残差", 9, ">"), ("源越界s", 9, ">"),
+        ("已混音", 7, ">"), ("压底残差", 9, ">"), ("源越界s", 9, ">"), ("对账s", 8, ">"),
         ("跨集", 6, ">"), ("耗时s", 7, ">"),
     ]
     print("".join(_pad(title, width, align) for title, width, align in columns))
@@ -874,6 +974,10 @@ def main() -> int:
             f"{r.get('segments_mixed', 0)}",
             _fmt(r.get("duck_max_residual_db"), 2),
             _fmt(r.get("source_worst_overrun_s"), 2),
+            # 这一列的**符号就是结论的方向**（负=少拼了段，正=多拼了残留段），所以打显式的
+            # `+`：靠"没有负号即正数"读方向，和隔壁 `_fmt` 的"没量到打 `-`"是两套约定。
+            ("-" if r.get("duration_vs_planned_s") is None
+             else f"{r['duration_vs_planned_s']:+.2f}"),
             f"{r.get('episodes_used', 0)}",
             f"{r.get('elapsed_s', 0)}",
         ]
@@ -888,6 +992,12 @@ def main() -> int:
         if r.get("source_flush_tails"):
             print(f"{'':<29}贴着源末尾收口的段：{r['source_flush_tails']} 段"
                   f"（核过 {r.get('source_fit_checked', 0)} 段的窗口）")
+        # 立案⑤的对账明细：规划 = Σ 段产物。报数是为了让人判断容差留得宽不宽，
+        # 判红由 `_check_duration_reconciliation` 负责。
+        if r.get("planned_segments_measured"):
+            print(f"{'':<29}成片 {r.get('duration_s')}s vs 规划 "
+                  f"{r.get('planned_output_s')}s（{r['planned_segments_measured']} 段产物）"
+                  f"，差 {r.get('duration_vs_planned_s')}s")
         # 重试留痕只报数不断言：靠重试过门的片子照样合格（门禁量的是最终成片），
         # 但限幅器落地后新渲染的片子它应当近乎为零，频繁出现说明上游混音又坏了。
         if r.get("loudness_retry_hints"):
