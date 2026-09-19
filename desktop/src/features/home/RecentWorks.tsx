@@ -140,7 +140,7 @@ function PosterMedia({ work }: { work: WorkItem }): React.ReactElement {
       <span
         style={{
           position: 'absolute', inset: 0,
-          background: 'linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%)',
+          background: 'linear-gradient(180deg, rgba(0,0,0,0) 50%, rgba(0,0,0,0.68) 100%)',
         }}
       />
       <PosterBadges work={work} />

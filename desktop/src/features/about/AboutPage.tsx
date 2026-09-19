@@ -22,18 +22,22 @@ export function AboutPage(): ReactElement {
     <PageShell>
       <PageHeader title="关于" desc="项目信息 · 版本 · 本地数据 · 许可与声明" />
       <ProjectBlock />
-      <VersionBlock />
-      <LocalDataBlock />
-      <PageSection title="开源许可">
-        <div style={{ fontSize: tokens.fontMicro, lineHeight: '18px', color: tokens.textTertiary }}>
-          {OPEN_SOURCE}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: tokens.space2xl, alignItems: 'start' }}>
+        <LocalDataBlock />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.space2xl, minWidth: 0 }}>
+          <VersionBlock />
+          <PageSection title="开源许可">
+            <div style={{ fontSize: tokens.fontMicro, lineHeight: '18px', color: tokens.textTertiary }}>
+              {OPEN_SOURCE}
+            </div>
+          </PageSection>
+          <PageSection title="授权与合规声明">
+            <div style={{ fontSize: tokens.fontMicro, lineHeight: '18px', color: tokens.textTertiary }}>
+              {COMPLIANCE}
+            </div>
+          </PageSection>
         </div>
-      </PageSection>
-      <PageSection title="授权与合规声明">
-        <div style={{ fontSize: tokens.fontMicro, lineHeight: '18px', color: tokens.textTertiary }}>
-          {COMPLIANCE}
-        </div>
-      </PageSection>
+      </div>
       <div style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary, textAlign: 'center' }}>
         © 2026 DramaClip · 本地优先的短剧高光剪辑工具
       </div>

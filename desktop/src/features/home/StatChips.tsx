@@ -6,7 +6,7 @@
  * 一个在样本被截断时如实显示 '—'。
  */
 import type { ReactElement, ReactNode } from 'react';
-import { FileDoneOutlined, LoadingOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import { FileDoneOutlined, ThunderboltOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import { tokens } from '../../styles/theme';
 import type { WorkbenchStats } from './stats';
 
@@ -23,7 +23,7 @@ export function StatChips({ stats }: { stats: WorkbenchStats }): ReactElement {
     { key: 'dramas', icon: <FileDoneOutlined />, value: String(stats.dramaCount), label: '部剧', note: '' },
     {
       key: 'running',
-      icon: <LoadingOutlined />, value: stats.runningValue,
+      icon: <ThunderboltOutlined />, value: stats.runningValue,
       label: stats.jobsAvailable ? '条在跑' : '条在跑 · 状态取不到',
       note: stats.runningEtaLabel,
     },

@@ -46,7 +46,7 @@ export function TtsTab({
   };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: tokens.spaceLg }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: tokens.spaceLg }}>
         {TTS_ENGINES.map((name) => (
           <EngineCard
             key={name}
@@ -61,11 +61,16 @@ export function TtsTab({
         ))}
       </div>
       <PageSection title="默认音色">
-        <VoicePicker
-          engine={engine}
-          value={settings[voiceSettingKey(engine)] ?? ''}
-          onSave={onSave}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceLg }}>
+          <VoicePicker
+            engine={engine}
+            value={settings[voiceSettingKey(engine)] ?? ''}
+            onSave={onSave}
+          />
+          <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
+            {VOICE_HINT[engine]}
+          </span>
+        </div>
       </PageSection>
       <PageSection title="本地模型库">
         <div style={{ fontSize: tokens.fontCaption, color: tokens.colorWarning, marginBottom: tokens.spaceLg }}>
@@ -77,6 +82,12 @@ export function TtsTab({
     </div>
   );
 }
+
+const VOICE_HINT: Record<TtsEngineName, string> = {
+  kokoro: 'Kokoro 提供 100 个中文音色（55 女 + 45 男），下拉可搜索',
+  sherpa_melo: 'melo 模型为单说话人，音色固定',
+  edge: '微软官方中文音色，覆盖普通话 / 东北 / 陕西 / 粤语 / 台湾',
+};
 
 function VoicePicker({
   engine,
@@ -120,20 +131,33 @@ function EngineCard({
       hoverable
       onClick={onClick}
       style={{
+        position: 'relative',
         borderColor: active ? tokens.colorPrimary : tokens.border,
         background: active ? tokens.accentSoft : undefined,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
-        <strong style={{ fontSize: tokens.fontBody, color: tokens.textPrimary }}>{title}</strong>
+      <span
+        style={{
+          position: 'absolute', top: tokens.spaceMd, right: tokens.spaceMd,
+          fontSize: tokens.fontCaption, color: ok ? tokens.colorSuccess : tokens.colorWarning,
+        }}
+      >
+        ● {ok ? '就绪' : '缺模型'}
+      </span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, paddingRight: 52 }}>
+        <strong
+          style={{
+            fontSize: tokens.fontBody, color: tokens.textPrimary,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}
+        >
+          {title}
+        </strong>
         {active && (
-          <Tag color="blue" style={{ marginRight: 0 }}>
+          <Tag color="blue" style={{ marginRight: 0, flexShrink: 0 }}>
             使用中
           </Tag>
         )}
-        <span style={{ marginLeft: 'auto', fontSize: tokens.fontCaption, color: ok ? tokens.colorSuccess : tokens.colorWarning }}>
-          ● {ok ? '就绪' : '缺模型'}
-        </span>
       </div>
       <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.fontCaption, lineHeight: '19px', color: tokens.textTertiary }}>
         {desc}

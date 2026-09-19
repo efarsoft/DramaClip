@@ -1,4 +1,5 @@
 /** LLM 引擎：OpenAI 兼容端点多实例（云端服务或本地 Ollama/LM Studio 同协议），单启用。 */
+import { WarningOutlined } from '@ant-design/icons';
 import { PageSection } from '../../components/layout/PageKit';
 import { tokens } from '../../styles/theme';
 import { CloudConfigSection } from './CloudConfigSection';
@@ -36,19 +37,25 @@ function UnconfiguredNotice(): React.ReactElement {
   return (
     <div
       style={{
+        display: 'flex',
+        gap: tokens.spaceSm,
         fontSize: tokens.fontCaption,
-        lineHeight: '19px',
+        lineHeight: '20px',
         color: tokens.colorWarning,
-        border: `1px solid ${tokens.colorWarning}66`,
-        background: `${tokens.colorWarning}14`,
+        border: `1px solid ${tokens.colorWarning}55`,
+        background: `${tokens.colorWarning}12`,
         borderRadius: tokens.radiusControl,
-        padding: `${tokens.spaceSm} ${tokens.spaceMd}`,
+        padding: `${tokens.spaceMd} ${tokens.spaceLg}`,
         marginBottom: tokens.spaceMd,
+        maxWidth: 860,
       }}
     >
-      未配置时：分析（转写、冲突打分）改用关键词打分，仍可跑完；但解说文案必须由编剧模型产出，
-      没有兜底——七个解说模式的每条方案都会失败并在任务里说明原因。
-      仅「纯原片剪辑」「字幕金句流」不依赖编剧模型。
+      <WarningOutlined style={{ fontSize: tokens.fontBodyLg, marginTop: 1 }} />
+      <span>
+        未配置时：分析（转写、冲突打分）改用关键词打分，仍可跑完；但解说文案必须由编剧模型产出，
+        没有兜底——七个解说模式的每条方案都会失败并在任务里说明原因。
+        仅「纯原片剪辑」「字幕金句流」不依赖编剧模型。
+      </span>
     </div>
   );
 }

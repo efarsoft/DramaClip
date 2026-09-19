@@ -91,31 +91,42 @@ function SettingsView(props: {
   };
   return (
     <PageShell>
-      <PageHeader
-        title="偏好设置"
-        desc={PAGE_DESC}
-        actions={
-          <>
+      <PageHeader title="偏好设置" desc={PAGE_DESC} />
+      <SettingsBody draft={props.draft} onPatch={patchDraft} />
+      {/* 吸底保存栏：仅在存在改动时出现，长表单滚动到底也能看见动作 */}
+      {changedKeys.length > 0 && (
+        <div
+          style={{
+            position: 'sticky',
+            bottom: 0,
+            zIndex: 10,
+            margin: `0 -${tokens.space2xl}`,
+            padding: `${tokens.spaceMd} ${tokens.space2xl}`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: tokens.spaceMd,
+            background: tokens.bgElevated,
+            borderTop: `1px solid ${tokens.border}`,
+            boxShadow: '0 -6px 18px rgba(4,8,20,0.35)',
+          }}
+        >
+          <span style={{ fontSize: tokens.fontCaption, color: tokens.textSecondary }}>
+            已修改 {String(changedKeys.length)} 项
+          </span>
+          <span style={{ marginLeft: 'auto', display: 'flex', gap: tokens.spaceSm }}>
             <Button
-              disabled={changedKeys.length === 0}
               onClick={() => {
                 props.onDraft({ ...props.original });
               }}
             >
               还原
             </Button>
-            <Button
-              type="primary"
-              loading={props.saving}
-              disabled={changedKeys.length === 0}
-              onClick={props.onSave}
-            >
-              保存{changedKeys.length > 0 ? `（${String(changedKeys.length)} 项）` : ''}
+            <Button type="primary" loading={props.saving} onClick={props.onSave}>
+              保存
             </Button>
-          </>
-        }
-      />
-      <SettingsBody draft={props.draft} onPatch={patchDraft} />
+          </span>
+        </div>
+      )}
     </PageShell>
   );
 }

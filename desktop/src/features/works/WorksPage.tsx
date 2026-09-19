@@ -206,6 +206,7 @@ function WorkPoster({
   const tint = modeColor(work.narration_mode);
   return (
     <div
+      className="work-poster"
       style={{
         position: 'relative',
         aspectRatio: '9 / 16',
@@ -227,11 +228,13 @@ function WorkPoster({
       <span
         style={{
           position: 'absolute', inset: 0,
-          background: 'linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,0.6) 100%)',
+          background: 'linear-gradient(180deg, rgba(0,0,0,0) 50%, rgba(0,0,0,0.68) 100%)',
         }}
       />
       <PosterBadges work={work} />
-      <FolderButton onClick={onFolder} />
+      <div className="work-poster-folder">
+        <FolderButton onClick={onFolder} />
+      </div>
     </div>
   );
 }
@@ -269,7 +272,6 @@ function FolderButton({ onClick }: { onClick: (event: React.MouseEvent) => void 
       title="打开所在文件夹"
       onClick={onClick}
       style={{
-        position: 'absolute', left: 6, bottom: 6,
         display: 'flex', alignItems: 'center', gap: 4,
         background: 'none', border: 'none', padding: 0,
         color: tokens.colorWhite, fontSize: tokens.fontMicro, cursor: 'pointer',

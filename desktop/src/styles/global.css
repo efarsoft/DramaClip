@@ -24,23 +24,27 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2A3140;
+  background: #262f47;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #4d9fff;
+  background: #3d4d73;
 }
 
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 
-/* ── DSS 氛围层：克制的双辐射光斑（左上主蓝 4% / 右下紫 3%）── */
+::selection {
+  background: rgba(124, 156, 255, 0.28);
+}
+
+/* ── DSS 氛围层：克制的双辐射光斑（左上主靛 4% / 右下紫 3%）── */
 body {
   background:
-    radial-gradient(900px 620px at 6% -8%, rgba(77, 159, 255, 0.05), transparent 62%),
-    radial-gradient(820px 540px at 102% 108%, rgba(124, 92, 255, 0.038), transparent 62%),
+    radial-gradient(900px 620px at 6% -8%, rgba(124, 156, 255, 0.05), transparent 62%),
+    radial-gradient(820px 540px at 102% 108%, rgba(155, 123, 255, 0.038), transparent 62%),
     #10141c;
 }
 
@@ -59,11 +63,22 @@ body {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
 
+/* ── 输入控件：边框与底色过渡，hover 微亮 ── */
+.ant-input,
+.ant-select:not(.ant-select-customize-input) .ant-select-selector,
+.ant-input-number,
+.ant-input-affix-wrapper {
+  transition:
+    border-color 0.15s ease-out,
+    background-color 0.15s ease-out,
+    box-shadow 0.15s ease-out;
+}
+
 /* ── 主按钮品牌渐变（禁用态除外）── */
 .ant-btn-primary:not(.ant-btn-disabled):not([disabled]) {
-  background: linear-gradient(135deg, #4d9fff 0%, #7c5cff 100%);
+  background: linear-gradient(135deg, #7c9cff 0%, #9b7bff 100%);
   border: none;
-  box-shadow: 0 2px 8px rgba(77, 159, 255, 0.3);
+  box-shadow: 0 2px 8px rgba(124, 156, 255, 0.28);
 }
 .ant-btn-primary:not(.ant-btn-disabled):not([disabled]):hover {
   filter: brightness(1.08);
@@ -93,4 +108,20 @@ main > * {
 }
 .project-cover:hover img {
   transform: scale(1.04);
+}
+
+/* ── 成品海报：「打开文件夹」悬停浮现，避免与时长角标/内嵌字幕三重叠 ── */
+.work-poster-folder {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 0.18s ease-out,
+    transform 0.18s ease-out;
+}
+.work-poster:hover .work-poster-folder {
+  opacity: 1;
+  transform: none;
 }
