@@ -9,11 +9,33 @@ from typing import Any
 from dramaclip.engines.subtitle.emotion_matcher import match_emotion
 
 _ALIGNMENT = {"bottom_bar": 2, "center_single": 5, "center_multi": 5, "top_title": 8}
+_DEFAULT_LAYOUT = "bottom_bar"
 _EFFECT_TAGS = {
     "none": "",
     "shake": "\\fscx105\\fscy105",
     "scale_glow": "\\fscx112\\fscy112\\bord4",
 }
+
+
+def _layout_of(preset: dict[str, Any], key: str = "default") -> str:
+    """取预设的布局名（default / climax 两档）；缺档回退贴底。"""
+    layout_map = preset.get("dimensions", {}).get("layout", {})
+    return str(layout_map.get(key, _DEFAULT_LAYOUT))
+
+
+def _placement(layout: str, preset_margin_v: int) -> tuple[int, int]:
+    """布局名 → (ASS 九宫格对齐, MarginV)。
+
+    居中档（5）下 MarginV 不参与纵向定位，给 0：沿用贴底那档的小留白会把整行字
+    沉到画面底缘之外（业主截图「字幕下半被裁」即此形状）。
+    """
+    alignment = _ALIGNMENT.get(layout, _ALIGNMENT[_DEFAULT_LAYOUT])
+    return (alignment, 0) if alignment == 5 else (alignment, preset_margin_v)
+
+
+def _margin_v(preset: dict[str, Any]) -> int:
+    return int(preset.get("font", {}).get("margin_v", 80))
+
 
 _STYLE_FORMAT = (
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,"
@@ -25,11 +47,13 @@ _EVENT_FORMAT = "Format: Layer, Start, End, Style, Name, MarginL, MarginR, Margi
 
 def _header(preset: dict[str, Any]) -> str:
     font = preset.get("font", {})
+    alignment, margin_v = _placement(_layout_of(preset), _margin_v(preset))
     style = (
         f"Style: DC,{font.get('name', 'Microsoft YaHei')},{int(font.get('size', 64))},"
         f"&H00FFFFFF,&H00FFFFFF,&H00000000,&H7F000000,"
         f"{-1 if font.get('bold', False) else 0},0,0,0,100,100,0,0,1,"
-        f"{int(font.get('outline_width', 3))},{int(font.get('shadow', 1))},2,40,40,40,1"
+        f"{int(font.get('outline_width', 3))},{int(font.get('shadow', 1))},{alignment},"
+        f"40,40,{margin_v},1"
     )
     return "\n".join(
         [
@@ -83,12 +107,12 @@ def _event_line(line: dict[str, Any], preset: dict[str, Any]) -> str | None:
     layout_key = (
         "climax" if emotion in ("anger", "triumph") and "climax" in layout_map else "default"
     )
-    bottom_bar = str(layout_map.get(layout_key, "bottom_bar")) == "bottom_bar"
-    margin_v = int(preset.get("font", {}).get("margin_v", 80)) if bottom_bar else 10
+    alignment, margin_v = _placement(_layout_of(preset, layout_key), _margin_v(preset))
 
     rhythm = str(dimensions.get("rhythm", {}).get("type", "whole_line"))
     duration_s = float(line["end"]) - float(line["start"])
-    tags = [f"\\fad({fade_ms},{fade_ms})"]
+    # \an 逐行覆盖 Style 对齐：同一条片里 default 与 climax 两种布局会混排
+    tags = [f"\\an{alignment}", f"\\fad({fade_ms},{fade_ms})"]
     if entrance == "bounce":
         tags.append("\\t(0,180,\\fscx115\\fscy115)\\t(180,320,\\fscx100\\fscy100)")
     if effect:
