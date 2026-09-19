@@ -3,11 +3,86 @@
 from __future__ import annotations
 
 import random
+import re
+
+import pytest
 
 from dramaclip.engines.exporter import encoder
 from dramaclip.engines.exporter.encoder import cut_segment_args
+from dramaclip.engines.narration.models import PlanData, TimelineSegment
 from dramaclip.engines.subtitle.mask import drawbox_filter
 from dramaclip.infra import config
+
+
+def _mask_geometry(cmd: list[str]) -> tuple[int, int]:
+    match = re.search(r"drawbox=x=0:y=(\d+):w=\d+:h=(\d+)", " ".join(cmd))
+    assert match, "命令里找不到遮罩"
+    return int(match.group(1)), int(match.group(2))
+
+
+def test_cut_segment_args_band_moves_the_mask() -> None:
+    """OCR 探测到的字幕带必须真的盖上去，两条音频分支都要吃到。
+
+    修复前 `band` 是死参数：`export_plan` 认真算好传进来，`cut_segment_args` 收下
+    却没转给 `drawbox_filter` —— OCR 的钱花了，盖子纹丝不动（业主立案①）。
+    """
+    static = _mask_geometry(cut_segment_args(
+        "src.mp4", "seg.mp4", start=0, end=6, audio="original", mask=True,
+        tts_audio=None, rng=random.Random(3), out_size=(1080, 1920),
+    ))
+    def band_box(**kw: object) -> tuple[int, int]:
+        kw.setdefault("audio", "original")
+        kw.setdefault("tts_audio", None)
+        return _mask_geometry(cut_segment_args(
+            "src.mp4", "seg.mp4", start=0, end=6, mask=True,
+            rng=random.Random(3), out_size=(1080, 1920), **kw,  # type: ignore[arg-type]
+        ))
+
+    moved = (int(1920 * 0.38), int(1920 * 0.14))
+    assert static == (1689, 230), "无 band 时回退静态底部区域"
+    assert band_box(band=(0.40, 0.50)) == moved, "band 未生效：遮罩仍停在静态位置"
+    assert band_box(audio="narration", tts_audio="a.mp3", band=(0.40, 0.50)) == moved, (
+        "旁白段走 -filter_complex，同样得吃到 band"
+    )
+    assert band_box(audio="ducked", tts_audio="a.mp3") == static
+
+
+def test_band_flows_from_detector_into_every_segment(
+    tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """穿过生产入口的可达性证明：band_detector 的值要出现在每一段渲染命令里。
+
+    只测 `cut_segment_args` 不够——它在 :389 处的传参被删掉照样绿。这条把
+    `export_plan` 驱动起来，删掉任何一处接线都会红。
+    """
+    source = tmp_path / "ep1.mp4"
+    source.write_bytes(b"x")
+    built: list[list[str]] = []
+    probed: list[str] = []
+
+    monkeypatch.setattr(encoder, "_run_cut", lambda args: built.append(args))
+    monkeypatch.setattr(encoder, "_concat", lambda *_args: None)
+    plan = PlanData(
+        mode="cross_narration",
+        timeline=[
+            TimelineSegment(episode_id="ep1", start=1.0, end=3.0, audio="original"),
+            TimelineSegment(episode_id="ep1", start=4.0, end=6.0, audio="original"),
+        ],
+    )
+
+    def detector(src: str) -> tuple[float, float]:
+        probed.append(src)
+        return (0.40, 0.50)
+
+    encoder.export_plan(
+        plan, {"ep1": str(source)}, tmp_path / "out.mp4", tmp_path / "work",
+        mask=True, band_detector=detector,
+    )
+
+    assert len(built) == 2, "两段都应出命令"
+    assert _mask_geometry(built[0]) == (int(1920 * 0.38), int(1920 * 0.14))
+    assert _mask_geometry(built[1]) == _mask_geometry(built[0])
+    assert probed == [str(source)], "字幕带探测须按源缓存，不得逐段重跑 OCR"
 
 
 def test_drawbox_filter_toggle() -> None:

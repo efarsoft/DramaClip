@@ -162,7 +162,7 @@ def cut_segment_args(
         f"scale={out_w}:{out_h}",
         f"setpts=PTS/{speed}",
     ]
-    box = drawbox_filter(mask, out_size)
+    box = drawbox_filter(mask, out_size, band)
     if box:
         filters.append(box)
     if transition == "fade":
@@ -323,20 +323,6 @@ def export_plan(
     """执行两阶段导出，返回成片路径。
     """
 
-    band_cache: dict[str, tuple[float, float] | None] = {}
-    lock = threading.Lock()
-
-    def _band_for_source(source: str) -> tuple[float, float] | None:
-        if band_detector is None:
-            return None
-        with lock:
-            if source in band_cache:
-                return band_cache[source]
-        band = band_detector(source)
-        with lock:
-            band_cache[source] = band
-        return band
-
     segments = plan.timeline
     if not segments:
         raise ValueError("编排时间轴为空")
@@ -344,6 +330,26 @@ def export_plan(
     rng = random.Random()
 
     total = len(segments)
+    # 字幕带探测前置：一次 OCR 是 10 帧解码 + 10 次识别，放在建令循环里逐段触发会
+    # 把 Phase A 卡住，且取消要等到下一段建令才响应。这里按**源**去重先跑完，
+    # 每个源之间留一次取消检查。
+    band_cache: dict[str, tuple[float, float] | None] = {}
+    if band_detector is not None:
+        sources = list(dict.fromkeys(
+            episode_paths[segment.episode_id]
+            for segment in segments
+            if segment.episode_id in episode_paths
+        ))
+        for index, probe_source in enumerate(sources, start=1):
+            if cancel is not None and cancel.is_set():
+                raise runner.FfmpegError("已取消", cancelled=True)
+            if on_progress is not None:
+                on_progress(0.0, f"定位原字幕 {index}/{len(sources)}")
+            band_cache[probe_source] = band_detector(probe_source)
+
+    def _band_for_source(source: str) -> tuple[float, float] | None:
+        return band_cache.get(source)
+
     # Phase A：构建每段命令参数（含台词保护区安全切点、字幕、混音）
     job_args: list[list[str]] = []
     zones_cache: dict[str, list[SpeechZone]] = {}
