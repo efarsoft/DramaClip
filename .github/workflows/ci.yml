@@ -14,8 +14,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      # TODO(W1 后): 锁文件入库后改为 npm ci
-      - run: npm install --no-audit --no-fund
+          cache: npm
+      - run: npm ci --no-audit --no-fund
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run test
@@ -31,7 +31,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install -e '.[dev]'
+          cache: pip
+      # torch 预装 CPU 轮子（PyPI linux 默认轮子含 CUDA 栈，多 2GB 下载）
+      - name: 安装依赖（ml + dev，torch 走 CPU 轮子）
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e '.[ml,dev]'
       - run: ruff check .
       - run: mypy dramaclip
-      - run: python -m pytest
+      - run: python -m pytest -x -q

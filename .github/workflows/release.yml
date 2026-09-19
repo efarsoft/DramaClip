@@ -1,0 +1,79 @@
+name: Release
+
+# tag 推送（v*）→ 构建 Windows 安装包（sidecar + electron-builder）→ 发布 GitHub Release
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 打包并发布 Windows 客户端
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # 版本防呆：tag 必须与 desktop/package.json 一致（electron-builder 以它命名产物）
+      - name: 校验 tag 与版本一致
+        shell: bash
+        run: |
+          PKG_VERSION=$(node -p "require('./desktop/package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "tag ${GITHUB_REF_NAME} 与 desktop/package.json 版本 ${PKG_VERSION} 不一致"
+            exit 1
+          fi
+
+      # dist:service 硬编码 .venv/Scripts/python.exe，此处先建同名 venv
+      - name: 建 Python venv 并安装 ML 依赖
+        shell: bash
+        run: |
+          python -m venv .venv
+          .venv/Scripts/python.exe -m pip install --upgrade pip
+          .venv/Scripts/pip.exe install -e 'service[ml]'
+
+      - name: 安装前端依赖
+        run: npm ci --no-audit --no-fund
+
+      - name: 打包 Python sidecar
+        run: npm run dist:service
+
+      - name: sidecar 冒烟验证
+        run: node scripts/verify_sidecar.mjs
+
+      # 仅 electron-builder（sidecar 已在上一步打包完成）
+      - name: 打包安装包（NSIS + zip）
+        run: npm run dist --workspace @dramaclip/desktop
+        env:
+          # CI 用 GitHub 官方源下载 Electron 二进制（覆盖 .npmrc 的国内镜像）
+          ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
+
+      - name: 发布 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: DramaClip ${{ github.ref_name }}
+          draft: true
+          files: |
+            desktop/release/*.exe
+            desktop/release/*.zip
+          body: |
+            ## 安装说明
+
+            1. 下载 `DramaClip-Setup-*.exe`（或便携版 zip）运行安装
+            2. 首次启动后在 **引擎中心** 下载所需模型（语音识别 / 配音）
+            3. 在 **引擎中心 → 文案 LLM** 配置任意 OpenAI 兼容端点（可选，纯原片类模式无需配置）
+
+            > 安装包内置 FFmpeg 与全部运行时；无 NVIDIA 显卡同样可跑（自动 CPU 模式）。
