@@ -303,6 +303,7 @@ export interface ModelSource {
 }
 
 export interface ModelInfo {
+  /** 内置清单里的身份；清单外的目录只在 import_records 里出现，不占这一列。 */
   readonly model_id: string;
   readonly kind: string;
   readonly engine: string;
@@ -322,6 +323,8 @@ export interface ModelInfo {
   readonly sources?: ReadonlyArray<ModelSource>;
   /** 引擎是否真接进了工厂：false = 储备资产，UI 不得当作可用能力展示。 */
   readonly engine_ready: boolean;
+  /** 本地导入的登记项；null = 这份资产不是导入进来的（应用下载或手动放置）。 */
+  readonly imported?: ImportRecord | null;
 }
 
 /** 资产体检单项判据（models.verify）。 */
@@ -342,6 +345,58 @@ export interface VerifyReport {
   /** 任一 check 为 fail 即 false。 */
   readonly ok: boolean;
   readonly checks: ReadonlyArray<VerifyCheck>;
+}
+
+/** 本地导入登记项（models/imported.json 的一行）。 */
+export interface ImportRecord {
+  readonly model_id: string | null;
+  /** asr | tts；外部资产由业主在第 ② 步声明。 */
+  readonly kind: string;
+  /** 外部资产为空：认不出身份就没有承接引擎。 */
+  readonly engine?: string;
+  /** 资产此刻所在的位置：copy/move 是库内 placement，register/coexist 是业主原目录。 */
+  readonly path: string;
+  /** 导入时业主挑的那个目录。 */
+  readonly source_path: string;
+  readonly mode: 'copy' | 'move' | 'register';
+  readonly label?: string;
+  /** true = 业主显式选了「不完整导入」，体检当时并不通过。 */
+  readonly incomplete: boolean;
+  /** epoch 毫秒：移除时的「何时导入」提示要有据可查。 */
+  readonly imported_at: number;
+}
+
+/** 导入向导第 ② 步的实测结果（models.import_inspect，只读）。 */
+export interface ImportInspection {
+  readonly source_path: string;
+  readonly file_count: number;
+  /** 实测字节数，不是清单标称值。 */
+  readonly total_bytes: number;
+  readonly recognized: boolean;
+  readonly model_id?: string | null;
+  readonly name?: string | null;
+  readonly kind?: string | null;
+  readonly engine?: string | null;
+  readonly engine_ready: boolean;
+  /** 模型真正所在的那一层（zip 解出来常带一层同名目录）。 */
+  readonly model_root?: string | null;
+  /** HF 缓存根；平铺目录为 null。 */
+  readonly cache_path?: string | null;
+  /** 凭什么认成这个模型；认不出来时说明为什么。 */
+  readonly basis: string;
+  readonly missing_files?: ReadonlyArray<string>;
+  readonly target?: { placement: string; path: string; free_bytes: number } | null;
+  /** 库里已有同一件资产；非 null 时 import_commit 必须先给 on_conflict 裁决。 */
+  readonly conflict?: {
+    model_id: string;
+    path: string;
+    size_bytes: number;
+    ok: boolean;
+    failed_checks?: ReadonlyArray<string>;
+  } | null;
+  readonly checks: ReadonlyArray<VerifyCheck>;
+  /** 第 ② 步闸门：false 就不许落位（除非业主显式选不完整导入）。 */
+  readonly ok: boolean;
 }
 
 /** tts.preview 返回体：产物是本机绝对路径，经 dramaclip:// 协议直接给 <audio> 播。 */
@@ -472,6 +527,10 @@ export const METHOD_NAMES = [
   'models.download',
   'models.scan_local',
   'models.verify',
+  'models.import_inspect',
+  'models.import_commit',
+  'models.import_records',
+  'models.import_forget',
   'models.delete',
   'engine_configs.list',
   'engine_configs.create',

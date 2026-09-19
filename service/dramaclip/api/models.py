@@ -1,18 +1,20 @@
-"""models 命名空间：list / download / verify（资产体检）/ scan（本地导入）/ delete。"""
+"""models 命名空间：list / download / verify（资产体检）/ import（导入向导）/ delete。"""
 
 from __future__ import annotations
 
 import shutil
 import threading
+from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext
 from dramaclip.infra.jobs import STATUS_RUNNING
-from dramaclip.infra.model_manager import downloader, registry
+from dramaclip.infra.model_manager import downloader, importer, registry
 from dramaclip.transport.rpc import Router, RpcDomainError
 
 _ERR_MODEL_NOT_FOUND = -32010
 _ERR_MODEL_STATE = -32011
+_ERR_IMPORT_PARAM = -32012
 
 _ENDPOINT_DEFAULTS: dict[str, str] = {
     "hf_mirror": "https://hf-mirror.com",
@@ -36,13 +38,22 @@ def register(router: Router, context: AppContext) -> None:
     router.register("models.download", lambda params: download(context, params))
     router.register("models.scan_local", lambda params: scan_local(context))
     router.register("models.verify", lambda params: verify(context, params))
+    router.register("models.import_inspect", lambda params: import_inspect(context, params))
+    router.register("models.import_commit", lambda params: import_commit(context, params))
+    router.register("models.import_records", lambda params: import_records(context))
+    router.register("models.import_forget", lambda params: import_forget(context, params))
     router.register("models.runtime_status", lambda params: runtime_status(context, params))
     router.register("models.install_runtime", lambda params: install_runtime(context, params))
     router.register("models.delete", lambda params: delete(context, params))
 
 
 def list_models(context: AppContext) -> list[dict[str, Any]]:
-    """清单 + 状态（内置清单 ∪ models/ 目录手动放置的发现项），附各源仓库主页。"""
+    """内置清单的状态，加上「本地导入」的登记项，附各源仓库主页。
+
+    这里只有内置清单的行：每一行都必须有 ``model_id``，因为「选为生效」按它落配置。
+    清单外的目录（业主给的、认不出身份的）在 ``models.import_records`` 里——把它伪装成
+    一行模型就等于给它一个身份，也就给了它一个「选为生效」。
+    """
     models_dir = context.data_dir / "models"
     eps = endpoints(context)
     items = registry.list_models(models_dir)
@@ -51,7 +62,7 @@ def list_models(context: AppContext) -> list[dict[str, Any]]:
             {**source, "web_url": downloader.web_url(str(source["kind"]), str(source["repo"]), eps)}
             for source in item["sources"]
         ]
-    return items
+    return _attach_imports(items, importer.records(models_dir))
 
 
 def verify(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:
@@ -175,15 +186,23 @@ def install_runtime(context: AppContext, params: dict[str, Any]) -> dict[str, An
 
 
 def scan_local(context: AppContext) -> dict[str, Any]:
-    """本地导入扫描：重新探测 models/ 目录（手动放置的模型即刻生效）。"""
+    """重新探测 models/：手动放进目录的模型即刻被认出来。
+
+    这里不叫「导入」：真正的导入是 ``models.import_commit``（识别 + 体检 + 落位 + 登记）。
+    本方法只是让引擎中心刷新一次磁盘状态，登记本坏了也在这里说一声。
+    """
     models_dir = context.data_dir / "models"
     found = [
         item
         for item in registry.list_models(models_dir)
         if item["status"] == "installed"
     ]
-    context.notifier.log("info", f"本地导入扫描完成：{len(found)} 个模型可用")
-    return {"installed": found, "total": len(found)}
+    context.notifier.log("info", f"模型目录重新探测完成：{len(found)} 个模型可用")
+    return {
+        "installed": found,
+        "total": len(found),
+        "import_error": importer.records_error(models_dir),
+    }
 
 
 def delete(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -192,13 +211,193 @@ def delete(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     if spec is None:
         raise RpcDomainError(_ERR_MODEL_NOT_FOUND, f"未知模型: {model_id}")
     models_dir = context.data_dir / "models"
+    records = [r for r in importer.records(models_dir) if r.get("model_id") == model_id]
     resolved = registry.find(spec, models_dir)
-    if resolved is None:
+    if resolved is None and not records:
         raise RpcDomainError(_ERR_MODEL_STATE, f"{spec.name} 未安装")
     # 只允许删除 models/ 目录内的内容（防误删仓库文件）
     root = models_dir.resolve()
-    target = resolved.resolve()
-    if root not in target.parents:
-        raise RpcDomainError(_ERR_MODEL_STATE, "目标不在模型目录内，拒绝删除")
-    shutil.rmtree(target, ignore_errors=True)
-    return {"ok": True}
+    removed: list[str] = []
+    for record in records:
+        path = Path(str(record["path"]))
+        importer.forget(models_dir, path)
+        if _inside(models_dir, str(record["path"])):
+            # 导入落在库内的副本：连整个资产目录一起清掉，只删快照会留下引用壳目录
+            shutil.rmtree(path.resolve(), ignore_errors=True)
+        # 库外的登记项（仅登记 / 并存）：只撤登记，业主自己的目录由他自己处置
+        removed.append(str(path))
+    if resolved is not None:
+        target = resolved.resolve()
+        if root not in target.parents:
+            raise RpcDomainError(_ERR_MODEL_STATE, "目标不在模型目录内，拒绝删除")
+        shutil.rmtree(target, ignore_errors=True)
+        removed.append(str(target))
+        importer.forget(models_dir, resolved)
+    return {"ok": True, "removed": removed}
+
+
+def _inside(models_dir: Path, path: str) -> bool:
+    """登记路径是否真在库里：库外的只有「撤销登记」这一种处置。"""
+    if not path:
+        return False
+    try:
+        target = Path(path).resolve()
+    except OSError:
+        return False
+    return models_dir.resolve() in target.parents
+
+
+# --------------------------------------------------------------------------- 导入向导（D4）
+
+
+def import_inspect(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """向导第 ② 步：认一认业主挑的目录，只读不落盘。
+
+    importer 的 ValueError 一律翻成领域错误码——向导要显示「缺哪几项」这种人话，
+    不是一个 JSON-RPC 内部异常。
+    """
+    source = _source_param(params)
+    try:
+        return importer.inspect(context.data_dir / "models", source)
+    except ValueError as exc:
+        raise RpcDomainError(_ERR_MODEL_STATE, str(exc)) from exc
+
+
+def import_commit(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """向导第 ③ 步：把目录落进资产库（GB 级复制，所以是作业）。
+
+    判据不在这里重写：能不能落位、冲突怎么裁决，全部由 ``importer.commit`` 说了算，
+    它拒绝时抛的 ValueError 原样进作业的 ``error``——UI 上看到的话术与引擎侧同源。
+    作业故意不挂 ``cancel_events``：复制半途没有「撤销」可言，能停下一半只会留下一份
+    比原状更糟的资产，所以宁可让业主等，也不给一个骗人的取消按钮。
+    """
+    source = _source_param(params)
+    models_dir = context.data_dir / "models"
+    job_id = context.job_store.create("model_import", ref_id=source.name)
+    # 必须置 running：看门狗只给 running 收尾，漏了这一句作业会永远停在 pending（同 download）
+    context.job_store.mark_running(job_id)
+    done_event = threading.Event()
+
+    def _progress(done: int, total: int) -> None:
+        percent = 100.0 if total <= 0 else round(done * 100.0 / total, 1)
+        message = f"落位 {importer.human_bytes(done)} / {importer.human_bytes(total)}"
+        context.job_store.set_progress(job_id, percent, message)
+        context.notifier.progress(job_id, percent, message)
+
+    def _run() -> None:
+        try:
+            result = importer.commit(
+                models_dir,
+                source,
+                mode=str(params.get("mode") or ""),
+                on_conflict=str(params.get("on_conflict") or ""),
+                allow_incomplete=bool(params.get("allow_incomplete") or False),
+                external_kind=str(params.get("external_kind") or ""),
+                label=str(params.get("label") or ""),
+                on_progress=_progress,
+            )
+            context.notifier.log(
+                "info",
+                f"{result['mode']} 落位完成：{result['path']}"
+                + ("（体检不通过，已按不完整导入登记）" if result["incomplete"] else ""),
+            )
+        except Exception as exc:  # noqa: BLE001 - 拒绝话术要原样回给向导
+            context.job_store.mark_failed(job_id, str(exc))
+        finally:
+            done_event.set()
+
+    def _watch() -> None:
+        done_event.wait()
+        job = context.job_store.get(job_id)
+        if job is not None and job["status"] == STATUS_RUNNING:
+            context.job_store.mark_completed(job_id)
+
+    threading.Thread(target=_run, daemon=True, name=f"import-{source.name}").start()
+    threading.Thread(target=_watch, daemon=True, name=f"import-watch-{job_id[:8]}").start()
+    return {"job_id": job_id}
+
+
+def import_records(context: AppContext) -> dict[str, Any]:
+    """登记本全文：来源标记与「外部资产」都在这一个形状里。
+
+    内置清单外的目录不进 ``models.list``——那一列每行都要有身份才能「选为生效」；这里给的是
+    登记项本身，认不出身份的 ``model_id`` 为 null，UI 据此只能提供「撤销登记」。
+    """
+    models_dir = context.data_dir / "models"
+    return {"records": importer.records(models_dir), "error": importer.records_error(models_dir)}
+
+
+def import_forget(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """撤销一条登记：业主放在自己盘上的字节，只能由他自己处置。
+
+    库内的路径一律拒绝——那份是真资产，只撤登记就等于把它变成「躺在库里但没人知道」；
+    那种情况该走的是 models.delete（连文件一起清）。
+    """
+    models_dir = context.data_dir / "models"
+    stored = str(_source_param(params, "请指明要撤销哪一条登记"))
+    record = next(
+        (item for item in importer.records(models_dir) if str(item.get("path") or "") == stored),
+        None,
+    )
+    if record is None:
+        raise RpcDomainError(_ERR_MODEL_STATE, f"登记本里没有这条路径: {stored}")
+    if _inside(models_dir, stored):
+        raise RpcDomainError(
+            _ERR_MODEL_STATE, f"{stored} 在模型库内，是已落位的资产；请用「移除」处置而不是撤销登记"
+        )
+    importer.forget(models_dir, Path(stored))
+    return {"ok": True, "path": stored}
+
+
+def _source_param(params: dict[str, Any], hint: str = "请先选择要导入的模型目录") -> Path:
+    raw = str(params.get("path") or "").strip()
+    if not raw:
+        raise RpcDomainError(_ERR_IMPORT_PARAM, f"缺少 path：{hint}")
+    return Path(raw)
+
+
+def _attach_imports(
+    items: list[dict[str, Any]], records: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """把「本地导入」挂到清单行上：移除时才分得清该删库内副本还是只撤登记。
+
+    一个模型可能有多条登记（先仅登记、后来又复制进库）：优先挂路径与已安装位置一致的那条，
+    它才是引擎此刻真正读到的那份。清单外的登记项不属于任何行，留在登记本里由
+    ``models.import_records`` 交出。
+    """
+    for item in items:
+        item["imported"] = None
+    claimed: set[int] = set()
+    for item in items:
+        index = _pick_record(records, claimed, str(item["model_id"]), item.get("path"))
+        if index is not None:
+            claimed.add(index)
+            item["imported"] = records[index]
+    return items
+
+
+def _pick_record(
+    records: list[dict[str, Any]], claimed: set[int], model_id: str, installed: Any
+) -> int | None:
+    """挑一条属于这个模型的登记：装到位的那条优先，其次按登记顺序。"""
+    candidates = [
+        index
+        for index, record in enumerate(records)
+        if index not in claimed and record.get("model_id") == model_id
+    ]
+    for index in candidates:
+        if _matches_installed(str(records[index].get("path") or ""), installed):
+            return index
+    return candidates[0] if candidates else None
+
+
+def _matches_installed(recorded: str, installed: Any) -> bool:
+    """登记路径是不是引擎此刻读到的那一份：同一目录，或它是包住快照的缓存根。
+
+    不能直接比字符串——whisper 的登记落在缓存根（``models--…``），清单里的 ``path`` 却是
+    ``snapshots/<hash>``，一比就永远不相等，行上会挂回那条躺在库外的旧登记。
+    """
+    if not recorded or not installed:
+        return False
+    stored, landed = Path(recorded), Path(str(installed))
+    return stored == landed or stored in landed.parents

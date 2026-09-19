@@ -76,7 +76,7 @@ Router 不做 schema 校验，参数问题一律由各 handler 抛业务域码�
 |----|------|------|
 | -32001 / -32002 | settings | 未知键 / 值非法 |
 | -32003 / -32004 | settings | LLM 未配置 / 不可达 |
-| -32010 / -32011 | models | 模型未知 / 状态不符（已安装、未安装、越界删除） |
+| -32010 / -32011 / -32012 | models | 模型未知 / 状态不符（已安装、未安装、越界删除、导入体检不通过、撤销登记指向库内路径） / 导入缺 `path` |
 | -32101 | project / analysis / narration | 项目不存在 |
 | -32102 / -32103 | project | 目录非法 / 项目无集 |
 | -32104 | project | `project.update_settings` 的 settings 不是对象 |
@@ -112,7 +112,7 @@ Router 不做 schema 校验，参数问题一律由各 handler 抛业务域码�
 | `system.health` | `{}` | `{status:"ok", uptime_s, gpu?, vram_free_mb?, disk_free_gb?, models_ok?}`（扩展字段供侧边栏/工作台系统状态） |
 | `system.shutdown` | `{}` | `{ok:true}`（Python 优雅退出） |
 
-### 已落地全集（P-1 收口实测：**46 个方法 / 10 个命名空间**；2026-09-19 按工作树复测 54 / 11，含他人未提交改动）
+### 已落地全集（P-1 收口实测：**46 个方法 / 10 个命名空间**；2026-09-19 按工作树复测 **58 / 11**，较前次复测 +4 = D-P3 导入面，含他人未提交改动）
 
 以 `Router.method_names` 与 `protocol/schemas/*.json` 的 `x-methods` 双向集合相等为准（两侧契约测试强制）。
 
@@ -121,7 +121,7 @@ Router 不做 schema 校验，参数问题一律由各 handler 抛业务域码�
 - `narration.*`（6）：plan_variants（阶段③：为选中模式各产出 K 条方案，只规划不渲染）/ list_plans / get_plan（单条方案详情+成本账）/ list_styles / generate_titles（LLM 生成候选标题）/ update_titles（整表保存候选标题）
 - `export.*`（6）：submit（把已规划好的方案排队渲染，一条方案一个 job）/ **retry**（P-1 新增：复用原 export_id 覆盖写，仅 failed 可重试）/ list / list_works（跨项目作品库）/ get（单条导出记录）/ ensure_covers（补拍历史成片封面，幂等）
 - `jobs.*`（3，**P-1 新建命名空间**）：list（跨类型任务列表，`limit`/`active_only`，队列页数据源）/ get（单任务详情，含 error）/ cancel（统一取消入口，不可中断时如实回 `cancelling:false + reason`）
-- `models.*`（7）：list / download / scan_local（本地放置后重探测）/ delete / **verify**（D-P1 新增：资产体检报告，不给 model_id 时报全部已落盘项）/ runtime_status（CUDA 运行库安装态）/ install_runtime（下载并启用 CUDA 运行库，作业模式）
+- `models.*`（11）：list / download / scan_local（**只是重探测 `models/`**，不搬文件；登记本坏了回 `import_error`）/ delete（库内的删目录，登记在库外的那份只撤登记）/ **verify**（D-P1 新增：资产体检报告，不给 model_id 时报全部已落盘项）/ **import_inspect**、**import_commit**、**import_records**、**import_forget**（D-P3 导入向导：第 ② 步只读实测体检，第 ③ 步落位是作业 `model_import`，登记本全文与撤销入口。落位作业**故意不挂取消事件**：复制半途撤手只会留下一份比原状更糟的资产，所以 `jobs.cancel` 对它如实回 `cancelling:false + 任务不可中断`）/ runtime_status（CUDA 运行库安装态）/ install_runtime（下载并启用 CUDA 运行库，作业模式）
 - `engine_configs.*`（6）：list / create / update / delete / enable / test（按能力域多实例，单启用）
 - `settings.*`（3）：get / update / test_llm
 - `subtitle.*`（1）：list_presets（内置+用户合并视图，ADR-008）
@@ -131,7 +131,8 @@ Router 不做 schema 校验，参数问题一律由各 handler 抛业务域码�
 **原案里规划但从未实现的方法**（不要按它们写客户端）：`project.open`（改为直接 `project.get`）、
 `subtitle.preview`、`tts.list_voices`（音色目录在前端 `ttsVoices.ts`，未走 RPC）、
 `export.status` / `export.cancel`（状态与取消统一走 `jobs.get` / `jobs.cancel` + `progress.update`）、
-`models.cancel` / `models.import_local`（下载取消走 `jobs.cancel`；本地导入即 `models.scan_local`）、
+`models.cancel` / `models.import_local`（下载取消走 `jobs.cancel`；本地导入是 D-P3 的
+`models.import_inspect` + `models.import_commit` 两步，`scan_local` 只是重探测）、
 `narration.synthesize_tts`（配音是 `export.submit` 渲染链路的一环，不再单独开方法）。
 
 ## 7. 通知事件
