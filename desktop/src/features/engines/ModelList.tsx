@@ -1,13 +1,14 @@
-/** 模型分组列表：档位分组 + 模型行（速度/精度评级、下载源气泡/目录/删除）。 */
-import { useEffect, useRef, type ReactElement } from 'react';
+/** 模型分组列表：档位分组 + 模型行（速度/精度评级、可行性提示、下载源气泡/目录/删除）。 */
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { App as AntdApp, Button, Empty, Popconfirm } from 'antd';
 import { DeleteOutlined, FolderOpenOutlined } from '@ant-design/icons';
-import type { ModelInfo } from '@dramaclip/protocol';
-import { modelsApi, revealInFolder } from '../../services/client';
+import type { HealthResult, ModelInfo } from '@dramaclip/protocol';
+import { modelsApi, revealInFolder, systemApi } from '../../services/client';
 import { useUiStore } from '../../stores/ui';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 import { DownloadSourceButton } from './ModelDownloadPopover';
+import { FIT_VERDICT_COLOR, FIT_VERDICT_LABEL, judgeModelFit, parseSizeGb, specsFromHealth } from './machineFit';
 
 interface TierSpec {
   readonly key: string;
@@ -30,15 +31,24 @@ export function ModelList({
   onChanged: () => void;
 }): ReactElement {
   useDownloadSettled(onChanged);
+  const [specs, setSpecs] = useState(() => specsFromHealth(null));
+  useEffect(() => {
+    void systemApi
+      .health()
+      .then((health: HealthResult) => {
+        setSpecs(specsFromHealth(health));
+      })
+      .catch(() => undefined);
+  }, []);
   if (models.length === 0) {
     return <Empty description="没有符合条件的模型" style={{ padding: tokens.spaceLg }} />;
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceMd }}>
       {TIERS.map((tier) => (
-        <TierGroup key={tier.key} tier={tier} models={models} onChanged={onChanged} />
+        <TierGroup key={tier.key} tier={tier} models={models} specs={specs} onChanged={onChanged} />
       ))}
-      <TierGroup tier={{ key: '', label: '其他', hint: '' }} models={models} onChanged={onChanged} />
+      <TierGroup tier={{ key: '', label: '其他', hint: '' }} models={models} specs={specs} onChanged={onChanged} />
     </div>
   );
 }
@@ -46,10 +56,12 @@ export function ModelList({
 function TierGroup({
   tier,
   models,
+  specs,
   onChanged,
 }: {
   tier: TierSpec;
   models: readonly ModelInfo[];
+  specs: ReturnType<typeof specsFromHealth>;
   onChanged: () => void;
 }): ReactElement | null {
   const group = models.filter((m) => (m.tier ?? '') === tier.key);
@@ -68,16 +80,26 @@ function TierGroup({
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
         {group.map((model) => (
-          <ModelRow key={model.model_id} model={model} onChanged={onChanged} />
+          <ModelRow key={model.model_id} model={model} specs={specs} onChanged={onChanged} />
         ))}
       </div>
     </div>
   );
 }
 
-function ModelRow({ model, onChanged }: { model: ModelInfo; onChanged: () => void }): ReactElement {
+function ModelRow({
+  model,
+  specs,
+  onChanged,
+}: {
+  model: ModelInfo;
+  specs: ReturnType<typeof specsFromHealth>;
+  onChanged: () => void;
+}): ReactElement {
   const installed = model.status === 'installed';
   const path = model.path;
+  const fit = judgeModelFit(specs, parseSizeGb(model.size_label));
+  const showFit = !installed && (fit.verdict === 'disk' || fit.verdict === 'ram');
   return (
     <div
       style={{
@@ -111,6 +133,7 @@ function ModelRow({ model, onChanged }: { model: ModelInfo; onChanged: () => voi
       {(model.speed ?? 0) > 0 && <RatingDots label="速度" level={model.speed ?? 0} />}
       {(model.quality ?? 0) > 0 && <RatingDots label="精度" level={model.quality ?? 0} />}
       {model.size_label !== undefined && <span style={mixins.chip()}>{model.size_label}</span>}
+      {showFit && <FitChip verdict={fit.verdict} reason={fit.reason} />}
       <span
         style={{
           fontSize: tokens.fontMicro,
@@ -122,6 +145,21 @@ function ModelRow({ model, onChanged }: { model: ModelInfo; onChanged: () => voi
       </span>
       <RowActions model={model} installed={installed} path={path} onChanged={onChanged} />
     </div>
+  );
+}
+
+function FitChip({ verdict, reason }: { verdict: 'disk' | 'ram'; reason: string }): ReactElement {
+  return (
+    <span
+      title={reason}
+      style={{
+        fontSize: tokens.fontMicro,
+        color: FIT_VERDICT_COLOR[verdict],
+        flexShrink: 0,
+      }}
+    >
+      ⚠ {FIT_VERDICT_LABEL[verdict]}
+    </span>
   );
 }
 

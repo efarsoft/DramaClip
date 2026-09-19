@@ -61,6 +61,8 @@ export interface HealthResult {
   readonly gpu_info?: GpuInfo;
   readonly vram_free_mb?: number;
   readonly disk_free_gb?: number;
+  readonly ram_total_gb?: number;
+  readonly ram_free_gb?: number;
   readonly models_ok?: boolean;
 }
 

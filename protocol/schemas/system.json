@@ -46,6 +46,8 @@
           },
           "vram_free_mb": { "type": "integer" },
           "disk_free_gb": { "type": "number" },
+          "ram_total_gb": { "type": "number" },
+          "ram_free_gb": { "type": "number" },
           "models_ok": { "type": "boolean" }
         }
       }

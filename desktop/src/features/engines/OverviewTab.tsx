@@ -1,12 +1,12 @@
-/** 引擎中心·总览：三类能力卡片 + 本地/云端起步路线 + 系统运行时。 */
+/** 引擎中心·总览：三类能力卡片 + 本地/云端起步路线 + 本机运行条件。 */
 import { AudioOutlined, EditOutlined, RightOutlined, SoundOutlined } from '@ant-design/icons';
 import { Card } from 'antd';
-import { useEffect, useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { HealthResult, ModelInfo } from '@dramaclip/protocol';
-import { systemApi } from '../../services/client';
+import type { ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
 import type { SettingsMap } from './EnginesPage';
+import { MachinePanel } from './MachinePanel';
 
 function SectionCard({
   onClick,
@@ -115,7 +115,7 @@ export function OverviewTab({
           }}
         />
       </div>
-      <RuntimeStrip />
+      <MachinePanel models={models} />
     </div>
   );
 }
@@ -218,47 +218,3 @@ function PathCard({
   );
 }
 
-/** 系统运行时条：GPU / 磁盘 / 服务在线时长——总览页的硬件事实区。 */
-function RuntimeStrip(): React.ReactElement {
-  const [health, setHealth] = useState<HealthResult | null>(null);
-  useEffect(() => {
-    void systemApi
-      .health()
-      .then(setHealth)
-      .catch(() => undefined);
-  }, []);
-  const gpu = health?.gpu_info;
-  const cells: { label: string; value: string }[] = [
-    {
-      label: '显卡',
-      value: gpu?.ready
-        ? `${gpu.name}${gpu.max_cuda_version !== '' ? ` · CUDA ${gpu.max_cuda_version}` : ''}`
-        : '未检测到 NVIDIA',
-    },
-    { label: '磁盘可用', value: health?.disk_free_gb !== undefined ? `${String(health.disk_free_gb)} GB` : '…' },
-    { label: '服务运行', value: health === null ? '…' : `${String(Math.round(health.uptime_s / 60))} 分钟` },
-  ];
-  return (
-    <SectionCard>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: tokens.spaceLg }}>
-        {cells.map((cell) => (
-          <div key={cell.label} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-            <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>{cell.label}</span>
-            <span
-              style={{
-                fontSize: tokens.fontCaption,
-                color: tokens.textSecondary,
-                fontFamily: tokens.fontFamilyMono,
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              {cell.value}
-            </span>
-          </div>
-        ))}
-      </div>
-    </SectionCard>
-  );
-}
