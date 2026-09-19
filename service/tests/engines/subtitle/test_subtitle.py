@@ -199,7 +199,17 @@ def test_cap_is_the_tightest_number_the_header_geometry_allows() -> None:
 
 
 def test_split_never_exceeds_cap_and_never_loses_a_char() -> None:
-    """两条全局性质：任一行不超上限；拆完拼回去等于原文（空白除外）。"""
+    """两条全局性质：任一行不超上限；拆完拼回去等于原文（行尾句读与空白除外）。
+
+    第二条在立案②的标点清理之后不再是「逐字符相等」：行尾那些 ，。、；： 是**有意**
+    删掉的。仍然成立、也仍然抓得住丢字的是「把句读全撇开后逐字相等」——真丢了词、
+    多了词、或者把该留的行中标点删了，这条照样红。
+    """
+    marks = set(ass_generator._TRAILING_MARKS) | set("？！")
+
+    def words(value: str) -> str:
+        return _stripped("".join(ch for ch in value if ch not in marks))
+
     for max_len in (6, 10, 16):
         for text in (
             _NO_PUNCT_RUN,
@@ -212,13 +222,41 @@ def test_split_never_exceeds_cap_and_never_loses_a_char() -> None:
             chunks = split_subtitle_text(text, max_len)
             assert chunks, f"{text!r} 拆成了空列表"
             assert all(len(chunk) <= max_len for chunk in chunks), f"{max_len} 被超过：{chunks}"
-            assert _stripped("".join(chunks)) == _stripped(text), f"丢字了：{chunks}"
+            assert words("".join(chunks)) == words(text), f"丢字了：{chunks}"
 
 
 def test_split_breaks_at_punctuation_before_hard_cutting() -> None:
     """有标点可断时**不得**出现句中硬切：每条都应是完整语义单元。"""
     chunks = split_subtitle_text(_PUNCTUATED, 16)
-    assert chunks == ["她本以为嫁了个老实人，", "谁知道新婚夜他锁上了门。", "门外传来婆婆的笑声！"]
+    assert chunks == ["她本以为嫁了个老实人", "谁知道新婚夜他锁上了门", "门外传来婆婆的笑声！"]
+
+
+def test_line_ends_lose_the_pause_marks_but_keep_the_tone_marks() -> None:
+    """行尾清理的边界：，。、；：… —— 扫掉，？！ 一个不许动。
+
+    「他凭什么？」去掉问号就不是同一句话了——语气是内容，停顿不是。
+    """
+    assert split_subtitle_text("他走了。她没追。风还在吹……", 5) == [
+        "他走了", "她没追", "风还在吹"
+    ]
+    assert split_subtitle_text("他凭什么？这事就这么定了！谁同意？", 10) == [
+        "他凭什么？", "这事就这么定了！", "谁同意？"
+    ]
+
+
+def test_remerged_commas_survive_the_cleanup() -> None:
+    """清理只作用于**行尾**：回并后进到行中的标点必须原样留着。
+
+    把清理挪到回并之前，"好，真的" 会变成 "好真的"——这条就是那一刀的探测器。
+    """
+    assert split_subtitle_text("好，真的。太好了！没错。", 16) == ["好，真的。太好了！没错"]
+    assert split_subtitle_text("她说：走吧，外面下雨了", 16) == ["她说：走吧，外面下雨了"]
+
+
+@pytest.mark.parametrize("text", ["。", "……", "——", "，。"])
+def test_a_line_of_punctuation_only_never_returns_empty(text: str) -> None:
+    """整行只剩标点时不能返回 []，也不能留一条 0 字行去分时长（调用方按比例除字数）。"""
+    assert split_subtitle_text(text, 12) == [""]
 
 
 def test_split_hard_cuts_a_run_without_punctuation() -> None:
@@ -261,6 +299,28 @@ def test_long_narration_becomes_multiple_ass_events() -> None:
         text = _stripped(_event_text(line))
         assert len(text) <= cap, f"这条字幕超上限：{text!r}"
         assert len(text) * _advance(size) <= usable, f"这条字幕一行放不下：{text!r}"
+
+
+def test_no_burned_line_ends_on_a_pause_mark() -> None:
+    """标点清理必须活到 ASS 事件里：拆行→build_ass 之后仍然行尾无句读。
+
+    只测 `split_subtitle_text` 的返回值不够——立案②的形状正是「函数做对了，
+    烧出来的那条还是带着句号」（预设/覆盖标签任一环把文本换掉都不会红）。
+    """
+    preset = presets.get_preset("conflict-impact")
+    chunks = split_subtitle_text(_PUNCTUATED + _PUNCTUATED, 12)
+    assert len(chunks) > 1, "用例已失效：这段文案不再触发拆行"
+    ass = build_ass(
+        [{"start": i * 1.5, "end": i * 1.5 + 1.5, "text": chunk} for i, chunk in enumerate(chunks)],
+        preset,
+    )
+    bodies = [_event_text(line) for line in ass.splitlines() if line.startswith("Dialogue:")]
+    assert len(bodies) == len(chunks)
+    for body in bodies:
+        assert body, f"烧出了一条空字幕：{bodies}"
+        assert not body.rstrip().endswith(tuple(ass_generator._TRAILING_MARKS)), (
+            f"这条字幕行尾还拖着句读：{body!r}"
+        )
 
 
 def _event_text(ass_line: str) -> str:

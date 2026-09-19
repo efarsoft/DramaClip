@@ -190,9 +190,15 @@ def _karaoke_body(text: str, duration_s: float, overrides: str, primary: str) ->
 
 _PUNCT_SPLIT = re.compile(r"(?<=[，。！？；：、…——])")
 
+# 行尾不留句读（业主立案②的「标点清理」）。`_PUNCT_SPLIT` 在标点**之后**断句，所以每条
+# 字幕都拖着自己那句的句号/逗号——短视频字幕的通行做法是行尾不放这些，它们只是排版噪声。
+# ？！ 不在这里：它们承载的是语气（"他凭什么？"去掉问号就变成另一句话），必须留。
+# 破折号「——」与省略号「…」按字符 rstrip，成对/连写的都能一次扫掉。
+_TRAILING_MARKS = "，。、；：…——,.;:"
+
 
 def split_subtitle_text(text: str, max_len: int) -> list[str]:
-    """长解说文案拆成字幕级短句：标点优先断句，超长句硬切，短段回并。
+    """长解说文案拆成字幕级短句：标点优先断句，超长句硬切，短段回并，行尾句读清理。
 
     `max_len` 没有默认值：能放几个字只取决于用哪套预设烧（`line_char_cap`），写死一个
     数就是业主立案②的形状——「拆了，但每条照样放不下」。
@@ -213,7 +219,13 @@ def split_subtitle_text(text: str, max_len: int) -> list[str]:
             merged[-1] += piece
         else:
             merged.append(piece)
-    return merged or [text.strip()]
+    # 清理必须在**回并之后**：回并把 "好，" + "真的" 拼成一行时，那个逗号从行尾挪到了
+    # 行中，是句子的一部分。挪到回并之前清，就把该留的标点一起删了（变异实测会红
+    # `test_remerged_commas_survive_the_cleanup`）。
+    cleaned = [piece.rstrip(_TRAILING_MARKS) for piece in merged]
+    # 整行只剩标点的（文案以「……」收尾就会产出这种行）留不得：0 字行在调用方按字数
+    # 比例分时长时是除零的来源，也不能替自己占一格时间轴。
+    return [piece for piece in cleaned if piece] or [""]
 
 
 def build_ass(lines: list[dict[str, Any]], preset: dict[str, Any]) -> str:
