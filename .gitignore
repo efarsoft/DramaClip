@@ -20,7 +20,6 @@ htmlcov/
 
 # ── 运行时数据 / 参考资料（永不入库）──
 data/
-backup/
 resources/models/
 resources/cache/
 
@@ -51,3 +50,7 @@ build/
 desktop/release/
 desktop/release2/
 data/models/sherpa-onnx/
+
+# ── 本地调试产物（永不入库）──
+scratch/
+/*ANALYSIS.md

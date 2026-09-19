@@ -507,7 +507,7 @@ def main() -> int:
     modes = ALL_MODES if args.modes == "all" else [m.strip() for m in args.modes.split(",")]
     for exe in (FFMPEG, FFPROBE):
         if not Path(exe).is_file():
-            print(f"缺少可执行文件：{exe}（可从 legacy/v1-electron 分支恢复）", file=sys.stderr)
+            print(f"缺少可执行文件：{exe}（随包 resources/ffmpeg/ 缺失，请重新安装或补齐）", file=sys.stderr)
             return 2
     # 预期表核对排在最前面（连临时目录都不建）：表都过期了，跑出来的绿是假绿。
     drift = _mode_table_drift()
