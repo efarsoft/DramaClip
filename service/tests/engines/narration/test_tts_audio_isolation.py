@@ -83,7 +83,14 @@ def _stored(plan: PlanData) -> PlanData:
 
 
 def _synthesize(plan: PlanData, tts_dir: Path, settings: dict[str, str] | None = None) -> PlanData:
-    return pipeline.synthesize_narration_texts(plan, dict(settings or _SETTINGS), tts_dir)
+    # 源长给 120s：本文件的槽位窗口最晚到 18s，这里是守卫的余量而不是被测对象
+    # （判红见 test_backfill_timeline.py）。
+    return pipeline.synthesize_narration_texts(
+        plan,
+        dict(settings or _SETTINGS),
+        tts_dir,
+        source_durations={"ep1": 120.0},
+    )
 
 
 def test_replanning_same_mode_does_not_corrupt_stored_plan(

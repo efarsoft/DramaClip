@@ -283,6 +283,11 @@ def test_assembly_failure_lands_in_jobs_table(
     assert job_id not in harness.context.cancel_events, "cancel_events 未释放"
 
 
+# `_variant_plan` 只有一条 0→1.25s 的段，120s 是一档真集长度。回填的越界判据按
+# 这份表算（不查库），所以直接调 `_voice` 的用例不必为 ep1 种集行。
+_PLAN_SOURCE_S = {"ep1": 120.0}
+
+
 def _variant_plan(copy_prefix: str) -> PlanData:
     """同模式同槽位 id、只有文案不同：内容寻址要隔离的东西。"""
     return PlanData(
@@ -331,7 +336,9 @@ def test_voice_gives_each_variant_its_own_audio(
     settings = dict(harness.context.settings)
 
     voiced = [
-        narration_api._voice(harness.context, _variant_plan(prefix), settings)
+        narration_api._voice(
+            harness.context, _variant_plan(prefix), settings, _PLAN_SOURCE_S
+        )
         for prefix in ("角度一", "角度二")
     ]
 
@@ -366,9 +373,13 @@ def test_voice_keeps_the_cross_call_cache(
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: 1.25)
     settings = dict(harness.context.settings)
 
-    first = narration_api._voice(harness.context, _variant_plan("同一份文案"), settings)
+    first = narration_api._voice(
+        harness.context, _variant_plan("同一份文案"), settings, _PLAN_SOURCE_S
+    )
     calls_after_first = len(engine.calls)
-    second = narration_api._voice(harness.context, _variant_plan("同一份文案"), settings)
+    second = narration_api._voice(
+        harness.context, _variant_plan("同一份文案"), settings, _PLAN_SOURCE_S
+    )
 
     assert calls_after_first == 1
     assert len(engine.calls) == 1, "第二次调用又付了一遍配音：目录随调用变化了"
@@ -432,6 +443,14 @@ def _seed_project_with_episodes(
                     }
                 ]
             ),
+        )
+        # 种子的秒轴是编的（第 i 集从 100*i 秒起），源文件却是 3s 的 testsrc 替身。
+        # 回填守卫拿 episodes.duration 判「窗口还在不在素材里」，所以这里把源长改成
+        # 与假时间轴同档：40s 余量既不会让守卫白测（真越界照样红），也不至于把
+        # 3s 的谎当成产品事实——那样每个 plan_variants 用例都会先撞上"越过源集末尾"。
+        memory_db.execute(
+            "UPDATE episodes SET duration = ? WHERE id = ?",
+            (offset + 40.0, str(episode["id"])),
         )
         episodes_repo.set_status(memory_db, str(episode["id"]), "done")
     return project_id
@@ -1045,9 +1064,11 @@ def test_plan_variants_cancel_releases_the_event(
 
     real_voice = narration_api._voice
 
-    def voice_then_cancel(context: Any, plan: Any, settings: Any) -> Any:
-        """配完第一条就取消：`_voice` 三个入参（Task 5 重写后无 job_id/mode/index）。"""
-        voiced = real_voice(context, plan, settings)
+    def voice_then_cancel(
+        context: Any, plan: Any, settings: Any, source_durations: Any
+    ) -> Any:
+        """配完第一条就取消：`_voice` 四个入参（Task 5 重写后无 job_id/mode/index）。"""
+        voiced = real_voice(context, plan, settings, source_durations)
         for event in context.cancel_events.values():
             event.set()
         return voiced

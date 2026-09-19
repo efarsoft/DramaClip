@@ -22,6 +22,10 @@ _SCENES = [
     for i, s in enumerate([60, 85, 45, 90])
 ]
 
+# 源时长是配音回填的必填输入（越界判红见 test_backfill_timeline.py）；本文件的种子
+# 场景最晚到 46s，给 120s 是一档真集长度，不是"无穷大放行"。
+_LONG_SOURCE = {"ep1": 120.0}
+
 
 class _StubTts:
     def __init__(self, fail_ids: tuple[str, ...] = ()) -> None:
@@ -52,7 +56,9 @@ def _synth(monkeypatch, plan, engine, work_dir: Path, duration: float = 1.25) ->
     传相对路径就是把测试产物写进共享工作树（`git status` 里凭空多一个 tts/）。"""
     monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: engine)
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: duration)
-    return pipeline.synthesize_narration_texts(plan, {"tts.engine": "edge"}, work_dir / "tts")
+    return pipeline.synthesize_narration_texts(
+        plan, {"tts.engine": "edge"}, work_dir / "tts", source_durations=_LONG_SOURCE
+    )
 
 
 def test_empty_copy_raises_before_tts(monkeypatch, tmp_path: Path) -> None:
@@ -115,4 +121,9 @@ def test_plan_without_narration_segments_skips_tts(monkeypatch, tmp_path: Path) 
         raise AssertionError("没有旁白段的方案不该构造 TTS 引擎")
 
     monkeypatch.setattr(pipeline, "create_tts", no_engine)
-    assert pipeline.synthesize_narration_texts(silent, {}, tmp_path / "tts") == silent
+    assert (
+        pipeline.synthesize_narration_texts(
+            silent, {}, tmp_path / "tts", source_durations=_LONG_SOURCE
+        )
+        == silent
+    )

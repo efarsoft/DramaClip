@@ -33,20 +33,33 @@ class _StubTts:
         return out_path
 
 
+_LONG_SOURCE_S = 3600.0
+
+
 def _voice(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     plan: PlanData,
     durations: dict[str, float],
+    source_durations: dict[str, float] | None = None,
 ) -> PlanData:
-    """按槽位给出实测时长并跑真回填：槽位 id 藏在音频文件名主干里（内容寻址前缀）。"""
+    """按槽位给出实测时长并跑真回填：槽位 id 藏在音频文件名主干里（内容寻址前缀）。
 
+    源时长默认给到 3600s——远大于本文件任何一条时间轴，这样「回填守住单调性」的
+    用例不会顺带把 #70 的越界守卫也测了一遍：那条守卫有自己专门的判红用例。
+    """
     def probe(path: Path) -> float:
         return durations[str(Path(path).stem.split("-")[0])]
 
     monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: _StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
-    return pipeline.synthesize_narration_texts(plan, {"tts.engine": "edge"}, tmp_path)
+    if source_durations is None:
+        source_durations = {
+            str(segment.episode_id): _LONG_SOURCE_S for segment in plan.timeline
+        }
+    return pipeline.synthesize_narration_texts(
+        plan, {"tts.engine": "edge"}, tmp_path, source_durations=source_durations
+    )
 
 
 def _plan(*segments: tuple[str, float, float, str]) -> PlanData:
@@ -174,3 +187,49 @@ def test_script_plan_stays_renderable_after_voicing(
     )
     _assert_source_never_runs_backwards(voiced)
     assert voiced.timeline[-1].start >= voiced.timeline[-2].end
+
+
+def test_backfill_past_the_source_end_is_rejected_not_truncated(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """回填把段尾推出源片末尾：这条方案必须失败，不能出成片。
+
+    真机实测（bundled ffmpeg 8.1.1，源 6.mp4=76.86s、9s 干音）：窗口 70.86→79.86
+    退码 **0**，产物视频 6.07s / 音频 6.03s——9 秒旁白被从中间掐掉；窗口
+    76.86→82.86（起点即 EOF）退码仍 0，产物 262 字节、无流。渲染层既不会报错也不
+    会警告，所以唯一的拦截点在这里（业主裁决：改所见所闻的一律失败，不截断）。
+    """
+    plan = _plan(("ep1", 186.0, 192.0, "ducked"), ("ep1", 192.0, 197.0, "ducked"))
+    with pytest.raises(RuntimeError, match=r"越过源集末尾.*197\.20.*192\.20.*超出 5\.00"):
+        _voice(
+            monkeypatch,
+            tmp_path,
+            plan,
+            {"n0": 6.2, "n1": 5.0},
+            {"ep1": 192.2},
+        )
+
+
+def test_an_original_segment_pushed_past_the_source_is_rejected_too(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """旁白顶穿预算后紧跟的原声段被平移出界，同样不能出片：它没有 narration_id。"""
+    plan = _plan(("ep1", 0.0, 1.0, "narration"), ("ep1", 1.0, 20.0, "original"))
+    with pytest.raises(RuntimeError, match=r"越过源集末尾.*原声段"):
+        _voice(
+            monkeypatch,
+            tmp_path,
+            plan,
+            {"n0": 25.0},
+            {"ep1": 26.0},
+        )
+
+
+def test_unknown_source_duration_fails_instead_of_skipping_the_check(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """源时长缺失/为 0 不许当成「没有越界」：那正是判据静默失效的形状。"""
+    plan = _plan(("ep1", 0.0, 1.0, "ducked"))
+    for missing in ({}, {"ep1": 0.0}):
+        with pytest.raises(RuntimeError, match="没有源集时长"):
+            _voice(monkeypatch, tmp_path, plan, {"n0": 1.0}, missing)

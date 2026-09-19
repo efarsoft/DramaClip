@@ -307,6 +307,10 @@ def _run_plan_variants(
         total = len(modes) * k
         done_count = 0
         failures: list[str] = []
+        # 源长表整批复用：这些行就是编排的取材范围，方案里的集 id 只会是它们的子集
+        source_durations = {
+            str(episode["id"]): float(episode["duration"] or 0.0) for episode in episodes
+        }
         for mode in modes:
             if cancel_event.is_set():
                 break
@@ -341,7 +345,7 @@ def _run_plan_variants(
                             f"取材与「{worst.name}」重叠 {worst.ratio:.0%}，"
                             f"超过 {overlap.OVERLAP_LIMIT:.0%}——这条角度不出（规格 §4.3）"
                         )
-                    plan = _voice(context, plan, settings)
+                    plan = _voice(context, plan, settings, source_durations)
                     plans_repo.create(
                         context.conn,
                         project_id,
@@ -536,11 +540,25 @@ def _settle_failed(context: AppContext, job_id: str, error: str) -> None:
         )
 
 
-def _voice(context: AppContext, plan: PlanData, settings: dict[str, str]) -> PlanData:
-    """配音：plan_variants 唯一的配音出口，只负责给出 tts 目录与 models 目录。
+def _voice(
+    context: AppContext,
+    plan: PlanData,
+    settings: dict[str, str],
+    source_durations: dict[str, float],
+) -> PlanData:
+    """配音：plan_variants 唯一的配音出口，负责给出 tts 目录与 models 目录。
+
+    `source_durations`（{集 id: 源片秒数}）交给回填做越界判定——回填会把段尾改成
+    `start + 实测音频时长`，跑出源长的窗口 ffmpeg 不报错、只把旁白截掉（业主立案③的
+    另一半，判据见 `pipeline._assert_within_source`）。缺键由 pipeline 判失败，
+    这里不兜底：拿不到源长就等于无法证明这条片子不会被截断。
     """
     return narration_pipeline.synthesize_narration_texts(
-        plan, settings, context.work_dir / "tts", context.data_dir / "models"
+        plan,
+        settings,
+        context.work_dir / "tts",
+        context.data_dir / "models",
+        source_durations=source_durations,
     )
 
 

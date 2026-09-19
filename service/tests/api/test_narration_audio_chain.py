@@ -73,7 +73,11 @@ def _full_plan(episode_id: str, tts_dir: Path) -> PlanData:
             for i, t in enumerate(plan.narration_texts)
         ]
     })
-    return pipeline.synthesize_narration_texts(plan, {"tts.engine": "edge"}, tts_dir)
+    # 源长与 `_render` 种的 episodes.duration 同值（120s）：这里的 plan 后面真的会进渲染，
+    # 两处不一致就是在测一个生产里不存在的形状。
+    return pipeline.synthesize_narration_texts(
+        plan, {"tts.engine": "edge"}, tts_dir, source_durations={episode_id: 120.0}
+    )
 
 
 def _stub_tts(monkeypatch: pytest.MonkeyPatch, engine: Any) -> None:

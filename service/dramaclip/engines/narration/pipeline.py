@@ -8,6 +8,7 @@ import json
 import os
 import uuid
 from pathlib import Path
+from typing import Any
 
 from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import (
@@ -80,6 +81,12 @@ def build_plan(
 
 
 _NEAR_GAP_S = 1.0  # 近邻衔接阈值：段间隔小于此值视为同镜头连续推进
+
+# 越界判定放的余量。两端数字都不精确：`end` 与源长都按 3 位小数入库（源长由扫描时
+# ffprobe 量得，见 api/project.py），而素材自己的帧栅格更粗——实测 6.00s 的窗口落出
+# 6.0667s 的流时长。所以「段尾正好等于源长」必须是绿的，判红线得抬到百分位以上。
+# 真越界是秒级的：库存量实测 +4.88s / +6.03s，2026-09-19 真机 dialogue_narration +5.23s。
+_SOURCE_FIT_TOL_S = 0.05
 
 
 def build_from_script_episodes(
@@ -226,13 +233,60 @@ def _synthesize_into(
         staging.unlink(missing_ok=True)
 
 
+def _assert_within_source(
+    timeline: list[dict[str, Any]],
+    source_durations: dict[str, float],
+) -> None:
+    """回填后的画面窗口必须仍落在源集里，越界就是这条方案失败。
+
+    查出问题的动作是回填：它把段尾改成 `start + 实测音频时长`。编排层自己也可能把窗
+    口摆到源末尾之外——`build_from_script_episodes` 的预算写的是「源长 + 5s」，真机
+    2026-09-19 那条 dialogue_narration 就是 192.20s 的集配 197.43s 的段（超 5.23s）。
+    两处谁犯的错都在这里一并兜住：判据看的是最终要播的窗口，不是谁写的。
+
+    源时长缺失或不大于 0 同样判失败：拿不到源长就等于「无法证明不越界」，把它当成
+    「没有越界」是这套判据最省事的静默失效方式。
+
+    真机实测（bundled ffmpeg 8.1.1，源 `6.mp4` = 76.86s，9s 旁白干音）：
+    窗口 70.86→79.86 退码 **0**、产物视频 6.07s / 音频 6.03s，旁白被从中间掐掉；
+    窗口 76.86→82.86（起点即 EOF）退码仍 0、产物 262 字节无流。渲染层既不报错也不
+    警告，所以这里不拦就是静默出坏片（业主裁决：改所见所闻的一律失败，不做截断）。
+    """
+    for index, segment in enumerate(timeline):
+        episode_id = str(segment["episode_id"])
+        limit = source_durations.get(episode_id, 0.0)
+        if limit <= 0:
+            raise RuntimeError(
+                f"无法核对画面窗口是否越过源集末尾：时间轴引用的集 {episode_id}"
+                " 没有源集时长（未入库或为 0）——宁可不出这条方案，"
+                "也不能拿「查不了」当「没问题」"
+            )
+        end = float(segment["end"])
+        if end <= limit + _SOURCE_FIT_TOL_S:
+            continue
+        slot = segment.get("narration_id")
+        label = f"旁白段 {slot}" if slot else f"原声段 #{index}"
+        raise RuntimeError(
+            f"配音回填后画面窗口越过源集末尾：{episode_id} 的{label} 要播到 "
+            f"{end:.2f}s，源集时长只有 {limit:.2f}s（超出 {end - limit:.2f}s）"
+            " —— 文案比素材剩下的长度还长，这条方案判失败而不是把旁白截掉"
+        )
+
+
 def synthesize_narration_texts(
     plan: PlanData,
     settings: dict[str, str],
     work_dir: Path,
     models_dir: Path | None = None,
+    *,
+    source_durations: dict[str, float],
 ) -> PlanData:
     """逐段合成旁白并按 narration_id 回填时长与解说字幕。
+
+    `source_durations` 是 {集 id: 源片秒数}，必填而非可选：回填会把段尾改成
+    `start + 实测音频时长`，只有拿到源长才知道这个窗口还在不在素材里。给默认值
+    就等于给「跳过检查」开门，而跳过检查的代价是成片把旁白说到一半掐掉（见
+    `_assert_within_source`）。
     """
     _assert_voiceable(plan)
     if not plan.narration_texts:
@@ -280,6 +334,7 @@ def synthesize_narration_texts(
         segment["start"] = round(start, 3)
         segment["end"] = round(end, 3)
         cursor[episode_id] = end
+    _assert_within_source(timeline, source_durations)
     updated = [
         item.model_copy(
             update={"audio_path": voiced[item.id][0], "duration": voiced[item.id][2]}

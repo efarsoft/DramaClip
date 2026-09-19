@@ -24,6 +24,11 @@ from dramaclip.engines.narration.modes_w8 import build_full
 from dramaclip.engines.semantic.models import ConflictScore
 
 _TTS_DURATION_S = 1.25
+# 源时长必填（回填会改段尾，见 `pipeline._assert_within_source`）。这里给 120s：
+# 比本文件种子场景的最晚段尾（9*12+10=118s）只多半集余量，不是"无穷大放行"——
+# 回填若把窗口推出 120s，这些用例自己就会红。越界判红另由
+# test_backfill_timeline.py 专门钉。
+_LONG_SOURCE = {"ep1": 120.0}
 
 
 class _StubTts:
@@ -80,7 +85,8 @@ def _broken_tts(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_ducked_segments_get_backfilled(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _stub_tts(monkeypatch, _TTS_DURATION_S)
     result = pipeline.synthesize_narration_texts(
-        _plan(["ducked", "ducked"]), {"tts.engine": "edge"}, tmp_path
+        _plan(["ducked", "ducked"]), {"tts.engine": "edge"}, tmp_path,
+        source_durations=_LONG_SOURCE
     )
     assert [segment.narration_id for segment in result.timeline] == ["n0", "n1"]
     assert [segment.subtitle_text for segment in result.timeline] == ["旁白0", "旁白1"]
@@ -95,7 +101,8 @@ def test_original_segments_are_untouched(monkeypatch: pytest.MonkeyPatch, tmp_pa
     """原声段不该被牵走旁白：既无 id 也不改时长与字幕。"""
     _stub_tts(monkeypatch, _TTS_DURATION_S)
     result = pipeline.synthesize_narration_texts(
-        _plan(["original", "ducked"]), {"tts.engine": "edge"}, tmp_path
+        _plan(["original", "ducked"]), {"tts.engine": "edge"}, tmp_path,
+        source_durations=_LONG_SOURCE
     )
     assert [segment.narration_id for segment in result.timeline] == [None, "n0"]
     assert result.timeline[0].end - result.timeline[0].start == 1.0
@@ -111,6 +118,7 @@ def test_alternating_roles_map_to_owning_text(
         _plan(["original", "narration", "original", "narration"]),
         {"tts.engine": "edge"},
         tmp_path,
+        source_durations=_LONG_SOURCE,
     )
     assert [segment.narration_id for segment in result.timeline] == [None, "n0", None, "n1"]
     assert [segment.audio for segment in result.timeline] == [
@@ -125,7 +133,8 @@ def test_failed_tts_fails_the_plan(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     _broken_tts(monkeypatch)
     with pytest.raises(RuntimeError, match="合成失败"):
         pipeline.synthesize_narration_texts(
-            _plan(["narration", "ducked"]), {"tts.engine": "edge"}, tmp_path
+            _plan(["narration", "ducked"]), {"tts.engine": "edge"}, tmp_path,
+            source_durations=_LONG_SOURCE
         )
 
 
@@ -134,7 +143,8 @@ def test_zero_duration_fails_the_plan(monkeypatch: pytest.MonkeyPatch, tmp_path:
     _stub_tts(monkeypatch, None)
     with pytest.raises(RuntimeError, match="时长"):
         pipeline.synthesize_narration_texts(
-            _plan(["ducked"]), {"tts.engine": "edge"}, tmp_path
+            _plan(["ducked"]), {"tts.engine": "edge"}, tmp_path,
+            source_durations=_LONG_SOURCE
         )
 
 
@@ -157,7 +167,9 @@ def test_full_narration_plan_maps_every_segment_to_own_text(
             for i, t in enumerate(plan.narration_texts)
         ]
     })
-    result = pipeline.synthesize_narration_texts(plan, {"tts.engine": "edge"}, tmp_path)
+    result = pipeline.synthesize_narration_texts(
+        plan, {"tts.engine": "edge"}, tmp_path, source_durations=_LONG_SOURCE
+    )
 
     assert len(result.timeline) > 1, "本用例要多段才有意义"
     assert [segment.narration_id for segment in result.timeline] == [
@@ -176,7 +188,8 @@ def test_backfilled_plan_still_round_trips_through_json(
     """plan_data 落库/读库后映射不丢（导出层读的是库里的那份）。"""
     _stub_tts(monkeypatch, _TTS_DURATION_S)
     result = pipeline.synthesize_narration_texts(
-        _plan(["ducked", "narration"]), {"tts.engine": "edge"}, tmp_path
+        _plan(["ducked", "narration"]), {"tts.engine": "edge"}, tmp_path,
+        source_durations=_LONG_SOURCE
     )
     reloaded = PlanData.model_validate(result.model_dump())
     assert [segment.narration_id for segment in reloaded.timeline] == ["n0", "n1"]
