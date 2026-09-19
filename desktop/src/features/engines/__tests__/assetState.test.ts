@@ -4,19 +4,22 @@
 import { describe, expect, it } from 'vitest';
 import type { ModelInfo } from '@dramaclip/protocol';
 import {
+  activateById,
   activateSettings,
   activeAsset,
   assetState,
   assetSummary,
   canActivate,
+  deleteNote,
   domainStats,
+  externalAssets,
   failureNote,
   formatBytes,
   incompleteAssets,
   partitionAssets,
   stateLabel,
 } from '../assetState';
-import { model, report, reportsOf } from './fixtures';
+import { externalRecord, importRecord, model, report, reportsOf } from './fixtures';
 
 describe('assetState', () => {
   it('已装 + 引擎接入 + 体检通过 → ready（唯一能报「就绪」的组合）', () => {
@@ -240,5 +243,30 @@ describe('domainStats', () => {
     });
     expect(domainStats(withAsr, reportsOf(broken), 'asr')).toEqual({ wired: 1, incomplete: 1 });
     expect(domainStats(withAsr, reportsOf(broken), 'tts')).toEqual({ wired: 2, incomplete: 0 });
+  });
+});
+
+describe('本地导入的两种货：清单内多一个来源标记，清单外另起一组', () => {
+  it('只有认不出身份的登记算「外部资产」，且按能力分到本域', () => {
+    const records = [
+      importRecord(),
+      externalRecord({ kind: 'tts' }),
+      externalRecord({ model_id: 'faster-whisper-medium' }),
+      externalRecord(),
+    ];
+
+    expect(externalAssets(records, 'asr')).toEqual([externalRecord()]);
+  });
+
+  it('删除提示按落位方式说真话：搬进库的删文件，只登记的不动业主的盘', () => {
+    expect(deleteNote(model())).toBe('删除后可随时重新下载。');
+    expect(deleteNote(model({ imported: importRecord() }))).toContain('库里这一份');
+    expect(deleteNote(model({ imported: importRecord({ mode: 'move' }) }))).toContain('库里这一份');
+    expect(deleteNote(model({ imported: externalRecord() }))).toContain('自己盘上');
+  });
+
+  it('向导交回的 model_id 折算成设置值；库里查不到这一行就不猜', () => {
+    expect(activateById([model()], 'kokoro-82m')).toEqual({ 'tts.engine': 'kokoro' });
+    expect(activateById([], 'kokoro-82m')).toBeNull();
   });
 });

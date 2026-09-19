@@ -15,6 +15,7 @@ import {
   activateSettings,
   activeAsset,
   assetState,
+  externalAssets,
   failureNote,
   formatBytes,
   reportFor,
@@ -48,12 +49,16 @@ const VOICE_HINT: Record<string, string> = {
 
 export function TtsTab({
   models,
+  imported,
+  importError,
   settings,
   reports,
   machine,
   onSave,
   onChanged,
   onVerify,
+  onForget,
+  onImport,
 }: DomainTabProps): ReactElement {
   const engine = settings['tts.engine'] ?? '';
   const domainModels = models.filter((model) => model.kind === 'tts');
@@ -71,6 +76,8 @@ export function TtsTab({
       />
       <AssetLibrary
         models={domainModels}
+        externals={externalAssets(imported, 'tts')}
+        importError={importError}
         reports={reports}
         specs={machine}
         activeModelId={active?.model_id}
@@ -79,6 +86,8 @@ export function TtsTab({
         }}
         onChanged={onChanged}
         onVerify={onVerify}
+        onForget={onForget}
+        onImport={onImport}
         renderPreview={(model) => {
           const assetVoice = settings[voiceSettingKey(model.engine)] ?? '';
           return (

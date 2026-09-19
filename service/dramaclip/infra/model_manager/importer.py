@@ -467,15 +467,16 @@ def _settle_conflict(
     if conflict is None:
         return ""
     if on_conflict == "coexist":
+        given = Path(str(report["source_path"]))
         return _record(
             models_dir,
             spec,
-            Path(str(report["source_path"])),
-            placement,
-            "copy",
+            given,
+            given,
+            "register",
             "coexist",
             report,
-            False,
+            not report["ok"],
             label=label,
         )
     if on_conflict == "merge":
@@ -585,7 +586,7 @@ def _record(
         "path": entry["path"],
         "mode": mode,
         "bytes_moved": moved,
-        "external": mode == "register" or action == "coexist",
+        "external": mode == "register",
         "conflict_action": action or ("backup" if report["conflict"] is not None else ""),
         "incomplete": incomplete,
         "post": post,

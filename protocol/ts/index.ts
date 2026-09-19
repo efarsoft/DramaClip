@@ -354,13 +354,13 @@ export interface ImportRecord {
   readonly kind: string;
   /** 外部资产为空：认不出身份就没有承接引擎。 */
   readonly engine?: string;
-  /** 资产此刻所在的位置：copy/move 是库内 placement，register/coexist 是业主原目录。 */
+  /** 资产此刻所在的位置：copy/move 在库内 placement，register（冲突时选「并存」也算）在业主自己的目录。 */
   readonly path: string;
   /** 导入时业主挑的那个目录。 */
   readonly source_path: string;
   readonly mode: 'copy' | 'move' | 'register';
   readonly label?: string;
-  /** true = 业主显式选了「不完整导入」，体检当时并不通过。 */
+  /** true = 落位登记当时体检不通过（业主显式按现状导入，或仅登记了一份坏资产）。 */
   readonly incomplete: boolean;
   /** epoch 毫秒：移除时的「何时导入」提示要有据可查。 */
   readonly imported_at: number;

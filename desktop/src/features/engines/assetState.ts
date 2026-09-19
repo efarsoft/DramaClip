@@ -1,9 +1,9 @@
 /**
- * 资产状态：把 models.list（engine_ready / status / size_bytes）与 models.verify
- * （体检结论）折算成 UI 语言。这里不出现任何「写死的就绪」——页面上每句
- * 「就绪 / 缺模型 / 不完整 / 待接入」都能回溯到这两个接口的字段。
+ * 资产状态：把 models.list（engine_ready / status / size_bytes）、models.verify 的体检结论
+ * 与 models.import_records 的登记项折算成 UI 语言。这里不出现任何「写死的就绪」——页面上每句
+ * 「就绪 / 缺模型 / 不完整 / 待接入」都能回溯到这几个接口的字段。
  */
-import type { ModelInfo, VerifyReport } from '@dramaclip/protocol';
+import type { ImportRecord, ModelInfo, VerifyReport } from '@dramaclip/protocol';
 
 export type Reports = ReadonlyMap<string, VerifyReport>;
 
@@ -184,4 +184,29 @@ export function activeAsset(
   const engine = settings['asr.engine'] ?? '';
   if (engine !== '' && engine !== 'faster_whisper') return findAsset(models, 'asr', engine);
   return findAsset(models, 'asr', settings['asr.model'] ?? '');
+}
+
+/** 向导第 ④ 步交回的 model_id：库里查不到这一行就不给设置值，前端不猜。 */
+export function activateById(
+  models: readonly ModelInfo[],
+  modelId: string,
+): Record<string, string> | null {
+  const picked = models.find((model) => model.model_id === modelId);
+  return picked === undefined ? null : activateSettings(picked);
+}
+
+/**
+ * 「外部资产」：登记本里认不出内置身份的那几条（model_id 为 null）。
+ * 有 model_id 的登记不在这儿——它由内置清单的那一行自己带来源标记。
+ */
+export function externalAssets(records: readonly ImportRecord[], kind: string): ImportRecord[] {
+  return records.filter((record) => record.model_id === null && record.kind === kind);
+}
+
+/** 按下「删除」到底会动到什么：只有真落进库的那一份才是删文件，仅登记的不碰业主的盘。 */
+export function deleteNote(model: ModelInfo): string {
+  const imported = model.imported;
+  if (imported === undefined || imported === null) return '删除后可随时重新下载。';
+  if (imported.mode === 'register') return '只撤销登记：你放在自己盘上的目录一个字节都不动。';
+  return '本地导入的那一份：删除会清掉库里这一份文件，需要时用导入向导再落一次位。';
 }

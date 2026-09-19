@@ -197,7 +197,27 @@ def test_commit_coexist_registers_without_touching_the_library(library: Path, so
     assert result["external"] is True
     assert result["path"] == str(source)
     assert [record["path"] for record in importer.records(library)] == [str(source)]
+    assert [record["source_path"] for record in importer.records(library)] == [str(source)], (
+        "「来源」必须是业主挑的那个目录：写成库内 placement，移除时的提示就指向错了地方"
+    )
+    # 并存一个字节都没搬进库：登记里写 copy，资产行的「删除」提示就会说错话。
+    assert [record["mode"] for record in importer.records(library)] == ["register"]
     assert result["conflict_action"] == "coexist"
+
+
+def test_commit_coexist_of_an_incomplete_asset_stays_flagged(
+    library: Path, tmp_path: Path
+) -> None:
+    """业主明知不完整还要并存：登记本里那条必须继续带着这个印记。"""
+    _cache_dir(library / "asr" / "faster-whisper")
+
+    result = importer.commit(
+        library, _flat_dir(tmp_path / "下载"), mode="copy", on_conflict="coexist",
+        allow_incomplete=True,
+    )
+
+    assert result["incomplete"] is True
+    assert [record["incomplete"] for record in importer.records(library)] == [True]
 
 
 def test_commit_register_copies_nothing(library: Path, source: Path) -> None:

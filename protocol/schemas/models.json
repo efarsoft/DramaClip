@@ -121,14 +121,14 @@
         "engine": { "type": "string", "description": "外部资产为空：认不出身份就没有承接引擎" },
         "path": {
           "type": "string",
-          "description": "资产此刻所在的位置：copy/move 是库内 placement，register/coexist 是业主原目录"
+          "description": "资产此刻所在的位置：copy/move 在库内 placement，register（冲突时选「并存」也算）在业主自己的目录"
         },
         "source_path": { "type": "string", "description": "导入时业主挑的那个目录" },
         "mode": { "type": "string", "enum": ["copy", "move", "register"] },
         "label": { "type": "string" },
         "incomplete": {
           "type": "boolean",
-          "description": "true = 业主显式选了「不完整导入」，体检当时并不通过"
+          "description": "true = 落位登记当时体检不通过（业主显式按现状导入，或仅登记了一份坏资产）"
         },
         "imported_at": { "type": "integer", "description": "epoch 毫秒" }
       }

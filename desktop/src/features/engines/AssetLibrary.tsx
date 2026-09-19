@@ -1,71 +1,104 @@
 /**
- * 资产库：一个域的全部模型，按「引擎已接入 / 待接入」分区，列表与表格两种视图共用同一批列。
+ * 资产库：一个域的全部模型，按「引擎已接入 / 待接入 / 外部登记」分区，列表与表格两种视图共用同一批列。
  *
  * 分区取代了原来那行黄字（P2）：未接入引擎的资产照样列，但不给「选为生效」——
- * 判据是后端下发的 engine_ready 与体检结论，前端一处都不写死。
+ * 判据是后端下发的 engine_ready 与体检结论，前端一处都不写死。登记本读坏了也要明说，
+ * 不能把「imported.json 打不开」演成「库里没货」。
  */
 import { useState } from 'react';
 import type { ReactElement } from 'react';
-import { Button, Empty, Input, Segmented } from 'antd';
+import { Alert, Button, Empty, Input, Segmented } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import type { ModelInfo } from '@dramaclip/protocol';
+import type { ImportRecord, ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
 import { PageSection } from '../../components/layout/PageKit';
 import { type Reports, partitionAssets, reportFor } from './assetState';
 import type { MachineSpecs } from './machineFit';
 import { COLUMNS, GRID } from './assetGrid';
 import { AssetRow } from './AssetRow';
+import { GroupHead } from './AssetKit';
+import { ExternalAssets } from './ExternalAssets';
 import { useDownloadSettled } from './useDownloadSettled';
 
 type View = 'list' | 'table';
 
 interface LibraryProps {
   models: readonly ModelInfo[];
+  /** 登记本里 model_id 为 null 的那几条：本地有目录，引擎没接。 */
+  externals: readonly ImportRecord[];
+  /** models.import_records 自己坏了的原话；空串 = 读通了。 */
+  importError: string;
   reports: Reports;
   specs: MachineSpecs;
   activeModelId: string | undefined;
   onActivate: (model: ModelInfo) => void;
   onChanged: () => void;
   onVerify: (modelId: string) => void;
+  onForget: (path: string) => void;
+  onImport: () => void;
   /** 域自带的行内动作（配音域放试听）：资产库不懂各域的事，只负责摆位置。 */
   renderPreview?: ((model: ModelInfo) => ReactElement) | undefined;
 }
 
-type GroupProps = Omit<LibraryProps, 'models'> & { models: readonly ModelInfo[]; view: View };
+type GroupProps = Omit<LibraryProps, 'models' | 'externals' | 'importError' | 'onForget' | 'onImport'> & {
+  models: readonly ModelInfo[];
+  view: View;
+};
 
 /** 资产库分区（含工具栏与视图切换）。 */
 export function AssetLibrary({
   models,
+  externals,
+  importError,
   reports,
   specs,
   activeModelId,
   onActivate,
   onChanged,
   onVerify,
+  onForget,
+  onImport,
   renderPreview,
 }: LibraryProps): ReactElement {
   useDownloadSettled(onChanged);
   const [keyword, setKeyword] = useState('');
   const [view, setView] = useState<View>('list');
   const filtered = models.filter((model) => hits(model, keyword));
+  const shown = externals.filter((record) => externalHits(record, keyword));
   const { usable, reserve } = partitionAssets(filtered);
   const group = { reports, view, specs, activeModelId, onActivate, onChanged, onVerify, renderPreview };
   return (
-    <PageSection title="资产库" extra={<LibraryToolbar keyword={keyword} view={view} onKeyword={setKeyword} onView={setView} onVerifyAll={onChanged} />}>
-      {filtered.length === 0 ? (
-        <Empty description="没有符合条件的模型" style={{ padding: tokens.spaceLg }} />
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
-          <AssetGroup title="可用 · 引擎已接入" models={usable} {...group} />
-          <AssetGroup
-            title="储备 · 待接入"
-            hint="下载备用可以，选为生效不行——合成/识别路径还没接进工厂"
-            collapsible
-            models={reserve}
-            {...group}
-          />
-        </div>
-      )}
+    <PageSection
+      title="资产库"
+      extra={
+        <LibraryToolbar
+          keyword={keyword}
+          view={view}
+          onKeyword={setKeyword}
+          onView={setView}
+          onVerifyAll={onChanged}
+          onImport={onImport}
+        />
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
+        {importError !== '' && <Alert type="warning" showIcon title={importError} />}
+        {filtered.length === 0 && shown.length === 0 ? (
+          <Empty description="没有符合条件的模型" style={{ padding: tokens.spaceLg }} />
+        ) : (
+          <>
+            <AssetGroup title="可用 · 引擎已接入" models={usable} {...group} />
+            <AssetGroup
+              title="储备 · 待接入"
+              hint="下载备用可以，选为生效不行——合成/识别路径还没接进工厂"
+              collapsible
+              models={reserve}
+              {...group}
+            />
+          </>
+        )}
+        <ExternalAssets items={shown} onForget={onForget} />
+      </div>
     </PageSection>
   );
 }
@@ -80,18 +113,27 @@ function hits(model: ModelInfo, keyword: string): boolean {
   );
 }
 
+/** 外部资产没有 repo_id，能对上号的只有登记名与路径。 */
+function externalHits(record: ImportRecord, keyword: string): boolean {
+  const kw = keyword.trim().toLowerCase();
+  if (kw === '') return true;
+  return (record.label ?? '').toLowerCase().includes(kw) || record.path.toLowerCase().includes(kw);
+}
+
 function LibraryToolbar({
   keyword,
   view,
   onKeyword,
   onView,
   onVerifyAll,
+  onImport,
 }: {
   keyword: string;
   view: View;
   onKeyword: (value: string) => void;
   onView: (value: View) => void;
   onVerifyAll: () => void;
+  onImport: () => void;
 }): ReactElement {
   return (
     <span style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceMd }}>
@@ -119,6 +161,9 @@ function LibraryToolbar({
       />
       <Button size="small" onClick={onVerifyAll}>
         批量校验
+      </Button>
+      <Button size="small" type="primary" onClick={onImport}>
+        导入本地模型
       </Button>
     </span>
   );
@@ -164,48 +209,6 @@ function AssetGroup({
           onVerify={onVerify}
           renderPreview={renderPreview}
         />
-      )}
-    </div>
-  );
-}
-
-function GroupHead({
-  title,
-  hint,
-  count,
-  collapsible,
-  open,
-  onToggle,
-}: {
-  title: string;
-  hint: string | undefined;
-  count: number;
-  collapsible: boolean;
-  open: boolean;
-  onToggle: () => void;
-}): ReactElement {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'baseline',
-        gap: tokens.spaceSm,
-        marginBottom: tokens.spaceSm,
-      }}
-    >
-      <span style={{ fontSize: tokens.fontCaption, fontWeight: 600, color: tokens.textSecondary }}>
-        {`${title}（${String(count)}）`}
-      </span>
-      {hint !== undefined && <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>{hint}</span>}
-      {collapsible && (
-        <Button
-          type="text"
-          size="small"
-          style={{ marginLeft: 'auto', fontSize: tokens.fontMicro }}
-          onClick={onToggle}
-        >
-          {open ? '收起' : '展开'}
-        </Button>
       )}
     </div>
   );

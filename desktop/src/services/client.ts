@@ -15,6 +15,9 @@ import type {
   PlanDetail,
   TitleCandidate,
   HealthResult,
+  ImportInspection,
+  ImportRecord,
+  JobInfo,
   NarrationMode,
   NarrationPlan,
   PingResult,
@@ -164,6 +167,12 @@ export const runtimeApi = {
     rpc<{ job_id: string }>('models.install_runtime', {}),
 } as const;
 
+/** models.import_records 的返回：登记本 + 读坏了的原因原文——坏了不等于空。 */
+export interface ImportRecordsResult {
+  readonly records: ImportRecord[];
+  readonly error: string;
+}
+
 export const modelsApi = {
   list: (): Promise<ModelInfo[]> => rpc<ModelInfo[]>('models.list'),
   download: (modelId: string, source?: string): Promise<{ job_id: string }> =>
@@ -176,6 +185,17 @@ export const modelsApi = {
     rpc<VerifyReport[]>('models.verify', modelId === undefined ? {} : { model_id: modelId }),
   remove: (modelId: string): Promise<{ ok: boolean }> =>
     rpc<{ ok: boolean }>('models.delete', { model_id: modelId }),
+  /** 导入向导第 ② 步：只读识别与体检，不落盘也不写登记。 */
+  inspectImport: (path: string): Promise<ImportInspection> =>
+    rpc<ImportInspection>('models.import_inspect', { path }),
+  /** 第 ③ 步：GB 级复制是长活，走作业；进度与收尾看 jobs.get。 */
+  commitImport: (payload: Record<string, string | boolean>): Promise<{ job_id: string }> =>
+    rpc<{ job_id: string }>('models.import_commit', payload),
+  /** 「本地导入」登记本：清单外的资产只在这里，不占资产库的内置行。 */
+  importRecords: (): Promise<ImportRecordsResult> => rpc<ImportRecordsResult>('models.import_records'),
+  /** 撤销一条外部登记：业主自己的文件一个字节都不动。 */
+  forgetImport: (path: string): Promise<{ ok: boolean; path: string }> =>
+    rpc<{ ok: boolean; path: string }>('models.import_forget', { path }),
 } as const;
 
 /** 配音试听：服务端合成一句短句并回本机路径，播放走 mediaUrl。 */
@@ -187,6 +207,8 @@ export const ttsApi = {
 export const jobsApi = {
   list: (limit: number): Promise<JobsListResult> =>
     rpc<JobsListResult>('jobs.list', { limit }),
+  /** 单只作业的当下状态：导入这类长活的收尾只有作业自己知道。 */
+  get: (jobId: string): Promise<{ job: JobInfo }> => rpc<{ job: JobInfo }>('jobs.get', { job_id: jobId }),
 } as const;
 
 export const settingsApi = {

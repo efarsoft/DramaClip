@@ -1,11 +1,12 @@
-/** 资产行动作：未装给下载，已装才谈试听与「选为生效」，体检/定位/删除只在已落盘后出现。 */
+/** 资产行动作：未装给下载，已装才谈试听与「选为生效」，体检/定位/删除只在已落盘后出现。
+ *  删除的提示按来源说清会动到哪一份——本地导入的那一份与仅登记的那一份，代价不是一回事。 */
 import { App as AntdApp, Button, Popconfirm } from 'antd';
 import { DeleteOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import type { ReactElement } from 'react';
 import type { ModelInfo, VerifyReport } from '@dramaclip/protocol';
 import { modelsApi, revealInFolder } from '../../services/client';
 import { tokens } from '../../styles/theme';
-import { type AssetState, canActivate, stateLabel } from './assetState';
+import { type AssetState, canActivate, deleteNote, stateLabel } from './assetState';
 import { DownloadSourceButton } from './ModelDownloadPopover';
 
 export function RowActions({
@@ -106,6 +107,7 @@ function InstalledActions({
         <Button
           size="small"
           type="text"
+          aria-label="定位所在目录"
           icon={<FolderOpenOutlined />}
           onClick={() => {
             void revealInFolder(model.path ?? '');
@@ -114,7 +116,7 @@ function InstalledActions({
       )}
       <Popconfirm
         title="删除模型"
-        description="删除后可随时重新下载。"
+        description={deleteNote(model)}
         okText="删除"
         cancelText="取消"
         onConfirm={() => {
@@ -126,7 +128,7 @@ function InstalledActions({
             });
         }}
       >
-        <Button size="small" danger icon={<DeleteOutlined />} />
+        <Button size="small" danger aria-label="删除这一份" icon={<DeleteOutlined />} />
       </Popconfirm>
     </>
   );

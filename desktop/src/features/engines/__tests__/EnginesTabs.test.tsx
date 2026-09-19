@@ -37,12 +37,16 @@ function tts(models: readonly ModelInfo[], reports: Reports, engine = 'kokoro'):
   render(
     <TtsTab
       models={[...models]}
+      imported={[]}
+      importError=""
       settings={{ 'tts.engine': engine }}
       reports={reports}
       machine={specsFromHealth(null)}
       onSave={noop}
       onChanged={noop}
       onVerify={noop}
+      onForget={noop}
+      onImport={noop}
     />,
   );
 }
@@ -134,6 +138,10 @@ describe('语音识别 ASR · 同构骨架', () => {
         onSave={noop}
         onChanged={noop}
         onVerify={noop}
+        imported={[]}
+        importError=""
+        onForget={noop}
+        onImport={noop}
       />,
     );
     expect(screen.getByText('当前生效')).toBeTruthy();

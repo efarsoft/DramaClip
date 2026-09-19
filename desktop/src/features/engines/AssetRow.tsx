@@ -91,6 +91,7 @@ function NameCell({
   active: boolean;
   table: boolean;
 }): ReactElement {
+  const imported = model.imported;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceMd, minWidth: 0 }}>
       <StateDot state={state} />
@@ -99,6 +100,14 @@ function NameCell({
         {active && (
           <span style={{ marginLeft: tokens.spaceSm, fontSize: tokens.fontMicro, color: tokens.colorPrimary }}>
             使用中
+          </span>
+        )}
+        {imported !== undefined && imported !== null && (
+          <span
+            style={{ marginLeft: tokens.spaceSm, fontSize: tokens.fontMicro, color: tokens.colorInfo }}
+            title={`不是下载来的，是导入向导落位的：${imported.path}`}
+          >
+            本地导入
           </span>
         )}
         {!table && (

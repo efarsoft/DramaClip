@@ -1,6 +1,6 @@
-/** 引擎中心共用小件：状态点/徽标、评级点、总览卡壳——生效卡与资产库共用，保证三域同构。 */
-import type { ReactNode } from 'react';
-import { Card } from 'antd';
+/** 引擎中心共用小件：状态点/徽标、评级点、分区标题、总览卡壳——生效卡与资产库共用，保证三域同构。 */
+import type { ReactElement, ReactNode } from 'react';
+import { Button, Card } from 'antd';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 import { type AssetState, stateLabel } from './assetState';
@@ -71,6 +71,49 @@ export function RatingDots({ label, level }: { label: string; level: number }): 
         />
       ))}
     </span>
+  );
+}
+
+/** 资产库的分区标题：几件、凭什么这么分、要不要收起，三个分区共用一个摆法。 */
+export function GroupHead({
+  title,
+  count,
+  hint,
+  collapsible = false,
+  open = true,
+  onToggle,
+}: {
+  title: string;
+  count: number;
+  hint?: string;
+  collapsible?: boolean;
+  open?: boolean;
+  onToggle?: () => void;
+}): ReactElement {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'baseline',
+        gap: tokens.spaceSm,
+        marginBottom: tokens.spaceSm,
+      }}
+    >
+      <span style={{ fontSize: tokens.fontCaption, fontWeight: 600, color: tokens.textSecondary }}>
+        {`${title}（${String(count)}）`}
+      </span>
+      {hint !== undefined && <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>{hint}</span>}
+      {collapsible && (
+        <Button
+          type="text"
+          size="small"
+          style={{ marginLeft: 'auto', fontSize: tokens.fontMicro }}
+          onClick={onToggle}
+        >
+          {open ? '收起' : '展开'}
+        </Button>
+      )}
+    </div>
   );
 }
 

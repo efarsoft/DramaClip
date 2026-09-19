@@ -1,17 +1,17 @@
 /** 体检详情：逐条列出后端判据（models.verify 的 checks），没跑过的先跑一次。 */
 import { useEffect } from 'react';
 import type { ReactElement } from 'react';
-import type { VerifyReport } from '@dramaclip/protocol';
+import type { VerifyCheck, VerifyReport } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
 
-const CHECK_COLOR: Record<VerifyReport['checks'][number]['status'], string> = {
+const CHECK_COLOR: Record<VerifyCheck['status'], string> = {
   pass: tokens.colorSuccess,
   warn: tokens.colorWarning,
   fail: tokens.colorError,
   skip: tokens.textTertiary,
 };
 
-const CHECK_LABEL: Record<VerifyReport['checks'][number]['status'], string> = {
+const CHECK_LABEL: Record<VerifyCheck['status'], string> = {
   pass: '通过',
   warn: '存疑',
   fail: '不通过',
@@ -56,7 +56,8 @@ export function VerifyDetail({
   );
 }
 
-function CheckRow({ check }: { check: VerifyReport['checks'][number] }): ReactElement {
+/** 一条判据：名字 + 结论 + 后端原话。导入向导第 ② 步共用同一份翻译。 */
+export function CheckRow({ check }: { check: VerifyCheck }): ReactElement {
   return (
     <div style={{ display: 'flex', gap: tokens.spaceMd, fontSize: tokens.fontMicro }}>
       <span style={{ width: 96, flexShrink: 0, color: tokens.textTertiary }}>{check.name}</span>

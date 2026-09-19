@@ -18,6 +18,7 @@ import {
   activeAsset,
   assetState,
   canActivate,
+  externalAssets,
   failureNote,
   formatBytes,
   reportFor,
@@ -49,12 +50,16 @@ const PARAMS: readonly { key: string; label: string; options: DefaultOptionType[
 
 export function AsrTab({
   models,
+  imported,
+  importError,
   settings,
   reports,
   machine,
   onSave,
   onChanged,
   onVerify,
+  onForget,
+  onImport,
 }: DomainTabProps): ReactElement {
   const { info: gpu, refresh } = useGpuInfo();
   const domainModels = models.filter((model) => model.kind === 'asr');
@@ -72,6 +77,8 @@ export function AsrTab({
       <GpuCard info={gpu} device={settings['asr.device'] ?? 'auto'} onRefresh={refresh} />
       <AssetLibrary
         models={domainModels}
+        externals={externalAssets(imported, 'asr')}
+        importError={importError}
         reports={reports}
         specs={machine}
         activeModelId={active?.model_id}
@@ -80,6 +87,8 @@ export function AsrTab({
         }}
         onChanged={onChanged}
         onVerify={onVerify}
+        onForget={onForget}
+        onImport={onImport}
       />
     </div>
   );
