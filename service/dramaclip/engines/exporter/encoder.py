@@ -183,7 +183,7 @@ def cut_segment_args(
         source,
     ]
     if audio in ("narration", "ducked") and tts_audio:
-        # 旁白/压底段：TTS 主音 + 原声压低（旁白 20%，全片衬底 12%）
+        # 旁白/压底段：TTS 主音 + 原声压低（旁白段原声 10%，全片衬底 8%）
         # normalize=0 必须显式给：ffmpeg 的 amix 默认把每路除以输入数（此处各砍 6dB），
         # 那样上面的 bg_volume 声明值与实际听感差一倍，响度无人负责。最终响度由 Phase C 统一收口。
         #

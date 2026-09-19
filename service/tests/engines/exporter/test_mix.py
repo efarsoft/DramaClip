@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 import re
 import subprocess  # noqa: S404 - 参数为受控列表
@@ -622,4 +623,120 @@ def test_delivered_track_has_one_channel_layout(
         f"直接量成片 {reading.integrated_lufs:.2f} LUFS 与整片解码参考 "
         f"{ref.integrated_lufs:.2f} LUFS 差 {reading.integrated_lufs - ref.integrated_lufs:+.2f}"
         "——量到的不是整片"
+    )
+
+
+# ---- 语音避让的**实际**深度：0d761d3 把声明值改成 10%/8%，可守卫只量字符串 ----
+#
+# 业主立案④「解说与原声同音量叠放」的功能修复确实在 09-16 立案之后的 09-17 落地了
+# （20%→10%、12%→8%），但直到本次为止，全仓库对"避让"的证据只到 `volume=0.1`
+# 出现在命令串里为止——那正是本批次反复咬人的"断言假象"：`normalize=0` 被拿掉、
+# `volume=` 被挂到旁白那一路、或 Phase C 的增益把两段一起抬回同一听感电平，
+# 字符串用例全都照绿，而业主听到的仍是同一件事。
+
+
+@pytest.fixture(scope="module")
+def cold_bed_and_silent_narration(
+    tmp_path_factory: pytest.TempPathFactory, repo_root: Path
+) -> tuple[Path, Path]:
+    """轻到限幅器完全不介入的原声床 + 数字静默旁白：量出来的差值只可能是鸭子的账。
+
+    两个设计点都不是随手挑的：
+      * 床要**冷**：交付链尾挂着 `_peak_ceiling_filter()`（-9.0 dBFS）。共用
+        `_BED_EXPR` 那张 -0.23 dBTP 的热床时，`volume=1.0` 对照档会被限幅器压掉
+        一截，差值里混进限幅器的账，量不到"声明的 duck 深度"本尊。
+      * 旁白要**静默**：amix 是求和，直接量混出来的段只能看到两路之和。把第二路
+        换成数字零，产出段就是被压过的原声本体，两档之差即避让深度。
+    """
+    ffmpeg = _ffmpeg(repo_root)
+    d = tmp_path_factory.mktemp("duck-depth")
+    src = d / "cold_bed.mp4"
+    silence = d / "silence_tts.wav"
+    _sh([ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=8",
+         "-f", "lavfi", "-i", _BED_EXPR,
+         "-filter_complex", "[1:a]aformat=sample_fmts=fltp,volume=0.1[a]",
+         "-map", "0:v", "-map", "[a]",
+         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+         "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-shortest", str(src)])
+    _sh([ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=24000",
+         "-t", "8", "-c:a", "pcm_s16le", str(silence)])
+    # 夹具自证：床不够冷（限幅器会出手）的话，下面的差值就不是避让深度。
+    # "旁白那一路必须是静音" 不需要单独量——它静不住的话差值会塌向 0 dB，
+    # 由下面那条参数化断言当场红掉（amix 是求和，响的那一路盖掉被压的那一路）。
+    assert _input_tp(src, ffmpeg) < -15.0, "原声床太热，限幅器会掺进差值里"
+    return src, silence
+
+
+def _render_bed_lufs(
+    repo_root: Path,
+    src: Path,
+    narration: Path,
+    out: Path,
+    *,
+    audio: str,
+    force_volume: str | None,
+) -> float:
+    """跑真 `cut_segment_args` 产出混音段，量整段 integrated LUFS。
+
+    `force_volume` 是对照组：只把 `[bg]` 子链上的 duck 换成给定值，其余滤镜逐字不动。
+    生产串里那个 `volume=` 若被摘掉，这里补一个恒等的 1.0 而不是就此报字符串错——
+    差值会自己量成 0 dB，"鸭子没了"这件事由数字说话。
+    """
+    args = encoder.cut_segment_args(
+        str(src), str(out), start=1.0, end=6.0, audio=audio, mask=False,
+        tts_audio=str(narration), rng=random.Random(7),
+    )
+    index = args.index("-filter_complex")
+    if force_volume is not None:
+        # 只命中 [0:a]…[bg] 那一条子链（`[^;]` + `\[bg\]` 双重锚定），旁白那一路不改
+        patched, hits = re.subn(
+            r"(\[0:a\][^;]*?)(?:,volume=[\d.]+)?(,atempo=[\d.]+\[bg\])",
+            rf"\1,volume={force_volume}\2",
+            args[index + 1],
+        )
+        assert hits == 1, f"[bg] 子链命中 {hits} 处，对照组的形状已与生产滤镜串不同步"
+        args[index + 1] = patched
+    _sh([_ffmpeg(repo_root), *args])
+    return _gate_pass(repo_root, out)[1].integrated_lufs
+
+
+@pytest.mark.parametrize(
+    ("audio", "declared"),
+    [("narration", 0.1), ("ducked", 0.08)],
+    ids=["narration-10pct", "ducked-8pct"],
+)
+def test_duck_depth_is_acoustically_real(
+    repo_root: Path,
+    cold_bed_and_silent_narration: tuple[Path, Path],
+    tmp_path: Path,
+    audio: str,
+    declared: float,
+) -> None:
+    """声明的避让比例必须等于量出来的避让深度：±0.5 dB 之内。
+
+    声明 0.1 = 20.0 dB、0.08 = 21.9 dB。真机实测（8.1.1-essentials，走完整条
+    `cut_segment_args` 到 AAC 128k 段再整段量 integrated）：narration 段 **19.90 dB**、
+    ducked 段 **21.90 dB**——两档各差 0.10 / 0.03 dB，说明 0d761d3 那次加深是**真落进
+    成片**的，业主立案④的功能修复成立，缺的只是这条量产物的证据。
+    这条吃劲的地方在于它比的是**同一条链的两档**：把 `volume=` 摘掉 → 差值实测
+    **0.00 dB**；把它从 `[bg]` 挪到旁白那一路 → 同样 0.00 dB。两个变异都会红。
+    它**不**管 `normalize=`：归一化对两档等量生效，差分把它抵消了——那一条由
+    `test_amix_does_not_normalize_inputs` 守。
+    """
+    src, narration = cold_bed_and_silent_narration
+    ducked = _render_bed_lufs(
+        repo_root, src, narration, tmp_path / f"{audio}_ducked.mp4",
+        audio=audio, force_volume=None,
+    )
+    open_bed = _render_bed_lufs(
+        repo_root, src, narration, tmp_path / f"{audio}_open.mp4",
+        audio=audio, force_volume="1.0",
+    )
+    depth = open_bed - ducked
+    expected = -20.0 * math.log10(declared)
+    assert depth == pytest.approx(expected, abs=0.5), (
+        f"{audio} 段实测避让 {depth:.2f} dB，声明 {declared:.0%} 应为 {expected:.1f} dB："
+        "命令串里的 volume= 与成片里听到的不是同一件事"
     )
