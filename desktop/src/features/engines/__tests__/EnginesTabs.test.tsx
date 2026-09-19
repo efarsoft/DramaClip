@@ -1,0 +1,115 @@
+/**
+ * 两段式骨架的自红验收（P1）：卡上每句状态都由传入的 models/reports 折算。
+ * 把装好的模型改成未落盘，卡片必须从「就绪」翻成「缺模型」，行内也不给「选为生效」——
+ * 这条断言就是旧三张引擎卡写死 ok:true 的照妖镜。
+ */
+import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ModelInfo, VerifyReport } from '@dramaclip/protocol';
+import { TtsTab } from '../TtsTab';
+import { AsrTab } from '../AsrTab';
+import { specsFromHealth } from '../machineFit';
+import { model, report, reportsOf } from './fixtures';
+
+vi.mock('../../../services/client', () => ({
+  modelsApi: {
+    list: vi.fn(() => Promise.resolve([])),
+    verify: vi.fn(() => Promise.resolve([])),
+    remove: vi.fn(() => Promise.resolve({})),
+    download: vi.fn(() => Promise.resolve({})),
+  },
+  systemApi: { health: vi.fn(() => Promise.resolve({})) },
+  runtimeApi: { status: vi.fn(() => Promise.resolve({ installed: true })), install: vi.fn(() => Promise.resolve({})) },
+  revealInFolder: vi.fn(() => Promise.resolve({})),
+}));
+
+type Reports = ReadonlyMap<string, VerifyReport>;
+
+const noop = (): void => {
+  // 渲染测试只验状态，不验写回
+};
+
+function tts(models: readonly ModelInfo[], reports: Reports, engine = 'kokoro'): void {
+  render(
+    <TtsTab
+      models={[...models]}
+      settings={{ 'tts.engine': engine }}
+      reports={reports}
+      machine={specsFromHealth(null)}
+      onSave={noop}
+      onChanged={noop}
+      onVerify={noop}
+    />,
+  );
+}
+
+describe('配音 TTS · 生效卡与资产库', () => {
+  afterEach(cleanup);
+
+  it('已装 + 体检通过 → 就绪', () => {
+    tts([model()], reportsOf(report()));
+    expect(screen.getAllByText('Kokoro 82M 中文').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('就绪').length).toBeGreaterThan(0);
+    expect(screen.queryByText('缺模型')).toBeNull();
+  });
+
+  it('模型目录不见了（改名/删除）→ 就绪翻成缺模型，且不给「选为生效」', () => {
+    tts([model({ status: 'not_installed', size_bytes: 0 })], reportsOf());
+    expect(screen.getAllByText('缺模型').length).toBeGreaterThan(0);
+    expect(screen.queryByText('就绪')).toBeNull();
+    expect(screen.queryByText('选为生效')).toBeNull();
+  });
+
+  it('体检不通过 → 不完整，并把 fail 判据原文带上', () => {
+    tts(
+      [model()],
+      reportsOf(
+        report({ ok: false, checks: [{ name: '必需文件齐全', status: 'fail', detail: '缺 config.json' }] }),
+      ),
+    );
+    expect(screen.getAllByText('不完整').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/缺 config\.json/).length).toBeGreaterThan(0);
+    const activate = screen.getByRole('button', { name: '选为生效' });
+    expect(activate.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('引擎未接入的资产只进「储备」分区且默认收起，可用区不出现它', () => {
+    tts(
+      [model({ model_id: 'indextts2', engine: 'indextts2', name: 'IndexTTS2', engine_ready: false })],
+      reportsOf(),
+    );
+    expect(screen.getByText(/储备 · 待接入（1）/)).toBeTruthy();
+    expect(screen.queryByText('IndexTTS2')).toBeNull();
+  });
+});
+
+describe('语音识别 ASR · 同构骨架', () => {
+  afterEach(cleanup);
+
+  it('生效卡 + 转写加速卡 + 资产库三段齐全，档位状态来自资产库', () => {
+    render(
+      <AsrTab
+        models={[
+          model({
+            model_id: 'faster-whisper-small',
+            kind: 'asr',
+            engine: 'faster_whisper',
+            name: 'Whisper Small',
+            required: true,
+          }),
+        ]}
+        settings={{ 'asr.engine': 'faster_whisper', 'asr.model': 'small', 'asr.device': 'auto', 'asr.language': 'zh' }}
+        reports={reportsOf(report({ model_id: 'faster-whisper-small', kind: 'asr', engine: 'faster_whisper' }))}
+        machine={specsFromHealth(null)}
+        onSave={noop}
+        onChanged={noop}
+        onVerify={noop}
+      />,
+    );
+    expect(screen.getByText('当前生效')).toBeTruthy();
+    expect(screen.getByText('转写加速（GPU）')).toBeTruthy();
+    expect(screen.getByText('资产库')).toBeTruthy();
+    expect(screen.getAllByText('Whisper Small').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('就绪').length).toBeGreaterThan(0);
+  });
+});

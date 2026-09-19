@@ -1,167 +1,175 @@
-/** TTS 引擎：本地 Kokoro / sherpa / 云端 Edge，音色目录与设置键按引擎独立。 */
-import { Card as StyledCard, Select, Tag } from 'antd';
-import { PageSection } from '../../components/layout/PageKit';
+/**
+ * 配音 TTS：当前生效卡（引擎切换 + 音色 + 该引擎模型的安装态内联）→ 资产库。
+ *
+ * 旧的三张平铺引擎卡上有写死的 `ok: true`（P1 缺陷本体）；这里一律以
+ * models.list 的 engine_ready/status 与 models.verify 的结论为准，
+ * 免模型的云端引擎单独走「无需本地模型」这条说明，不冒充体检结果。
+ */
+import { Button, Segmented } from 'antd';
+import type { ReactElement } from 'react';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
-import { ModelList } from './ModelList';
-import type { SettingsMap } from './EnginesPage';
-import { TTS_ENGINES, TTS_VOICE_OPTIONS, voiceSettingKey } from './ttsVoices';
-import type { TtsEngineName } from './ttsVoices';
+import type { DomainTabProps } from './EnginesPage';
+import type { AssetState, Reports } from './assetState';
+import {
+  activateSettings,
+  activeAsset,
+  assetState,
+  failureNote,
+  formatBytes,
+  reportFor,
+} from './assetState';
+import { DownloadSourceButton } from './ModelDownloadPopover';
+import { type ActiveCardProps, ActiveEngineCard } from './ActiveEngineCard';
+import { AssetLibrary } from './AssetLibrary';
+import { SettingSelect } from './SettingSelect';
+import { useDownloadProgress } from './useDownloadProgress';
+import {
+  TTS_ENGINES,
+  isModelFreeEngine,
+  ttsEngineLabel,
+  voiceOptions,
+  voiceSettingKey,
+} from './ttsVoices';
 
-const ENGINE_META: Record<TtsEngineName, { title: string; desc: string }> = {
-  kokoro: {
-    title: '本地 · Kokoro 82M 中文',
-    desc: '模型下载到本机运行，免费、离线、数据不出本机；速度取决于 CPU。',
-  },
-  sherpa_melo: {
-    title: '本地 · sherpa-onnx melo-zh',
-    desc: 'VITS melo 中文模型，CPU 推理 RTF~0.69，44.1kHz 高音质。',
-  },
-  edge: {
-    title: '云端 · Edge（微软）',
-    desc: '免费云端服务，无需 API Key，音质佳；需联网，不计费。',
-  },
+const ENGINE_KIND_LABEL: Record<string, string> = {
+  kokoro: '本地 · 免费离线',
+  sherpa_melo: '本地 · 免费离线',
+  edge: '云端 · 免费无需 API Key',
 };
 
-export function TtsTab({
-  models,
-  settings,
-  onSave,
-  onChanged,
-}: {
-  models: ModelInfo[];
-  settings: SettingsMap;
-  onSave: (values: SettingsMap) => void;
-  onChanged: () => void;
-}): React.ReactElement {
-  const engine: TtsEngineName = TTS_ENGINES.includes(settings['tts.engine'] as TtsEngineName)
-    ? (settings['tts.engine'] as TtsEngineName)
-    : 'edge';
-  const ttsModels = models.filter((m) => m.kind === 'tts');
-  const kokoroReady = ttsModels.some((m) => m.model_id.includes('kokoro') && m.status === 'installed');
-  const engineReady: Record<TtsEngineName, boolean> = {
-    kokoro: kokoroReady,
-    sherpa_melo: true,
-    edge: true,
-  };
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: tokens.spaceLg }}>
-        {TTS_ENGINES.map((name) => (
-          <EngineCard
-            key={name}
-            title={ENGINE_META[name].title}
-            desc={ENGINE_META[name].desc}
-            active={engine === name}
-            ok={engineReady[name]}
-            onClick={() => {
-              onSave({ 'tts.engine': name });
-            }}
-          />
-        ))}
-      </div>
-      <PageSection title="默认音色">
-        <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceLg }}>
-          <VoicePicker
-            engine={engine}
-            value={settings[voiceSettingKey(engine)] ?? ''}
-            onSave={onSave}
-          />
-          <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
-            {VOICE_HINT[engine]}
-          </span>
-        </div>
-      </PageSection>
-      <PageSection title="本地模型库">
-        <div style={{ fontSize: tokens.fontCaption, color: tokens.colorWarning, marginBottom: tokens.spaceLg }}>
-          注意：IndexTTS2 / VibeVoice 当前仅支持下载存储，合成引擎尚未接入（排期 P-2）——
-          当前可用的配音引擎为上方 Kokoro / sherpa / Edge。
-        </div>
-        <ModelList models={ttsModels} onChanged={onChanged} />
-      </PageSection>
-    </div>
-  );
-}
-
-const VOICE_HINT: Record<TtsEngineName, string> = {
+const VOICE_HINT: Record<string, string> = {
   kokoro: 'Kokoro 提供 100 个中文音色（55 女 + 45 男），下拉可搜索',
   sherpa_melo: 'melo 模型为单说话人，音色固定',
   edge: '微软官方中文音色，覆盖普通话 / 东北 / 陕西 / 粤语 / 台湾',
 };
 
-function VoicePicker({
-  engine,
-  value,
+export function TtsTab({
+  models,
+  settings,
+  reports,
+  machine,
   onSave,
-}: {
-  engine: TtsEngineName;
-  value: string;
-  onSave: (values: SettingsMap) => void;
-}): React.ReactElement {
-  const key = voiceSettingKey(engine);
+  onChanged,
+  onVerify,
+}: DomainTabProps): ReactElement {
+  const engine = settings['tts.engine'] ?? '';
+  const domainModels = models.filter((model) => model.kind === 'tts');
+  const active = isModelFreeEngine(engine) ? undefined : activeAsset(models, 'tts', settings);
   return (
-    <Select
-      style={{ width: 280 }}
-      showSearch={engine === 'kokoro' ? { optionFilterProp: 'label' } : false}
-      value={value}
-      options={TTS_VOICE_OPTIONS[engine]}
-      onChange={(next) => {
-        onSave({ [key]: next });
-      }}
-    />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
+      <ActiveCard
+        active={active}
+        engine={engine}
+        settings={settings}
+        reports={reports}
+        onSave={onSave}
+        onChanged={onChanged}
+        onVerify={onVerify}
+      />
+      <AssetLibrary
+        models={domainModels}
+        reports={reports}
+        specs={machine}
+        activeModelId={active?.model_id}
+        onActivate={(model) => {
+          onSave(activateSettings(model));
+        }}
+        onChanged={onChanged}
+        onVerify={onVerify}
+      />
+    </div>
   );
 }
 
-function EngineCard({
-  title,
-  desc,
+function ActiveCard({
   active,
-  ok,
-  onClick,
+  engine,
+  settings,
+  reports,
+  onSave,
+  onChanged,
+  onVerify,
 }: {
-  title: string;
-  desc: string;
-  active: boolean;
-  ok: boolean;
-  onClick: () => void;
-}): React.ReactElement {
+  active: ModelInfo | undefined;
+  engine: string;
+  settings: DomainTabProps['settings'];
+  reports: Reports;
+  onSave: DomainTabProps['onSave'];
+  onChanged: () => void;
+  onVerify: DomainTabProps['onVerify'];
+}): ReactElement {
+  const modelFree = isModelFreeEngine(engine);
+  const report = active === undefined ? undefined : reportFor(reports, active.model_id);
+  const state: AssetState | null =
+    active === undefined ? (modelFree ? null : 'missing') : assetState(active, report);
+  const card: ActiveCardProps = {
+    domain: '配音 TTS',
+    title: active?.name ?? (engine === '' ? '未选引擎' : ttsEngineLabel(engine)),
+    state,
+    hint: '云端引擎，无需本地模型 · 需联网',
+    stateNote: failureNote(report),
+    progress: useDownloadProgress(active),
+    picker: (
+      <Segmented
+        size="small"
+        value={engine}
+        options={TTS_ENGINES.map((name) => ({ label: ttsEngineLabel(name), value: name }))}
+        onChange={(value) => {
+          onSave({ 'tts.engine': value });
+        }}
+      />
+    ),
+    actions: cardActions(active, state, onChanged, onVerify),
+    props: [
+      { label: '音色', value: <VoiceSelect engine={engine} settings={settings} onSave={onSave} /> },
+      { label: '引擎类型', value: ENGINE_KIND_LABEL[engine] ?? '未登记引擎' },
+      { label: '磁盘实占', value: active === undefined ? '—' : formatBytes(active.size_bytes ?? 0) },
+      { label: '生效时机', value: '保存后下次任务' },
+    ],
+    footnote: VOICE_HINT[engine] ?? '换引擎后各自的音色互不覆盖',
+  };
+  return <ActiveEngineCard {...card} />;
+}
+
+function cardActions(
+  active: ModelInfo | undefined,
+  state: AssetState | null,
+  onChanged: () => void,
+  onVerify: (modelId: string) => void,
+): ReactElement | undefined {
+  if (active === undefined) return undefined;
+  if (state === 'missing') return <DownloadSourceButton model={active} onChanged={onChanged} />;
   return (
-    <StyledCard
+    <Button
       size="small"
-      hoverable
-      onClick={onClick}
-      style={{
-        position: 'relative',
-        borderColor: active ? tokens.colorPrimary : tokens.border,
-        background: active ? tokens.accentSoft : undefined,
+      onClick={() => {
+        onVerify(active.model_id);
       }}
     >
-      <span
-        style={{
-          position: 'absolute', top: tokens.spaceMd, right: tokens.spaceMd,
-          fontSize: tokens.fontCaption, color: ok ? tokens.colorSuccess : tokens.colorWarning,
-        }}
-      >
-        ● {ok ? '就绪' : '缺模型'}
-      </span>
-      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, paddingRight: 52 }}>
-        <strong
-          style={{
-            fontSize: tokens.fontBody, color: tokens.textPrimary,
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}
-        >
-          {title}
-        </strong>
-        {active && (
-          <Tag color="blue" style={{ marginRight: 0, flexShrink: 0 }}>
-            使用中
-          </Tag>
-        )}
-      </div>
-      <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.fontCaption, lineHeight: '19px', color: tokens.textTertiary }}>
-        {desc}
-      </div>
-    </StyledCard>
+      校验资产
+    </Button>
+  );
+}
+
+function VoiceSelect({
+  engine,
+  settings,
+  onSave,
+}: {
+  engine: string;
+  settings: DomainTabProps['settings'];
+  onSave: DomainTabProps['onSave'];
+}): ReactElement {
+  const key = voiceSettingKey(engine);
+  return (
+    <SettingSelect
+      value={settings[key] ?? ''}
+      options={voiceOptions(engine)}
+      searchable={engine === 'kokoro'}
+      onChange={(value: string) => {
+        onSave({ [key]: value });
+      }}
+    />
   );
 }

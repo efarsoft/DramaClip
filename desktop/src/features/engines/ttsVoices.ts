@@ -9,8 +9,33 @@ export type TtsEngineName = 'kokoro' | 'sherpa_melo' | 'edge';
 
 export const TTS_ENGINES: readonly TtsEngineName[] = ['kokoro', 'sherpa_melo', 'edge'];
 
+/** 不需要本地模型的引擎：Edge 走云端，故它没有「缺模型」这一态。其余引擎一律以资产为准。 */
+export const TTS_MODEL_FREE_ENGINES: readonly TtsEngineName[] = ['edge'];
+
+/** 引擎短名 → 展示名（设置值只有短名，UI 上说短名等于让人猜）。 */
+export const TTS_ENGINE_LABEL: Record<TtsEngineName, string> = {
+  kokoro: 'Kokoro 82M',
+  sherpa_melo: 'sherpa-onnx melo',
+  edge: 'Edge',
+};
+
+/** 设置值 → 展示名；未登记引擎原样回显（不编名字）。 */
+export function ttsEngineLabel(engine: string): string {
+  return (TTS_ENGINE_LABEL as Record<string, string>)[engine] ?? engine;
+}
+
+/** 免本地模型的引擎（云端）：这类引擎没有「缺模型」这一态。 */
+export function isModelFreeEngine(engine: string): boolean {
+  return (TTS_MODEL_FREE_ENGINES as readonly string[]).includes(engine);
+}
+
+/** 设置值 → 该引擎的音色下拉；未登记的引擎没有音色可给。 */
+export function voiceOptions(engine: string): DefaultOptionType[] {
+  return (TTS_VOICE_OPTIONS as Record<string, DefaultOptionType[]>)[engine] ?? [];
+}
+
 /** 引擎 → 音色设置键。切换引擎互不覆盖各自的音色选择。 */
-export function voiceSettingKey(engine: TtsEngineName): string {
+export function voiceSettingKey(engine: string): string {
   return `tts.voice.${engine}`;
 }
 

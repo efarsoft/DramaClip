@@ -22,6 +22,7 @@ import type {
   ProjectGetResult,
   ScannedEpisode,
   ServiceEvent,
+  VerifyReport,
 } from '@dramaclip/protocol';
 
 function bridge(): DramaClipBridge {
@@ -169,8 +170,9 @@ export const modelsApi = {
       'models.download',
       source === undefined ? { model_id: modelId } : { model_id: modelId, source },
     ),
-  scanLocal: (): Promise<{ installed: ModelInfo[]; total: number }> =>
-    rpc<{ installed: ModelInfo[]; total: number }>('models.scan_local'),
+  /** 资产体检：给 id 报那一项，不给则批量报所有已落盘的（只读，不改文件）。 */
+  verify: (modelId?: string): Promise<VerifyReport[]> =>
+    rpc<VerifyReport[]>('models.verify', modelId === undefined ? {} : { model_id: modelId }),
   remove: (modelId: string): Promise<{ ok: boolean }> =>
     rpc<{ ok: boolean }>('models.delete', { model_id: modelId }),
 } as const;

@@ -21,7 +21,7 @@ function SectionCard({ children }: { children: React.ReactNode }): ReactElement 
 }
 
 /** 总览页·本机运行条件卡。 */
-export function MachinePanel({ models }: { models: ModelInfo[] }): ReactElement {
+export function MachinePanel({ models }: { models: readonly ModelInfo[] }): ReactElement {
   const [health, setHealth] = useState<HealthResult | null>(null);
   useEffect(() => {
     void systemApi
@@ -54,12 +54,18 @@ export function MachinePanel({ models }: { models: ModelInfo[] }): ReactElement 
   ];
   return (
     <SectionCard>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: tokens.spaceLg }}>
+      <div style={{ fontSize: tokens.fontBody, fontWeight: 600, color: tokens.textPrimary }}>
+        本机运行条件
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: tokens.spaceLg, marginTop: tokens.spaceMd }}>
         {cells.map((cell) => (
           <SpecCell key={cell.label} label={cell.label} value={cell.value} />
         ))}
       </div>
       {verdict.verdict !== 'unknown' && <VerdictLine verdict={verdict} maxSizeGb={maxSizeGb} />}
+      <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.fontMicro, color: tokens.textTertiary }}>
+        本卡只回答硬件「装得下 / 跑得动」；某次转写实际走了哪张卡，看语音识别域内的转写加速卡。
+      </div>
     </SectionCard>
   );
 }
@@ -126,7 +132,7 @@ function VerdictLine({
 }
 
 /** registry 全部本地模型中的最大体积（GB）。 */
-function maxLocalModelSizeGb(models: ModelInfo[]): number | undefined {
+function maxLocalModelSizeGb(models: readonly ModelInfo[]): number | undefined {
   const sizes = models.map((m) => parseSizeGb(m.size_label)).filter((s) => s !== undefined);
   return sizes.length === 0 ? undefined : Math.max(...sizes);
 }

@@ -97,7 +97,7 @@ export function GpuCard({
       <div style={{ ...mixins.sectionTitleRow(), marginBottom: tokens.spaceSm }}>
         <span style={{ ...mixins.sectionBar(), marginRight: tokens.spaceSm }} />
         <span style={{ fontSize: tokens.fontBody, fontWeight: 600, color: tokens.textPrimary }}>
-          GPU 加速
+          转写加速（GPU）
         </span>
         <Tooltip title="重新检测显卡与驱动" placement="top">
           <Button

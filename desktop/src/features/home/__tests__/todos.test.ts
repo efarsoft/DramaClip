@@ -9,7 +9,7 @@ function model(over: Partial<ModelInfo> = {}): ModelInfo {
   return {
     model_id: 'asr-small', kind: 'asr', engine: 'faster_whisper',
     repo_id: 'Systran/faster-whisper-small', name: 'Whisper small',
-    required: true, status: 'installed', ...over,
+    required: true, status: 'installed', engine_ready: true, ...over,
   };
 }
 

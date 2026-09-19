@@ -53,7 +53,7 @@ describe('judgeMachine / specsFromHealth', () => {
 
   it('从 health 快照提取规格', () => {
     expect(
-      specsFromHealth({ status: 'ok', uptime_s: 1, ram_total_gb: 16, disk_free_gb: 88 }),
+      specsFromHealth({ status: 'ok', uptime_s: 1, ffmpeg_version: '', ram_total_gb: 16, disk_free_gb: 88 }),
     ).toEqual({ ramTotalGb: 16, ramFreeGb: undefined, diskFreeGb: 88 });
     expect(specsFromHealth(null)).toEqual({});
   });
