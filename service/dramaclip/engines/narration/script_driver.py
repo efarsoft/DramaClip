@@ -81,8 +81,6 @@ def script_dialogue_plan(
     script = scriptwriter.write_script_episodes(
         llm,
         episode_inputs,
-        target_min_s=strategy.min_duration_s,
-        target_max_s=strategy.max_duration_s,
         project_name=str(settings.get("_project_name") or "这部剧"),
         angle_block=angle_block,
         style_directives=str(settings.get("_style_directives") or ""),

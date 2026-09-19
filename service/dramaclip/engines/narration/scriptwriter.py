@@ -13,7 +13,6 @@ from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable
 
 _CHARS_PER_SECOND = 4.2  # 中文 TTS 语速估算（约 250 字/分钟）
 _MIN_SEGMENTS = 2
-_MAX_SEGMENTS = 10
 _EPISODE_LINE_CAP = 80
 _TOTAL_LINE_CAP = 500
 _MIN_LINES_PER_EPISODE = 3  # 集数再多，每集也至少露面的保底线
@@ -30,7 +29,7 @@ FUNDAMENTALS = (
     "每段只讲一个信息点；段间用「谁知」「直到」「更狠的是」等递进衔接，禁止流水账。"
     "正文必须是一条连续故事线：背景起因→冲突升级→高潮反转，后一段承接前一段，"
     "禁止跳跃拼凑不相关片段。善用「半句钩」：把关键揭晓切在段落边界，答案留在下一段开头。"
-    "节奏紧凑，但参考时长只是粗略锚点：剧情完整与冲突张力优先，宁可有血有肉地略长，不要干瘪压缩。\n"
+    "节奏紧凑，但时长不设限：剧情完整与冲突张力优先，宁可有血有肉地长，不要干瘪压缩。\n"
     "内容纪律：所有情节、细节、台词必须来自转写内容，禁止编造转写外的事件或设定；"
     "优先引用最有画面感的具体细节（动作/冲突/原话），拒绝抽象概括。\n"
     "悬念管理：全片最大的反转不得提前剧透——关键信息延后到结尾前揭晓。"
@@ -44,7 +43,9 @@ _SYSTEM_PROMPT = (
     '{"hook": "开场钩子(1-2句)", "segments": [{"start": 数字秒, "end": 数字秒,'
     ' "text": "该片段解说文案"}], "cta": "结尾引导语(1句)"}。'
     "要求：1) start/end 必须取自转写台词的时间区间且按时间顺序；"
-    "2) 4-10 段，每段文案不超过 60 字；3) 覆盖剧情完整钩子-冲突-反转弧线；"
+    "2) 正文 12-20 段：把冲突链条完整铺开（起因→多轮升级→连环反转→高潮），"
+    "段数不够就是没讲透；每段文案不超过 60 字；"
+    "3) 覆盖剧情完整钩子-冲突-反转弧线；"
     "4) 只输出 JSON，不要多余文字。"
     + FUNDAMENTALS
 )
@@ -63,7 +64,7 @@ class Script(BaseModel):
     """解说剧本：钩子 + 正文片段 + 结尾引导。"""
 
     hook: str = Field(min_length=1)
-    segments: list[ScriptSegment] = Field(min_length=_MIN_SEGMENTS, max_length=_MAX_SEGMENTS)
+    segments: list[ScriptSegment] = Field(min_length=_MIN_SEGMENTS)
     cta: str = ""
 
 
@@ -189,8 +190,6 @@ def write_script_episodes(
     llm: LlmClient,
     episode_inputs: list[dict[str, Any]],
     *,
-    target_min_s: float,
-    target_max_s: float,
     project_name: str,
     angle_block: str,
     style_directives: str = "",
@@ -218,9 +217,8 @@ def write_script_episodes(
     style_block = f"\n解说风格要求：{style_directives}" if style_directives != "" else ""
     user_prompt = (
         f"项目：{project_name}\n"
-        f"参考时长：{target_min_s:.0f}-{target_max_s:.0f} 秒（仅作参考，不是硬限制）。\n"
-        f"最高优先级是剧情完整与吸引力：铺垫果断压缩，冲突和反转给足戏份；"
-        f"宁可略长，也不要为凑时长删掉关键冲突。\n"
+        f"时长不设上限：段数由剧情需要决定，把冲突讲透、反转给足戏份。\n"
+        f"铺垫果断压缩，但绝不为了控制时长删掉关键冲突或草草收尾。\n"
         f"{cross_block}\n"
         f"{angle_block}\n"
         f"台词转写：\n" + transcript_block

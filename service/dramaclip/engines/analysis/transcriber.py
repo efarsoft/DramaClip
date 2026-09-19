@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Protocol
 from dramaclip.engines.analysis.models import AsrSegment, WordSpan
 
 _LOGGER = logging.getLogger(__name__)
-_CUDA_PROBLEM = re.compile(r"cublas|cudnn|cudart|cuda|gpu", re.I)
+_CUDA_PROBLEM = re.compile(r"cublas|cudnn|cudart|cuda|gpu|int8 compute type", re.I)
 
 
 def simplify(text: str) -> str:
