@@ -16,7 +16,7 @@ from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.exporter import encoder, loudness
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle import presets as subtitle_presets
-from dramaclip.engines.subtitle.ass_generator import build_ass, split_subtitle_text
+from dramaclip.engines.subtitle.ass_generator import build_ass, line_char_cap, split_subtitle_text
 from dramaclip.infra import config
 from dramaclip.infra.ffmpeg import cover as ffmpeg_cover
 from dramaclip.infra.ffmpeg import probe
@@ -311,11 +311,14 @@ def render_export(
         """生成段级 ass 文件并返回路径（相对时间轴 0→duration）。
 
         长文案按标点/字数拆成多行字幕，时长按字数比例分配——整段一行会溢出画面。
+        每行几个字的上限问预设要（`line_char_cap`）：字号 64 与字号 96 能塞进同一幅
+        1080 宽的画框的字数不是一回事，写死一个数的话大字号预设会「拆了，但每条照样放
+        不下」，真机烧出来整行向两侧溢出、首尾被画框切掉（实测）。
         """
         ass_dir = context.work_dir / "export" / export_id
         ass_dir.mkdir(parents=True, exist_ok=True)
         ass_path = ass_dir / f"seg_{segment_index:03d}.ass"
-        chunks = split_subtitle_text(text)
+        chunks = split_subtitle_text(text, line_char_cap(preset))
         total_chars = sum(len(c) for c in chunks)
         lines: list[dict[str, Any]] = []
         cursor = 0.0
