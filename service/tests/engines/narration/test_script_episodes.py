@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
 from typing import Any
 
 import pytest
@@ -157,16 +158,25 @@ def test_prompt_keeps_raw_segments_by_episode() -> None:
 
 
 def test_near_adjacent_segments_bridge_without_stutter() -> None:
-    """#3 跳帧修复：同集近邻段（间隔 <1s）贴合为连续播放，消除微跳跃。"""
+    """#3 跳帧修复（编排层）：同集近邻段（间隔 <1s）贴合为连续播放，消除微跳跃。
+
+    转写区间**故意离剧本切点 1.5s 以上**：否则 `snap` 会自己把 6.03 吸附到 5.5，
+    贴合与否都得到同一个 0 间隔，这条用例就变成永真——上一版正是栽在这里。
+    回填那一层的同一不变量由 `test_backfill_timeline.py` 守。
+    """
     script = scriptwriter.Script(
         hook="钩子",
         segments=[
-            scriptwriter.ScriptSegment(episode=1, start=0.08, end=5.58, text="第一段解说文案超过时长"),
-            scriptwriter.ScriptSegment(episode=1, start=6.03, end=13.155, text="第二段解说文案也超过时长"),
+            scriptwriter.ScriptSegment(
+                episode=1, start=0.08, end=5.58, text="第一段解说文案超过时长"
+            ),
+            scriptwriter.ScriptSegment(
+                episode=1, start=6.03, end=13.155, text="第二段解说文案也超过时长"
+            ),
         ],
         cta="点我看结局",
     )
-    episode_map = {1: ("ep-a", _asr([(0.0, 20.0), (5.5, 14.0)]))}
+    episode_map = {1: ("ep-a", _asr([(0.0, 1.0)]))}
     durations = {1: 100.0}
     plan = build_from_script_episodes(episode_map, durations, script, StrategySpec())
 
@@ -175,6 +185,8 @@ def test_near_adjacent_segments_bridge_without_stutter() -> None:
         for seg in plan.timeline
         if seg.episode_id == "ep-a"
     ]
-    for (_prev_start, prev_end), (next_start, _next_end) in zip(same_ep, same_ep[1:]):
+    for (_prev_start, prev_end), (next_start, _next_end) in pairwise(same_ep):
         gap = round(next_start - prev_end, 2)
         assert gap == 0.0, f"近邻段出现 {gap}s 微跳跃（应为连续衔接）"
+    # 6.03 没有被吸附、也没被留在原地：它被拉回上一段的结尾 5.58
+    assert same_ep[2] == (5.58, 13.15), f"贴合落点不对：{same_ep[2]}"

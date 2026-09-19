@@ -261,13 +261,25 @@ def synthesize_narration_texts(
         voiced[item.id] = (str(audio_path), item.text, float(duration))
 
     timeline = [segment.model_dump() for segment in plan.timeline]
+    # 实测音频时长 ≠ 编排期的估计时长：把 end 直接改成 start + 实测，前一段就会
+    # 盖住后一段的源素材区间，成片演到第 6 秒又倒回第 1 秒重播同一段画面（业主
+    # 立案③）。这里按集重走一遍编排层同款游标（`build_from_script_episodes` 的
+    # `start = max(candidate, cursor)`）：只保证源时间单调不回退，旁白段长度
+    # 仍等于实测音频，原声段只平移不压缩。
+    cursor: dict[str, float] = {}
     for segment in timeline:
-        # ducked（全片解说全程压底旁白）与 narration 同权：两者都要回填时长与解说字幕
-        if segment["audio"] not in ("narration", "ducked"):
-            continue
-        _audio_path, text, duration = voiced[str(segment["narration_id"])]
-        segment["end"] = round(segment["start"] + duration, 3)
-        segment["subtitle_text"] = text
+        episode_id = str(segment["episode_id"])
+        start = max(float(segment["start"]), cursor.get(episode_id, 0.0))
+        if segment["audio"] in ("narration", "ducked"):
+            # ducked（全片解说全程压底旁白）与 narration 同权：两者都要回填时长与解说字幕
+            _audio_path, text, duration = voiced[str(segment["narration_id"])]
+            segment["subtitle_text"] = text
+            end = start + duration
+        else:
+            end = start + (float(segment["end"]) - float(segment["start"]))
+        segment["start"] = round(start, 3)
+        segment["end"] = round(end, 3)
+        cursor[episode_id] = end
     updated = [
         item.model_copy(
             update={"audio_path": voiced[item.id][0], "duration": voiced[item.id][2]}
