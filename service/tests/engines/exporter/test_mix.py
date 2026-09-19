@@ -24,7 +24,7 @@ from dramaclip.engines.exporter import encoder, loudness
 
 def _args(audio: str, tts: str | None) -> list[str]:
     return encoder.cut_segment_args(
-        "src.mp4", "out.mp4", start=0.0, end=3.0, audio=audio, mask=False,
+        "src.mp4", "out.mp4", start=0.0, end=3.0, audio=audio,
         tts_audio=tts, rng=random.Random(0),
     )
 
@@ -234,7 +234,7 @@ def _render_tp(
 ) -> float:
     """跑真 `cut_segment_args`（不是抄一份滤镜串），量产出段的 input_tp。"""
     args = encoder.cut_segment_args(
-        str(bed), str(out), start=1.0, end=6.0, audio="narration", mask=False,
+        str(bed), str(out), start=1.0, end=6.0, audio="narration",
         tts_audio=str(tts), rng=random.Random(7),
     )
     if strip_limiter:
@@ -355,7 +355,7 @@ def _render_original_tp(
         真机输出 `level <boolean> auto level (default true)`），即"顺手清理掉这个选项"的后果。
     """
     args = encoder.cut_segment_args(
-        str(src), str(out), start=1.0, end=6.0, audio="original", mask=False,
+        str(src), str(out), start=1.0, end=6.0, audio="original",
         tts_audio=None, rng=random.Random(7),
     )
     index = args.index("-af")
@@ -571,7 +571,7 @@ def test_delivered_track_has_one_channel_layout(
     for index, (audio, tts_arg) in enumerate((("narration", str(tts)), ("original", None))):
         segment = tmp_path / f"seg_{index:03d}.mp4"
         args = encoder.cut_segment_args(
-            str(src), str(segment), start=1.0, end=6.0, audio=audio, mask=False,
+            str(src), str(segment), start=1.0, end=6.0, audio=audio,
             tts_audio=tts_arg, rng=random.Random(11),
         )
         _sh([ffmpeg, *args])
@@ -685,7 +685,7 @@ def _render_bed_lufs(
     差值会自己量成 0 dB，"鸭子没了"这件事由数字说话。
     """
     args = encoder.cut_segment_args(
-        str(src), str(out), start=1.0, end=6.0, audio=audio, mask=False,
+        str(src), str(out), start=1.0, end=6.0, audio=audio,
         tts_audio=str(narration), rng=random.Random(7),
     )
     index = args.index("-filter_complex")

@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext
-from dramaclip.engines.analysis import subtitle_ocr
 from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.exporter import encoder, loudness
 from dramaclip.engines.narration.models import PlanData
@@ -32,10 +31,6 @@ _ERR_NO_PLANS = -32406
 _ERR_PLAN_NOT_RENDERABLE = -32407
 _ERR_EXPORT_NOT_FOUND = -32404
 _ERR_EXPORT_NOT_RETRYABLE = -32405  # 导出域 -32400~-32499（见 common.json x-error-codes）
-
-# 纯原片模式零加工：不遮罩（原案 6B）
-_NO_MASK_MODES = {"raw_clip"}
-
 
 def _safe_filename(name: str) -> str:
     """项目名 → 安全文件名段（去除路径/非法字符）。"""
@@ -303,7 +298,6 @@ def render_export(
             dialogue_zones[episode_id] = zones
 
     tts_segments = tts_audio_by_segment(plan_data)
-    mask = plan_row["narration_mode"] not in _NO_MASK_MODES
     preset = subtitle_presets.get_preset(context.settings.get("subtitle.default_preset"))
     out_size = _output_size(context.settings)
 
@@ -335,38 +329,13 @@ def render_export(
         video_codec = "h264_nvenc" if encoder.nvenc_available() else "libx264"
     else:
         video_codec = codec_setting
-    # 逐集字幕带探测回调：遮罩按 OCR 探测到的实际字幕位置盖（band 缓存按源视频）
-    durations = {
-        str(ep["id"]): float(ep["duration"] or 0)
-        for ep in episodes_repo.list_by_project(context.conn, project_id)
-    }
-    band_cache: dict[str, tuple[float, float] | None] = {}
-
-    def band_detector(source: str) -> tuple[float, float] | None:
-        if source in band_cache:
-            return band_cache[source]
-        ep_id = next((eid for eid, path in episode_paths.items() if path == source), None)
-        if ep_id is None:
-            return None
-        work_sub = context.work_dir / f"band_{ep_id}"
-        try:
-            band = subtitle_ocr.detect_band(
-                Path(source), work_sub, duration_s=durations.get(ep_id, 0.0)
-            )
-        except Exception:  # noqa: BLE001 - 探测失败回退静态底部遮罩
-            band = None
-        band_cache[source] = band
-        return band
-
     encoder.export_plan(
         plan_data,
         episode_paths,
         out_path,
         context.work_dir / "export" / export_id,
         video_codec=video_codec,
-        band_detector=band_detector,
         tts_audio_by_segment=tts_segments or None,
-        mask=mask,
         cancel=cancel_event,
         on_progress=report,
         subtitle_burner=burn_subtitle if plan_data.mode != "raw_clip" else None,

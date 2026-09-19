@@ -15,7 +15,6 @@ from dramaclip.engines.dedup import jitter
 from dramaclip.engines.dedup import params as dedup_params
 from dramaclip.engines.exporter import loudness
 from dramaclip.engines.narration.models import PlanData
-from dramaclip.engines.subtitle.mask import drawbox_filter
 from dramaclip.infra import config
 from dramaclip.infra.ffmpeg import runner
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
@@ -143,14 +142,12 @@ def cut_segment_args(
     start: float,
     end: float,
     audio: str,
-    mask: bool,
     tts_audio: str | None,
     rng: random.Random,
     transition: str = "cut",
     ass_path: str | None = None,
     out_size: tuple[int, int] = _DEFAULT_OUT_SIZE,
     video_codec: str = "libx264",
-    band: tuple[float, float] | None = None,
 ) -> list[str]:
     """构建单段切割命令（Phase A）。
     """
@@ -167,9 +164,6 @@ def cut_segment_args(
         f"scale={out_w}:{out_h}",
         f"setpts=PTS/{speed}",
     ]
-    box = drawbox_filter(mask, out_size, band)
-    if box:
-        filters.append(box)
     if transition == "fade":
         filters.append("fade=t=in:st=0:d=0.25")
     if ass_path:
@@ -318,7 +312,6 @@ def export_plan(
     work_dir: Path,
     *,
     tts_audio_by_segment: dict[int, str] | None = None,
-    mask: bool = True,
     cancel: threading.Event | None = None,
     on_progress: Callable[[float, str], None] | None = None,
     subtitle_burner: Callable[[int, str, float], str] | None = None,
@@ -327,7 +320,6 @@ def export_plan(
     out_size: tuple[int, int] = _DEFAULT_OUT_SIZE,
     loudness_target: loudness.LoudnessTarget | None = None,
     video_codec: str = "libx264",
-    band_detector: Callable[[str], tuple[float, float] | None] | None = None,
 ) -> Path:
     """执行两阶段导出，返回成片路径。
     """
@@ -339,25 +331,6 @@ def export_plan(
     rng = random.Random()
 
     total = len(segments)
-    # 字幕带探测前置：一次 OCR 是 10 帧解码 + 10 次识别，放在建令循环里逐段触发会
-    # 把 Phase A 卡住，且取消要等到下一段建令才响应。这里按**源**去重先跑完，
-    # 每个源之间留一次取消检查。
-    band_cache: dict[str, tuple[float, float] | None] = {}
-    if band_detector is not None:
-        sources = list(dict.fromkeys(
-            episode_paths[segment.episode_id]
-            for segment in segments
-            if segment.episode_id in episode_paths
-        ))
-        for index, probe_source in enumerate(sources, start=1):
-            if cancel is not None and cancel.is_set():
-                raise runner.FfmpegError("已取消", cancelled=True)
-            if on_progress is not None:
-                on_progress(0.0, f"定位原字幕 {index}/{len(sources)}")
-            band_cache[probe_source] = band_detector(probe_source)
-
-    def _band_for_source(source: str) -> tuple[float, float] | None:
-        return band_cache.get(source)
 
     # Phase A：构建每段命令参数（含台词保护区安全切点、字幕、混音）
     job_args: list[list[str]] = []
@@ -394,14 +367,12 @@ def export_plan(
                 start=safe_start,
                 end=safe_end,
                 audio=segment.audio,
-                mask=mask,
                 tts_audio=tts_audio,
                 rng=rng,
                 transition=segment.transition,
                 ass_path=ass_path,
                 out_size=out_size,
                 video_codec=video_codec,
-                band=_band_for_source(episode_paths.get(segment.episode_id, "")),
             )
         )
 
