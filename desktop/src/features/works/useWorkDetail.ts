@@ -3,9 +3,11 @@ import { useEffect, useState } from 'react';
 import { App as AntdApp } from 'antd';
 import type { ExportJob, TitleCandidate } from '@dramaclip/protocol';
 import { exportApi, projectApi, rpc, titlesApi } from '../../services/client';
+import { useUiStore } from '../../stores/ui';
 
 export function useWorkDetail(exportId: string): WorkDetail {
   const { message } = AntdApp.useApp();
+  const serviceState = useUiStore((state) => state.serviceState);
   const [job, setJob] = useState<ExportJob | null>(null);
   const [failed, setFailed] = useState(false);
   const [projectName, setProjectName] = useState('…');
@@ -14,8 +16,9 @@ export function useWorkDetail(exportId: string): WorkDetail {
   const [planId, setPlanId] = useState('');
   const [generating, setGenerating] = useState(false);
 
+  // 服务就绪前 RPC 会失败；ready 后再加载
   useEffect(() => {
-    if (exportId === '') return;
+    if (exportId === '' || serviceState !== 'ready') return;
     void exportApi
       .get(exportId)
       .then((row) => {
@@ -40,7 +43,7 @@ export function useWorkDetail(exportId: string): WorkDetail {
         }
       })
       .catch(() => { setFailed(true); });
-  }, [exportId]);
+  }, [exportId, serviceState]);
 
   const onGenerate = (): void => {
     setGenerating(true);

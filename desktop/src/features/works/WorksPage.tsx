@@ -5,6 +5,7 @@ import { App as AntdApp, Card, Empty } from 'antd';
 import { FolderOpenOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import type { WorkItem } from '@dramaclip/protocol';
 import { listWorks, mediaUrl, projectApi, revealInFolder } from '../../services/client';
+import { useUiStore } from '../../stores/ui';
 import { tokens } from '../../styles/theme';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import { MODE_INFO } from '../../components/modeMeta';
@@ -69,6 +70,7 @@ function groupWorks(works: WorkItem[]): WorkGroup[] {
 /** 成品库页（导航「成品」）：按剧分组，剧内片单横向滑动。 */
 export function WorksPage() {
   const navigate = useNavigate();
+  const serviceState = useUiStore((state) => state.serviceState);
   const [works, setWorks] = useState<WorkItem[] | null>(null);
   const [covers, setCovers] = useState<Map<string, string>>(new Map());
 
@@ -81,9 +83,11 @@ export function WorksPage() {
     setCovers(new Map(projects.map((p) => [p.id, p.cover_path ?? ''])));
   }, []);
 
+  // 服务就绪前 RPC 会失败（首进偶发 -32603 即此因）；ready 后（重）加载一次
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (serviceState !== 'ready') return;
+    void load().catch(() => undefined);
+  }, [load, serviceState]);
 
   const groups = useMemo<WorkGroup[]>(() => (works === null ? [] : groupWorks(works)), [works]);
 
