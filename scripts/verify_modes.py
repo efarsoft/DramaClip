@@ -491,6 +491,62 @@ def _check_ducking(mode: str, captured: list[dict[str, Any]]) -> tuple[list[str]
     }
 
 
+def _check_source_fit(
+    mode: str, captured: list[dict[str, Any]]
+) -> tuple[list[str], dict[str, Any]]:
+    """每段真正下发的源窗口必须落在它自己那份素材里（业主立案③的尾巴）。
+
+    编排层写「源长 + 5s」的预算、回填把段尾改成 `start + 实测音频时长`，两处都可能把
+    窗口排出素材末尾。`pipeline` 出方案时拦一道，但那里读的是 plan；这里读的是**渲染
+    层收到的那条命令**（`-ss`/`-to` 都在 `-i` 之前，都是源时间），窗口在管道里被谁又
+    改过一次，只有这里看得见。
+
+    源长取本次真的拿去切的那个文件，由 ffprobe 现量：库里存的时长可能与被切的文件
+    不是同一份（隔离副本、重新转码过的素材）。真机实测：窗口越过 76.86s 的源末尾时
+    ffmpeg 退码 0、产物静默变短（见 `pipeline._assert_within_source` 的注释）——渲染层
+    不会替我们报错，所以量不到源长一律算红，不算通过。
+    """
+    tol = narration_pipeline._SOURCE_FIT_TOL_S
+    failures: list[str] = []
+    durations: dict[str, float] = {}
+    checked = 0
+    overruns: list[float] = []
+    flush_tails = 0
+    for record in captured:
+        source = Path(str(record["source"]))
+        if str(source) not in durations:
+            durations[str(source)] = probe_duration_s(source)
+        limit = durations[str(source)]
+        if limit <= 0:
+            failures.append(
+                f"{mode}: 量不到源集 {source.name} 的时长 —— 源窗口判据在它上面覆盖为 0，"
+                "不能把「查不了」当「没问题」"
+            )
+            continue
+        checked += 1
+        overrun = float(record["end"]) - limit
+        overruns.append(overrun)
+        if overrun > tol:
+            failures.append(
+                f"{mode}: 段 {Path(str(record['out_path'])).name} 的画面窗口要播到 "
+                f"{float(record['end']):.2f}s，源集 {source.name} 只有 {limit:.2f}s"
+                f"（越界 {overrun:.2f}s > 容差 {tol}s）—— 旁白会被从中间掐掉"
+            )
+        elif abs(overrun) <= tol:
+            # 段尾正好等于源末尾：尾部收口把这条挪到过这儿（没有这一格，收口是否真的
+            # 在生产路径上跑过，从成片里看不出来）
+            flush_tails += 1
+    if captured and checked == 0:
+        failures.append(f"{mode}: {len(captured)} 段没有一段核上源长 —— 本行源窗口结论无效")
+    return failures, {
+        "source_fit_checked": checked,
+        # 最紧那一段离集尾还剩多少秒（负=越界）：不是 0 起算的"最多越界几秒"，
+        # 否则一条都没越界的片子也会报 0.0，和"正好贴着末尾"分不清。
+        "source_worst_overrun_s": round(max(overruns), 3) if overruns else None,
+        "source_flush_tails": flush_tails,
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--media", default=r"D:\BaiduNetdiskDownload\小小球神不好惹")
@@ -787,6 +843,9 @@ def main() -> int:
         duck_failures, duck_rec = _check_ducking(mode, CAPTURED)
         failures.extend(duck_failures)
         rec.update(duck_rec)
+        fit_failures, fit_rec = _check_source_fit(mode, CAPTURED)
+        failures.extend(fit_failures)
+        rec.update(fit_rec)
         rows.append(rec)
 
     executor.shutdown(wait=True, cancel_futures=True)
@@ -796,7 +855,8 @@ def main() -> int:
         ("模式", 18, "<"), ("状态", 11, "<"), ("时长s", 8, ">"), ("均量dB", 9, ">"),
         ("LUFS", 8, ">"), ("峰dB", 8, ">"), ("冻结s", 7, ">"), ("来源", 11, ">"),
         ("段", 4, ">"), ("插桩", 5, ">"), ("TTS", 5, ">"), ("带旁白", 7, ">"),
-        ("已混音", 7, ">"), ("压底残差", 9, ">"), ("跨集", 6, ">"), ("耗时s", 7, ">"),
+        ("已混音", 7, ">"), ("压底残差", 9, ">"), ("源越界s", 9, ">"),
+        ("跨集", 6, ">"), ("耗时s", 7, ">"),
     ]
     print("".join(_pad(title, width, align) for title, width, align in columns))
     print("-" * sum(width for _, width, _ in columns))
@@ -813,6 +873,7 @@ def main() -> int:
             f"{r.get('tts_files_ok', 0)}", f"{r.get('segments_with_tts', 0)}",
             f"{r.get('segments_mixed', 0)}",
             _fmt(r.get("duck_max_residual_db"), 2),
+            _fmt(r.get("source_worst_overrun_s"), 2),
             f"{r.get('episodes_used', 0)}",
             f"{r.get('elapsed_s', 0)}",
         ]
@@ -822,6 +883,11 @@ def main() -> int:
         ))
         if r.get("audio_roles"):
             print(f"{'':<29}音频角色：{r['audio_roles']}")
+        # 源越界那一列是负数=窗口离集尾还留着这么多秒；>0 直接判红。贴源末尾的段数
+        # 单独报：它证明回填的尾部收口在生产路径上真的动过（负得越深越说明没走到边界）。
+        if r.get("source_flush_tails"):
+            print(f"{'':<29}贴着源末尾收口的段：{r['source_flush_tails']} 段"
+                  f"（核过 {r.get('source_fit_checked', 0)} 段的窗口）")
         # 重试留痕只报数不断言：靠重试过门的片子照样合格（门禁量的是最终成片），
         # 但限幅器落地后新渲染的片子它应当近乎为零，频繁出现说明上游混音又坏了。
         if r.get("loudness_retry_hints"):
