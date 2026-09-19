@@ -379,6 +379,21 @@ def _missing_requirements(root: Path, required: tuple[str, ...]) -> list[str]:
     return missing
 
 
+def requirements(engine: str) -> tuple[str, ...]:
+    """该引擎的必需文件集（相对模型根目录）——体检与导入向导共用同一份判据。"""
+    return _REQUIREMENTS.get(engine, ())
+
+
+def missing_requirements(root: Path, required: tuple[str, ...]) -> list[str]:
+    """按必需文件集核对一个目录，返回缺项（``*`` 者按一次通配匹配）。"""
+    return _missing_requirements(root, required)
+
+
+def whisper_snapshot(cache: Path) -> Path | None:
+    """HF 缓存里已解析出的快照目录；导入识别与体检都只认这一个解析规则。"""
+    return _whisper_snapshot(cache)
+
+
 def verify(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
     """资产体检：逐项判据，任何一项 ``fail`` 都不许被当成「可用」。
 
@@ -436,8 +451,13 @@ def verify(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
     }
 
 
+def weight_files(root: Path) -> list[Path]:
+    """目录树内的权重文件——体检与导入共用同一份扩展名表，不各抄一份。"""
+    return [path for path in root.rglob("*") if path.suffix in _WEIGHT_SUFFIXES and path.is_file()]
+
+
 def _verify_weights(root: Path, add: Any) -> None:
-    weights = [p for p in root.rglob("*") if p.suffix in _WEIGHT_SUFFIXES and p.is_file()]
+    weights = weight_files(root)
     if not weights:
         add("权重非空", "fail", "目录里没有任何权重文件")
         return
