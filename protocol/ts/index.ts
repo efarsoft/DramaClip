@@ -318,6 +318,28 @@ export interface ModelInfo {
   readonly quality?: number;
   readonly desc?: string;
   readonly sources?: ReadonlyArray<ModelSource>;
+  /** 引擎是否真接进了工厂：false = 储备资产，UI 不得当作可用能力展示。 */
+  readonly engine_ready: boolean;
+}
+
+/** 资产体检单项判据（models.verify）。 */
+export interface VerifyCheck {
+  readonly name: string;
+  /** fail = 不可用；warn = 可用但有隐患（如重复缓存、无下载清单）；skip = 前置项已 fail。 */
+  readonly status: 'pass' | 'warn' | 'fail' | 'skip';
+  readonly detail?: string;
+}
+
+export interface VerifyReport {
+  readonly model_id: string;
+  readonly name: string;
+  readonly kind: string;
+  readonly engine: string;
+  readonly engine_ready: boolean;
+  readonly path?: string;
+  /** 任一 check 为 fail 即 false。 */
+  readonly ok: boolean;
+  readonly checks: ReadonlyArray<VerifyCheck>;
 }
 
 /** 引擎配置（云端/服务端点多实例，单启用）。 */
@@ -437,6 +459,7 @@ export const METHOD_NAMES = [
   'models.list',
   'models.download',
   'models.scan_local',
+  'models.verify',
   'models.delete',
   'engine_configs.list',
   'engine_configs.create',

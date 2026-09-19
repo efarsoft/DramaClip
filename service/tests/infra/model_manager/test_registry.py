@@ -37,3 +37,10 @@ def test_detect_status_installed_via_weights(tmp_path: Path) -> None:
 def test_find_returns_none_when_missing(tmp_path: Path) -> None:
     spec = builtin_specs()[0]
     assert registry.find(spec, tmp_path / "models") is None
+
+
+def test_sherpa_spec_has_no_auto_download_source() -> None:
+    """sherpa 的模型不在 HF/ModelScope 仓库里（是 sherpa-onnx 的发布包），
+    不能编一个 repo id 去下。"""
+    spec = next(s for s in builtin_specs() if s.model_id == "sherpa-melo-zh")
+    assert spec.sources() == []

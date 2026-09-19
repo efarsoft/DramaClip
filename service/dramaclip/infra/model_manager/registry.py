@@ -29,12 +29,17 @@ class ModelSpec:
     desc: str = ""         # 一句话定位
 
     def sources(self) -> list[tuple[str, str]]:
-        """可用下载源（国内优先排序）：[(kind, repo)]，kind ∈ modelscope/hf_mirror/huggingface。"""
+        """可用下载源（国内优先排序）：[(kind, repo)]，kind ∈ modelscope/hf_mirror/huggingface。
+
+        空 ``repo_id`` = 该模型没有仓库形式的自动下载源（如 sherpa-onnx 的发布包），
+        返回空表让调用方明确拒绝下载，而不是拼出一个不存在的 URL。
+        """
         out: list[tuple[str, str]] = []
         if self.ms_repo:
             out.append(("modelscope", self.ms_repo))
-        out.append(("hf_mirror", self.repo_id))
-        out.append(("huggingface", self.repo_id))
+        if self.repo_id:
+            out.append(("hf_mirror", self.repo_id))
+            out.append(("huggingface", self.repo_id))
         return out
 
 
@@ -123,6 +128,22 @@ def builtin_specs() -> list[ModelSpec]:
             speed=3,
             quality=4,
             desc="中文离线配音",
+        ),
+        ModelSpec(
+            model_id="sherpa-melo-zh",
+            kind="tts",
+            engine="sherpa_melo",
+            # 没有仓库形式的下载源：模型是 sherpa-onnx 的发布包（由 MeloTTS 转换而来），
+            # 只能人工取回后用「导入模型」放到 placement 目录下。
+            repo_id="",
+            placement="tts/sherpa-onnx/melo/vits-melo-tts-zh_en",
+            name="sherpa-onnx melo-zh（CPU 高音质）",
+            notes="约 190MB（含词典）；无自动下载源，需手动导入到上述目录；单说话人",
+            size_label="~190MB",
+            tier="balanced",
+            speed=4,
+            quality=4,
+            desc="VITS melo 中文，CPU 推理，44.1kHz",
         ),
         ModelSpec(
             model_id="indextts2",
@@ -291,7 +312,203 @@ def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
         "sources": [{"kind": kind, "repo": repo} for kind, repo in spec.sources()],
         "status": "installed" if installed else "not_installed",
         "path": str(resolved) if resolved is not None else None,
+        "engine_ready": engine_ready(spec),
     }
+
+
+def engine_ready(spec: ModelSpec) -> bool:
+    """该模型归属的合成/识别路径是否真接进了工厂——「可用」与「储备」的唯一判据。
+
+    名单只存在于两处：``engines/tts/factory.supported()`` 与
+    ``engines/analysis/runtime.supported()``。这里只做查表，不再抄一份。
+    """
+    if spec.kind == "tts":
+        from dramaclip.engines.tts.factory import supported
+    elif spec.kind == "asr":
+        from dramaclip.engines.analysis.runtime import supported
+    else:
+        return False
+    return spec.engine in supported()
+
+
+# 每引擎的必需相对路径（相对「模型根目录」；含 * 者按一次通配匹配，目录直接写名字）。
+_REQUIREMENTS: dict[str, tuple[str, ...]] = {
+    "faster_whisper": ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt"),
+    "sensevoice": ("model.pt",),
+    "kokoro": (
+        "Kokoro-82M-v1.1-zh/config.json",
+        "Kokoro-82M-v1.1-zh/*.pth",
+        "Kokoro-82M-v1.1-zh/voices",
+    ),
+    "sherpa_melo": ("model.onnx", "lexicon.txt", "tokens.txt", "dict"),
+}
+_WEIGHT_SUFFIXES = (".bin", ".pth", ".pt", ".onnx", ".safetensors")
+_HEX = set("0123456789abcdef")
+
+
+def _whisper_cache(base: Path, spec: ModelSpec) -> Path | None:
+    short = spec.model_id.removeprefix("faster-whisper-")
+    for cache in sorted(base.glob(f"models--*faster-whisper-{short}")):
+        if cache.is_dir():
+            return cache
+    return None
+
+
+def _whisper_snapshot(cache: Path) -> Path | None:
+    """优先按 refs/main 指向的快照；没有 ref 时退回目录名倒序的第一个（与探测同序）。"""
+    ref = cache / "refs" / "main"
+    if ref.is_file():
+        try:
+            named = cache / "snapshots" / ref.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        if named.is_dir():
+            return named
+    candidates = [p for p in sorted((cache / "snapshots").glob("*"), reverse=True) if p.is_dir()]
+    return candidates[0] if candidates else None
+
+
+def _missing_requirements(root: Path, required: tuple[str, ...]) -> list[str]:
+    missing = []
+    for pattern in required:
+        if "*" in pattern:
+            if not any(p.is_file() for p in root.glob(pattern)):
+                missing.append(pattern)
+        elif not (root / pattern).exists():
+            missing.append(pattern)
+    return missing
+
+
+def verify(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
+    """资产体检：逐项判据，任何一项 ``fail`` 都不许被当成「可用」。
+
+    为什么不复用 ``detect_status`` 的 ``status``：那个判据是「placement 下存在一个权重
+    文件」，下载中断留下的半截目录一样过——10 集分析白跑就是这么来的。这里按引擎各自的
+    必需文件、快照提交号、下载清单、中断残留、重复缓存五道查，全部有真机形态对应
+    （见 tests/infra/model_manager/test_verify.py 的模块 docstring）。
+    """
+    checks: list[dict[str, str]] = []
+
+    def add(name: str, status: str, detail: str = "") -> None:
+        checks.append({"name": name, "status": status, "detail": detail})
+
+    base = models_dir / spec.placement
+    # cache 只在 faster_whisper 下算得出：非 None 即等价于「这是 HF 缓存布局的模型」。
+    cache = _whisper_cache(base, spec) if spec.engine == "faster_whisper" else None
+    snapshot = _whisper_snapshot(cache) if cache is not None else None
+
+    if not base.is_dir():
+        add("目录存在", "fail", f"未找到 {base}")
+        add("必需文件", "skip", "目录不存在，未继续")
+    elif cache is None and spec.engine == "faster_whisper":
+        add("目录存在", "pass", str(base))
+        add("必需文件", "fail", f"{base} 下没有 {spec.repo_id.replace('/', '--')} 缓存目录")
+    else:
+        add("目录存在", "pass", str(base))
+        required = _REQUIREMENTS.get(spec.engine, ())
+        root = snapshot if snapshot is not None else base
+        if cache is not None and snapshot is None:
+            add("必需文件", "fail", f"{cache} 下没有已解析的快照目录（snapshots/<提交号>）")
+        else:
+            missing = _missing_requirements(root, required)
+            if missing:
+                add("必需文件", "fail", f"缺 {', '.join(missing)}")
+            else:
+                add("必需文件", "pass", f"{len(required)} 项齐全")
+        if root.is_dir():
+            _verify_weights(root, add)
+        if cache is not None:
+            _verify_snapshot_revision(cache, snapshot, add)
+            _verify_manifest(cache, snapshot, add)
+    _verify_residue(cache if cache is not None else base, add)
+    _verify_unique_path(models_dir, base, cache, add)
+    if not engine_ready(spec):
+        add("引擎接入", "warn", f"{spec.engine} 尚未接入，只能作为储备资产")
+    return {
+        "model_id": spec.model_id,
+        "name": spec.name,
+        "kind": spec.kind,
+        "engine": spec.engine,
+        "engine_ready": engine_ready(spec),
+        "path": str(base),
+        "ok": not any(check["status"] == "fail" for check in checks),
+        "checks": checks,
+    }
+
+
+def _verify_weights(root: Path, add: Any) -> None:
+    weights = [p for p in root.rglob("*") if p.suffix in _WEIGHT_SUFFIXES and p.is_file()]
+    if not weights:
+        add("权重非空", "fail", "目录里没有任何权重文件")
+        return
+    largest = max(weights, key=lambda p: p.stat().st_size)
+    if largest.stat().st_size <= 0:
+        add("权重非空", "fail", f"全部权重文件都是 0 字节（{len(weights)} 个）")
+        return
+    add("权重非空", "pass", f"{largest.name} {largest.stat().st_size / 1024 / 1024:.1f}MB")
+
+
+def _verify_snapshot_revision(cache: Path, root: Path | None, add: Any) -> None:
+    """快照目录名必须是 40 位提交号，且与 refs/main 一致。
+
+    真机形态：``models--Systran--faster-whisper-medium/snapshots/main`` + 4 字节的
+    ``refs/main``——下载没解析到提交号就收工了，这种缓存随时可能少文件。
+    """
+    name = root.name if root is not None else ""
+    ref = cache / "refs" / "main"
+    content = ref.read_text(encoding="utf-8").strip() if ref.is_file() else ""
+    if len(name) != 40 or any(char not in _HEX for char in name):
+        add("快照提交号", "fail", f"快照目录名不是提交号：{name or '（无）'}")
+        return
+    if content != name:
+        add("快照提交号", "fail", f"refs/main={content!r} 与快照 {name} 不一致")
+        return
+    add("快照提交号", "pass", name[:12])
+
+
+def _verify_manifest(cache: Path, root: Path | None, add: Any) -> None:
+    """HF 的 ``trees/<rev>.json`` 是逐文件对账的依据；没有它只能信「文件在」。"""
+    rev = root.name if root is not None else ""
+    if (cache / "trees" / f"{rev}.json").is_file():
+        add("下载清单", "pass", f"trees/{rev[:12]}.json")
+    else:
+        add("下载清单", "warn", "无 trees 清单，无法逐文件对账（可能是手动放置）")
+
+
+def _verify_residue(scope: Path, add: Any) -> None:
+    leftovers = list(scope.rglob("*.incomplete"))
+    if leftovers:
+        total = sum(p.stat().st_size for p in leftovers) / 1024 / 1024
+        add("中断残留", "fail", f"{len(leftovers)} 个 .incomplete 半截文件（{total:.0f}MB）")
+        return
+    add("中断残留", "pass", "无 .incomplete 残留")
+
+
+def _looks_like_assets(path: Path) -> bool:
+    """目录里确实放着模型：HF 缓存骨架，或任一权重文件。锁目录/空壳目录不算。"""
+    if (path / "snapshots").is_dir() or (path / "blobs").is_dir():
+        return True
+    return any(f.suffix in _WEIGHT_SUFFIXES for f in path.rglob("*") if f.is_file())
+
+
+def _verify_unique_path(models_dir: Path, base: Path, cache: Path | None, add: Any) -> None:
+    """同一份缓存出现在第二个路径：引擎只会读登记路径那份，另一份纯占磁盘。
+
+    只数「目录里真有模型」的：本机 ``models/.locks/models--…`` 与登记项同名却是 hf_hub 的空锁
+    目录，按名字判重复会把每个正常模型都报成脏。
+    """
+    probe = cache.name if cache is not None else base.name
+    own = cache if cache is not None else base
+    others = [
+        path
+        for path in models_dir.rglob(probe)
+        if path != own and _looks_like_assets(path)
+    ]
+    if others:
+        shown = ", ".join(str(o) for o in others[:2])
+        add("唯一路径", "warn", f"另有 {len(others)} 处同名缓存：{shown}")
+        return
+    add("唯一路径", "pass", "仅登记路径一份")
 
 
 def list_models(models_dir: Path) -> list[dict[str, Any]]:

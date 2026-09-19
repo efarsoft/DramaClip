@@ -78,17 +78,24 @@ def stub_download(
         watchdog.join(5.0)
 
 
-def _download(context: SimpleNamespace, stub: _StubDownload) -> str:
+def _download(
+    context: SimpleNamespace, stub: _StubDownload, model_id: str = _MODEL_ID
+) -> str:
     """跑一次 models.download，返回 job_id（顺带登记本次起的看门狗线程）。
 
     看门狗是 api/models.py 内部起的，起线程发生在 download() 返回之前，
     所以调用前后各取一次线程快照即可精确拿到本次那一条。
     """
     before = {t.name for t in threading.enumerate()}
-    job_id = str(models_api.download(context, {"model_id": _MODEL_ID})["job_id"])
-    stub.watchdogs.extend(
-        t for t in threading.enumerate() if t.name not in before and t.name.startswith("dl-watch-")
-    )
+    try:
+        job_id = str(models_api.download(context, {"model_id": model_id})["job_id"])
+    finally:
+        # 无论成功还是断言失败都要登记：漏登记的看门狗会带着已关闭的连接活到下一个用例。
+        stub.watchdogs.extend(
+            t
+            for t in threading.enumerate()
+            if t.name not in before and t.name.startswith("dl-watch-")
+        )
     return job_id
 
 
@@ -152,6 +159,19 @@ def test_sweep_interrupted_fails_crashed_download(
     assert job is not None
     assert job["status"] == "failed"
     assert job["error"] == "服务中断"
+
+
+def test_download_rejects_a_model_without_any_source(
+    memory_db: sqlite3.Connection, tmp_path: Path, stub_download: _StubDownload
+) -> None:
+    """没有下载源还点下载：明确拒绝并指向「导入」，而不是拼出一个坏 URL。"""
+    from dramaclip.transport.rpc import RpcDomainError
+
+    context = _context(memory_db, tmp_path)
+    with pytest.raises(RpcDomainError) as exc:
+        _download(context, stub_download, "sherpa-melo-zh")
+    assert "导入" in str(exc.value)
+    assert stub_download.calls == [], "无源模型不得走到下载器"
 
 
 def test_download_never_touches_the_network(

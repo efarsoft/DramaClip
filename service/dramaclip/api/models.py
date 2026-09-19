@@ -1,4 +1,4 @@
-"""models 命名空间：list / download / scan（本地导入）/ delete。"""
+"""models 命名空间：list / download / verify（资产体检）/ scan（本地导入）/ delete。"""
 
 from __future__ import annotations
 
@@ -35,6 +35,7 @@ def register(router: Router, context: AppContext) -> None:
     router.register("models.list", lambda _params: list_models(context))
     router.register("models.download", lambda params: download(context, params))
     router.register("models.scan_local", lambda params: scan_local(context))
+    router.register("models.verify", lambda params: verify(context, params))
     router.register("models.runtime_status", lambda params: runtime_status(context, params))
     router.register("models.install_runtime", lambda params: install_runtime(context, params))
     router.register("models.delete", lambda params: delete(context, params))
@@ -53,12 +54,40 @@ def list_models(context: AppContext) -> list[dict[str, Any]]:
     return items
 
 
+def verify(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:
+    """资产体检报告：给 model_id 报那一项，不给则报所有已落盘的。
+
+    为什么批量只覆盖已安装：总览页一次拉全，把 11 个未安装项逐条报「目录不存在」是噪声
+    ——它们的状态在 models.list 里已经有了。指定 model_id 时未安装照样回完整报告，
+    体检弹窗要能告诉业主「缺哪一项」而不是弹个异常。
+    """
+    models_dir = context.data_dir / "models"
+    model_id = str(params.get("model_id") or "")
+    if model_id:
+        spec = downloader.spec_by_id(model_id)
+        if spec is None:
+            raise RpcDomainError(_ERR_MODEL_NOT_FOUND, f"未知模型: {model_id}")
+        specs: list[registry.ModelSpec] = [spec]
+    else:
+        specs = [
+            spec
+            for spec in registry.builtin_specs()
+            if registry.detect_status(models_dir, spec)["status"] == "installed"
+        ]
+    return [registry.verify(models_dir, spec) for spec in specs]
+
+
 def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     model_id = str(params.get("model_id", ""))
     source = str(params.get("source") or "auto")
     spec = downloader.spec_by_id(model_id)
     if spec is None:
         raise RpcDomainError(_ERR_MODEL_NOT_FOUND, f"未知模型: {model_id}")
+    if not spec.sources():
+        # 无源不等于可下载：拼出空 repo 的 URL 只会以一堆重试收场，指回导入这条路。
+        raise RpcDomainError(
+            _ERR_MODEL_STATE, f"{spec.name} 无自动下载源，请用「导入模型」放入 {spec.placement}"
+        )
     if source != "auto" and source not in dict(spec.sources()):
         raise RpcDomainError(_ERR_MODEL_STATE, f"{spec.name} 不支持来源 {source}")
     models_dir = context.data_dir / "models"

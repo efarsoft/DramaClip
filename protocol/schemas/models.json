@@ -68,6 +68,39 @@
               "web_url": { "type": "string" }
             }
           }
+        },
+        "engine_ready": {
+          "type": "boolean",
+          "description": "该引擎是否真接进了工厂：false = 储备资产，不可当可用能力展示"
+        }
+      }
+    },
+    "VerifyCheck": {
+      "type": "object",
+      "required": ["name", "status"],
+      "properties": {
+        "name": { "type": "string" },
+        "status": { "type": "string", "enum": ["pass", "warn", "fail", "skip"] },
+        "detail": { "type": "string" }
+      }
+    },
+    "VerifyReport": {
+      "type": "object",
+      "required": ["model_id", "name", "kind", "engine", "engine_ready", "ok", "checks"],
+      "properties": {
+        "model_id": { "type": "string" },
+        "name": { "type": "string" },
+        "kind": { "type": "string" },
+        "engine": { "type": "string" },
+        "engine_ready": { "type": "boolean" },
+        "path": { "type": "string" },
+        "ok": {
+          "type": "boolean",
+          "description": "任一 check 为 fail 即 false"
+        },
+        "checks": {
+          "type": "array",
+          "items": { "$ref": "#/x-models/VerifyCheck" }
         }
       }
     }
@@ -134,6 +167,25 @@
           "total": {
             "type": "integer"
           }
+        }
+      }
+    },
+    {
+      "name": "models.verify",
+      "summary": "资产体检：目录/必需文件/权重/快照提交号/下载清单/中断残留/唯一路径逐项判据",
+      "params": {
+        "type": "object",
+        "properties": {
+          "model_id": {
+            "type": "string",
+            "description": "缺省 = 批量体检所有已落盘模型"
+          }
+        }
+      },
+      "result": {
+        "type": "array",
+        "items": {
+          "$ref": "#/x-models/VerifyReport"
         }
       }
     },
