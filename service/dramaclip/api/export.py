@@ -259,7 +259,7 @@ def render_export(
     *,
     report: Callable[[float, str], None],
 ) -> Path:
-    """渲染核心：剪辑→遮罩→字幕→编码→写成品记录（失败抛异常，不管理 job）。
+    """渲染核心：剪辑→字幕→编码→写成品记录（失败抛异常，不管理 job）。
     """
     export_id = run.export_id
     project_id = run.project_id
