@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dramaclip"
-version = "2.0.0"
+version = "1.1.0-RC"
 description = "DramaClip 本地服务（分析/解说/字幕/消重/TTS/存储）"
 requires-python = ">=3.12"
 license = { text = "MIT" }

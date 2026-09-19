@@ -1,6 +1,6 @@
 {
   "name": "@dramaclip/protocol",
-  "version": "2.0.0",
+  "version": "1.1.0-RC",
   "private": true,
   "description": "DramaClip 三端契约唯一真相源（schema 权威 + TS 类型）",
   "license": "MIT",
