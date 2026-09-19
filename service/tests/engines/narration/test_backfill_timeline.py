@@ -192,7 +192,7 @@ def test_script_plan_stays_renderable_after_voicing(
 def test_backfill_past_the_source_end_is_rejected_not_truncated(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """回填把段尾推出源片末尾：这条方案必须失败，不能出成片。
+    """回填把段尾推出源片末尾、且往前挪就会和上一段重叠：这条方案必须失败。
 
     真机实测（bundled ffmpeg 8.1.1，源 6.mp4=76.86s、9s 干音）：窗口 70.86→79.86
     退码 **0**，产物视频 6.07s / 音频 6.03s——9 秒旁白被从中间掐掉；窗口
@@ -200,7 +200,10 @@ def test_backfill_past_the_source_end_is_rejected_not_truncated(
     会警告，所以唯一的拦截点在这里（业主裁决：改所见所闻的一律失败，不截断）。
     """
     plan = _plan(("ep1", 186.0, 192.0, "ducked"), ("ep1", 192.0, 197.0, "ducked"))
-    with pytest.raises(RuntimeError, match=r"越过源集末尾.*197\.20.*192\.20.*超出 5\.00"):
+    with pytest.raises(
+        RuntimeError,
+        match=r"越过源集末尾.*197\.20.*192\.20.*超出 5\.00.*止于 192\.20s.*重播画面",
+    ):
         _voice(
             monkeypatch,
             tmp_path,
@@ -208,6 +211,15 @@ def test_backfill_past_the_source_end_is_rejected_not_truncated(
             {"n0": 6.2, "n1": 5.0},
             {"ep1": 192.2},
         )
+
+
+def test_a_narration_longer_than_the_whole_episode_says_so(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """没有上一段可撞时，越界只可能是文案比整集还长：原因要说清，别赖回填。"""
+    plan = _plan(("ep1", 0.0, 1.0, "ducked"))
+    with pytest.raises(RuntimeError, match=r"越过源集末尾.*比整集素材还长"):
+        _voice(monkeypatch, tmp_path, plan, {"n0": 30.0}, {"ep1": 26.0})
 
 
 def test_an_original_segment_pushed_past_the_source_is_rejected_too(
@@ -233,3 +245,45 @@ def test_unknown_source_duration_fails_instead_of_skipping_the_check(
     for missing in ({}, {"ep1": 0.0}):
         with pytest.raises(RuntimeError, match="没有源集时长"):
             _voice(monkeypatch, tmp_path, plan, {"n0": 1.0}, missing)
+
+
+def test_the_tail_beat_is_pulled_back_onto_the_material_instead_of_being_cut(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """末尾那条旁白装不进剩余素材时，先往前挪（真机 896cd284 的形状），不是截音。
+
+    库里那条方案的最后一段起点正好等于源长（192.20/192.20），它前面一段在 68.19s
+    结束——中间空着 124s，往前挪既不放重画面也不动文案，是唯一不损失所见所闻的解。
+    """
+    plan = _plan(
+        ("ep1", 59.24, 68.19, "narration"),
+        ("ep1", 192.2, 197.2, "narration"),
+    )
+    result = _voice(
+        monkeypatch, tmp_path, plan, {"n0": 8.95, "n1": 6.03}, {"ep1": 192.2}
+    )
+    _assert_source_never_runs_backwards(result)
+    assert [(s.start, s.end) for s in result.timeline] == [
+        (59.24, 68.19),
+        (186.17, 192.2),
+    ], "末段应贴着源末尾起，长度仍等于旁白实测 6.03s"
+
+
+def test_a_pulled_back_tail_leaves_later_episodes_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """收口只动这一集：别的集的游标不能被末段的平移带偏。"""
+    plan = _plan(
+        ("ep-a", 190.0, 192.0, "narration"),
+        ("ep-b", 5.0, 9.0, "narration"),
+    )
+    result = _voice(
+        monkeypatch,
+        tmp_path,
+        plan,
+        {"n0": 6.0, "n1": 4.0},
+        {"ep-a": 192.2, "ep-b": 30.0},
+    )
+    _assert_source_never_runs_backwards(result)
+    assert _windows(result) == [("ep-a", 186.2, 192.2), ("ep-b", 5.0, 9.0)]
+

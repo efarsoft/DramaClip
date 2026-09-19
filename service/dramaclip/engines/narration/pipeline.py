@@ -251,7 +251,11 @@ def _assert_within_source(
     窗口 70.86→79.86 退码 **0**、产物视频 6.07s / 音频 6.03s，旁白被从中间掐掉；
     窗口 76.86→82.86（起点即 EOF）退码仍 0、产物 262 字节无流。渲染层既不报错也不
     警告，所以这里不拦就是静默出坏片（业主裁决：改所见所闻的一律失败，不做截断）。
+
+    走到这里说明回填的尾部收口（`synthesize_narration_texts` 里那句「整段往前挪到贴着
+    集尾」）已经让过位了：再往前就撞上同集的上一段。所以文案与长度都不动，判失败。
     """
+    prev_end: dict[str, float] = {}
     for index, segment in enumerate(timeline):
         episode_id = str(segment["episode_id"])
         limit = source_durations.get(episode_id, 0.0)
@@ -262,14 +266,23 @@ def _assert_within_source(
                 "也不能拿「查不了」当「没问题」"
             )
         end = float(segment["end"])
+        floor = prev_end.get(episode_id)
+        prev_end[episode_id] = end
         if end <= limit + _SOURCE_FIT_TOL_S:
             continue
         slot = segment.get("narration_id")
         label = f"旁白段 {slot}" if slot else f"原声段 #{index}"
+        # 为什么不挪了：往前贴集尾会撞上同集的上一段（画面重播=业主立案③），
+        # 而这一集的第一段已经没有"上一段"可撞，说明旁白比整集素材还长。
+        stuck = (
+            f"往前挪到贴着集尾就会和上一段（止于 {floor:.2f}s）重叠，等于重播画面"
+            if floor is not None and floor > 0
+            else "这一段比整集素材还长，挪到集头也放不下"
+        )
         raise RuntimeError(
             f"配音回填后画面窗口越过源集末尾：{episode_id} 的{label} 要播到 "
             f"{end:.2f}s，源集时长只有 {limit:.2f}s（超出 {end - limit:.2f}s）"
-            " —— 文案比素材剩下的长度还长，这条方案判失败而不是把旁白截掉"
+            f" —— {stuck}，这条方案判失败而不是把旁白截掉"
         )
 
 
@@ -323,14 +336,27 @@ def synthesize_narration_texts(
     cursor: dict[str, float] = {}
     for segment in timeline:
         episode_id = str(segment["episode_id"])
-        start = max(float(segment["start"]), cursor.get(episode_id, 0.0))
+        floor = cursor.get(episode_id, 0.0)
+        start = max(float(segment["start"]), floor)
         if segment["audio"] in ("narration", "ducked"):
             # ducked（全片解说全程压底旁白）与 narration 同权：两者都要回填时长与解说字幕
             _audio_path, text, duration = voiced[str(segment["narration_id"])]
             segment["subtitle_text"] = text
-            end = start + duration
+            length = duration
         else:
-            end = start + (float(segment["end"]) - float(segment["start"]))
+            length = float(segment["end"]) - float(segment["start"])
+        # 尾部收口：实测比剩余素材长时，整段往前挪到贴着集尾——这段的文案与长度都不动，
+        # 换的只是压在它下面的画面。挪不动（再往前就和上一段重叠=画面重播）就照原样
+        # 交给 `_assert_within_source` 判死，不截音也不截画面。
+        # 为什么"段尾正好等于源末尾"是安全的：真机实测（bundled ffmpeg 8.1.1，源
+        # `1.mp4` 现量 192.200s，真 TTS 干音 6.350s，命令由 `cut_segment_args` 生成）
+        # 窗口 185.85→192.20 出片视频 6.367s / 音频 6.371s，与同一干音在素材中段
+        # 20.00→26.35 的产物逐毫秒一致；而起点即 EOF 的越界窗口退码仍 0、262 字节无流。
+        # 收口损失的只有"这一段配哪几秒画面"，没有一帧声音被丢掉。
+        limit = source_durations.get(episode_id, 0.0)
+        if 0 < limit < start + length and limit - length >= floor:
+            start = limit - length
+        end = start + length
         segment["start"] = round(start, 3)
         segment["end"] = round(end, 3)
         cursor[episode_id] = end
