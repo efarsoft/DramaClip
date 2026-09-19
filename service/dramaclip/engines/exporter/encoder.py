@@ -108,6 +108,11 @@ _SEGMENT_PEAK_CEILING_DBFS = -9.0
 _SEGMENT_SAMPLE_RATE = 48000
 _SEGMENT_CHANNEL_LAYOUT = "stereo"
 
+# 压底段的原声音量（旁白段 10% / 全片衬底段 8%）。真机门禁按名字读这两个数——它要用同一个
+# 值算出该段的预测响度再去量实测，所以音量只在这里定义一次。写成字符串是因为它直接拼进滤镜。
+_NARRATION_BED_VOLUME = "0.1"
+_DUCKED_BED_VOLUME = "0.08"
+
 
 def _audio_format_filter() -> str:
     """段级音频格式滤镜串——两条分支（含 amix 的两路输入）共用的**唯一**一处构造。
@@ -190,7 +195,11 @@ def cut_segment_args(
         # 求和之后必须挂限幅器：normalize=0 也把 amix 那 6 dB 的意外余量一起去掉了，
         # 旁白 + 原声可以直接冲过 0 dBFS。滤镜选型与 `level=disabled` / `latency=true`
         # 为什么不可省，见 `_peak_ceiling_filter`；实测数字见 test_mix。
-        bg_volume = "0.1" if audio == "narration" else "0.08"
+        #
+        # 这两个音量真机门禁按名字读（scripts/verify_modes.py 逐段核对滤镜里真的写了
+        # volume=，并按它算出"这一段应当有多响"去量实测）：写成字面量的话，改了这里只有
+        # 成片听得出差别，而那是业主立案④「解说与原声同音量叠放」的形状。
+        bg_volume = _NARRATION_BED_VOLUME if audio == "narration" else _DUCKED_BED_VOLUME
         args += ["-i", tts_audio]
         args += [
             "-filter_complex",

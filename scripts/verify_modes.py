@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -73,6 +74,26 @@ EXPECT_NARRATION = {
 MIN_MEAN_VOLUME_DB = -70.0  # 近乎静音的判据：旁白整条丢失会落在这里
 MAX_FREEZE_S = 2.0  # 任一静止段超过这么久即判失败
 
+# 设计上"全程压底"的模式：`engines/narration/modes_w8.py::build_full` 给每一段都写
+# `audio="ducked"`，所以这个模式的时间轴里不该出现原声直通段。业主立案④的排查项原话是
+# "确认 narration 模式下 original 段全部 ducked"——那正是这段判据要钉住的东西。
+ALL_DUCKED_MODES = {"full_narration"}
+
+# 语音避让的段级声学判据（业主立案④「解说与原声同音量叠放」）：混音段的实测响度与
+# 「旁白 + 按声明音量压底的原声」两者功率相加的**预测值**之差（下称残差），允许偏离这么多 dB。
+# 两侧都是真机量的（素材：小小球神不好惹；TTS=kokoro；full_narration 全部 8 段，
+# 干音 ≈−25 LUFS、源窗口 −10.8…−5.2 LUFS，正是"原声比解说响 15–20 dB"的难素材）：
+#   · 压底按声明生效（volume=0.08）：残差 −0.87 … −0.05 dB；换一版重新生成的 8 段方案
+#     独立复跑，落 −0.92 … −0.17 dB（门禁表格里那一列就是它的带符号最大值）；
+#   · 压底彻底失效（同一条生产命令，只把 volume=0.08 换成 1.0）：残差 +8.83 … +9.91 dB。
+# 阈值取 2.0：两轮合格侧最差 0.92 之上留一倍余量，失效侧最近 8.83 之下还有 6.8 dB。
+# 为什么不用"混音段比干音响多少 dB"当判据：同一批段实测 0.50…2.00 dB，而它的上界完全由
+# 素材热度决定（源越响、干音越轻，压底完全正确也能顶过 3 dB）——换个剧就假红。参照物带上
+# 源窗口才与素材无关，这也是 `_check_ducking` 要量第三个数的唯一理由。
+# 每次跑打出的「压底残差」列是本轮 |残差| 最大那一段的带符号值，逐段数值进 summary.json 的
+# `duck_residuals`；要改这个数先看那一列。
+DUCK_RESIDUAL_TOL_DB = 2.0
+
 # 编排来源预期：文案真值化（P-1.5）之后，除零加工两模式外必须是 LLM 成稿。
 # 这张表不是抄清单，是从代码事实推出来的：
 #   · `api/narration.py::_NO_TTS_MODES` 恰好是 raw_clip / subtitle_flow，两者不产旁白槽位，
@@ -117,12 +138,24 @@ def _capturing_cut_args(*args: Any, **kw: Any) -> list[str]:
     result = _ORIG_CUT_ARGS(*args, **kw)
     audio = str(kw.get("audio") or (args[3] if len(args) > 3 else ""))
     tts = kw.get("tts_audio")
+    filter_complex = ""
+    if "-filter_complex" in result:
+        filter_complex = str(result[result.index("-filter_complex") + 1])
     CAPTURED.append({
         "audio": audio,
         "has_tts_input": bool(tts),
         "tts_path": str(tts) if tts else None,
         "mixed": "-filter_complex" in result,
         "cmd_tail": result[-6:],
+        # 压底音量、段文件与**源窗口**都在这一段落地：音量证明滤镜真写了 volume=，
+        # 段文件是测量对象，源窗口给出"压底之前那层原声有多响"——业主立案④的声学
+        # 判据少这三样里的任何一样都立不起来（理由见 `_check_ducking`）。
+        # `-i` 在这条命令里出现两次（源、旁白），`index` 取到的第一个就是源。
+        "filter_complex": filter_complex,
+        "out_path": str(result[-1]),
+        "source": str(result[result.index("-i") + 1]),
+        "start": float(result[result.index("-ss") + 1]),
+        "end": float(result[result.index("-to") + 1]),
     })
     return result
 
@@ -233,6 +266,35 @@ def ebur128(video: Path) -> tuple[float | None, float | None]:
                     except (ValueError, IndexError):
                         pass
     return integrated, peak
+
+
+def source_window_lufs(video: Path, start: float, end: float) -> float | None:
+    """只量源素材某一个区间的 R128（`-vn` 不重编码，几百毫秒一趟）。
+
+    压底判据的第三条腿：不拿"这一段的原声本身有多响"当参照，就没有办法把
+    "原声比解说响 20 dB 的素材"和"压底没生效"分开（见 `DUCK_RESIDUAL_TOL_DB`）。
+    区间参数与 `cut_segment_args` 同形（`-ss`/`-to` 都在 `-i` 之前，都是输入时间），
+    否则量的就不是渲染吃进去的那一段。
+    """
+    proc = sh([FFMPEG, "-hide_banner", "-nostats", "-ss", f"{start:.3f}", "-to", f"{end:.3f}",
+               "-i", str(video), "-vn", "-af", "ebur128=peak=true:framelog=quiet",
+               "-f", "null", "-"])
+    for line in proc.stderr.splitlines():
+        if line.strip().startswith("I:"):
+            try:
+                return float(line.split("I:")[1].strip().split()[0])
+            except (ValueError, IndexError):
+                return None
+    return None
+
+
+def power_sum_db(*levels: float) -> float:
+    """若干路声音按功率相加后的响度（dB）。
+
+    混音不是取最大也不是取平均：`amix=normalize=0` 就是把样本相加，所以"这一段应当有多响"
+    = 各路先转功率、相加、再转回 dB。压底是否真生效，判的就是这个数和实测的差。
+    """
+    return 10.0 * math.log10(sum(10.0 ** (level / 10.0) for level in levels))
 
 
 def _fmt(value: Any, digits: int = 1) -> str:
@@ -348,12 +410,98 @@ def _mode_table_drift() -> list[str]:
     return problems
 
 
+def _check_ducking(mode: str, captured: list[dict[str, Any]]) -> tuple[list[str], dict[str, Any]]:
+    """语音避让（业主立案④「解说与原声同音量叠放」）的段级判据。
+
+    三道一起才成立：
+    · 编排道——设计上"全程压底"的模式（`ALL_DUCKED_MODES`）不允许有原声直通段。业主立案④
+      的原话形状就是"解说与原声同音量叠放"，而那是 timeline 段标记层面的问题：命令与声学
+      两条道都只查"已经混音的段"，一段压根没进混音分支的直通段从它们眼里是漏掉的。
+    · 命令道——每个 narration/ducked 段的滤镜串必须带 `volume=<encoder 声明值>`，即"声明的
+      音量真的写进了那条命令"。音量常量在 encoder 只定义一次、这里按名字读，所以它抓的是
+      滤镜少没少，而不是数值对不对——变异实测把 ducked 音量改成 1.0 时这一道照样绿，
+      那种失效只有声学道抓得住。
+    · 声学道——每段量三个真数：该段自己的 TTS 干音 N、该段**源窗口**的 R128 S（压底之前的
+      原声有多响）、混音产物 M。压底按声明生效时 M 应当等于 `power_sum_db(N, S + 20·lg v)`；
+      实测与它的差超过 `DUCK_RESIDUAL_TOL_DB` 就是压底没照声明做事。只查命令不够：volume=
+      写了但挂错链路、限幅器把整段钳了、amix 又偷偷归一化，都是听得见的事故、看不见的红。
+      参照物必须带上 S：单拿 M−N 当判据的话，它的上界由素材热度决定而不是由压底决定。
+
+    量不到一律算红、不算通过：段文件、干音与源窗口都在本次渲染摸得着的地方，读不到就是
+    判据覆盖为 0——那正是本门禁历史上「零值空转通过」的形状。
+    """
+    bed_volumes = {
+        "narration": encoder._NARRATION_BED_VOLUME,
+        "ducked": encoder._DUCKED_BED_VOLUME,
+    }
+    failures: list[str] = []
+    passthrough = [c for c in captured if c["audio"] == "original"]
+    if mode in ALL_DUCKED_MODES and passthrough:
+        failures.append(
+            f"{mode}: 设计上全程压底，却有 {len(passthrough)}/{len(captured)} 段"
+            "原声直通（audio=original，不走混音分支）—— 立案④的残留形状"
+        )
+    mixed = [c for c in captured if c["mixed"] and c["has_tts_input"]]
+    residuals: list[float] = []
+    for record in mixed:
+        segment = Path(str(record["out_path"]))
+        declared = bed_volumes.get(str(record["audio"]))
+        if declared and f"volume={declared}" not in str(record["filter_complex"]):
+            failures.append(
+                f"{mode}: 段 {segment.name}（角色 {record['audio']}）滤镜里没有 "
+                f"volume={declared} —— 压底参数没落地"
+            )
+        dry = Path(str(record["tts_path"]))
+        source = Path(str(record["source"]))
+        if not segment.is_file() or not dry.is_file() or not source.is_file():
+            failures.append(f"{mode}: 量不到压底（{segment.name} / {dry.name} /"
+                            f" {source.name} 有不在的）")
+            continue
+        voiced, _ = ebur128(segment)
+        dry_lufs, _ = ebur128(dry)
+        bed_lufs = source_window_lufs(source, float(record["start"]), float(record["end"]))
+        if voiced is None or dry_lufs is None or bed_lufs is None:
+            failures.append(f"{mode}: {segment.name} 三处响度没量齐（段={voiced}"
+                            f" 干音={dry_lufs} 源窗口={bed_lufs}），压底判据本轮不可信")
+            continue
+        if declared is None:
+            failures.append(f"{mode}: {segment.name} 角色 {record['audio']} 没有声明压底音量，"
+                            "压底判据量不了它")
+            continue
+        bed_gain = 20.0 * math.log10(float(declared))
+        residuals.append(voiced - power_sum_db(dry_lufs, bed_lufs + bed_gain))
+    if mixed and not residuals:
+        failures.append(f"{mode}: {len(mixed)} 段混音一段都没量到 —— 本行压底结论无效")
+    worst = max(residuals, key=abs) if residuals else None
+    if worst is not None and abs(worst) > DUCK_RESIDUAL_TOL_DB:
+        # 不拿方向当诊断写进结论：正残差实测是压底失效（+8.83…+9.91），但负残差既可能是
+        # amix 偷偷归一化、也可能是这条段本来就热到撞上限幅器——三种都是听得见的事故，
+        # 区分它们要看的不是符号而是 `duck_residuals` 逐段值（全体一致 = 命令级问题，
+        # 个别段炸开 = 素材级）。这里只负责把"偏离了声明"报出来。
+        failures.append(
+            f"{mode}: 混音段实测响度与「干音 + 按声明音量压底的原声」的预测值最大偏差 "
+            f"{worst:+.2f} dB（容差 ±{DUCK_RESIDUAL_TOL_DB} dB，两侧实测值见该常量注释）"
+            " —— 压底没照声明做事"
+        )
+    return failures, {
+        "duck_segments": len(mixed),
+        "duck_measured": len(residuals),
+        "duck_residuals": [round(r, 2) for r in residuals],
+        "duck_max_residual_db": None if worst is None else round(worst, 2),
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--media", default=r"D:\BaiduNetdiskDownload\小小球神不好惹")
     ap.add_argument("--modes", default="full_narration", help="逗号分隔，或 all")
     ap.add_argument("--out", default="")
     ap.add_argument("--job-timeout", type=float, default=1800.0)
+    ap.add_argument(
+        "--require-cross-episode",
+        action="store_true",
+        help="每部成片必须真的用到 ≥2 集素材（P-2a 定案做真跨集；默认只记录不判）",
+    )
     args = ap.parse_args()
 
     modes = ALL_MODES if args.modes == "all" else [m.strip() for m in args.modes.split(",")]
@@ -524,6 +672,12 @@ def main() -> int:
         tts_ok = sum(1 for t in texts
                      if t.get("audio_path") and Path(str(t["audio_path"])).is_file()
                      and Path(str(t["audio_path"])).stat().st_size > 0)
+        # 跨集度只在这一处定义：时间轴上的不重复集数。业主对这条的定案是"不做强制守卫"
+        # （不拿它判红），所以默认走记录——但记录也得有个唯一来源，否则"看起来跨集了"这种
+        # 印象会被当成事实。真机实测（2026-09-19）：full_narration 8 段跨 2 集、
+        # intro_narration 60 段跨 2 集、ultra_short_hook 3 段只用 1 集——开关管的就是最后那种。
+        episodes_used = len({str(s.get("episode_id")) for s in timeline
+                             if s.get("episode_id")})
         # 量一次取两值：ebur128 每跑一遍就要把整片音频解码一次。
         integrated, true_peak = ebur128(clip)
         rec.update({
@@ -536,6 +690,7 @@ def main() -> int:
             "max_freeze_s": round(max_freeze_s(clip), 2),
             "planner": plan.get("planner"),
             "segments": len(timeline),
+            "episodes_used": episodes_used,
             "audio_roles": roles,
             "narration_texts": len(texts),
             "tts_files_ok": tts_ok,
@@ -624,6 +779,14 @@ def main() -> int:
         if rec["tts_files_missing"] or rec["tts_files_empty"]:
             failures.append(f"{mode}: 旁白音频文件缺失/为空 "
                             f"(missing={rec['tts_files_missing']}, empty={rec['tts_files_empty']})")
+        if args.require_cross_episode and rec["episodes_used"] < 2:
+            failures.append(
+                f"{mode}: 只用了 {rec['episodes_used']} 集素材，--require-cross-episode "
+                "要求成片真的跨集（默认不加这个开关，见上方注释）"
+            )
+        duck_failures, duck_rec = _check_ducking(mode, CAPTURED)
+        failures.extend(duck_failures)
+        rec.update(duck_rec)
         rows.append(rec)
 
     executor.shutdown(wait=True, cancel_futures=True)
@@ -633,7 +796,7 @@ def main() -> int:
         ("模式", 18, "<"), ("状态", 11, "<"), ("时长s", 8, ">"), ("均量dB", 9, ">"),
         ("LUFS", 8, ">"), ("峰dB", 8, ">"), ("冻结s", 7, ">"), ("来源", 11, ">"),
         ("段", 4, ">"), ("插桩", 5, ">"), ("TTS", 5, ">"), ("带旁白", 7, ">"),
-        ("已混音", 7, ">"), ("耗时s", 7, ">"),
+        ("已混音", 7, ">"), ("压底残差", 9, ">"), ("跨集", 6, ">"), ("耗时s", 7, ">"),
     ]
     print("".join(_pad(title, width, align) for title, width, align in columns))
     print("-" * sum(width for _, width, _ in columns))
@@ -648,7 +811,10 @@ def main() -> int:
             str(r.get("planner", "-")),
             f"{r.get('segments', 0)}", f"{r.get('segments_captured', 0)}",
             f"{r.get('tts_files_ok', 0)}", f"{r.get('segments_with_tts', 0)}",
-            f"{r.get('segments_mixed', 0)}", f"{r.get('elapsed_s', 0)}",
+            f"{r.get('segments_mixed', 0)}",
+            _fmt(r.get("duck_max_residual_db"), 2),
+            f"{r.get('episodes_used', 0)}",
+            f"{r.get('elapsed_s', 0)}",
         ]
         print("".join(
             _pad(value, width, align)
