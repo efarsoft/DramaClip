@@ -54,7 +54,7 @@ _EPISODE_INPUTS = [
 def test_write_script_episodes_multi() -> None:
     fake = FakeLLM(_payload())
     script = scriptwriter.write_script_episodes(
-        fake, _EPISODE_INPUTS, target_min_s=30, target_max_s=120,
+        fake, _EPISODE_INPUTS,
         angle_block="",
         project_name="剧"
     )
@@ -69,7 +69,7 @@ def test_write_script_episodes_empty_transcript_raises() -> None:
     empty = [{"number": 1, "duration": 60.0, "segments": []}]
     with pytest.raises(ValueError, match="无米下锅"):
         scriptwriter.write_script_episodes(
-            fake, empty, target_min_s=30, target_max_s=60,
+            fake, empty,
             angle_block="",
             project_name="剧"
         )
@@ -146,7 +146,7 @@ def test_prompt_keeps_raw_segments_by_episode() -> None:
         }
     ]
     scriptwriter.write_script_episodes(
-        fake, inputs, target_min_s=30, target_max_s=60,
+        fake, inputs,
             angle_block="",
             project_name="剧"
     )
