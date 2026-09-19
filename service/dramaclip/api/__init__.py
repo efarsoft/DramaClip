@@ -22,6 +22,7 @@ def build_router(context: AppContext, shutdown: Callable[[], None]) -> Router:
         settings,
         subtitle,
         system,
+        tts,
     )
 
     router = Router()
@@ -38,6 +39,7 @@ def build_router(context: AppContext, shutdown: Callable[[], None]) -> Router:
     settings.register(router, context)
     engine_configs.register(router, context)
     subtitle.register(router)
+    tts.register(router, context)
     models.register(router, context)
     jobs.register(router, context)
     return router

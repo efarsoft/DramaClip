@@ -23,6 +23,8 @@ import { DownloadSourceButton } from './ModelDownloadPopover';
 import { type ActiveCardProps, ActiveEngineCard } from './ActiveEngineCard';
 import { AssetLibrary } from './AssetLibrary';
 import { SettingSelect } from './SettingSelect';
+import { TtsPreviewButton } from './TtsPreviewButton';
+import { previewNotice } from './ttsPreview';
 import { useDownloadProgress } from './useDownloadProgress';
 import {
   TTS_ENGINES,
@@ -77,6 +79,20 @@ export function TtsTab({
         }}
         onChanged={onChanged}
         onVerify={onVerify}
+        renderPreview={(model) => {
+          const assetVoice = settings[voiceSettingKey(model.engine)] ?? '';
+          return (
+            <TtsPreviewButton
+              engine={model.engine}
+              voice={assetVoice}
+              blocked={previewNotice({
+                engine: model.engine,
+                voice: assetVoice,
+                state: assetState(model, reportFor(reports, model.model_id)),
+              })}
+            />
+          );
+        }}
       />
     </div>
   );
@@ -103,6 +119,7 @@ function ActiveCard({
   const report = active === undefined ? undefined : reportFor(reports, active.model_id);
   const state: AssetState | null =
     active === undefined ? (modelFree ? null : 'missing') : assetState(active, report);
+  const voice = settings[voiceSettingKey(engine)] ?? '';
   const card: ActiveCardProps = {
     domain: '配音 TTS',
     title: active?.name ?? (engine === '' ? '未选引擎' : ttsEngineLabel(engine)),
@@ -122,14 +139,41 @@ function ActiveCard({
     ),
     actions: cardActions(active, state, onChanged, onVerify),
     props: [
-      { label: '音色', value: <VoiceSelect engine={engine} settings={settings} onSave={onSave} /> },
+      {
+        label: '音色',
+        value: (
+          <VoiceRow engine={engine} voice={voice} state={state} settings={settings} onSave={onSave} />
+        ),
+      },
       { label: '引擎类型', value: ENGINE_KIND_LABEL[engine] ?? '未登记引擎' },
       { label: '磁盘实占', value: active === undefined ? '—' : formatBytes(active.size_bytes ?? 0) },
       { label: '生效时机', value: '保存后下次任务' },
     ],
-    footnote: VOICE_HINT[engine] ?? '换引擎后各自的音色互不覆盖',
+    footnote: `${VOICE_HINT[engine] ?? '换引擎后各自的音色互不覆盖'} · 试听是引擎原声，成片还要过响度归一`,
   };
   return <ActiveEngineCard {...card} />;
+}
+
+/** 音色与试听同处一格：换音色必然要再听一次，分成两格等于让人自己记着去点。 */
+function VoiceRow({
+  engine,
+  voice,
+  state,
+  settings,
+  onSave,
+}: {
+  engine: string;
+  voice: string;
+  state: AssetState | null;
+  settings: DomainTabProps['settings'];
+  onSave: DomainTabProps['onSave'];
+}): ReactElement {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'flex-start', gap: tokens.spaceSm }}>
+      <VoiceSelect engine={engine} settings={settings} onSave={onSave} />
+      <TtsPreviewButton engine={engine} voice={voice} blocked={previewNotice({ engine, voice, state })} />
+    </span>
+  );
 }
 
 function cardActions(

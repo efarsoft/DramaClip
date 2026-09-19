@@ -313,6 +313,8 @@ export interface ModelInfo {
   readonly status: string;
   readonly path?: string;
   readonly size_label?: string;
+  /** 磁盘实占字节（未安装为 0）；与标称 size_label 不是一回事。 */
+  readonly size_bytes?: number;
   readonly tier?: string;
   readonly speed?: number;
   readonly quality?: number;
@@ -340,6 +342,16 @@ export interface VerifyReport {
   /** 任一 check 为 fail 即 false。 */
   readonly ok: boolean;
   readonly checks: ReadonlyArray<VerifyCheck>;
+}
+
+/** tts.preview 返回体：产物是本机绝对路径，经 dramaclip:// 协议直接给 <audio> 播。 */
+export interface TtsPreviewResult {
+  readonly path: string;
+  /** ffprobe 实测秒数；服务端已保证 >0，否则报错而非返回空样本。 */
+  readonly duration_s: number;
+  readonly engine: string;
+  readonly voice: string;
+  readonly text: string;
 }
 
 /** 引擎配置（云端/服务端点多实例，单启用）。 */
@@ -470,6 +482,7 @@ export const METHOD_NAMES = [
   'settings.get',
   'settings.update',
   'settings.test_llm',
+  'tts.preview',
 ] as const;
 
 export const NOTIFICATION_NAMES = ['progress.update', 'log.append', 'models.download_progress'] as const;

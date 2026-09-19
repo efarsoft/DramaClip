@@ -25,6 +25,8 @@ export interface AssetRowProps {
   onActivate: (model: ModelInfo) => void;
   onChanged: () => void;
   onVerify: (modelId: string) => void;
+  /** 域自带的行内动作（配音 = 试听）：由调用方造好节点，这一行只管摆哪儿。 */
+  preview?: ReactElement;
   table?: boolean;
 }
 
@@ -36,6 +38,7 @@ export function AssetRow({
   onActivate,
   onChanged,
   onVerify,
+  preview,
   table = false,
 }: AssetRowProps): ReactElement {
   const [detail, setDetail] = useState(false);
@@ -69,6 +72,7 @@ export function AssetRow({
           onActivate={onActivate}
           onChanged={onChanged}
           onVerify={onVerify}
+          preview={preview}
         />
       </div>
       {detail && <VerifyDetail report={report} modelId={model.model_id} onVerify={onVerify} />}

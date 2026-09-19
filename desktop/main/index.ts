@@ -7,7 +7,7 @@ import { ServiceManager, type ServiceManagerOptions } from './services/service-m
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 
-// dramaclip:// 本地文件的响应类型（视频预览 + 图片封面）
+// dramaclip:// 本地文件的响应类型（视频预览 + 图片封面 + 配音试听）
 const CONTENT_TYPES: Record<string, string> = {
   mp4: 'video/mp4',
   webm: 'video/webm',
@@ -16,6 +16,8 @@ const CONTENT_TYPES: Record<string, string> = {
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   png: 'image/png',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
 };
 // dist-electron/main/index.js → 上三级即仓库根
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');

@@ -22,6 +22,7 @@ import type {
   ProjectGetResult,
   ScannedEpisode,
   ServiceEvent,
+  TtsPreviewResult,
   VerifyReport,
 } from '@dramaclip/protocol';
 
@@ -175,6 +176,12 @@ export const modelsApi = {
     rpc<VerifyReport[]>('models.verify', modelId === undefined ? {} : { model_id: modelId }),
   remove: (modelId: string): Promise<{ ok: boolean }> =>
     rpc<{ ok: boolean }>('models.delete', { model_id: modelId }),
+} as const;
+
+/** 配音试听：服务端合成一句短句并回本机路径，播放走 mediaUrl。 */
+export const ttsApi = {
+  preview: (engine: string, voice: string): Promise<TtsPreviewResult> =>
+    rpc<TtsPreviewResult>('tts.preview', { engine, voice }),
 } as const;
 
 export const jobsApi = {

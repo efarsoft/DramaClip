@@ -83,6 +83,7 @@ Router 不做 schema 校验，参数问题一律由各 handler 抛业务域码�
 | -32201 ~ -32204 | analysis | 任务不存在 / 无集 / 无分析结果 / 段非法 |
 | -32301 / -32302 | narration | 无分析结果 / 模式不支持 |
 | -32310 / -32311 | engine_configs | 参数或状态非法（含「启用中的配置不可删」） / 配置不存在 |
+| -32320 / -32321 | tts | 试听参数非法（引擎未接入工厂 / 文案空或超 60 字 / 音色会被引擎静默换掉 / 本地模型未下载） / 试听合成失败（含 0 字节产物、时长探不出来） |
 | -32401 | export | 编排方案不存在 |
 | -32406 | export | plan_ids 必须为非空数组 |
 | -32407 | export | 方案不可渲染（状态非 ready / 时间轴为空 / 旁白段缺配音或音频丢失） |
@@ -111,26 +112,27 @@ Router 不做 schema 校验，参数问题一律由各 handler 抛业务域码�
 | `system.health` | `{}` | `{status:"ok", uptime_s, gpu?, vram_free_mb?, disk_free_gb?, models_ok?}`（扩展字段供侧边栏/工作台系统状态） |
 | `system.shutdown` | `{}` | `{ok:true}`（Python 优雅退出） |
 
-### 已落地全集（P-1 收口实测：**46 个方法 / 10 个命名空间**）
+### 已落地全集（P-1 收口实测：**46 个方法 / 10 个命名空间**；2026-09-19 按工作树复测 54 / 11，含他人未提交改动）
 
 以 `Router.method_names` 与 `protocol/schemas/*.json` 的 `x-methods` 双向集合相等为准（两侧契约测试强制）。
 
 - `project.*`（11）：create / list / get / delete / rename / duplicate / scan_episodes（导入=扫描目录，返回逐文件时长/大小）/ dashboard_summary（工作台统计4卡）/ ensure_covers / reorder_episodes / **update_settings**（P-1 新增：项目级参数覆盖，键级合并，`null` 值=恢复该项默认）
 - `analysis.*`（7）：prescreen（阶段一预筛）/ start（阶段二全量）/ status / cancel / results / resync_semantic（语义增量刷新）/ update_asr（手工改写）
-- `narration.*`（4）：generate_plans（LLM 一次生成各模式文案与编排）/ list_plans / list_styles / produce
-- `export.*`（4）：start / **retry**（P-1 新增：复用原 export_id 覆盖写，仅 failed 可重试）/ list / list_works（跨项目作品库）
+- `narration.*`（6）：plan_variants（阶段③：为选中模式各产出 K 条方案，只规划不渲染）/ list_plans / get_plan（单条方案详情+成本账）/ list_styles / generate_titles（LLM 生成候选标题）/ update_titles（整表保存候选标题）
+- `export.*`（6）：submit（把已规划好的方案排队渲染，一条方案一个 job）/ **retry**（P-1 新增：复用原 export_id 覆盖写，仅 failed 可重试）/ list / list_works（跨项目作品库）/ get（单条导出记录）/ ensure_covers（补拍历史成片封面，幂等）
 - `jobs.*`（3，**P-1 新建命名空间**）：list（跨类型任务列表，`limit`/`active_only`，队列页数据源）/ get（单任务详情，含 error）/ cancel（统一取消入口，不可中断时如实回 `cancelling:false + reason`）
-- `models.*`（4）：list / download / scan_local（本地放置后重探测）/ delete
+- `models.*`（7）：list / download / scan_local（本地放置后重探测）/ delete / **verify**（D-P1 新增：资产体检报告，不给 model_id 时报全部已落盘项）/ runtime_status（CUDA 运行库安装态）/ install_runtime（下载并启用 CUDA 运行库，作业模式）
 - `engine_configs.*`（6）：list / create / update / delete / enable / test（按能力域多实例，单启用）
 - `settings.*`（3）：get / update / test_llm
 - `subtitle.*`（1）：list_presets（内置+用户合并视图，ADR-008）
+- `tts.*`（1，**D-P2 新建命名空间**）：preview（配音试听：用所选引擎+音色合成一句 ≤60 字短句，回本机音频路径；内容寻址缓存，不改设置、不下载模型、失败不换引擎）
 - `system.*`（3）：见上表
 
 **原案里规划但从未实现的方法**（不要按它们写客户端）：`project.open`（改为直接 `project.get`）、
-`subtitle.preview`、`tts.list_voices` / `tts.preview`（整个 tts 命名空间不存在）、
+`subtitle.preview`、`tts.list_voices`（音色目录在前端 `ttsVoices.ts`，未走 RPC）、
 `export.status` / `export.cancel`（状态与取消统一走 `jobs.get` / `jobs.cancel` + `progress.update`）、
 `models.cancel` / `models.import_local`（下载取消走 `jobs.cancel`；本地导入即 `models.scan_local`）、
-`narration.synthesize_tts` / `narration.get_plan`（分别为 `narration.produce` 的一环与 `narration.list_plans`）。
+`narration.synthesize_tts`（配音是 `export.submit` 渲染链路的一环，不再单独开方法）。
 
 ## 7. 通知事件
 

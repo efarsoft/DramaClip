@@ -3,7 +3,7 @@
  * 把装好的模型改成未落盘，卡片必须从「就绪」翻成「缺模型」，行内也不给「选为生效」——
  * 这条断言就是旧三张引擎卡写死 ok:true 的照妖镜。
  */
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ModelInfo, VerifyReport } from '@dramaclip/protocol';
 import { TtsTab } from '../TtsTab';
@@ -18,6 +18,10 @@ vi.mock('../../../services/client', () => ({
     remove: vi.fn(() => Promise.resolve({})),
     download: vi.fn(() => Promise.resolve({})),
   },
+  ttsApi: {
+    preview: vi.fn(() => Promise.resolve({ path: 'C:/x/tts-preview/edge-a.mp3', duration_s: 2.5, engine: 'edge', voice: 'v', text: 't' })),
+  },
+  mediaUrl: (path: string) => `dramaclip://local/${path}`,
   systemApi: { health: vi.fn(() => Promise.resolve({})) },
   runtimeApi: { status: vi.fn(() => Promise.resolve({ installed: true })), install: vi.fn(() => Promise.resolve({})) },
   revealInFolder: vi.fn(() => Promise.resolve({})),
@@ -80,6 +84,32 @@ describe('配音 TTS · 生效卡与资产库', () => {
     );
     expect(screen.getByText(/储备 · 待接入（1）/)).toBeTruthy();
     expect(screen.queryByText('IndexTTS2')).toBeNull();
+  });
+
+  it('试听挂在生效卡的音色行上；落盘的资产行各带一个，未落盘的不带', () => {
+    tts([model()], reportsOf(report()));
+    // 卡上 1 个 + 可用区那一行 1 个
+    expect(screen.getAllByText('试听')).toHaveLength(2);
+  });
+
+  it('卡上说明写破试听的口径：引擎原声，不等于成片响度', () => {
+    tts([model()], reportsOf(report()));
+    expect(screen.getByText(/引擎原声/)).toBeTruthy();
+  });
+
+  it('资产没下载 → 行内不给试听（点了也只会得到一声失败）', () => {
+    tts([model({ status: 'not_installed', size_bytes: 0 })], reportsOf());
+    expect(screen.getAllByText('试听')).toHaveLength(1);
+  });
+
+  it('储备资产（引擎未接入）展开后行内也不给试听', () => {
+    tts(
+      [model(), model({ model_id: 'indextts2', engine: 'indextts2', name: 'IndexTTS2', engine_ready: false })],
+      reportsOf(report()),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '展开' }));
+    expect(screen.getByText('IndexTTS2')).toBeTruthy();
+    expect(screen.getAllByText('试听')).toHaveLength(2);
   });
 });
 

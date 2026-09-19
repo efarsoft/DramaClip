@@ -1,4 +1,4 @@
-/** 资产行动作：未装给下载，已装才谈「选为生效」，体检/定位/删除只在已落盘后出现。 */
+/** 资产行动作：未装给下载，已装才谈试听与「选为生效」，体检/定位/删除只在已落盘后出现。 */
 import { App as AntdApp, Button, Popconfirm } from 'antd';
 import { DeleteOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import type { ReactElement } from 'react';
@@ -17,6 +17,7 @@ export function RowActions({
   onActivate,
   onChanged,
   onVerify,
+  preview,
 }: {
   model: ModelInfo;
   state: AssetState;
@@ -26,14 +27,15 @@ export function RowActions({
   onActivate: (model: ModelInfo) => void;
   onChanged: () => void;
   onVerify: (modelId: string) => void;
+  preview?: ReactElement;
 }): ReactElement {
   const installed = model.status === 'installed';
+  const wired = installed && model.engine_ready;
   return (
     <span style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, justifyContent: 'flex-end' }}>
       {!installed && <DownloadSourceButton model={model} onChanged={onChanged} />}
-      {installed && model.engine_ready && (
-        <ActivateButton model={model} state={state} report={report} onActivate={onActivate} />
-      )}
+      {wired && preview}
+      {wired && <ActivateButton model={model} state={state} report={report} onActivate={onActivate} />}
       {installed && (
         <InstalledActions
           model={model}

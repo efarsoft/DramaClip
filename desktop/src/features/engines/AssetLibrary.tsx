@@ -27,6 +27,8 @@ interface LibraryProps {
   onActivate: (model: ModelInfo) => void;
   onChanged: () => void;
   onVerify: (modelId: string) => void;
+  /** 域自带的行内动作（配音域放试听）：资产库不懂各域的事，只负责摆位置。 */
+  renderPreview?: ((model: ModelInfo) => ReactElement) | undefined;
 }
 
 type GroupProps = Omit<LibraryProps, 'models'> & { models: readonly ModelInfo[]; view: View };
@@ -40,13 +42,14 @@ export function AssetLibrary({
   onActivate,
   onChanged,
   onVerify,
+  renderPreview,
 }: LibraryProps): ReactElement {
   useDownloadSettled(onChanged);
   const [keyword, setKeyword] = useState('');
   const [view, setView] = useState<View>('list');
   const filtered = models.filter((model) => hits(model, keyword));
   const { usable, reserve } = partitionAssets(filtered);
-  const group = { reports, view, specs, activeModelId, onActivate, onChanged, onVerify };
+  const group = { reports, view, specs, activeModelId, onActivate, onChanged, onVerify, renderPreview };
   return (
     <PageSection title="资产库" extra={<LibraryToolbar keyword={keyword} view={view} onKeyword={setKeyword} onView={setView} onVerifyAll={onChanged} />}>
       {filtered.length === 0 ? (
@@ -133,6 +136,7 @@ function AssetGroup({
   onActivate,
   onChanged,
   onVerify,
+  renderPreview,
 }: GroupProps & { title: string; hint?: string; collapsible?: boolean }): ReactElement | null {
   const [open, setOpen] = useState(!collapsible);
   if (models.length === 0) return null;
@@ -158,6 +162,7 @@ function AssetGroup({
           onActivate={onActivate}
           onChanged={onChanged}
           onVerify={onVerify}
+          renderPreview={renderPreview}
         />
       )}
     </div>
@@ -215,6 +220,7 @@ function AssetList({
   onActivate,
   onChanged,
   onVerify,
+  renderPreview,
 }: GroupProps): ReactElement {
   const row = (model: ModelInfo, table: boolean) => (
     <AssetRow
@@ -226,6 +232,7 @@ function AssetList({
       onActivate={onActivate}
       onChanged={onChanged}
       onVerify={onVerify}
+      preview={renderPreview?.(model)}
       table={table}
     />
   );

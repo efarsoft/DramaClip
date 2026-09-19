@@ -22,10 +22,23 @@ class TtsEngine(Protocol):
 
 def audio_duration_s(path: Path) -> float:
     """探测音频时长（秒）。"""
+    return float(_ffprobe(path, "format=duration"))
+
+
+def audio_container(path: Path) -> str:
+    """探测落盘字节真实的容器名（ffprobe format_name）。
+
+    三个引擎各写各的原生容器（Edge=MP3，Kokoro/sherpa=WAV），文件名按扩展名决定
+    浏览器收到的 Content-Type——按 `.mp3` 猜等于给 WAV 挂个 MP3 的牌子。
+    """
+    return _ffprobe(path, "format=format_name")
+
+
+def _ffprobe(path: Path, entries: str) -> str:
     result = subprocess.run(  # noqa: S603
         [
             resolve_ffprobe(),
-            "-v", "error", "-show_entries", "format=duration",
+            "-v", "error", "-show_entries", entries,
             "-of", "csv=p=0", str(path),
         ],
         capture_output=True,
@@ -34,4 +47,4 @@ def audio_duration_s(path: Path) -> float:
         timeout=30,
         check=True,
     )
-    return float(result.stdout.strip())
+    return result.stdout.strip()

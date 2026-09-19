@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dramaclip.dev/protocol/tts.json",
+  "title": "tts 命名空间",
+  "namespace": "tts",
+  "x-methods": [
+    {
+      "name": "tts.preview",
+      "summary": "试听：用指定（缺省取当前生效）引擎+音色合成一句短句，返回本机音频路径供播放",
+      "params": {
+        "type": "object",
+        "properties": {
+          "engine": {
+            "type": "string",
+            "description": "kokoro | sherpa_melo | edge；缺省取设置项 tts.engine。未接入工厂的引擎直接报错，不换个引擎出声"
+          },
+          "voice": {
+            "type": "string",
+            "description": "该引擎的音色名；缺省取设置项 tts.voice.<engine>。引擎会静默回退的音色名直接报错（-32320）"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 60,
+            "description": "缺省为服务端固定试听短句（PREVIEW_TEXT）；上限 60 字——长文是出片不是试听"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["path", "duration_s", "engine", "voice", "text"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "合成产物的绝对路径（cache/tts-preview/ 下，按 引擎|音色|文案 内容寻址，可反复播）"
+          },
+          "duration_s": {
+            "type": "number",
+            "description": "ffprobe 实测秒数；≤0 视为失败并报错，不返回空样本"
+          },
+          "engine": { "type": "string" },
+          "voice": { "type": "string" },
+          "text": { "type": "string" }
+        }
+      }
+    }
+  ]
+}
