@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
 
+from dramaclip.engines.narration import scriptwriter
 from dramaclip.engines.narration.scriptwriter import Script, write_script_episodes
 
 _VALID_PAYLOAD: dict[str, Any] = {
@@ -41,10 +43,14 @@ class FakeLLM:
     def __init__(self, script: list[Any]) -> None:
         self.script = list(script)
         self.calls = 0
+        self.systems: list[str] = []
+        self.users: list[str] = []
 
-    def chat_json(self, _system: str, _user: str) -> dict[str, Any]:
+    def chat_json(self, system: str, user: str) -> dict[str, Any]:
         # 单元素脚本视为"每次都返回该结果"（write_script_episodes 内部会重试一次）
         self.calls += 1
+        self.systems.append(system)
+        self.users.append(user)
         item = self.script.pop(0) if len(self.script) > 1 else self.script[0]
         if isinstance(item, Exception):
             raise item
@@ -149,3 +155,58 @@ def test_no_transcript_raises() -> None:
             project_name="测试剧",
         angle_block="",
         )
+
+
+def _system_sent(**prompts: str) -> str:
+    llm = FakeLLM([dict(_VALID_PAYLOAD)])
+    write_script_episodes(
+        llm, _EPISODES, project_name="测试剧", angle_block="", prompts=prompts
+    )
+    return llm.systems[0]
+
+
+def test_default_system_carries_both_layers() -> None:
+    system = _system_sent()
+    assert "【解说基本功——逐条强制遵守】" in system
+    assert "start/end 必须取自转写台词的时间区间" in system
+
+
+def test_structure_override_replaces_only_the_structure() -> None:
+    """换掉结构指令不该把基本功层一起带走：两层各自独立才可分别调。"""
+    system = _system_sent(**{"prompt.scriptwriter_system": "只回 JSON。"})
+    assert system.startswith("只回 JSON。")
+    assert "start/end 必须取自转写台词的时间区间" not in system
+    assert "【解说基本功——逐条强制遵守】" in system
+
+
+def test_floor_override_replaces_the_floor() -> None:
+    """改基本功层必须真的换掉底线，而不是只换个标题、原文照旧跟在后面。"""
+    system = _system_sent(
+        **{"prompt.scriptwriter_fundamentals": "【解说基本功——逐条强制遵守】\n只准写短句。"}
+    )
+    assert "只准写短句。" in system
+    assert "悬念管理" not in system
+
+
+def test_saving_the_default_floor_verbatim_does_not_duplicate_it() -> None:
+    """界面上「原样存回默认」是最常见的误操作：正文重复会让模型看到两份互相矛盾的底线。"""
+    system = _system_sent(**{"prompt.scriptwriter_fundamentals": scriptwriter.FUNDAMENTALS})
+    for token in ("【解说基本功——逐条强制遵守】", "人称二选一", "悬念管理"):
+        assert system.count(token) == 1, token
+
+
+def test_trace_dumps_the_system_actually_sent(tmp_path) -> None:
+    """留痕写默认值＝排查时看到的是假账：改了提示词却仍显示原生版本。"""
+    llm = FakeLLM([dict(_VALID_PAYLOAD)])
+    trace = tmp_path / "llm_script.json"
+    write_script_episodes(
+        llm, _EPISODES,
+        project_name="测试剧",
+        angle_block="",
+        prompts={"prompt.scriptwriter_system": "只回 JSON。"},
+        trace_path=trace,
+    )
+    payload = json.loads(trace.read_text(encoding="utf-8"))
+    assert payload["system"] == llm.systems[0]
+    assert payload["system"].startswith("只回 JSON。")
+    assert payload["user"] == llm.users[0]

@@ -6,12 +6,12 @@ import { tokens } from '../../styles/theme';
 import { usePrompts } from './usePrompts';
 
 export function PromptsTab(): ReactElement {
-  const { prompts, editing, setEditing, draft, setDraft, saving, save, reset } = usePrompts();
+  const { prompts, editing, openEdit, closeEdit, draft, setDraft, saving, save, reset } = usePrompts();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
       <PromptHint />
       {(prompts ?? []).map((info) => (
-        <PromptCard key={info.key} info={info} onEdit={setEditing} onReset={reset} />
+        <PromptCard key={info.key} info={info} onEdit={openEdit} onReset={reset} />
       ))}
       <PromptEditor
         editing={editing}
@@ -21,9 +21,7 @@ export function PromptsTab(): ReactElement {
         onSave={() => {
           void save();
         }}
-        onClose={() => {
-          setEditing(null);
-        }}
+        onClose={closeEdit}
       />
     </div>
   );

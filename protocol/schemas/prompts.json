@@ -56,7 +56,7 @@
     },
     {
       "name": "prompts.save",
-      "summary": "保存提示词覆盖；空内容报 -32001",
+      "summary": "保存提示词覆盖并同步运行时快照；空内容报 -32001、超长报 -32002",
       "params": {
         "type": "object",
         "required": [
@@ -69,7 +69,8 @@
           },
           "text": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 20000
           }
         }
       },

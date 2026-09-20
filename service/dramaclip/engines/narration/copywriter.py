@@ -17,16 +17,25 @@ _MAX_LINE_CHARS = 60
 _OVERSIZE_TOLERANCE = 1.2  # 容忍 20% 溢出，再长即判不合格重问
 _ATTEMPTS = 2
 
-_SYSTEM_PROMPT = (
+_STRUCTURE_PROMPT = (
     "你是短剧推广解说编剧。下面给出若干旁白槽位，每个槽位标注了它承担的职责、"
     "覆盖的画面区间，以及该区间内的原片台词。为每个槽位各写一条解说文案。\n"
     '只输出 JSON：{"lines": [{"id": "槽位id", "text": "解说文案"}]}，不要其他文字。\n'
     f"硬性要求：lines 必须覆盖全部槽位 id（数量与 id 一字不差）；每条不超过 {_MAX_LINE_CHARS} 字；"
     "槽位的职责标注是契约：文案必须完成该槽位要做的事，不得答非所问；"
     "按给定顺序书写，相邻两条要能连读成一条故事线；鼓励在条尾留半句钩勾住下一条；"
-    "情节、细节、称谓只能来自给定台词，禁止编造台词之外的事件。\n"
-    + scriptwriter.FUNDAMENTALS
+    "情节、细节、称谓只能来自给定台词，禁止编造台词之外的事件。"
 )
+
+
+def system_prompt(settings: dict[str, str]) -> str:
+    """真正发出去的 system：结构指令 + 与编剧共用的那一层基本功。
+
+    基本功层必须在调用时拼：导入期拼死等于让「基本功」那张卡对填词不起作用。
+    """
+    overrides = llm_prompts.overrides_from(settings)
+    structure = overrides.get("prompt.copywriter_system") or _STRUCTURE_PROMPT
+    return structure + scriptwriter.fundamentals_layer(overrides)
 
 
 def _slot_block(
@@ -123,14 +132,11 @@ def write_plan_copy(
         + (f"\n\n解说风格要求：{directives}" if directives else "")
     )
     llm = LlmClient(config, timeout_s=COPY_LLM_TIMEOUT_S)
+    system = system_prompt(settings)
     attempts: list[dict[str, Any]] = []
     filled: dict[str, str] | None = None
     for _ in range(_ATTEMPTS):
         try:
-            system = (
-                llm_prompts.system_override(settings, "prompt.copywriter_system")
-                or _SYSTEM_PROMPT
-            )
             raw = llm.chat_json(system, user_prompt)
             filled = _sanitize(raw, plan.narration_texts)
         except (LlmUnavailable, ValueError, TypeError, KeyError) as exc:

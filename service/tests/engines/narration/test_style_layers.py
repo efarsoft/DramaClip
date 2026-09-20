@@ -60,11 +60,11 @@ def test_empty_transcript_short_circuits(monkeypatch) -> None:
 
 
 def test_fundamentals_layer_injected_into_system_prompt() -> None:
-    system = scriptwriter_lib._SYSTEM_PROMPT
+    system = scriptwriter_lib.system_prompt()
     for keyword in ("解说基本功", "人称二选一", "半句钩", "禁止编造转写外", "前 3 秒抛出"):
         assert keyword in system
 
 
 def test_fundamentals_precede_style_directives() -> None:
     """基本功在 system prompt（全局），风格 directives 在 user prompt（本次）——分层不混用。"""
-    assert "解说风格要求" not in scriptwriter_lib._SYSTEM_PROMPT
+    assert "解说风格要求" not in scriptwriter_lib.system_prompt()

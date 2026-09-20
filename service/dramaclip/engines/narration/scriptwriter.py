@@ -37,7 +37,7 @@ FUNDAMENTALS = (
     "结尾必须留「想知道结局」的缺口，配合引导语。"
 )
 
-_SYSTEM_PROMPT = (
+_STRUCTURE_PROMPT = (
     "你是短剧推广解说编剧。根据给定的带时间戳台词转写，"
     "输出一条推广解说视频的剧本 JSON，格式："
     '{"hook": "开场钩子(1-2句)", "segments": [{"start": 数字秒, "end": 数字秒,'
@@ -50,8 +50,19 @@ _SYSTEM_PROMPT = (
     "段数不够就是没讲透；每段文案不超过 60 字；"
     "3) 覆盖剧情完整钩子-冲突-反转弧线；"
     "4) 只输出 JSON，不要多余文字。"
-    + FUNDAMENTALS
 )
+
+
+def fundamentals_layer(prompts: dict[str, str] | None = None) -> str:
+    """基本功层文本（编剧与逐槽填词共用这一张卡）。"""
+    return (prompts or {}).get("prompt.scriptwriter_fundamentals") or FUNDAMENTALS
+
+
+def system_prompt(prompts: dict[str, str] | None = None) -> str:
+    """真正发出去的 system = 结构指令 + 基本功层，两层各自可覆盖、各自不吞对方。"""
+    overrides = prompts or {}
+    structure = overrides.get("prompt.scriptwriter_system") or _STRUCTURE_PROMPT
+    return structure + fundamentals_layer(overrides)
 
 
 class ScriptSegment(BaseModel):
@@ -228,19 +239,11 @@ def write_script_episodes(
         f"台词转写：\n" + transcript_block
         + f"{style_block}"
     )
-    overrides = prompts or {}
-    system_prompt = (
-        overrides.get("prompt.scriptwriter_system")
-        or _SYSTEM_PROMPT.replace(
-            "【解说基本功——逐条强制遵守】",
-            overrides.get("prompt.scriptwriter_fundamentals", "【解说基本功——逐条强制遵守】"),
-        )
-    )
+    system = system_prompt(prompts)
     attempts: list[dict[str, Any]] = []
     script: Script | None = None
     for _ in range(2):  # 失败重试一次
         try:
-            system = system_prompt or _SYSTEM_PROMPT
             raw = llm.chat_json(system, user_prompt)
             script = _sanitize_episodes(raw, durations)
         except (LlmUnavailable, ValidationError, ValueError, TypeError, KeyError) as exc:
@@ -259,7 +262,7 @@ def write_script_episodes(
     if trace_path is not None:
         dump_trace(
             trace_path,
-            {"system": _SYSTEM_PROMPT, "user": user_prompt, "attempts": attempts},
+            {"system": system, "user": user_prompt, "attempts": attempts},
         )
     if script is None:
         detail = "；".join(str(item.get("error", "清洗后片段不足")) for item in attempts)

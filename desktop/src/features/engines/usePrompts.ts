@@ -17,8 +17,10 @@ export function usePrompts(): PromptsState {
 
   useEffect(() => {
     reload()
-      .catch(() => {
-        message.error('提示词加载失败');
+      .catch((error: unknown) => {
+        // 只报"加载失败"会把真因（未注册的方法、断连）藏起来，运维无从判断
+        const reason = error instanceof Error ? error.message : String(error);
+        message.error(`提示词加载失败：${reason}`);
         setPrompts([]);
       })
       .finally(() => undefined);
@@ -57,13 +59,24 @@ export function usePrompts(): PromptsState {
     void runAction(() => promptsApi.reset(info.key), `「${info.title}」已恢复默认`);
   };
 
-  return { prompts, editing, setEditing, draft, setDraft, saving, save, reset };
+  // 打开时必须把现值灌进草稿：否则编辑框一片空白，存回去就是把提示词清空
+  const openEdit = (info: PromptInfo): void => {
+    setDraft(info.current);
+    setEditing(info);
+  };
+
+  const closeEdit = (): void => {
+    setEditing(null);
+  };
+
+  return { prompts, editing, openEdit, closeEdit, draft, setDraft, saving, save, reset };
 }
 
 export interface PromptsState {
   prompts: PromptInfo[] | null;
   editing: PromptInfo | null;
-  setEditing: (info: PromptInfo | null) => void;
+  openEdit: (info: PromptInfo) => void;
+  closeEdit: () => void;
   draft: string;
   setDraft: (text: string) => void;
   saving: boolean;

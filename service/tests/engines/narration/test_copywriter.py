@@ -44,16 +44,18 @@ _MATERIAL: casting.MaterialByEpisode = {
 
 
 class FakeLlm:
-    """按队列应答 chat_json，记录每次 user prompt 供断言。"""
+    """按队列应答 chat_json，记录每次 system/user 供断言。"""
 
     calls: list[str] = []
+    systems: list[str] = []
     queue: list[Any] = []
 
     def __init__(self, _config: Any, timeout_s: float = 60.0) -> None:
         self.timeout_s = timeout_s
 
-    def chat_json(self, _system: str, user: str) -> Any:
+    def chat_json(self, system: str, user: str) -> Any:
         FakeLlm.calls.append(user)
+        FakeLlm.systems.append(system)
         item = FakeLlm.queue.pop(0) if len(FakeLlm.queue) > 1 else FakeLlm.queue[0]
         if isinstance(item, Exception):
             raise item
@@ -76,6 +78,7 @@ def _lines() -> dict[str, Any]:
 @pytest.fixture()
 def llm(monkeypatch: pytest.MonkeyPatch) -> Any:
     FakeLlm.calls = []
+    FakeLlm.systems = []
     FakeLlm.queue = []
     monkeypatch.setattr(copywriter, "LlmClient", FakeLlm)
     return FakeLlm
@@ -340,3 +343,34 @@ def test_a_slot_whose_episode_is_missing_from_the_material_raises(llm: Any) -> N
             plan, material, _SETTINGS, mode_label=_MODE_LABEL, angle_block=""
         )
     assert llm.calls == [], "缺料就该在发请求之前拦住，不该先付一次成稿"
+
+
+_FLOOR = "【解说基本功——逐条强制遵守】\n只准写短句。"
+
+
+def _copy(**prompts: str) -> str:
+    FakeLlm.calls = []
+    FakeLlm.systems = []
+    FakeLlm.queue = [_lines()]
+    copywriter.write_plan_copy(
+        _plan(), _MATERIAL, {**_SETTINGS, **prompts}, mode_label=_MODE_LABEL, angle_block=""
+    )
+    return FakeLlm.systems[0]
+
+
+def test_default_copy_prompt_carries_the_floor(llm: Any) -> None:
+    assert "【解说基本功——逐条强制遵守】" in _copy()
+
+
+def test_floor_override_reaches_the_copy_prompt(llm: Any) -> None:
+    """基本功卡是编剧与填词共用的：导入期把文本拼死，这张卡对填词就是死的。"""
+    system = _copy(**{"prompt.scriptwriter_fundamentals": _FLOOR})
+    assert "只准写短句。" in system
+    assert "悬念管理" not in system
+
+
+def test_copy_structure_override_replaces_only_the_structure(llm: Any) -> None:
+    system = _copy(**{"prompt.copywriter_system": "只回 JSON。"})
+    assert system.startswith("只回 JSON。")
+    assert "lines 必须覆盖全部槽位" not in system
+    assert "【解说基本功——逐条强制遵守】" in system

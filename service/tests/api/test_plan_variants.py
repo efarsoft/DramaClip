@@ -623,7 +623,7 @@ def test_rejected_angle_does_not_pay_for_copy(
     从 `variant.episode_numbers` 确定性装配。故时间轴是 `(mode, 取材集组合)` 的纯函数，
     同一组集 ⇒ 同一条时间轴 ⇒ Jaccard = 1.0，成稿前就该判得出来。
 
-    成稿调用数按 copywriter 的 system prompt 认（`_SYSTEM_PROMPT` 首句是
+    成稿调用数按 copywriter 的 system prompt 认（`_STRUCTURE_PROMPT` 首句是
     「你是短剧推广解说编剧」），与选题（「选题操盘手」）、口味层（「风格库」）三者互不混淆。
     """
     project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)

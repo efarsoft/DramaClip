@@ -2,18 +2,18 @@
 
 键即 settings 表键（`prompt.*`）；重置 = 删除该键。新增可编辑提示词在
 SPECS 登记一行，引擎函数以 `system_override` 取覆盖、模块常量兜底。
+
+默认值按「模块路径 + 属性名」延迟取：本模块被各引擎 import，若在模块顶层
+反过来 import 引擎就成环（mypy 判不出类型、运行时靠 import 顺序侥幸过关）。
 """
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Callable
 
-from dramaclip.engines.narration import angles, copywriter, scriptwriter, styles, titles
-from dramaclip.engines.semantic import conflict, genre
-
-
-def _get(module: object, name: str) -> Callable[[], str]:
-    return lambda: str(getattr(module, name))
+# 提示词原样进每一次 LLM 往返：不设上限等于让人一键撑爆上下文预算
+MAX_PROMPT_CHARS = 20_000
 
 
 class PromptSpec:
@@ -34,54 +34,64 @@ class PromptSpec:
         return self.default_getter()
 
 
+
+def _default(module: str, name: str) -> Callable[[], str]:
+    """延迟到读取时再 import：登记处因此不需要认识任何引擎模块。"""
+
+    def read() -> str:
+        return str(getattr(importlib.import_module(module), name))
+
+    return read
+
+
 SPECS: list[PromptSpec] = [
     PromptSpec(
         "prompt.genre_system",
         "题材分类",
         "分析层：判断短剧主导题材（失败自动降级关键词）",
-        _get(genre, "_SYSTEM_PROMPT"),
+        _default("dramaclip.engines.semantic.genre", "_SYSTEM_PROMPT"),
     ),
     PromptSpec(
         "prompt.conflict_system",
         "冲突打分",
         "分析层：逐场景冲突强度评分，驱动选料排序",
-        _get(conflict, "_SYSTEM_PROMPT"),
+        _default("dramaclip.engines.semantic.conflict", "_SYSTEM_PROMPT"),
     ),
     PromptSpec(
         "prompt.style_select_system",
         "风格自选",
         "口味层：LLM 读转写从风格库选解说风格",
-        _get(styles, "_SELECT_SYSTEM_PROMPT"),
+        _default("dramaclip.engines.narration.styles", "_SELECT_SYSTEM_PROMPT"),
     ),
     PromptSpec(
         "prompt.angles_system",
         "选题角度",
         "为一模式选出 K 条卖点互异的取材角度",
-        _get(angles, "_SYSTEM_PROMPT"),
+        _default("dramaclip.engines.narration.angles", "_SYSTEM_PROMPT"),
     ),
     PromptSpec(
         "prompt.scriptwriter_system",
         "剧情解说·结构指令",
-        "剧本 JSON 格式与段数/时间轴等结构要求",
-        _get(scriptwriter, "_SYSTEM_PROMPT"),
+        "剧本 JSON 格式与段数/时间轴等结构要求；手艺底线在下面那张卡",
+        _default("dramaclip.engines.narration.scriptwriter", "_STRUCTURE_PROMPT"),
     ),
     PromptSpec(
         "prompt.scriptwriter_fundamentals",
-        "剧情解说·基本功层",
-        "说书人视角/半句钩/悬念管理等常驻手艺底线",
-        _get(scriptwriter, "FUNDAMENTALS"),
+        "解说基本功（编剧与填词共用）",
+        "说书人视角/半句钩/悬念管理等常驻手艺底线，两条成稿链路都拼上这一段",
+        _default("dramaclip.engines.narration.scriptwriter", "FUNDAMENTALS"),
     ),
     PromptSpec(
         "prompt.copywriter_system",
-        "逐槽填词",
-        "六槽位模式（片头/交叉/超短/全片/双人/独白）共用",
-        _get(copywriter, "_SYSTEM_PROMPT"),
+        "逐槽填词·结构指令",
+        "六槽位模式（片头/交叉/超短/全片/双人/独白）共用的槽位契约与硬性要求",
+        _default("dramaclip.engines.narration.copywriter", "_STRUCTURE_PROMPT"),
     ),
     PromptSpec(
         "prompt.titles_system",
         "候选标题",
         "成片详情页 8 条候选标题生成",
-        _get(titles, "_SYSTEM_PROMPT"),
+        _default("dramaclip.engines.narration.titles", "_SYSTEM_PROMPT"),
     ),
 ]
 
