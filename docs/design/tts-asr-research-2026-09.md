@@ -17,10 +17,11 @@
 
 对比过的新轻量候选均**不换**：KittenTTS（中文支持弱）、Piper（中文音质机械）、MeloTTS（与已接入的 melo 同源）。现有 Kokoro+melo 就是 CPU 中文档的头部组合。
 
-### ⚠️ 储备策略反转：IndexTTS2 许可否决
+### IndexTTS2：许可标注为 informational，接入候选保留
 - **IndexTTS2 采用 B 站自定义模型协议：非商用，商用需单独授权**（此前记录的 Apache 2.0 是 IndexTTS 1.x 的）。
-- 对 CPS 商业场景=一票否决。已下载的 5.5GB 降级为「仅个人测试」，registry 需标注许可状态。
-- 技术上仍是独一份（精确时长控制+音色情感解耦），若未来拿到授权或出 Apache 版再启用。
+- **业主裁决（2026-09-19）：本项目用途按常规视频剪辑对待，许可作为说明信息标注，不构成接入障碍。**
+- 技术上独一份（精确时长控制+音色情感解耦），接入优先级回升：与 Fun-CosyVoice3 并列为储备接入的前两位——
+  IndexTTS2 胜在时长控制（解说时间轴对齐的根治方案），CosyVoice3 胜在协议完全无虞+方言广度。
 
 ### 新增储备第一优先：Fun-CosyVoice3-0.5B（阿里，Apache 2.0）
 - 9 语言 + **18 种以上中文方言**零样本克隆、**情感控制**（韵律/音质可控）——正中解说风格系统
@@ -51,7 +52,7 @@ word 级时间戳 + 热词 prompt + int8 CPU 已与融合管线深度耦合；�
 ## 三、行动清单（按性价比）
 
 1. **registry 许可标注**（0.5h）：IndexTTS2 标「非商用·B 站协议」、VibeVoice 标 MIT、CosyVoice 系标 Apache——引擎中心诚实性原则
-2. **Fun-CosyVoice3-0.5B 登记 + 引擎接入**（P-2 首位）：情感+方言+可商用，接替 IndexTTS2 的储备位
+2. **引擎接入排队**（P-2）：Fun-CosyVoice3-0.5B 与 IndexTTS2 并列首位（前者协议稳妥、后者时长控制独门）
 3. **Qwen3-ASR-0.6B spike**（1 天）：许可证核实 → 中文短剧样片 CER 对比 whisper-small → 时间戳质量评估（融合兼容性）
 4. FireRedASR2S / IndexTTS-2.5 挂观察名单，季度复查
 
