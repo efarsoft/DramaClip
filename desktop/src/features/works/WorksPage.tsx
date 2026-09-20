@@ -8,14 +8,9 @@ import { listWorks, mediaUrl, projectApi, revealInFolder } from '../../services/
 import { useUiStore } from '../../stores/ui';
 import { tokens } from '../../styles/theme';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
-import { MODE_INFO } from '../../components/modeMeta';
+import { MODE_INFO, modeLabel } from '../../components/modeMeta';
 
 const MODE_COLORS = ['#7C9CFF', '#9B7BFF', '#34D399', '#FBBF24', '#F87171', '#60A5FA'];
-
-function modeLabel(mode: string | undefined): string {
-  if (mode === undefined) return '成片';
-  return MODE_INFO.find((item) => item.mode === mode)?.label ?? mode;
-}
 
 function modeColor(mode: string | undefined): string {
   if (mode === undefined) return tokens.textTertiary;

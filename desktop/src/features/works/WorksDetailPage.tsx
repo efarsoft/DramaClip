@@ -5,16 +5,12 @@ import type { ReactElement } from 'react';
 import { useParams } from 'react-router-dom';
 import type { ExportJob } from '@dramaclip/protocol';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
-import { MODE_INFO } from '../../components/modeMeta';
+import { modeLabel } from '../../components/modeMeta';
 import { mediaUrl } from '../../services/client';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 import { TitlesSection } from './TitlesSection';
 import { useWorkDetail } from './useWorkDetail';
-
-function modeLabel(mode: string | undefined): string {
-  return MODE_INFO.find((item) => item.mode === mode)?.label ?? mode ?? '成片';
-}
 
 function formatDuration(s: number | undefined): string {
   if (s === undefined || s <= 0) return '—';

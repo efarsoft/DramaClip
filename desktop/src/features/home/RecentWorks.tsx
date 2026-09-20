@@ -2,14 +2,9 @@
 import { useNavigate } from 'react-router-dom';
 import type { WorkItem } from '@dramaclip/protocol';
 import { PageSection } from '../../components/layout/PageKit';
-import { MODE_INFO } from '../../components/modeMeta';
+import { modeLabel } from '../../components/modeMeta';
 import { mediaUrl } from '../../services/client';
 import { tokens } from '../../styles/theme';
-
-function modeLabel(mode: string | undefined): string {
-  if (mode === undefined) return '成片';
-  return MODE_INFO.find((item) => item.mode === mode)?.label ?? mode;
-}
 
 function formatDate(ms: number | undefined): string {
   if (ms === undefined) return '';

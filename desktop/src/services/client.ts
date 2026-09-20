@@ -21,6 +21,7 @@ import type {
   NarrationMode,
   NarrationPlan,
   PingResult,
+  PlanVariantsResult,
   Project,
   ProjectGetResult,
   ScannedEpisode,
@@ -123,22 +124,28 @@ export function listWorks(limit = 60): Promise<WorksItem[]> {
 }
 
 export const narrationApi = {
-  produce: (projectId: string, modes: string[]): Promise<{ job_id: string }> =>
-    rpc<{ job_id: string }>('narration.produce', { project_id: projectId, modes }),
+  /** 阶段③：为选中模式各产出 K 条角度互异的方案，只规划不渲染。 */
+  planVariants: (
+    projectId: string,
+    modes: NarrationMode[],
+    k?: number,
+    excludePlanIds?: string[],
+  ): Promise<PlanVariantsResult> =>
+    rpc<PlanVariantsResult>(
+      'narration.plan_variants',
+      excludePlanIds
+        ? { project_id: projectId, modes, k, exclude_plan_ids: excludePlanIds }
+        : { project_id: projectId, modes, k },
+    ),
   listStyles: (): Promise<StyleInfo[]> => rpc<StyleInfo[]>('narration.list_styles', {}),
   getPlan: (planId: string): Promise<PlanDetail> =>
     rpc<PlanDetail>('narration.get_plan', { plan_id: planId }),
-  generatePlans: (
-    projectId: string,
-    modes: NarrationMode[],
-    episodeIds?: string[],
-  ): Promise<{ job_id: string }> =>
-    rpc<{ job_id: string }>(
-      'narration.generate_plans',
-      episodeIds ? { project_id: projectId, modes, episode_ids: episodeIds } : { project_id: projectId, modes },
-    ),
-  listPlans: (projectId: string): Promise<NarrationPlan[]> =>
-    rpc<NarrationPlan[]>('narration.list_plans', { project_id: projectId }),
+  /** 不给 batchId 取全项目，给了只取那一组（规划完只显示本次产物）。 */
+  listPlans: (projectId: string, batchId?: string): Promise<NarrationPlan[]> =>
+    rpc<NarrationPlan[]>('narration.list_plans', {
+      project_id: projectId,
+      ...(batchId ? { batch_id: batchId } : {}),
+    }),
 } as const;
 
 export const exportApi = {

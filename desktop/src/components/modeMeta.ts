@@ -19,3 +19,8 @@ export const MODE_INFO: readonly ModeInfoItem[] = [
   { mode: 'dual_host_chat', label: '双人对谈', desc: '双音色对话式解说，像两位博主聊剧', needs: ['copy', 'voice'] },
   { mode: 'inner_monologue', label: '内心独白', desc: '第一人称 OS 旁白，代入主角视角', needs: ['copy', 'voice'] },
 ];
+
+/** 模式 → 中文名；未知模式原样显示（宁可露 id 也不给空白），没有模式时统称「成片」。 */
+export function modeLabel(mode: string | undefined): string {
+  return MODE_INFO.find((item) => item.mode === mode)?.label ?? mode ?? '成片';
+}
