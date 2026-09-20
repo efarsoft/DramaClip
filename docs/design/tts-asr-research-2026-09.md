@@ -23,10 +23,16 @@
 - 技术上独一份（精确时长控制+音色情感解耦），接入优先级回升：与 Fun-CosyVoice3 并列为储备接入的前两位——
   IndexTTS2 胜在时长控制（解说时间轴对齐的根治方案），CosyVoice3 胜在协议完全无虞+方言广度。
 
-### 新增储备第一优先：Fun-CosyVoice3-0.5B（阿里，Apache 2.0）
-- 9 语言 + **18 种以上中文方言**零样本克隆、**情感控制**（韵律/音质可控）——正中解说风格系统
-- 0.5B 参数：显存压力小，M4000 torch 生态可试；Apache 2.0 商用无忧
-- 行动：registry 登记真实仓库名（此前 iic/FunAudioLLM 404 待复核）→ 引擎接入排队 P-2 首位
+### 新增储备第一优先：Fun-CosyVoice3-0.5B（阿里，Apache 2.0）✅ 已核实（2026-09-20）
+- **真实仓库：`FunAudioLLM/Fun-CosyVoice3-0.5B-2512`**（ModelScope 下载 30.8 万 / HF 30 天 18.7 万；
+  此前查的 iic/* 与 FunAudioLLM/CosyVoice3-0.5B 均为 404，本次经 README 链接定位）
+- **HF API license tag = apache-2.0，商用无忧**
+- 9 语言 + 18+ 中文方言零样本克隆（3 秒参考音频）、内容一致性/说话人相似度/韵律自然度全面超 2.0
+- 模型构成（ModelScope 文件清单实测，总量 9.08GB，必装子集约 **5.6GB**）：
+  llm.pt 1.9G（另有 RL 强化版 llm.rl.pt 1.9G 可不装）+ flow.pt 1.27G + speech_tokenizer_v3 0.9G
+  + CosyVoice-BlankEN 分词器 0.94G + hift 79M + campplus 27M + 配置
+- **推理方式：git clone FunAudioLLM/CosyVoice 官方仓库 + 模型目录加载**（无 pip 包，
+  requirements 较重：sox/ttsfrd 等，Windows 需验证 sox 依赖；文本规范化有 wetext 纯 py 兜底）
 - 附带：同批开源 Fun-ASR-Nano（轻量 ASR），纳入 ASR 观察名单
 
 ### VibeVoice-1.5B（已下 5GB，MIT）
