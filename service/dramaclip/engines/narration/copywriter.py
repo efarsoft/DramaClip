@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from dramaclip.engines import llm_prompts
 from dramaclip.engines.narration import casting, scriptwriter
 from dramaclip.engines.narration.models import NarrationText, PlanData, TimelineSegment
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
@@ -126,7 +127,11 @@ def write_plan_copy(
     filled: dict[str, str] | None = None
     for _ in range(_ATTEMPTS):
         try:
-            raw = llm.chat_json(_SYSTEM_PROMPT, user_prompt)
+            system = (
+                llm_prompts.system_override(settings, "prompt.copywriter_system")
+                or _SYSTEM_PROMPT
+            )
+            raw = llm.chat_json(system, user_prompt)
             filled = _sanitize(raw, plan.narration_texts)
         except (LlmUnavailable, ValueError, TypeError, KeyError) as exc:
             attempts.append({"error": f"{type(exc).__name__}: {exc}"})
@@ -137,7 +142,7 @@ def write_plan_copy(
         stamp_time = time.strftime("%m%d_%H%M%S")
         scriptwriter.dump_trace(
             Path(trace_dir) / f"llm_copy_{plan.mode}_{stamp_time}.json",
-            {"system": _SYSTEM_PROMPT, "user": user_prompt, "attempts": attempts},
+            {"system": system, "user": user_prompt, "attempts": attempts},
         )
     if filled is None:
         detail = "；".join(str(item["error"]) for item in attempts)

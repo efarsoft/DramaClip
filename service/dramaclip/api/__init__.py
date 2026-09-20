@@ -19,6 +19,7 @@ def build_router(context: AppContext, shutdown: Callable[[], None]) -> Router:
         models,
         narration,
         project,
+        prompts,
         settings,
         subtitle,
         system,
@@ -33,6 +34,7 @@ def build_router(context: AppContext, shutdown: Callable[[], None]) -> Router:
         shutdown=shutdown,
     )
     project.register(router, context)
+    prompts.register(router, context)
     analysis.register(router, context)
     narration.register(router, context)
     export.register(router, context)

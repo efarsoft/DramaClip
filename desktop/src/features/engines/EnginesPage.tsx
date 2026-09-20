@@ -7,6 +7,7 @@ import { OverviewTab } from './OverviewTab';
 import { AsrTab } from './AsrTab';
 import { TtsTab } from './TtsTab';
 import { LlmTab } from './LlmTab';
+import { PromptsTab } from './PromptsTab';
 import { EngineTabNav } from './EngineTabNav';
 import { ImportModelModal } from './ImportModelModal';
 import type { Reports } from './assetState';
@@ -15,7 +16,7 @@ import { type EnginesData, useEnginesData } from './useEnginesData';
 import { useModelImport } from './useModelImport';
 
 export type SettingsMap = Record<string, string>;
-export type EngineTabKey = 'overview' | 'asr' | 'tts' | 'llm';
+export type EngineTabKey = 'overview' | 'asr' | 'tts' | 'llm' | 'prompts';
 
 /** ASR / TTS 两域同构：同一份数据、同一批回调（切骨架不切数据流，P3）。 */
 export interface DomainTabProps {
@@ -118,6 +119,7 @@ function TabBody({
   if (tab === 'asr') return <AsrTab {...domain} />;
   if (tab === 'tts') return <TtsTab {...domain} />;
   if (tab === 'llm') return <LlmTab onChanged={domain.onChanged} />;
+  if (tab === 'prompts') return <PromptsTab />;
   return (
     <OverviewTab
       models={data.models}

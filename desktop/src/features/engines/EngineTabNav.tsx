@@ -4,6 +4,7 @@ import {
   AudioOutlined,
   CustomerServiceOutlined,
   DashboardOutlined,
+  ProfileOutlined,
 } from '@ant-design/icons';
 import type { ReactElement } from 'react';
 import { mixins } from '../../styles/mixins';
@@ -15,6 +16,7 @@ const TAB_ICONS: Record<EngineTabKey, typeof DashboardOutlined> = {
   asr: AudioOutlined,
   tts: CustomerServiceOutlined,
   llm: ApiOutlined,
+  prompts: ProfileOutlined,
 };
 
 const TAB_LABELS: Record<EngineTabKey, string> = {
@@ -22,9 +24,10 @@ const TAB_LABELS: Record<EngineTabKey, string> = {
   asr: '语音识别 ASR',
   tts: '配音 TTS',
   llm: '文案 LLM',
+  prompts: '提示词',
 };
 
-const TAB_ORDER: readonly EngineTabKey[] = ['overview', 'asr', 'tts', 'llm'];
+const TAB_ORDER: readonly EngineTabKey[] = ['overview', 'asr', 'tts', 'llm', 'prompts'];
 
 export function EngineTabNav({
   tab,

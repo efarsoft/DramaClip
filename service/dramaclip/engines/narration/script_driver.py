@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from dramaclip.engines import llm_prompts
 from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration import scriptwriter, styles
@@ -40,7 +41,11 @@ def resolve_run_style(
     ):
         selector = LlmClient(LlmConfig.from_settings(settings), timeout_s=_SELECT_TIMEOUT_S)
         try:
-            selection = styles.select_style_with_reason(selector, _excerpt(episode_inputs))
+            selection = styles.select_style_with_reason(
+                selector,
+                _excerpt(episode_inputs),
+                system_prompt=llm_prompts.system_override(settings, "prompt.style_select_system"),
+            )
         except Exception:  # noqa: BLE001 - 选题失败必须降级而非中断出片
             selection = None
         if selection is None:
@@ -85,6 +90,7 @@ def script_dialogue_plan(
         angle_block=angle_block,
         style_directives=str(settings.get("_style_directives") or ""),
         trace_path=trace_path,
+        prompts=llm_prompts.overrides_from(settings),
     )
 
     episode_map = {

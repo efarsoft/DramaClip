@@ -28,13 +28,15 @@ def score_scenes(
     segments: list[AsrSegment],
     scenes: list[SceneInfo],
     client: LlmClient | None,
+    *,
+    system_prompt: str | None = None,
 ) -> list[ConflictScore]:
     """LLM 可用走主路；未配置/失败降级关键词。"""
     if not scenes:
         return []
     if client is not None:
         try:
-            return _score_with_llm(segments, scenes, client)
+            return _score_with_llm(segments, scenes, client, system_prompt=system_prompt)
         except LlmUnavailable:
             pass
     return _score_with_keywords(segments, scenes)
@@ -44,6 +46,8 @@ def _score_with_llm(
     segments: list[AsrSegment],
     scenes: list[SceneInfo],
     client: LlmClient,
+    *,
+    system_prompt: str | None = None,
 ) -> list[ConflictScore]:
     user_payload = [
         {
@@ -55,7 +59,9 @@ def _score_with_llm(
     ]
     import json
 
-    raw = client.chat_json(_SYSTEM_PROMPT, json.dumps(user_payload, ensure_ascii=False))
+    raw = client.chat_json(
+        system_prompt or _SYSTEM_PROMPT, json.dumps(user_payload, ensure_ascii=False)
+    )
     if not isinstance(raw, list):
         raise LlmUnavailable("冲突打分返回不是数组")
     by_index = {

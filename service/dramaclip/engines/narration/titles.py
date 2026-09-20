@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from dramaclip.engines import llm_prompts
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
 
 _SYSTEM_PROMPT = (
@@ -29,7 +30,10 @@ def generate(
     if not texts:
         raise ValueError("该方案没有解说文案，无需生成标题")
     client = LlmClient(config, timeout_s=timeout_s)
-    data = client.chat_json(_SYSTEM_PROMPT, "解说文案：\n" + "\n".join(texts))
+    data = client.chat_json(
+        llm_prompts.system_override(settings, "prompt.titles_system") or _SYSTEM_PROMPT,
+        "解说文案：\n" + "\n".join(texts),
+    )
     raw = data.get("titles", []) if isinstance(data, dict) else []
     titles = [{"text": str(t).strip(), "selected": False} for t in raw if str(t).strip()]
     if not titles:

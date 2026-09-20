@@ -23,11 +23,13 @@ _GENRE_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 
-def classify(asr_text: str, client: LlmClient | None) -> str:
+def classify(
+    asr_text: str, client: LlmClient | None, *, system_prompt: str | None = None
+) -> str:
     text = asr_text[:3000]
     if client is not None and text.strip():
         try:
-            raw = client.chat_json(_SYSTEM_PROMPT, text)
+            raw = client.chat_json(system_prompt or _SYSTEM_PROMPT, text)
             if isinstance(raw, dict):
                 genre = str(raw.get("genre", "")).strip()
                 if genre in GENRES:

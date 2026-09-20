@@ -57,6 +57,8 @@ export interface GpuInfo {
 export interface HealthResult {
   readonly status: string;
   readonly uptime_s: number;
+  /** 本机 ffmpeg 自述版本；空串 = 渲染引擎不可用。 */
+  readonly ffmpeg_version: string;
   readonly gpu?: string;
   readonly gpu_info?: GpuInfo;
   readonly vram_free_mb?: number;
@@ -542,8 +544,28 @@ export const METHOD_NAMES = [
   'settings.update',
   'settings.test_llm',
   'tts.preview',
+  'prompts.list',
+  'prompts.save',
+  'prompts.reset',
 ] as const;
 
 export const NOTIFICATION_NAMES = ['progress.update', 'log.append', 'models.download_progress'] as const;
 
 export const PROTOCOL_VERSION = 1;
+
+/** ---- prompts 命名空间（可编辑 LLM 提示词） ---- */
+
+export interface PromptInfo {
+  readonly key: string;
+  readonly title: string;
+  readonly description: string;
+  /** 代码内置默认（重置后的值） */
+  readonly default: string;
+  /** 当前生效值（覆盖或默认） */
+  readonly current: string;
+  readonly overridden: boolean;
+}
+
+export interface PromptsListResult {
+  readonly prompts: PromptInfo[];
+}

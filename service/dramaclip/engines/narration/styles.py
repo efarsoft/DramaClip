@@ -83,6 +83,7 @@ def select_style_with_reason(
     transcript: list[dict[str, Any]],
     *,
     max_lines: int = 40,
+    system_prompt: str | None = None,
 ) -> tuple[str, str] | None:
     """口味层：LLM 读转写从风格库自选风格，返回 (style_id, reason)。
     """
@@ -102,7 +103,7 @@ def select_style_with_reason(
         return None
     user_prompt = f"风格库：\n{menu}\n\n台词转写节选：\n" + "\n".join(lines)
     try:
-        raw = llm.chat_json(_SELECT_SYSTEM_PROMPT, user_prompt)
+        raw = llm.chat_json(system_prompt or _SELECT_SYSTEM_PROMPT, user_prompt)
     except LlmUnavailable:
         return None
     if not isinstance(raw, dict):

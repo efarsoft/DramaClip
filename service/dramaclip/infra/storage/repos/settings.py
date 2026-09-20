@@ -18,3 +18,8 @@ def set_value(conn: sqlite3.Connection, key: str, value: str) -> None:
         (key, value, int(time.time() * 1000)),
     )
     conn.commit()
+
+def delete_value(conn: sqlite3.Connection, key: str) -> None:
+    """删除设置键（提示词重置 = 删覆盖回默认）。"""
+    conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+    conn.commit()

@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prompts.json",
+  "title": "prompts 命名空间",
+  "namespace": "prompts",
+  "x-methods": [
+    {
+      "name": "prompts.list",
+      "summary": "列出全部可编辑 LLM 提示词：默认值在代码，settings 只存覆盖",
+      "params": {
+        "type": "object",
+        "properties": {}
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "prompts"
+        ],
+        "properties": {
+          "prompts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "key",
+                "title",
+                "description",
+                "default",
+                "current",
+                "overridden"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "default": {
+                  "type": "string"
+                },
+                "current": {
+                  "type": "string"
+                },
+                "overridden": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "prompts.save",
+      "summary": "保存提示词覆盖；空内容报 -32001",
+      "params": {
+        "type": "object",
+        "required": [
+          "key",
+          "text"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "prompts.reset",
+      "summary": "删除覆盖回代码默认（未覆盖时幂等 ok）",
+      "params": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  ]
+}

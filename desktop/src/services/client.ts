@@ -25,6 +25,7 @@ import type {
   ProjectGetResult,
   ScannedEpisode,
   ServiceEvent,
+  PromptsListResult,
   TtsPreviewResult,
   VerifyReport,
 } from '@dramaclip/protocol';
@@ -215,6 +216,14 @@ export const settingsApi = {
   get: (): Promise<Record<string, string>> => rpc<Record<string, string>>('settings.get'),
   update: (values: Record<string, string>): Promise<{ ok: boolean }> =>
     rpc<{ ok: boolean }>('settings.update', { values }),
+} as const;
+
+/** 可编辑 LLM 提示词（覆盖存 settings，重置回代码默认）。 */
+export const promptsApi = {
+  list: (): Promise<PromptsListResult> => rpc<PromptsListResult>('prompts.list'),
+  save: (key: string, text: string): Promise<{ ok: boolean }> =>
+    rpc<{ ok: boolean }>('prompts.save', { key, text }),
+  reset: (key: string): Promise<{ ok: boolean }> => rpc<{ ok: boolean }>('prompts.reset', { key }),
 } as const;
 
 /** 引擎配置（云端/服务端点多实例，单启用）。 */

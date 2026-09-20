@@ -197,6 +197,7 @@ def write_script_episodes(
     angle_block: str,
     style_directives: str = "",
     trace_path: Path | None = None,
+    prompts: dict[str, str] | None = None,
 ) -> Script:
     """跨集剧本：读多集转写（每集一个「【第N集】」分组），产出带集号的跨集故事剧本。
     """
@@ -227,11 +228,20 @@ def write_script_episodes(
         f"台词转写：\n" + transcript_block
         + f"{style_block}"
     )
+    overrides = prompts or {}
+    system_prompt = (
+        overrides.get("prompt.scriptwriter_system")
+        or _SYSTEM_PROMPT.replace(
+            "【解说基本功——逐条强制遵守】",
+            overrides.get("prompt.scriptwriter_fundamentals", "【解说基本功——逐条强制遵守】"),
+        )
+    )
     attempts: list[dict[str, Any]] = []
     script: Script | None = None
     for _ in range(2):  # 失败重试一次
         try:
-            raw = llm.chat_json(_SYSTEM_PROMPT, user_prompt)
+            system = system_prompt or _SYSTEM_PROMPT
+            raw = llm.chat_json(system, user_prompt)
             script = _sanitize_episodes(raw, durations)
         except (LlmUnavailable, ValidationError, ValueError, TypeError, KeyError) as exc:
             # 留痕必须带上异常类型：网关挂了与 schema 不合规是两件完全不同的事
