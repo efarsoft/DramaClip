@@ -24,6 +24,8 @@ export interface PlanCardView {
   readonly hook: string;
   /** 「取材重叠 NN%」；组内首条为「组内首条」。 */
   readonly overlap: string;
+  /** 「剧本丢弃 N 段」；0 段或非编剧链为空串，界面不占行。 */
+  readonly dropped: string;
 }
 
 export function planCardView(plan: NarrationPlan): PlanCardView {
@@ -35,6 +37,7 @@ export function planCardView(plan: NarrationPlan): PlanCardView {
     episodes: `取材 ${String(plan.episode_ids.length)} 集`,
     hook: hookLine(plan),
     overlap: overlapText(plan.overlap_max),
+    dropped: droppedText(plan.plan_data.dropped_segments),
   };
 }
 
@@ -50,4 +53,10 @@ function hookLine(plan: NarrationPlan): string {
 function overlapText(ratio: number | null | undefined): string {
   if (ratio === null || ratio === undefined) return '组内首条';
   return `取材重叠 ${String(Math.round(ratio * 100))}%`;
+}
+
+/** 清洗层丢了几段必须说出口：不说，方案看起来就像天生只有这么长。 */
+function droppedText(count: number | undefined): string {
+  if (!count || count <= 0) return '';
+  return `剧本丢弃 ${String(count)} 段`;
 }

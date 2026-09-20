@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -92,3 +93,78 @@ def test_ranker_orders_and_truncates() -> None:
     assert len(highlights) == 2
     assert highlights[0].score >= highlights[1].score
     assert highlights[0].start == 10 and highlights[0].end == 20, "冲突+情绪双高的场景应排第一"
+
+
+# --------------------------------------------------------------------------- 留痕
+# 冲突打分与题材判定是整条链上最"悄悄变差"的两处：LLM 挂了退回关键词、模型漏答
+# 场景补 50 分，界面上一格都不显示。留痕是唯一能被复核的证据。
+
+_SCENES = [SceneInfo(start=0, end=10), SceneInfo(start=10, end=20)]
+_SEGMENTS = [AsrSegment(start=1, end=3, text="你给我滚出去")]
+
+
+def _read(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_conflict_trace_keeps_the_round_trip(tmp_path: Path) -> None:
+    trace = tmp_path / "conflict_ep1.json"
+    reply = json.dumps(
+        [
+            {"scene_index": 0, "score": 88, "reason": "激烈争吵"},
+            {"scene_index": 1, "score": 12, "reason": "平静"},
+        ],
+        ensure_ascii=False,
+    )
+    conflict.score_scenes(_SEGMENTS, _SCENES, FakeLlm(reply), trace_path=trace)
+    blob = _read(trace)
+    assert blob["degraded"] is False
+    assert blob["raw"][0]["score"] == 88, "留痕没记下模型到底回了什么"
+    assert blob["scene_count"] == 2 and blob["answered"] == 2
+
+
+def test_conflict_trace_counts_scenes_the_model_left_unanswered(tmp_path: Path) -> None:
+    """漏答的场景拿 50 分补数——分数照旧，但补了几个必须看得见。"""
+    trace = tmp_path / "conflict.json"
+    reply = json.dumps([{"scene_index": 0, "score": 88, "reason": "吵"}], ensure_ascii=False)
+    scores = conflict.score_scenes(_SEGMENTS, _SCENES, FakeLlm(reply), trace_path=trace)
+    blob = _read(trace)
+    assert scores[1].score == 50
+    assert blob["answered"] == 1 and blob["missing_scenes"] == 1
+
+
+def test_conflict_trace_records_why_it_degraded(tmp_path: Path) -> None:
+    class Broken(FakeLlm):
+        def chat_json(self, system: str, user: str) -> dict | list:
+            raise LlmUnavailable("网络炸了")
+
+    trace = tmp_path / "conflict.json"
+    conflict.score_scenes(_SEGMENTS, _SCENES, Broken(""), trace_path=trace)
+    blob = _read(trace)
+    assert blob["degraded"] is True
+    assert "网络炸了" in blob["error"]
+
+
+def test_conflict_without_client_writes_no_trace(tmp_path: Path) -> None:
+    """没发请求就没有往返可留——降级路本身不该造一个空壳文件充数。"""
+    trace = tmp_path / "conflict.json"
+    conflict.score_scenes(_SEGMENTS, _SCENES, None, trace_path=trace)
+    assert not trace.exists()
+
+
+def test_genre_trace_keeps_round_trip_and_verdict(tmp_path: Path) -> None:
+    trace = tmp_path / "genre.json"
+    assert genre.classify("她要为母亲报仇", FakeLlm('{"genre":"复仇"}'), trace_path=trace) == "复仇"
+    blob = _read(trace)
+    assert blob["raw"] == {"genre": "复仇"}
+    assert blob["matched"] is True and blob["degraded"] is False
+
+
+def test_genre_trace_exposes_the_silent_fallback(tmp_path: Path) -> None:
+    """模型答了个库外题材：界面看到的"家庭伦理"其实来自关键词，留痕必须说明这点。"""
+    trace = tmp_path / "genre.json"
+    text = "婆婆儿媳争家产"
+    assert genre.classify(text, FakeLlm('{"genre":"武侠"}'), trace_path=trace) == "家庭伦理"
+    blob = _read(trace)
+    assert blob["raw"] == {"genre": "武侠"}
+    assert blob["matched"] is False and blob["degraded"] is True

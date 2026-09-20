@@ -67,7 +67,7 @@
       "name": "progress.update",
       "params": { "job_id": "string", "percent": "number", "message": "string", "detail": "object?" }
     },
-    { "name": "log.append", "params": { "level": "info|warn|error", "message": "string" } },
+    { "name": "log.append", "params": { "level": "info|warn|error", "message": "string", "job_id": "string?" } },
     {
       "name": "models.download_progress",
       "params": { "model_id": "string", "percent": "number", "speed": "string?", "eta": "string?" }

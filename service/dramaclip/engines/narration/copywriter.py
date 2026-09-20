@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.engines import llm_prompts
+from dramaclip.engines.llm_trace import dump_trace, trace_path
 from dramaclip.engines.narration import casting, scriptwriter
 from dramaclip.engines.narration.models import NarrationText, PlanData, TimelineSegment
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
@@ -144,12 +145,11 @@ def write_plan_copy(
             continue
         attempts.append({"raw": raw, "accepted": True})
         break
-    if trace_dir is not None:
-        stamp_time = time.strftime("%m%d_%H%M%S")
-        scriptwriter.dump_trace(
-            Path(trace_dir) / f"llm_copy_{plan.mode}_{stamp_time}.json",
-            {"system": system, "user": user_prompt, "attempts": attempts},
-        )
+    stamp_time = time.strftime("%m%d_%H%M%S")
+    dump_trace(
+        trace_path(trace_dir, f"llm_copy_{plan.mode}_{stamp_time}.json"),
+        {"system": system, "user": user_prompt, "attempts": attempts},
+    )
     if filled is None:
         detail = "；".join(str(item["error"]) for item in attempts)
         raise ValueError(f"编剧未产出合格文案：{detail}")

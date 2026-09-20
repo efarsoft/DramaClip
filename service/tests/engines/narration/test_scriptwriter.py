@@ -279,3 +279,47 @@ def test_trace_dumps_the_system_actually_sent(tmp_path) -> None:
     assert payload["system"] == llm.systems[0]
     assert payload["system"].startswith("只回 JSON。")
     assert payload["user"] == llm.users[0]
+
+
+# ------------------------------------------------------------- 清洗丢弃数可见化
+# 实测真机剧本里清洗层吃掉 22-23% 的片段（未知集号、越界、重叠、空文案），
+# 界面上一个数字都不见——方案看起来"就是这么长"。先做到可对账，不加硬门。
+
+_DIRTY_PAYLOAD: dict[str, Any] = {
+    "hook": "开场钩子",
+    "segments": [
+        {"episode": 1, "start": 1.0, "end": 10.0, "text": "第一段解说"},
+        {"episode": 1, "start": 10.0, "end": 20.0, "text": "第二段解说"},
+        {"episode": 2, "start": 5.0, "end": 15.0, "text": "第三段解说"},
+        {"episode": 9, "start": 1.0, "end": 8.0, "text": "不存在的第九集"},
+        {"episode": 1, "start": 20.0, "end": 30.0, "text": "   "},
+    ],
+    "cta": "点我看完结",
+}
+
+
+def test_clean_script_reports_no_drop() -> None:
+    assert _run(FakeLLM([dict(_VALID_PAYLOAD)])).dropped_segments == 0
+
+
+def test_sanitizer_drop_count_travels_with_the_script() -> None:
+    """5 段进、3 段出：丢掉的 2 段（未知集号 + 空文案）必须是剧本上的一个数。"""
+    script = _run(FakeLLM([dict(_DIRTY_PAYLOAD)]))
+    assert [segment.text for segment in script.segments] == [
+        "第一段解说", "第二段解说", "第三段解说",
+    ]
+    assert script.dropped_segments == 2
+
+
+def test_drop_count_is_in_the_trace_too(tmp_path) -> None:
+    trace = tmp_path / "llm_script.json"
+    write_script_episodes(
+        FakeLLM([dict(_DIRTY_PAYLOAD)]),
+        _EPISODES,
+        project_name="测试剧",
+        angle_block="",
+        trace_path=trace,
+    )
+    attempt = json.loads(trace.read_text(encoding="utf-8"))["attempts"][-1]
+    assert attempt["segments_kept"] == 3
+    assert attempt["segments_dropped"] == 2

@@ -3,12 +3,12 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
+from dramaclip.engines.llm_trace import dump_trace
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable
 
 _CHARS_PER_SECOND = 4.2  # 中文 TTS 语速估算（约 250 字/分钟）
@@ -83,6 +83,9 @@ class Script(BaseModel):
     hook: str = Field(min_length=1)
     segments: list[ScriptSegment] = Field(min_length=_MIN_SEGMENTS)
     cta: str = ""
+    # 清洗层吃掉的段数（未知集号/越界/重叠/空文案）：随剧本一路带到方案卡，
+    # 界面据此说"剧本丢弃 N 段"，不再让方案看起来天生就这么长。
+    dropped_segments: int = 0
 
 
 def estimate_duration(text: str) -> float:
@@ -124,7 +127,8 @@ def _sanitize_episodes(raw: Any, durations: dict[int, float]) -> Script | None:
         cursors[segment.episode] = end
     if len(kept) < _MIN_SEGMENTS:
         return None
-    return script.model_copy(update={"segments": kept})
+    dropped = len(script.segments) - len(kept)
+    return script.model_copy(update={"segments": kept, "dropped_segments": dropped})
 
 
 def clock(seconds: float) -> str:
@@ -286,15 +290,15 @@ def write_script_episodes(
                 "raw": raw,
                 "accepted": script is not None,
                 "segments_kept": len(script.segments) if script is not None else 0,
+                "segments_dropped": script.dropped_segments if script is not None else 0,
             }
         )
         if script is not None:
             break
-    if trace_path is not None:
-        dump_trace(
-            trace_path,
-            {"system": system, "user": user_prompt, "attempts": attempts},
-        )
+    dump_trace(
+        trace_path,
+        {"system": system, "user": user_prompt, "attempts": attempts},
+    )
     if script is None:
         detail = "；".join(str(item.get("error", "清洗后片段不足")) for item in attempts)
         raise ValueError(
@@ -302,17 +306,4 @@ def write_script_episodes(
             + (f"；完整往返见 {trace_path}" if trace_path else "")
         )
     return script
-
-
-def dump_trace(path: Path, payload: dict[str, Any]) -> None:
-    """LLM 调用全量留痕（system/user/原始响应），供人工检查。"""
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8",
-        )
-    except OSError:
-        pass
-
 

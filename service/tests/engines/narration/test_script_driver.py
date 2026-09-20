@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -164,3 +165,66 @@ def test_angle_block_is_forwarded_to_the_script_prompt(
     assert any("复仇线" in call[1] for call in FakeLlmClient.calls), (
         "角度块没转交到编剧 prompt"
     )
+
+
+# --------------------------------------------------------------- 留痕与丢弃数
+# 选题与清洗是两处"结果悄悄变差、界面上毫无痕迹"的环节：一次是模型答的非库内风格，
+# 一次是清洗层吃掉整段剧本。两处都得留下可对账的数字。
+
+
+def _blobs(tmp_path: Any) -> list[dict[str, Any]]:
+    return [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(tmp_path.glob("*.json"))
+    ]
+
+
+def test_resolve_run_style_traces_the_selection(driver: Any, tmp_path: Any) -> None:
+    FakeLlmClient.queue = [{"style_id": "sweet", "reason": "甜宠互动密集"}]
+    driver.resolve_run_style(
+        dict(_SETTINGS), _EPISODES, log=_noop_log, trace_dir=tmp_path
+    )
+    blobs = _blobs(tmp_path)
+    assert len(blobs) == 1, "选题一次往返该且只该留一份痕"
+    assert blobs[0]["raw"] == {"style_id": "sweet", "reason": "甜宠互动密集"}
+    assert blobs[0]["accepted"] is True
+
+
+def test_style_outside_the_library_is_traced_as_rejected(
+    driver: Any, tmp_path: Any
+) -> None:
+    """模型报了个库外风格 id：界面拿到的"按题材匹配"其实是兜底，留痕要说明为什么。"""
+    FakeLlmClient.queue = [{"style_id": "不存在的风格", "reason": "自认为合适"}]
+    style = driver.resolve_run_style(
+        dict(_SETTINGS), _EPISODES, log=_noop_log, trace_dir=tmp_path
+    )
+    assert style["style_id"] == "shuanggan"
+    blob = _blobs(tmp_path)[0]
+    assert blob["accepted"] is False
+    assert "不存在的风格" in json.dumps(blob, ensure_ascii=False)
+
+
+def test_manual_style_writes_no_trace(driver: Any, tmp_path: Any) -> None:
+    """手动指定风格根本不发请求，留一个空壳文件等于伪造证据。"""
+    settings = dict(_SETTINGS)
+    settings["narration.style_id"] = "suspense"
+    driver.resolve_run_style(settings, _EPISODES, log=_noop_log, trace_dir=tmp_path)
+    assert _blobs(tmp_path) == []
+
+
+def test_script_plan_carries_what_the_sanitizer_ate(driver: Any) -> None:
+    """清洗吃掉的段数随方案落库：界面上的「剧本丢弃 N 段」只有这一条来源。"""
+    payload = {
+        "hook": "钩子",
+        "segments": [
+            {"episode": 1, "start": 1.0, "end": 10.0, "text": "第一集解说"},
+            {"episode": 2, "start": 5.0, "end": 15.0, "text": "第二集解说"},
+            {"episode": 9, "start": 1.0, "end": 8.0, "text": "不存在的第九集"},
+        ],
+        "cta": "点我看结局",
+    }
+    FakeLlmClient.queue = [payload]
+    plan, _used = script_driver.script_dialogue_plan(
+        _EPISODES, dict(_SETTINGS), angle_block=""
+    )
+    assert plan.dropped_segments == 1

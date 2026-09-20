@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from dramaclip.api.context import AppContext
+from dramaclip.api.context import AppContext, llm_trace_dir
 from dramaclip.engines.analysis import (
     fusion,
     pipeline,
@@ -65,7 +65,9 @@ def prescreen(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     job_id = context.job_store.create("prescreen", ref_id=project_id)
     cancel_event = threading.Event()
     context.cancel_events[job_id] = cancel_event
-    context.executor.submit(_run_prescreen, context, job_id, targets, cancel_event)
+    context.executor.submit(
+        context.notifier.tracked(job_id, _run_prescreen, context, job_id, targets, cancel_event)
+    )
     return {"job_id": job_id}
 
 
@@ -134,7 +136,11 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     job_id = context.job_store.create("analysis", ref_id=project_id)
     cancel_event = threading.Event()
     context.cancel_events[job_id] = cancel_event
-    context.executor.submit(_run_job, context, job_id, project_id, targets, cancel_event)
+    context.executor.submit(
+        context.notifier.tracked(
+            job_id, _run_job, context, job_id, project_id, targets, cancel_event
+        )
+    )
     return {"job_id": job_id}
 
 
@@ -223,7 +229,9 @@ def resync_semantic(context: AppContext, params: dict[str, Any]) -> dict[str, An
     job_id = context.job_store.create("semantic", ref_id=episode_id)
     cancel_event = threading.Event()
     context.cancel_events[job_id] = cancel_event
-    context.executor.submit(_run_resync, context, job_id, episode_id, cancel_event)
+    context.executor.submit(
+        context.notifier.tracked(job_id, _run_resync, context, job_id, episode_id, cancel_event)
+    )
     return {"job_id": job_id}
 
 
@@ -253,7 +261,12 @@ def _run_resync(
             context.job_store.mark_cancelled(job_id)
             return
         context.notifier.progress(job_id, 40.0, "语义分析中")
-        semantic_result = semantic_pipeline.enhance(raw, context.settings)
+        semantic_result = semantic_pipeline.enhance(
+            raw,
+            context.settings,
+            trace_dir=llm_trace_dir(context),
+            trace_tag=episode_id,
+        )
         analysis_repo.update_semantic(
             context.conn,
             episode_id,
@@ -396,7 +409,12 @@ def _analyze_one(
             report=report,
             hotwords=hotwords,
         )
-        semantic_result = semantic_pipeline.enhance(raw, context.settings)
+        semantic_result = semantic_pipeline.enhance(
+            raw,
+            context.settings,
+            trace_dir=llm_trace_dir(context),
+            trace_tag=episode_id,
+        )
     except Exception as exc:
         episodes_repo.set_status(context.conn, episode_id, "failed")
         context.notifier.log("error", f"{label} 分析失败: {exc}")

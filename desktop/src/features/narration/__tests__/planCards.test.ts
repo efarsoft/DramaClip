@@ -94,3 +94,21 @@ describe('角度名与理由', () => {
     expect(card.reason).toBe('');
   });
 });
+
+describe('剧本清洗丢弃段数', () => {
+  function withDropped(count: number | undefined): NarrationPlan {
+    return plan({
+      plan_data: { mode: 'dialogue_narration', timeline: [], narration_texts: [], dropped_segments: count },
+    });
+  }
+
+  it('丢掉几段是句要说的话——实测真机吃掉 22-23% 而界面上毫无痕迹', () => {
+    expect(planCardView(withDropped(3)).dropped).toBe('剧本丢弃 3 段');
+  });
+
+  it('0 段不占卡片位置，缺失字段（非剧本模式）同样不占', () => {
+    expect(planCardView(withDropped(0)).dropped).toBe('');
+    expect(planCardView(withDropped(undefined)).dropped).toBe('');
+    expect(planCardView(plan({})).dropped).toBe('');
+  });
+});

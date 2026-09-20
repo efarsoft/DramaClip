@@ -72,3 +72,18 @@ it('换了批次，上一批的勾选自动作废', () => {
   expect(screen.getByText('已选 0 / 2 条方案')).not.toBeNull();
   expect(screen.getByRole('button', { name: /出片所选/ }).hasAttribute('disabled')).toBe(true);
 });
+
+it('剧本清洗丢了几段就写在卡上：不说出口，方案看起来像天生只有这么长', () => {
+  const dropped: NarrationPlan = {
+    ...plan('a'),
+    plan_data: { ...plan('a').plan_data, dropped_segments: 3 },
+  };
+  render(
+    <PlanPickList
+      batch={{ planning: false, percent: 0, stageText: '', plans: [dropped, plan('b')], error: '', run: vi.fn() }}
+      queue={idleQueue}
+    />,
+  );
+  expect(screen.getByText('剧本丢弃 3 段')).not.toBeNull();
+  expect(screen.getAllByText(/剧本丢弃/)).toHaveLength(1);
+});

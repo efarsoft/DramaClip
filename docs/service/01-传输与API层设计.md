@@ -45,9 +45,13 @@ class Router:
 ```python
 class Notifier:  # 持有 connection.send
     def progress(job_id, percent, message, detail=None)   # progress.update
-    def log(level, message)                                # log.append
+    def log(level, message, *, job_id=None)                # log.append（同时镜像 <data>/logs/backend.log）
+    def tracked(job_id, fn, *args)                         # 包任务体：作用域内 log() 自动带 job_id
     def model_download(model_id, percent, ...)             # models.download_progress
 ```
+
+任务体一律经 `tracked()` 投池（五处 `executor.submit` 站点）：线程池会复用工作线程，绑定
+必须随任务体开始/结束成对发生，否则上一条任务的 `job_id` 会漏进下一条的日志。
 
 engines 不直接持有 Notifier——api 层包装为 `ProgressReporter` 注入（保持 engines 与 transport 解耦）。
 

@@ -129,6 +129,9 @@ function PlanCard({ plan, checked, onToggle }: { plan: NarrationPlan; checked: b
           <span>{modeLabel(card.mode)}</span>
           <span>{card.episodes}</span>
           <span>{card.overlap}</span>
+          {card.dropped !== '' && (
+            <span style={{ color: tokens.colorWarning }}>{card.dropped}</span>
+          )}
         </span>
       </div>
     </Card>

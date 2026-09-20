@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -83,3 +84,38 @@ def test_blank_titles_from_model_are_not_shipped(monkeypatch) -> None:
 def test_no_copy_raises_instead_of_inventing_titles(monkeypatch) -> None:
     with pytest.raises(ValueError, match="没有解说文案"):
         titles.generate({"narration_texts": []}, {"llm.base_url": "u", "llm.model": "m"})
+
+
+# --------------------------------------------------------------- 留痕（立案C）
+# 标题忽好忽坏只能靠人眼盯，唯一的复核证据是当时到底发了什么、回了什么。
+
+_BASE = {"llm.base_url": "https://x/v1", "llm.model": "m", "llm.api_key": "k"}
+
+
+def _trace(monkeypatch, payload: Any, tmp_path):
+    """跑一次带留痕的生成；生成抛不抛都要把留痕读回来——留痕正是复核证据。"""
+    client = FakeClient(payload)
+    monkeypatch.setattr(titles, "LlmClient", lambda *a, **k: client)
+    trace = tmp_path / "titles_plan1.json"
+    outcome = "ok"
+    try:
+        titles.generate(_PLAN, _BASE, trace_path=trace)
+    except ValueError as exc:
+        outcome = str(exc)
+    return outcome, json.loads(trace.read_text(encoding="utf-8"))
+
+
+def test_trace_keeps_the_prompt_and_the_answer(monkeypatch, tmp_path) -> None:
+    outcome, blob = _trace(monkeypatch, {"titles": ["她一杆清台"]}, tmp_path)
+    assert outcome == "ok"
+    assert "她被全家逼着嫁给残废将军" in blob["user"], "解说文案没进留痕"
+    assert blob["raw"] == {"titles": ["她一杆清台"]}
+    assert blob["accepted"] == 1
+
+
+def test_a_rejected_answer_is_traced_too(monkeypatch, tmp_path) -> None:
+    """整批标题被判空而抛出时更要留下模型当时回了什么，否则无从复盘。"""
+    outcome, blob = _trace(monkeypatch, {"titles": ["  ", ""]}, tmp_path)
+    assert "未产出有效标题" in outcome
+    assert blob["raw"] == {"titles": ["  ", ""]}
+    assert blob["accepted"] == 0

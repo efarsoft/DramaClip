@@ -140,7 +140,7 @@ Router 不做 schema 校验，参数问题一律由各 handler 抛业务域码�
 | method | params | 说明 |
 |--------|--------|------|
 | `progress.update` | `{job_id, percent: 0-100, message, detail?}` | 长任务进度（jobs 表 job_id） |
-| `log.append` | `{level: info\|warn\|error, message}` | 服务端日志 |
+| `log.append` | `{level: info\|warn\|error, message, job_id?}` | 服务端日志；任务体内的调用由 `Notifier.tracked` 投池时自动带上 `job_id`。渲染层目前未订阅本通知，业务日志同时镜像到 `<data>/logs/backend.log`（带 `[job_id]` 前缀），事后可查以盘为准 |
 | `models.download_progress` | `{model_id, percent, status: downloading\|done\|failed}` | 模型下载进度（两端实际字段即此三项；原案的 `speed`/`eta` **从未实现**）。下载中 `percent` 钳在 99，只有 `status:"done"` 那条为 100 |
 
 ## 8. 心跳与失联

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from dramaclip.engines import llm_prompts
+from dramaclip.engines.llm_trace import dump_trace
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
 
 _SYSTEM_PROMPT = (
@@ -21,6 +23,7 @@ def generate(
     settings: dict[str, str],
     *,
     timeout_s: float = 120.0,
+    trace_path: Path | None = None,
 ) -> list[dict[str, Any]]:
     """返回 [{text, selected}]；LLM 未配置或产出为空时抛异常，由调用方转译。"""
     config = LlmConfig.from_settings(settings)
@@ -30,16 +33,20 @@ def generate(
     if not texts:
         raise ValueError("该方案没有解说文案，无需生成标题")
     client = LlmClient(config, timeout_s=timeout_s)
-    data = client.chat_json(
-        llm_prompts.system_override(settings, "prompt.titles_system") or _SYSTEM_PROMPT,
-        "解说文案：\n" + "\n".join(texts),
-    )
+    system = llm_prompts.system_override(settings, "prompt.titles_system") or _SYSTEM_PROMPT
+    user = "解说文案：\n" + "\n".join(texts)
+    data = client.chat_json(system, user)
     raw = data.get("titles", []) if isinstance(data, dict) else []
     titles = [
         {"text": title.strip(), "selected": False}
         for title in raw
         if isinstance(title, str) and title.strip()
     ]
+    # 判空抛出前先把往返落盘：标题忽好忽坏时，这是唯一能复盘的证据
+    dump_trace(
+        trace_path,
+        {"engine": "titles", "system": system, "user": user, "raw": data, "accepted": len(titles)},
+    )
     if not titles:
         raise ValueError("模型未产出有效标题")
     return titles

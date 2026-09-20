@@ -53,3 +53,32 @@ def test_jobs_limit_constants_match_schema(repo_root: Path) -> None:
     ]
     assert limit["maximum"] == jobs_api._LIMIT_MAX
     assert limit["default"] == jobs_api._LIMIT_DEFAULT
+
+
+def test_notifier_payloads_match_declared_notifications(repo_root: Path) -> None:
+    """Notifier 实际发出的字段必须都在 protocol 声明里，一条不落。
+
+    通知面无运行时校验，渲染层拿到什么全凭约定；字段悄悄多出来（如 log.append 的
+    job_id），protocol 追不上的话第三方案例里就是永久黑户。
+    """
+    from dramaclip.transport.notify import Notifier
+
+    common = repo_root / "protocol" / "schemas" / "common.json"
+    data = json.loads(common.read_text(encoding="utf-8"))
+    declared = {
+        str(item["name"]): {str(key).rstrip("?") for key in item["params"]}
+        for item in data["x-notifications"]
+    }
+    sent: list[dict[str, Any]] = []
+    notifier = Notifier(sent.append)
+    notifier.progress("job-1", 10.0, "跑起来了", detail={"step": 1})
+    notifier.log("info", "第一段解说已配音", job_id="job-1")
+    notifier.model_download("model-1", 42.0, speed="3MB/s", eta="00:10")
+
+    assert {str(item["method"]) for item in sent} == set(declared), (
+        "声明的通知与实际发出的不是一套"
+    )
+    for item in sent:
+        name = str(item["method"])
+        extra = set(item["params"]) - declared[name]
+        assert extra == set(), f"{name} 发出了 protocol 未声明的字段：{extra}"

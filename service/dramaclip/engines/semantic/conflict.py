@@ -3,7 +3,11 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from dramaclip.engines.analysis.models import AsrSegment, SceneInfo
+from dramaclip.engines.llm_trace import dump_trace
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable
 from dramaclip.engines.semantic.models import ConflictScore
 
@@ -30,15 +34,28 @@ def score_scenes(
     client: LlmClient | None,
     *,
     system_prompt: str | None = None,
+    trace_path: Path | None = None,
 ) -> list[ConflictScore]:
     """LLM 可用走主路；未配置/失败降级关键词。"""
     if not scenes:
         return []
     if client is not None:
         try:
-            return _score_with_llm(segments, scenes, client, system_prompt=system_prompt)
-        except LlmUnavailable:
-            pass
+            return _score_with_llm(
+                segments, scenes, client, system_prompt=system_prompt, trace_path=trace_path
+            )
+        except LlmUnavailable as exc:
+            # 降级不是异常，但对不上账时它是唯一的线索——把线索留在盘上
+            dump_trace(
+                trace_path,
+                {
+                    "engine": "conflict",
+                    "system": system_prompt or _SYSTEM_PROMPT,
+                    "degraded": True,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "scene_count": len(scenes),
+                },
+            )
     return _score_with_keywords(segments, scenes)
 
 
@@ -48,6 +65,7 @@ def _score_with_llm(
     client: LlmClient,
     *,
     system_prompt: str | None = None,
+    trace_path: Path | None = None,
 ) -> list[ConflictScore]:
     user_payload = [
         {
@@ -57,11 +75,9 @@ def _score_with_llm(
         }
         for index, scene in enumerate(scenes)
     ]
-    import json
-
-    raw = client.chat_json(
-        system_prompt or _SYSTEM_PROMPT, json.dumps(user_payload, ensure_ascii=False)
-    )
+    system = system_prompt or _SYSTEM_PROMPT
+    user = json.dumps(user_payload, ensure_ascii=False)
+    raw = client.chat_json(system, user)
     if not isinstance(raw, list):
         raise LlmUnavailable("冲突打分返回不是数组")
     by_index = {
@@ -69,6 +85,19 @@ def _score_with_llm(
         for item in raw
         if isinstance(item, dict) and "scene_index" in item and "score" in item
     }
+    dump_trace(
+        trace_path,
+        {
+            "engine": "conflict",
+            "system": system,
+            "user": user,
+            "raw": raw,
+            "degraded": False,
+            "scene_count": len(scenes),
+            "answered": len(by_index),
+            "missing_scenes": max(len(scenes) - len(by_index), 0),
+        },
+    )
     results: list[ConflictScore] = []
     for index, scene in enumerate(scenes):
         item = by_index.get(index)

@@ -74,16 +74,19 @@ def _submit_export(
     cancel_event = threading.Event()
     context.cancel_events[job_id] = cancel_event
     context.executor.submit(
-        _run_export,
-        context,
-        job_id,
-        ExportRun(
-            export_id=export_id,
-            project_id=project_id,
-            plan_row=plan_row,
-            plan_data=plan_data,
-            cancel_event=cancel_event,
-        ),
+        context.notifier.tracked(
+            job_id,
+            _run_export,
+            context,
+            job_id,
+            ExportRun(
+                export_id=export_id,
+                project_id=project_id,
+                plan_row=plan_row,
+                plan_data=plan_data,
+                cancel_event=cancel_event,
+            ),
+        )
     )
     return job_id
 

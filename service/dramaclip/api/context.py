@@ -26,3 +26,8 @@ class AppContext:
     work_dir: Path  # 分析/中间产物缓存目录（<data>/cache/analysis）
     data_dir: Path  # 数据根：outputs/ models/ logs/ covers/ 的唯一锚点
     cancel_events: dict[str, threading.Event] = field(default_factory=dict)
+
+
+def llm_trace_dir(context: AppContext) -> Path:
+    """LLM 往返留痕锚点：<data>/logs/llm，八处调用点共用一个目录，别再各拼各的。"""
+    return Path(context.data_dir) / "logs" / "llm"

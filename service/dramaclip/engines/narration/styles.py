@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
+from dramaclip.engines.llm_trace import dump_trace
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable
 from dramaclip.infra.paths import resolve_resources_dir
 
@@ -84,6 +86,7 @@ def select_style_with_reason(
     *,
     max_lines: int = 40,
     system_prompt: str | None = None,
+    trace_path: Path | None = None,
 ) -> tuple[str, str] | None:
     """口味层：LLM 读转写从风格库自选风格，返回 (style_id, reason)。
     """
@@ -102,14 +105,29 @@ def select_style_with_reason(
     if not lines:
         return None
     user_prompt = f"风格库：\n{menu}\n\n台词转写节选：\n" + "\n".join(lines)
+    system = system_prompt or _SELECT_SYSTEM_PROMPT
+    raw: Any = None
+    error = ""
     try:
-        raw = llm.chat_json(system_prompt or _SELECT_SYSTEM_PROMPT, user_prompt)
-    except LlmUnavailable:
+        raw = llm.chat_json(system, user_prompt)
+    except LlmUnavailable as exc:
+        error = f"{type(exc).__name__}: {exc}"
+    picked = str(raw.get("style_id", "")).strip() if isinstance(raw, dict) else ""
+    reason = str(raw.get("reason", "")).strip() if isinstance(raw, dict) else ""
+    accepted = picked in styles
+    # 模型报库外风格 id 时界面只看到"按题材匹配"，留痕是唯一的解释
+    dump_trace(
+        trace_path,
+        {
+            "engine": "style_select",
+            "system": system,
+            "user": user_prompt,
+            "raw": raw,
+            "error": error,
+            "style_id": picked,
+            "accepted": accepted,
+        },
+    )
+    if not accepted:
         return None
-    if not isinstance(raw, dict):
-        return None
-    style_id = str(raw.get("style_id", "")).strip()
-    reason = str(raw.get("reason", "")).strip()
-    if style_id not in styles:
-        return None
-    return style_id, reason or "剧情匹配"
+    return picked, reason or "剧情匹配"

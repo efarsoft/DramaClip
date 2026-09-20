@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from dramaclip.engines import llm_prompts
+from dramaclip.engines.llm_trace import dump_trace, trace_path
 from dramaclip.engines.narration import scriptwriter
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
 
@@ -164,12 +165,11 @@ def select_angles(
             continue
         attempts.append({"raw": raw, "accepted": True})
         break
-    if trace_dir is not None:
-        stamp = time.strftime("%m%d_%H%M%S")
-        scriptwriter.dump_trace(
-            Path(trace_dir) / f"llm_angles_{mode}_{stamp}.json",
-            {"system": system, "user": user_prompt, "attempts": attempts},
-        )
+    stamp = time.strftime("%m%d_%H%M%S")
+    dump_trace(
+        trace_path(trace_dir, f"llm_angles_{mode}_{stamp}.json"),
+        {"system": system, "user": user_prompt, "attempts": attempts},
+    )
     if briefs is None:
         detail = "；".join(str(item["error"]) for item in attempts)
         raise ValueError(f"选题未产出 {k} 条合格角度：{detail}")

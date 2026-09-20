@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from dramaclip.engines import llm_prompts
+from dramaclip.engines import llm_prompts, llm_trace
 from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration import scriptwriter, styles
@@ -27,6 +27,7 @@ def resolve_run_style(
     episode_inputs: list[dict[str, Any]],
     *,
     log: LogFn,
+    trace_dir: Path | None = None,
 ) -> dict[str, Any]:
     """口味层解析，每个任务只跑一次（原状是每模式一次，produce 白付 6 次 LLM 往返）。
     """
@@ -40,11 +41,13 @@ def resolve_run_style(
         and LlmConfig.from_settings(settings).configured
     ):
         selector = LlmClient(LlmConfig.from_settings(settings), timeout_s=_SELECT_TIMEOUT_S)
+        stamp = time.strftime("%m%d_%H%M%S")
         try:
             selection = styles.select_style_with_reason(
                 selector,
                 _excerpt(episode_inputs),
                 system_prompt=llm_prompts.system_override(settings, "prompt.style_select_system"),
+                trace_path=llm_trace.trace_path(trace_dir, f"llm_style_select_{stamp}.json"),
             )
         except Exception:  # noqa: BLE001 - 选题失败必须降级而非中断出片
             selection = None
@@ -102,6 +105,8 @@ def script_dialogue_plan(
     }
     durations = {int(ep["number"]): float(ep.get("duration") or 0.0) for ep in episode_inputs}
     plan = narration_pipeline.build_from_script_episodes(episode_map, durations, script, strategy)
+    # 清洗吃掉了几段随方案落库：方案卡据此说"剧本丢弃 N 段"（规格 §4.3 卡片可见性）
+    plan = plan.model_copy(update={"dropped_segments": script.dropped_segments})
     used_ids = sorted({seg.episode_id for seg in plan.timeline})
     return plan, used_ids
 

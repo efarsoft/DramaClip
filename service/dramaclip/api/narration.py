@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from dramaclip.api.context import AppContext
+from dramaclip.api.context import AppContext, llm_trace_dir
 from dramaclip.engines.narration import (
     angles,
     casting,
@@ -99,7 +99,11 @@ def generate_titles(context: AppContext, params: dict[str, Any]) -> dict[str, An
     if row is None:
         raise RpcDomainError(_ERR_PLAN_NOT_FOUND, f"编排方案不存在: {plan_id}")
     try:
-        titles = titles_engine.generate(row["plan_data"], context.settings)
+        titles = titles_engine.generate(
+            row["plan_data"],
+            context.settings,
+            trace_path=llm_trace_dir(context) / f"llm_titles_{plan_id}.json",
+        )
     except LlmUnavailable as exc:
         raise RpcDomainError(_ERR_LLM, str(exc)) from exc
     except ValueError as exc:
@@ -254,16 +258,19 @@ def plan_variants(context: AppContext, params: dict[str, Any]) -> dict[str, Any]
     cancel_event = threading.Event()
     context.cancel_events[job_id] = cancel_event
     context.executor.submit(
-        _run_plan_variants,
-        context,
-        job_id,
-        project_id,
-        done_episodes,
-        modes,
-        k,
-        excluded_angles,
-        bool(exclude_plan_ids),
-        cancel_event,
+        context.notifier.tracked(
+            job_id,
+            _run_plan_variants,
+            context,
+            job_id,
+            project_id,
+            done_episodes,
+            modes,
+            k,
+            excluded_angles,
+            bool(exclude_plan_ids),
+            cancel_event,
+        )
     )
     return {"job_id": job_id, "k": k, "batch_id": job_id}
 
@@ -402,7 +409,7 @@ def _angle_variants(
         episode_inputs=episode_inputs,
         settings=settings,
         excluded=excluded_angles,
-        trace_dir=context.data_dir / "logs" / "llm",
+        trace_dir=llm_trace_dir(context),
     )
     return [
         _Variant(
@@ -423,7 +430,7 @@ def _plan_one(
 ) -> tuple[PlanData, list[str]]:
     """按取材意图产出一条方案（未配音、未落库）。返回 (方案, **实际用到**的集 id)。
     """
-    trace_dir = context.data_dir / "logs" / "llm"
+    trace_dir = llm_trace_dir(context)
 
     if mode == "dialogue_narration":
         wanted = set(variant.episode_numbers)
@@ -523,7 +530,10 @@ def _inject_run_settings(
     if any(mode in _NARRATION_MODES for mode in modes) and (episode_inputs or pinned):
         settings["_style_directives"] = str(
             script_driver.resolve_run_style(
-                settings, episode_inputs, log=context.notifier.log
+                settings,
+                episode_inputs,
+                log=context.notifier.log,
+                trace_dir=llm_trace_dir(context),
             ).get("directives", "")
         )
     return episode_inputs

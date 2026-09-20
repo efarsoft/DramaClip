@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
+from dramaclip.engines.llm_trace import dump_trace
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable
 
 GENRES: tuple[str, ...] = ("复仇", "甜宠", "悬疑", "逆袭", "家庭伦理", "都市", "古装", "其他")
@@ -24,19 +28,41 @@ _GENRE_KEYWORDS: dict[str, tuple[str, ...]] = {
 
 
 def classify(
-    asr_text: str, client: LlmClient | None, *, system_prompt: str | None = None
+    asr_text: str,
+    client: LlmClient | None,
+    *,
+    system_prompt: str | None = None,
+    trace_path: Path | None = None,
 ) -> str:
+    """题材判定。降级（关键词兜底）不是异常，但必须留下一份能对上账的痕。"""
     text = asr_text[:3000]
-    if client is not None and text.strip():
-        try:
-            raw = client.chat_json(system_prompt or _SYSTEM_PROMPT, text)
-            if isinstance(raw, dict):
-                genre = str(raw.get("genre", "")).strip()
-                if genre in GENRES:
-                    return genre
-        except LlmUnavailable:
-            pass
-    return _classify_by_keywords(text)
+    if client is None or not text.strip():
+        return _classify_by_keywords(text)
+    system = system_prompt or _SYSTEM_PROMPT
+    raw: Any = None
+    error = ""
+    try:
+        raw = client.chat_json(system, text)
+    except LlmUnavailable as exc:
+        error = f"{type(exc).__name__}: {exc}"
+    answer = str(raw.get("genre", "")).strip() if isinstance(raw, dict) else ""
+    matched = answer in GENRES
+    keyword = _classify_by_keywords(text)
+    dump_trace(
+        trace_path,
+        {
+            "engine": "genre",
+            "system": system,
+            "user": text,
+            "raw": raw,
+            "error": error,
+            "model_genre": answer,
+            "matched": matched,
+            "degraded": not matched,
+            "keyword_genre": keyword,
+        },
+    )
+    return answer if matched else keyword
 
 
 def _classify_by_keywords(text: str) -> str:

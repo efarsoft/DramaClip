@@ -55,3 +55,6 @@ class PlanData(BaseModel):
     strategy: StrategySpec = Field(default_factory=StrategySpec)
     # 编排来源：rule=规则预算（默认）；llm_script=LLM 剧本驱动
     planner: str = "rule"
+    # 剧本清洗层丢掉的段数（未知集号/越界/重叠/空文案）：仅 llm_script 链会写，
+    # 其余模式恒为 0。方案卡据此显示「剧本丢弃 N 段」，把悄悄变短讲成明账。
+    dropped_segments: int = 0

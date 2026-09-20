@@ -207,6 +207,8 @@ export interface PlanData {
   readonly mode: NarrationMode;
   readonly timeline: TimelineSegment[];
   readonly narration_texts: ReadonlyArray<{ id: string; text: string; voice?: string; audio_path?: string; duration?: number }>;
+  /** 剧本清洗层丢掉的段数（未知集号/越界/重叠/空文案）；仅编剧链会写，其余模式为 0。 */
+  readonly dropped_segments?: number;
 }
 
 export interface NarrationPlan {
