@@ -38,6 +38,19 @@
 ### VibeVoice-1.5B（已下 5GB，MIT）
 - 多角色（4 人）对话合成 → 只服务「双人对谈」模式的升级；推理较重需 GPU，维持储备观察。
 
+### 扩充核实（2026-09-20 第二轮：头部模型逐一过 API）
+
+| 模型 | 仓库实测 | 许可（HF API） | 体积 | 亮点 | 裁决 |
+|---|---|---|---|---|---|
+| **VoxCPM2**（OpenBMB） | ✓ 34.4万下载（MS）/ HF 38万/月、1630 赞 | **apache-2.0** | 4.62GB | 2B 参数、tokenizer-free 扩散自回归、**48kHz 录音室级音质**、30 语言、零样本克隆、上下文感知 | **🥇 新增高音质首选**：热度与许可双优，48kHz 输出是全榜独一档 |
+| IndexTTS-2.5 | ✓ 2.5万下载（MS） | other（B 站协议，informational） | 5.11GB | 时长控制+情感解耦+RTF 2.28×提速 | 已有 2 于盘，2.5 升级收益中庸，先不重复下载 |
+| CosyVoice2-0.5B | ✓ 192.6万下载（MS） | apache-2.0 | 5.23GB | 上一代旗舰 | 被 CosyVoice3 全面替代，跳过 |
+| VoxCPM-0.5B | ✓ | — | 1.5GB | 轻量版 | CPU 可能可行，作 VoxCPM2 跑分不佳的备胎 |
+| fish-speech-1.5 | ✓ | CC-BY-NC（不可商用） | ~4GB | — | 排除（业主 informational 裁决也救不了：质量不构成独占价值） |
+| F5-TTS / Spark-TTS / MOSS-TTSD / Kimi-TTS | ✗ 不在 ModelScope | — | — | — | HF 侧再核（国内下载需镜像，暂缓） |
+
+**结论修订：TTS 接入序列 = CosyVoice3（已核实启动）→ VoxCPM2（高音质档）**，两者许可均 apache-2.0、热度可信、仓库直连国内 CDN。
+
 ---
 
 ## 二、ASR 结论
