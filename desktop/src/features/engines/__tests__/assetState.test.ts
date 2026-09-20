@@ -45,17 +45,11 @@ describe('assetState', () => {
     expect(canActivate(wired, report({ engine_ready: false }))).toBe(false);
   });
 
-  it('验收用例：sherpa 目录被改名后 status 变 not_installed → 缺模型且不得生效', () => {
-    const sherpa = model({
-      model_id: 'sherpa-melo-zh',
-      engine: 'sherpa_melo',
-      name: 'sherpa-onnx melo-zh',
-      status: 'not_installed',
-      size_bytes: 0,
-    });
-    expect(assetState(sherpa, undefined)).toBe('missing');
+  it('验收用例：目录被改名后 status 变 not_installed → 缺模型且不得生效', () => {
+    const movedAway = model({ status: 'not_installed', size_bytes: 0 });
+    expect(assetState(movedAway, undefined)).toBe('missing');
     expect(stateLabel('missing')).toBe('缺模型');
-    expect(canActivate(sherpa, undefined)).toBe(false);
+    expect(canActivate(movedAway, undefined)).toBe(false);
   });
 
   it('未体检 → unverified：已装也不冒充「就绪」', () => {
@@ -164,11 +158,11 @@ describe('activateSettings', () => {
     expect(activeAsset([item], 'asr', values)?.model_id).toBe('sensevoice-small');
   });
 
-  it('TTS 按引擎名生效，并能找回同一件资产', () => {
-    const item = model({ model_id: 'sherpa-melo-zh', kind: 'tts', engine: 'sherpa_melo' });
+  it('TTS 生效写回的是引擎名，并能用同一份设置找回这件资产', () => {
+    const item = model({ kind: 'tts' });
     const values = activateSettings(item);
-    expect(values).toEqual({ 'tts.engine': 'sherpa_melo' });
-    expect(activeAsset([item], 'tts', values)?.model_id).toBe('sherpa-melo-zh');
+    expect(values).toEqual({ 'tts.engine': 'kokoro' });
+    expect(activeAsset([item], 'tts', values)?.model_id).toBe('kokoro-82m');
   });
 });
 
@@ -222,18 +216,26 @@ describe('incompleteAssets', () => {
 describe('domainStats', () => {
   const ttsModels: ModelInfo[] = [
     model({ kind: 'tts' }),
-    model({ kind: 'tts', model_id: 'sherpa-melo-zh', status: 'not_installed', size_bytes: 0 }),
     model({ kind: 'tts', model_id: 'indextts2', engine: 'indextts2', engine_ready: false }),
   ];
 
   it('可用 = 本域引擎已接入的件数，未接入的储备项不计入', () => {
-    expect(domainStats(ttsModels, reportsOf(), 'tts')).toEqual({ wired: 2, incomplete: 0 });
+    expect(domainStats(ttsModels, reportsOf(), 'tts')).toEqual({ wired: 1, incomplete: 0 });
   });
 
   it('待修 = 本域体检不通过的件数，别域的不串进来', () => {
     const withAsr = [
       ...ttsModels,
       model({ kind: 'asr', model_id: 'faster-whisper-medium', engine: 'faster_whisper' }),
+      // 撤下 sherpa 后本域只剩一件已接入资产，「缺模型照样计入可用」这一维改在 ASR 上验：
+      // 计的是 engine_ready，不是安装态。
+      model({
+        kind: 'asr',
+        model_id: 'faster-whisper-large-v3',
+        engine: 'faster_whisper',
+        status: 'not_installed',
+        size_bytes: 0,
+      }),
     ];
     const broken = report({
       model_id: 'faster-whisper-medium',
@@ -241,8 +243,8 @@ describe('domainStats', () => {
       engine: 'faster_whisper',
       ok: false,
     });
-    expect(domainStats(withAsr, reportsOf(broken), 'asr')).toEqual({ wired: 1, incomplete: 1 });
-    expect(domainStats(withAsr, reportsOf(broken), 'tts')).toEqual({ wired: 2, incomplete: 0 });
+    expect(domainStats(withAsr, reportsOf(broken), 'asr')).toEqual({ wired: 2, incomplete: 1 });
+    expect(domainStats(withAsr, reportsOf(broken), 'tts')).toEqual({ wired: 1, incomplete: 0 });
   });
 });
 

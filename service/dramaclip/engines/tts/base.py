@@ -28,7 +28,7 @@ def audio_duration_s(path: Path) -> float:
 def audio_container(path: Path) -> str:
     """探测落盘字节真实的容器名（ffprobe format_name）。
 
-    三个引擎各写各的原生容器（Edge=MP3，Kokoro/sherpa=WAV），文件名按扩展名决定
+    各引擎写各自的原生容器（Edge=MP3，Kokoro=WAV），文件名按扩展名决定
     浏览器收到的 Content-Type——按 `.mp3` 猜等于给 WAV 挂个 MP3 的牌子。
     """
     return _ffprobe(path, "format=format_name")

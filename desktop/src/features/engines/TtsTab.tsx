@@ -37,13 +37,11 @@ import {
 
 const ENGINE_KIND_LABEL: Record<string, string> = {
   kokoro: '本地 · 免费离线',
-  sherpa_melo: '本地 · 免费离线',
   edge: '云端 · 免费无需 API Key',
 };
 
 const VOICE_HINT: Record<string, string> = {
   kokoro: 'Kokoro 提供 100 个中文音色（55 女 + 45 男），下拉可搜索',
-  sherpa_melo: 'melo 模型为单说话人，音色固定',
   edge: '微软官方中文音色，覆盖普通话 / 东北 / 陕西 / 粤语 / 台湾',
 };
 

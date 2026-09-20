@@ -220,7 +220,7 @@ def test_preview_caches_by_engine_voice_text(tmp_path: Path, fake_engine: FakeEn
 def test_preview_names_the_file_by_the_container_the_engine_wrote(
     tmp_path: Path, fake_engine: FakeEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """扩展名要按落盘字节真实的容器写：kokoro/sherpa 出的是 WAV，Edge 出的才是 MP3。
+    """扩展名要按落盘字节真实的容器写：Kokoro 出的是 WAV，Edge 出的才是 MP3。
 
     浏览器只按 Content-Type（我们按扩展名给）决定能不能播，名字骗人等于点了没声。
     """

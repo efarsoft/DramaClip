@@ -121,22 +121,14 @@ def test_inspect_recognizes_a_flat_directory_by_its_files_and_name(tmp_path: Pat
 
 def test_inspect_recognizes_a_release_folder_nested_one_level_down(tmp_path: Path) -> None:
     """zip 解出来常带一层同名目录：模型在里面，不在业主点的那一层。"""
-    source = tmp_path / "sherpa-download"
-    inner = source / "vits-melo-tts-zh_en"
-    for name in registry.requirements("sherpa_melo"):
-        path = inner / name
-        if name == "dict":
-            path.mkdir(parents=True, exist_ok=True)
-        elif name == "model.onnx":
-            _sparse(path, 200 * 1024 * 1024)
-        else:
-            _write(path, b"data")
+    source = tmp_path / "whisper-download"
+    inner = source / "faster-whisper-medium"
+    _whisper_files(inner)
 
     result = importer.inspect(tmp_path / "library", source)
 
     assert result["recognized"] is True
-    assert result["model_id"] == "sherpa-melo-zh"
-    assert result["engine"] == "sherpa_melo"
+    assert result["model_id"] == "faster-whisper-medium"
     assert Path(result["model_root"]) == inner
 
 

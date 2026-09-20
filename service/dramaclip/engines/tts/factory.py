@@ -2,7 +2,7 @@
 
 ``supported()`` 与 ``create()`` 共用 ``_MODEL_DIRS`` 这一张表：模型清单里的
 「引擎已接入」判据（``registry.engine_ready``）读的就是这里。任何一处再单独维护一份
-名单，「就绪」就会退回成猜的——旧版 TtsTab 把 sherpa 写死成 ``ok: true`` 正是这么来的。
+名单，「就绪」就会退回成猜的——旧版引擎卡把某个引擎写死成 ``ok: true`` 正是这么来的。
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ from dramaclip.engines.tts.base import TtsEngine
 _MODEL_DIRS: dict[str, Path | None] = {
     "edge": None,
     "kokoro": Path("tts") / "kokoro" / "Kokoro-82M-v1.1-zh",
-    "sherpa_melo": Path("tts") / "sherpa-onnx" / "melo" / "vits-melo-tts-zh_en",
 }
 
 
@@ -24,8 +23,11 @@ def supported() -> frozenset[str]:
     return frozenset(_MODEL_DIRS)
 
 
-def model_dir(models_dir: Path, engine: str = "sherpa_melo") -> Path:
-    """引擎实际加载模型的目录——与 registry 里该引擎登记项的 placement 必须是同一个地方。"""
+def model_dir(models_dir: Path, engine: str) -> Path:
+    """引擎实际加载模型的目录——与 registry 里该引擎登记项的 placement 必须是同一个地方。
+
+    没有默认引擎：默认值等于替调用方回答「用哪个引擎」，漏传参数会安静地读错目录。
+    """
     relative = _MODEL_DIRS[engine]
     if relative is None:
         raise ValueError(f"{engine} 是云端引擎，没有本地模型目录")
@@ -41,10 +43,6 @@ def create(engine: str, models_dir: Path | None = None) -> TtsEngine:
         from dramaclip.engines.tts.engines.kokoro import KokoroEngine
 
         return KokoroEngine(_local_dir(engine, models_dir))
-    if engine == "sherpa_melo":
-        from dramaclip.engines.tts.engines.sherpa import SherpaTtsEngine
-
-        return SherpaTtsEngine(_local_dir(engine, models_dir))
     available = " / ".join(sorted(supported()))
     raise ValueError(f"未知 TTS 引擎: {engine}（可用: {available}）")
 

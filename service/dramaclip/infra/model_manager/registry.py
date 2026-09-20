@@ -31,7 +31,7 @@ class ModelSpec:
     def sources(self) -> list[tuple[str, str]]:
         """可用下载源（国内优先排序）：[(kind, repo)]，kind ∈ modelscope/hf_mirror/huggingface。
 
-        空 ``repo_id`` = 该模型没有仓库形式的自动下载源（如 sherpa-onnx 的发布包），
+        空 ``repo_id`` = 该模型没有仓库形式的自动下载源（只能业主自己取回后导入），
         返回空表让调用方明确拒绝下载，而不是拼出一个不存在的 URL。
         """
         out: list[tuple[str, str]] = []
@@ -128,22 +128,6 @@ def builtin_specs() -> list[ModelSpec]:
             speed=3,
             quality=4,
             desc="中文离线配音",
-        ),
-        ModelSpec(
-            model_id="sherpa-melo-zh",
-            kind="tts",
-            engine="sherpa_melo",
-            # 没有仓库形式的下载源：模型是 sherpa-onnx 的发布包（由 MeloTTS 转换而来），
-            # 只能人工取回后用「导入模型」放到 placement 目录下。
-            repo_id="",
-            placement="tts/sherpa-onnx/melo/vits-melo-tts-zh_en",
-            name="sherpa-onnx melo-zh（CPU 高音质）",
-            notes="约 190MB（含词典）；无自动下载源，需手动导入到上述目录；单说话人",
-            size_label="~190MB",
-            tier="balanced",
-            speed=4,
-            quality=4,
-            desc="VITS melo 中文，CPU 推理，44.1kHz",
         ),
         ModelSpec(
             model_id="indextts2",
@@ -340,7 +324,6 @@ _REQUIREMENTS: dict[str, tuple[str, ...]] = {
         "Kokoro-82M-v1.1-zh/*.pth",
         "Kokoro-82M-v1.1-zh/voices",
     ),
-    "sherpa_melo": ("model.onnx", "lexicon.txt", "tokens.txt", "dict"),
 }
 _WEIGHT_SUFFIXES = (".bin", ".pth", ".pt", ".onnx", ".safetensors")
 _HEX = set("0123456789abcdef")

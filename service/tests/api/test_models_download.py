@@ -162,14 +162,32 @@ def test_sweep_interrupted_fails_crashed_download(
 
 
 def test_download_rejects_a_model_without_any_source(
-    memory_db: sqlite3.Connection, tmp_path: Path, stub_download: _StubDownload
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    stub_download: _StubDownload,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """没有下载源还点下载：明确拒绝并指向「导入」，而不是拼出一个坏 URL。"""
+    """没有下载源还点下载：明确拒绝并指向「导入」，而不是拼出一个坏 URL。
+
+    清单里如今没有无源行（原先是 sherpa-melo-zh，引擎已撤下），所以按替身注入一只：
+    判据要跟着 ``ModelSpec.sources()`` 这条类型契约走，不能钉在某一行资产上。
+    """
+    from dramaclip.infra.model_manager.registry import ModelSpec
     from dramaclip.transport.rpc import RpcDomainError
 
+    sourceless = ModelSpec(
+        model_id="manual-only",
+        kind="tts",
+        engine="kokoro",
+        repo_id="",
+        placement="tts/manual-only",
+        name="只能手工导入的模型",
+    )
+    monkeypatch.setattr(downloader, "spec_by_id", lambda _model_id: sourceless)
     context = _context(memory_db, tmp_path)
+
     with pytest.raises(RpcDomainError) as exc:
-        _download(context, stub_download, "sherpa-melo-zh")
+        _download(context, stub_download, "manual-only")
     assert "导入" in str(exc.value)
     assert stub_download.calls == [], "无源模型不得走到下载器"
 

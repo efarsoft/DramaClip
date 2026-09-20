@@ -12,7 +12,7 @@
         "properties": {
           "engine": {
             "type": "string",
-            "description": "kokoro | sherpa_melo | edge；缺省取设置项 tts.engine。未接入工厂的引擎直接报错，不换个引擎出声"
+            "description": "kokoro | edge；缺省取设置项 tts.engine。未接入工厂的引擎直接报错，不换个引擎出声"
           },
           "voice": {
             "type": "string",

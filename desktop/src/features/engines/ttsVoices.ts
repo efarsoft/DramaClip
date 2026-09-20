@@ -1,13 +1,14 @@
-/** 三引擎音色目录：每个引擎的音色体系互不相通，故按引擎独立成键存储。
+/** 引擎音色目录：每个引擎的音色体系互不相通，故按引擎独立成键存储。
  *
  * Kokoro 名单 = 模型 voices/ 目录实际存在的中文音色（55 女 + 45 男）；
- * sherpa melo 为单说话人模型（sid=0 固定）；Edge 为微软官方中文音色名。
+ * Edge 为微软官方中文音色名。这张表跟着 TTS 工厂的 ``supported()`` 走：
+ * 工厂撤下一个引擎，这里必须一起撤，否则下拉能把业主送到一条造不出声的路上了。
  */
 import type { DefaultOptionType } from 'antd/es/select';
 
-export type TtsEngineName = 'kokoro' | 'sherpa_melo' | 'edge';
+export type TtsEngineName = 'kokoro' | 'edge';
 
-export const TTS_ENGINES: readonly TtsEngineName[] = ['kokoro', 'sherpa_melo', 'edge'];
+export const TTS_ENGINES: readonly TtsEngineName[] = ['kokoro', 'edge'];
 
 /** 不需要本地模型的引擎：Edge 走云端，故它没有「缺模型」这一态。其余引擎一律以资产为准。 */
 export const TTS_MODEL_FREE_ENGINES: readonly TtsEngineName[] = ['edge'];
@@ -15,7 +16,6 @@ export const TTS_MODEL_FREE_ENGINES: readonly TtsEngineName[] = ['edge'];
 /** 引擎短名 → 展示名（设置值只有短名，UI 上说短名等于让人猜）。 */
 export const TTS_ENGINE_LABEL: Record<TtsEngineName, string> = {
   kokoro: 'Kokoro 82M',
-  sherpa_melo: 'sherpa-onnx melo',
   edge: 'Edge',
 };
 
@@ -86,6 +86,5 @@ export const TTS_VOICE_OPTIONS: Record<TtsEngineName, DefaultOptionType[]> = {
     { label: '女声', options: female(KOKORO_FEMALE_IDS) },
     { label: '男声', options: male(KOKORO_MALE_IDS) },
   ],
-  sherpa_melo: [{ label: '默认女声（单说话人模型）', value: 'default' }],
   edge: EDGE_VOICES,
 };

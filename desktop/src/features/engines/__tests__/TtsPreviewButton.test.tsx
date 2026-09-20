@@ -157,8 +157,8 @@ describe('TtsPreviewButton · 不出声的理由', () => {
   it('给了不可试听的原因时按钮禁用，点击不发请求', () => {
     render(
       <TtsPreviewButton
-        engine="sherpa_melo"
-        voice="default"
+        engine="kokoro"
+        voice="zf_001"
         blocked="模型未下载，先下载后再试听"
       />,
     );

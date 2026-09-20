@@ -29,9 +29,8 @@ DEFAULTS: dict[str, str] = {
     "llm.api_key": "",
     "llm.model": "",
     "tts.engine": "kokoro",
-    # 音色按引擎独立成键：三引擎音色体系互不相通（Kokoro 音色名/单说话人/微软官方名）
+    # 音色按引擎独立成键：两引擎音色体系互不相通（Kokoro 音色名 / 微软官方名）
     "tts.voice.kokoro": "zf_001",
-    "tts.voice.sherpa_melo": "default",
     "tts.voice.edge": "zh-CN-XiaoxiaoNeural",
     "narration.style_id": "auto",
     # 每模式的方案数 K（规格 §4.3「方案数 K 」的全局默认；项目级覆盖走 projects.settings）

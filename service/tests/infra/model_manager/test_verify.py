@@ -5,8 +5,9 @@
     ``main``、``refs/main`` 只有 4 字节，且没有 ``trees/``；根目录那份是 40 位提交号 + 40 字节 ref。
   · ``…faster-whisper-small/blobs/`` 里躺着 201MB 的 ``*.incomplete`` 半截文件。
   · medium 在 ``models/`` 根与 ``models/asr/faster-whisper/`` 下各有一份。
-  · sherpa 的模型在 ``models/sherpa-onnx/melo/…``，而 ``tts/factory.py`` 读的是
-    ``models/tts/sherpa-onnx/melo/…``——两边都不是登记路径。
+  · sherpa 当年在 ``models/sherpa-onnx/melo/…``，而 ``tts/factory.py`` 读的是
+    ``models/tts/sherpa-onnx/melo/…``——两边都不是登记路径（该引擎 2026-09-20 撤下；
+    「登记路径 = 工厂加载路径」这条判据现在由下面的 kokoro 对账用例守着）。
 """
 
 from __future__ import annotations
@@ -240,29 +241,6 @@ def test_verify_missing_model_reports_a_single_clear_failure(tmp_path: Path) -> 
     assert report["ok"] is False
     assert report["checks"][0]["name"] == "目录存在"
     assert report["checks"][0]["status"] == "fail"
-
-
-def test_verify_sherpa_needs_its_dict_directory(tmp_path: Path) -> None:
-    spec = _spec("sherpa-melo-zh")
-    base = tmp_path / "models" / spec.placement
-    base.mkdir(parents=True)
-    for name in ("model.onnx", "lexicon.txt", "tokens.txt"):
-        (base / name).write_bytes(b"x" * 16)
-    report = registry.verify(tmp_path / "models", spec)
-    assert report["ok"] is False
-    assert "dict" in next(c for c in report["checks"] if c["name"] == "必需文件")["detail"]
-
-
-def test_sherpa_model_is_a_registered_asset(tmp_path: Path) -> None:
-    """sherpa 在工厂里可选、引擎已接入，却在清单里没有登记项——所以它永远显示不了安装态。"""
-    spec = _spec("sherpa-melo-zh")
-    assert spec.kind == "tts"
-    assert spec.engine == "sherpa_melo"
-    assert registry.engine_ready(spec) is True
-    # 登记路径必须与工厂实际加载的路径一致，否则「已装」和「能跑」会分家。
-    from dramaclip.engines.tts.factory import model_dir
-
-    assert model_dir(tmp_path / "models") == tmp_path / "models" / spec.placement
 
 
 def test_kokoro_placement_and_factory_path_agree(tmp_path: Path) -> None:

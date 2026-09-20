@@ -49,7 +49,6 @@ resources/dramaclip-service/
 build/
 desktop/release/
 desktop/release2/
-data/models/sherpa-onnx/
 
 # ── 本地调试产物（永不入库）──
 scratch/
