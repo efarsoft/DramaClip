@@ -165,17 +165,49 @@ def _system_sent(**prompts: str) -> str:
     return llm.systems[0]
 
 
+def _user_sent(**prompts: str) -> str:
+    llm = FakeLLM([dict(_VALID_PAYLOAD)])
+    write_script_episodes(
+        llm, _EPISODES, project_name="测试剧", angle_block="", prompts=prompts
+    )
+    return llm.users[0]
+
+
+def test_system_carries_the_rules_the_sanitizer_enforces() -> None:
+    """清洗层会整段丢掉重叠与越界的片段：规则不写进提示词，等于让模型盲写再默默吃掉。
+
+    实测 n=8（真机 2 集 116 行）：103 段原始输出里 59 段漏了 episode（旧版格式示例
+    本身就没这个字段），18 段的 start 越过第一集真实长度（最远写到 446s），
+    清洗层最终丢弃 42 段——全被当成第一集的重叠段吃掉。
+    """
+    system = _system_sent()
+    assert '"episode": 集号整数' in system, "格式示例漏掉 episode，模型照抄就缺字段"
+    assert "下一段的 start 不得早于前一段的 end" in system
+    assert "本集台词截至" in system, "未把清洗层的时间上界告诉模型"
+
+
+def test_user_block_points_at_the_band_instead_of_canceling_it() -> None:
+    """同输入的自然实验：相隔 10 分钟的两次跑，「段数不设上限」措辞出 6 段，
+    「正文 12-20 段」出 17 段。user 层再讲一遍「不设上限/由剧情需要决定」
+    正好抵消掉 system 的段数区间。
+    """
+    user = _user_sent()
+    assert "段数由剧情需要决定" not in user
+    assert "段数区间" in user
+
+
+
 def test_default_system_carries_both_layers() -> None:
     system = _system_sent()
     assert "【解说基本功——逐条强制遵守】" in system
-    assert "start/end 必须取自转写台词的时间区间" in system
+    assert "正文 12-20 段" in system
 
 
 def test_structure_override_replaces_only_the_structure() -> None:
     """换掉结构指令不该把基本功层一起带走：两层各自独立才可分别调。"""
     system = _system_sent(**{"prompt.scriptwriter_system": "只回 JSON。"})
     assert system.startswith("只回 JSON。")
-    assert "start/end 必须取自转写台词的时间区间" not in system
+    assert "正文 12-20 段" not in system
     assert "【解说基本功——逐条强制遵守】" in system
 
 
@@ -193,6 +225,43 @@ def test_saving_the_default_floor_verbatim_does_not_duplicate_it() -> None:
     system = _system_sent(**{"prompt.scriptwriter_fundamentals": scriptwriter.FUNDAMENTALS})
     for token in ("【解说基本功——逐条强制遵守】", "人称二选一", "悬念管理"):
         assert system.count(token) == 1, token
+
+
+def test_missing_episode_is_not_guessed_as_episode_one() -> None:
+    """实测旧版 103 段里 59 段漏 episode，`episode: int = 1` 把第二集的段落悄悄塞回第一集：
+    时间轴被钳到 192s 以内、后段整批判为重叠丢掉。多集输入下缺集号只能算不合格，不能猜。
+    """
+    payload = {
+        "hook": "开场钩子",
+        "segments": [
+            {"episode": 1, "start": 1.0, "end": 10.0, "text": "第一段解说"},
+            {"start": 5.0, "end": 15.0, "text": "漏了集号的第二段"},
+        ],
+        "cta": "点我看完结",
+    }
+    llm = FakeLLM([payload])
+    with pytest.raises(ValueError, match="缺 episode"):
+        _run(llm)
+    assert llm.calls == 2, "不合格必须重试一次，一次不中就放弃等于白丢一遍"
+
+
+def test_single_episode_may_omit_the_episode_field() -> None:
+    """只有一集时集号没有歧义，不该为了格式洁癖把能用的剧本判死。"""
+    payload = {
+        "hook": "开场钩子",
+        "segments": [
+            {"start": 1.0, "end": 10.0, "text": "第一段解说"},
+            {"start": 10.0, "end": 20.0, "text": "第二段解说"},
+        ],
+        "cta": "",
+    }
+    script = write_script_episodes(
+        FakeLLM([payload]),
+        [_EPISODES[0]],
+        project_name="测试剧",
+        angle_block="",
+    )
+    assert [segment.episode for segment in script.segments] == [1, 1]
 
 
 def test_trace_dumps_the_system_actually_sent(tmp_path) -> None:

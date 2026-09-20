@@ -35,7 +35,11 @@ def generate(
         "解说文案：\n" + "\n".join(texts),
     )
     raw = data.get("titles", []) if isinstance(data, dict) else []
-    titles = [{"text": str(t).strip(), "selected": False} for t in raw if str(t).strip()]
+    titles = [
+        {"text": title.strip(), "selected": False}
+        for title in raw
+        if isinstance(title, str) and title.strip()
+    ]
     if not titles:
         raise ValueError("模型未产出有效标题")
     return titles

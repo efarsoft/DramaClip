@@ -52,3 +52,22 @@ def test_small_project_uses_every_line() -> None:
     """集数少时不应无谓丢行：3 集 × 20 段 = 60 行，远在预算内。"""
     prompt = scriptwriter.format_transcript_episodes([_ep(n, 20) for n in (1, 2, 3)])
     assert prompt.count("台词19") == 3
+
+
+def test_each_episode_states_its_time_bounds() -> None:
+    """实测：模型见不到集长就编越界时间戳（单次 20 段里 16 段越过集尾），
+    清洗层再把这些段整段吃掉。每集标题下必须交代可用时间上界。
+    """
+    prompt = scriptwriter.format_transcript_episodes([_ep(1, 20)])
+    assert "本集台词截至 00:20" in prompt, "未告知模型该集台词的可用上界"
+    assert "全长 02:40" in prompt, "未告知模型该集真实时长"
+
+
+def test_unknown_duration_does_not_fabricate_a_length() -> None:
+    """集长缺失时只能说台词截至，不能凭空报一个 00:00 的全长。"""
+    ep = _ep(1, 5)
+    ep.pop("duration")
+    prompt = scriptwriter.format_transcript_episodes([ep])
+    assert "本集台词截至 00:05" in prompt
+    assert "全长" not in prompt
+

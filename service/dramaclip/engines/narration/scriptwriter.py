@@ -29,7 +29,8 @@ FUNDAMENTALS = (
     "每段只讲一个信息点；段间用「谁知」「直到」「更狠的是」等递进衔接，禁止流水账。"
     "正文必须是一条连续故事线：背景起因→冲突升级→高潮反转，后一段承接前一段，"
     "禁止跳跃拼凑不相关片段。善用「半句钩」：把关键揭晓切在段落边界，答案留在下一段开头。"
-    "节奏紧凑，但时长不设限：剧情完整与冲突张力优先，宁可有血有肉地长，不要干瘪压缩。\n"
+    "紧凑是指不灌水，不是砍完整度：冲突链条没铺开就收尾才是失败，"
+    "宁可有血有肉地长，不要干瘪压缩。\n"
     "内容纪律：所有情节、细节、台词必须来自转写内容，禁止编造转写外的事件或设定；"
     "优先引用最有画面感的具体细节（动作/冲突/原话），拒绝抽象概括。\n"
     "悬念管理：全片最大的反转不得提前剧透——关键信息延后到结尾前揭晓。"
@@ -40,9 +41,11 @@ FUNDAMENTALS = (
 _STRUCTURE_PROMPT = (
     "你是短剧推广解说编剧。根据给定的带时间戳台词转写，"
     "输出一条推广解说视频的剧本 JSON，格式："
-    '{"hook": "开场钩子(1-2句)", "segments": [{"start": 数字秒, "end": 数字秒,'
-    ' "text": "该片段解说文案"}], "cta": "结尾引导语(1句)"}。'
-    "要求：1) start/end 必须取自转写台词的时间区间且按时间顺序；"
+    '{"hook": "开场钩子(1-2句)", "segments": [{"episode": 集号整数, "start": 数字秒,'
+    ' "end": 数字秒, "text": "该片段解说文案"}], "cta": "结尾引导语(1句)"}。'
+    "要求：1) 每个片段都必须带 episode，一个都不能漏；start/end 是该集内的相对秒，"
+    "取自转写台词的时间区间，不得超过该集「本集台词截至」给出的上界；"
+    "同一集内按时间递增且互不重叠：下一段的 start 不得早于前一段的 end；"
     "1.5) hook 必须含一个具体反差事实（身份/生死/数字），禁止「他竟然…」式空泛悬念；"
     "关键台词可原样引用（加引号）增强真实感；善用具体数字（年份/金额/集数）制造冲击；"
     "cta 必须是转化引导：留剧情缺口并引导观看完整版，不得空喊关注。"
@@ -85,6 +88,21 @@ class Script(BaseModel):
 def estimate_duration(text: str) -> float:
     """按文案字数估算 TTS 时长（合成后以实际音频时长回填）。"""
     return max(1.0, round(len(text) / _CHARS_PER_SECOND, 2))
+
+
+def _require_explicit_episode(raw: Any, durations: dict[int, float]) -> None:
+    """多集输入下缺 episode 等于把别的集的段落悄悄塞回第 1 集：宁可重试也不猜。"""
+    if len(durations) < 2:
+        return
+    segments = raw.get("segments") if isinstance(raw, dict) else None
+    if not isinstance(segments, list):
+        return
+    for segment in segments:
+        if isinstance(segment, dict) and "episode" not in segment:
+            raise ValueError(
+                f"剧本片段缺 episode 集号（{segment.get('start', '?')}s 起那段）："
+                "多集输入下无法安全归位"
+            )
 
 
 def _sanitize_episodes(raw: Any, durations: dict[int, float]) -> Script | None:
@@ -161,6 +179,15 @@ def _transcript_note(
     )
 
 
+def _episode_bound_note(segments: list[dict[str, Any]], duration: float) -> str:
+    """把清洗层真正执行的时间上界告诉模型：藏住上界等于让模型盲写、再整段丢弃。"""
+    ceiling = max(float(seg.get("end", 0)) for seg in segments)
+    note = f"（本集台词截至 {clock(ceiling)}"
+    if duration > 0:
+        note += f"，全长 {clock(duration)}"
+    return note + "）"
+
+
 def format_transcript_episodes(
     episode_inputs: list[dict[str, Any]],
     *,
@@ -176,8 +203,9 @@ def format_transcript_episodes(
     lines: list[str] = []
     kept = 0
     for episode in usable:
+        all_segments = list(episode["segments"])
         rendered: list[str] = []
-        for seg in _pick_across(list(episode["segments"]), quota):
+        for seg in _pick_across(all_segments, quota):
             text = str(seg.get("text", "")).strip()
             if text == "":
                 continue
@@ -186,6 +214,7 @@ def format_transcript_episodes(
         if not rendered:  # 一行没进就不留孤立集标题
             continue
         lines.append(f"【第{int(episode['number'])}集】")
+        lines.append(_episode_bound_note(all_segments, float(episode.get("duration") or 0.0)))
         lines.extend(rendered)
         kept += len(rendered)
     total_segments = sum(len(ep["segments"]) for ep in usable)
@@ -220,19 +249,20 @@ def write_script_episodes(
     if not transcript_block:
         raise ValueError("编剧无米下锅：所有集都没有台词转写")
     cross_block = (
-        "跨集叙事要求：转写按集分组（每组以「【第N集】」单独一行开头），"
-        "其后每行一条台词，格式为「开始-结束 台词」，时间为该集内的相对时间。"
+        "跨集叙事要求：转写按集分组（每组以「【第N集】」单独一行开头，"
+        "下一行给出该集的时间上界），其后每行一条台词，格式为「开始-结束 台词」，"
+        "时间为该集内的相对时间。"
         "受上下文预算限制，每组是该集跨头尾的均匀摘录（集首与集尾台词必定保留），"
         "不是该集全量逐字。"
-        "1) 每个片段必须带 episode 字段（集号整数），start/end 为该集内的相对秒，"
-        "且必须落在某一行转写的时间区间内或其邻近处；"
+        "1) 片段结构按 system 要求 1)：episode 逐段必填，start/end 用各集自己的相对秒，"
+        "禁止把多集拼成一条连续时间轴；"
         "2) 按剧情逻辑排序：铺垫在前、冲突升级居中、反转/高潮在后，可在不同集之间选取；"
         "3) 同一片段的画面必须取自同一集，同一集内按时间顺序。"
     )
     style_block = f"\n解说风格要求：{style_directives}" if style_directives != "" else ""
     user_prompt = (
         f"项目：{project_name}\n"
-        f"时长不设上限：段数由剧情需要决定，把冲突讲透、反转给足戏份。\n"
+        f"时长不设上限：按 system 给定的段数区间给够段数，把冲突讲透、反转给足戏份。\n"
         f"铺垫果断压缩，但绝不为了控制时长删掉关键冲突或草草收尾。\n"
         f"{cross_block}\n"
         f"{angle_block}\n"
@@ -245,6 +275,7 @@ def write_script_episodes(
     for _ in range(2):  # 失败重试一次
         try:
             raw = llm.chat_json(system, user_prompt)
+            _require_explicit_episode(raw, durations)
             script = _sanitize_episodes(raw, durations)
         except (LlmUnavailable, ValidationError, ValueError, TypeError, KeyError) as exc:
             # 留痕必须带上异常类型：网关挂了与 schema 不合规是两件完全不同的事
