@@ -9,7 +9,8 @@ from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnava
 _SYSTEM_PROMPT = (
     "你是短剧推广视频标题专家。根据解说文案生成 8 条候选视频标题，"
     "风格多样：钩子前置、悬念留白、数字冲击、身份反差各占一些，"
-    "每条不超过 20 个字，忠于剧情、不夸大、不使用违规词。"
+    "每条不超过 20 个字，忠于剧情、不夸大、不使用违规词；"
+    "标题只抛悬念，严禁剧透最大反转或结局——观众知道答案就不会看完。"
     '只输出 JSON：{"titles": ["标题1", "标题2", ...]}'
 )
 

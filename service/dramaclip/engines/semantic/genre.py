@@ -7,7 +7,7 @@ from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable
 GENRES: tuple[str, ...] = ("复仇", "甜宠", "悬疑", "逆袭", "家庭伦理", "都市", "古装", "其他")
 
 _SYSTEM_PROMPT = (
-    "判断短剧题材，只能从以下选择一个："
+    "你是短剧发行顾问。判断这部短剧的主导题材——多题材混合时按**主线冲突**归类，只能从以下选择一个："
     + " / ".join(GENRES[:-1])
     + '。只返回 JSON：{"genre":"复仇"}，不要其他内容。'
 )

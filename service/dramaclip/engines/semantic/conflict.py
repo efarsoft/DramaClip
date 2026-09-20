@@ -8,7 +8,10 @@ from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable
 from dramaclip.engines.semantic.models import ConflictScore
 
 _SYSTEM_PROMPT = (
-    "你是短剧剪辑顾问。对每个场景的冲突强度打分（0-100：0 平淡，100 激烈冲突/反转/高潮）。"
+    "你是短剧剪辑顾问。对每个场景的冲突强度打分（0-100）。评分锚点："
+    "90+=死亡/背叛/身份揭晓/当众羞辱级爆点；70-89=明确冲突升级或强反转；"
+    "40-69=争吵摩擦与铺垫张力；<30=过场交代。分数必须拉开梯度，"
+    "禁止把多数场景挤在 70-85 区间——打分是为了排序选料。"
     '只返回 JSON 数组：[{"scene_index":0,"score":82,"reason":"简短理由"}]，'
     "scene_index 必须覆盖每个场景，不要输出其他内容。"
 )
