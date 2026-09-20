@@ -1,4 +1,4 @@
-"""消重参数生成（每片段独立随机，docs/06-经验参数表 §1）。"""
+"""逐片段处理参数生成（每片段独立随机，docs/06-经验参数表 §1）。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ class DedupParams:
     speed_factor: float      # 微变速 0.996~1.004（atempo 变速不变调）
     contrast: float          # eq 对比度 0.99~1.01
     brightness: float        # eq 亮度 ±0.01
-    scale_factor: float      # 微缩放 0.982~0.988（缩小后拉回，破坏像素哈希）
+    scale_factor: float      # 微缩放 0.982~0.988（缩小后等比拉回标准尺寸，无黑边）
 
     @property
     def changed(self) -> bool:
