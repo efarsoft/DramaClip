@@ -14,8 +14,13 @@ import {
 } from '../ttsVoices';
 
 describe('配音引擎下拉与音色表', () => {
-  it('下拉里只有工厂真能创建的引擎：本地 kokoro + 云端 edge', () => {
-    expect([...TTS_ENGINES]).toEqual(['kokoro', 'edge']);
+  it('下拉里只有工厂真能创建的引擎：kokoro + indextts2 本地，edge 云端', () => {
+    expect([...TTS_ENGINES]).toEqual(['kokoro', 'edge', 'indextts2']);
+  });
+
+  it('indextts2 音色=参考音频不走下拉，标签如实', () => {
+    expect(voiceOptions('indextts2')).toEqual([]);
+    expect(ttsEngineLabel('indextts2')).toBe('IndexTTS-2.5');
   });
 
   it('撤下的引擎既没有音色可给，也没有编出来的名字', () => {

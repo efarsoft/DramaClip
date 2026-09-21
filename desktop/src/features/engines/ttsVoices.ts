@@ -6,9 +6,9 @@
  */
 import type { DefaultOptionType } from 'antd/es/select';
 
-export type TtsEngineName = 'kokoro' | 'edge';
+export type TtsEngineName = 'kokoro' | 'edge' | 'indextts2';
 
-export const TTS_ENGINES: readonly TtsEngineName[] = ['kokoro', 'edge'];
+export const TTS_ENGINES: readonly TtsEngineName[] = ['kokoro', 'edge', 'indextts2'];
 
 /** 不需要本地模型的引擎：Edge 走云端，故它没有「缺模型」这一态。其余引擎一律以资产为准。 */
 export const TTS_MODEL_FREE_ENGINES: readonly TtsEngineName[] = ['edge'];
@@ -17,6 +17,7 @@ export const TTS_MODEL_FREE_ENGINES: readonly TtsEngineName[] = ['edge'];
 export const TTS_ENGINE_LABEL: Record<TtsEngineName, string> = {
   kokoro: 'Kokoro 82M',
   edge: 'Edge',
+  indextts2: 'IndexTTS-2.5',
 };
 
 /** 设置值 → 展示名；未登记引擎原样回显（不编名字）。 */
@@ -87,4 +88,5 @@ export const TTS_VOICE_OPTIONS: Record<TtsEngineName, DefaultOptionType[]> = {
     { label: '男声', options: male(KOKORO_MALE_IDS) },
   ],
   edge: EDGE_VOICES,
+  indextts2: [], // 音色=参考音频文件（零样本克隆），不走下拉，见 RefVoiceRow
 };

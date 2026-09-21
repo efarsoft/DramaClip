@@ -6,6 +6,17 @@ const VIDEO_FILTERS = [
   { name: '全部文件', extensions: ['*'] },
 ];
 
+const AUDIO_FILTERS = [
+  { name: '音频文件', extensions: ['wav', 'mp3', 'flac', 'ogg', 'm4a'] },
+  { name: '全部文件', extensions: ['*'] },
+];
+
+export function pickAudioFile(window: BaseWindow | null): Promise<string | null> {
+  const options = { properties: ['openFile' as const], filters: AUDIO_FILTERS };
+  const result = window === null ? dialog.showOpenDialogSync(options) : dialog.showOpenDialogSync(window, options);
+  return Promise.resolve(result?.[0] ?? null);
+}
+
 export function pickFolder(window: BaseWindow | null): Promise<string | null> {
   const result =
     window === null

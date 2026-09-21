@@ -2,7 +2,7 @@
 import { BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import { METHOD_NAMES, type DataPaths, type ServiceEvent } from '@dramaclip/protocol';
-import { pickFolder, pickVideoFile } from './services/dialog';
+import { pickAudioFile, pickFolder, pickVideoFile } from './services/dialog';
 
 export interface IpcContext {
   /** RPC 转发目标（ServiceManager.rpc）。 */
@@ -39,6 +39,9 @@ export function registerIpc(context: IpcContext): void {
   ipcMain.handle('dialog:pickFolder', (event) => pickFolder(BrowserWindow.fromWebContents(event.sender)));
   ipcMain.handle('dialog:pickVideoFile', (event) =>
     pickVideoFile(BrowserWindow.fromWebContents(event.sender)),
+  );
+  ipcMain.handle('dialog:pickAudioFile', (event) =>
+    pickAudioFile(BrowserWindow.fromWebContents(event.sender)),
   );
   ipcMain.handle('shell:reveal', (_event, targetPath: unknown) => {
     if (typeof targetPath === 'string' && targetPath.length > 0) {

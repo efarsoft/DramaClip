@@ -55,6 +55,10 @@ export function pickFolder(): Promise<string | null> {
   return bridge().pickFolder();
 }
 
+export function pickAudioFile(): Promise<string | null> {
+  return bridge().pickAudioFile();
+}
+
 export function revealInFolder(path: string): Promise<void> {
   return bridge().revealInFolder(path);
 }

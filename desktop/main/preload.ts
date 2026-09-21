@@ -12,6 +12,8 @@ const api = {
     ipcRenderer.invoke('dialog:pickFolder') as Promise<string | null>,
   pickVideoFile: (): Promise<string | null> =>
     ipcRenderer.invoke('dialog:pickVideoFile') as Promise<string | null>,
+  pickAudioFile: (): Promise<string | null> =>
+    ipcRenderer.invoke('dialog:pickAudioFile') as Promise<string | null>,
   revealInFolder: (path: string): Promise<void> =>
     ipcRenderer.invoke('shell:reveal', path) as Promise<void>,
   windowControl: (action: 'minimize' | 'maximize-toggle' | 'close'): Promise<void> =>
