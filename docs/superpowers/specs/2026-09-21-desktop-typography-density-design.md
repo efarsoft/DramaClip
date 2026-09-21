@@ -2,7 +2,7 @@
 
 **日期**：2026-09-21 · **状态**：待用户审阅 · **分支**：`feat/correctness-wiring`
 **起因**：用户对现状观感不满意（原话「感觉好廉价的感觉」），要求做一次全局 UI 与 UX 设计。
-**范围裁决（用户亲手收窄）**：四个候选方向里只勾了**排版与密度**，UX 侧另加三项（长作业进度反馈 / 空·失败·部分成功统一表达 / 导入→分析→解说→出片动线）。**品牌图形资产、层次材质、结构导航三类只作"统一来源"式收拾，不重做。**
+**范围裁决（用户亲手收窄）**：四个候选方向里只勾了**排版与密度**，UX 侧另加四项（长作业进度反馈 / 空·失败·部分成功统一表达 / 导入→分析→解说→出片动线 / **出片取材范围可见且可收窄**——最后一项是审阅时业主点名补上的，见 §6.5）。**品牌图形资产、层次材质、结构导航三类只作"统一来源"式收拾，不重做。**
 **上位文件**：`docs/superpowers/specs/2026-09-10-dramaclip-ui-redesign-design.md`（信息架构与页面职责）与 `docs/desktop/04-设计系统方案.md`（DSS v1 视觉真相源）。本文件**不推翻**前者；两者冲突时，**结构以 09-10 为准、本文件的 token 与状态契约优先级高于 DSS v1 的对应条目**。
 **本文件不重复**：09-10 已定的导轨分组、剧空间四阶段、工具箱、后端接口缺口清单。
 
@@ -24,12 +24,15 @@
 
 三个次级根因（每条都有实测位点，构成 §1–§3 的靶子）：
 
-1. **字阶与行高从未成对**。全站 12 处内联 `lineHeight`、9 个不同值：`1`、`14`、`16`、`17`、`18`、`19`、`20`、`28`（位点：`AboutPage:30,35`、`EpisodeListRow:190`、`TranscriptCard:176`、`LlmTab:43`、`PromptCard:56`、`TtsPreviewButton:72`、`EmptyWorkbench:46`、`EnvPanel:109`、`StatChips:81`、`SettingsPage:268`、`WorksDetailPage:168`）。中文正文要呼吸靠的是行高，不是字号——13px 中文配 14px 行高（`TranscriptCard:176`）是挤成一团的直接原因。
+1. **字阶与行高从未成对**。全站 12 处内联 `lineHeight`、**8 个不同值**：`1`、`14`、`16`、`17`、`18`、`19`、`20`、`28`（位点：`AboutPage:30,35`、`EpisodeListRow:190`、`TranscriptCard:176`、`LlmTab:43`、`PromptCard:56`、`TtsPreviewButton:72`、`EmptyWorkbench:46`、`EnvPanel:109`、`StatChips:81`、`SettingsPage:268`、`WorksDetailPage:168`）。中文正文要呼吸靠的是行高，不是字号——13px 中文配 14px 行高（`TranscriptCard:176`）是挤成一团的直接原因。
 2. **内联字面量绕开已有阶梯**。间距阶梯 `4/8/12/16/20/24/32/64` 与 `font*` 字阶**都在**（`theme.ts:9,37-44,47-60`），问题不是"没有 token"。
-   **实测口径（本文件所有字面量计数统一用这一条，可复算）**：`features/**` + `components/**`，排除 `__tests__` 与 `*.test.*`，统计 `style={{ … }}` 块内匹配 `: 数字[px|%]` 的出现次数（含多行 style 对象）= **248 处，跨 47 个文件**。其中 5 个常驻原语组件自身占 41 处（`PageKit 7`、`Rail 10`、`TitleBar 16`、`StatusBar 4`、`AppLayout 4`——原语自己就该改成读 token），**页面绕开原语的有 207 处**。
-   连常驻外框都绕：`StatusBar` 用 `padding: '0 14px'`——**14 不在阶梯上**、`height 26` 写死；`Rail.tsx:47` 用 `width: 68`，而 `tokens.railWidth = 68`（`theme.ts:72`）**零引用**。
+   **实测口径（本文件所有字面量计数统一用这一条，可复算）**：扫 `desktop/src/features/**` + `desktop/src/components/**` 的 `.ts`/`.tsx`（排除 `__tests__` 目录与 `*.test.*`），按花括号配对截出每个 `style={{ … }}` 块（**含跨多行的对象**），先剥掉字符串字面量（单引号 / 双引号 / 反引号，防 `'#7C9CFF'`、`'0 14px'` 里的数字被计入），再数匹配 **`/:\s*-?\d+(\.\d+)?/`** 的出现次数——**冒号后跟数值即计一次，单位后缀可有可无**（AntD 的 style 收 number，现实里 `height: 46`、`width: 6` 都不带单位；写成"必须带 px"则命中 0 处）。锚定 **HEAD 快照**（`git archive HEAD | tar -x -C <tmp>` 后跑，避免把别的在飞改动算进基线）实测 = **248 处，跨 53 个文件**（104 个文件里 53 个至少命中一次）。其中 5 个常驻原语组件自身占 41 处（`PageKit 7`、`Rail 10`、`TitleBar 16`、`StatusBar 4`、`AppLayout 4`——原语自己就该改成读 token），**页面绕开原语的有 207 处**。
+   ⚠️ 工作树当前是 **250 处**（多出的 2 处在 `PlanPickList.tsx`，属另一在飞改动，非本规格所辖）。**基线数一律按 §8.2 的"每批开工时在 HEAD 快照上复算并逐文件公布"重取，不许沿用本行的 248。**
+   连常驻外框都绕：`StatusBar.tsx:54` 用 `padding: '0 14px'`——**14 不在阶梯上**、`:49` 的 `height 26` 写死；`Rail.tsx:47` 用 `width: 68`，而 `tokens.railWidth = 68`（`theme.ts:72`）**零引用**（`grep -rn railWidth src/` 只命中定义那一行）。
    ⚠️ **修正草案口径**：讨论过程中我说过的"全站 64 处""分析屏 28 处"来自一个只看单行 `style={{…}}` 的窄 grep，**按上口径复算不可重现**（同一窄口径全站是 64、分析屏只有 10——差在多行 style 对象）。以本条 248 / 45 为准。
-3. **字号命名空间里混着图标尺寸**。`tokens.fontIcon = 10px` 一个值同时被当三种语义用：真图标（`AboutPage:158`、`OverviewTab:116`、`ContinueCard:65`、`EnvPanel:91`、`TitleBar:37,69,237`）、**圆角**（`StepsNav:24`、`Rail:86` 的 `borderRadius: tokens.fontIcon`）、**文本标签字阶**（`Rail:101` 导轨标签、`ModePicker:132`）。`Rail` 拿字阶当圆角不是手滑，是命名空间没分家的必然结果。
+3. **字号命名空间里混着图标尺寸**。`tokens.fontIcon = 10px` 一个值同时被当四种语义用（12 个引用位，逐位清单见 §1.3 陷阱 2）：真图标 5 处（`AboutPage:158`、`OverviewTab:116`、`ContinueCard:65`、`EnvPanel:91`、`TitleBar:237`）、**角标里的文本** 4 处（`TitleBar:37,69`、`ModePicker:141`、`EpisodeListRow:189`）、**导轨中文标签** 1 处（`Rail:101`）、**圆角** 2 处（`StepsNav:24`、`Rail:86` 的 `borderRadius: tokens.fontIcon`）。`Rail` 拿字阶当圆角不是手滑，是命名空间没分家的必然结果。
+
+> **行号约定（读本文所有 `file:line` 前先看这条）**：行号是**写作时点工作树**的方便定位，不是判据——别的提交在同时改这些文件，行号必然漂。归段与验收的判据是 **token 名 + 文中给出的可复跑 grep 命令**；凡计数（248、9 处假图标、12 个 `fontIcon` 引用位……）都在 §0.2 声明的快照口径上复算，行号漂移不算读数错误，**计数漂移必须重发**。
 
 ---
 
@@ -48,9 +51,10 @@
 | `text.meta` | **13 / 18** | 次要信息：数字、标签、单行元信息 | 400 |
 | `text.badge` | **11 / 14** | 徽标、导轨标签、角标 | 400 / 选中 600 |
 
-页标题对正文的落差 **2.0×**（现状 1.54×）。原 `font*` 名的映射：`fontTitleLg→sectionTitle`（22→20，降档，因为它今天实际是卡级标题在用）、`fontTitle→cardTitle`、`fontBodyLg+fontBody→body`（**两档合一，这是"正文与次要用同一 token"这条病灶的收口动作**）、`fontCaption→meta`、`fontMicro→badge`、`fontHeading→pageTitle`、`fontDisplay 24 / fontStat 26→sectionTitle 20`。
+页标题对正文的落差 **2.0×**（现状 1.54×）。原 `font*` 名的映射：`fontTitleLg→sectionTitle`（22→20，降档，因为它今天实际是卡级标题在用）、`fontTitle→cardTitle`、`fontBodyLg+fontBody→body`（**两档合一，这是"正文与次要用同一 token"这条病灶的收口动作**）、`fontCaption→meta`、`fontMicro→badge`、`fontDisplay 24 / fontStat 26→sectionTitle 20`。五个图形尺寸名（`fontIcon / fontChipIcon / fontPlayGlyph / fontEmptyIcon / fontPoster`）**不进这张表**——它们是 §1.3 的 `glyph.*`。
+⚠️ **`fontHeading` 与 `fontIcon` 两个名字不能按表整体替换**：`fontHeading→pageTitle` 只对三处里的一处成立，另两处是图标尺寸（详见 §1.3 陷阱 1）。
 
-**后一条是故意的降档，写清楚以免被当成笔误**：现状三枚统计芯片各配 26px 大数字（`StatChips.tsx`），与页标题同量级——**它本身就在抢层级，是"平级元素过多"的一个实例，不是层级手段**。降到的重要度改由字重 600 + 主色 + `fontFamilyMono` 承担。
+**后一条（`fontStat 26→sectionTitle 20`）是故意的降档，写清楚以免被当成笔误**：首页三枚统计芯片（`StatChips.tsx:22,23,29` 三条 `Chip` 字面量）的大数字现在配 26px（`:79` 的 `fontSize: tokens.fontStat`），与页标题同量级——**它本身就在抢层级，是"平级元素过多"的一个实例，不是层级手段**。降档后重要度改由三样承担：字重 600 + 主色 + `fontFamilyMono`（`:83` 已经在用 mono，本批只降字号）。
 
 ### 1.2 三条硬约束
 
@@ -63,10 +67,21 @@
 `theme.ts` 拆两段，**且 eslint 封死跨界**（§8.3）：
 
 - `text.*` — §1.1 六档，只准出现在 `fontSize` / `lineHeight` 位。
-- `glyph.*` — 图标与图形：`glyph.icon 16`、`glyph.railIcon 20`、`glyph.chipIcon 18`、`glyph.play 28`、`glyph.empty 48`、`glyph.poster 34`、`glyph.thumbW 34` + `glyph.thumbH 46`（缩略图对，`EpisodeListRow.tsx:145,150-151` 现状写死）。承接现状 `fontIcon / fontChipIcon / fontPlayGlyph / fontEmptyIcon / fontPoster` 五个错放在字号命名空间里的值。**内容尺寸（封面比例、缩略图）也归这一段**，不另起第三段。
-- **数字与时间戳不另立命名空间**（避免 `metric.*` 只是 `text.*` 的别名）：仍取 `text.*` 字阶，但**必须配 `fontFamilyMono`**（`theme.ts:34` 已有，现状几乎没用上）。判据：时长、集数、百分比、时间戳的渲染位，缺 mono 即为未迁。
+- `glyph.*` — 图标与图形，**七枚**：`glyph.icon 10`、`glyph.railIcon 20`、`glyph.chipIcon 17`、`glyph.poster 28`、`glyph.empty 48`、`glyph.thumbW 34` + `glyph.thumbH 46`（缩略图对，`EpisodeListRow.tsx:145,150-151` 现状写死）。**内容尺寸（封面比例、缩略图、海报黑底）也归这一段**，不另起第三段。**草案里这段写的是 `glyph.icon 16`——撤掉**：全站没有任何 16px 图标位点（`grep -rhoE "fontSize: [^,}]+" src --include=*.tsx` 的取值全是 tokens 名，无 16），今天真正的行内图标尺寸是 `fontIcon` 的 **10**（10 处在用），所以照搬值是 10 而不是 16。
+  承接现状错放在字号命名空间里的五个值（`theme.ts:53,57-60`）：`fontIcon 10 / fontChipIcon 17 / fontPlayGlyph 28 / fontEmptyIcon 48 / fontPoster 34`——**四个逐值照搬，一个例外**：`fontPlayGlyph(28)` 与 `fontPoster(34)` 合并为一枚 `glyph.poster 28`。理由可复核：这两个 token 各自**全站只有一处用处**（`fontSize: tokens.fontPoster` 命中 `ProjectCard.tsx:71`、`fontPlayGlyph` 命中 `WorksPage.tsx:221`），而这两处是**同一个元素**（无封面时的海报播放占位）。34 随合并退役。
+  **两条迁移陷阱——它们就是这段存在的理由**：
+  1. **`fontHeading(20)` 一名三职**：`WorkbenchHeader.tsx:35` 的页标题（→ 随 §1.1 升 `text.pageTitle 28`）、`Rail.tsx:34` 的导轨图标、`RecentWorks.tsx:132` 的海报占位。**按 §1.1 的名字映射做整体替换，导轨图标会从 20 涨到 28**——那不是升字阶，是走形。必须逐位点重新归段，不做名字级替换。
+  2. **`fontIcon(10)` 一名四职——12 个引用位逐位归段**（`cd desktop && grep -rn fontIcon src/` 命中 13 行，减 `theme.ts:53` 定义 = **12 处使用**）：
+     - **真图标 5 处** → `glyph.icon 10`：`AboutPage.tsx:158`、`OverviewTab.tsx:116`、`ContinueCard.tsx:65`、`EnvPanel.tsx:91`、`TitleBar.tsx:237`（全是 AntD 图标组件的 `fontSize`）。
+     - **角标 / 徽标容器里的文本 4 处** → `text.badge 11`：`TitleBar.tsx:69`（搜索快捷键角标）、`ModePicker.tsx:141`（`NeedBadge` 文案）、`EpisodeListRow.tsx:189`（18×13 小框内的序号，配 `lineHeight: 1`）、`TitleBar.tsx:37`（22×22 品牌徽标内的 `▶`——它同时是下面假图标清单里的位点，换成随容器缩放的图标后从 text 段退出）。
+     - **导轨中文标签 1 处** → `text.badge 11`：`Rail.tsx:101`（10px 中文，触 §1.2 ① 的下限）。
+     - **圆角 2 处** → `tokens.radiusControl`：`Rail.tsx:86`、`StepsNav.tsx:24`。**这是现成事故**：字号 token 当圆角用，改字号会静悄悄改控件圆角（两值恰好都是 10，所以今天"看起来对"）；`radiusControl` 今天已被 15 处正确引用（含同类徽标容器 `TitleBar.tsx:32`、`AboutPage.tsx:57`、`StatChips.tsx:69`），说明这两处是漏改而非设计。
+     ⚠️ **本条的计数陷阱**：`fontSize: tokens.fontIcon` 有 10 处，但**只有 5 处是图标**。按"`fontIcon` 的名字 = 图标"做名字级整体替换，会把 4 个角标文本和 1 个导轨标签送进 `glyph.*`——用图标命名空间藏文本字阶，§8.3 的命名空间↔属性矩阵门禁当场红。逐位归段，不按名字迁。
+  **同构元素尺寸漂移的实测铁证**：海报/封面占位的那枚播放标记，今天有**四种尺寸**——13（`EpisodeListRow.tsx:157`、`ContinueCard.tsx:83`）、20（`RecentWorks.tsx:132`）、28（`WorksPage.tsx:221`）、34（`ProjectCard.tsx:71`）。品牌徽标另算（`TitleBar` 22×22 容器配 10、`AboutPage` 40×40 配 22——**按容器缩放是可辩护的**，不并入本条）。占位标记统一一枚 `glyph.poster`，徽标各自跟随容器，两者不互相迁就。
+  ⚠️ **合并 `glyph.poster` 是有视觉变化的改动**，不是纯搬家：四处占位标记会变大（13→28 两处、20→28 一处、34→28 一处）。这属本批有意变化，**必须在参照页成对截图里显式列出这四行**（§8.2 的四项标注），不允许混在"只是收口字面量"里蒙过去。
+- **数字与时间戳不另立命名空间**（避免 `metric.*` 只是 `text.*` 的别名）：仍取 `text.*` 字阶，但**必须配 `fontFamilyMono`**。这条不是新规矩——`fontFamilyMono`（`theme.ts:34`）**实测已在 11 处 / 8 个文件里用着**（HEAD 快照 `grep -rn fontFamilyMono src/ | grep -v theme.ts` 恰 11 行：`TranscriptCard.tsx:86,148`、`MachinePanel.tsx:81`、`PromptCard.tsx:50`、`PromptEditor.tsx:45`、`RecentWorks.tsx:154`、`StatChips.tsx:83`、`WorksDetailPage.tsx:157,183`、`WorksPage.tsx:186,254`）。所以判据是**补漏**而非"从零推广"：时长、集数、百分比、时间戳的渲染位，缺 mono 即为未迁；已合规的 11 处不动。
 
-**Unicode 假图标一律换成 AntD 图标组件**（同构元素全图标或全图标，不允许一半真一半假——见 [[feedback-ui-consistency]]）。实测位点：`ContinueCard:83` 的 `▶`、`RecentWorks:132` 的 `▶`、`TitlesSection:88` 的 `★ `。
+**Unicode 假图标一律换成 AntD 图标组件**（同构元素全图标或全图标，不允许一半真一半假——见 [[feedback-ui-consistency]]）。**位点实测为 9 处**，命令可复跑：`cd desktop && grep -rn "▶\|★\|▲\|▼" src/`（输出恰 9 行）。`▶` 六处——`TitleBar.tsx:41`、`AboutPage.tsx:66`（品牌徽标，换成一枚随容器缩放的 SVG/`PlayCircleFilled`，两处的容器尺寸不同是设计而非漂移）；`ContinueCard.tsx:83`、`RecentWorks.tsx:132`、`ProjectCard.tsx:76`、`EpisodeListRow.tsx:162`（四处海报/缩略图占位，统一 `PlayCircleFilled` + `glyph.poster`）。`★ ` 一处——`TitlesSection.tsx:88`（选中态星标，换 `StarFilled`）。`▲` / `▼` 两处——`EpisodeListRow.tsx:134-135`（拖序按钮，换 `UpOutlined` / `DownOutlined`）。**草案里我只点了三处**，那是只查了 `features/home/` 的结果——按三处施工必然漏掉品牌徽标和拖序按钮。验收判据：同一条 grep 返回 0 行。
 
 ### 1.4 AntD 基线必须同批改
 
@@ -79,9 +94,12 @@
 - **阶梯不动**：`4/8/12/16/20/24/32/64`（`theme.ts:9`）保留为唯一真相源，本批**不新增档位**。新增的是**用法约束**：`style` 里出现的每个 px 必须能写成 `tokens.space*` 或 `layout.*`；写不出的说明它不是布局度量而是内容尺寸（封面比例、缩略图），那类归 §1.3 的 `glyph.*` 段。
 - **字号升档的连带**：正文 13→14、行高 +8px ⇒ 同屏可视行数下降。因此**卡内 padding 从 `spaceLg(16)` 收到 `spaceMd(12)`** 作对冲，行内上下留白靠行高给，不靠 padding 硬撑。这是"中密度"的真实含义：字变大、气靠行高、不靠空白堆。
 - **`layout` 段必须真的有人用**。`theme.ts:76-83` 导出的 `layout`（page / fullbleed / card / listSection / field / controlHeight）与 `railWidth` 目前**零引用**——它们是纸面真相源。本批把散落的度量收进来并**引用它**：`Rail` 宽度读 `layout.rail.width`、`StatusBar` 高度与左右内边距读 `layout.statusBar`（现在写死 26 与 `'0 14px'`）、表单标签列宽读 `layout.field.labelWidth`。
+- **分栏四值逐值收口，不顺手补设定**。实测：`features/analysis/useSplit.ts:4` 的默认 `initialPct = 24` 与 `:22` 的带宽 `Math.min(40, Math.max(20, next))` 分居两处（改带宽的人看不见默认值，反之也一样）；`WorkbenchPage.tsx:106` 的 `minWidth: 250` 是左栏的**第二道下限**（拖到 20% 也可能被它顶住，两道下限不同源）；`:126` 把手 `width: 6`。收口 = 原样登记为 `layout.split = { initial: 24, min: 20, max: 40, minWidth: 250, handle: 6 }`，**五个数一个都不改**，只把它们从三处搬进 `layout` 并被引用。**本批唯一的例外**：`:128` 的 `paddingLeft: 14`——14 不在 `4/8/12/16/…` 阶梯上，无法"原样收口"，改到 `spaceLg(16)`，并在参照页成对截图里显式复核这一处变化。**不做的事**：拖拽宽度今天不持久（全站只有 `stores/lastDrama.ts` 用 `localStorage`），刷新回 24%——加持久化是新行为，不在本批，本节只消灭散落的数。
+- **同一条"读现值、不改"纪律适用于另两处断口**：底部操作栏 `height: 46`（分叉两份各写一次：`StepFooter.tsx:26` 与 `PageKit.PageFooter:146`，§3.3 合流后只剩一处）、`StatusBar.tsx:49` 的 `height 26` 与 `:54` 的 `padding '0 14px'`——照现状逐值登记进 `layout`；`'0 14px'` 与上面那处同理，14 不在阶梯上。**"唯一需要改值"只在本批登记进 `layout` 的这批值里成立**：全站还有别的脱阶字面量（如 `StepsNav.tsx:22,29` 的 18 / `marginRight: 7`），它们不属 §2，由 §8.3 棘轮在碰到的那一屏收口。
 - **列表行高统一**：`mixins.listRow` 补 `height`（单行 36、双行 52），派生自字阶而非另起数字。现状同一列表里行高由内容撑，是"没对齐"感的直接来源。
 
-**明确不做**：响应式断点体系。桌面固定窗口宽度带宽余即可，`maxWidth 1080` 维持 DSS v1。
+**明确不做**：响应式断点体系。桌面固定窗口宽度带宽余即可。
+⚠️ **但 `maxWidth 1080` 这一条要先纠正我自己**：草案把它当"维持 DSS v1 的既有实现"，实测**它从来没被实现过**——1080 只活在两句注释里（`PageKit.tsx:8`、`mixins.ts:22`），`mixins.pageShell()` 给的是 `width: 100%` 且无 `maxWidth`，`theme.ts` 的 `layout.page` 里也只有 `paddingBlock / gap`。这正是 §3.3 那条"契约写了没人用"的病，只是方向相反（文档有、代码无）。处置二选一、不许留第三种：**要么**加 `layout.page.maxWidth = 1080` 并让 `pageShell` 真读它（内容页随之居中），**要么**删掉那两句注释、承认内容页就是满宽。参照页截图时按选定那条如实呈现。
 
 ---
 
@@ -96,7 +114,7 @@
 | P1 | 双栏概览 | 左主内容 + 右环境/提示侧栏；统计芯片一行三枚，芯片内 ≤3 层级 |
 | P2 | 卡片库 | 网格 `minmax(236px,1fr)`；封面 9/16；卡片四态齐备才算完 |
 | P3 | 详情双栏 | `minmax(300px,420px) + 1fr`；列表行复用 `mixins.listRow` |
-| P4 | 主从编辑器 | 左栏按百分比可拖（宽度、下限、把手三值进 `layout.split`）+ 右栏多卡 + **底部批量条**；左栏只放选择，不放编辑 |
+| P4 | 主从编辑器 | 左栏按百分比可拖（`layout.split` 五值，见 §2）+ 右栏多卡 + **底部批量条**；左栏只放选择，不放编辑 |
 | P5 | 流水线 | 四段纵向；任务行 = §4 三件套常驻 |
 | P6 | 配置中心 | tab 收进同一 `tabs` 契约；卡容器一律 `PageSection` |
 | P7 | 元信息 | 窄单列 `max-width 720`，无侧栏 |
@@ -118,16 +136,25 @@
 - `mixins.hoverBg(:90)` 的值 **等于** `accentSoft`，即悬停与选中同一底色，两态天然不可分；
 - `EpisodeListRow.tsx:88-91` 更彻底：竖条、铺底、名称主色（`:111`）三样一起上，和该行的复选框（`:211`）抢同一视觉通道。
 
-修法：`listRow` 拆成 `listRow({ checked, active })` 两个独立入参、两通道各写各的；`hoverBg` 改成中性一档（`bgElevated`），**把铺底这一通道整个让给"已勾选"**。这条不改，§6 的默认勾选前 10 集会渲染成一屏蓝、看不出到底勾了什么。
+修法：`listRow` 拆成 `listRow({ checked, active })` 两个独立入参、两通道各写各的；`hoverBg` 改成中性一档（`bgElevated`），**把铺底这一通道整个让给"已勾选"**。这条不改，§6.2 的默认勾选（前 `full_threshold` 集）会渲染成一屏蓝、看不出到底勾了什么。
 
 ### 3.3 消灭分叉
 
-`StepFooter.tsx:23-54` 是 `PageKit.PageFooter:143-172` 的近逐字分叉。同一件事两份实现将来必漂——**删分叉，用回 `PageFooter`**（见 [[feedback-cleanup-on-pivot]]）。
+`StepFooter.tsx:6-55`（`features/analysis/`）与 `PageKit.PageFooter:126-172` 是一对分叉，实测**签名逐字节相同**（`:6-22` vs `:126-142`）。真正的差异只有两处：StepFooter 的「下一步」外面套了 `<Tooltip title={canProceed ? '' : '完成至少一集分析后解锁'}>`（`:42`），以及 `padding: '0 16px'`（`:31`，裸字面量）对 `padding: \`0 ${tokens.spaceLg}\``（`:151`，`spaceLg`=16px，**渲染完全相同**）。也就是说：**活的那一份多了一个解锁提示，死的那一份多了一个 token 引用。**
+
+关键实测：`PageFooter` 全站**零调用点**（`grep -rn "PageFooter" src/` 只命中 `PageKit.tsx:126` 的导出本身）；`WorkbenchPage.tsx:10,55` 用的是 `StepFooter`。所以这不是"页面各自造轮子"，而是**唯一活的实现长在功能目录里、布局原语是一份没人用的副本**。
+
+处置（不需要向后兼容）：把 Tooltip 并进 `PageKit.PageFooter`、`WorkbenchPage` 改用 `PageFooter`、**删掉 `StepFooter.tsx` 整个文件**。同一件事两份实现将来必漂——留着漂移过的那份、删掉没人用的那份是反的（见 [[feedback-cleanup-on-pivot]]）。
 
 ### 3.4 资产纪律：颜色与重复色板
 
-- `WorksPage.tsx:13` 的 `MODE_COLORS` 六个裸 hex 与 `tokens` 完全重复。改为**从 tokens 派生的数组**，模式色只有一处真相。
-- 全站颜色字面量（非 `theme.ts`）纳入棘轮门禁（§8.3）。
+- `WorksPage.tsx:13` 的 `MODE_COLORS` 六个裸 hex 与 `tokens` **逐一重复**（`#7C9CFF`=colorPrimary、`#9B7BFF`=colorAccent、`#34D399`=colorSuccess、`#FBBF24`=colorWarning、`#F87171`=colorError、`#60A5FA`=colorInfo，见 `theme.ts:13-20`）。改为**从 tokens 派生的数组**，模式色只有一处真相。
+- **其余字面量色位点：全量清单（三条命令可复跑，前版说"只剩四处"是漏扫，实测见下）**
+  - `cd desktop && grep -rnE "#[0-9A-Fa-f]{6}\b|#[0-9A-Fa-f]{3}\b" src --include=*.ts --include=*.tsx | grep -v "src/styles/theme.ts" | grep -vE "__tests__|\.test\."` → **9 行 = 6 个位点**（`WorksPage` 与 `machineFit` 各是一行多色）：`WorksPage.tsx:13`（`MODE_COLORS` 六枚，上条已述）、`engines/machineFit.ts:84-87`（ok/tight/disk/ram 四枚，全是 success/warning/error 的复制）、`layout/TitleBar.tsx:238` `'#C43A3A'`（关闭按钮热区色，非重复色 → 收进 `theme.ts` 或改 `colorError`）、`analysis/StepsNav.tsx:31` `'#FFFFFF'`（`tokens.colorWhite` 已存在）、**`analysis/PlayerCard.tsx:29` 与 `works/WorksDetailPage.tsx:88` 各一处 `'#000'`**（视频/海报的黑底——**这两处是草案漏掉的**）。另有两行是注释里的 `#FF4D4F` 禁令（`EpisodeListRow.tsx:233`、`TodoList.tsx:7`），不计位点。
+  - `grep -rnE "rgba?\(" src --include=*.ts --include=*.tsx | grep -v "src/styles/theme.ts" | grep -vE "__tests__|\.test\."` → **10 处**，全在海报 scrim 与阴影上：`rgba(0,0,0,0.72)` 在 `RecentWorks.tsx:152,162` 与 `WorksPage.tsx:243,252` **逐字重复四份**、`linear-gradient(180deg, rgba(0,0,0,0) 50%, rgba(0,0,0,0.68) 100%)` 在 `RecentWorks.tsx:138` 与 `WorksPage.tsx:226` **逐字重复两份**（同一枚"海报底部渐隐"写了两遍，正是 §3.1 原型契约要收的东西）、`ProjectCard.tsx:97,112` 两种黑 alpha、`TitleBar.tsx:170` 与 `SettingsPage.tsx:110` 两处裸 `boxShadow`（`tokens.shadowPop` 全站只有 `RecentWorks.tsx:99` 一处在用，近乎空转）。
+    ⚠️ **上面这条命令按 `rgba(` 扫，天然扫不到"用变量拼出来的阴影"**：`grep -rn boxShadow src/ | grep -v theme.ts` 复算得 12 行，其中三处是同一枚状态光晕 ``boxShadow: `0 0 6px ${color}` ``——`StatusBar.tsx:68`、`OverviewTab.tsx:99`、`mixins.ts:99`。**组件里那两处是 `mixins` 已有能力的重复实现**：`mixins.ts:93 statusDot(color)`（`width/height 6` + `radiusDot` + `background` + 同一枚 `0 0 6px` 光晕）已被 5 处在用（`AssetKit.tsx:18`、`GpuCard.tsx:113`、`ReadinessCard.tsx:88,145`、`TodoList.tsx:57`），而 `StatusBar.tsx:62-69` 把同一组度量手抄了一遍。收口 = 改调 `statusDot`，不是再抄一份常量。另两行 `RecentWorks.tsx:43,103` 的 `boxShadow: 'none'` 是重置、`:111` 是 transition 字符串，都不算色板位点——**写清哪些不算，门禁才不会变成数字游戏**。
+  - **`token` 拼 alpha 的模板串 = 第二套隐形色值，按 hex 扫的棘轮根本测不到**：`grep -rnE '\$\{tokens\.[A-Za-z]+\}[0-9A-Fa-f]{2}`' src --include=*.ts --include=*.tsx | grep -vE "__tests__|\.test\."` → **7 处 / 5 个文件**：`EpisodeListRow.tsx:159`、`IndexttsRuntimeSlot.tsx:20,21`、`LlmTab.tsx:45,46`、`ModePicker.tsx:145,146`。**alpha 值本身有五种**（`1A / 44 / 0d / 55 / 12`）表达的却是同一件语义（"某个状态色的软底"）。修法不是逐处换成 hex，而是**立一档半透明阶梯**：与 `accentSoft` 同族命名（`…Soft`），按语义给 success/warning/error 各一枚，七个位点全部改读它；`IndexttsRuntimeSlot.tsx` 属引擎屏（另一位工程师的属主区，已于 `e6d57fe` 入库），**本批不主动重写它的内部逻辑**，只在同屏改字阶时按 §8.3 棘轮把这两处拼色收进 `…Soft` 阶梯。
+- **棘轮三条禁令**（§8.3）：hex 字面量、`rgb()/rgba()` 字面量、`` `${tokens.…}XY` `` 模板拼色——三者都只准出现在 `theme.ts`。阴影类走 `tokens.shadow*`，禁止在组件里手写 `boxShadow` 字面量。
 - **红色 `#FF4D4F` 只给钩子语义**（既有定案，不因本批改动）。角度名沿用 warning 金 `#FBBF24`，不得占用钩子红。
   **本批不为钩子红新增 token**：实测桌面渲染层今天**没有任何钩子色位点**——`#FF4D4F` 在 `desktop/` 只出现在 3 处注释与测试里（`EpisodeListRow:233`、`TodoList:7`、`TodoList.test:83`），全作为"**不得**使用"的引用。为一个不存在的用法造 token 是投机；等钩子视觉真进界面（封面 / 字幕侧）时再进 `theme.ts`。
 
@@ -147,10 +174,10 @@
 2. **ETA 无历史样本时显示 `—`**，不显示猜测值。首个作业、或阶段切换后样本不足以线性外推时，只给百分比。
 3. **进度单调不回退**：阶段从 3/5 回到 2/5 必须是显式的"重跑"事件，否则夹住不动。
 4. **降级必须上任务行**，不能只进日志：某条方案走了规则编排，行内要有金色标记 + 一句原因 + 「重掷」。这是 09-10 界面主张 1 的落点。
-5. **状态栏常驻在跑任务**：现状 `StatusBar.tsx:50-57` 只显示服务状态，不显示在跑作业；无作业时整段收起，不给空占位。
-6. 状态栏信息**分级**：现状四项同为 `fontMicro 11px`、无分组（`StatusBar.tsx:58`），把"有活儿在跑"和"ffmpeg 版本"压成同一个重要度。改为在跑任务 `13/18 · 500`、环境元信息 `11/14`，段间留气口。
+5. **状态栏常驻在跑任务**：现状 `StatusBar.tsx:61-77` 的四项是服务 / FFmpeg / GPU / 版本，**没有任何在跑作业**；无作业时整段收起，不给空占位。
+6. 状态栏信息**分级**：现状四项同为 `fontMicro 11px`、无分组（`fontSize` 在容器 `:57` 一处给死），把"有活儿在跑"和"ffmpeg 版本"压成同一个重要度。改为在跑任务 `13/18 · 500`、环境元信息 `11/14`，段间留气口。
 
-实测缺口：出片轮询 `poll.ts:2 POLL_INTERVAL_MS = 1500` 拿到 `Progress percent` 但**算不出也不显示 ETA**；`ExportsCard` 的"进行中"只有一个标签。
+实测缺口：出片轮询 `poll.ts:2 POLL_INTERVAL_MS = 1500` 拿到 `Progress percent` 但**算不出也不显示 ETA**；`ExportsCard.tsx:27` 的状态只剩一个三值标签（`完成 / 失败 / 进行中`），整份文件不含任何 `Progress` 或 `percent` 渲染——**进度数字根本没被读到过界面**。
 
 ---
 
@@ -169,40 +196,76 @@
 
 **验收口径（不依赖我给的总数）**：附录 A 的"四态"列即缺口清单。本批完成的判据 = **该列不再出现「无 / 永不 / 仅加载中 / 只有 toast」字样**，且每处缺口的修法都能指回本节表格的一行。**不发布聚合计数**——上一版我写的"9 处"与自己那张表对不齐（逐条重数是 12–13 处，取决于"保存失败只有 toast"算一处还是两处），说明计数本身就是个不可判定的口径，清单才是。
 
-一条必须点名的实测：**`ProjectsPage` 失败后永久转圈**——`:35` 把错误 `.catch(() => undefined)` 吞掉，而 `:138` 的渲染判据是 `projects === null`，于是失败与载入同形。**这不是缺一个态，是把失败态伪装成载入态**，属于禁止降级那条纪律在界面上的对应物。
+一条必须点名的实测：**`ProjectsPage` 失败后永久转圈**，且有**两条**路径停在同一个形状——① `useProjects.ts:23-25` 的 `load()` 里 `setProjects(await projectApi.list())` **完全没有捕获**，初始 `project.list` 一失败就是 unhandled rejection，`projects` 永远停在初始值 `null`；② `ProjectsPage.tsx:35` 把 `ensureCovers().then(() => reload())` **整条链** `.catch(() => undefined)` 吞掉。而渲染判据 `:138` 是 `if (projects === null) return <Card loading />`——**失败与载入同形**。**这不是缺一个态，是把失败态伪装成载入态**，属于禁止降级那条纪律在界面上的对应物。
+一个必须写死的区分，否则 `StateBlock` 会被接错：`null` = 从未取到数据，`[]` = **真·零项目**。判据按"最后一次成功完成的加载"分流——成功过就按长度分流（`[]` → 空态），失败过就进失败态；**任何情况下 `[]` 不得渲染成骨架，`null` 不得当成空**。
 
 ---
 
 ## 6. 动线：导入 → 分析 → 解说 → 出片
 
-结构（导轨分组、剧空间四阶段、阶段条只读）**沿用 09-10 定案，本批不动**。本批只补动线上的三处断口：
+结构（导轨分组、剧空间四阶段、阶段条只读）**沿用 09-10 定案，本批不动**。本节列动线上的**五处**断口，其中 §6.4 只记边界、不在本批实现，其余四处本批补齐：
 
 ### 6.1 多选的可见性 = 计数回声 + 底部批量条
 
 全站三个多选场景（模式、方案、剧集），**只有剧集不回显已选数**——这不是不好看，是**同构元素走样**，也是"廉价"最直接的来源。而且这一条把静默失效暴露了出来：
 
-> `WorkbenchHeader.tsx:48` 的「批量分析所选」判据是 `disabled={running || total === 0}`，**不看勾选**；`useAnalysisWorkspace.ts:74` 算好的 `canStart`（`:89` 声明）**全站零消费**；空选点下去撞 `:54` 的 `if (selectedIds.length === 0) return;`——**静默无事发生**。
+> `WorkbenchHeader.tsx:55` 的「批量分析所选」判据是 `disabled={total === 0}`，**完全不看勾选**（`running` 时整颗按钮被 `:49-58` 的三元换成「取消分析」）；`useAnalysisWorkspace.ts:95` 算好的 `canStart`（接口 `:111` 声明）**全站零消费**（`grep -rn canStart src` 命中只有这两处）；空选点下去撞 `:68` 的 `if (selectedIds.length === 0) return;`——**静默无事发生**。
 
 契约：
-- **表头回显** `已选 N / 总`（对齐既有约定：`ModePicker.tsx:33`「已选 N / 9 个模式」、`PlanPickList.tsx:86`「已选 N / M 条方案」）。
+- **表头回显** `已选 N / 总`（对齐既有约定：`ModePicker.tsx:33`「已选 N / 9 个模式」、`PlanPickList.tsx:91`「已选 N / M 条方案」——这两处今天都做对了，剧集列表是三个多选场景里唯一漏的）。
 - **批量动作锚回勾选发生的地方**：左栏底部**批量条**（勾选非空才出现），内容为「已选 N 集 · 其中 M 集已分析，将重跑 · [批量分析] · 取消选择」。页头右上角那颗按钮不再是唯一入口（跨整屏找按钮是现状最大的动线成本）。
 - 按钮的 enabled 判据统一用 `canStart`（同时修掉 §附录 B 的第 ④ 条缺陷）。
 
-### 6.2 默认勾选前 10 集（用户定的产品规则）
+### 6.2 默认勾选 = 前 `full_threshold` 集（改读设置，不立新数字）
 
-代码现状是 `useAnalysisWorkspace.ts:14` 初始 **空数组**——进页面一集都不勾。新规则落三条约束，缺一条即视为未实现：
+代码现状是 `useAnalysisWorkspace.ts:14` 初始 **空数组**——进页面一集都不勾。
 
-1. **数字要有唯一真相源**：`DEFAULT_SELECTED_EPISODES = 10` 常量（放 `features/analysis` 的常量模块，不进组件），否则下次改数就是全站搜。
-2. **按当前排序**取前 10；不足 10 集全勾；**用户手动改过勾选后不再自动覆盖**他的选择。
-3. **默认态必须可辨识、可反悔**：表头写「默认前 10 集」，批量条写「其中 M 集已分析，将重跑」。重跑是真花时间和钱的——**规则可以简单，副作用不能藏。**
+**草案里我定的"默认前 10 集"作废**（业主指出漏掉的调度分支，复核实锤）：这个数**产品里已经有了**——`analysis.full_threshold`（`infra/config.py:18` 默认 **15**），消费端 `api/analysis.py:53-78 autostart_after_scan`，由 `api/project.py:134-136` 在扫集落库后立刻调用：
+
+- 集数 ≤ 阈值 → 直接 `analysis.start` **全量分析所有集**；
+- 集数 > 阈值 → `prescreen(then_analyze=True)`：先轻量预筛，只分析入选集。
+
+再立一个 `DEFAULT_SELECTED_EPISODES = 10` 就是同一含义的**第二处**真相源（第一处是这个键本身；设置页字段 `sections.ts:43-49`「自动全量分析集数上限」已经在呈现它），两处并存必然漂移。契约因此改成**读，不写死**：
+
+1. **唯一真相源 = `analysis.full_threshold`**：默认勾选数从设置当前值取——`rpc('settings.get')` 全量返回该 map（`SettingsPage.tsx:44` 已在用同一条），前端不留字面量、不再另立常量。
+2. **按当前排序**取前 N；不足 N 集全勾；**用户手动改过勾选后不再自动覆盖**他的选择；阈值在会话中被改动时不追溯重算已勾集合。
+3. **默认态必须可辨识、可反悔**：表头写「默认前 N 集」（N 为读到的值），批量条写「其中 M 集已分析，将重跑」。重跑是真花时间和钱的——**规则可以简单，副作用不能藏。**
+4. **默认勾选与自动调度的关系必须上界面**（这是上一条规则真正的风险所在）：≤ 阈值时扫完集已经自动全量跑完，此时"前 N 集"的真实语义是**整剧重跑**；> 阈值时它的作用是**补跑预筛未入选的前 N 集**。同一个复选框在两种调度下语义不同，界面不说清就是让用户猜着花钱。批量条的「其中 M 集已分析，将重跑」就是这句话的落点——M 等于总集数时，它显示的是一整剧重跑，不是"选了 15 集"。
 
 ### 6.3 服务未就绪不得表现为空白屏
 
-`useAnalysisWorkspace.ts:31` 在服务未就绪时直接不加载 → 用户看到空白屏，不知道为什么。改为渲染 `StateBlock`（载入 / 失败分支）+ 一条指向引擎总览的可点提示；状态栏的服务状态位与之同判据、同可点（**同一状态，两处入口，不许一处哑一处响**）。
+`useAnalysisWorkspace.ts:43` 在服务未就绪时直接不加载（`if (serviceState === 'ready') void loadAll();`）→ 用户看到空白屏，不知道为什么。改为渲染 `StateBlock`（载入 / 失败分支）+ 一条指向引擎总览的可点提示；状态栏的服务状态位与之同判据、同可点（**同一状态，两处入口，不许一处哑一处响**）。
 
 ### 6.4 跨页勾选传递（记为边界，不在本批实现）
 
-分析页与出片页各持 store、勾选传不到（09-10 判为批量断裂的根）。真正的修法是把两页合进单一剧空间 `/drama/:id`——那是结构改动，**属 09-10 批次，本批不吞**。本批只保证：两屏各自的三态与回声都合规，不让缺失的传递伪装成"已经选好了"。
+分析页与出片页各持 store、勾选传不到——这是 09-10 判定的批量断裂根因（`2026-09-10-dramaclip-ui-redesign-design.md:63-64`：两页**废弃 → redirect `/drama/:id/...`**、"分析页勾选的集传不到出片页，是批量断裂的根因"）。真正的修法就是那条已定案的合并——那是结构改动，**属 09-10 批次，本批不吞**。本批只保证：两屏各自的三态与回声都合规，不让缺失的传递伪装成"已经选好了"。
+
+### 6.5 出片取材范围：可见 + 可收窄（P4 / P5 交界）
+
+业主复核定稿时点名的第二处缺口。**核实过程中我原以为缺口比实际更大——以下按实测重写，并把两处过头的话标出来，免得下一轮照着错话说服人。**
+
+先说清楚"取材"在今天到底是什么（全部为工作区实测，位点可查）：
+
+- **候选池 = 已完成分析的全部集**：`api/narration.py:252-256` 硬取 `episodes_repo.list_by_project(...)` 里 `status == "done"` 的集，入参侧只有 `project_id / modes / k / exclude_plan_ids`（`narration.py:241`、`:244`、`:259`、`:270` 四处读取，别的全被契约的 `additionalProperties: false` 挡掉），`usePlanBatch.ts:40-43` 也只发前三项。**没有任何一条路径能收窄这个池。**
+- **"用哪些集"是模型选的，不是配置**：选题把整池转写喂给 LLM（`engines/narration/angles.py:134`、提示词 `:145` 原文要求"每条角度的 `episode_numbers` 给出这条片要用到的全部集号"），产出的 `_Variant.episode_numbers`（`api/narration.py:185-192`）再决定装配范围：`dialogue_narration` 按集号筛转写（`:446-452`），其余模式由 `_casting_for:485-520` 按集号取场景/高光/台词。模型答了池外集号会被整批否决（`angles.py:102-104`，判据 `:68`"绝不拿残缺的凑够 K 条"）。
+- **界面上看得到"几条取材"，看不到"取材了谁"**：方案卡 `planCards.ts:41` 渲染 `取材 ${plan.episode_ids.length} 集`——**一个计数**。而卡片自己的契约写的是「取材集区间」（`planCards.ts:2`、`__tests__/planCards.test.ts:56`），`plan.episode_ids` 本来就在返回体里。**承诺过区间、交付了个数**，这是本条真正的可见性缺口。
+- 重叠也已经在算：同模式同取材集 100% 直接不出（R7 闸门 `:222-235`）、跨条重叠超 `OVERLAP_LIMIT` 不出（`:361-365`），卡片回显「取材重叠 NN%」。
+
+**两处过头的话，撤回**：① 我起草时写过"取材范围只存在于服务端一行过滤里"——不成立，`_Variant.episode_numbers` → `_casting_for` 是一条完整的取材链，还带自己的验收与重叠闸门；② "界面上完全看不到"——也不成立，卡片有「取材 N 集」与「取材重叠 NN%」。准确的说法是：**池不可见也不可改，单条方案的取材只有数量没有身份。**
+
+所以缺口成立，但比草案里说的窄。契约：
+
+1. **池常驻可见**：出片屏（P5）顶部一条「本次取材：已完成分析 X / Y 集」。`X` 与 `Y` 同源服务端统计，不由前端数 `episodes.length` 反推——前端算的是"勾了几集分析"，不是"哪些集进了选题"。
+2. **单条方案的取材从计数改成点名**：卡片「取材 N 集」补上可点的集号（数据已在 `plan.episode_ids`），兑现 `planCards.ts:2` 自己写下的"取材集区间"。这一条**零接口改动**，是纯前端补欠。
+3. **可收窄**：区间（第 a~b 集）或逐集勾选，二选一即可，不必都做。收窄后条上回显「已收窄到 Z 集」+「恢复全部」。
+4. **后端补一个入参，且必须收在选题之前**：`narration.plan_variants` 增 `episode_ids`，**缺省 = 全部 done 集**，不传时语义与今天逐字一致。改一处不够：`protocol/schemas/narration.json:211` 是 `"additionalProperties": false`，光加服务端参数会被 schema 挡掉，所以**契约改动 = schema + 服务端 + 契约测试三处同批**。这是**本规格新增的一条接口缺口**：09-10 那份清单按 §5 映射表逐条点数为 **29 处**（`2026-09-10-...-design.md:353`），其中 #16 / #17 / #20 三条都是 `narration.plan_variants` 的**其它入参**（`:313`、`:314`、`:317`），没有一条是取材范围——所以本条是清单外的 **第 30 处**，不并入其计数、也不改它的推导口径。
+   **为什么过滤点只能在 `done_episodes`**：`episode_inputs` 同时是选题的转写输入（`angles.py:134`）和 `known_numbers` 的真相源（`:137`），所以窄化池会自动窄化"模型被允许选谁"与"验收放行谁"，一处过滤三线同频，`_run_plan_variants:307` 与下游签名都不用改。反过来，**若放在选题之后过滤**，模型会照常点名池外的集，`_sanitize:102-104` 的整批否决就会变成"改了收窄、K 条全没了"——这是本条唯一真正的实现陷阱。
+5. **收窄的代价必须同屏回显**：参与选题的集数变少 = 角度池变小 = K 条方案更容易同质（重叠闸门 `:361-365` 会更频繁地吃掉角度）。收窄后条上直接显示"参与选题 Z 集"，不让用户收窄完只看到方案变差却不知道原因。
+6. **两条通道不共用 store**：分析页勾选回答"跑哪些集"，本节回答"用哪些已完成的集"，语义不同、生命周期不同（前者在跑完后失去意义）。合店属 09-10 结构批次，本批只保证两屏各自回显正确。
+7. **与 09-10「剧空间 ① 投料」不重复、不冲突**：09-10 `:180` 已把素材列表（勾选 / 排序 / 逐行三态 / 单集重试）定在剧空间第一阶段。本节**不建投料段**，只在今天的出片屏上补"取材可见 + 可收窄"这一条最小面；剧空间落地时，取材状态**同源汇入 ① 投料**，届时节 3 的收窄控件即为投料勾选，不留两套。
+
+**勘误（同批必改，因为它会误导下一次清扫）**：09-10 规格在三处断言 `analysis.full_threshold`「有字段却全库无消费端」「代码里没有这条分支」（§3.3「参数未生效」行、§4.6 键表后的正文、§8 ⑧）。今天不成立——消费端是 `api/analysis.py:53-78`。那条断言的处置建议是"指不出读它的那行代码就删或接线"，照旧文执行会把唯一的阈值真相源删掉，§6.2 就得退回头疼医头的字面量。**已在 09-10 原文件这三处回写勘误**；同批把 §4.6 键表里另外两条随之失效的断言一并标注（`export.width/height`「控件无」→ 9fbd1f5 起 `sections.ts:100-101` 有字段；`export.encoder`「已删」→ 同一提交因 NVENC 探测把它接回来了），并把行号锚点按当前树重测（`api/export.py` `_output_size` 182→`247-251`、`default_preset` 消费端 241→`300`、`loudness.py` 136→`87-88`、`config.py` 响度两键 40→`43-44`）。**除这些"当时为真、此后被别的提交改掉"的事实外，09-10 的设计结论一字未动**，缺口清单仍是它自己的清单（本规格 §6.5 是唯一新增的第 30 处，另说）。
+
 
 ---
 
@@ -218,8 +281,8 @@
 
 ### 7.2 许可与合规
 
-- **OFL 1.1 要求许可文本随包**：两份字体各自的 `OFL.txt` 进 `resources/fonts/`。
-- **「关于」页开源清单必须新增这两条字体**——分发含字体的二进制包本就该有项（同清单已含 OpenCV / faster-whisper）。
+- **OFL 1.1 要求许可文本随包**：`resources/fonts/` 今天是 `NotoSansSC-Regular.otf`（8,331,336 字节）+ `OFL-NotoSansSC.txt` ——**一份许可、一个字重**（⚠️ 该目录**尚未入库**：`git ls-tree -r HEAD` 无 `resources/fonts`，它是立案 D #92 在飞的未跟踪产物，HEAD 里根本没有随包字体）。本批新增 Inter 与思源 500 档，各自的 `OFL.txt` 一并进目录，**一份许可覆盖两种字面是不成立的**。
+- **「关于」页开源清单必须新增这两条字体**：`AboutPage.tsx:14` 今天是一行九个名字的字符串常量（Electron / React / Ant Design / FFmpeg / PySceneDetect / OpenCV / faster-whisper / edge-tts / Kokoro），**没有任何字体项**——分发含字体的二进制包本就该有。
 - 本批不新增任何对外文案。合规红线照旧：**「消重 / 抗比对」不得作为用户可见卖点**（¥1.85M 判例）；AI 生成图片须带显式标识（2025-09-01 施行）。见 [[project-compliance-red-lines]]。
 
 ---
@@ -234,25 +297,27 @@
 2. **成品库**（P2 卡片库 + 海报 + 角标）
 3. **成片详情**（P3 详情双栏）
 
-截图定版、用户认可后再按页推其余屏。**先做全站再截图 = 用 40 处返工换一次判断机会。**
+截图定版、用户认可后再按页推其余屏。**先做全站再截图 = 用 16 屏返工换一次判断机会。**
 
 ### 8.2 基线截图与机检断言
 
 - **改前基线**：随包字体、固定窗口尺寸与 DPR、**100% 与 150% 缩放各一组**（中文 11px 在 150% 下最容易暴露问题）→ 实现后**同参数重拍**。
-- 机器侧断言：**参照页零字号 / 零间距 / 零颜色字面量**（脚本按 §0.2 口径扫 `style={{…}}`；三块参照页的份额——分析屏 45、成品库 `WorksPage` 11 + `TitlesSection` 3、成品详情 4——**必须归零**，其余屏不在本门禁内，由棘轮接管）。
-- 每屏改前 / 改后成对图，**对比结论在聊天里给，不写文件**。
+- 机器侧断言：脚本按 §0.2 口径扫 `style={{…}}`（实测份额——分析屏 45、成品库 `WorksPage` 11 + `TitlesSection` 3、成品详情 4）。**"归零"的准确对象是带 px 语义的度量**（宽高、内边距、外边距、间隙、圆角、行高）；同一口径里还含 `flex: 1`、`minWidth: 0`、`zIndex` 这类**无单位结构值**，它们不是度量、不进 token，也就**不该被算作未改**——把它们混进"归零"会让门禁变成数字游戏。判据两句：① 度量类字面量归零；② 改后用同口径复算并按文件公布差值，剩余项逐条标注为结构值或写进本屏例外。**口径一旦写下就不再改**：改口径 = 重测全部基线。
+  ⚠️ **一处必须撤回的草案数字**：讨论中我说过"分析屏 45 → 38"，那是**估的**，没有复算依据（本屏实际会消失的是 `WorkbenchPage` 的 250 / 6 / 14 与 `EpisodeListRow` 移入 `glyph.*` 的 34 / 46 / 18 / 13 等，减几取决于改到哪一步）。规格不预测差值，只在改后复算并公布。同理，§8.1 里"用 40 处返工"一句按可推导的口径改成屏数。其余 16 屏不进这条门禁，由 §8.3 棘轮接管（一碰就必须归零）。
+- 每屏改前 / 改后成对图，**对比结论在聊天里给，不写文件**。每张图必须带**四项标注，缺一不可**：字阶档位、该行高成对值、栅格落点（token 名）、状态变体。不带字阶档位的图 = 没做，因为下一屏无法据此复现。
 
 ### 8.3 eslint 棘轮
 
 现状（`eslint.config.mjs:46-63`）只管 `fontSize` / `borderRadius` 的字面量。本批扩面，**只对改动文件生效**（棘轮：未迁页面不报错、一碰就必须归零）：
 
 - 新增禁令：`padding` / `margin` / `gap` / `lineHeight` 的字面量 → 必须 `tokens.space*` 或 `layout.*`。
-- **`font*` 只准出现在文本属性位**：这条直接封掉 `borderRadius: tokens.fontIcon`（`Rail:86`、`StepsNav:24`）。
-- 颜色字面量禁令（`theme.ts` 除外）。
+- **命名空间只准出现在自己的属性位**（§1.3 的机检形式）：`text.*` 只准在 `fontSize` / `lineHeight`；`glyph.*` 只准在 `fontSize`（图标）与 `width` / `height`（图形）；两者都**不得**出现在 `borderRadius` / `padding` / `margin` / `gap`。这条直接封掉 `borderRadius: tokens.fontIcon`（实测两处：`Rail.tsx:86`、`StepsNav.tsx:24`，而 `TitleBar.tsx:32`、`AboutPage.tsx:57`、`StatChips.tsx:69` 已经在正确读 `radiusControl`——15 处 `radiusControl` 引用说明那是漏改，不是设计）。
+- **颜色三条**（§3.4）：hex 字面量、`rgb()/rgba()` 字面量、`` `${tokens.…}XY` `` 模板拼色、组件内裸 `boxShadow` 字面量——一律只准出现在 `theme.ts`。
+  ⚠️ **这三条的覆盖面边界必须写明，否则是假门禁**：eslint 只解析 `.ts/.tsx`，**`src/styles/global.css` 里那 7 枚裸 hex**（`:9 #10141C`、`:10 #e8eaed`、`:27 #262f47`、`:32 #3d4d73`、`:48`、`:79` 渐变两枚）**在机器判据够不着的地方**——其中 `#7c9cff / #9b7bff` 与 `tokens.gradientAccent`（`theme.ts:30`）逐字重复，是第二处品牌渐变真相。收口方式不是假装 eslint 管得到，而是 §7.1 改 `global.css`（加 `@font-face`）时同批把这些值改成 CSS 变量、由 `theme.ts` 单点导出；人工复核项进 §8.2 的成对截图。
 
 ### 8.4 参照页一（分析工作台）的已知清单
 
-P4 是整站唯一 `mixins.ts` 与 `PageKit.tsx` **零引用**的 feature（`features/analysis/` 11 个组件全裸写 AntD 卡）。按 §0.2 口径实测本屏 **45 处内联数值字面量**（`EpisodeListRow 14`、`WorkbenchPage 8`、`PlayerCard 5`、`TranscriptCard 5`、`StepsNav 5`、其余 8）；本屏 **26 处 `fontSize` 声明里只有 2 处配了行高**（`EpisodeListRow:190` 与 `TranscriptCard:176`，而后者给 12px 中文配的是 14px 行高）。本屏要一次改齐：卡容器统一、字面量进度量层、字阶+行高成对、三态分道、批量条与回声、默认前 10 集。
+P4 是整站唯一 `mixins.ts` 与 `PageKit.tsx` **零引用**的 feature（`features/analysis/` 11 个组件全裸写 AntD 卡）。按 §0.2 口径实测本屏 **45 处内联数值字面量**（`EpisodeListRow 14`、`WorkbenchPage 8`、`PlayerCard 5`、`TranscriptCard 5`、`StepsNav 5`、其余 8）；本屏 **26 处 `fontSize` 声明里只有 2 处配了行高**（`EpisodeListRow:190` 与 `TranscriptCard:176`，而后者给 12px 中文配的是 14px 行高）。本屏要一次改齐：卡容器统一、字面量进度量层、字阶+行高成对、三态分道、批量条与回声、默认勾选改读 `analysis.full_threshold`。
 
 ---
 
@@ -266,7 +331,8 @@ P4 是整站唯一 `mixins.ts` 与 `PageKit.tsx` **零引用**的 feature（`fea
 2. **AntD 基线改 14 的连带面**（Table 行高、Modal 宽度、表单控件）。→ §1.4 列为同批必做项，不是后续。
 3. **契约写在原型层，可能掩盖屏级特殊需求**。→ 附录 A 的"本屏特有例外"列是强制项；空着即视为没审这屏。
 4. **根因判定可能是错的**。→ §0 的反证条件必须在 8.1 截图定版时显式判定并记录结论。
-5. **执行期与另一位工程师同树同分支**（当前有其 9 个已暂存未提交文件）。→ 提交只 add 显式路径，先 `git diff --cached --name-only`；本批不碰 `engine_configs*`、`docs/05-开发路线图.md`、`tests/api/test_analysis.py`。
+5. **执行期与另一位工程师同树同分支**（**复测 2026-09-21：索引为空，工作树有 75 个已改未提交 + 13 个未跟踪文件，其中 `desktop/` 下 16 个**——含本规格引用的 `WorkbenchHeader.tsx`、`useAnalysisWorkspace.ts`、`ModePicker.tsx`、`PlanPickList.tsx`）。→ 提交只 add 显式路径，先 `git diff --cached --name-only`；本批不碰 `engine_configs*`、`docs/05-开发路线图.md`、`tests/api/test_analysis.py`。**同树期间不 `git stash`、不 `git add -A`、不在脏树上用 `git checkout/restore` 求"干净"**；基线复算走 §0.2 的 `git archive HEAD` 快照，不在工作树上做。
+6. **本批唯一一处越出 09-10 计划范围的结构改动 = §6.5 的取材契约**（`protocol/schemas/narration.json` + `api/narration.py` 的 `episode_ids` + 契约测试）。其余全是排版、状态与动线表层，不动任何方法签名。→ 单独成一个提交，与视觉改动分开，坏了能只回滚它。
 
 ---
 
@@ -278,13 +344,13 @@ P4 是整站唯一 `mixins.ts` 与 `PageKit.tsx` **零引用**的 feature（`fea
 | # | 屏 / 路由 | 原型 | 本屏契约落点 | 四态 | 本屏特有例外 |
 |---|---|---|---|---|---|
 | 1 | 工作台 `/` | P1 | 左三芯片 + 待办 + 海报网格；右环境 / 提示 | 空 ✓ 有数据 ✓ 无骨架 | `EmptyWorkbench` 持 primary，页标题区按钮须让位 |
-| 2 | 项目 `/projects` | P2 | 网格收进度量层；封面 9/16 | **无空态 无失败态** 载入 ✓ | `:35` 吞错 + `:138` 判 null → 失败永久转圈 |
+| 2 | 项目 `/projects` | P2 | 网格收进度量层；封面 9/16 | **无空态 无失败态** 载入 ✓ | `useProjects.ts:24` 的 `setProjects(await projectApi.list())` **无 try/catch** → 列表请求一失败就是未处理的 rejection，`projects` 永远停在 `null`，于是 `:138` 的 `if (projects === null) return <Card loading />` **永久转圈**（不是吞错，是根本没接）；另一处真吞错在 `ProjectsPage.tsx:35` 的 `.catch(() => undefined)`（补封面失败无声）→ §5 失败态 |
 | 3 | 成品库 `/works` | P2 | 按剧分组横向滚动；角标收进 `posterBadge` | 空 ✓ 载入 ✓ **无失败态** | `:13` `MODE_COLORS` 六裸 hex |
 | 4 | 成品详情 `/works/:exportId` | P3 | `minmax(300px,420px) + 1fr`；行复用 `listRow` | 空 ✓ 失败 ✓ **无部分成功** | `:168` 内联 `lineHeight 19px` |
-| 5 | 分析工作台 `/projects/:id/analysis` | P4 | 左栏按百分比可拖（`WorkbenchPage.tsx:96 useSplitDrag(24)`、`:103 minWidth 250`、`:123` 把手 6px）——三个数全部收进 `layout.split`；勾选 + 全选 + **批量条**；右栏三卡；底栏 46（`StepFooter:26` 写死） | 空 ✓ **无骨架 无失败横幅** 部分成功仅计数 | **45 处内联字面量**（§0.2 口径）；`mixins/PageKit` **整屏零引用**；26 处字号仅 2 处配行高；三态撞道；默认前 10 集 |
-| 6 | 出片 `/projects/:id/produce` | P5 | 四段纵向：风格 → 模式 → 方案 → 产出 | 空 ✓ 失败 ✓ 部分成功 ✓ | `poll.ts:2` 1500ms 轮询**有百分比无 ETA** |
-| 7 | 引擎·总览 `/engines` | P6 | 5 tab 收进同一 `tabs` 契约；卡容器一律 `PageSection` | 未就绪 ✓ **下载失败永不显示** | `EnginesPage.tsx:133-135` 正则漏 `prompts` |
-| 8 | 引擎·分 tab `/engines/:tab` | P6 | 同上；`asr / tts / llm / prompts` 四 tab 同契约 | 同 7 | 「提示词」今天点不进（同上） |
+| 5 | 分析工作台 `/projects/:id/analysis` | P4 | 左栏按百分比可拖（`useSplit.ts:4` 默认 24、`:22` 带宽 20~40、`WorkbenchPage.tsx:106` `minWidth 250`、`:126` 把手 6px）——**五个数**全部收进 `layout.split` 且不改数值；勾选 + 全选 + **批量条**；右栏三卡；底栏 46（`StepFooter:26` 写死） | 空 ✓ **无骨架 无失败横幅** 部分成功仅计数 | **45 处内联字面量**（§0.2 口径）；`mixins/PageKit` **整屏零引用**；26 处字号仅 2 处配行高；三态撞道；初始空选须改读 `full_threshold`（§6.2） |
+| 6 | 出片 `/projects/:id/produce` | P5 | 四段纵向：风格 → 模式 → 方案 → 产出；**顶部常驻「本次取材：已完成分析 X / Y 集」+ 可收窄**（§6.5） | 空 ✓ 失败 ✓ 部分成功 ✓ | `poll.ts:2` 1500ms 轮询**有百分比无 ETA**；取材候选池**服务端硬取全部 done 集、不可改**，卡片只有「取材 N 集」计数、无集号（§6.5 实测） |
+| 7 | 引擎·总览 `/engines` | P6 | 5 tab 收进同一 `tabs` 契约；卡容器一律 `PageSection` | 未就绪 ✓ **下载失败永不显示** | `EnginesPage.tsx:134` 正则漏 `prompts`（**按 HEAD 成立，工作区已被另一位工程师就地修好、未提交**——见附录 B ①） |
+| 8 | 引擎·分 tab `/engines/:tab` | P6 | 同上；`asr / tts / llm / prompts` 四 tab 同契约 | 同 7 | 开工前复查上一条是否已入库，勿重复修 |
 | 9 | 设置 `/settings` | P6 | 单列表单；`labelWidth/controlWidth` 收进 `layout` | 仅"加载中…" | `:268` 内联 `lineHeight 17px` + 自带 shadow 字面量 |
 | 10 | 关于 `/about` | P7 | 窄单列 `max-width 720`；开源清单**必须含两条字体** | 静态，无需 | `:30,35` 两处内联 `lineHeight 18px`；`▶` 假图标 |
 | 11 | 新建项目弹窗 | O | 统一 `Overlay`：标题 16/24、宽 720、footer 右对齐 | 提交失败需内联 | `ProjectsPage:225` 自带一套 footer |
@@ -292,9 +358,9 @@ P4 是整站唯一 `mixins.ts` 与 `PageKit.tsx` **零引用**的 feature（`fea
 | 13 | 导入模型向导 | O | 四步 `Steps`；宽 720；异常态三张 `StateBlock` | 三态已覆盖 | 自带 footer，与另两弹窗各写一套 → 收一 |
 | 14 | 云配置弹窗 | O | 同 11 | **保存失败只有 toast，无内联横幅** | `CloudConfigModal` |
 | 15 | 提示词编辑器 | O | 同 11；编辑器正文走 `text.body 14/22` + `fontFamilyMono` 可选 | 保存失败同上 | 从 P6 进入，但自身是 O |
-| 16 | `TitleBar` | C | 高度与控件尺寸进 `layout`；图标一律 `glyph.*` | 无需 | `:37,69,237` 用字阶 token 当图标尺寸 |
+| 16 | `TitleBar` | C | 高度与控件尺寸进 `layout`；图标一律 `glyph.*`，角标里的文本走 `text.badge` | 无需 | `:37,69` 是**角标文本**、`:237` 才是图标——三处同读 `fontIcon`，逐位归段见 §1.3 陷阱 2；`:41` `▶` 假图标；`:170` 裸 `boxShadow` |
 | 17 | `Rail` | C | **导轨法**：`loop` 组贴顶、`config` 组 `margin-top:auto` 钉底、中间分隔线 | 无需 | `:47` 硬编码 68 而 `railWidth` 零引用；`:86` 字阶当圆角；`:101` 标签 10→11 |
-| 18 | `StatusBar` | C | 四段分级：在跑任务 `13/18·500`、环境 `11/14`；§4 三件套落点 | 无需 | `padding '0 14px'` 不在阶梯上；`height 26` 写死；`:50-57` 不显示在跑任务 |
+| 18 | `StatusBar` | C | 四段分级：在跑任务 `13/18·500`、环境 `11/14`；§4 三件套落点 | 无需 | `padding '0 14px'`（`:54`）不在阶梯上；`height 26`（`:49`）写死；`:61-77` 四项里没有在跑任务 |
 | 19 | `ErrorBoundary` | C | 复用 `StateBlock` 失败态 | 只有整页 reload | 把 `error.message` 原样给用户看 |
 
 ---
@@ -303,10 +369,11 @@ P4 是整站唯一 `mixins.ts` 与 `PageKit.tsx` **零引用**的 feature（`fea
 
 这几条是本次全站扫描顺带挖出来的真缺陷。它们**不是排版问题**，混进本批会让"改了什么"变得不可判定，因此单列：
 
-1. `EnginesPage.tsx:133-135` 的 `/\/engines\/(asr|tts|llm)/` 漏 `prompts` → `EngineTabNav` 的 `TAB_ORDER` 有 `prompts`、`:122` 已渲染 `<PromptsTab />`，但**永远回落到总览**，「提示词」点不进。
+1. `EnginesPage.tsx:134`（HEAD `381f32c5`）的 `/\/engines\/(asr|tts|llm)/` 漏 `prompts` → `EngineTabNav.tsx:30` 的 `TAB_ORDER` 有 `prompts`、`EnginesPage` 已渲染 `<PromptsTab />`，但**永远回落到总览**，「提示词」点不进。
+   ⚠️ **开工前必查**：写本规格期间，**同一工作树里另一位工程师已就地把这行改成 `(asr|tts|llm|prompts)`，但尚未提交**（`git status` 显示 `M desktop/src/features/engines/EnginesPage.tsx`，`git blame` 该行为 "Not Committed Yet"）。所以这条缺陷**按 HEAD 成立、按工作区已修**——本批开工前先 `git log -S'llm|prompts'` 确认它是否已入库，已入库即结案，**不得重复修一遍、更不得把自己的改动盖在同一段上**。
 2. 下载失败态永不渲染：`stores/ui.ts:15` 有 `'failed'`，`useDownloadProgress.ts:9` 只读 `'downloading'`。
-3. `StepFooter.tsx:23-54` 是 `PageKit.PageFooter:143-172` 的近逐字分叉（本批 §3.3 要删的是**分叉**，其承载的批量判据缺陷另案）。
-4. 「批量分析所选」空选可点、点了静默无事：`canStart`（`useAnalysisWorkspace.ts:74`，`:89` 声明）**零消费**；按钮用 `disabled={running || total === 0}`（`WorkbenchHeader.tsx:48`），点下去撞 `:54` 的早退。与设计里的批量条是同一问题的两面。
+3. `StepFooter.tsx:6-55` 与 `PageKit.PageFooter:126-172` 是一对分叉，且 **`PageFooter` 全站零调用点**（详见 §3.3：活的那份在功能目录里、原语是一份死副本）。本批 §3.3 要删的是**分叉**，其承载的批量判据缺陷另案。
+4. 「批量分析所选」空选可点、点了静默无事：`canStart`（`useAnalysisWorkspace.ts:95` 算、`:111` 声明进接口）**全站零消费**；按钮用 `disabled={total === 0}`（`WorkbenchHeader.tsx:55`），点下去撞 `:68` 的早退。与设计里的批量条是同一问题的两面。
 5. 另有 6 个零引用 token（`theme.ts:76-83` 整个 `layout`、`railWidth`、`colorPrimaryHover`、`colorPrimaryActive`、`colorAccent`、`mixins.hoverBg`）：**处置不是删掉，而是本批让它们变成真有人用的那个真相源**——`hoverBg` 因 §3.2 必须改值，`layout` 与 `railWidth` 因 §2 必须被引用。
 
-**待验证（不进规格，须实测才能定）**：Electron 里 `<audio>` 走 `dramaclip://` 的可行性；`IndexttsRuntimeSlot.tsx` 是另一位工程师**已暂存未提交**的工作，不属于任何清扫范围。
+**待验证（不进规格，须实测才能定）**：Electron 里 `<audio>` 走 `dramaclip://` 的可行性。**属主边界**：`IndexttsRuntimeSlot.tsx` 写作本规格时是另一位工程师的未提交改动，现已随 `e6d57fe` 入库——它仍不属任何清扫范围，动它之前先与属主对账。
