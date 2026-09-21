@@ -47,6 +47,10 @@
         "size_label": {
           "type": "string"
         },
+        "size_bytes": {
+          "type": "integer",
+          "description": "磁盘实占字节数（未安装为 0）；与标称 size_label 无关"
+        },
         "tier": {
           "type": "string"
         },
@@ -63,10 +67,17 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["kind", "web_url"],
+            "required": [
+              "kind",
+              "web_url"
+            ],
             "properties": {
-              "kind": { "type": "string" },
-              "web_url": { "type": "string" }
+              "kind": {
+                "type": "string"
+              },
+              "web_url": {
+                "type": "string"
+              }
             }
           }
         },
@@ -76,8 +87,12 @@
         },
         "imported": {
           "oneOf": [
-            { "$ref": "#/x-models/ImportRecord" },
-            { "type": "null" }
+            {
+              "$ref": "#/x-models/ImportRecord"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "本地导入的登记项；null = 这份资产不是导入进来的（内置清单下载或手动放置）"
         }
@@ -85,107 +100,274 @@
     },
     "VerifyCheck": {
       "type": "object",
-      "required": ["name", "status"],
+      "required": [
+        "name",
+        "status"
+      ],
       "properties": {
-        "name": { "type": "string" },
-        "status": { "type": "string", "enum": ["pass", "warn", "fail", "skip"] },
-        "detail": { "type": "string" }
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "warn",
+            "fail",
+            "skip"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        }
       }
     },
     "VerifyReport": {
       "type": "object",
-      "required": ["model_id", "name", "kind", "engine", "engine_ready", "ok", "checks"],
+      "required": [
+        "model_id",
+        "name",
+        "kind",
+        "engine",
+        "engine_ready",
+        "ok",
+        "checks"
+      ],
       "properties": {
-        "model_id": { "type": "string" },
-        "name": { "type": "string" },
-        "kind": { "type": "string" },
-        "engine": { "type": "string" },
-        "engine_ready": { "type": "boolean" },
-        "path": { "type": "string" },
+        "model_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "engine": {
+          "type": "string"
+        },
+        "engine_ready": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        },
         "ok": {
           "type": "boolean",
           "description": "任一 check 为 fail 即 false"
         },
         "checks": {
           "type": "array",
-          "items": { "$ref": "#/x-models/VerifyCheck" }
+          "items": {
+            "$ref": "#/x-models/VerifyCheck"
+          }
         }
       }
     },
     "ImportRecord": {
       "type": "object",
-      "required": ["model_id", "kind", "path", "source_path", "mode", "incomplete", "imported_at"],
+      "required": [
+        "model_id",
+        "kind",
+        "path",
+        "source_path",
+        "mode",
+        "incomplete",
+        "imported_at"
+      ],
       "properties": {
-        "model_id": { "type": ["string", "null"] },
-        "kind": { "type": "string", "description": "asr | tts" },
-        "engine": { "type": "string", "description": "外部资产为空：认不出身份就没有承接引擎" },
+        "model_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "description": "asr | tts"
+        },
+        "engine": {
+          "type": "string",
+          "description": "外部资产为空：认不出身份就没有承接引擎"
+        },
         "path": {
           "type": "string",
           "description": "资产此刻所在的位置：copy/move 在库内 placement，register（冲突时选「并存」也算）在业主自己的目录"
         },
-        "source_path": { "type": "string", "description": "导入时业主挑的那个目录" },
-        "mode": { "type": "string", "enum": ["copy", "move", "register"] },
-        "label": { "type": "string" },
+        "source_path": {
+          "type": "string",
+          "description": "导入时业主挑的那个目录"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "copy",
+            "move",
+            "register"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
         "incomplete": {
           "type": "boolean",
           "description": "true = 落位登记当时体检不通过（业主显式按现状导入，或仅登记了一份坏资产）"
         },
-        "imported_at": { "type": "integer", "description": "epoch 毫秒" }
+        "imported_at": {
+          "type": "integer",
+          "description": "epoch 毫秒"
+        }
       }
     },
     "ImportInspection": {
       "type": "object",
       "required": [
-        "source_path", "file_count", "total_bytes", "recognized", "basis",
-        "checks", "ok"
+        "source_path",
+        "file_count",
+        "total_bytes",
+        "recognized",
+        "basis",
+        "checks",
+        "ok"
       ],
       "properties": {
-        "source_path": { "type": "string" },
-        "file_count": { "type": "integer" },
-        "total_bytes": { "type": "integer", "description": "实测字节数，不是清单标称值" },
-        "recognized": { "type": "boolean" },
-        "model_id": { "type": ["string", "null"] },
-        "name": { "type": ["string", "null"] },
-        "kind": { "type": ["string", "null"] },
-        "engine": { "type": ["string", "null"] },
-        "engine_ready": { "type": "boolean" },
-        "model_root": { "type": ["string", "null"], "description": "模型真正所在的那一层" },
-        "cache_path": { "type": ["string", "null"], "description": "HF 缓存根；平铺目录为 null" },
-        "basis": { "type": "string", "description": "凭什么认成这个模型；认不出来时说明为什么" },
-        "missing_files": { "type": "array", "items": { "type": "string" } },
+        "source_path": {
+          "type": "string"
+        },
+        "file_count": {
+          "type": "integer"
+        },
+        "total_bytes": {
+          "type": "integer",
+          "description": "实测字节数，不是清单标称值"
+        },
+        "recognized": {
+          "type": "boolean"
+        },
+        "model_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "engine": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "engine_ready": {
+          "type": "boolean"
+        },
+        "model_root": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "模型真正所在的那一层"
+        },
+        "cache_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "HF 缓存根；平铺目录为 null"
+        },
+        "basis": {
+          "type": "string",
+          "description": "凭什么认成这个模型；认不出来时说明为什么"
+        },
+        "missing_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "target": {
           "oneOf": [
             {
               "type": "object",
-              "required": ["placement", "path", "free_bytes"],
+              "required": [
+                "placement",
+                "path",
+                "free_bytes"
+              ],
               "properties": {
-                "placement": { "type": "string" },
-                "path": { "type": "string" },
-                "free_bytes": { "type": "integer" }
+                "placement": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "free_bytes": {
+                  "type": "integer"
+                }
               }
             },
-            { "type": "null" }
+            {
+              "type": "null"
+            }
           ]
         },
         "conflict": {
           "oneOf": [
             {
               "type": "object",
-              "required": ["model_id", "path", "size_bytes", "ok"],
+              "required": [
+                "model_id",
+                "path",
+                "size_bytes",
+                "ok"
+              ],
               "properties": {
-                "model_id": { "type": "string" },
-                "path": { "type": "string" },
-                "size_bytes": { "type": "integer" },
-                "ok": { "type": "boolean" },
-                "failed_checks": { "type": "array", "items": { "type": "string" } }
+                "model_id": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "size_bytes": {
+                  "type": "integer"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "failed_checks": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
               }
             },
-            { "type": "null" }
+            {
+              "type": "null"
+            }
           ],
           "description": "库里已有同一件资产；非 null 时 import_commit 必须先给 on_conflict 裁决"
         },
-        "checks": { "type": "array", "items": { "$ref": "#/x-models/VerifyCheck" } },
-        "ok": { "type": "boolean", "description": "第 ② 步闸门：false 就不许落位（除非显式不完整导入）" }
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/x-models/VerifyCheck"
+          }
+        },
+        "ok": {
+          "type": "boolean",
+          "description": "第 ② 步闸门：false 就不许落位（除非显式不完整导入）"
+        }
       }
     }
   },
@@ -283,29 +465,49 @@
       "summary": "导入向导第 ② 步：识别目录并实测体检（只读，不落盘、不写登记）",
       "params": {
         "type": "object",
-        "required": ["path"],
+        "required": [
+          "path"
+        ],
         "properties": {
-          "path": { "type": "string", "description": "业主挑的源目录；models/ 之内的路径一律拒绝" }
+          "path": {
+            "type": "string",
+            "description": "业主挑的源目录；models/ 之内的路径一律拒绝"
+          }
         }
       },
-      "result": { "$ref": "#/x-models/ImportInspection" }
+      "result": {
+        "$ref": "#/x-models/ImportInspection"
+      }
     },
     {
       "name": "models.import_commit",
       "summary": "导入向导第 ③ 步：落位（复制/移动/仅登记）；体检不通过或冲突未裁决时作业以该判据失败",
       "params": {
         "type": "object",
-        "required": ["path", "mode"],
+        "required": [
+          "path",
+          "mode"
+        ],
         "properties": {
-          "path": { "type": "string" },
+          "path": {
+            "type": "string"
+          },
           "mode": {
             "type": "string",
-            "enum": ["copy", "move", "register"],
+            "enum": [
+              "copy",
+              "move",
+              "register"
+            ],
             "description": "copy 保留原文件；move 仅在落位体检通过后清源；register 只登记路径不搬文件"
           },
           "on_conflict": {
             "type": "string",
-            "enum": ["overwrite", "merge", "coexist"],
+            "enum": [
+              "overwrite",
+              "merge",
+              "coexist"
+            ],
             "description": "库里已有同一资产时的裁决；缺省 = 拒绝落位。overwrite 改名留备份，不删旧文件"
           },
           "allow_incomplete": {
@@ -314,31 +516,48 @@
           },
           "external_kind": {
             "type": "string",
-            "enum": ["asr", "tts"],
+            "enum": [
+              "asr",
+              "tts"
+            ],
             "description": "未识别目录登记为外部资产时必须声明能力；不认身份就不猜 placement"
           },
-          "label": { "type": "string" }
+          "label": {
+            "type": "string"
+          }
         }
       },
       "result": {
         "type": "object",
-        "required": ["job_id"],
+        "required": [
+          "job_id"
+        ],
         "properties": {
-          "job_id": { "type": "string", "description": "作业类型 model_import；进度走 progress.update" }
+          "job_id": {
+            "type": "string",
+            "description": "作业类型 model_import；进度走 progress.update"
+          }
         }
       }
     },
     {
       "name": "models.import_records",
       "summary": "导入登记本全文：「本地导入」的来源与内置清单外的外部资产",
-      "params": { "type": "object" },
+      "params": {
+        "type": "object"
+      },
       "result": {
         "type": "object",
-        "required": ["records", "error"],
+        "required": [
+          "records",
+          "error"
+        ],
         "properties": {
           "records": {
             "type": "array",
-            "items": { "$ref": "#/x-models/ImportRecord" }
+            "items": {
+              "$ref": "#/x-models/ImportRecord"
+            }
           },
           "error": {
             "type": "string",
@@ -352,7 +571,9 @@
       "summary": "撤销一条库外登记：只删登记项，业主自己盘上的字节不动",
       "params": {
         "type": "object",
-        "required": ["path"],
+        "required": [
+          "path"
+        ],
         "properties": {
           "path": {
             "type": "string",
@@ -362,10 +583,17 @@
       },
       "result": {
         "type": "object",
-        "required": ["ok", "path"],
+        "required": [
+          "ok",
+          "path"
+        ],
         "properties": {
-          "ok": { "type": "boolean" },
-          "path": { "type": "string" }
+          "ok": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          }
         }
       }
     },
@@ -394,7 +622,9 @@
           },
           "removed": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "本次处置过的路径：库内副本已删，库外登记项只撤了登记"
           }
         }
@@ -403,24 +633,78 @@
     {
       "name": "models.runtime_status",
       "summary": "CUDA 运行库安装态",
-      "params": { "type": "object" },
+      "params": {
+        "type": "object"
+      },
       "result": {
         "type": "object",
         "properties": {
-          "cublas": { "type": "boolean" },
-          "cudnn": { "type": "boolean" },
-          "installed": { "type": "boolean" }
+          "cublas": {
+            "type": "boolean"
+          },
+          "cudnn": {
+            "type": "boolean"
+          },
+          "installed": {
+            "type": "boolean"
+          }
         }
       }
     },
     {
       "name": "models.install_runtime",
       "summary": "下载并启用 CUDA 运行库（作业）",
-      "params": { "type": "object" },
+      "params": {
+        "type": "object"
+      },
       "result": {
         "type": "object",
         "properties": {
-          "job_id": { "type": "string" }
+          "job_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "models.indextts_status",
+      "summary": "IndexTTS 运行环境安装态（venv 存在且 import 自检通过）",
+      "params": {
+        "type": "object",
+        "properties": {}
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "installed",
+          "dir"
+        ],
+        "properties": {
+          "installed": {
+            "type": "boolean"
+          },
+          "dir": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "models.install_indextts",
+      "summary": "引导 IndexTTS 运行环境（uv→venv→torch→依赖→源码→自检），作业模式有进度可取消",
+      "params": {
+        "type": "object",
+        "properties": {}
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
         }
       }
     }

@@ -179,6 +179,14 @@ export const runtimeApi = {
     rpc<{ job_id: string }>('models.install_runtime', {}),
 } as const;
 
+/** IndexTTS 运行环境（隔离 venv）：状态/一键安装（作业模式有进度）。 */
+export const indexttsApi = {
+  status: (): Promise<{ installed: boolean; dir: string }> =>
+    rpc<{ installed: boolean; dir: string }>('models.indextts_status', {}),
+  install: (): Promise<{ job_id: string }> =>
+    rpc<{ job_id: string }>('models.install_indextts', {}),
+} as const;
+
 /** models.import_records 的返回：登记本 + 读坏了的原因原文——坏了不等于空。 */
 export interface ImportRecordsResult {
   readonly records: ImportRecord[];

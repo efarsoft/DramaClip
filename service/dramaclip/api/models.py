@@ -44,6 +44,8 @@ def register(router: Router, context: AppContext) -> None:
     router.register("models.import_forget", lambda params: import_forget(context, params))
     router.register("models.runtime_status", lambda params: runtime_status(context, params))
     router.register("models.install_runtime", lambda params: install_runtime(context, params))
+    router.register("models.indextts_status", lambda params: indextts_status(context, params))
+    router.register("models.install_indextts", lambda params: install_indextts(context, params))
     router.register("models.delete", lambda params: delete(context, params))
 
 
@@ -401,3 +403,55 @@ def _matches_installed(recorded: str, installed: Any) -> bool:
         return False
     stored, landed = Path(recorded), Path(str(installed))
     return stored == landed or stored in landed.parents
+
+
+def indextts_status(context: AppContext, _params: dict[str, Any]) -> dict[str, Any]:
+    """IndexTTS 运行环境安装态（引擎卡内联安装槽的判据）。"""
+    from dramaclip.infra.model_manager import indextts_runtime
+
+    return indextts_runtime.status(context.data_dir)
+
+
+def install_indextts(context: AppContext, _params: dict[str, Any]) -> dict[str, Any]:
+    """引导 IndexTTS 运行环境（作业模式：uv → venv → torch → 依赖 → 源码 → 自检）。"""
+    from dramaclip.infra.model_manager import indextts_runtime
+
+    if indextts_runtime.status(context.data_dir)["installed"]:
+        raise RpcDomainError(_ERR_MODEL_STATE, "IndexTTS 运行环境已就绪")
+    _active = [
+        j for j in context.job_store.list_recent(limit=50, active_only=True)
+        if j["type"] == "indextts_runtime"
+    ]
+    if _active:
+        raise RpcDomainError(_ERR_MODEL_STATE, "已有安装任务进行中，请等待完成或取消")
+    job_id = context.job_store.create("indextts_runtime", ref_id="indextts-runtime")
+    context.job_store.mark_running(job_id)
+    cancel_event = threading.Event()
+    context.cancel_events[job_id] = cancel_event
+    done_event = threading.Event()
+
+    def _run() -> None:
+        try:
+            indextts_runtime.install(
+                context.data_dir,
+                cancel=cancel_event,
+                on_progress=lambda percent, stage: context.job_store.set_progress(
+                    job_id, float(percent), stage
+                ),
+            )
+            context.notifier.log("info", "IndexTTS 运行环境安装完成")
+        except Exception as exc:  # noqa: BLE001 - 作业失败原样落 error
+            context.job_store.mark_failed(job_id, str(exc))
+        finally:
+            done_event.set()
+
+    def _watch() -> None:
+        done_event.wait()
+        job = context.job_store.get(job_id)
+        if job is not None and job["status"] == "running":
+            context.job_store.mark_completed(job_id)
+        context.cancel_events.pop(job_id, None)
+
+    threading.Thread(target=_run, daemon=True, name="indextts-runtime-install").start()
+    threading.Thread(target=_watch, daemon=True, name="indextts-runtime-watch").start()
+    return {"job_id": job_id}

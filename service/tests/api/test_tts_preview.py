@@ -105,7 +105,7 @@ def test_preview_rejects_reserve_engine_without_touching_factory(
     context = _context(tmp_path)
 
     with pytest.raises(Exception, match="未接入"):
-        tts_api.preview(context, {"engine": "indextts2", "voice": "default"})
+        tts_api.preview(context, {"engine": "vibevoice", "voice": "default"})
 
     assert fake_engine.created == []
 

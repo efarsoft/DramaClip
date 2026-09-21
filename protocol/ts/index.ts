@@ -160,6 +160,8 @@ export interface JobInfo {
   readonly ref_id: string | null;
   readonly status: JobStatus;
   readonly progress: number;
+  /** 人读阶段（服务端 jobs.label），如「第3集 预筛中」 */
+  readonly stage?: string | null;
   readonly error?: string | null;
   readonly created_at: number;
   readonly updated_at: number;
@@ -521,6 +523,8 @@ export const METHOD_NAMES = [
   'export.ensure_covers',
   'models.runtime_status',
   'models.install_runtime',
+  'models.indextts_status',
+  'models.install_indextts',
   'narration.generate_titles',
   'narration.update_titles',
   'export.get',
