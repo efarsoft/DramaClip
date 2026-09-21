@@ -15,6 +15,7 @@ from dramaclip.engines.tts.base import TtsEngine
 _MODEL_DIRS: dict[str, Path | None] = {
     "edge": None,
     "kokoro": Path("tts") / "kokoro" / "Kokoro-82M-v1.1-zh",
+    "indextts2": Path("tts") / "indextts2",
 }
 
 
@@ -43,6 +44,10 @@ def create(engine: str, models_dir: Path | None = None) -> TtsEngine:
         from dramaclip.engines.tts.engines.kokoro import KokoroEngine
 
         return KokoroEngine(_local_dir(engine, models_dir))
+    if engine == "indextts2":
+        from dramaclip.engines.tts.engines.indextts2 import IndexTts2Engine
+
+        return IndexTts2Engine(_local_dir(engine, models_dir))
     available = " / ".join(sorted(supported()))
     raise ValueError(f"未知 TTS 引擎: {engine}（可用: {available}）")
 

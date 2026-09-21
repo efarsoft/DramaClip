@@ -133,12 +133,12 @@ def builtin_specs() -> list[ModelSpec]:
             model_id="indextts2",
             kind="tts",
             engine="indextts2",
-            repo_id="IndexTeam/IndexTTS-2",
-            ms_repo="IndexTeam/IndexTTS-2",
+            repo_id="IndexTeam/IndexTTS-2.5",
+            ms_repo="IndexTeam/IndexTTS-2.5",
             placement="tts/indextts2",
-            name="IndexTTS2（音色克隆+情绪控制）",
-            notes="约 5.5GB；建议 N 卡 4GB+ 显存；毫秒级时长控制",
-            size_label="~5.5GB",
+            name="IndexTTS-2.5（音色克隆+情绪控制）",
+            notes="约 5.1GB；建议 N 卡 4GB+ 显存；时长控制+情感解耦，RTF 较 2 提速 2.28 倍",
+            size_label="~5.1GB",
             tier="accurate",
             speed=2,
             quality=5,
@@ -261,6 +261,7 @@ def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
     base = models_dir / spec.placement
     installed = False
     resolved: Path | None = None
+    asset: Path | None = None
     if base.is_dir():
         if spec.engine == "faster_whisper":
             # HF 缓存布局，模型级精确探测：
@@ -269,7 +270,7 @@ def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
             for cache_dir in sorted(base.glob(f"models--*faster-whisper-{short}")):
                 for snapshot in sorted((cache_dir / "snapshots").glob("*"), reverse=True):
                     if (snapshot / "model.bin").is_file():
-                        installed, resolved = True, snapshot
+                        installed, resolved, asset = True, snapshot, cache_dir
                         break
                 if installed:
                     break
@@ -278,7 +279,7 @@ def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
             for pattern in ("*.pth", "*.pt", "*.bin", "*.onnx", "*.safetensors"):
                 hit = next(base.rglob(pattern), None)
                 if hit is not None:
-                    installed, resolved = True, base
+                    installed, resolved, asset = True, base, base
                     break
     return {
         "model_id": spec.model_id,
@@ -296,8 +297,16 @@ def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
         "sources": [{"kind": kind, "repo": repo} for kind, repo in spec.sources()],
         "status": "installed" if installed else "not_installed",
         "path": str(resolved) if resolved is not None else None,
+        # 磁盘实占：按「这份资产自己的目录」统计（whisper 是缓存根，权重实体在 blobs/ 下），
+        # 不是清单里的标称大小，也不把同 placement 的邻居档位算进来。
+        "size_bytes": _dir_bytes(asset) if asset is not None else 0,
         "engine_ready": engine_ready(spec),
     }
+
+
+def _dir_bytes(root: Path) -> int:
+    """目录树内全部普通文件字节数之和。"""
+    return sum(path.stat().st_size for path in root.rglob("*") if path.is_file())
 
 
 def engine_ready(spec: ModelSpec) -> bool:
