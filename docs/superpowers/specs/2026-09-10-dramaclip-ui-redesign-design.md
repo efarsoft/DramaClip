@@ -351,7 +351,13 @@
 
 ## 6. 后端缺口清单与依赖顺序
 
-**29 处接口缺口**（按 §5 映射表逐条清点：#31b 单片预览是**追认已存在的能力**，无新 RPC，不计入缺口）：其中 **25 处为全新增方法**，**4 处为既有方法的返回字段扩展**（`project.list` 阶段聚合、`project.scan_episodes` 的 `issues`、`analysis.results` 的覆盖度、`export.list_works` 的 `angle`/`selfcheck`/`cover_path`）。另有两处非接口项：`episode_analysis.subtitle_zone` 新列、`drawbox_filter` 写死常量修正。
+**接口缺口清单 = §5 表中 RPC 列标「新」的那些行**，不发布聚合数——旧版本这里写过"29 处（25 全新增 + 4 字段扩展）"，**两个口径都复算不出 29**（见下），撤回到"以表为准"：
+
+- **按行数**：`awk -F'|' 'NR>=298 && NR<=348 && $6 ~ /\*\*新\*\*/' docs/superpowers/specs/2026-09-10-dramaclip-ui-redesign-design.md` → **33 行**（#2、3、4、9、11、12、15、16、17、18、19、20、20c、21、22、23、24、25、28、29、30、31、32、33、36–42、44、47）。#31b 单片预览是**追认已存在的能力**、无新 RPC，本就不标新，无需在此另设排除条款。
+- **去重到接口改动点**（同一方法的多行算一点）→ **27 点**：`jobs.list` / `jobs.get` / `jobs.cancel` / `project.batch_create` / `project.update_settings` / `narration.plan_variants` / `narration.get_plan` / `semantic/subtitle_probe` / `export.submit` / `export.retry` / `export.delete` / `export.rename` / `export.set_cover` / `tools.*` 七件 / 角度重叠度量 / 自检度量 / 更新检查器 = **23 点全新增**；`project.list` 阶段聚合、`project.scan_episodes` 的 `issues`、`analysis.results` 的覆盖度、`export.list_works` 的字段与筛选参数 = **4 点既有方法扩展**。
+- 两点提醒：**#19 重叠度量与 #29 自检度量不是 RPC**，是规划期/导出期新增的产出字段，前端读它们仍走 #12 与 #27 那两个方法的扩展；**#47 更新检查器在主进程侧**，不经 JSON-RPC。所以"27 点"里真正要新写方法签名的比 23 还少 3 个——这正是不该发布聚合数的原因。
+
+另有两处非接口项：`episode_analysis.subtitle_zone` 新列、`drawbox_filter` 写死常量修正。
 
 **其中工具箱的 7 个（`tools.*`）里 6 个最便宜**：全是既有引擎的薄封装，**不含任何新算法**，且按 §4.7 的隔离规矩不写剧库表——建议作为独立小批次随时插入，不必排队。**唯一的例外是 `tools.generate_image`**，它要新引一类图像模型（见下方「图像」层）。按依赖分层：
 
