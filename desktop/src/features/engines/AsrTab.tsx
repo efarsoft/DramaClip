@@ -54,6 +54,7 @@ export function AsrTab({
   importError,
   settings,
   reports,
+  selftests,
   machine,
   onSave,
   onChanged,
@@ -71,6 +72,7 @@ export function AsrTab({
         active={active}
         settings={settings}
         reports={reports}
+        selftests={selftests}
         onSave={onSave}
         onVerify={onVerify}
       />
@@ -80,6 +82,7 @@ export function AsrTab({
         externals={externalAssets(imported, 'asr')}
         importError={importError}
         reports={reports}
+        selftests={selftests}
         specs={machine}
         activeModelId={active?.model_id}
         onActivate={(model) => {
@@ -99,6 +102,7 @@ function ActiveCard({
   active,
   settings,
   reports,
+  selftests,
   onSave,
   onVerify,
 }: {
@@ -106,6 +110,7 @@ function ActiveCard({
   active: ModelInfo | undefined;
   settings: DomainTabProps['settings'];
   reports: Reports;
+  selftests: DomainTabProps['selftests'];
   onSave: DomainTabProps['onSave'];
   onVerify: DomainTabProps['onVerify'];
 }): ReactElement {
@@ -113,7 +118,10 @@ function ActiveCard({
   const card: ActiveCardProps = {
     domain: '语音识别 ASR',
     title: active?.name ?? '未选择模型',
-    state: active === undefined ? null : assetState(active, report),
+    state:
+      active === undefined
+        ? null
+        : assetState(active, report, selftests?.[active.model_id]),
     hint: '设置里没有可用的识别模型，去下方资产库选一个',
     stateNote: failureNote(report),
     progress: useDownloadProgress(active),

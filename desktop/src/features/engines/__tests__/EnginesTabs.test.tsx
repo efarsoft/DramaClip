@@ -5,7 +5,7 @@
  */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ModelInfo, VerifyReport } from '@dramaclip/protocol';
+import type { ModelInfo, SelftestResults, VerifyReport } from '@dramaclip/protocol';
 import { TtsTab } from '../TtsTab';
 import { AsrTab } from '../AsrTab';
 import { specsFromHealth } from '../machineFit';
@@ -17,6 +17,14 @@ vi.mock('../../../services/client', () => ({
     verify: vi.fn(() => Promise.resolve([])),
     remove: vi.fn(() => Promise.resolve({})),
     download: vi.fn(() => Promise.resolve({})),
+    cleanResidue: vi.fn(() => Promise.resolve({ removed: 0, freed_bytes: 0 })),
+    orphanList: vi.fn(() => Promise.resolve([])),
+    cleanOrphan: vi.fn(() => Promise.resolve({ ok: true, removed: '', freed_bytes: 0 })),
+    relayout: vi.fn(() => Promise.resolve({ path: '', migrated: false })),
+  },
+  enginesApi: {
+    selftest: vi.fn(() => Promise.resolve({ ok: true })),
+    selftestResults: vi.fn(() => Promise.resolve({})),
   },
   ttsApi: {
     preview: vi.fn(() => Promise.resolve({ path: 'C:/x/tts-preview/edge-a.mp3', duration_s: 2.5, engine: 'edge', voice: 'v', text: 't' })),
@@ -33,33 +41,54 @@ const noop = (): void => {
   // 渲染测试只验状态，不验写回
 };
 
-function tts(models: readonly ModelInfo[], reports: Reports, engine = 'kokoro'): void {
+function tts(
+  models: readonly ModelInfo[],
+  reports: Reports,
+  engine = 'kokoro',
+  selftests?: SelftestResults,
+): void {
+  const base = {
+    imported: [],
+    importError: '',
+    machine: specsFromHealth(null),
+    onSave: noop,
+    onChanged: noop,
+    onVerify: noop,
+    onForget: noop,
+    onImport: noop,
+  };
   render(
     <TtsTab
+      {...base}
       models={[...models]}
-      imported={[]}
-      importError=""
       settings={{ 'tts.engine': engine }}
       reports={reports}
-      machine={specsFromHealth(null)}
-      onSave={noop}
-      onChanged={noop}
-      onVerify={noop}
-      onForget={noop}
-      onImport={noop}
+      selftests={selftests}
     />,
   );
 }
 
-describe('配音 TTS · 生效卡与资产库', () => {
+describe('配音 TTS · 自检口径（§10.1：就绪 = 校验过 + 自检过）', () => {
   afterEach(cleanup);
 
-  it('已装 + 体检通过 → 就绪', () => {
-    tts([model()], reportsOf(report()));
+  it('已装 + 校验通过 + 自检通过 → 就绪（两层都过才发绿灯）', () => {
+    tts([model()], reportsOf(report()), 'kokoro', { 'kokoro-82m': { ok: true, duration_s: 3.2 } });
     expect(screen.getAllByText('Kokoro 82M 中文').length).toBeGreaterThan(0);
     expect(screen.getAllByText('就绪').length).toBeGreaterThan(0);
     expect(screen.queryByText('缺模型')).toBeNull();
   });
+
+  it('校验通过但没自检 → 待自检：不冒充就绪，但「选为生效」不被禁（自检是就绪口径不是准入闸）', () => {
+    tts([model()], reportsOf(report()));
+    expect(screen.getAllByText('待自检').length).toBeGreaterThan(0);
+    expect(screen.queryByText('就绪')).toBeNull();
+    const activate = screen.getByRole('button', { name: '选为生效' });
+    expect(activate.hasAttribute('disabled')).toBe(false);
+  });
+});
+
+describe('配音 TTS · 生效卡与资产库', () => {
+  afterEach(cleanup);
 
   it('模型目录不见了（改名/删除）→ 就绪翻成缺模型，且不给「选为生效」', () => {
     tts([model({ status: 'not_installed', size_bytes: 0 })], reportsOf());
@@ -134,6 +163,7 @@ describe('语音识别 ASR · 同构骨架', () => {
         ]}
         settings={{ 'asr.engine': 'faster_whisper', 'asr.model': 'small', 'asr.device': 'auto', 'asr.language': 'zh' }}
         reports={reportsOf(report({ model_id: 'faster-whisper-small', kind: 'asr', engine: 'faster_whisper' }))}
+        selftests={{ 'faster-whisper-small': { ok: true, chars: 56, elapsed_s: 8.4 } }}
         machine={specsFromHealth(null)}
         onSave={noop}
         onChanged={noop}

@@ -1,6 +1,13 @@
 // 引擎中心纯函数的共用替身：字段与 protocol 的 ModelInfo / VerifyReport / ImportInspection /
-// ImportRecord 同步，缺字段即 typecheck 失败——这是「UI 不得凭空造判据」的下限保障。
-import type { ImportInspection, ImportRecord, JobInfo, ModelInfo, VerifyReport } from '@dramaclip/protocol';
+// ImportRecord / SelftestResult 同步，缺字段即 typecheck 失败——这是「UI 不得凭空造判据」的下限保障。
+import type {
+  ImportInspection,
+  ImportRecord,
+  JobInfo,
+  ModelInfo,
+  SelftestResult,
+  VerifyReport,
+} from '@dramaclip/protocol';
 
 export function model(over: Partial<ModelInfo> = {}): ModelInfo {
   return {
@@ -32,6 +39,18 @@ export function report(over: Partial<VerifyReport> = {}): VerifyReport {
 
 export function reportsOf(...items: VerifyReport[]): ReadonlyMap<string, VerifyReport> {
   return new Map(items.map((item) => [item.model_id, item]));
+}
+
+/** 一条「能力层自检通过」的账本记录：就绪 = 校验过 + 自检过，两半都得有替身。 */
+export function selftestOk(over: Partial<SelftestResult> = {}): SelftestResult {
+  return { ok: true, chars: 56, elapsed_s: 8.4, at: 1_760_000_000_000, ...over };
+}
+
+/** 自检账本（key → 结果），与 protocol 的 SelftestResults 同形。 */
+export function selftestsOf(
+  ...items: [string, SelftestResult][]
+): Readonly<Record<string, SelftestResult>> {
+  return Object.fromEntries(items);
 }
 
 /** 一份「能直接落位」的体检结果：认成了 Whisper Medium，全部判据通过，库里没有同一件。 */

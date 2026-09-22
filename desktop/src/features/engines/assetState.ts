@@ -1,18 +1,22 @@
 /**
- * 资产状态：把 models.list（engine_ready / status / size_bytes）、models.verify 的体检结论
- * 与 models.import_records 的登记项折算成 UI 语言。这里不出现任何「写死的就绪」——页面上每句
- * 「就绪 / 缺模型 / 不完整 / 待接入」都能回溯到这几个接口的字段。
+ * 资产状态：把 models.list（engine_ready / status / size_bytes）、models.verify 的体检结论、
+ * engines.selftest 的自检账本与 models.import_records 的登记项折算成 UI 语言。
+ * 这里不出现任何「写死的就绪」——页面上每句「就绪 / 缺模型 / 不完整 / 待接入」
+ * 都能回溯到这几个接口的字段。
+ *
+ * 就绪口径（§10.1）：**校验通过 + 自检通过**，两层缺一不可——文件在 ≠ 能推。
  */
-import type { ImportRecord, ModelInfo, VerifyReport } from '@dramaclip/protocol';
+import type { ImportRecord, ModelInfo, SelftestResult, VerifyReport } from '@dramaclip/protocol';
 
 export type Reports = ReadonlyMap<string, VerifyReport>;
 
-export type AssetState = 'ready' | 'unverified' | 'incomplete' | 'missing' | 'reserve';
+export type AssetState = 'ready' | 'untested' | 'unverified' | 'incomplete' | 'missing' | 'reserve';
 
 export type EngineTab = 'asr' | 'tts' | 'llm';
 
 const LABEL: Record<AssetState, string> = {
   ready: '就绪',
+  untested: '待自检',
   unverified: '未校验',
   incomplete: '不完整',
   missing: '缺模型',
@@ -27,32 +31,68 @@ export function reportFor(reports: Reports, modelId: string): VerifyReport | und
   return reports.get(modelId);
 }
 
-/** 五态判定：未接入优先（装了也不能生效），其次落盘态，最后体检态。 */
-export function assetState(model: ModelInfo, report: VerifyReport | undefined): AssetState {
+/** 状态判定：未接入优先（装了也不能生效），其次落盘态，再文件层校验，最后能力层自检。 */
+export function assetState(
+  model: ModelInfo,
+  report: VerifyReport | undefined,
+  selftest?: SelftestResult,
+): AssetState {
   if (!model.engine_ready) return 'reserve';
   if (model.status !== 'installed') return 'missing';
   if (report === undefined) return 'unverified';
-  return report.ok ? 'ready' : 'incomplete';
+  if (!report.ok) return 'incomplete';
+  // 校验过了还差能力层：没跑过自检或自检没过都不许叫「就绪」（§10.3）。
+  return selftest?.ok === true ? 'ready' : 'untested';
 }
 
 export function stateLabel(state: AssetState): string {
   return LABEL[state];
 }
 
-/** 能否「选为生效」：只有确认坏了或压根没装/没接入才禁用。 */
+/**
+ * 能否「选为生效」：只由文件层体检结论决定（report.ok，§10.1）——warn 级异常
+ * （残留/无从对账/多余副本）不禁用生效，但必须上卡且自带修法；
+ * fail、未校验、没装、未接入一律禁用。「待自检」可以生效：自检是就绪口径，不是准入闸。
+ */
 export function canActivate(model: ModelInfo, report: VerifyReport | undefined): boolean {
-  const state = assetState(model, report);
-  return state === 'ready' || state === 'unverified';
+  if (!model.engine_ready || model.status !== 'installed') return false;
+  return report?.ok === true;
 }
 
 /** 体检里所有 fail 项，供横幅一行说清「缺哪三件」。 */
 export function failureNote(report: VerifyReport | undefined): string | undefined {
-  if (report === undefined || report.ok) return undefined;
+  if (report === undefined) return undefined;
   const failed = report.checks.filter((check) => check.status === 'fail');
   if (failed.length === 0) return undefined;
   return failed
     .map((check) => `${check.name}${check.detail === undefined ? '' : `：${check.detail}`}`)
     .join(' · ');
+}
+
+/** warn 项条数：不拦「选为生效」，但要上卡（§10.1 降级的另一半：可见 + 有修法）。 */
+export function warnCount(report: VerifyReport | undefined): number {
+  if (report === undefined) return 0;
+  return report.checks.filter((check) => check.status === 'warn').length;
+}
+
+/** warn 项一行摘要：判据名 + 后端原话（行内截断展示，title 给全文）。 */
+export function warnNote(report: VerifyReport | undefined): string | undefined {
+  if (report === undefined) return undefined;
+  const warns = report.checks.filter((check) => check.status === 'warn');
+  if (warns.length === 0) return undefined;
+  return warns
+    .map((check) => `${check.name}${check.detail === undefined ? '' : `：${check.detail}`}`)
+    .join(' · ');
+}
+
+/** warn 项短摘要（只列判据名与件数）：行内窄，详情在 title 与体检面板里。 */
+export function warnSummary(report: VerifyReport | undefined): string | undefined {
+  if (report === undefined) return undefined;
+  const names = report.checks
+    .filter((check) => check.status === 'warn')
+    .map((check) => check.name);
+  if (names.length === 0) return undefined;
+  return `${String(names.length)} 项待修：${names.join('、')}`;
 }
 
 /** 分区只认后端下发的 engine_ready：体检结论改变不了「这台机器的工厂接没接它」。 */

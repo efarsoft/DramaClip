@@ -1,8 +1,8 @@
-// 开工就绪度：四格绿/红一律由设置值 + 资产状态 + 真实探测到的渲染版本折算，
+// 开工就绪度：四格绿/红一律由设置值 + 资产状态（校验+自检两层）+ 真实探测到的渲染版本折算，
 // 前端不得写死任何「免装 / 已就绪」（旧的三张引擎卡正是这么翻车的）。
 import { describe, expect, it } from 'vitest';
 import { workReadiness } from '../workReadiness';
-import { model, report, reportsOf } from './fixtures';
+import { model, report, reportsOf, selftestOk, selftestsOf } from './fixtures';
 
 const asr = model({
   model_id: 'faster-whisper-small',
@@ -13,17 +13,30 @@ const asr = model({
 });
 
 const READY = reportsOf(report({ model_id: 'faster-whisper-small', kind: 'asr' }));
+const TESTED = selftestsOf(['faster-whisper-small', selftestOk()]);
 
 describe('workReadiness · 全绿', () => {
   it('四个环节全绿 → 可开工', () => {
     const steps = workReadiness({
       models: [asr],
       reports: READY,
+      selftests: TESTED,
       settings: { 'asr.model': 'small', 'tts.engine': 'edge', 'llm.base_url': 'https://x/v1' },
       ffmpegVersion: '8.1.1',
     });
     expect(steps.map((s) => s.ok)).toEqual([true, true, true, true]);
     expect(steps[3]?.detail).toBe('ffmpeg 8.1.1');
+  });
+
+  it('校验过了但没自检 → 转写格红「待自检」（§10.1 缺陷 4：不给未证实的发绿灯）', () => {
+    const steps = workReadiness({
+      models: [asr],
+      reports: READY,
+      settings: { 'asr.model': 'small', 'tts.engine': 'edge', 'llm.base_url': 'https://x/v1' },
+      ffmpegVersion: '8.1.1',
+    });
+    expect(steps[0]?.ok).toBe(false);
+    expect(steps[0]?.detail).toBe('Whisper Small · 待自检');
   });
 });
 
@@ -57,6 +70,7 @@ describe('workReadiness · 转写环节', () => {
     const steps = workReadiness({
       models: [sense],
       reports: reportsOf(report({ model_id: 'sensevoice-small', kind: 'asr', engine: 'sensevoice' })),
+      selftests: selftestsOf(['sensevoice-small', selftestOk({ chars: 42 })]),
       settings: { 'asr.engine': 'sensevoice', 'asr.model': 'small' },
       ffmpegVersion: '8.1.1',
     });
@@ -113,6 +127,7 @@ describe('workReadiness · 文案与渲染环节', () => {
     const steps = workReadiness({
       models: [asr],
       reports: READY,
+      selftests: TESTED,
       settings: { 'asr.model': 'small', 'tts.engine': 'edge' },
       ffmpegVersion: '8.1.1',
     });
@@ -125,6 +140,7 @@ describe('workReadiness · 文案与渲染环节', () => {
     const steps = workReadiness({
       models: [asr],
       reports: READY,
+      selftests: TESTED,
       settings: { 'asr.model': 'small', 'llm.base_url': 'https://x/v1' },
       ffmpegVersion: '',
     });

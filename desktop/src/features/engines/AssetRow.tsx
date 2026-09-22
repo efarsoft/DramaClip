@@ -6,10 +6,17 @@
  */
 import { useState } from 'react';
 import type { ReactElement } from 'react';
-import type { ModelInfo, VerifyReport } from '@dramaclip/protocol';
+import type { ModelInfo, SelftestResult, VerifyReport } from '@dramaclip/protocol';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
-import { type AssetState, assetState, failureNote, formatBytes } from './assetState';
+import {
+  type AssetState,
+  assetState,
+  failureNote,
+  formatBytes,
+  warnNote,
+  warnSummary,
+} from './assetState';
 import { RatingDots, StateBadge, StateDot } from './AssetKit';
 import { FIT_VERDICT_COLOR, judgeModelFit, type MachineSpecs, parseSizeGb } from './machineFit';
 import { GRID } from './assetGrid';
@@ -20,6 +27,8 @@ import { useDownloadProgress } from './useDownloadProgress';
 export interface AssetRowProps {
   model: ModelInfo;
   report: VerifyReport | undefined;
+  /** engines.selftest 账本里这件资产的最近一次结果；没跑过 = undefined。 */
+  selftest?: SelftestResult | undefined;
   specs: MachineSpecs;
   active: boolean;
   onActivate: (model: ModelInfo) => void;
@@ -33,6 +42,7 @@ export interface AssetRowProps {
 export function AssetRow({
   model,
   report,
+  selftest,
   specs,
   active,
   onActivate,
@@ -42,7 +52,7 @@ export function AssetRow({
   table = false,
 }: AssetRowProps): ReactElement {
   const [detail, setDetail] = useState(false);
-  const state = assetState(model, report);
+  const state = assetState(model, report, selftest);
   return (
     <div style={{ borderTop: `1px solid ${tokens.borderSecondary}` }}>
       <div
@@ -64,6 +74,7 @@ export function AssetRow({
           model={model}
           state={state}
           report={report}
+          selftest={selftest}
           detail={detail}
           onToggleDetail={() => {
             setDetail(!detail);
@@ -140,11 +151,22 @@ function StateCell({
 }): ReactElement {
   const progress = useDownloadProgress(model);
   const note = failureNote(report);
+  // warn 上卡（§10.1 降级的另一半：可见 + 有修法）；储备资产的「引擎接入」warn
+  // 是分区自带的事实，不再重复喊一遍。
+  const warns = note === undefined && state !== 'reserve' ? warnSummary(report) : undefined;
   return (
     <span style={{ minWidth: 0 }}>
       <StateBadge state={state} progress={progress} />
       {note !== undefined && (
         <div style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.colorError }}>{note}</div>
+      )}
+      {warns !== undefined && (
+        <div
+          title={warnNote(report)}
+          style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.colorWarning }}
+        >
+          {warns}
+        </div>
       )}
     </span>
   );

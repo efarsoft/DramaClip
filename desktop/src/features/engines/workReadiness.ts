@@ -2,7 +2,7 @@
  * 开工就绪度：转写 → 文案 → 配音 → 渲染四环节，每格的结论都由资产状态、设置值与
  * 真实探测到的渲染引擎版本折算而来（红格必须说清「去哪修」）。
  */
-import type { ModelInfo } from '@dramaclip/protocol';
+import type { ModelInfo, SelftestResults } from '@dramaclip/protocol';
 import { isModelFreeEngine, ttsEngineLabel } from './ttsVoices';
 import {
   type AssetState,
@@ -26,25 +26,34 @@ export interface ReadinessStep {
 export interface ReadinessInput {
   readonly models: readonly ModelInfo[];
   readonly reports: Reports;
+  /** 自检账本：缺省时按「未自检」折算——不发假绿灯，而不是按通过折算。 */
+  readonly selftests?: SelftestResults;
   readonly settings: Readonly<Record<string, string>>;
   readonly ffmpegVersion: string;
 }
 
-/** 未体检与体检通过都算「能开工」；不完整/缺模型/待接入才算红。 */
-const OK_STATES: ReadonlySet<AssetState> = new Set<AssetState>(['ready', 'unverified']);
+/**
+ * 只有 ready（校验过 + 自检过）算「能开工」（§10.1 缺陷 4 的修复）：
+ * 「未校验」「待自检」都不再冒充就绪——文件在 ≠ 能推，没证据就不发绿灯。
+ */
+const OK_STATES: ReadonlySet<AssetState> = new Set<AssetState>(['ready']);
 
 function assetStep(
   key: 'asr' | 'tts',
   index: string,
   label: string,
   model: ModelInfo | undefined,
-  reports: Reports,
+  input: ReadinessInput,
   missingDetail: string,
 ): ReadinessStep {
   if (model === undefined) {
     return { key, index, label, detail: missingDetail, ok: false, tab: key };
   }
-  const state = assetState(model, reportFor(reports, model.model_id));
+  const state = assetState(
+    model,
+    reportFor(input.reports, model.model_id),
+    input.selftests?.[model.model_id],
+  );
   return {
     key,
     index,
@@ -65,7 +74,7 @@ function ttsStep(input: ReadinessInput): ReadinessStep {
     '③',
     '配音',
     activeAsset(input.models, 'tts', input.settings),
-    input.reports,
+    input,
     engine === '' ? '未选引擎' : `${ttsEngineLabel(engine)} · 无对应资产`,
   );
 }
@@ -76,7 +85,7 @@ function asrStep(input: ReadinessInput): ReadinessStep {
     '①',
     '转写',
     activeAsset(input.models, 'asr', input.settings),
-    input.reports,
+    input,
     '未选模型',
   );
 }

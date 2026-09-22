@@ -1,7 +1,7 @@
 /** 引擎中心：按能力域（ASR/TTS/LLM）组织本地与云端引擎，数据一次拉齐后各 tab 共用。 */
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
-import type { ImportRecord, ModelInfo } from '@dramaclip/protocol';
+import type { ImportRecord, ModelInfo, SelftestResults } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
 import { OverviewTab } from './OverviewTab';
 import { AsrTab } from './AsrTab';
@@ -27,6 +27,8 @@ export interface DomainTabProps {
   readonly importError: string;
   readonly settings: SettingsMap;
   readonly reports: Reports;
+  /** 自检账本：就绪 = 校验过 + 自检过（§10.1），能力层那一半从这里来。 */
+  readonly selftests?: SelftestResults;
   readonly machine: MachineSpecs;
   readonly onSave: (values: SettingsMap) => void;
   readonly onChanged: () => void;
@@ -103,6 +105,7 @@ function TabBody({
     importError: data.importError,
     settings: data.settings,
     reports: data.reports,
+    selftests: data.selftests,
     machine: data.machine,
     onSave: (values) => {
       void onSave(values);
@@ -125,6 +128,7 @@ function TabBody({
       models={data.models}
       settings={data.settings}
       reports={data.reports}
+      selftests={data.selftests}
       ffmpegVersion={data.ffmpegVersion}
     />
   );

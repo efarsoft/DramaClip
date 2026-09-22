@@ -8,8 +8,8 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { App as AntdApp } from 'antd';
-import type { ImportRecord, ModelInfo } from '@dramaclip/protocol';
-import { modelsApi, rpc, systemApi } from '../../services/client';
+import type { ImportRecord, ModelInfo, SelftestResults } from '@dramaclip/protocol';
+import { enginesApi, modelsApi, rpc, systemApi } from '../../services/client';
 import { type Reports, reportsOf } from './assetState';
 import { type MachineSpecs, specsFromHealth } from './machineFit';
 import type { SettingsMap } from './EnginesPage';
@@ -20,6 +20,8 @@ export interface EnginesData {
   readonly importError: string;
   readonly settings: SettingsMap;
   readonly reports: Reports;
+  /** 自检账本（engines.selftest_results）：就绪口径的能力层那一半。 */
+  readonly selftests: SelftestResults;
   readonly ffmpegVersion: string;
   readonly machine: MachineSpecs;
 }
@@ -36,12 +38,13 @@ export function useEnginesData(): EnginesDataHub {
   const [data, setData] = useState<EnginesData | null>(null);
 
   const load = useCallback(async () => {
-    const [models, settings, reports, health, records] = await Promise.all([
+    const [models, settings, reports, health, records, selftests] = await Promise.all([
       modelsApi.list(),
       rpc<SettingsMap>('settings.get'),
       modelsApi.verify(),
       systemApi.health(),
       modelsApi.importRecords(),
+      enginesApi.selftestResults(),
     ]);
     setData({
       models,
@@ -49,6 +52,7 @@ export function useEnginesData(): EnginesDataHub {
       importError: records.error,
       settings,
       reports: reportsOf(reports),
+      selftests,
       ffmpegVersion: health.ffmpeg_version,
       machine: specsFromHealth(health),
     });

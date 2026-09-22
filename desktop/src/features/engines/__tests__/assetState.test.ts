@@ -18,15 +18,24 @@ import {
   incompleteAssets,
   partitionAssets,
   stateLabel,
+  warnCount,
+  warnNote,
+  warnSummary,
 } from '../assetState';
-import { externalRecord, importRecord, model, report, reportsOf } from './fixtures';
+import { externalRecord, importRecord, model, report, reportsOf, selftestOk } from './fixtures';
 
 describe('assetState', () => {
-  it('已装 + 引擎接入 + 体检通过 → ready（唯一能报「就绪」的组合）', () => {
-    expect(assetState(model(), report())).toBe('ready');
+  it('已装 + 引擎接入 + 校验通过 + 自检通过 → ready（唯一能报「就绪」的组合，§10.1）', () => {
+    expect(assetState(model(), report(), selftestOk())).toBe('ready');
   });
 
-  it('已装但体检不通过 → incomplete（旧的「半条命」判据在这里失效）', () => {
+  it('校验通过但自检没过/没跑 → untested：文件在 ≠ 能推，不冒充就绪', () => {
+    expect(assetState(model(), report())).toBe('untested');
+    expect(assetState(model(), report(), { ok: false, error: 'cuDNN 找不到' })).toBe('untested');
+    expect(stateLabel('untested')).toBe('待自检');
+  });
+
+  it('已装但体检不通过 → incomplete（自检救不了文件层的 fail）', () => {
     const broken = report({
       ok: false,
       checks: [
@@ -34,7 +43,7 @@ describe('assetState', () => {
         { name: '权重完整', status: 'fail', detail: '疑似下载中断' },
       ],
     });
-    expect(assetState(model(), broken)).toBe('incomplete');
+    expect(assetState(model(), broken, selftestOk())).toBe('incomplete');
     expect(canActivate(model(), broken)).toBe(false);
   });
 
@@ -52,9 +61,17 @@ describe('assetState', () => {
     expect(canActivate(movedAway, undefined)).toBe(false);
   });
 
-  it('未体检 → unverified：已装也不冒充「就绪」', () => {
+  it('未校验 → unverified：不冒充就绪，也不给「选为生效」（§10.1 缺陷 4：绿灯必须有证据）', () => {
     expect(assetState(model(), undefined)).toBe('unverified');
-    expect(canActivate(model(), undefined)).toBe(true);
+    expect(canActivate(model(), undefined)).toBe(false);
+  });
+
+  it('warn 级异常不禁用生效（残留/无从对账照样可选），fail 才禁', () => {
+    const withWarn = report({
+      ok: true,
+      checks: [{ name: '中断残留', status: 'warn', detail: '1 个 .incomplete（192MB）' }],
+    });
+    expect(canActivate(model(), withWarn)).toBe(true);
   });
 });
 
@@ -76,6 +93,29 @@ describe('failureNote', () => {
   it('通过或未体检 → undefined', () => {
     expect(failureNote(report())).toBeUndefined();
     expect(failureNote(undefined)).toBeUndefined();
+  });
+});
+
+describe('warn 上卡（§10.1 降级的另一半：可见 + 有修法）', () => {
+  const withWarns = report({
+    ok: true,
+    checks: [
+      { name: '中断残留', status: 'warn', detail: '1 个 .incomplete 半截文件（192MB）' },
+      { name: '唯一路径', status: 'warn', detail: '另有 1 处同名缓存', paths: ['D:\\x'] },
+      { name: '权重非空', status: 'pass' },
+    ],
+  });
+
+  it('warnCount/warnSummary：只数 warn，摘要只列判据名（行内窄）', () => {
+    expect(warnCount(withWarns)).toBe(2);
+    expect(warnSummary(withWarns)).toBe('2 项待修：中断残留、唯一路径');
+    expect(warnCount(report())).toBe(0);
+    expect(warnSummary(undefined)).toBeUndefined();
+  });
+
+  it('warnNote：详情带后端原话，供 title 展开', () => {
+    expect(warnNote(withWarns)).toContain('192MB');
+    expect(warnNote(report())).toBeUndefined();
   });
 });
 

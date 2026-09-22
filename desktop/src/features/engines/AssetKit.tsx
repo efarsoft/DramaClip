@@ -5,9 +5,10 @@ import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 import { type AssetState, stateLabel } from './assetState';
 
-/** 五态配色：绿只在「体检通过的已装已接入」上出现，其余一律不假装。 */
+/** 状态配色：绿只在「校验过 + 自检过」上出现，其余一律不假装（§10.1 就绪口径）。 */
 const STATE_TONE: Record<AssetState, string> = {
   ready: tokens.colorSuccess,
+  untested: tokens.colorInfo,
   unverified: tokens.colorInfo,
   incomplete: tokens.colorError,
   missing: tokens.colorWarning,

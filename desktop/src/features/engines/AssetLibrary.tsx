@@ -9,7 +9,7 @@ import { useState } from 'react';
 import type { ReactElement } from 'react';
 import { Alert, Button, Empty, Input, Segmented } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import type { ImportRecord, ModelInfo } from '@dramaclip/protocol';
+import type { ImportRecord, ModelInfo, SelftestResults } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
 import { PageSection } from '../../components/layout/PageKit';
 import { type Reports, partitionAssets, reportFor } from './assetState';
@@ -29,6 +29,8 @@ interface LibraryProps {
   /** models.import_records 自己坏了的原话；空串 = 读通了。 */
   importError: string;
   reports: Reports;
+  /** 自检账本（engines.selftest_results）：就绪口径的能力层那一半。 */
+  selftests?: SelftestResults;
   specs: MachineSpecs;
   activeModelId: string | undefined;
   onActivate: (model: ModelInfo) => void;
@@ -51,6 +53,7 @@ export function AssetLibrary({
   externals,
   importError,
   reports,
+  selftests,
   specs,
   activeModelId,
   onActivate,
@@ -66,7 +69,7 @@ export function AssetLibrary({
   const filtered = models.filter((model) => hits(model, keyword));
   const shown = externals.filter((record) => externalHits(record, keyword));
   const { usable, reserve } = partitionAssets(filtered);
-  const group = { reports, view, specs, activeModelId, onActivate, onChanged, onVerify, renderPreview };
+  const group = { reports, selftests, view, specs, activeModelId, onActivate, onChanged, onVerify, renderPreview };
   return (
     <PageSection
       title="资产库"
@@ -175,6 +178,7 @@ function AssetGroup({
   collapsible = false,
   models,
   reports,
+  selftests,
   view,
   specs,
   activeModelId,
@@ -202,6 +206,7 @@ function AssetGroup({
           models={models}
           view={view}
           reports={reports}
+          selftests={selftests}
           specs={specs}
           activeModelId={activeModelId}
           onActivate={onActivate}
@@ -218,6 +223,7 @@ function AssetList({
   models,
   view,
   reports,
+  selftests,
   specs,
   activeModelId,
   onActivate,
@@ -230,6 +236,7 @@ function AssetList({
       key={model.model_id}
       model={model}
       report={reportFor(reports, model.model_id)}
+      selftest={selftests?.[model.model_id]}
       specs={specs}
       active={model.model_id === activeModelId}
       onActivate={onActivate}

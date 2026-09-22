@@ -54,6 +54,7 @@ export function TtsTab({
   importError,
   settings,
   reports,
+  selftests,
   machine,
   onSave,
   onChanged,
@@ -71,6 +72,7 @@ export function TtsTab({
         engine={engine}
         settings={settings}
         reports={reports}
+        selftests={selftests}
         onSave={onSave}
         onChanged={onChanged}
         onVerify={onVerify}
@@ -80,6 +82,7 @@ export function TtsTab({
         externals={externalAssets(imported, 'tts')}
         importError={importError}
         reports={reports}
+        selftests={selftests}
         specs={machine}
         activeModelId={active?.model_id}
         onActivate={(model) => {
@@ -89,23 +92,31 @@ export function TtsTab({
         onVerify={onVerify}
         onForget={onForget}
         onImport={onImport}
-        renderPreview={(model) => {
-          const assetVoice = settings[voiceSettingKey(model.engine)] ?? '';
-          return (
-            <TtsPreviewButton
-              engine={model.engine}
-              voice={assetVoice}
-              blocked={previewNotice({
-                engine: model.engine,
-                voice: assetVoice,
-                state: assetState(model, reportFor(reports, model.model_id)),
-              })}
-            />
-          );
-        }}
+        renderPreview={previewRenderer(settings, reports)}
       />
     </div>
   );
+}
+
+/** 行内试听节点：音色取该引擎自己的设置值，放行判断照旧只挡「必然听不到」的确定情况。 */
+function previewRenderer(
+  settings: DomainTabProps['settings'],
+  reports: Reports,
+): (model: ModelInfo) => ReactElement {
+  return (model) => {
+    const assetVoice = settings[voiceSettingKey(model.engine)] ?? '';
+    return (
+      <TtsPreviewButton
+        engine={model.engine}
+        voice={assetVoice}
+        blocked={previewNotice({
+          engine: model.engine,
+          voice: assetVoice,
+          state: assetState(model, reportFor(reports, model.model_id)),
+        })}
+      />
+    );
+  };
 }
 
 function ActiveCard({
@@ -113,6 +124,7 @@ function ActiveCard({
   engine,
   settings,
   reports,
+  selftests,
   onSave,
   onChanged,
   onVerify,
@@ -121,6 +133,7 @@ function ActiveCard({
   engine: string;
   settings: DomainTabProps['settings'];
   reports: Reports;
+  selftests: DomainTabProps['selftests'];
   onSave: DomainTabProps['onSave'];
   onChanged: () => void;
   onVerify: DomainTabProps['onVerify'];
@@ -128,7 +141,9 @@ function ActiveCard({
   const modelFree = isModelFreeEngine(engine);
   const report = active === undefined ? undefined : reportFor(reports, active.model_id);
   const state: AssetState | null =
-    active === undefined ? (modelFree ? null : 'missing') : assetState(active, report);
+    active === undefined
+      ? (modelFree ? null : 'missing')
+      : assetState(active, report, selftests?.[active.model_id]);
   const voice = settings[voiceSettingKey(engine)] ?? '';
   const card: ActiveCardProps = {
     domain: '配音 TTS',

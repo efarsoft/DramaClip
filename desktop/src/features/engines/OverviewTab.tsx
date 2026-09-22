@@ -8,7 +8,7 @@
 import { AudioOutlined, EditOutlined, RightOutlined, SoundOutlined } from '@ant-design/icons';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { ModelInfo } from '@dramaclip/protocol';
+import type { ModelInfo, SelftestResults } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
 import { mixins } from '../../styles/mixins';
 import type { SettingsMap } from './EnginesPage';
@@ -24,15 +24,17 @@ export function OverviewTab({
   models,
   settings,
   reports,
+  selftests,
   ffmpegVersion,
 }: {
   models: readonly ModelInfo[];
   settings: SettingsMap;
   reports: Reports;
+  selftests?: SelftestResults;
   ffmpegVersion: string;
 }): React.ReactElement {
   const navigate = useNavigate();
-  const steps = workReadiness({ models, reports, settings, ffmpegVersion });
+  const steps = workReadiness({ models, reports, selftests, settings, ffmpegVersion });
   const go = (tab: EngineTab): void => {
     void navigate(`/engines/${tab}`);
   };

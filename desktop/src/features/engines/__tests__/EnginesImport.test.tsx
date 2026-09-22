@@ -41,6 +41,10 @@ vi.mock('../../../services/client', () => ({
     download: vi.fn(() => Promise.resolve({ job_id: 'j' })),
   },
   jobsApi: { get: api.job },
+  enginesApi: {
+    selftest: vi.fn(() => Promise.resolve({ ok: true })),
+    selftestResults: vi.fn(() => Promise.resolve({})),
+  },
   ttsApi: { preview: vi.fn() },
   runtimeApi: { status: vi.fn(() => Promise.resolve({ installed: true })), install: vi.fn() },
   systemApi: { health: vi.fn(() => Promise.resolve({})) },
