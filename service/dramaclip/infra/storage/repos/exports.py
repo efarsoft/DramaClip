@@ -166,13 +166,15 @@ def set_cover(conn: sqlite3.Connection, export_id: str, cover_path: str) -> None
 def list_missing_covers(conn: sqlite3.Connection, limit: int = 200) -> list[dict[str, Any]]:
     """已完成但封面缺失的成片：ensure_covers 的补拍队列。"""
     rows = conn.execute(
-        "SELECT id, output_path FROM export_jobs"
+        "SELECT id, output_path, narration_plan_id FROM export_jobs"
         " WHERE status = ? AND output_path IS NOT NULL"
         " AND (cover_path IS NULL OR cover_path = '')"
         " ORDER BY COALESCE(completed_at, created_at) DESC LIMIT ?",
         (STATUS_COMPLETED, limit),
     ).fetchall()
-    return [dict(zip(("id", "output_path"), row, strict=True)) for row in rows]
+    return [
+        dict(zip(("id", "output_path", "narration_plan_id"), row, strict=True)) for row in rows
+    ]
 
 
 def get(conn: sqlite3.Connection, export_id: str) -> dict[str, Any] | None:

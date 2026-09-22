@@ -428,6 +428,7 @@ def export_plan(
     cancel: threading.Event | None = None,
     on_progress: Callable[[float, str], None] | None = None,
     subtitle_burner: Callable[[int, str, float], str] | None = None,
+    original_subtitle_provider: Callable[[int, float, float], str | None] | None = None,
     parallel: int = 2,
     dialogue_zones: dict[str, list[SpeechZone]] | None = None,
     out_size: tuple[int, int] = _DEFAULT_OUT_SIZE,
@@ -477,6 +478,15 @@ def export_plan(
                     max(safe_end - safe_start, 0.1),
                 )
             )
+        elif (
+            original_subtitle_provider is not None
+            and segment.audio == "original"
+            and not segment.subtitle_text
+        ):
+            # 原声段没有 subtitle_text（字幕是台词本身，不是解说文案），走独立回调：
+            # 它拿到的是 **safe_times 之后的真实窗口**，词级裁剪才能按实际切点重定基；
+            # 在调用方按 segment.start/end 预生成字幕的话，抖动挪过的段会整体错位。
+            ass_path = original_subtitle_provider(index, safe_start, safe_end)
         nxt = segments[index + 1] if index + 1 < total else None
         prev = segments[index - 1] if index else None
         vin, vout, ain, aout = seam_fades(

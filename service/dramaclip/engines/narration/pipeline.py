@@ -33,6 +33,7 @@ from dramaclip.engines.narration.transitions import apply as apply_transitions
 from dramaclip.engines.semantic.models import HighlightSegment
 from dramaclip.engines.tts import base as tts_base
 from dramaclip.engines.tts.factory import create as create_tts
+from dramaclip.infra.ffmpeg import runner as ffmpeg_runner
 
 logger = logging.getLogger(__name__)
 
@@ -338,10 +339,100 @@ def _is_auto(engine_setting: str) -> bool:
     return engine_setting.strip().lower() in ("", "auto")
 
 
-def _emit(log: LogFn | None, message: str) -> None:
-    logger.info("%s", message)
+def _emit(log: LogFn | None, message: str, level: str = "info") -> None:
+    (logger.warning if level == "warn" else logger.info)("%s", message)
     if log is not None:
-        log("info", message)
+        log(level, message)
+
+
+# ---- 批次二：hook 槽位对齐策略机 ------------------------------------------
+# DramaClip「时长服从故事」：narration 段长=实测音频时长，全片只有一个硬槽位——
+# intro_narration 首段（narration_id=intro-1），编排层 `_fit_duration(intro_first)`
+# 把它钳到 `modes._INTRO_MAX_S`。策略机只约束这一个槽位，其余段（含剧本驱动的
+# n0 钩子，长度=实测音频，没有槽位）绝不变速。这是 hook 节奏优化（封面级增强），
+# 不是正确性门禁：任何 ffmpeg 失败都保留原音频 + warn，绝不 raise。
+_HOOK_SLOT_ID = modes._INTRO_SLOT_ID
+_HOOK_SLOT_MAX_S = modes._INTRO_MAX_S
+_RETIME_MAX_RATIO = 1.5  # 超过 1.5 倍拒绝自动变速：atempo 拉太狠听感会坏（业主质量线）
+_SLOT_FIT_TOL_S = 0.05  # 复测收口容差：atempo=ratio 的产物理应≈槽位，留浮点/编码栅格余量
+
+
+def _align_to_hook_slot(
+    item_id: str, audio_path: Path, duration: float, log: LogFn | None
+) -> tuple[Path, float]:
+    """hook 槽位对齐：实测 vs 槽位上限，ratio 分档决策，每档都经 log 回调留痕。
+
+    - ratio ≤ 1.0：不动（decision=keep）；
+    - 1.0 < ratio ≤ 1.5：一次 ffmpeg atempo（变速不变调）压进槽位，复测定去留；
+    - ratio > 1.5：拒绝自动变速（decision=reject），warn 带实测/槽位/ratio，
+      让人知道该改文案或换音色。
+
+    变速产物落 `目标路径-atempo.后缀`（work_dir 内的派生文件），**不回写内容寻址
+    目标、也不进缓存**：缓存 key=sha256(text|engine|voice|speed) 没有变速维度，
+    变速产物一旦入缓存就是同 key 不同字节，破坏「命中即等价重合成」的契约。
+    原始干音仍是缓存里的那份，改文案重合成时策略机会对新实测重新决策。
+    """
+    if item_id != _HOOK_SLOT_ID:
+        return audio_path, duration  # 非槽位段：时长服从故事，禁止任何 atempo
+    ratio = duration / _HOOK_SLOT_MAX_S
+    head = (
+        f"旁白 {item_id} hook 槽位对齐: 实测={duration:.2f}s"
+        f" 槽位={_HOOK_SLOT_MAX_S:.2f}s ratio={ratio:.2f}"
+    )
+    if ratio <= 1.0:
+        _emit(log, f"{head} decision=keep（槽位内，不动）")
+        return audio_path, duration
+    if ratio > _RETIME_MAX_RATIO:
+        _emit(
+            log,
+            f"{head} decision=reject —— 超 {_RETIME_MAX_RATIO} 倍拒绝自动变速"
+            "（听感优先），请改短文案或换音色",
+            level="warn",
+        )
+        return audio_path, duration
+    derived = audio_path.with_name(f"{audio_path.stem}-atempo{audio_path.suffix}")
+    try:
+        # atempo ∈ [0.5, 100]，本档 ratio ≤ 1.5 恒在范围内，单 filter 一次变速即可
+        ffmpeg_runner.run(
+            [
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(audio_path),
+                "-filter:a",
+                f"atempo={ratio:.6f}",
+                str(derived),
+            ]
+        )
+        retimed = tts_base.audio_duration_s(derived)
+        if not _usable(derived) or retimed <= 0:
+            raise RuntimeError(f"变速产物不可用（复测 {retimed}s）")
+    except Exception as exc:  # noqa: BLE001 - 节奏优化失败不拦方案，诚实 warn 后保留原音频
+        derived.unlink(missing_ok=True)
+        _emit(
+            log,
+            f"{head} decision=atempo_failed —— atempo 变速失败"
+            f"（{type(exc).__name__}: {exc}），保留原音频",
+            level="warn",
+        )
+        return audio_path, duration
+    if retimed <= _HOOK_SLOT_MAX_S + _SLOT_FIT_TOL_S:
+        _emit(
+            log,
+            f"{head} decision=atempo atempo={ratio:.6f} 变速后={retimed:.2f}s（已入槽）",
+        )
+        return derived, retimed
+    # 1.15 < ratio ≤ 1.5 档也可能落到这里（atempo 实际压缩不足）：接受变短了的
+    # 产物但必须 warn——静默超槽等于把问题藏给下游渲染。
+    _emit(
+        log,
+        f"{head} decision=retime_overrun atempo={ratio:.6f} 变速后={retimed:.2f}s"
+        f" 仍超槽位 {_HOOK_SLOT_MAX_S:.2f}s，接受现状",
+        level="warn",
+    )
+    return derived, retimed
 
 
 class _EnginePool:
@@ -517,6 +608,9 @@ def synthesize_narration_texts(
             ) from exc
         if not duration or duration <= 0:
             raise RuntimeError(f"旁白 {item.id} 合成后音频时长无效（{duration}s）")
+        # hook 槽位对齐策略机（批次二）：只对硬槽位段（intro-1）可能变速，
+        # 其余段原样通过。失败保留原音频，不影响下面的回填与越界守卫。
+        audio_path, duration = _align_to_hook_slot(item.id, audio_path, float(duration), log)
         voiced[item.id] = (str(audio_path), item.text, float(duration))
     _evict_cache(cache_dir, _CACHE_MAX_BYTES)
 

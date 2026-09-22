@@ -16,7 +16,12 @@ from dramaclip.engines.exporter import encoder, loudness
 from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle import presets as subtitle_presets
-from dramaclip.engines.subtitle.ass_generator import build_ass, line_char_cap, split_subtitle_text
+from dramaclip.engines.subtitle.ass_generator import (
+    TRAILING_MARKS,
+    build_ass,
+    line_char_cap,
+    split_subtitle_text,
+)
 from dramaclip.infra import config
 from dramaclip.infra.ffmpeg import cover as ffmpeg_cover
 from dramaclip.infra.ffmpeg import probe
@@ -188,14 +193,34 @@ def list_exports(context: AppContext, params: dict[str, Any]) -> list[dict[str, 
     return exports_repo.list_by_project(context.conn, str(params.get("project_id", "")))
 
 
-def _extract_cover(context: AppContext, export_id: str, out_path: Path) -> None:
+def _cover_title(context: AppContext, plan_row: dict[str, Any]) -> str | None:
+    """封面字层用标题：取方案的第一条候选标题。
+
+    plan_row 自带 titles 优先；为空时回库重读——`_ensure_titles` 可能刚生成完，
+    而 render_export 手里的 plan_row 是提交时的旧快照。封面属增强项：任何异常
+    都退回无字层，绝不挡导出。
+    """
+    try:
+        titles = plan_row.get("titles") or []
+        if not titles:
+            row = plans_repo.get(context.conn, str(plan_row["id"]))
+            titles = (row or {}).get("titles") or []
+        first = str(titles[0]).strip() if titles else ""
+        return first or None
+    except Exception:  # noqa: BLE001 - 增强项失败退回无字层截帧
+        return None
+
+
+def _extract_cover(
+    context: AppContext, export_id: str, out_path: Path, *, title: str | None = None
+) -> None:
     """成品逐片钩帧：失败静默（封面缺失退化为占位图，不影响导出成功）。"""
     covers_dir = context.data_dir / "covers" / "exports"
     covers_dir.mkdir(parents=True, exist_ok=True)
     cover_path = covers_dir / f"{export_id}.jpg"
     if cover_path.is_file():
         return
-    if ffmpeg_cover.extract_cover(out_path, cover_path):
+    if ffmpeg_cover.extract_cover(out_path, cover_path, title=title):
         exports_repo.set_cover(context.conn, export_id, str(cover_path))
 
 
@@ -210,7 +235,13 @@ def ensure_covers(context: AppContext, params: dict[str, Any]) -> dict[str, Any]
         covers_dir = context.data_dir / "covers" / "exports"
         covers_dir.mkdir(parents=True, exist_ok=True)
         cover_path = covers_dir / f"{row['id']}.jpg"
-        if ffmpeg_cover.extract_cover(out_path, cover_path):
+        title: str | None = None
+        plan_id = str(row.get("narration_plan_id") or "")
+        if plan_id:
+            plan_row = plans_repo.get(context.conn, plan_id)
+            if plan_row is not None:
+                title = _cover_title(context, plan_row)
+        if ffmpeg_cover.extract_cover(out_path, cover_path, title=title):
             exports_repo.set_cover(context.conn, str(row["id"]), str(cover_path))
             generated += 1
     return {"ok": True, "generated": generated}
@@ -258,6 +289,155 @@ def _output_size(settings: config.Settings) -> tuple[int, int]:
 # 只抓「段丢了/拼重了/时长翻倍」级别的真偏差（诚实失败哲学：超阈值写明账，不伪造不失败）。
 _AUDIT_DURATION_REL_TOLERANCE = 0.08
 _AUDIT_DURATION_ABS_TOLERANCE_S = 3.0
+
+
+def _as_float(value: Any) -> float | None:
+    """JSON 里的时间戳 → float；不是数就 None（坏行逐个跳过，不炸整段渲染）。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def crop_dialogue_lines(
+    items: list[dict[str, Any]], win_start: float, win_end: float
+) -> list[dict[str, Any]]:
+    """把库内 ASR 句按段切割窗口 [win_start, win_end] 裁成段内台词行（批次二）。
+
+    返回元素形状 {start, end, text, words}：start/end 是**重定基到窗口起点的相对秒**，
+    words 是同基的词表（[{start,end,word}]）或 None（句级降级）。
+
+    词级裁剪（FunClip 的多数重叠思路）：跨界词按「与窗口的重叠 ≥ 词长一半」归属——
+    一半以上音节落在段内，观众就能在本段听到它，字幕跟声音走；恰好压线归本段
+    （前半在本段听得到，后半切掉了也要把词标出来，否则台词缺字）。
+
+    无 words 的旧库（words 空/缺失）降级为句级：整句与窗口有交集就显示整句，
+    区间钳到窗口——旧数据不 raise，也不假装能词级对齐。
+    """
+    cropped: list[dict[str, Any]] = []
+    if win_end <= win_start:
+        return cropped
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        s = _as_float(item.get("start"))
+        e = _as_float(item.get("end"))
+        if s is None or e is None or e <= s or e <= win_start or s >= win_end:
+            continue  # 坏行或与窗口无交集
+        text = str(item.get("text") or "").strip()
+        raw_words = item.get("words")
+        valid_words: list[dict[str, Any]] = []
+        if isinstance(raw_words, list):
+            for word in raw_words:
+                if not isinstance(word, dict):
+                    continue
+                ws = _as_float(word.get("start"))
+                we = _as_float(word.get("end"))
+                wt = str(word.get("word") or "")
+                if ws is None or we is None or we <= ws or not wt:
+                    continue
+                valid_words.append({"ws": ws, "we": we, "wt": wt})
+        if text and valid_words:
+            kept: list[dict[str, Any]] = []
+            for entry in valid_words:
+                ws, we, wt = entry["ws"], entry["we"], entry["wt"]
+                length = we - ws
+                overlap = min(we, win_end) - max(ws, win_start)
+                if overlap * 2 < length:
+                    continue  # 跨界词：重叠不足一半，归另一段
+                kept.append(
+                    {
+                        "start": max(ws, win_start) - win_start,
+                        "end": min(we, win_end) - win_start,
+                        "word": wt,
+                    }
+                )
+            if kept:
+                cropped.append(
+                    {
+                        "start": kept[0]["start"],
+                        "end": kept[-1]["end"],
+                        "text": "".join(w["word"] for w in kept),
+                        "words": kept,
+                    }
+                )
+            # 有词级数据但一个词都没留在窗口内：这句在本段听不到，也不显示——
+            # 回退整句会把观众听不到的词烧上屏（降级只留给**没有**词级数据的旧库）。
+            continue
+        if not text:
+            continue
+        # 句级降级：整句钳到窗口
+        cropped.append(
+            {
+                "start": max(s, win_start) - win_start,
+                "end": min(e, win_end) - win_start,
+                "text": text,
+                "words": None,
+            }
+        )
+    return cropped
+
+
+def _dialogue_word_chunks(
+    words: list[dict[str, Any]], cap: int
+) -> list[tuple[float, float, str]]:
+    """词表 → (start, end, text) 行块：贪心攒词到上限；单词超限在词内硬切，
+    时间按字数在词时长上线性内插（时间仍出自 words 时间戳，只是细到字）。"""
+    chunks: list[tuple[float, float, str]] = []
+    cur_start: float | None = None
+    cur_end = 0.0
+    cur_text = ""
+    for word in words:
+        wt = str(word.get("word") or "")
+        ws = float(word["start"])
+        we = float(word["end"])
+        total = len(wt)
+        consumed = 0
+        while consumed < total:
+            room = cap - len(cur_text)
+            if room <= 0:
+                assert cur_start is not None
+                chunks.append((cur_start, cur_end, cur_text))
+                cur_start, cur_end, cur_text = None, 0.0, ""
+                continue
+            take = min(room, total - consumed)
+            p0 = ws + (we - ws) * consumed / total
+            p1 = ws + (we - ws) * (consumed + take) / total
+            if cur_start is None:
+                cur_start = p0
+            cur_end = p1
+            cur_text += wt[consumed : consumed + take]
+            consumed += take
+    if cur_start is not None and cur_text:
+        chunks.append((cur_start, cur_end, cur_text))
+    return chunks
+
+
+def _dialogue_ass_lines(item: dict[str, Any], cap: int) -> list[dict[str, Any]]:
+    """一条裁剪后的台词 → ass 行元素（相对段起点的时间轴，同 narration 字幕形状）。
+
+    有 words：时长按词时间戳（一行一句/词组）；无 words（句级降级）：拆行后
+    时长按字数比例分配整句区间——与 burn_subtitle 的既有规矩一致。"""
+    text = str(item["text"])
+    start = float(item["start"])
+    end = float(item["end"])
+    words = item.get("words")
+    lines: list[dict[str, Any]] = []
+    if isinstance(words, list) and words:
+        for ws, we, wt in _dialogue_word_chunks(words, cap):
+            cleaned = wt.rstrip(TRAILING_MARKS)
+            if cleaned and we > ws:
+                lines.append({"start": ws, "end": we, "text": cleaned})
+        return lines
+    chunks = split_subtitle_text(text, cap)
+    total_chars = sum(len(chunk) for chunk in chunks)
+    if total_chars <= 0 or end <= start:
+        return lines
+    cursor = start
+    for chunk in chunks:
+        span = (end - start) * len(chunk) / total_chars
+        lines.append({"start": cursor, "end": cursor + span, "text": chunk})
+        cursor += span
+    return lines
 
 
 def _audit_duration(context: AppContext, plan_data: PlanData, actual_s: float) -> None:
@@ -309,6 +489,9 @@ def render_export(
     # 优先级在编码器里判：源视频同名 .srt（人工校对过的手工字幕）优先，
     # 该文件不存在时才回退用这里预取的 ASR 区（见 encoder.export_plan 的 zones_cache）
     dialogue_zones: dict[str, list[SpeechZone]] = {}
+    # 原声段台词字幕的源（批次二）：同一份 asr_segments JSON 的**原始 dict** 视图，
+    # 带 text/words（SpeechZone 只有 start/end，是 jitter 保护区的最小形状，不改它）。
+    dialogue_items: dict[str, list[dict[str, Any]]] = {}
     for segment in plan_data.timeline:
         episode_id = segment.episode_id
         if episode_id in dialogue_zones:
@@ -316,13 +499,28 @@ def render_export(
         record = analysis_repo.get(context.conn, episode_id)
         if record is None or not record["asr_segments"]:
             continue
+        try:
+            raw_items = json.loads(record["asr_segments"])
+        except (TypeError, json.JSONDecodeError):
+            continue
         zones = [
             SpeechZone(start=float(item["start"]), end=float(item["end"]))
-            for item in json.loads(record["asr_segments"])
-            if float(item.get("end", 0)) > float(item.get("start", 0))
+            for item in raw_items
+            if isinstance(item, dict)
+            and float(item.get("end", 0)) > float(item.get("start", 0))
         ]
         if zones:
             dialogue_zones[episode_id] = zones
+        items = [
+            item
+            for item in raw_items
+            if isinstance(item, dict)
+            and isinstance(item.get("start"), (int, float))
+            and isinstance(item.get("end"), (int, float))
+            and float(item["end"]) > float(item["start"])
+        ]
+        if items:
+            dialogue_items[episode_id] = items
 
     tts_segments = tts_audio_by_segment(plan_data)
     preset = subtitle_presets.get_preset(context.settings.get("subtitle.default_preset"))
@@ -360,6 +558,32 @@ def render_export(
         ass_path.write_text(build_ass(lines, preset), encoding="utf-8")
         return str(ass_path)
 
+    def dialogue_subtitle(segment_index: int, win_start: float, win_end: float) -> str | None:
+        """原声段台词字幕（批次二·方案 B 的回调实现）：ASR 句按实际切割窗口做词级
+        裁剪，写成段级 ass（相对时间轴 0→窗口长），窗口内没台词返回 None（不烧）。
+
+        窗口是 encoder 传的 **safe_times 之后的真实切点**：抖动挪过的段，按声明
+        start/end 预生成的字幕会整体错位，所以裁剪必须在这里做、拿这个窗口做。
+        """
+        if not (0 <= segment_index < len(plan_data.timeline)):
+            return None
+        episode_id = plan_data.timeline[segment_index].episode_id
+        items = dialogue_items.get(episode_id) or []
+        cropped = crop_dialogue_lines(items, win_start, win_end)
+        if not cropped:
+            return None
+        cap = line_char_cap(preset)
+        lines: list[dict[str, Any]] = []
+        for item in cropped:
+            lines.extend(_dialogue_ass_lines(item, cap))
+        if not lines:
+            return None
+        ass_dir = context.work_dir / "export" / export_id
+        ass_dir.mkdir(parents=True, exist_ok=True)
+        ass_path = ass_dir / f"seg_{segment_index:03d}.ass"
+        ass_path.write_text(build_ass(lines, preset), encoding="utf-8")
+        return str(ass_path)
+
     # 输出编码：auto=探测到 NVENC 可用即 GPU 编码（黑帧实编验证），失败/关闭回退 libx264
     codec_setting = str(context.settings.get("export.encoder", "auto") or "auto").lower()
     if codec_setting == "auto":
@@ -376,6 +600,9 @@ def render_export(
         cancel=cancel_event,
         on_progress=report,
         subtitle_burner=burn_subtitle if plan_data.mode != "raw_clip" else None,
+        original_subtitle_provider=(
+            dialogue_subtitle if plan_data.mode != "raw_clip" else None
+        ),
         dialogue_zones=dialogue_zones,
         out_size=out_size,
         loudness_target=loudness.LoudnessTarget.from_settings(context.settings),
@@ -390,7 +617,9 @@ def render_export(
     except (ValueError, OSError):
         pass  # 元信息回填/时长审计失败不影响导出成功
     with contextlib.suppress(OSError, ValueError):
-        _extract_cover(context, export_id, out_path)  # 封面失败不影响导出成功
+        _extract_cover(
+            context, export_id, out_path, title=_cover_title(context, plan_row)
+        )  # 封面失败不影响导出成功
     return out_path
 
 
@@ -458,8 +687,10 @@ def _run_export(context: AppContext, job_id: str, run: ExportRun) -> None:
             plan_data=_ensure_voiced(context, run.plan_row, run.plan_data),
             cancel_event=run.cancel_event,
         )
-        out_path = render_export(context, voiced, report=report)
+        # 标题先生成再渲染：render_export 尾部的封面字层要用第一条标题，
+        # 而 titles 生成不依赖渲染产物（LLM 只吃 plan_data），顺序对调零副作用。
         _ensure_titles(context, run.plan_row)
+        out_path = render_export(context, voiced, report=report)
         context.job_store.mark_completed(job_id)
         context.notifier.log("info", f"导出完成: {out_path.name}")
     except Exception as exc:

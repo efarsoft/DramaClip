@@ -120,6 +120,70 @@ def _escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
 
 
+def _color_override(style_def: dict[str, Any]) -> str:
+    """情绪样式的颜色 override 串（\\c 主色 + \\3c 描边）——整行与 span 区间共用同一形状。
+
+    span 刻意**不带**效果标签（shake/scale_glow 的 \\fscx）：那是缩放变换，内联插进
+    行中会持续到行尾且回底色时无法撤销，一行字会一半大一倍。花字 span 只做颜色。
+    """
+    primary = str(style_def.get("primary", "&H00FFFFFF"))
+    outline_color = str(style_def.get("outline", "&H00000000"))
+    return f"\\c{primary}\\3c{outline_color}"
+
+
+def _span_body(
+    text: str,
+    spans: list[Any],
+    base_overrides: str,
+    base_colors: str,
+    emotion_styles: dict[str, Any],
+) -> str:
+    """按字符区间拼 span 化的行体：区间前插对应情绪颜色，区间后回插整行底色。
+
+    坏区间（非三元组/坐标非整数/空区间/倒序/越界）逐个丢弃不 raise：花字是增益，
+    一条脏数据不能把整段渲染炸掉。与底色同色的 span 不插标签，所以「span 恰好
+    覆盖整行且情绪与行级一致」时输出与不给 span 逐字节相同。重叠区间先到者得。
+    """
+    valid: list[tuple[int, int, str]] = []
+    for span in spans:
+        if not isinstance(span, tuple) or len(span) != 3:
+            continue
+        start_raw, end_raw, label = span
+        if not isinstance(start_raw, int) or not isinstance(end_raw, int):
+            continue
+        start = max(start_raw, 0)
+        end = min(end_raw, len(text))
+        if start >= end or not str(label):
+            continue
+        valid.append((start, end, str(label)))
+    valid.sort()
+    pieces: list[str] = [f"{{{base_overrides}}}"]
+    cursor = 0
+    active = base_colors  # 行首整段 override 已含底色，颜色状态从底色起算
+    for start, end, label in valid:
+        if start < cursor:
+            continue
+        emotion = match_emotion("", label)  # 与整行同一套标签归一化
+        style_def = emotion_styles.get(emotion) or emotion_styles.get("default") or {}
+        override = _color_override(style_def)
+        if start > cursor:
+            if active != base_colors:
+                pieces.append(f"{{{base_colors}}}")
+                active = base_colors
+            pieces.append(_escape(text[cursor:start]))
+        if override != active:
+            pieces.append(f"{{{override}}}")
+            active = override
+        pieces.append(_escape(text[start:end]))
+        cursor = end
+    if cursor < len(text):
+        if active != base_colors:
+            # 回底色：不回插的话 span 之后所有字都染着区间颜色
+            pieces.append(f"{{{base_colors}}}")
+        pieces.append(_escape(text[cursor:]))
+    return "".join(pieces)
+
+
 def _event_line(line: dict[str, Any], preset: dict[str, Any]) -> str | None:
     text = str(line.get("text", "")).strip()
     if not text:
@@ -156,13 +220,20 @@ def _event_line(line: dict[str, Any], preset: dict[str, Any]) -> str | None:
         tags.append("\\t(0,180,\\fscx115\\fscy115)\\t(180,320,\\fscx100\\fscy100)")
     if effect:
         tags.append(effect)
-    tags.append(f"\\c{primary}\\3c{outline_color}")
+    colors = f"\\c{primary}\\3c{outline_color}"
+    tags.append(colors)
 
     start = _ass_time(float(line["start"]))
     end = _ass_time(float(line["end"]))
     overrides = "".join(tags)
     if rhythm == "karaoke":
+        # span 与逐字 \k 互斥：karaoke 每个字自带一段 override，再插区间颜色会互相
+        # 覆盖出不可预测的形状——该路径下忽略 span（不给时行为本就逐字节一致）。
         body = _karaoke_body(text, duration_s, overrides, primary)
+        return _event_row(start, end, margin_v, body)
+    spans = line.get("span_emotions")
+    if spans:
+        body = _span_body(text, list(spans), overrides, colors, emotion_styles)
         return _event_row(start, end, margin_v, body)
     return _event_row(start, end, margin_v, f"{{{overrides}}}{_escape(text)}")
 
@@ -200,6 +271,8 @@ _PUNCT_SPLIT = re.compile(r"(?<=[，。！？；：、…——])")
 # ？！ 不在这里：它们承载的是语气（"他凭什么？"去掉问号就变成另一句话），必须留。
 # 破折号「——」与省略号「…」按字符 rstrip，成对/连写的都能一次扫掉。
 _TRAILING_MARKS = "，。、；：…——,.;:"
+# 对 export 侧公开：原声台词按词组拼行时沿用同一套「行尾不留句读」的规矩
+TRAILING_MARKS = _TRAILING_MARKS
 
 
 def split_subtitle_text(text: str, max_len: int) -> list[str]:
