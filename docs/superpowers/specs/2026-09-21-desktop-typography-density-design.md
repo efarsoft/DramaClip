@@ -84,6 +84,11 @@
 
 **Unicode 假图标一律换成 AntD 图标组件**（同构元素全图标或全图标，不允许一半真一半假——见 [[feedback-ui-consistency]]）。**位点实测为 9 处**，命令可复跑：`cd desktop && grep -rn "▶\|★\|▲\|▼" src/`（输出恰 9 行）。`▶` 六处——`TitleBar.tsx:41`、`AboutPage.tsx:66`（品牌徽标，换成一枚随容器缩放的 SVG/`PlayCircleFilled`，两处的容器尺寸不同是设计而非漂移）；`ContinueCard.tsx:83`、`RecentWorks.tsx:132`、`ProjectCard.tsx:76`、`EpisodeListRow.tsx:162`（四处海报/缩略图占位，统一 `PlayCircleFilled` + `glyph.poster`）。`★ ` 一处——`TitlesSection.tsx:88`（选中态星标，换 `StarFilled`）。`▲` / `▼` 两处——`EpisodeListRow.tsx:134-135`（拖序按钮，换 `UpOutlined` / `DownOutlined`）。**草案里我只点了三处**，那是只查了 `features/home/` 的结果——按三处施工必然漏掉品牌徽标和拖序按钮。验收判据：同一条 grep 返回 0 行。
 
+**施工回写（§1.3 三处读数以现状为准，均为计数漂移必须重发的自纠）**：
+1. **`glyph` 实测落成 11 枚，不是七枚**。新增四枚都为了消灭一个裸字面量：`iconMd 14`（两处真实位点：`TitleBar` 搜索框放大镜、`EngineTabNav` 导轨式标签图标，全站真实在用的第二档图标尺寸，七枚表里没有它）、`brandSm 10 / brandMd 22 / brandBox 40`（两处品牌徽标「按容器缩放」的容器边长与符号尺寸——本条既然承认「各自跟随容器是设计」，容器尺寸就必须有名字，否则它继续以 `width: 40` 裸写）。复核命令：`grep -A14 "  glyph: {" desktop/src/styles/theme.ts` 命中 11 个键。
+2. **`text.body` 多出 `weightActive: 600`**，§1.1 表里没有。理由同 `badge` 的「/ 选中 600」——§3.2 的「当前查看」通道要求名称用主色**并 600**，字重必须跟字阶成对，否则又是一处「配对靠人记」。表里 `badge` 那一格本就该写成同样的形状，本条把它显式化。
+3. **mono 判据要收窄成「只包数字」**。整条 `text.* + fontFamilyMono` 若套在中西混排的标签上（`共 12 集`、`下载中 45%`），`fontFamilyMono` 栈（JetBrains Mono / Cascadia / Consolas / `monospace`）没有中文字面，中文会掉到 Windows 的通用等宽映射（宋体一路），**比现状更差**。所以可施工口径改为：**数字与单位（`12s`、`45%`、`01:23`、`1.2 MB`）单独成 span 取 mono，中文留在界面字体里**。据此 `AssetKit`、`ModelDownloadPopover`、`ImportWizardLanding` 的「下载中/落位中 N%」判为**不可整段迁移**（三者的容器已各自 `minWidth` 定宽，宽度抖动这条路本就堵住了），`WorkbenchHeader` 三处计数按新口径包了数字。§8.3 的棘轮若要机检 mono，只能检「span 内含中文则不得带 fontFamilyMono」这条反向判据。
+
 ### 1.4 AntD 基线必须同批改
 
 `theme.ts:102` 的 `fontSize: 13` → **14**。**漏这一条整个方案失效**：Table / Input / Modal / Select 继续 13，界面变成一半 13 一半 14，比现状更糟。连带核对 `components` 段（`:104-110`）里 `Button.controlHeight 32`、`Card.paddingLG`，字阶上抬后控件高度是否仍够。
