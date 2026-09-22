@@ -374,6 +374,31 @@ export interface OrphanCopy {
   readonly size_bytes: number;
 }
 
+/** 能力层自检结果（engines.selftest；账本值同形，多一个 at）。 */
+export interface SelftestResult {
+  readonly ok: boolean;
+  /** 账本键：本地资产 = model_id，云端 = cloud:<domain>。 */
+  readonly key?: string;
+  /** 实际跑起来的引擎名（如 faster_whisper:small）。 */
+  readonly engine?: string;
+  /** ASR：样例识别字数。 */
+  readonly chars?: number;
+  readonly elapsed_s?: number;
+  /** TTS：合成音频实测时长（秒）。 */
+  readonly duration_s?: number;
+  /** 云端域：连通延迟（engine_configs.test 透传）。 */
+  readonly latency_s?: number | null;
+  /** ASR：识别文本前 60 字。 */
+  readonly text?: string;
+  /** ok=false 时的失败原文。 */
+  readonly error?: string | null;
+  /** epoch 毫秒：这次自检发生在何时（落账后才有）。 */
+  readonly at?: number;
+}
+
+/** 自检账本（engines.selftest_results）：key → 结果。 */
+export type SelftestResults = Readonly<Record<string, SelftestResult>>;
+
 /** 本地导入登记项（models/imported.json 的一行）。 */
 export interface ImportRecord {
   readonly model_id: string | null;
@@ -566,6 +591,8 @@ export const METHOD_NAMES = [
   'models.import_records',
   'models.import_forget',
   'models.delete',
+  'engines.selftest',
+  'engines.selftest_results',
   'engine_configs.list',
   'engine_configs.create',
   'engine_configs.update',

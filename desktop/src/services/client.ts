@@ -26,6 +26,8 @@ import type {
   Project,
   ProjectGetResult,
   ScannedEpisode,
+  SelftestResult,
+  SelftestResults,
   ServiceEvent,
   PromptsListResult,
   RelayoutResult,
@@ -237,6 +239,19 @@ export const modelsApi = {
 export const ttsApi = {
   preview: (engine: string, voice: string): Promise<TtsPreviewResult> =>
     rpc<TtsPreviewResult>('tts.preview', { engine, voice }),
+} as const;
+
+/** 能力层自检（§10.3）：校验=文件层，自检=能力层，两者都过才叫 ready。 */
+export const enginesApi = {
+  /** 本地资产给 modelId，云端域给 domain；同步 RPC，ASR 在 CPU 上可能十几秒。 */
+  selftest: (target: { modelId?: string; domain?: string }): Promise<SelftestResult> =>
+    rpc<SelftestResult>(
+      'engines.selftest',
+      target.modelId !== undefined ? { model_id: target.modelId } : { domain: target.domain ?? '' },
+    ),
+  /** 历史自检账本：就绪口径的能力层那一半，重启不丢。 */
+  selftestResults: (): Promise<SelftestResults> =>
+    rpc<SelftestResults>('engines.selftest_results'),
 } as const;
 
 export const jobsApi = {

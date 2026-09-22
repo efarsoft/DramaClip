@@ -1,0 +1,93 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "engines 命名空间：能力层自检（规格 §10.3）",
+  "description": "校验 = 文件层（models.verify），自检 = 能力层（本命名空间），两者都过才叫 ready。云端域委托 engine_configs.test，不新造第二条连通测试。",
+  "x-engines": {
+    "SelftestResult": {
+      "type": "object",
+      "required": [
+        "ok"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "key": {
+          "type": "string",
+          "description": "账本键：本地资产 = model_id，云端 = cloud:<domain>（run 的返回里带上）"
+        },
+        "engine": {
+          "type": "string",
+          "description": "实际跑起来的引擎名（如 faster_whisper:small）"
+        },
+        "chars": {
+          "type": "integer",
+          "description": "ASR：样例音频识别出的字数"
+        },
+        "elapsed_s": {
+          "type": "number",
+          "description": "本次自检耗时（秒）"
+        },
+        "duration_s": {
+          "type": "number",
+          "description": "TTS：合成音频的实测时长（秒）"
+        },
+        "latency_s": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "云端域：连通延迟（engine_configs.test 原样透传）"
+        },
+        "text": {
+          "type": "string",
+          "description": "ASR：识别文本前 60 字（给业主核对「识别的对不对」）"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "ok=false 时的失败原文（现象+动作，§10.5）；ok=true 时缺省或 null"
+        },
+        "at": {
+          "type": "integer",
+          "description": "epoch 毫秒：这次自检发生在何时（落账时补上）"
+        }
+      }
+    }
+  },
+  "x-methods": [
+    {
+      "name": "engines.selftest",
+      "summary": "能力层自检：ASR 真转写随包样例 / TTS 真合成一句 / 云端域委托 engine_configs.test；结果落账 models/selftest.json",
+      "params": {
+        "type": "object",
+        "properties": {
+          "model_id": {
+            "type": "string",
+            "description": "本地资产自检（ASR/TTS）；与 domain 二选一"
+          },
+          "domain": {
+            "type": "string",
+            "description": "云端能力域（engine_configs 的 domain 取值）；测的是该域启用中的配置"
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/x-engines/SelftestResult"
+      }
+    },
+    {
+      "name": "engines.selftest_results",
+      "summary": "历史自检账本（key → SelftestResult）：就绪口径的能力层那一半，重启不丢",
+      "params": {},
+      "result": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/x-engines/SelftestResult"
+        }
+      }
+    }
+  ]
+}

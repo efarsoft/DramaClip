@@ -14,6 +14,7 @@ def build_router(context: AppContext, shutdown: Callable[[], None]) -> Router:
     from dramaclip.api import (
         analysis,
         engine_configs,
+        engines,
         export,
         jobs,
         models,
@@ -43,5 +44,6 @@ def build_router(context: AppContext, shutdown: Callable[[], None]) -> Router:
     subtitle.register(router)
     tts.register(router, context)
     models.register(router, context)
+    engines.register(router, context)
     jobs.register(router, context)
     return router
