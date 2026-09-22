@@ -15,6 +15,7 @@ import threading
 import wave
 from pathlib import Path
 
+from dramaclip.engines.tts import reference_qc
 from dramaclip.engines.tts.base import EngineCaps
 from dramaclip.engines.tts.text_split import split_long_text
 from dramaclip.infra.paths import resolve_data_dir
@@ -128,6 +129,18 @@ class IndexTts2Engine:
         if voice == "" or not Path(voice).is_file():
             raise ValueError(
                 "IndexTTS 需要参考音频作为音色（任意 3~10 秒人声 wav），当前 voice 为空"
+            )
+        # B6 质检：poor 只留痕不阻断——质检是报告不是门禁，用户可能就是要用这段
+        # 参考，拦死是假门禁（硬约束是批次一的「显式引擎不回退」，不在这一层）。
+        # 为什么不做 (ref_audio, ref_text) 重转写核对：worker 桥协议只透传
+        # {id,text,voice,out,lang}，没有 ref_text 槽位，IndexTTS2 内部自转写
+        # 参考音频——「参考对不配对」这个问题形态在当前接入里不存在。
+        quality = reference_qc.inspect_reference(Path(voice))
+        if quality.grade == "poor":
+            logging.getLogger(__name__).warning(
+                "indextts2 参考音频质检 poor（%s）：%s",
+                quality.metrics or "无指标",
+                "；".join(quality.reasons),
             )
         # B7 长文本：克隆预算收紧切块（见 _CLONE_MAX_CHARS 注释），逐块送 worker，
         # wav 帧拼接落 out_path 单文件——对调用方透明（契约见 base.TtsEngine）。

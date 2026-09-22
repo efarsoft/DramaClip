@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext
-from dramaclip.engines.tts import factory
+from dramaclip.engines.tts import factory, reference_qc
 from dramaclip.engines.tts.base import DEFAULT_VOICE, audio_container, audio_duration_s
 from dramaclip.engines.tts.factory import create as create_tts
 from dramaclip.transport.rpc import Router, RpcDomainError
@@ -63,12 +63,37 @@ def preview(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         raise RpcDomainError(
             _ERR_TTS_SYNTH, f"试听音频时长无效（{duration:.2f}s）：{path}（换个音色再试）"
         )
-    return {
+    result: dict[str, Any] = {
         "path": str(path),
         "duration_s": round(duration, 3),
         "engine": engine,
         "voice": voice,
         "text": text,
+    }
+    quality = _reference_quality(engine, voice)
+    if quality is not None:
+        result["reference_quality"] = quality
+    return result
+
+
+def _reference_quality(engine: str, voice: str) -> dict[str, Any] | None:
+    """B6：克隆引擎且 voice 是存在的文件时才附参考音频质检报告。
+
+    附加字段，不阻断不报错：质检是报告不是门禁（poor 也照常合成返回 path，
+    用户在试听时看到「这段参考质量差+为什么+怎么补救」，而不是出片后听出来）。
+    result 的 schema 无 additionalProperties:false，contract_sync 只钉 required
+    集合与方法名单——附加字段属开放集，不动 protocol/*（禁碰）也合法。
+    """
+    if engine != "indextts2":
+        return None  # 固定音色表引擎（edge/kokoro）没有参考音频这一说
+    ref = Path(voice)
+    if voice == "" or not ref.is_file():
+        return None  # 不是文件路径无从质检；合成失败自有报错，这里不替引擎判死
+    quality = reference_qc.inspect_reference(ref)
+    return {
+        "grade": quality.grade,
+        "reasons": list(quality.reasons),
+        "suggestions": list(quality.suggestions),
     }
 
 
