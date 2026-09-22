@@ -1,7 +1,7 @@
 /** 阶段④「渲染」：export.submit 排队所选方案，轮询到全部终态再刷新记录。 */
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { ExportRejection } from '@dramaclip/protocol';
-import { exportApi } from '../../services/client';
+import { exportApi, jobsApi } from '../../services/client';
 import { POLL_INTERVAL_MS, isTerminal, reasonOr, sleep } from './poll';
 
 export interface ExportQueue {
@@ -11,6 +11,7 @@ export interface ExportQueue {
   rejected: ExportRejection[];
   error: string;
   run: (planIds: string[]) => Promise<void>;
+  cancel: () => Promise<void>;
 }
 
 export function useExportQueue(projectId: string, onDone: () => Promise<void>): ExportQueue {
@@ -19,6 +20,11 @@ export function useExportQueue(projectId: string, onDone: () => Promise<void>): 
   const [stageText, setStageText] = useState('');
   const [rejected, setRejected] = useState<ExportRejection[]>([]);
   const [error, setError] = useState('');
+  const jobIdsRef = useRef<string[]>([]);
+
+  const cancel = useCallback(async (): Promise<void> => {
+    await Promise.all(jobIdsRef.current.map((jobId) => jobsApi.cancel(jobId)));
+  }, []);
 
   const run = useCallback(
     async (planIds: string[]): Promise<void> => {
@@ -32,6 +38,7 @@ export function useExportQueue(projectId: string, onDone: () => Promise<void>): 
         const result = await exportApi.submit(planIds);
         setRejected([...result.rejected]);
         const queued = result.exports.map((item) => item.export_id);
+        jobIdsRef.current = result.exports.map((item) => item.job_id);
         if (queued.length === 0) {
           return;
         }
@@ -58,6 +65,7 @@ export function useExportQueue(projectId: string, onDone: () => Promise<void>): 
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
+        jobIdsRef.current = [];
         setRunning(false);
         setStageText('');
       }
@@ -65,5 +73,5 @@ export function useExportQueue(projectId: string, onDone: () => Promise<void>): 
     [onDone, projectId, running],
   );
 
-  return { running, percent, stageText, rejected, error, run };
+  return { running, percent, stageText, rejected, error, run, cancel };
 }

@@ -80,7 +80,7 @@ function PageHeader({ projectName }: { projectName?: string }): React.ReactEleme
       title={`${projectName ?? '…'} · 出片中心`}
       desc="先出方案再出片：AI 编排的角度、文案、配音在这一步看得见"
       actions={
-        <Link to="/works" style={{ fontSize: tokens.fontBody, color: tokens.colorPrimary }}>
+        <Link to="/works" style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.colorPrimary }}>
           前往作品库 →
         </Link>
       }

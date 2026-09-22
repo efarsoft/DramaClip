@@ -37,18 +37,19 @@ function ExportRow({ job }: { job: ExportJob }) {
         gap: tokens.spaceMd,
         padding: '8px 0',
         borderBottom: `1px solid ${tokens.borderSecondary}`,
-        fontSize: tokens.fontBody,
+        fontSize: tokens.text.body.size,
+        lineHeight: tokens.text.body.leading,
         cursor: 'pointer',
       }}
     >
       <Tag color={color}>{label}</Tag>
       {job.status === 'failed' && job.error !== undefined ? (
         <Tooltip title={job.error}>
-          <span style={{ color: tokens.colorWarning, fontSize: tokens.fontMicro, marginLeft: tokens.spaceSm }}>原因</span>
+          <span style={{ color: tokens.colorWarning, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, marginLeft: tokens.spaceSm }}>原因</span>
         </Tooltip>
       ) : null}
       <span style={{ color: tokens.textPrimary }}>{modeLabel(job.narration_mode)}</span>
-      <span style={{ marginLeft: 'auto', fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
+      <span style={{ marginLeft: 'auto', fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, fontFamily: tokens.fontFamilyMono, color: tokens.textTertiary }}>
         {job.duration_s !== undefined ? `${String(Math.round(job.duration_s))}s` : ''}
       </span>
     </div>

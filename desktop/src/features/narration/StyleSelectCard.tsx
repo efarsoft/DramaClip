@@ -87,12 +87,12 @@ export function StyleSelectCard(): React.ReactElement {
           }))}
         />
         {current !== undefined && (
-          <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, minWidth: 0 }}>
+          <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary, minWidth: 0 }}>
             {current.desc}
           </span>
         )}
       </div>
-      <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.fontMicro, color: tokens.textTertiary }}>
+      <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
         自动匹配按分析阶段的题材判定（如 悬疑→悬疑反转、逆袭→爽感逆袭）；风格注入 AI 编剧，对话解说模式生效，仅 LLM 已配置时可用。
       </div>
     </Card>

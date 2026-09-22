@@ -24,6 +24,7 @@ vi.mock('../../../services/client', () => ({
     listPlans: (projectId: string, batchId?: string): unknown => listPlans(projectId, batchId),
   },
   analysisApi: { status: (jobId: string): unknown => status(jobId) },
+  jobsApi: { cancel: (): unknown => Promise.resolve({ cancelling: true }) },
 }));
 
 const PLAN: NarrationPlan = {
@@ -79,6 +80,20 @@ it('作业失败时说出原因，不演成「没有方案」', async () => {
   });
 
   expect(result.current.error).toBe('编剧模型未配置');
+  expect(listPlans).not.toHaveBeenCalled();
+  expect(result.current.plans).toEqual([]);
+});
+
+it('作业被取消时不把取消演成失败', async () => {
+  planVariants.mockResolvedValue({ job_id: 'job-1', k: 3, batch_id: 'job-1' });
+  status.mockResolvedValue({ status: 'cancelled', progress: 40, message: '' });
+
+  const { result } = renderHook(() => usePlanBatch('p1'), { wrapper });
+  await act(async () => {
+    await result.current.run(['full_narration'], 3);
+  });
+
+  expect(result.current.error).toBe('');
   expect(listPlans).not.toHaveBeenCalled();
   expect(result.current.plans).toEqual([]);
 });

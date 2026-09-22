@@ -3,7 +3,7 @@ import { Alert, Button, Card, Select, Tag } from 'antd';
 import { PageSection } from '../../components/layout/PageKit';
 import type { NarrationMode } from '@dramaclip/protocol';
 import { MODE_INFO } from '../../components/modeMeta';
-import { tokens } from '../../styles/theme';
+import { layout, tokens } from '../../styles/theme';
 import type { PlanBatch } from './usePlanBatch';
 import { StageProgress } from './StageProgress';
 
@@ -28,14 +28,35 @@ export function ModePicker({
   return (
     <PageSection title="① 选模式，出方案">
       <ModeGrid modes={modes} onToggleMode={onToggleMode} />
+      <PlanToolbar batch={batch} modes={modes} k={k} onSelectAll={onSelectAll} onKChange={onKChange} />
+      {batch.error !== '' && <Alert style={{ marginTop: tokens.spaceMd }} type="error" showIcon title={batch.error} />}
+    </PageSection>
+  );
+}
+
+function PlanToolbar({
+  batch,
+  modes,
+  k,
+  onSelectAll,
+  onKChange,
+}: {
+  batch: PlanBatch;
+  modes: NarrationMode[];
+  k: number;
+  onSelectAll: () => void;
+  onKChange: (k: number) => void;
+}) {
+  return (
+    <>
       <div style={{ display: 'flex', alignItems: 'center', marginTop: tokens.spaceLg, gap: tokens.spaceMd, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
+        <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
           已选 {String(modes.length)} / {String(MODE_INFO.length)} 个模式
         </span>
         <Button size="small" disabled={batch.planning} onClick={onSelectAll}>
           全选
         </Button>
-        <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginLeft: tokens.spaceMd }}>每个模式</span>
+        <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary, marginLeft: tokens.spaceMd }}>每个模式</span>
         <Select
           size="small"
           style={{ width: 92 }}
@@ -57,10 +78,18 @@ export function ModePicker({
         >
           {batch.planning ? '规划中…' : '生成方案'}
         </Button>
+        {batch.planning && (
+          <Button
+            onClick={() => {
+              void batch.cancel();
+            }}
+          >
+            取消规划
+          </Button>
+        )}
       </div>
       {batch.planning && <StageProgress percent={batch.percent} stageText={batch.stageText} />}
-      {batch.error !== '' && <Alert style={{ marginTop: tokens.spaceMd }} type="error" showIcon title={batch.error} />}
-    </PageSection>
+    </>
   );
 }
 
@@ -108,14 +137,14 @@ function ModeTile({
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
-          <strong style={{ color: tokens.textPrimary, fontSize: tokens.fontBody }}>{label}</strong>
+          <strong style={{ color: tokens.textPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading }}>{label}</strong>
           {checked && (
             <Tag color="blue" style={{ marginRight: 0 }}>
               已选
             </Tag>
           )}
         </div>
-        <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>{desc}</span>
+        <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>{desc}</span>
         <span style={{ display: 'flex', gap: tokens.spaceSm, marginTop: 'auto' }}>
           {needs.includes('copy') ? <NeedBadge text="含 AI 文案" /> : <NeedBadge text="无需文案" muted />}
           {needs.includes('voice') ? <NeedBadge text="含 AI 配音" /> : <NeedBadge text="原声" muted />}
@@ -129,8 +158,9 @@ function NeedBadge({ text, muted = false }: { text: string; muted?: boolean }): 
   return (
     <span
       style={{
-        fontSize: tokens.fontIcon,
-        padding: '1px 7px',
+        fontSize: tokens.text.badge.size,
+        lineHeight: tokens.text.badge.leading,
+        padding: `${String(layout.chip.paddingBlock)}px ${layout.chip.paddingInline}`,
         borderRadius: tokens.radiusChip,
         color: muted ? tokens.textTertiary : tokens.colorSuccess,
         border: `1px solid ${muted ? tokens.border : `${tokens.colorSuccess}55`}`,

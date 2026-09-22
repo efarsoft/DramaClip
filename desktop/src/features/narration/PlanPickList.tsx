@@ -55,6 +55,9 @@ export function PlanPickList({ batch, queue }: { batch: PlanBatch; queue: Export
         onProduce={() => {
           void queue.run(picked);
         }}
+        onCancel={() => {
+          void queue.cancel();
+        }}
       />
     </PageSection>
   );
@@ -69,6 +72,7 @@ function QueueFooter({
   rejected,
   error,
   onProduce,
+  onCancel,
 }: {
   count: number;
   total: number;
@@ -78,16 +82,20 @@ function QueueFooter({
   rejected: string[];
   error: string;
   onProduce: () => void;
+  onCancel: () => void;
 }) {
   return (
     <>
-      <div style={{ display: 'flex', alignItems: 'center', marginTop: tokens.spaceLg }}>
-        <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginTop: tokens.spaceLg, gap: tokens.spaceMd }}>
+        <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
           已选 {String(count)} / {String(total)} 条方案
         </span>
         <Button type="primary" style={{ marginLeft: 'auto' }} disabled={count === 0} loading={running} onClick={onProduce}>
           {running ? '出片中…' : '出片所选'}
         </Button>
+        {running && (
+          <Button onClick={onCancel}>取消出片</Button>
+        )}
       </div>
       {running && <StageProgress percent={percent} stageText={stageText} />}
       {rejected.length > 0 && (
@@ -107,11 +115,23 @@ function planMode(plans: NarrationPlan[], planId: string): string {
 function PlanCard({ plan, checked, onToggle }: { plan: NarrationPlan; checked: boolean; onToggle: () => void }) {
   const card = planCardView(plan);
   return (
-    <Card size="small" hoverable onClick={onToggle} style={{ borderColor: checked ? tokens.colorPrimary : tokens.border, background: checked ? tokens.accentSoft : undefined }}>
+    <Card
+      size="small"
+      hoverable={card.pickable}
+      onClick={() => {
+        if (card.pickable) onToggle();
+      }}
+      style={{
+        borderColor: checked ? tokens.colorPrimary : tokens.border,
+        background: checked ? tokens.accentSoft : undefined,
+        opacity: card.pickable ? 1 : 0.55,
+        cursor: card.pickable ? 'pointer' : 'not-allowed',
+      }}
+    >
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm, minHeight: 130 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, flexWrap: 'wrap' }}>
           {card.angle === '' ? (
-            <strong style={{ color: tokens.textPrimary, fontSize: tokens.fontBody }}>{modeLabel(card.mode)}</strong>
+            <strong style={{ color: tokens.textPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading }}>{modeLabel(card.mode)}</strong>
           ) : (
             <Tag color="gold" style={{ marginRight: 0 }}>
               {card.angle}
@@ -122,10 +142,18 @@ function PlanCard({ plan, checked, onToggle }: { plan: NarrationPlan; checked: b
               已选
             </Tag>
           )}
+          {!card.pickable && (
+            <Tag color="warning" style={{ marginLeft: 'auto', marginRight: 0 }}>
+              不能出片
+            </Tag>
+          )}
         </div>
-        {card.hook !== '' && <span style={{ fontSize: tokens.fontBody, color: tokens.textPrimary }}>{card.hook}</span>}
-        {card.reason !== '' && <span style={{ fontSize: tokens.fontCaption, color: tokens.textSecondary }}>{card.reason}</span>}
-        <span style={{ display: 'flex', gap: tokens.spaceMd, marginTop: 'auto', fontSize: tokens.fontMicro, color: tokens.textTertiary }}>
+        {card.hook !== '' && <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textPrimary }}>{card.hook}</span>}
+        {card.reason !== '' && <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textSecondary }}>{card.reason}</span>}
+        {card.gate !== '' && (
+          <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.colorWarning }}>{card.gate}</span>
+        )}
+        <span style={{ display: 'flex', gap: tokens.spaceMd, marginTop: 'auto', fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
           <span>{modeLabel(card.mode)}</span>
           <span>{card.episodes}</span>
           <span>{card.overlap}</span>

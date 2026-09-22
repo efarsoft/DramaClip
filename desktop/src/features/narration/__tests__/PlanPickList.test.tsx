@@ -25,7 +25,7 @@ function plan(id: string): NarrationPlan {
       timeline: [],
       narration_texts: [{ id: 'n0', text: `第 ${id} 条的钩子。` }],
     },
-    status: 'planned',
+    status: 'ready',
     created_at: 0,
     angle: `角度 ${id}`,
   };
@@ -38,13 +38,23 @@ const idleQueue = {
   rejected: [],
   error: '',
   run: vi.fn(),
+  cancel: vi.fn(),
+};
+
+const idleBatch = {
+  planning: false,
+  percent: 0,
+  stageText: '',
+  error: '',
+  run: vi.fn(),
+  cancel: vi.fn(),
 };
 
 it('勾选后出片，提交的是勾了的方案 id', () => {
   const run = vi.fn();
   render(
     <PlanPickList
-      batch={{ planning: false, percent: 0, stageText: '', plans: [plan('a'), plan('b')], error: '', run: vi.fn() }}
+      batch={{ ...idleBatch, plans: [plan('a'), plan('b')] }}
       queue={{ ...idleQueue, run }}
     />,
   );
@@ -56,7 +66,7 @@ it('勾选后出片，提交的是勾了的方案 id', () => {
 it('换了批次，上一批的勾选自动作废', () => {
   const { rerender } = render(
     <PlanPickList
-      batch={{ planning: false, percent: 0, stageText: '', plans: [plan('a')], error: '', run: vi.fn() }}
+      batch={{ ...idleBatch, plans: [plan('a')] }}
       queue={idleQueue}
     />,
   );
@@ -65,7 +75,7 @@ it('换了批次，上一批的勾选自动作废', () => {
 
   rerender(
     <PlanPickList
-      batch={{ planning: false, percent: 0, stageText: '', plans: [plan('c'), plan('d')], error: '', run: vi.fn() }}
+      batch={{ ...idleBatch, plans: [plan('c'), plan('d')] }}
       queue={idleQueue}
     />,
   );
@@ -80,10 +90,30 @@ it('剧本清洗丢了几段就写在卡上：不说出口，方案看起来像�
   };
   render(
     <PlanPickList
-      batch={{ planning: false, percent: 0, stageText: '', plans: [dropped, plan('b')], error: '', run: vi.fn() }}
+      batch={{ ...idleBatch, plans: [dropped, plan('b')] }}
       queue={idleQueue}
     />,
   );
   expect(screen.getByText('剧本丢弃 3 段')).not.toBeNull();
   expect(screen.getAllByText(/剧本丢弃/)).toHaveLength(1);
+});
+
+it('过不了转化门禁的方案不能勾选出片', () => {
+  const run = vi.fn();
+  const blocked: NarrationPlan = {
+    ...plan('a'),
+    status: 'draft',
+    block_reason: '收尾没有指向看全集',
+  };
+  render(
+    <PlanPickList
+      batch={{ ...idleBatch, plans: [blocked, plan('b')] }}
+      queue={{ ...idleQueue, run }}
+    />,
+  );
+  fireEvent.click(screen.getByText('角度 a'));
+  fireEvent.click(screen.getByText('角度 b'));
+  fireEvent.click(screen.getByRole('button', { name: /出片所选/ }));
+  expect(run).toHaveBeenCalledWith(['b']);
+  expect(screen.getByText('收尾没有指向看全集')).not.toBeNull();
 });

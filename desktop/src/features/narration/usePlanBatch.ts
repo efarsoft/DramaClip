@@ -1,7 +1,7 @@
 /** 阶段③「规划」：narration.plan_variants 产出本批 K 条方案，轮询作业后按批次取回。 */
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { NarrationMode, NarrationPlan } from '@dramaclip/protocol';
-import { analysisApi, narrationApi } from '../../services/client';
+import { analysisApi, jobsApi, narrationApi } from '../../services/client';
 import { POLL_INTERVAL_MS, isTerminal, reasonOr, sleep } from './poll';
 
 export interface PlanBatch {
@@ -11,6 +11,7 @@ export interface PlanBatch {
   plans: NarrationPlan[];
   error: string;
   run: (modes: NarrationMode[], k: number) => Promise<void>;
+  cancel: () => Promise<void>;
 }
 
 export function usePlanBatch(projectId: string): PlanBatch {
@@ -19,6 +20,13 @@ export function usePlanBatch(projectId: string): PlanBatch {
   const [stageText, setStageText] = useState('');
   const [plans, setPlans] = useState<NarrationPlan[]>([]);
   const [error, setError] = useState('');
+  const jobIdRef = useRef<string | null>(null);
+
+  const cancel = useCallback(async (): Promise<void> => {
+    const jobId = jobIdRef.current;
+    if (jobId === null) return;
+    await jobsApi.cancel(jobId);
+  }, []);
 
   const run = useCallback(
     async (modes: NarrationMode[], k: number): Promise<void> => {
@@ -34,12 +42,16 @@ export function usePlanBatch(projectId: string): PlanBatch {
           modes,
           k,
         );
+        jobIdRef.current = jobId;
         for (;;) {
           const job = await analysisApi.status(jobId);
           setPercent(job.progress);
           setStageText(job.message ?? '');
           if (job.status === 'completed') {
             setPlans(await narrationApi.listPlans(projectId, batchId));
+            return;
+          }
+          if (job.status === 'cancelled') {
             return;
           }
           if (isTerminal(job.status)) {
@@ -51,6 +63,7 @@ export function usePlanBatch(projectId: string): PlanBatch {
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
+        jobIdRef.current = null;
         setPlanning(false);
         setStageText('');
       }
@@ -58,5 +71,5 @@ export function usePlanBatch(projectId: string): PlanBatch {
     [planning, projectId],
   );
 
-  return { planning, percent, stageText, plans, error, run };
+  return { planning, percent, stageText, plans, error, run, cancel };
 }

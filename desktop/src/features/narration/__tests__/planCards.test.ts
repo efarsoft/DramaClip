@@ -112,3 +112,17 @@ describe('剧本清洗丢弃段数', () => {
     expect(planCardView(plan({})).dropped).toBe('');
   });
 });
+
+describe('转化门禁', () => {
+  it('ready 可出片', () => {
+    const card = planCardView(plan({ status: 'ready' }));
+    expect(card.pickable).toBe(true);
+    expect(card.gate).toBe('');
+  });
+
+  it('draft 不能勾选，原因优先用 block_reason', () => {
+    const card = planCardView(plan({ status: 'draft', block_reason: '收尾没有指向看全集' }));
+    expect(card.pickable).toBe(false);
+    expect(card.gate).toBe('收尾没有指向看全集');
+  });
+});

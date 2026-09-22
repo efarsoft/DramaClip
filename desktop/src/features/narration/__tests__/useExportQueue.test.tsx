@@ -14,11 +14,15 @@ import { useExportQueue } from '../useExportQueue';
 
 const submit = vi.hoisted(() => vi.fn());
 const list = vi.hoisted(() => vi.fn());
+const cancel = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../services/client', () => ({
   exportApi: {
     submit: (planIds: string[]): unknown => submit(planIds),
     list: (projectId: string): unknown => list(projectId),
+  },
+  jobsApi: {
+    cancel: (jobId: string): unknown => cancel(jobId),
   },
 }));
 
@@ -29,6 +33,7 @@ function wrapper({ children }: { children: ReactNode }): ReactNode {
 afterEach(() => {
   submit.mockReset();
   list.mockReset();
+  cancel.mockReset();
 });
 
 it('全部导出跑到终态才刷新出片记录', async () => {
@@ -69,6 +74,26 @@ it('逐条被拒时把原因留在界面上，不谎报成已提交', async () =
   expect(result.current.rejected).toEqual([{ plan_id: 'plan-9', reason: '该方案没有可渲染的解说文案' }]);
   expect(onDone).not.toHaveBeenCalled();
   expect(list).not.toHaveBeenCalled();
+  expect(result.current.running).toBe(false);
+});
+
+it('取消出片不当失败', async () => {
+  submit.mockResolvedValue({
+    exports: [{ plan_id: 'plan-1', export_id: 'x-1', job_id: 'j-1' }],
+    rejected: [],
+  });
+  list
+    .mockResolvedValueOnce([{ id: 'x-1', status: 'pending', progress: 10 }])
+    .mockResolvedValueOnce([{ id: 'x-1', status: 'cancelled', progress: 10 }]);
+  const onDone = vi.fn();
+
+  const { result } = renderHook(() => useExportQueue('p1', onDone), { wrapper });
+  await act(async () => {
+    await result.current.run(['plan-1']);
+  });
+
+  expect(result.current.error).toBe('');
+  expect(onDone).toHaveBeenCalledTimes(1);
   expect(result.current.running).toBe(false);
 });
 

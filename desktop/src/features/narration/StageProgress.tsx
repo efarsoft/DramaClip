@@ -6,7 +6,7 @@ export function StageProgress({ percent, stageText }: { percent: number; stageTe
   return (
     <div style={{ marginTop: tokens.spaceLg }}>
       <Progress percent={Math.round(percent)} status="active" />
-      <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginTop: tokens.spaceSm }}>
+      <div style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary, marginTop: tokens.spaceSm }}>
         {stageText === '' ? '排队中' : stageText} · 可离开本页面，任务在后台继续
       </div>
     </div>

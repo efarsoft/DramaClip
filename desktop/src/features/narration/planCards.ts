@@ -26,6 +26,10 @@ export interface PlanCardView {
   readonly overlap: string;
   /** 「剧本丢弃 N 段」；0 段或非编剧链为空串，界面不占行。 */
   readonly dropped: string;
+  /** 过了转化门禁才能勾选出片。 */
+  readonly pickable: boolean;
+  /** 不能出片时的原因；可出片为空串。 */
+  readonly gate: string;
 }
 
 export function planCardView(plan: NarrationPlan): PlanCardView {
@@ -38,6 +42,8 @@ export function planCardView(plan: NarrationPlan): PlanCardView {
     hook: hookLine(plan),
     overlap: overlapText(plan.overlap_max),
     dropped: droppedText(plan.plan_data.dropped_segments),
+    pickable: plan.status === 'ready',
+    gate: plan.status === 'ready' ? '' : (plan.block_reason ?? '过不了转化门禁，不能出片'),
   };
 }
 
