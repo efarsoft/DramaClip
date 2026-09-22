@@ -119,6 +119,13 @@
         },
         "detail": {
           "type": "string"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "修复动作的结构化白名单（如「唯一路径」warn 附带的多余副本全路径）；动作只删这里列出的路径，不解析文案"
         }
       }
     },
@@ -415,6 +422,10 @@
           "source": {
             "type": "string",
             "description": "modelscope | hf_mirror | huggingface；缺省 auto=国内优先"
+          },
+          "force": {
+            "type": "boolean",
+            "description": "true = 强制重下：先按 models.delete 同口径删除现有资产再下载（真删真下，UI 必须二次确认并显示将删除的体量）；缺省 false，已安装即拒绝"
           }
         }
       },
@@ -426,6 +437,109 @@
         "properties": {
           "job_id": {
             "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "models.clean_residue",
+      "summary": "清理该资产的中断残留（*.incomplete）：删除范围与体检「中断残留」判据同一条，不碰已完成的权重",
+      "params": {
+        "type": "object",
+        "required": [
+          "model_id"
+        ],
+        "properties": {
+          "model_id": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "removed",
+          "freed_bytes"
+        ],
+        "properties": {
+          "removed": {
+            "type": "integer",
+            "description": "实际删除的残留文件数"
+          },
+          "freed_bytes": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "name": "models.clean_orphan",
+      "summary": "删除登记路径之外的同名多余副本：只接受体检「唯一路径」warn 附带的白名单路径，名单外一律拒绝",
+      "params": {
+        "type": "object",
+        "required": [
+          "model_id",
+          "path"
+        ],
+        "properties": {
+          "model_id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "必须是 models.orphan_list（或体检 paths 字段）里的路径；解析后逐一比对"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "ok",
+          "removed",
+          "freed_bytes"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "removed": {
+            "type": "string"
+          },
+          "freed_bytes": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "name": "models.orphan_list",
+      "summary": "列出登记路径之外的同名多余副本（只读）：删除确认弹窗要展示全路径与实占体积",
+      "params": {
+        "type": "object",
+        "required": [
+          "model_id"
+        ],
+        "properties": {
+          "model_id": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "path",
+            "size_bytes"
+          ],
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "size_bytes": {
+              "type": "integer"
+            }
           }
         }
       }

@@ -20,6 +20,7 @@ import type {
   JobInfo,
   NarrationMode,
   NarrationPlan,
+  OrphanCopy,
   PingResult,
   PlanVariantsResult,
   Project,
@@ -196,11 +197,21 @@ export interface ImportRecordsResult {
 
 export const modelsApi = {
   list: (): Promise<ModelInfo[]> => rpc<ModelInfo[]>('models.list'),
-  download: (modelId: string, source?: string): Promise<{ job_id: string }> =>
-    rpc<{ job_id: string }>(
-      'models.download',
-      source === undefined ? { model_id: modelId } : { model_id: modelId, source },
-    ),
+  download: (modelId: string, source?: string, force?: boolean): Promise<{ job_id: string }> => {
+    const params: Record<string, unknown> = { model_id: modelId };
+    if (source !== undefined) params.source = source;
+    if (force === true) params.force = true;
+    return rpc<{ job_id: string }>('models.download', params);
+  },
+  /** 清理中断残留（*.incomplete）：删除范围与体检「中断残留」判据同一条，不碰已完成权重。 */
+  cleanResidue: (modelId: string): Promise<{ removed: number; freed_bytes: number }> =>
+    rpc<{ removed: number; freed_bytes: number }>('models.clean_residue', { model_id: modelId }),
+  /** 登记路径外的同名多余副本（只读）：确认弹窗要展示全路径与实占体积再让删。 */
+  orphanList: (modelId: string): Promise<OrphanCopy[]> =>
+    rpc<OrphanCopy[]>('models.orphan_list', { model_id: modelId }),
+  /** 删除一条多余副本：只接受 orphanList/体检 paths 白名单内的路径，名单外服务端拒绝。 */
+  cleanOrphan: (modelId: string, path: string): Promise<{ ok: boolean; removed: string; freed_bytes: number }> =>
+    rpc<{ ok: boolean; removed: string; freed_bytes: number }>('models.clean_orphan', { model_id: modelId, path }),
   /** 资产体检：给 id 报那一项，不给则批量报所有已落盘的（只读，不改文件）。 */
   verify: (modelId?: string): Promise<VerifyReport[]> =>
     rpc<VerifyReport[]>('models.verify', modelId === undefined ? {} : { model_id: modelId }),

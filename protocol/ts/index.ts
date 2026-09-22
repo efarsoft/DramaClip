@@ -344,6 +344,8 @@ export interface VerifyCheck {
   /** fail = 不可用；warn = 可用但有隐患（如重复缓存、无下载清单）；skip = 前置项已 fail。 */
   readonly status: 'pass' | 'warn' | 'fail' | 'skip';
   readonly detail?: string;
+  /** 修复动作的结构化白名单（如「唯一路径」warn 附带的多余副本全路径）；动作只删这里列出的路径。 */
+  readonly paths?: ReadonlyArray<string>;
 }
 
 export interface VerifyReport {
@@ -364,6 +366,12 @@ export interface RelayoutResult {
   readonly path: string;
   /** false = 已是目标布局，本次未动盘（幂等空操作）。 */
   readonly migrated: boolean;
+}
+
+/** 登记路径之外的同名多余副本（models.orphan_list 条目；models.clean_orphan 的删除白名单）。 */
+export interface OrphanCopy {
+  readonly path: string;
+  readonly size_bytes: number;
 }
 
 /** 本地导入登记项（models/imported.json 的一行）。 */
@@ -547,6 +555,9 @@ export const METHOD_NAMES = [
   'subtitle.list_presets',
   'models.list',
   'models.download',
+  'models.clean_residue',
+  'models.clean_orphan',
+  'models.orphan_list',
   'models.scan_local',
   'models.verify',
   'models.relayout',

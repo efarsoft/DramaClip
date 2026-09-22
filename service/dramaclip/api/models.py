@@ -36,6 +36,9 @@ def endpoints(context: AppContext) -> dict[str, str]:
 def register(router: Router, context: AppContext) -> None:
     router.register("models.list", lambda _params: list_models(context))
     router.register("models.download", lambda params: download(context, params))
+    router.register("models.clean_residue", lambda params: clean_residue(context, params))
+    router.register("models.clean_orphan", lambda params: clean_orphan(context, params))
+    router.register("models.orphan_list", lambda params: orphan_list(context, params))
     router.register("models.scan_local", lambda params: scan_local(context))
     router.register("models.verify", lambda params: verify(context, params))
     router.register("models.relayout", lambda params: relayout(context, params))
@@ -116,6 +119,7 @@ def relayout(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
 def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     model_id = str(params.get("model_id", ""))
     source = str(params.get("source") or "auto")
+    force = bool(params.get("force") or False)
     spec = downloader.spec_by_id(model_id)
     if spec is None:
         raise RpcDomainError(_ERR_MODEL_NOT_FOUND, f"未知模型: {model_id}")
@@ -127,8 +131,21 @@ def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     if source != "auto" and source not in dict(spec.sources()):
         raise RpcDomainError(_ERR_MODEL_STATE, f"{spec.name} 不支持来源 {source}")
     models_dir = context.data_dir / "models"
-    if registry.find(spec, models_dir) is not None:
-        raise RpcDomainError(_ERR_MODEL_STATE, f"{spec.name} 已安装")
+    has_existing = registry.find(spec, models_dir) is not None or any(
+        record.get("model_id") == model_id for record in importer.records(models_dir)
+    )
+    if has_existing:
+        if not force:
+            raise RpcDomainError(
+                _ERR_MODEL_STATE,
+                f"{spec.name} 已安装；要重来请用「强制重新下载」（会先删除现有资产）",
+            )
+        # 强制重下 = 真删真下（§10.6）：删除口径与 models.delete 完全同一条，
+        # 库内副本连目录清掉、库外登记只撤登记。二次确认（含体量）是 UI 侧的契约。
+        delete(context, {"model_id": model_id})
+        context.notifier.log(
+            "warn", f"{spec.name}：强制重新下载，已按「删除模型」同口径删除现有资产"
+        )
     job_id = context.job_store.create("model_download", ref_id=model_id)
     # 必须置 running：看门狗的回写条件是 status=="running"，而启动清扫只扫 running——
     # 不置位则下载成功后记录永远停在 pending，且重启也清不掉（队列页永久假"下载中"）。
@@ -142,6 +159,7 @@ def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         job = context.job_store.get(job_id)
         if job is not None and job["status"] == STATUS_RUNNING:
             context.job_store.mark_completed(job_id)
+            _auto_verify(context, models_dir, spec)
         context.cancel_events.pop(job_id, None)
 
     downloader.download_in_background(
@@ -155,6 +173,114 @@ def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     )
     threading.Thread(target=_watch, daemon=True, name=f"dl-watch-{model_id}").start()
     return {"job_id": job_id}
+
+
+def _auto_verify(context: AppContext, models_dir: Path, spec: registry.ModelSpec) -> None:
+    """下载收尾即体检：文件层结论当场播报，不留「下完了但没人验过」的悬置态。
+
+    措辞只说体检结论、不说「下载成功」——下载是否成功由作业状态自己说话，
+    体检失败时两者并排出现，谁也不冒充谁。
+    """
+    report = registry.verify(models_dir, spec)
+    if report["ok"]:
+        context.notifier.log(
+            "info", f"{spec.name}：落盘自动体检通过（{len(report['checks'])} 项判据）"
+        )
+        return
+    fails = "；".join(
+        f"{check['name']}：{check['detail']}"
+        for check in report["checks"]
+        if check["status"] == "fail"
+    )
+    context.notifier.log("warn", f"{spec.name}：落盘自动体检未通过——{fails}")
+
+
+def _require_spec(params: dict[str, Any]) -> registry.ModelSpec:
+    model_id = str(params.get("model_id") or "")
+    spec = downloader.spec_by_id(model_id)
+    if spec is None:
+        raise RpcDomainError(_ERR_MODEL_NOT_FOUND, f"未知模型: {model_id}")
+    return spec
+
+
+def _dir_size(root: Path) -> int:
+    return sum(path.stat().st_size for path in root.rglob("*") if path.is_file())
+
+
+def clean_residue(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """清理中断残留（§10.2「能自动」档）：只删 *.incomplete 半成品，不碰已完成的权重。
+
+    删除范围与体检「中断残留」判据同一条（registry.residue_files），否则清完再校验
+    还是红——那正是 §10.0 第 2 条「穿着修复外衣的跳转按钮」要杜绝的事。
+    """
+    spec = _require_spec(params)
+    models_dir = context.data_dir / "models"
+    files = registry.residue_files(models_dir, spec)
+    removed = 0
+    freed = 0
+    stuck: list[str] = []
+    for path in files:
+        try:
+            size = path.stat().st_size
+            path.unlink()
+        except OSError as exc:
+            stuck.append(f"{path.name}（{exc}）")
+            continue
+        removed += 1
+        freed += size
+    if stuck:
+        raise RpcDomainError(
+            _ERR_MODEL_STATE,
+            f"已删 {removed} 个（{importer.human_bytes(freed)}），但有 {len(stuck)} 个删不掉："
+            + "；".join(stuck[:3]),
+        )
+    context.notifier.log(
+        "info", f"{spec.name}：清理中断残留 {removed} 个，释放 {importer.human_bytes(freed)}"
+    )
+    return {"removed": removed, "freed_bytes": freed}
+
+
+def orphan_list(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:
+    """登记路径之外的同名多余副本（只读）：确认弹窗要展示全路径与实占体积再让删。"""
+    spec = _require_spec(params)
+    models_dir = context.data_dir / "models"
+    return [
+        {"path": str(path), "size_bytes": _dir_size(path)}
+        for path in registry.orphan_copies(models_dir, spec)
+    ]
+
+
+def clean_orphan(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """删除一条多余副本（§10.2「要确认」档）：白名单制，只删 orphan_copies 里的路径。
+
+    白名单必须现算再比对——不解析文案、不接受任意路径：删除入口拿到一个
+    用户可影响的字符串就 rmtree，等于给整个磁盘开了个洞。
+    """
+    spec = _require_spec(params)
+    models_dir = context.data_dir / "models"
+    wanted = str(params.get("path") or "")
+    target: Path | None = None
+    if wanted:
+        try:
+            resolved = Path(wanted).resolve()
+        except OSError:
+            resolved = Path(wanted)
+        orphans = registry.orphan_copies(models_dir, spec)
+        target = next((path for path in orphans if path.resolve() == resolved), None)
+    if target is None:
+        raise RpcDomainError(
+            _ERR_MODEL_STATE,
+            f"路径不在 {spec.name} 的多余副本名单内，拒绝删除：{wanted or '（空）'}",
+        )
+    freed = _dir_size(target)
+    try:
+        shutil.rmtree(target)
+    except OSError as exc:
+        raise RpcDomainError(_ERR_MODEL_STATE, f"删除失败：{target}（{exc}）") from exc
+    context.notifier.log(
+        "info", f"{spec.name}：已删除多余副本 {target}（释放 {importer.human_bytes(freed)}）"
+    )
+    return {"ok": True, "removed": str(target), "freed_bytes": freed}
 
 
 def runtime_status(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -253,6 +379,13 @@ def delete(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         removed.append(str(path))
     if resolved is not None:
         target = resolved.resolve()
+        if spec.engine == "faster_whisper":
+            # HF 缓存布局：resolved 指向 snapshots/<rev>，只删它会留下 refs/trees/blobs
+            # 壳目录——壳里的旧 refs 还会与下一次下载的快照纠缠（对不上就报"修订不一致"）。
+            # 删整个缓存根才是「删除这一档」的完整语义。
+            whole = registry.whisper_cache(models_dir / spec.placement, spec)
+            if whole is not None:
+                target = whole.resolve()
         if root not in target.parents:
             raise RpcDomainError(_ERR_MODEL_STATE, "目标不在模型目录内，拒绝删除")
         shutil.rmtree(target, ignore_errors=True)

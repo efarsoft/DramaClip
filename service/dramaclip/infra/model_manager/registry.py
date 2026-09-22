@@ -417,10 +417,15 @@ def verify(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
     必需文件、快照提交号、下载清单、中断残留、重复缓存五道查，全部有真机形态对应
     （见 tests/infra/model_manager/test_verify.py 的模块 docstring）。
     """
-    checks: list[dict[str, str]] = []
+    checks: list[dict[str, Any]] = []
 
-    def add(name: str, status: str, detail: str = "") -> None:
-        checks.append({"name": name, "status": status, "detail": detail})
+    def add(name: str, status: str, detail: str = "", *, paths: list[str] | None = None) -> None:
+        # paths：给修复动作用的结构化白名单（如「删除多余副本」只删这里列出的路径）。
+        # 文案里的路径是给人读的，动作不能靠解析文案——所以单独带字段。
+        check: dict[str, Any] = {"name": name, "status": status, "detail": detail}
+        if paths:
+            check["paths"] = paths
+        checks.append(check)
 
     base = models_dir / spec.placement
     # cache 只在 faster_whisper 下算得出：非 None 即等价于「这是 HF 缓存布局的模型」。
@@ -572,9 +577,51 @@ def _verify_unique_path(models_dir: Path, base: Path, cache: Path | None, add: A
     ]
     if others:
         shown = ", ".join(str(o) for o in others[:2])
-        add("唯一路径", "warn", f"另有 {len(others)} 处同名缓存：{shown}")
+        add(
+            "唯一路径",
+            "warn",
+            f"另有 {len(others)} 处同名缓存：{shown}",
+            paths=[str(o) for o in others],
+        )
         return
     add("唯一路径", "pass", "仅登记路径一份")
+
+
+# --------------------------------------------------------------------------- 修复动作的判定口径
+# 「清理残留」「删除多余副本」的删除范围必须与体检判据**同一条**——否则清完再校验还是红，
+# 动作就成了摆设（规格 §10.2）。判定放这里（体检旁），api 层只做参数校验与删除执行。
+
+
+def residue_files(models_dir: Path, spec: ModelSpec) -> list[Path]:
+    """该资产的中断残留清单：与 ``_verify_residue`` 的作用域同一条。
+
+    whisper 按自己的缓存根切分（四档共用 placement，不能替邻居删），其余按 placement 根。
+    """
+    base = models_dir / spec.placement
+    scope: Path | None = base
+    if spec.engine == "faster_whisper":
+        scope = _whisper_cache(base, spec)
+    if scope is None or not scope.is_dir():
+        return []
+    return [path for path in scope.rglob("*.incomplete") if path.is_file()]
+
+
+def orphan_copies(models_dir: Path, spec: ModelSpec) -> list[Path]:
+    """登记路径之外的同名缓存（与 ``_verify_unique_path`` 同一探法）——删除入口的白名单。
+
+    只列 models_dir 之内的；外面 world 的目录一个字节都不碰。
+    """
+    base = models_dir / spec.placement
+    if not base.is_dir():
+        return []
+    cache = _whisper_cache(base, spec) if spec.engine == "faster_whisper" else None
+    probe = cache.name if cache is not None else base.name
+    own = cache if cache is not None else base
+    return [
+        path
+        for path in models_dir.rglob(probe)
+        if path != own and _looks_like_assets(path)
+    ]
 
 
 def list_models(models_dir: Path) -> list[dict[str, Any]]:
