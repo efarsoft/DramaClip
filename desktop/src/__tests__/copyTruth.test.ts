@@ -11,7 +11,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 
 const SRC_DIR = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const ROOT_DIR = path.resolve(SRC_DIR, '../..');
@@ -161,33 +161,60 @@ const SURFACES: readonly Surface[] = [
   },
 ];
 
-function hitsIn(surface: Surface, phrase: string): string[] {
-  const hits: string[] = [];
-  for (const file of surface.files()) {
-    const lines = readFileSync(file, 'utf8').split('\n');
-    lines.forEach((line, index) => {
-      if (line.includes(phrase)) hits.push(`${path.relative(surface.base, file)}:${String(index + 1)}`);
+/** 一个扫描面只走盘一次、每个文件只读一次，所有红线词在同一趟里配好命中。
+ *  原写法是「每条红线 × 全仓重扫」：源码注释面 300+ 文件 × 9 条 = 2700+ 次读盘。
+ *  ⚠️ 但真正的红因不是重复遍历而是**冷盘首扫**——快照 `git archive` 全绿后重跑，
+ *  第一个用例读满 300+ 文件花了 7.9s，直接顶穿 vitest 5s 默认超时（同一条用例
+ *  热盘只要 40ms）。所以两条都要：单趟扫描把总量压到 1×，冷盘那一次由 SCAN_TIMEOUT
+ *  兜住。二者缺一仍会红，afterAll 只兜得住前一条。 */
+interface Scan {
+  readonly files: readonly string[];
+  readonly hits: ReadonlyMap<string, string[]>;
+}
+
+const SCAN_TIMEOUT_MS = 60_000;
+const scans = new Map<string, Scan>();
+const walkCounts = new Map<string, number>();
+const readCounts = new Map<string, number>();
+
+function scanOf(surface: Surface): Scan {
+  const cached = scans.get(surface.label);
+  if (cached !== undefined) return cached;
+  walkCounts.set(surface.label, (walkCounts.get(surface.label) ?? 0) + 1);
+  const files = surface.files();
+  const hits = new Map<string, string[]>(surface.banned.map(({ phrase }) => [phrase, []]));
+  for (const file of files) {
+    readCounts.set(surface.label, (readCounts.get(surface.label) ?? 0) + 1);
+    const rel = path.relative(surface.base, file);
+    readFileSync(file, 'utf8').split('\n').forEach((line, index) => {
+      for (const { phrase } of surface.banned) {
+        if (line.includes(phrase)) hits.get(phrase)?.push(`${rel}:${String(index + 1)}`);
+      }
     });
   }
-  return hits;
+  const scan: Scan = { files, hits };
+  scans.set(surface.label, scan);
+  return scan;
 }
 
 describe('文案真值门禁', () => {
   for (const surface of SURFACES) {
     describe(surface.label, () => {
-      // 自证下限：扫描面被悄悄删窄、红线词被摘掉，都要当场响，不能只少跑几个用例
+      // 自证下限：扫描面被悄悄删窄、红线词被摘掉，都要当场响，不能只少跑几个用例。
+      // 超时同样要给这条：每个面都是它先跑，冷盘那一次全量扫描落在它头上——
+      // 只给红线词用例抬超时，快照 `git archive` 干净检出下这条先顶穿 5s（实测 7.3s）。
       it('扫描面与红线词表不得缩水', () => {
-        const files = surface.files();
+        const files = scanOf(surface).files;
         expect(files.length, `${surface.label} 只扫到 ${String(files.length)} 个文件`).toBeGreaterThanOrEqual(surface.minFiles);
         expect(files.some((file) => file.endsWith(surface.probe)), `扫描面里没有 ${surface.probe}`).toBe(true);
         expect(surface.banned.length, `${surface.label} 红线词表缩水`).toBeGreaterThanOrEqual(surface.minPhrases);
-      });
+      }, SCAN_TIMEOUT_MS);
 
       for (const { phrase, reason } of surface.banned) {
         it(`不得出现「${phrase}」`, () => {
-          const hits = hitsIn(surface, phrase);
-          expect(hits, `${phrase} —— ${reason}。命中：${hits.join(', ')}`).toEqual([]);
-        });
+          const hits = scanOf(surface).hits.get(phrase);
+          expect(hits, `${phrase} —— ${reason}。命中：${(hits ?? []).join(', ')}`).toEqual([]);
+        }, SCAN_TIMEOUT_MS);
       }
     });
   }
@@ -195,5 +222,20 @@ describe('文案真值门禁', () => {
   it('免责声明原文保留——合规靠改文案，不靠删声明', () => {
     const readme = readFileSync(path.join(ROOT_DIR, 'README.md'), 'utf8');
     expect(readme).toContain('不提供规避原创性检测的功能');
+  });
+
+  afterAll(() => {
+    // 三条各自挡一种退化：重复走盘（缓存被拆）、逐条重读（单趟被打回 per-phrase）、
+    // 命中表与词表脱钩（加了红线词却没进扫描）。
+    for (const surface of SURFACES) {
+      const scan = scans.get(surface.label);
+      expect(scan, `${surface.label} 从未被扫描——用例面被删窄`).toBeDefined();
+      expect(walkCounts.get(surface.label), `${surface.label} 重复走盘`).toBe(1);
+      expect(readCounts.get(surface.label), `${surface.label} 读盘次数不等于文件数：退化成逐条重扫`)
+        .toBe(scan?.files.length);
+      expect([...(scan?.hits.keys() ?? [])].sort(), `${surface.label} 命中表与红线词表脱钩`).toEqual(
+        surface.banned.map(({ phrase }) => phrase).sort(),
+      );
+    }
   });
 });

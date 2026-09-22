@@ -25,6 +25,16 @@ function faceFontFiles(): string[] {
   return urls.filter((u) => !u.startsWith('data:')).map((u) => path.resolve(path.dirname(CSS_PATH), u));
 }
 
+/** electron-builder `files:` 段的列表项（注释行不算条目）。 */
+function builderFileEntries(config: string): string[] {
+  // 换行先归一：Windows 干净检出就是 CRLF，按 \n 锚定的话整段读空，门禁在
+  // 新检出的机器上直接红（快照 git archive + tar 实测过这一次）。
+  const normalized = config.replace(/\r\n/g, '\n');
+  // 只取 files: 到下一个顶格键之间的那一段（extraResources 走的是 ../resources，两码事）
+  const filesBlock = /^files:\n([\s\S]*?)(?=^[^\s#])/m.exec(normalized)?.[1] ?? '';
+  return [...filesBlock.matchAll(/^[ \t]+-[ \t]+(\S+)/gm)].map((m) => m[1] ?? '');
+}
+
 describe('§7.1 global.css 不得是第二处色值真相', () => {
   it('global.css 里零裸色值（hex / rgb() / rgba()）', () => {
     const offenders: string[] = [];
@@ -103,15 +113,26 @@ describe('§7.2 许可随包与关于页清单', () => {
 
   it('许可文本必须真的进包——不被代码引用的文件 Vite 不会带进 dist', () => {
     const config = readFileSync(path.resolve(SRC_DIR, '..', 'electron-builder.yml'), 'utf8');
-    // 只取 files: 到下一个顶格键之间的那一段（extraResources 走的是 ../resources，两码事）；
-    // 条目必须是真正的列表项——注释里写 OFL 不算。
-    const filesBlock = /^files:\n([\s\S]*?)(?=^[^\s#])/m.exec(config)?.[1] ?? '';
-    const entries = [...filesBlock.matchAll(/^[ \t]+-[ \t]+(\S+)/gm)].map((m) => m[1] ?? '');
+    const entries = builderFileEntries(config);
     expect(entries.length, '没读到 electron-builder 的 files 段').toBeGreaterThanOrEqual(2);
     expect(
       entries.some((entry) => entry.includes('OFL')),
       `字体随包而许可文本不在 files 段：${entries.join(', ')}`,
     ).toBe(true);
+  });
+
+  it('files 段解析对 CRLF 检出有效——Windows 干净检出就是 \\r\\n', () => {
+    const fixture = [
+      'productName: DramaClip',
+      'files:',
+      '  - dist/**',
+      '  # - 注释里提 OFL 不算条目',
+      '  - src/assets/fonts/OFL-*.txt',
+      'extraResources:',
+      '  - from: ../resources',
+      '',
+    ].join('\r\n');
+    expect(builderFileEntries(fixture)).toEqual(['dist/**', 'src/assets/fonts/OFL-*.txt']);
   });
 
   it('关于页开源清单含两种字面，且逐条标注 OFL', () => {
