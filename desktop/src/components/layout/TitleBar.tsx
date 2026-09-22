@@ -1,10 +1,11 @@
 /** 自定义标题栏：拖拽区 + 项目搜索 + 窗口控制（frame:false 配套）。 */
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { BorderOutlined, CloseOutlined, MinusOutlined, SearchOutlined } from '@ant-design/icons';
+import { BorderOutlined, CloseOutlined, MinusOutlined, PlayCircleFilled, SearchOutlined } from '@ant-design/icons';
 import { projectApi, windowControl } from '../../services/client';
 import { rememberDrama } from '../../stores/lastDrama';
-import { tokens } from '../../styles/theme';
+import { hoverBg } from '../../styles/mixins';
+import { layout, tokens } from '../../styles/theme';
 import { dramaEntryPath } from '../../app/routes';
 
 export function TitleBar(): React.ReactElement {
@@ -13,12 +14,12 @@ export function TitleBar(): React.ReactElement {
   return (
     <div
       style={{
-        height: 46,
+        height: layout.titleBar.height,
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
         gap: tokens.spaceLg,
-        paddingLeft: 14,
+        padding: `0 ${layout.titleBar.paddingX}`,
         background: tokens.bgSidebar,
         borderBottom: `1px solid ${tokens.borderSecondary}`,
         WebkitAppRegion: 'drag',
@@ -27,25 +28,39 @@ export function TitleBar(): React.ReactElement {
       <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
         <span
           style={{
-            width: 22,
-            height: 22,
+            width: layout.titleBar.brand,
+            height: layout.titleBar.brand,
             borderRadius: tokens.radiusControl,
             background: tokens.gradientAccent,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: tokens.fontIcon,
             color: tokens.colorWhite,
           }}
         >
-          ▶
+          <PlayCircleFilled style={{ fontSize: tokens.glyph.brandSm }} />
         </span>
-        <span style={{ fontWeight: 700, fontSize: tokens.fontBody, color: tokens.textPrimary }}>DramaClip</span>
+        <span
+          style={{
+            fontWeight: 700,
+            fontSize: tokens.text.body.size,
+            lineHeight: tokens.text.body.leading,
+            color: tokens.textPrimary,
+          }}
+        >
+          DramaClip
+        </span>
       </div>
       {onProjectArea ? (
         <ProjectSearch />
       ) : (
-        <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>
+        <span
+          style={{
+            fontSize: tokens.text.body.size,
+            lineHeight: tokens.text.body.leading,
+            color: tokens.textTertiary,
+          }}
+        >
           左侧选择工作区，进入项目后可在此快速跳转
         </span>
       )}
@@ -56,7 +71,14 @@ export function TitleBar(): React.ReactElement {
 
 const SEARCH_ICON = (
   <SearchOutlined
-    style={{ position: 'absolute', left: 9, top: 7, fontSize: tokens.fontBody, color: tokens.textTertiary }}
+    style={{
+      position: 'absolute',
+      left: layout.titleBar.search.iconInset,
+      top: '50%',
+      transform: 'translateY(-50%)',
+      fontSize: tokens.glyph.iconMd,
+      color: tokens.textTertiary,
+    }}
   />
 );
 
@@ -64,10 +86,12 @@ const SEARCH_BADGE = (
   <span
     style={{
       position: 'absolute',
-      right: 8,
-      top: 5,
-      fontSize: tokens.fontIcon,
-      padding: '1px 6px',
+      right: layout.titleBar.search.iconInset,
+      top: '50%',
+      transform: 'translateY(-50%)',
+      fontSize: tokens.text.badge.size,
+      lineHeight: tokens.text.badge.leading,
+      padding: `${String(layout.chip.paddingBlock)}px ${layout.chip.paddingInline}`,
       borderRadius: tokens.radiusThumb,
       border: `1px solid ${tokens.border}`,
       color: tokens.textTertiary,
@@ -79,14 +103,15 @@ const SEARCH_BADGE = (
 
 const SEARCH_INPUT_STYLE: CSSProperties = {
   width: '100%',
-  height: 28,
-  paddingLeft: 28,
-  paddingRight: 44,
+  height: layout.controlHeight.sm,
+  paddingLeft: layout.titleBar.search.clearanceLeft,
+  paddingRight: layout.titleBar.search.clearanceRight,
   borderRadius: tokens.radiusControl,
   border: `1px solid ${tokens.border}`,
   background: tokens.bgInput,
   color: tokens.textPrimary,
-  fontSize: tokens.fontCaption,
+  fontSize: tokens.text.meta.size,
+  lineHeight: tokens.text.meta.leading,
   outline: 'none',
 };
 
@@ -116,7 +141,7 @@ function ProjectSearch(): React.ReactElement {
 
   return (
     <div
-      style={{ position: 'relative', width: 340, WebkitAppRegion: 'no-drag' } as CSSProperties}
+      style={{ position: 'relative', width: layout.titleBar.search.width, WebkitAppRegion: 'no-drag' } as CSSProperties}
     >
       <input
         value={keyword}
@@ -160,14 +185,14 @@ function SearchResults({
     <div
       style={{
         position: 'absolute',
-        top: 34,
+        top: layout.titleBar.search.resultsOffset,
         left: 0,
         right: 0,
         zIndex: 30,
         borderRadius: tokens.radiusControl,
         border: `1px solid ${tokens.border}`,
         background: tokens.bgElevated,
-        boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+        boxShadow: tokens.shadowPop,
         overflow: 'hidden',
       }}
     >
@@ -178,13 +203,14 @@ function SearchResults({
             onPick(item);
           }}
           style={{
-            padding: '8px 12px',
-            fontSize: tokens.fontCaption,
+            padding: `${tokens.spaceSm} ${tokens.spaceMd}`,
+            fontSize: tokens.text.body.size,
+            lineHeight: tokens.text.body.leading,
             color: tokens.textSecondary,
             cursor: 'pointer',
           }}
           onMouseEnter={(event) => {
-            event.currentTarget.style.background = tokens.accentSoft;
+            event.currentTarget.style.background = hoverBg;
           }}
           onMouseLeave={(event) => {
             event.currentTarget.style.background = 'transparent';
@@ -209,7 +235,7 @@ function WindowButtons() {
         void windowControl(action);
       }}
       style={{
-        width: 44,
+        width: layout.titleBar.windowButton.width,
         height: '100%',
         display: 'flex',
         alignItems: 'center',
@@ -217,7 +243,7 @@ function WindowButtons() {
         background: 'transparent',
         border: 'none',
         color: tokens.textSecondary,
-        fontSize: tokens.fontMicro,
+        fontSize: tokens.glyph.icon,
         cursor: 'pointer',
         WebkitAppRegion: 'no-drag',
       } as CSSProperties}
@@ -233,9 +259,9 @@ function WindowButtons() {
   );
   return (
     <div style={{ marginLeft: 'auto', display: 'flex', height: '100%' }}>
-      {make(<MinusOutlined />, 'minimize', tokens.bgElevated)}
-      {make(<BorderOutlined style={{ fontSize: tokens.fontIcon }} />, 'maximize-toggle', tokens.bgElevated)}
-      {make(<CloseOutlined />, 'close', '#C43A3A')}
+      {make(<MinusOutlined />, 'minimize', hoverBg)}
+      {make(<BorderOutlined style={{ fontSize: tokens.glyph.icon }} />, 'maximize-toggle', hoverBg)}
+      {make(<CloseOutlined />, 'close', tokens.closeHot)}
     </div>
   );
 }

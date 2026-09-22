@@ -2,7 +2,8 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { NAV_GROUPS, NAV_ITEMS, isNavActive } from '../../app/navItems';
-import { tokens } from '../../styles/theme';
+import { hoverBg } from '../../styles/mixins';
+import { layout, tokens } from '../../styles/theme';
 
 export function Rail() {
   const location = useLocation();
@@ -20,7 +21,12 @@ export function Rail() {
       groups.push(
         <div
           key="divider"
-          style={{ width: 40, height: 1, background: tokens.borderSecondary, margin: '4px 0' }}
+          style={{
+            width: layout.rail.divider.width,
+            height: 1,
+            background: tokens.borderSecondary,
+            margin: `${tokens.spaceXs} 0`,
+          }}
         />,
       );
     }
@@ -31,7 +37,7 @@ export function Rail() {
         <RailButton
           key={item.path}
           label={item.label}
-          icon={<item.icon style={{ fontSize: tokens.fontHeading }} />}
+          icon={<item.icon style={{ fontSize: tokens.glyph.railIcon }} />}
           active={active}
           onClick={() => {
             void navigate(item.path);
@@ -44,13 +50,13 @@ export function Rail() {
   return (
     <nav
       style={{
-        width: 68,
+        width: layout.rail.width,
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         gap: tokens.spaceSm,
-        paddingTop: 12,
+        paddingTop: tokens.spaceMd,
         background: tokens.bgSidebar,
         borderRight: `1px solid ${tokens.borderSecondary}`,
       }}
@@ -76,14 +82,14 @@ function RailButton({
       type="button"
       onClick={onClick}
       style={{
-        width: 54,
-        height: 52,
+        width: layout.rail.button.width,
+        height: layout.rail.button.height,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 3,
-        borderRadius: tokens.fontIcon,
+        gap: tokens.spaceXs,
+        borderRadius: tokens.radiusControl,
         border: 'none',
         background: active ? tokens.accentSoft : 'transparent',
         color: active ? tokens.colorPrimary : tokens.textSecondary,
@@ -91,14 +97,22 @@ function RailButton({
         transition: 'background 0.15s',
       }}
       onMouseEnter={(event) => {
-        if (!active) event.currentTarget.style.background = tokens.bgElevated;
+        if (!active) event.currentTarget.style.background = hoverBg;
       }}
       onMouseLeave={(event) => {
         event.currentTarget.style.background = active ? tokens.accentSoft : 'transparent';
       }}
     >
       {icon}
-      <span style={{ fontSize: tokens.fontIcon, fontWeight: active ? 600 : 400 }}>{label}</span>
+      <span
+        style={{
+          fontSize: tokens.text.badge.size,
+          lineHeight: tokens.text.badge.leading,
+          fontWeight: active ? tokens.text.badge.weightActive : tokens.text.badge.weight,
+        }}
+      >
+        {label}
+      </span>
     </button>
   );
 }

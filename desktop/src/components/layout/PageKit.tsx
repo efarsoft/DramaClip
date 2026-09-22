@@ -1,11 +1,11 @@
-/** DSS v1 布局骨架：页面壳 / 页头 / 分区 / 向导底栏（docs/desktop/04 §2）。 */
+/** DSS v1 布局骨架：页面壳 / 页头 / 分区 / 向导底栏（规格 §1–§3）。 */
 import type { CSSProperties, ReactNode } from 'react';
-import { Button } from 'antd';
+import { Button, Tooltip } from 'antd';
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { mixins } from '../../styles/mixins';
-import { tokens } from '../../styles/theme';
+import { layout, tokens } from '../../styles/theme';
 
-/** 页面容器：内容页 1080 居中；fullbleed 供向导型工作台。 */
+/** 页面容器：内容页满宽（§2）；fullbleed 供向导型工作台。 */
 export function PageShell({
   children,
   fullbleed = false,
@@ -14,7 +14,7 @@ export function PageShell({
   fullbleed?: boolean;
 }): React.ReactElement {
   const style = fullbleed
-    ? { ...mixins.pageShell(true), gap: tokens.spaceXl, padding: `${tokens.spaceXl} 0` }
+    ? { ...mixins.pageShell(true), gap: layout.fullbleed.gap, padding: `${layout.fullbleed.paddingBlock} 0` }
     : mixins.pageShell();
   return <div style={style}>{children}</div>;
 }
@@ -45,8 +45,9 @@ export function PageHeader({
           <h1
             style={{
               margin: 0,
-              fontSize: tokens.fontTitleLg,
-              fontWeight: 700,
+              fontSize: tokens.text.pageTitle.size,
+              lineHeight: tokens.text.pageTitle.leading,
+              fontWeight: tokens.text.pageTitle.weight,
               color: tokens.textPrimary,
             }}
           >
@@ -55,7 +56,14 @@ export function PageHeader({
           {chip !== undefined && <span style={mixins.chip()}>{chip}</span>}
         </div>
         {desc !== undefined && (
-          <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginTop: tokens.spaceSm }}>
+          <div
+            style={{
+              fontSize: tokens.text.body.size,
+              lineHeight: tokens.text.body.leading,
+              color: tokens.textTertiary,
+              marginTop: tokens.spaceSm,
+            }}
+          >
             {desc}
           </div>
         )}
@@ -104,8 +112,9 @@ export function PageSection({
           <span style={mixins.sectionBar()} />
           <span
             style={{
-              fontSize: tokens.fontTitle,
-              fontWeight: 600,
+              fontSize: tokens.text.cardTitle.size,
+              lineHeight: tokens.text.cardTitle.leading,
+              fontWeight: tokens.text.cardTitle.weight,
               color: tokens.textPrimary,
               marginLeft: tokens.spaceSm,
             }}
@@ -122,12 +131,13 @@ export function PageSection({
   );
 }
 
-/** 向导页底栏：上一步 / 进度文案 / 下一步。 */
+/** 向导页底栏：上一步 / 进度文案 / 下一步（禁用时给出解锁条件）。 */
 export function PageFooter({
   step,
   total,
   canProceed,
   proceedHint,
+  lockedHint,
   nextLabel,
   onPrev,
   onNext,
@@ -136,6 +146,8 @@ export function PageFooter({
   total: number;
   canProceed: boolean;
   proceedHint: string;
+  /** 未满足推进条件时悬停给出的原因；不传则不给提示。 */
+  lockedHint?: string;
   nextLabel: string;
   onPrev: () => void;
   onNext: () => void;
@@ -143,12 +155,12 @@ export function PageFooter({
   return (
     <div
       style={{
-        height: 46,
+        height: layout.footer.height,
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
         gap: tokens.spaceMd,
-        padding: `0 ${tokens.spaceLg}`,
+        padding: `0 ${layout.footer.paddingX}`,
         background: tokens.bgSidebar,
         borderTop: `1px solid ${tokens.borderSecondary}`,
       }}
@@ -160,13 +172,21 @@ export function PageFooter({
       >
         上一步
       </Button>
-      <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
+      <span
+        style={{
+          fontSize: tokens.text.meta.size,
+          lineHeight: tokens.text.meta.leading,
+          color: tokens.textTertiary,
+        }}
+      >
         步骤 {String(step)} / {String(total)} · {proceedHint}
       </span>
-      <Button type="primary" style={{ marginLeft: 'auto' }} disabled={!canProceed} onClick={onNext}>
-        下一步：{nextLabel}
-        <RightOutlined style={{ fontSize: tokens.fontMicro }} />
-      </Button>
+      <Tooltip title={canProceed ? '' : (lockedHint ?? '')}>
+        <Button type="primary" style={{ marginLeft: 'auto' }} disabled={!canProceed} onClick={onNext}>
+          下一步：{nextLabel}
+          <RightOutlined style={{ fontSize: tokens.glyph.icon }} />
+        </Button>
+      </Tooltip>
     </div>
   );
 }

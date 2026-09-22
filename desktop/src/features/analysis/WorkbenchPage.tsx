@@ -1,13 +1,13 @@
 /** 项目详情工作台：步骤导航 + 左素材列表 + 右复合面板（分割线可拖拽）。 */
 import { useNavigate, useParams } from 'react-router-dom';
 import { App as AntdApp } from 'antd';
-import { tokens } from '../../styles/theme';
+import { layout, tokens } from '../../styles/theme';
 import { useAnalysisWorkspace } from './useAnalysisWorkspace';
 import { useEpisodeOrder } from './useEpisodeOrder';
 import { useEpisodeReorder, useProjectDetail } from './useProjectDetail';
 import { useSplitDrag } from './useSplit';
 import { WorkbenchHeader } from './WorkbenchHeader';
-import { StepFooter } from './StepFooter';
+import { PageFooter } from '../../components/layout/PageKit';
 import { EpisodeListPanel } from './EpisodeListPanel';
 import { EpisodeDetail } from './EpisodeDetail';
 
@@ -34,6 +34,9 @@ export function WorkbenchPage() {
         onBatchAnalyze={() => {
           startAnalysis(workspace.start, message);
         }}
+        onCancel={() => {
+          startAnalysis(workspace.cancel, message);
+        }}
       />
       <TwoColumns
         projectId={projectId}
@@ -49,7 +52,7 @@ export function WorkbenchPage() {
           void workspace.reload();
         }}
       />
-      <StepFooter
+      <PageFooter
         step={1}
         total={4}
         canProceed={doneCount > 0}
@@ -58,6 +61,7 @@ export function WorkbenchPage() {
             ? '完成至少一集分析后进入出片'
             : `已完成 ${String(doneCount)} 集 · 到出片中心选择模式`
         }
+        lockedHint="完成至少一集分析后解锁"
         nextLabel="选择出片模式"
         onPrev={() => {
           void navigate('/projects');
@@ -93,14 +97,14 @@ interface TwoColumnsProps {
 }
 
 function TwoColumns(props: TwoColumnsProps): React.ReactElement {
-  const { pct, containerRef, onHandleDown } = useSplitDrag(24);
+  const { pct, containerRef, onHandleDown } = useSplitDrag();
   const order = useEpisodeOrder(props.episodes, props.onReorder);
   return (
     <div
       ref={containerRef}
       style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'stretch' }}
     >
-      <div style={{ width: `${String(pct)}%`, minWidth: 250, overflowY: 'auto' }}>
+      <div style={{ width: `${String(pct)}%`, minWidth: layout.split.minWidth, overflowY: 'auto' }}>
         <EpisodeListPanel
           orderedIds={order.orderedIds}
           byId={order.byId}
@@ -120,9 +124,9 @@ function TwoColumns(props: TwoColumnsProps): React.ReactElement {
       </div>
       <div
         onPointerDown={onHandleDown}
-        style={{ width: 6, cursor: 'col-resize', flexShrink: 0, background: tokens.borderSecondary }}
+        style={{ width: layout.split.handle, cursor: 'col-resize', flexShrink: 0, background: tokens.borderSecondary }}
       />
-      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', paddingLeft: 14 }}>
+      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', paddingLeft: layout.split.paddingX }}>
         <EpisodeDetail
           projectId={props.projectId}
           episodes={props.episodes}

@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { appVersion, systemApi } from '../../services/client';
 import type { GpuInfo } from '@dramaclip/protocol';
 import { useUiStore } from '../../stores/ui';
-import { tokens } from '../../styles/theme';
+import { mixins } from '../../styles/mixins';
+import { layout, tokens } from '../../styles/theme';
 
 const STATE_META: Record<string, { label: string; color: string }> = {
   starting: { label: '启动中', color: tokens.colorWarning },
@@ -46,28 +47,21 @@ export function StatusBar(): React.ReactElement {
   return (
     <div
       style={{
-        height: 26,
+        height: layout.statusBar.height,
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
         gap: tokens.spaceLg,
-        padding: '0 14px',
+        padding: `0 ${layout.statusBar.paddingX}`,
         background: tokens.bgSidebar,
         borderTop: `1px solid ${tokens.borderSecondary}`,
-        fontSize: tokens.fontMicro,
+        fontSize: tokens.text.badge.size,
+        lineHeight: tokens.text.badge.leading,
         color: tokens.textTertiary,
       }}
     >
       <span style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
-        <span
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: tokens.radiusDot,
-            background: meta.color,
-            boxShadow: `0 0 6px ${meta.color}`,
-          }}
-        />
+        <span style={mixins.statusDot(meta.color)} />
         Python 服务 · {meta.label}
       </span>
       <span>FFmpeg · 内置</span>
