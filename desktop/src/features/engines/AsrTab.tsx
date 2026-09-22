@@ -14,10 +14,10 @@ import type { Reports } from './assetState';
 import {
   activateSettings,
   activeAsset,
+  activeStateNote,
   assetState,
   canActivate,
   externalAssets,
-  failureNote,
   formatBytes,
   reportFor,
 } from './assetState';
@@ -111,15 +111,13 @@ function ActiveCard({
   onVerify: DomainTabProps['onVerify'];
 }): ReactElement {
   const report = active === undefined ? undefined : reportFor(reports, active.model_id);
+  const state = active === undefined ? null : assetState(active, report, selftests?.[active.model_id]);
   const card: ActiveCardProps = {
     domain: '语音识别 ASR',
     title: active?.name ?? '未选择模型',
-    state:
-      active === undefined
-        ? null
-        : assetState(active, report, selftests?.[active.model_id]),
+    state,
     hint: '设置里没有可用的识别模型，去下方资产库选一个',
-    stateNote: failureNote(report),
+    stateNote: state === null ? undefined : activeStateNote(state, report),
     progress: useDownloadProgress(active),
     picker: <ModelPicker models={models} reports={reports} value={active?.model_id} onSave={onSave} />,
     actions:

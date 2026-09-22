@@ -12,6 +12,7 @@ import type { ReactElement } from 'react';
 import type { ModelInfo, OrphanCopy, SelftestResult, VerifyReport } from '@dramaclip/protocol';
 import { enginesApi, modelsApi } from '../../services/client';
 import { formatBytes } from './assetState';
+import { errorText } from './errorText';
 import { repairNeeds } from './repairPlan';
 
 interface RepairProps {
@@ -47,11 +48,7 @@ export function RepairActions({
   );
 }
 
-/** 服务端 rpc 拒绝时带 [code] 原文——原样上屏，比前端猜一句「失败」有用。 */
-function errText(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message !== '' ? error.message : fallback;
-}
-
+/** 服务端原话上屏走 errorText（./errorText）：这里不再养第二份。 */
 function ResidueButton({
   model,
   onChanged,
@@ -82,7 +79,7 @@ function ResidueButton({
             onChanged();
           })
           .catch((error: unknown) => {
-            message.error(errText(error, '清理失败'));
+            message.error(errorText(error, '清理失败'));
           })
           .finally(() => {
             setBusy(false);
@@ -119,7 +116,7 @@ function MigrateButton({
             onChanged();
           })
           .catch((error: unknown) => {
-            message.error(errText(error, '迁移失败'));
+            message.error(errorText(error, '迁移失败'));
           });
       }}
     >
@@ -164,7 +161,7 @@ function OrphanButton({ model, onChanged }: { model: ModelInfo; onChanged: () =>
             onChanged();
           })
           .catch((error: unknown) => {
-            message.error(errText(error, '删除失败'));
+            message.error(errorText(error, '删除失败'));
           });
       }}
     >
@@ -214,7 +211,7 @@ function SelftestButton({
             onChanged();
           })
           .catch((error: unknown) => {
-            message.error(errText(error, '自检失败'));
+            message.error(errorText(error, '自检失败'));
           })
           .finally(() => {
             setBusy(false);
@@ -262,7 +259,7 @@ function RedownloadButton({ model, onChanged }: { model: ModelInfo; onChanged: (
             onChanged();
           })
           .catch((error: unknown) => {
-            message.error(errText(error, '下载任务创建失败'));
+            message.error(errorText(error, '下载任务创建失败'));
           });
       }}
     >

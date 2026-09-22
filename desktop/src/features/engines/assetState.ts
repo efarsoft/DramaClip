@@ -119,6 +119,18 @@ export function formatBytes(bytes: number): string {
   return `${gb.toFixed(2)}GB`;
 }
 
+/** 生效卡的状态补充行：fail 给判据原文；待自检/未校验给能落地的下一步，不替业主下结论。 */
+export function activeStateNote(
+  state: AssetState,
+  report: VerifyReport | undefined,
+): string | undefined {
+  const note = failureNote(report);
+  if (note !== undefined) return note;
+  if (state === 'untested') return '文件校验通过，但能力自检还没通过——资产行里点「自检」，过了才叫就绪';
+  if (state === 'unverified') return '还没校验过——资产行里点「体检」按判据核一遍';
+  return undefined;
+}
+
 /** 「就绪与修复」段的一条待办：现象 + 后果（§10.5 三要素的前两件，动作在行内按钮上）。 */
 export interface AttentionAsset {
   readonly model: ModelInfo;

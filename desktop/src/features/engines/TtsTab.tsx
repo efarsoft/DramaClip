@@ -15,9 +15,9 @@ import type { AssetState, Reports } from './assetState';
 import {
   activateSettings,
   activeAsset,
+  activeStateNote,
   assetState,
   externalAssets,
-  failureNote,
   formatBytes,
   reportFor,
 } from './assetState';
@@ -150,7 +150,7 @@ function ActiveCard({
     title: active?.name ?? (engine === '' ? '未选引擎' : ttsEngineLabel(engine)),
     state,
     hint: '云端引擎，无需本地模型 · 需联网',
-    stateNote: failureNote(report),
+    stateNote: state === null ? undefined : activeStateNote(state, report),
     progress: useDownloadProgress(active),
     picker: (
       <Segmented

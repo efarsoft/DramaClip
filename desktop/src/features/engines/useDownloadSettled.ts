@@ -14,7 +14,13 @@ export function useDownloadSettled(onChanged: () => void): void {
       if (state.status === 'done') {
         message.success('模型下载完成');
       } else {
-        message.error('模型下载失败，可在该行重试下载');
+        // 分类原因随事件到达（classify_failure 的原话）——上屏，不吞成一句干巴巴的「失败」
+        message.error(
+          state.message !== ''
+            ? `模型下载失败：${state.message}——可在该行重试`
+            : '模型下载失败，可在该行重试下载',
+          8,
+        );
       }
       onChanged();
     }

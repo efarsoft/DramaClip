@@ -1,11 +1,13 @@
 /** 下载源选择按钮：点击弹气泡（选源 + 复制链接 + 开始下载），进度就地显示。 */
 import { useState, type ReactElement } from 'react';
-import { App as AntdApp, Button, Popover, Radio } from 'antd';
+import { App as AntdApp, Button, Popover, Radio, Tooltip } from 'antd';
 import { CopyOutlined, DownloadOutlined } from '@ant-design/icons';
 import type { ModelInfo, ModelSource } from '@dramaclip/protocol';
 import { modelsApi } from '../../services/client';
 import { useUiStore } from '../../stores/ui';
 import { tokens } from '../../styles/theme';
+import { downloadingLabel } from './downloadLabel';
+import { errorText } from './errorText';
 
 const SOURCE_META: Record<string, { label: string; hint: string }> = {
   modelscope: { label: 'ModelScope（国内）', hint: '国内 CDN，速度最快，推荐' },
@@ -17,7 +19,7 @@ function sourceLabel(kind: string): string {
   return SOURCE_META[kind]?.label ?? kind;
 }
 
-/** 下载按钮：单源直接下，多源弹选择气泡；下载中显示进度。 */
+/** 下载按钮：单源直接下，多源弹选择气泡；下载中显示进度三件套；失败给原因 + 重试。 */
 export function DownloadSourceButton({
   model,
   onChanged,
@@ -31,9 +33,12 @@ export function DownloadSourceButton({
   if (download?.status === 'downloading') {
     return (
       <Button size="small" disabled style={{ minWidth: 86 }}>
-        下载中 {String(Math.floor(download.percent))}%
+        {downloadingLabel(download)}
       </Button>
     );
+  }
+  if (download?.status === 'failed') {
+    return <RetryDownload model={model} reason={download.message} onChanged={onChanged} />;
   }
   if (sources.length === 0) {
     return <DirectDownload model={model} onChanged={onChanged} />;
@@ -50,6 +55,33 @@ export function DownloadSourceButton({
         下载
       </Button>
     </Popover>
+  );
+}
+
+/** 失败态（附录 B② 根治）：分类原因挂在悬停上，按钮直接给「重试」——名字与动作同权重。 */
+function RetryDownload({
+  model,
+  reason,
+  onChanged,
+}: {
+  model: ModelInfo;
+  reason: string;
+  onChanged: () => void;
+}): ReactElement {
+  const { message } = AntdApp.useApp();
+  return (
+    <Tooltip title={reason !== '' ? `上次失败：${reason}` : '上次下载失败了'} placement="top">
+      <Button
+        size="small"
+        danger
+        icon={<DownloadOutlined />}
+        onClick={() => {
+          launch(message, model, undefined, onChanged);
+        }}
+      >
+        重试
+      </Button>
+    </Tooltip>
   );
 }
 
@@ -161,7 +193,8 @@ function launch(
   modelsApi
     .download(model.model_id, source)
     .then(onChanged)
-    .catch(() => {
-      message.error('下载任务创建失败');
+    .catch((error: unknown) => {
+      // 串行闸与磁盘预算的拒绝原话（「已有下载任务进行中…」「磁盘空间不足…」）必须上屏
+      message.error(errorText(error, '下载任务创建失败'));
     });
 }

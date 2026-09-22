@@ -22,7 +22,7 @@ import { FIT_VERDICT_COLOR, judgeModelFit, type MachineSpecs, parseSizeGb } from
 import { GRID } from './assetGrid';
 import { RowActions } from './RowActions';
 import { VerifyDetail } from './VerifyDetail';
-import { useDownloadProgress } from './useDownloadProgress';
+import { useDownloadState } from './useDownloadProgress';
 
 export interface AssetRowProps {
   model: ModelInfo;
@@ -149,14 +149,32 @@ function StateCell({
   state: AssetState;
   report: VerifyReport | undefined;
 }): ReactElement {
-  const progress = useDownloadProgress(model);
+  const download = useDownloadState(model);
   const note = failureNote(report);
   // warn 上卡（§10.1 降级的另一半：可见 + 有修法）；储备资产的「引擎接入」warn
   // 是分区自带的事实，不再重复喊一遍。
   const warns = note === undefined && state !== 'reserve' ? warnSummary(report) : undefined;
+  // 失败态上屏（附录 B② 根治）：分类原因写在行里，不只在一次性 toast 里闪一下
+  const failed = download?.status === 'failed' && download.message !== '' ? download.message : undefined;
   return (
     <span style={{ minWidth: 0 }}>
-      <StateBadge state={state} progress={progress} />
+      <StateBadge state={state} progress={download?.status === 'downloading' ? download.percent : undefined} />
+      {failed !== undefined && (
+        <div
+          title={`上次下载失败：${failed}`}
+          style={{
+            fontSize: tokens.text.badge.size,
+            lineHeight: tokens.text.badge.leading,
+            color: tokens.colorError,
+            maxWidth: 220,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          下载失败：{failed}
+        </div>
+      )}
       {note !== undefined && (
         <div style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.colorError }}>{note}</div>
       )}

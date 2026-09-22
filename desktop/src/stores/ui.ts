@@ -13,6 +13,12 @@ export interface AnalysisProgress {
 export interface ModelDownloadState {
   readonly percent: number;
   readonly status: 'downloading' | 'done' | 'failed';
+  /** 速度文本（如「3.2 MB/s」）；空串 = 后端算不出（刚起步，采样窗没满）。 */
+  readonly speed: string;
+  /** 预计剩余文本（如「3分20秒」）；空串 = 还估不出——界面显示「—」，不瞎猜。 */
+  readonly eta: string;
+  /** 失败原因的分类原话（后端 classify_failure 产出）；非 failed 时为空串。 */
+  readonly message: string;
 }
 
 /** 仅全局 UI 状态（docs/desktop/01 §3）；域内状态留在各 feature。 */
@@ -70,13 +76,23 @@ export function subscribeAnalysisProgress(): () => void {
 export function subscribeModelDownloadProgress(): () => void {
   return onServiceEvent((event) => {
     if (event.type !== 'notification' || event.method !== 'models.download_progress') return;
-    const params = event.params as { model_id?: unknown; percent?: unknown; status?: unknown };
+    const params = event.params as {
+      model_id?: unknown;
+      percent?: unknown;
+      status?: unknown;
+      speed?: unknown;
+      eta?: unknown;
+      message?: unknown;
+    };
     const modelId = typeof params.model_id === 'string' ? params.model_id : '';
     const status = params.status === 'done' || params.status === 'failed' ? params.status : 'downloading';
     if (modelId === '') return;
     useUiStore.getState().setModelDownload(modelId, {
       percent: typeof params.percent === 'number' ? params.percent : 0,
       status,
+      speed: typeof params.speed === 'string' ? params.speed : '',
+      eta: typeof params.eta === 'string' ? params.eta : '',
+      message: typeof params.message === 'string' ? params.message : '',
     });
   });
 }

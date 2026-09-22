@@ -93,7 +93,7 @@ export function AssetLibrary({
             <AssetGroup title="可用 · 引擎已接入" models={usable} {...group} />
             <AssetGroup
               title="储备 · 待接入"
-              hint="下载备用可以，选为生效不行——合成/识别路径还没接进工厂"
+              hint="下载备用可以，选为生效不行——合成/识别路径还没接进工厂。接入后各自进对应模式（如 IndexTTS2 → 音色克隆配音）；时间不预先承诺，界面不说没证的话"
               collapsible
               models={reserve}
               {...group}
