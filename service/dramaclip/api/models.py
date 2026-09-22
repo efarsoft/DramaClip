@@ -38,6 +38,7 @@ def register(router: Router, context: AppContext) -> None:
     router.register("models.download", lambda params: download(context, params))
     router.register("models.scan_local", lambda params: scan_local(context))
     router.register("models.verify", lambda params: verify(context, params))
+    router.register("models.relayout", lambda params: relayout(context, params))
     router.register("models.import_inspect", lambda params: import_inspect(context, params))
     router.register("models.import_commit", lambda params: import_commit(context, params))
     router.register("models.import_records", lambda params: import_records(context))
@@ -88,6 +89,28 @@ def verify(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:
             if registry.detect_status(models_dir, spec)["status"] == "installed"
         ]
     return [registry.verify(models_dir, spec) for spec in specs]
+
+
+def relayout(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """whisper 存量 ``snapshots/main`` 就地迁移成提交号布局：改名 + 补 refs/trees，零重新下载。
+
+    同步短活（一次在线解析提交号 + 目录改名 + 逐文件哈希，秒级），不建作业；
+    解析不到提交号/目标修订已并存时把 ValueError 原文转域错误——那都是要业主
+    看见的诚实结论，不是可以吞掉的内部状态。
+    """
+    model_id = str(params.get("model_id") or "")
+    spec = downloader.spec_by_id(model_id)
+    if spec is None:
+        raise RpcDomainError(_ERR_MODEL_NOT_FOUND, f"未知模型: {model_id}")
+    try:
+        result = downloader.relayout_whisper_cache(
+            spec, context.data_dir / "models", endpoints(context)
+        )
+    except ValueError as exc:
+        raise RpcDomainError(_ERR_MODEL_STATE, str(exc)) from exc
+    if result["migrated"]:
+        context.notifier.log("info", f"{spec.name}：缓存布局已就地迁移到 {result['path']}")
+    return result
 
 
 def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:

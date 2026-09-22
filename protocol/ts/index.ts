@@ -358,6 +358,14 @@ export interface VerifyReport {
   readonly checks: ReadonlyArray<VerifyCheck>;
 }
 
+/** whisper 存量缓存就地迁移的结果（models.relayout）。 */
+export interface RelayoutResult {
+  /** 迁移后（或幂等命中时既有）的快照目录绝对路径。 */
+  readonly path: string;
+  /** false = 已是目标布局，本次未动盘（幂等空操作）。 */
+  readonly migrated: boolean;
+}
+
 /** 本地导入登记项（models/imported.json 的一行）。 */
 export interface ImportRecord {
   readonly model_id: string | null;
@@ -541,6 +549,7 @@ export const METHOD_NAMES = [
   'models.download',
   'models.scan_local',
   'models.verify',
+  'models.relayout',
   'models.import_inspect',
   'models.import_commit',
   'models.import_records',

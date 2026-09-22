@@ -27,6 +27,7 @@ import type {
   ScannedEpisode,
   ServiceEvent,
   PromptsListResult,
+  RelayoutResult,
   TtsPreviewResult,
   VerifyReport,
 } from '@dramaclip/protocol';
@@ -203,6 +204,9 @@ export const modelsApi = {
   /** 资产体检：给 id 报那一项，不给则批量报所有已落盘的（只读，不改文件）。 */
   verify: (modelId?: string): Promise<VerifyReport[]> =>
     rpc<VerifyReport[]>('models.verify', modelId === undefined ? {} : { model_id: modelId }),
+  /** whisper 存量 snapshots/main 就地迁移成提交号布局：零重新下载；失败原因在域错误原文里。 */
+  relayout: (modelId: string): Promise<RelayoutResult> =>
+    rpc<RelayoutResult>('models.relayout', { model_id: modelId }),
   remove: (modelId: string): Promise<{ ok: boolean }> =>
     rpc<{ ok: boolean }>('models.delete', { model_id: modelId }),
   /** 导入向导第 ② 步：只读识别与体检，不落盘也不写登记。 */

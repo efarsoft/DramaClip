@@ -164,6 +164,23 @@
         }
       }
     },
+    "RelayoutResult": {
+      "type": "object",
+      "required": [
+        "path",
+        "migrated"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "迁移后（或幂等命中时既有）的快照目录绝对路径"
+        },
+        "migrated": {
+          "type": "boolean",
+          "description": "false = 已是目标布局，本次未动盘（幂等空操作）"
+        }
+      }
+    },
     "ImportRecord": {
       "type": "object",
       "required": [
@@ -458,6 +475,25 @@
         "items": {
           "$ref": "#/x-models/VerifyReport"
         }
+      }
+    },
+    {
+      "name": "models.relayout",
+      "summary": "whisper 存量 snapshots/main 就地迁移成提交号布局：改名 + 补 refs/trees，零重新下载；解析不到提交号如实报错",
+      "params": {
+        "type": "object",
+        "required": [
+          "model_id"
+        ],
+        "properties": {
+          "model_id": {
+            "type": "string",
+            "description": "whisper 系 model_id（非 faster-whisper 档位拒绝）"
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/x-models/RelayoutResult"
       }
     },
     {

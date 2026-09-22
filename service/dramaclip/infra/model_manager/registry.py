@@ -256,6 +256,11 @@ def _hf_cache_layout(base: Path) -> bool:
     return (base / "snapshots").is_dir() or any(base.glob("models--*"))
 
 
+def whisper_cache(base: Path, spec: ModelSpec) -> Path | None:
+    """placement 下该档位自己的缓存根（四个 whisper 档位共用 placement，必须按档切分）。"""
+    return _whisper_cache(base, spec)
+
+
 def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
     """探测单个模型的安装状态：placement 目录下有实质文件即视为已安装。"""
     base = models_dir / spec.placement
@@ -266,9 +271,11 @@ def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
         if spec.engine == "faster_whisper":
             # HF 缓存布局，模型级精确探测：
             # placement/models--Systran--faster-whisper-<size>/snapshots/<hash>/model.bin
+            # refs/main 解析出的快照优先——引擎按 refs 加载，探测口径必须与加载口径一致，
+            # 否则会出现「体检报的修订」与「引擎真加载的修订」不是同一份。
             short = spec.model_id.removeprefix("faster-whisper-")
             for cache_dir in sorted(base.glob(f"models--*faster-whisper-{short}")):
-                for snapshot in sorted((cache_dir / "snapshots").glob("*"), reverse=True):
+                for snapshot in _snapshot_candidates(cache_dir):
                     if (snapshot / "model.bin").is_file():
                         installed, resolved, asset = True, snapshot, cache_dir
                         break
@@ -361,6 +368,19 @@ def _whisper_snapshot(cache: Path) -> Path | None:
             return named
     candidates = [p for p in sorted((cache / "snapshots").glob("*"), reverse=True) if p.is_dir()]
     return candidates[0] if candidates else None
+
+
+def _snapshot_candidates(cache: Path) -> list[Path]:
+    """快照目录枚举序：refs/main 解析出的那个排最前，其余按名字倒序兜底。
+
+    detect_status 与引擎加载必须同口径：refs 指向谁就优先信谁，
+    否则「体检报的修订」与「引擎真加载的修订」可能不是同一份。
+    """
+    preferred = _whisper_snapshot(cache)
+    rest = sorted((cache / "snapshots").glob("*"), reverse=True)
+    if preferred is None:
+        return rest
+    return [preferred] + [path for path in rest if path != preferred]
 
 
 def _missing_requirements(root: Path, required: tuple[str, ...]) -> list[str]:
@@ -464,21 +484,41 @@ def _verify_weights(root: Path, add: Any) -> None:
 
 
 def _verify_snapshot_revision(cache: Path, root: Path | None, add: Any) -> None:
-    """快照目录名必须是 40 位提交号，且与 refs/main 一致。
+    """refs/main 与快照目录名的一致性判据（severity 划分按规格 §10.1）。
 
-    真机形态：``models--Systran--faster-whisper-medium/snapshots/main`` + 4 字节的
-    ``refs/main``——下载没解析到提交号就收工了，这种缓存随时可能少文件。
+    - **fail**：refs 与快照不一致（两个权威对「加载哪个修订」意见不同，是真矛盾）；
+      或目录名非提交号**却有** trees 清单（清单自称可对账，与目录名互相打脸）。
+    - **warn**：目录名非提交号且无清单——只是当年下载没解析到提交号（历史版本
+      下载器就落 ``snapshots/main``，这形态多半是我们自己制造的，不是手动放置），
+      无从逐文件对账 ≠ 权重缺损，能不能加载留给能力层自检，不在文件层判死。
     """
     name = root.name if root is not None else ""
     ref = cache / "refs" / "main"
-    content = ref.read_text(encoding="utf-8").strip() if ref.is_file() else ""
-    if len(name) != 40 or any(char not in _HEX for char in name):
-        add("快照提交号", "fail", f"快照目录名不是提交号：{name or '（无）'}")
+    content = ref.read_text(encoding="utf-8", errors="replace").strip() if ref.is_file() else None
+    if content is not None and content != name:
+        add(
+            "快照提交号",
+            "fail",
+            f"refs/main={content!r} 与快照 {name!r} 不一致——加载哪个修订两个权威意见不同",
+        )
         return
-    if content != name:
-        add("快照提交号", "fail", f"refs/main={content!r} 与快照 {name} 不一致")
+    if len(name) == 40 and all(char in _HEX for char in name):
+        add("快照提交号", "pass", name[:12])
         return
-    add("快照提交号", "pass", name[:12])
+    has_trees = (cache / "trees").is_dir() and any((cache / "trees").glob("*.json"))
+    if has_trees:
+        add(
+            "快照提交号",
+            "fail",
+            f"有 trees 清单但快照目录名不是提交号：{name or '（无）'}——清单与目录名互相矛盾",
+        )
+        return
+    add(
+        "快照提交号",
+        "warn",
+        f"快照目录名不是提交号：{name or '（无）'}——无从按上游修订逐文件对账；"
+        "权重齐全仍可用，建议就地迁移或重新下载",
+    )
 
 
 def _verify_manifest(cache: Path, root: Path | None, add: Any) -> None:
@@ -491,10 +531,21 @@ def _verify_manifest(cache: Path, root: Path | None, add: Any) -> None:
 
 
 def _verify_residue(scope: Path, add: Any) -> None:
-    leftovers = list(scope.rglob("*.incomplete"))
+    """下载残留是卫生问题不是可用性缺陷（规格 §10.1 fail→warn）。
+
+    体检从头到尾不碰权重本身，残留也不参与推理——它只占磁盘。把它判成「不完整」
+    等于让 192MB 的垃圾文件禁掉一份 483MB 完好权重的「选为生效」；正确形态是
+    warn 上卡 + 「清理残留」动作（clean_residue 的删除范围与本判据同一口径）。
+    """
+    leftovers = [path for path in scope.rglob("*.incomplete") if path.is_file()]
     if leftovers:
         total = sum(p.stat().st_size for p in leftovers) / 1024 / 1024
-        add("中断残留", "fail", f"{len(leftovers)} 个 .incomplete 半截文件（{total:.0f}MB）")
+        add(
+            "中断残留",
+            "warn",
+            f"{len(leftovers)} 个 .incomplete 半截文件（{total:.0f}MB）——上次下载中断的残留，"
+            "占磁盘但不参与推理，可安全清理",
+        )
         return
     add("中断残留", "pass", "无 .incomplete 残留")
 

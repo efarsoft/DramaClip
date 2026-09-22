@@ -132,16 +132,49 @@ def test_verify_accepts_a_well_formed_hf_cache(tmp_path: Path) -> None:
     assert {c["name"] for c in report["checks"]} >= {"必需文件", "快照提交号", "下载清单"}
 
 
-def test_verify_rejects_unresolved_snapshot_dir(tmp_path: Path) -> None:
-    """snapshots/main + 4 字节 refs/main：下载没走到提交号就收工，正是本机 medium 的形状。"""
+def test_degraded_main_snapshot_without_metadata_warns_but_stays_usable(tmp_path: Path) -> None:
+    """规格 §10.1：目录名非提交号且无 refs/trees → warn「无从对账」，不 fail。
+
+    snapshots/main 正是历史版本自家下载器落出的形态——无从对账 ≠ 权重缺损，
+    能不能加载留给能力层自检，文件层不判死（本机 medium 曾被这条判据禁掉「选为生效」）。
+    """
+    spec = _spec("faster-whisper-medium")
+    base = tmp_path / "models" / spec.placement
+    base.mkdir(parents=True)
+    cache = _whisper_cache(base, rev="main")
+    shutil.rmtree(cache / "trees")
+    shutil.rmtree(cache / "refs")
+    report = registry.verify(tmp_path / "models", spec)
+    revision = next(c for c in report["checks"] if c["name"] == "快照提交号")
+    assert revision["status"] == "warn"
+    assert "无从" in revision["detail"]
+    assert report["ok"] is True, report
+
+
+def test_main_snapshot_with_trees_manifest_is_a_contradiction(tmp_path: Path) -> None:
+    """有 trees 清单却配着非提交号的目录名：清单自称可对账，与目录名互相打脸 → fail。"""
     spec = _spec("faster-whisper-medium")
     base = tmp_path / "models" / spec.placement
     base.mkdir(parents=True)
     _whisper_cache(base, rev="main")
     report = registry.verify(tmp_path / "models", spec)
     assert report["ok"] is False
-    failing = {c["name"] for c in report["checks"] if c["status"] == "fail"}
-    assert "快照提交号" in failing
+    revision = next(c for c in report["checks"] if c["name"] == "快照提交号")
+    assert revision["status"] == "fail"
+    assert "互相矛盾" in revision["detail"]
+
+
+def test_refs_pointing_elsewhere_still_fails(tmp_path: Path) -> None:
+    """refs 与快照目录名两个权威意见不同是真矛盾，severity 重划不动这条 fail。"""
+    spec = _spec("faster-whisper-medium")
+    base = tmp_path / "models" / spec.placement
+    base.mkdir(parents=True)
+    cache = _whisper_cache(base, rev="main")
+    (cache / "refs" / "main").write_text(_REV)
+    report = registry.verify(tmp_path / "models", spec)
+    revision = next(c for c in report["checks"] if c["name"] == "快照提交号")
+    assert revision["status"] == "fail"
+    assert "不一致" in revision["detail"]
 
 
 def test_verify_handles_a_cache_with_no_snapshot_dir(tmp_path: Path) -> None:
@@ -211,10 +244,12 @@ def test_verify_residue_scopes_to_the_models_own_cache(tmp_path: Path) -> None:
     assert report["ok"] is True, report
     residue = next(c for c in report["checks"] if c["name"] == "中断残留")
     assert residue["status"] == "pass"
-    # 反向确认判据没被削平：那只盯着 small 的体检必须报出来。
+    # 反向确认判据没被削平：那只盯着 small 的体检必须报出来（§10.1 后是 warn，仍上卡）。
     small = next(s for s in builtin_specs() if s.model_id == "faster-whisper-small")
-    assert next(c for c in registry.verify(tmp_path / "models", small)["checks"]
-                if c["name"] == "中断残留")["status"] == "fail"
+    small_residue = next(
+        c for c in registry.verify(tmp_path / "models", small)["checks"] if c["name"] == "中断残留"
+    )
+    assert small_residue["status"] == "warn"
 
 
 def test_verify_ignores_hf_lock_dirs_when_checking_duplicates(tmp_path: Path) -> None:
@@ -232,6 +267,7 @@ def test_verify_ignores_hf_lock_dirs_when_checking_duplicates(tmp_path: Path) ->
 
 
 def test_verify_reports_interrupted_download_residue(tmp_path: Path) -> None:
+    """残留是卫生问题不是可用性缺陷（§10.1 fail→warn）：上卡、报体积、给出「可安全清理」。"""
     spec = _spec("faster-whisper-medium")
     base = tmp_path / "models" / spec.placement
     base.mkdir(parents=True)
@@ -240,9 +276,10 @@ def test_verify_reports_interrupted_download_residue(tmp_path: Path) -> None:
     (cache / "blobs" / ("a" * 64 + ".incomplete")).write_bytes(b"x" * 1024)
     report = registry.verify(tmp_path / "models", spec)
     residue = next(c for c in report["checks"] if c["name"] == "中断残留")
-    assert residue["status"] == "fail"
-    assert "1" in residue["detail"]
-    assert report["ok"] is False
+    assert residue["status"] == "warn"
+    assert "1 个" in residue["detail"]
+    assert "清理" in residue["detail"]
+    assert report["ok"] is True, report
 
 
 def test_verify_reports_the_same_model_cached_twice(tmp_path: Path) -> None:

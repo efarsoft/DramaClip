@@ -1,7 +1,8 @@
-"""fetch 原语：Range 续传、镜像忽略 Range 时覆盖写、size 校验与取消。"""
+"""fetch 原语：Range 续传、镜像忽略 Range 时覆盖写、size/SHA256 校验与取消。"""
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -56,7 +57,7 @@ def _get(tmp_path: Path, base: str) -> tuple[Path, Path]:
 def test_download_then_resume_from_partial(tmp_path: Path, server: str) -> None:
     dest, url = _get(tmp_path, server)
     payload = _FILES["/model.bin"]
-    partial = dest.with_name(dest.name + ".download")
+    partial = dest.with_name(dest.name + fetch.TMP_SUFFIX)
     partial.write_bytes(payload[:16])  # 模拟上次中断
     fetch.download_file(url, dest, len(payload), cancel=threading.Event())
     assert dest.read_bytes() == payload
@@ -69,7 +70,7 @@ def test_ignored_range_overwrites_instead_of_append(tmp_path: Path, server: str)
     try:
         dest, url = _get(tmp_path, server)
         payload = _FILES["/model.bin"]
-        dest.with_name(dest.name + ".download").write_bytes(b"JUNK" * 16)
+        dest.with_name(dest.name + fetch.TMP_SUFFIX).write_bytes(b"JUNK" * 16)
         fetch.download_file(url, dest, len(payload), cancel=threading.Event())
         assert dest.read_bytes() == payload
     finally:
@@ -81,7 +82,32 @@ def test_size_mismatch_rejects(tmp_path: Path, server: str) -> None:
     with pytest.raises(IOError, match="大小校验失败"):
         fetch.download_file(url, dest, 999999, cancel=threading.Event())
     assert not dest.exists()
-    assert not dest.with_name(dest.name + ".download").exists()
+    assert not dest.with_name(dest.name + fetch.TMP_SUFFIX).exists()
+
+
+def test_sha256_match_passes(tmp_path: Path, server: str) -> None:
+    dest, url = _get(tmp_path, server)
+    payload = _FILES["/model.bin"]
+    fetch.download_file(
+        url,
+        dest,
+        len(payload),
+        expected_sha256=hashlib.sha256(payload).hexdigest().upper(),  # 大小写不敏感
+        cancel=threading.Event(),
+    )
+    assert dest.read_bytes() == payload
+
+
+def test_sha256_mismatch_deletes_partial(tmp_path: Path, server: str) -> None:
+    """哈希不对的半成品必须删干净：留着它，下次续传会把坏内容当合法前缀接着拼。"""
+    dest, url = _get(tmp_path, server)
+    with pytest.raises(IOError, match="SHA256 校验失败"):
+        fetch.download_file(
+            url, dest, len(_FILES["/model.bin"]), expected_sha256="0" * 64,
+            cancel=threading.Event(),
+        )
+    assert not dest.exists()
+    assert not dest.with_name(dest.name + fetch.TMP_SUFFIX).exists()
 
 
 def test_cancelled_before_read(tmp_path: Path, server: str) -> None:
