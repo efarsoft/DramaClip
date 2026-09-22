@@ -18,7 +18,50 @@ def test_full_lifecycle(memory_db: sqlite3.Connection) -> None:
     job = store.get(job_id)
     assert job is not None
     assert job["status"] == "completed"
-    assert job["progress"] == 45.5
+    # 终态的 100 由 mark_completed 迁移写入，不再保留中断时的 45.5——
+    # 与 set_progress 的 99 cap 成对（见 test_set_progress_caps_at_99_until_completed）。
+    assert job["progress"] == 100.0
+
+
+def test_set_progress_caps_at_99_until_completed(memory_db: sqlite3.Connection) -> None:
+    """非终态 cap：没到 DONE 就不许写 100——防「进度 100% 但任务没完成」的假状态。
+
+    cap 必须做在 set_progress 写入层、且 mark_completed 必须补写 100，两处成对：
+    只做 cap 会让完成任务永远停在 99；只补 100 则运行中的任务照样能自报 100。
+    """
+    store = JobStore(memory_db)
+    job_id = store.create("export")
+    store.mark_running(job_id)
+    store.set_progress(job_id, 100.0, "渲染完成")
+    row = store.get(job_id)
+    assert row is not None
+    assert row["progress"] == 99.0, "非终态写 100 必须被钳到 99"
+    assert row["label"] == "渲染完成", "cap 只钳数值，label 照常写"
+    store.set_progress(job_id, 137.0)
+    assert store.get(job_id)["progress"] == 99.0  # type: ignore[index]
+    store.mark_completed(job_id)
+    assert store.get(job_id)["progress"] == 100.0  # type: ignore[index]
+
+
+def test_set_progress_keeps_intermediate_values(memory_db: sqlite3.Connection) -> None:
+    """cap 只碰 >=100 的写入，中间值（含 99.x）原样落库。"""
+    store = JobStore(memory_db)
+    job_id = store.create("export")
+    store.set_progress(job_id, 99.4)
+    assert store.get(job_id)["progress"] == 99.4  # type: ignore[index]
+    store.set_progress(job_id, 42.0)
+    assert store.get(job_id)["progress"] == 42.0  # type: ignore[index]
+
+
+def test_mark_failed_keeps_interrupted_progress(memory_db: sqlite3.Connection) -> None:
+    """只有 completed 迁移补写 100：失败任务保留中断时的进度（事后诊断用）。"""
+    store = JobStore(memory_db)
+    job_id = store.create("export")
+    store.set_progress(job_id, 55.0)
+    store.mark_failed(job_id, "boom")
+    job = store.get(job_id)
+    assert job is not None
+    assert job["progress"] == 55.0
 
 
 def test_terminal_state_rejects_transition(memory_db: sqlite3.Connection) -> None:

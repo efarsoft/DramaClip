@@ -400,8 +400,22 @@ def nvenc_available() -> bool:
         return _NVENC_CACHE
 
 
-def _run_cut(args: list[str], cancel: threading.Event | None = None) -> None:
-    runner.run(args, timeout_s=600, cancel=cancel)
+def _run_cut(
+    args: list[str],
+    cancel: threading.Event | None = None,
+    *,
+    total_duration_s: float | None = None,
+    on_progress: runner.ProgressCallback | None = None,
+) -> None:
+    # total_duration_s/on_progress 成对给才生效（runner.run 据此追加 -progress pipe:1）；
+    # 默认 None 时与旧行为逐字节一致。测试桩是 lambda *_a, **_k 形状，吸收新 kwargs。
+    runner.run(
+        args,
+        timeout_s=600,
+        cancel=cancel,
+        total_duration_s=total_duration_s,
+        on_progress=on_progress,
+    )
 
 
 def export_plan(
@@ -433,6 +447,7 @@ def export_plan(
 
     # Phase A：构建每段命令参数（含台词保护区安全切点、字幕、混音）
     job_args: list[list[str]] = []
+    segment_durations: list[float] = []  # 与 job_args 同序：段内进度换算 0-1 比例的分母
     zones_cache: dict[str, list[SpeechZone]] = {}
     face_cache: dict[tuple[str, float], float | None] = {}
     for index, segment in enumerate(segments):
@@ -499,20 +514,50 @@ def export_plan(
                 crop_x_ratio=face_cache[face_key],
             )
         )
+        # 段内进度分母：声明时长（dedup 微变速 ±0.4% 忽略，runner 侧 min(fraction,1) 钳住）
+        segment_durations.append(max(safe_end - safe_start, 0.05))
 
     if cancel is not None and cancel.is_set():
         raise runner.FfmpegError("已取消", cancelled=True)
 
-    def _cut_one(args: list[str]) -> None:
-        _run_cut(args, cancel)
+    # 段内进度平滑（调研②）：总进度 = (已完成段 + 当前段内比例)/总段数 × 90。
+    # Phase A 并行时段收集序 ≠ 完成序，peak 钳住保证单调不减——进度条回退比冻结更像 bug。
+    progress_lock = threading.Lock()
+    progress_state = {"done": 0, "peak": 0.0}
+
+    def _emit(percent: float, label: str) -> None:
+        if on_progress is None:
+            return
+        with progress_lock:
+            percent = max(percent, progress_state["peak"])
+            progress_state["peak"] = percent
+        on_progress(percent, label)
+
+    def _cut_one(index: int, args: list[str]) -> None:
+        if on_progress is None:
+            _run_cut(args, cancel)  # 旧路径逐字节不变（不追加 -progress）
+            return
+
+        def _intra(fraction: float) -> None:
+            with progress_lock:
+                done = progress_state["done"]
+            _emit((done + min(fraction, 1.0)) / total * 90, f"切割第 {index + 1} 段")
+
+        _run_cut(
+            args,
+            cancel,
+            total_duration_s=segment_durations[index],
+            on_progress=_intra,
+        )
 
     # Phase A 并行执行（ffmpeg 自身多线程，2 并发已接近 IO/CPU 饱和）
     with ThreadPoolExecutor(max_workers=parallel) as pool:
-        futures = [pool.submit(_cut_one, args) for args in job_args]
+        futures = [pool.submit(_cut_one, index, args) for index, args in enumerate(job_args)]
         for done, future in enumerate(futures, start=1):
             future.result()
-            if on_progress is not None:
-                on_progress(done / total * 90, f"切割 {done}/{total}")
+            with progress_lock:
+                progress_state["done"] = done
+            _emit(done / total * 90, f"切割 {done}/{total}")
             if cancel is not None and cancel.is_set():
                 raise runner.FfmpegError("已取消", cancelled=True)
 

@@ -580,6 +580,7 @@ def _voice(
         context.work_dir / "tts",
         context.data_dir / "models",
         source_durations=source_durations,
+        log=context.notifier.log,
     )
 
 

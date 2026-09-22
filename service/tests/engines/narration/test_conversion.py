@@ -97,3 +97,75 @@ def test_last_segment_subtitle_cta_passes() -> None:
         ],
     )
     assert defects(plan) == []
+
+
+# ------------------------------------------------------------- 时间轴合法性缺陷（批次一 A2）
+# 纯 plan 数据可判的幻觉时间戳：负起点、end<=start、同集段区间重叠。
+# 此前只有 CTA/禁用词缺陷——LLM 剧本链坏时间轴一路放行到渲染期才暴雷。
+
+
+def _good_tail() -> tuple[list[TimelineSegment], list[NarrationText]]:
+    """结尾两段带合法 CTA，让新缺陷是断言里唯一新增项。"""
+    return (
+        [
+            TimelineSegment(
+                episode_id="ep1", start=0.0, end=3.0, audio="ducked", narration_id="a"
+            ),
+            TimelineSegment(
+                episode_id="ep1", start=3.0, end=6.0, audio="ducked", narration_id="b"
+            ),
+        ],
+        [
+            NarrationText(id="a", text="开场钩子"),
+            NarrationText(id="b", text="后面更狠——点进去看全集"),
+        ],
+    )
+
+
+def test_negative_start_is_a_defect() -> None:
+    timeline, texts = _good_tail()
+    timeline[0] = timeline[0].model_copy(update={"start": -1.0})
+    plan = PlanData(mode="full_narration", timeline=timeline, narration_texts=texts)
+    assert any("起点为负" in issue for issue in defects(plan))
+
+
+def test_end_before_start_is_a_defect() -> None:
+    timeline, texts = _good_tail()
+    timeline[1] = timeline[1].model_copy(update={"end": 1.0})  # start=3.0 > end
+    plan = PlanData(mode="full_narration", timeline=timeline, narration_texts=texts)
+    assert any("结束不晚于开始" in issue for issue in defects(plan))
+
+
+def test_overlap_within_episode_is_a_defect() -> None:
+    """同集两段画面区间重叠＝成片重播同一段素材（业主立案③），门禁必须拦。"""
+    timeline, texts = _good_tail()
+    timeline[1] = timeline[1].model_copy(update={"start": 2.0, "end": 6.0})  # 与 [0,3) 重叠
+    plan = PlanData(mode="full_narration", timeline=timeline, narration_texts=texts)
+    assert any("重叠" in issue for issue in defects(plan))
+
+
+def test_same_span_in_different_episodes_is_not_overlap() -> None:
+    """跨集本来就会重复用相似时间码：只有同集内两两比才算重叠。"""
+    timeline, texts = _good_tail()
+    timeline[1] = timeline[1].model_copy(update={"episode_id": "ep2"})
+    plan = PlanData(mode="full_narration", timeline=timeline, narration_texts=texts)
+    assert not any("重叠" in issue for issue in defects(plan))
+
+
+def test_touching_ends_are_not_overlap() -> None:
+    """首尾相接（前段 end == 后段 start）是连续推进，不是重叠。"""
+    timeline, texts = _good_tail()
+    plan = PlanData(mode="full_narration", timeline=timeline, narration_texts=texts)
+    assert defects(plan) == []
+
+
+def test_raw_clip_still_checks_timeline_legality() -> None:
+    """raw_clip 豁免的是 CTA 文案检查（无旁白），时间轴合法性照查——
+    现有口径就是「raw_clip 无旁白，只查时间轴」。"""
+    plan = PlanData(
+        mode="raw_clip",
+        timeline=[
+            TimelineSegment(episode_id="ep1", start=5.0, end=3.0, audio="original"),
+        ],
+    )
+    assert any("结束不晚于开始" in issue for issue in defects(plan))

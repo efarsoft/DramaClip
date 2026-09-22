@@ -37,6 +37,17 @@ def test_parse_json_blob_plain_and_fenced() -> None:
         parse_json_blob("不是 JSON")
 
 
+def test_parse_json_blob_tolerates_trailing_comma() -> None:
+    """尾逗号是 LLM 生成 JSON 的头号手滑（对象/数组/围栏内都会犯）：
+    一条「`,` 紧邻 `}`/`]` 前删除」的轻修复就能救回整次往返，省一轮重试。
+    不做括号配平/补引号——那是在替模型重写响应，救回的也是歪的。"""
+    assert parse_json_blob('{"a": 1, "b": [1, 2,],}') == {"a": 1, "b": [1, 2]}
+    assert parse_json_blob('[{"a": 1,},]') == [{"a": 1}]
+    assert parse_json_blob('```json\n{"a": 1,}\n```') == {"a": 1}
+    # 字符串值里的「,}」不是尾逗号，误删会毁掉文案内容
+    assert parse_json_blob('{"text": "值里有,}怎么办"}') == {"text": "值里有,}怎么办"}
+
+
 def test_conflict_llm_path() -> None:
     scenes = [SceneInfo(start=0, end=10), SceneInfo(start=10, end=20)]
     segments = [AsrSegment(start=1, end=3, text="你给我滚出去")]

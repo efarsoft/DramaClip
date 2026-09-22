@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -11,11 +12,21 @@ from pydantic import BaseModel, Field, ValidationError
 from dramaclip.engines.llm_trace import dump_trace
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable
 
+logger = logging.getLogger(__name__)
+
 _CHARS_PER_SECOND = 4.2  # 中文 TTS 语速估算（约 250 字/分钟）
 _MIN_SEGMENTS = 2
 _EPISODE_LINE_CAP = 80
 _TOTAL_LINE_CAP = 500
 _MIN_LINES_PER_EPISODE = 3  # 集数再多，每集也至少露面的保底线
+_MAX_ATTEMPTS = 3  # 首次 + 最多 2 次重试：网关抖动与模型手滑都不该一次判死
+
+# 重试注入的格式强化：原样重问等于期待模型原样再犯一遍。
+_FORMAT_REINFORCEMENT = (
+    "\n\n【格式强化】上一次输出不是合法 JSON 或结构不符合要求。"
+    "请严格按要求只输出 JSON：不要 markdown 围栏、不要任何多余文字；"
+    "每个片段必须含 episode/start/end/text，且 0 <= start < end，不得超过该集时间上界。"
+)
 
 # 基本功层（永远注入，不交给模型发挥）：平台验证过的解说手艺底线。
 # 题材口味由口味层（风格 directives）差异化，与此处不重叠。
@@ -117,27 +128,46 @@ def _require_explicit_episode(raw: Any, durations: dict[int, float]) -> None:
             )
 
 
-def _sanitize_episodes(raw: Any, durations: dict[int, float]) -> Script | None:
-    """跨集剧本清洗：未知集号丢弃、逐集去重叠、集内时间越界裁剪、最少段数。"""
+def _sanitize_episodes(raw: Any, durations: dict[int, float]) -> tuple[Script | None, int]:
+    """跨集剧本清洗：未知集号丢弃、逐集去重叠、集内时间越界裁剪、最少段数。
+
+    返回 (剧本, 钳制段数)：钳制是悄悄改数（负起点抬到 0、超长尾裁到集时长、
+    重叠段起点后移），段数进留痕才能对上「剧本为什么变短了」这笔账。
+    集时长缺失（<=0）等于没有上界可钳：只去重叠不裁尾，宁可放过也不整批丢光。
+    """
     script = Script.model_validate(raw)
     kept: list[ScriptSegment] = []
     cursors: dict[int, float] = {}
+    clamped = 0
     for segment in sorted(script.segments, key=lambda s: (s.episode, s.start)):
         if segment.episode not in durations:
             continue
         duration = durations[segment.episode]
         start = max(segment.start, cursors.get(segment.episode, 0.0))
-        end = min(segment.end, duration)
+        end = min(segment.end, duration) if duration > 0 else segment.end
         text = segment.text.strip()
         if end - start < 0.5 or text == "":
             continue
         updated = {"start": round(start, 2), "end": round(end, 2), "text": text}
+        if updated["start"] != segment.start or updated["end"] != segment.end:
+            clamped += 1
+            logger.info(
+                "剧本段钳制：第%d集 %s-%ss → %s-%ss",
+                segment.episode,
+                segment.start,
+                segment.end,
+                updated["start"],
+                updated["end"],
+            )
         kept.append(segment.model_copy(update=updated))
         cursors[segment.episode] = end
     if len(kept) < _MIN_SEGMENTS:
-        return None
+        return None, clamped
     dropped = len(script.segments) - len(kept)
-    return script.model_copy(update={"segments": kept, "dropped_segments": dropped})
+    return (
+        script.model_copy(update={"segments": kept, "dropped_segments": dropped}),
+        clamped,
+    )
 
 
 def clock(seconds: float) -> str:
@@ -285,14 +315,21 @@ def write_script_episodes(
     system = system_prompt(prompts)
     attempts: list[dict[str, Any]] = []
     script: Script | None = None
-    for _ in range(2):  # 失败重试一次
+    for attempt in range(_MAX_ATTEMPTS):
+        # 重试注入格式强化：原样重问等于期待模型原样再犯
+        ask = user_prompt + _FORMAT_REINFORCEMENT if attempt > 0 else user_prompt
+        raw: Any = None
         try:
-            raw = llm.chat_json(system, user_prompt)
+            raw = llm.chat_json(system, ask)
             _require_explicit_episode(raw, durations)
-            script = _sanitize_episodes(raw, durations)
+            script, clamped = _sanitize_episodes(raw, durations)
         except (LlmUnavailable, ValidationError, ValueError, TypeError, KeyError) as exc:
-            # 留痕必须带上异常类型：网关挂了与 schema 不合规是两件完全不同的事
-            attempts.append({"error": f"{type(exc).__name__}: {exc}"})
+            # 留痕必须带上异常类型：网关挂了与 schema 不合规是两件完全不同的事；
+            # 坏响应原文一并留下——只记异常文案，排查时分不清模型到底写了什么。
+            attempt_trace: dict[str, Any] = {"error": f"{type(exc).__name__}: {exc}"}
+            if raw is not None:
+                attempt_trace["raw"] = raw
+            attempts.append(attempt_trace)
             continue
         attempts.append(
             {
@@ -300,6 +337,7 @@ def write_script_episodes(
                 "accepted": script is not None,
                 "segments_kept": len(script.segments) if script is not None else 0,
                 "segments_dropped": script.dropped_segments if script is not None else 0,
+                "segments_clamped": clamped,
             }
         )
         if script is not None:

@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
+import shutil
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +33,8 @@ from dramaclip.engines.narration.transitions import apply as apply_transitions
 from dramaclip.engines.semantic.models import HighlightSegment
 from dramaclip.engines.tts import base as tts_base
 from dramaclip.engines.tts.factory import create as create_tts
+
+logger = logging.getLogger(__name__)
 
 MODE_LABELS = {
     "raw_clip": "纯原片剪辑",
@@ -209,31 +214,209 @@ def _assert_voiceable(plan: PlanData) -> None:
 
 
 def _content_addressed_audio(
-    work_dir: Path, slot_id: str, text: str, voice: str, engine: str
+    work_dir: Path, slot_id: str, text: str, voice: str, engine: str, speed: str = ""
 ) -> Path:
-    """音频文件名内容寻址：影响成品的输入 (text, voice, engine) 全部进哈希。
-    """
+    """音频文件名内容寻址：影响成品的输入 (text, voice, engine, speed) 全部进哈希。"""
     digest = hashlib.sha1(
-        f"{text}|{voice}|{engine}".encode(), usedforsecurity=False
+        f"{text}|{voice}|{engine}|{speed}".encode(), usedforsecurity=False
     ).hexdigest()[:12]
     return work_dir / f"{slot_id}-{digest}.mp3"
 
 
 def _synthesize_into(
-    engine: tts_base.TtsEngine, text: str, voice: str, final_path: Path
+    engine: tts_base.TtsEngine,
+    engine_name: str,
+    text: str,
+    voice: str,
+    speed: str,
+    final_path: Path,
+    cache_dir: Path,
 ) -> None:
     """缓存优先 + 暂存落位：命中即复用，未命中先写临时名、成功后原子搬进最终路径。
+
+    两层缓存判据：
+    1. 目标路径已存在且非空 → 直接跳过（既有判据，内容寻址文件名兜住参数变化）；
+    2. 内容寻址缓存 `cache_dir/sha256(text|engine|voice|speed).<ext>` 命中 →
+       copy 落位（改一句只重合成一段，未改的段落不二次付费）；
+    3. 都未命中 → 真合成，成功后写入缓存再原子落位。
     """
-    if final_path.is_file() and final_path.stat().st_size > 0:
+    if _usable(final_path):
         return
+    cache_entry = _cache_entry_for(cache_dir, text, engine_name, voice, speed)
+    if cache_entry is not None:
+        tmp = final_path.with_name(f"{final_path.stem}.{uuid.uuid4().hex}{final_path.suffix}")
+        try:
+            shutil.copyfile(cache_entry, tmp)
+            os.replace(tmp, final_path)
+            return
+        finally:
+            tmp.unlink(missing_ok=True)
     # uuid 插进主干、保留最终扩展名：soundfile/edge 都靠扩展名推断音频格式，
     # 以 .part 结尾会让 sf.write 直接抛 TypeError。
     staging = final_path.with_name(f"{final_path.stem}.{uuid.uuid4().hex}{final_path.suffix}")
     try:
         engine.synthesize(text, voice, staging)
+        _store_in_cache(staging, cache_dir, text, engine_name, voice, speed)
         os.replace(staging, final_path)
     finally:
         staging.unlink(missing_ok=True)
+
+
+def _usable(path: Path) -> bool:
+    """非空文件才算数：0 字节占位残留（历史脏产物）不是缓存命中。"""
+    return path.is_file() and path.stat().st_size > 0
+
+
+# ---- A5 内容寻址合成缓存 -----------------------------------------------
+# key = sha256(text|engine|voice|speed)。引擎没有可用的版本标识（TtsEngine 协议
+# 只有 name，本地引擎也无从廉价取到模型版本），key 就是这四个量；日后引擎换代
+# 需要整体作废旧缓存时，改 key 组成即等于换 schema。
+_CACHE_MAX_BYTES = 2 * 1024**3  # 2GB 容量上限（治理是 best-effort，永不 raise）
+
+
+def _cache_key(text: str, engine_name: str, voice: str, speed: str) -> str:
+    return hashlib.sha256(f"{text}|{engine_name}|{voice}|{speed}".encode()).hexdigest()
+
+
+def _cache_entry_for(
+    cache_dir: Path, text: str, engine_name: str, voice: str, speed: str
+) -> Path | None:
+    """命中返回缓存文件路径，未命中返回 None。任何探测异常都当未命中。"""
+    try:
+        key = _cache_key(text, engine_name, voice, speed)
+        for candidate in cache_dir.glob(f"{key}.*"):
+            if _usable(candidate):
+                return candidate
+    except OSError:
+        pass
+    return None
+
+
+def _store_in_cache(
+    source: Path, cache_dir: Path, text: str, engine_name: str, voice: str, speed: str
+) -> None:
+    """合成成功后写入缓存条目；失败静默放弃（缓存是加速层，不是正确性层）。"""
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        key = _cache_key(text, engine_name, voice, speed)
+        shutil.copyfile(source, cache_dir / f"{key}{source.suffix}")
+    except OSError as exc:
+        logger.debug("TTS 缓存写入失败（忽略）: %s", exc)
+
+
+def _evict_cache(cache_dir: Path, max_bytes: int) -> None:
+    """超上限按 mtime 淘汰最旧文件至上限内。best-effort：任何失败都不 raise。"""
+    try:
+        entries = [
+            (p.stat().st_mtime, p.stat().st_size, p)
+            for p in cache_dir.iterdir()
+            if p.is_file()
+        ]
+    except OSError:
+        return
+    total = sum(size for _mtime, size, _p in entries)
+    if total <= max_bytes:
+        return
+    for _mtime, size, path in sorted(entries, key=lambda item: item[0]):
+        if total <= max_bytes:
+            break
+        try:
+            path.unlink()
+            total -= size
+        except OSError as exc:  # 占用/只读/已消失：跳过这一条，继续淘汰别的
+            logger.debug("TTS 缓存淘汰失败（忽略）: %s", exc)
+
+
+# ---- B1 引擎解析：显式不回退，auto 才回退且留痕 ---------------------------
+# auto 链首是 edge：与历史默认 settings.get("tts.engine", "edge") 行为一致。
+_AUTO_CHAIN = ("edge", "kokoro", "indextts2")
+
+LogFn = Callable[[str, str], None]
+
+
+def _is_auto(engine_setting: str) -> bool:
+    return engine_setting.strip().lower() in ("", "auto")
+
+
+def _emit(log: LogFn | None, message: str) -> None:
+    logger.info("%s", message)
+    if log is not None:
+        log("info", message)
+
+
+class _EnginePool:
+    """一次配音任务的引擎解析与逐段合成。
+
+    显式引擎（`tts.engine` 是具体名字）：只此一个，构造失败当场抛（未知引擎的
+    ValueError 原样透传），合成失败原样抛——绝不静默换引擎（JJYB 纪律：克隆
+    音色失败落到 edge 默认音 = 人设声音变了还查不出来）。
+    auto/未配置：按 _AUTO_CHAIN 顺序试，构造或合成失败就带着原因试下一个，
+    每段成功后把 engine_requested/engine_used/fallback_used/fallback_reason
+    写进溯源日志（log 回调 + 模块级 logger 双写）。
+    """
+
+    def __init__(
+        self, setting: str, models_dir: Path | None, log: LogFn | None
+    ) -> None:
+        self._setting = setting
+        self._explicit = not _is_auto(setting)
+        self._requested = setting.strip() if self._explicit else "auto"
+        self._names: tuple[str, ...] = (
+            (self._requested,) if self._explicit else _AUTO_CHAIN
+        )
+        self._models_dir = models_dir
+        self._log = log
+        self._instances: dict[str, tts_base.TtsEngine] = {}
+        if self._explicit:
+            # 显式引擎构造失败必须当场炸（未知引擎名 = 配置错误，不许当 auto 兜走）
+            self._instances[self._requested] = create_tts(self._requested, models_dir)
+
+    @property
+    def label(self) -> str:
+        return self._requested
+
+    def voice_for(self, settings: dict[str, str]) -> str:
+        """音色按引擎独立成键；兼容升级前仅存全局 tts.voice 的旧库。"""
+        return settings.get(f"tts.voice.{self._setting}") or settings.get("tts.voice") or ""
+
+    def synthesize_item(
+        self,
+        item_id: str,
+        text: str,
+        voice: str,
+        speed: str,
+        work_dir: Path,
+        cache_dir: Path,
+    ) -> Path:
+        """合成一段，返回落位后的音频路径；全链失败抛 RuntimeError（逐因带出）。"""
+        reasons: list[str] = []
+        for name in self._names:
+            engine = self._instances.get(name)
+            if engine is None:
+                try:
+                    engine = create_tts(name, self._models_dir)
+                except Exception as exc:  # noqa: BLE001 - auto 链跳过构造不了的引擎
+                    reasons.append(f"{name}: 构造失败 {type(exc).__name__}: {exc}")
+                    continue
+                self._instances[name] = engine
+            target = _content_addressed_audio(work_dir, item_id, text, voice, name, speed)
+            try:
+                _synthesize_into(engine, name, text, voice, speed, target, cache_dir)
+            except Exception as exc:
+                if self._explicit:
+                    raise  # 显式引擎：原因原样上抛，由调用方带 item_id 包装，绝不换引擎
+                reasons.append(f"{name}: {type(exc).__name__}: {exc}")
+                continue
+            fallback_used = bool(reasons)
+            _emit(
+                self._log,
+                f"旁白 {item_id} 语音合成: engine_requested={self._requested}"
+                f" engine_used={name} fallback_used={fallback_used}"
+                f" fallback_reason={'; '.join(reasons)}",
+            )
+            return target
+        raise RuntimeError(f"auto 回退链全员失败: {'; '.join(reasons)}")
+
 
 
 def _assert_within_source(
@@ -296,6 +479,7 @@ def synthesize_narration_texts(
     models_dir: Path | None = None,
     *,
     source_durations: dict[str, float],
+    log: LogFn | None = None,
 ) -> PlanData:
     """逐段合成旁白并按 narration_id 回填时长与解说字幕。
 
@@ -303,32 +487,38 @@ def synthesize_narration_texts(
     `start + 实测音频时长`，只有拿到源长才知道这个窗口还在不在素材里。给默认值
     就等于给「跳过检查」开门，而跳过检查的代价是成片把旁白说到一半掐掉（见
     `_assert_within_source`）。
+
+    `log` 是可选的 (level, message) 回调（api 侧接 notifier.log），每段合成都会
+    留下 engine_requested/engine_used/fallback_used/fallback_reason 溯源记录；
+    不传则只写模块级 logger。引擎纪律见 `_EnginePool`：显式不回退，auto 才回退。
     """
     _assert_voiceable(plan)
     if not plan.narration_texts:
         return plan
-    engine_name = settings.get("tts.engine", "edge")
-    engine = create_tts(engine_name, models_dir)
-    # 音色按引擎独立成键；兼容升级前仅存全局 tts.voice 的旧库
-    default_voice = (
-        settings.get(f"tts.voice.{engine_name}") or settings.get("tts.voice") or ""
-    )
+    engine_setting = settings.get("tts.engine", "")
+    pool = _EnginePool(engine_setting, models_dir, log)
+    # 音色按引擎独立成键；兼容升级前仅存全局 tts.voice 的旧库。
+    # auto 链下每段可能落在不同引擎上，段级 voice 缺省时逐引擎取键。
+    speed = str(settings.get("tts.speed", "") or "")
+    cache_dir = work_dir / "cache"
     voiced: dict[str, tuple[str, str, float]] = {}  # id → (audio_path, text, duration)
     for item in plan.narration_texts:
         # 段级 voice 优先（双人对谈的双音色），缺省用全局设置
-        voice = item.voice or default_voice
-        audio_path = _content_addressed_audio(work_dir, item.id, item.text, voice, engine_name)
+        voice = item.voice or pool.voice_for(settings)
         try:
-            _synthesize_into(engine, item.text, voice, audio_path)
+            audio_path = pool.synthesize_item(
+                item.id, item.text, voice, speed, work_dir, cache_dir
+            )
             duration = tts_base.audio_duration_s(audio_path)
         except Exception as exc:  # noqa: BLE001 - 任何配音失败都是方案失败，原因要原样带出
             raise RuntimeError(
-                f"旁白 {item.id} 合成失败（引擎={settings.get('tts.engine', 'edge')}）："
+                f"旁白 {item.id} 合成失败（engine={pool.label}）："
                 f"{type(exc).__name__}: {exc}"
             ) from exc
         if not duration or duration <= 0:
             raise RuntimeError(f"旁白 {item.id} 合成后音频时长无效（{duration}s）")
         voiced[item.id] = (str(audio_path), item.text, float(duration))
+    _evict_cache(cache_dir, _CACHE_MAX_BYTES)
 
     timeline = [segment.model_dump() for segment in plan.timeline]
     # 实测音频时长 ≠ 编排期的估计时长：把 end 直接改成 start + 实测，前一段就会

@@ -143,4 +143,40 @@ def _json_candidates(text: str) -> list[str]:
         end = text.rfind(closer)
         if end > start:
             candidates.append(text[start : end + 1])
+    # 轻修复只加一条「去尾逗号」：`,}` / `,]` 是 LLM 的头号手滑，删掉就能解析。
+    # 不做括号配平/补引号——那是替模型重写响应。原候选在前，严格 JSON 优先。
+    candidates.extend(
+        stripped
+        for stripped in (_strip_trailing_commas(c) for c in list(candidates))
+        if stripped not in candidates
+    )
     return candidates
+
+
+def _strip_trailing_commas(text: str) -> str:
+    """删除紧邻 `}`/`]` 之前的逗号（跳过其间空白）。字符串字面量内的逗号不动。"""
+    out: list[str] = []
+    in_string = False
+    escaped = False
+    for index, char in enumerate(text):
+        if escaped:
+            escaped = False
+            out.append(char)
+            continue
+        if in_string:
+            if char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            out.append(char)
+            continue
+        if char == '"':
+            in_string = True
+            out.append(char)
+            continue
+        if char == ",":
+            rest = text[index + 1 :].lstrip()
+            if rest[:1] in ("}", "]"):
+                continue  # 尾逗号：丢弃
+        out.append(char)
+    return "".join(out)

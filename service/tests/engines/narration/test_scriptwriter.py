@@ -242,7 +242,7 @@ def test_missing_episode_is_not_guessed_as_episode_one() -> None:
     llm = FakeLLM([payload])
     with pytest.raises(ValueError, match="缺 episode"):
         _run(llm)
-    assert llm.calls == 2, "不合格必须重试一次，一次不中就放弃等于白丢一遍"
+    assert llm.calls == 3, "不合格必须重试到上限（首次+2 次重试），一次不中就放弃等于白丢一遍"
 
 
 def test_single_episode_may_omit_the_episode_field() -> None:
@@ -323,3 +323,108 @@ def test_drop_count_is_in_the_trace_too(tmp_path) -> None:
     attempt = json.loads(trace.read_text(encoding="utf-8"))["attempts"][-1]
     assert attempt["segments_kept"] == 3
     assert attempt["segments_dropped"] == 2
+
+
+# ------------------------------------------------------------- 输出防御闭环（批次一 A2）
+# 参考项目调研：NarratoAI/autoclip 都有「钳制到边界 + 重试注入格式强化 + 坏响应留痕」，
+# 我们只有 pydantic 结构校验——LLM 幻觉时间戳只能等渲染期暴雷。
+
+
+def test_negative_start_is_clamped_to_zero() -> None:
+    """LLM 写出负数 start 是幻觉不是意图：钳到 0 保住这段，而不是留给渲染层去炸。"""
+    payload = dict(
+        _VALID_PAYLOAD,
+        segments=[
+            {"episode": 1, "start": -5.0, "end": 10.0, "text": "负起点段"},
+            {"episode": 1, "start": 10.0, "end": 20.0, "text": "第二段解说"},
+        ],
+    )
+    script = _run(FakeLLM([payload]))
+    assert script.segments[0].start == 0.0
+    assert len(script.segments) == 2
+
+
+def test_unknown_episode_duration_does_not_drop_everything() -> None:
+    """集时长缺失（0）等于没有上界可钳：钳到 0 会把整批段落静默丢光，剧本直接判死。"""
+    episodes = [
+        {
+            "number": 1,
+            "duration": 0.0,
+            "segments": [
+                {"start": 1.0, "end": 10.0, "text": "台词一"},
+                {"start": 10.0, "end": 20.0, "text": "台词二"},
+            ],
+        }
+    ]
+    payload = {
+        "hook": "开场钩子",
+        "segments": [
+            {"episode": 1, "start": 1.0, "end": 10.0, "text": "第一段解说"},
+            {"episode": 1, "start": 10.0, "end": 20.0, "text": "第二段解说"},
+        ],
+        "cta": "",
+    }
+    script = write_script_episodes(
+        FakeLLM([payload]), episodes, project_name="测试剧", angle_block=""
+    )
+    assert [(segment.start, segment.end) for segment in script.segments] == [
+        (1.0, 10.0),
+        (10.0, 20.0),
+    ]
+
+
+def test_retry_cap_is_three_attempts() -> None:
+    """首次 + 最多 2 次重试：只试一次就把「网关抖一下」当成「模型写不出」。"""
+    llm = FakeLLM([ValueError("非法 JSON")])
+    with pytest.raises(ValueError, match="未产出合法剧本"):
+        _run(llm)
+    assert llm.calls == 3
+
+
+def test_retry_prompt_appends_format_reinforcement() -> None:
+    """重试不能原样重问：不追加格式强化指令，模型大概率原样再犯一遍。"""
+    llm = FakeLLM([ValueError("非法 JSON"), dict(_VALID_PAYLOAD)])
+    _run(llm)
+    assert "格式强化" not in llm.users[0], "首次提问不该带强化指令"
+    assert llm.users[1].startswith(llm.users[0]), "强化指令追加在原 prompt 末尾"
+    assert "格式强化" in llm.users[1]
+    assert "只输出 JSON" in llm.users[1]
+
+
+def test_bad_raw_response_is_kept_in_trace(tmp_path) -> None:
+    """结构校验失败时坏响应原文必须留痕：只记异常文案，排查时分不清模型到底写了什么。"""
+    payload = dict(_VALID_PAYLOAD, hook="")  # min_length=1 → ValidationError
+    trace = tmp_path / "llm_script.json"
+    with pytest.raises(ValueError, match="未产出合法剧本"):
+        write_script_episodes(
+            FakeLLM([payload]),
+            _EPISODES,
+            project_name="测试剧",
+            angle_block="",
+            trace_path=trace,
+        )
+    attempts = json.loads(trace.read_text(encoding="utf-8"))["attempts"]
+    assert attempts[0]["raw"] == payload, "坏响应原文没进留痕"
+    assert attempts[0]["error"].startswith("ValidationError")
+
+
+def test_clamped_segments_are_counted_in_trace(tmp_path) -> None:
+    """钳制是悄悄改数：留痕里必须能对上账，否则「剧本变短了」无从解释。"""
+    payload = dict(
+        _VALID_PAYLOAD,
+        segments=[
+            {"episode": 1, "start": 1.0, "end": 10.0, "text": "正文一"},
+            {"episode": 1, "start": 10.0, "end": 20.0, "text": "正文二"},
+            {"episode": 1, "start": 30.0, "end": 99.0, "text": "越界段（尾部钳到 40s）"},
+        ],
+    )
+    trace = tmp_path / "llm_script.json"
+    write_script_episodes(
+        FakeLLM([payload]),
+        _EPISODES,
+        project_name="测试剧",
+        angle_block="",
+        trace_path=trace,
+    )
+    attempt = json.loads(trace.read_text(encoding="utf-8"))["attempts"][-1]
+    assert attempt["segments_clamped"] == 1

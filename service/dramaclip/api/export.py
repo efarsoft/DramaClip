@@ -252,6 +252,34 @@ def _output_size(settings: config.Settings) -> tuple[int, int]:
     return width - width % 2, height - height % 2
 
 
+# 渲染后时长审计阈值：相对 8% 与绝对 3s 取大。渲染层天然引入数个百分点偏差——
+# dedup 微变速（speed 0.996~1.004，逐段 ±0.4%）、切点安全抖动（jitter ±0.3s、
+# 保护区顺延 ≤1s）、AAC priming/concat 的毫秒级出入——阈值必须容得下这些已知行为，
+# 只抓「段丢了/拼重了/时长翻倍」级别的真偏差（诚实失败哲学：超阈值写明账，不伪造不失败）。
+_AUDIT_DURATION_REL_TOLERANCE = 0.08
+_AUDIT_DURATION_ABS_TOLERANCE_S = 3.0
+
+
+def _audit_duration(context: AppContext, plan_data: PlanData, actual_s: float) -> None:
+    """实测时长 vs 时间轴声明总时长（sum(end-start)）：超阈值只写 warn 明账。
+
+    审计自身任何异常都静默吞掉——它是事后体检，绝不反过来挡已成功的导出。
+    """
+    with contextlib.suppress(Exception):
+        declared = sum(max(seg.end - seg.start, 0.0) for seg in plan_data.timeline)
+        if declared <= 0:
+            return
+        diff = actual_s - declared
+        tolerance = max(declared * _AUDIT_DURATION_REL_TOLERANCE, _AUDIT_DURATION_ABS_TOLERANCE_S)
+        if abs(diff) <= tolerance:
+            return
+        context.notifier.log(
+            "warn",
+            f"成片时长审计：实测 {actual_s:.1f}s vs 声明 {declared:.1f}s"
+            f"（差 {diff:+.1f}s，超出阈值 ±{tolerance:.1f}s）——成片可能缺段/重复，请人工核对",
+        )
+
+
 def render_export(
     context: AppContext,
     run: ExportRun,
@@ -358,8 +386,9 @@ def render_export(
         exports_repo.set_meta(
             context.conn, export_id, duration_s=media.duration_s, size_bytes=out_path.stat().st_size
         )
+        _audit_duration(context, plan_data, media.duration_s)
     except (ValueError, OSError):
-        pass  # 元信息回填失败不影响导出成功
+        pass  # 元信息回填/时长审计失败不影响导出成功
     with contextlib.suppress(OSError, ValueError):
         _extract_cover(context, export_id, out_path)  # 封面失败不影响导出成功
     return out_path

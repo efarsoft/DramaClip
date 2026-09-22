@@ -27,6 +27,11 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+# 非终态进度上限：没到 DONE 就不许写 100——「进度 100% 但任务没完成」是比卡住更糟的
+# 假状态（渲染层最后一步失败/挂起时进度条已经报满）。100 只由 mark_completed 迁移写入。
+_PROGRESS_CAP = 99.0
+
+
 class JobStore:
     """jobs 表仓储：创建、状态迁移、进度更新、启动清扫。"""
 
@@ -48,7 +53,10 @@ class JobStore:
         self._transition(job_id, STATUS_RUNNING)
 
     def mark_completed(self, job_id: str) -> None:
-        self._transition(job_id, "completed")
+        # 完成即写 100：set_progress 把非终态钳在 99（_PROGRESS_CAP），终态的满进度
+        # 只能在这里补写，否则完成任务永远停在 99。failed/cancelled 不补——保留
+        # 中断时的进度供事后诊断。
+        self._transition(job_id, "completed", progress=100.0)
 
     def mark_failed(self, job_id: str, error: str) -> None:
         self._transition(job_id, "failed", error=error)
@@ -57,7 +65,14 @@ class JobStore:
         self._transition(job_id, "cancelled")
 
     def set_progress(self, job_id: str, percent: float, label: str | None = None) -> None:
-        """更新进度；label 为队列页要显示的人读阶段（如「第3集 预筛中」）。"""
+        """更新进度；label 为队列页要显示的人读阶段（如「第3集 预筛中」）。
+
+        >=100 的写入钳到 _PROGRESS_CAP（99）：100 是终态语义，只由 mark_completed
+        迁移写入；运行中的任务自报 100 会造出「进度满了但没完成」的假状态。
+        (99, 100) 区间的真实值原样保留——只钳「报满」，不压中间进度。
+        """
+        if percent >= 100.0:
+            percent = _PROGRESS_CAP
         if label is None:
             self._conn.execute(
                 "UPDATE jobs SET progress = ?, updated_at = ? WHERE id = ?",
@@ -115,14 +130,22 @@ class JobStore:
         self._conn.commit()
         return cursor.rowcount or 0
 
-    def _transition(self, job_id: str, status: str, error: str | None = None) -> None:
+    def _transition(
+        self, job_id: str, status: str, error: str | None = None, progress: float | None = None
+    ) -> None:
         current = self.get(job_id)
         if current is None:
             raise ValueError(f"任务不存在: {job_id}")
         if current["status"] in _TERMINAL_STATUSES:
             raise ValueError(f"任务已终态({current['status']}), 不可迁移: {job_id}")
-        self._conn.execute(
-            "UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE id = ?",
-            (status, error, _now_ms(), job_id),
-        )
+        if progress is None:
+            self._conn.execute(
+                "UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE id = ?",
+                (status, error, _now_ms(), job_id),
+            )
+        else:
+            self._conn.execute(
+                "UPDATE jobs SET status = ?, error = ?, progress = ?, updated_at = ? WHERE id = ?",
+                (status, error, progress, _now_ms(), job_id),
+            )
         self._conn.commit()
