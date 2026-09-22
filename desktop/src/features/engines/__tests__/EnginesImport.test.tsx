@@ -45,6 +45,19 @@ vi.mock('../../../services/client', () => ({
     selftest: vi.fn(() => Promise.resolve({ ok: true })),
     selftestResults: vi.fn(() => Promise.resolve({})),
   },
+  engineConfigsApi: {
+    list: vi.fn(() => Promise.resolve({ configs: [] })),
+    create: vi.fn(),
+    update: vi.fn(),
+    enable: vi.fn(),
+    remove: vi.fn(),
+    test: vi.fn(),
+  },
+  promptsApi: {
+    list: vi.fn(() => Promise.resolve({ prompts: [] })),
+    save: vi.fn(),
+    reset: vi.fn(),
+  },
   ttsApi: { preview: vi.fn() },
   runtimeApi: { status: vi.fn(() => Promise.resolve({ installed: true })), install: vi.fn() },
   systemApi: { health: vi.fn(() => Promise.resolve({})) },
@@ -109,24 +122,42 @@ afterEach(() => {
 });
 
 describe('引擎中心页接登记本', () => {
-  it('本域的外部登记进资产库，别域的绝不串台', async () => {
+  /** 单页六段后「别域不串台」按段判：ASR 段只有 ASR 的货，TTS 段只有 TTS 的。 */
+  async function sectionOf(id: string): Promise<HTMLElement> {
+    return waitFor(() => {
+      const el = document.getElementById(id);
+      if (el === null) throw new Error(`${id} 段还没渲染`);
+      return el;
+    });
+  }
+
+  it('本域的外部登记进本域段，别域的绝不串台', async () => {
     page();
 
-    expect(await screen.findByText(/外部资产 · 引擎未接入（1）/)).toBeTruthy();
-    expect(screen.getByText('同事给的识别模型')).toBeTruthy();
-    expect(screen.queryByText('同事给的配音模型')).toBeNull();
+    const asrSection = await sectionOf('engines-asr');
+    expect(within(asrSection).getByText('同事给的识别模型')).toBeTruthy();
+    expect(within(asrSection).queryByText('同事给的配音模型')).toBeNull();
+
+    const ttsSection = await sectionOf('engines-tts');
+    expect(within(ttsSection).getByText('同事给的配音模型')).toBeTruthy();
+    expect(within(ttsSection).queryByText('同事给的识别模型')).toBeNull();
   });
 
   it('登记本读坏了：原话上屏，不当成库里没货', async () => {
     api.importRecords.mockResolvedValue({ records: [], error: 'imported.json 读不出来：JSON 在第 12 行断了' });
     page();
 
-    expect(await screen.findByText(/imported\.json 读不出来/)).toBeTruthy();
+    // 两个资产库段各挂一条同款横幅：坏登记本是全局事实，页面上不止一处说法也得一致
+    const hits = await screen.findAllByText(/imported\.json 读不出来/);
+    expect(hits.length).toBeGreaterThan(0);
   });
 
   it('撤销登记交的是那条路径，交完再拉一次登记本', async () => {
     page();
-    fireEvent.click(await screen.findByRole('button', { name: '撤销登记' }));
+    // ASR/TTS 两段各有一颗：第一颗在 ASR 段，对应 asrExternal
+    const [first] = await screen.findAllByRole('button', { name: '撤销登记' });
+    if (first === undefined) throw new Error('页面上找不到「撤销登记」');
+    fireEvent.click(first);
     const calls = api.importRecords.mock.calls.length;
 
     fireEvent.click(await screen.findByRole('button', { name: '确认撤销' }));
@@ -141,7 +172,9 @@ describe('引擎中心页接登记本', () => {
 
   it('工具栏那颗按钮在页面上把向导叫起来', async () => {
     page();
-    fireEvent.click(await screen.findByRole('button', { name: '导入本地模型' }));
+    const [first] = await screen.findAllByRole('button', { name: '导入本地模型' });
+    if (first === undefined) throw new Error('页面上找不到「导入本地模型」');
+    fireEvent.click(first);
 
     expect(await screen.findByRole('button', { name: '选择目录' })).toBeTruthy();
   });
@@ -150,7 +183,9 @@ describe('引擎中心页接登记本', () => {
 /** 走到第 ④ 步，把弹窗那半边交回来：库里到处是同名按钮，只在弹窗里找。 */
 async function toDone(): Promise<HTMLElement> {
   page();
-  fireEvent.click(await screen.findByRole('button', { name: '导入本地模型' }));
+  const [importButton] = await screen.findAllByRole('button', { name: '导入本地模型' });
+  if (importButton === undefined) throw new Error('页面上找不到「导入本地模型」');
+  fireEvent.click(importButton);
   fireEvent.click(await screen.findByRole('button', { name: '选择目录' }));
   fireEvent.click(await screen.findByRole('button', { name: '下一步' }));
   fireEvent.click(await screen.findByRole('button', { name: '开始导入' }));

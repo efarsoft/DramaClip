@@ -1,16 +1,14 @@
 /**
- * 语音识别 ASR：当前生效卡（参数即改即存 + 该模型的安装态内联）→ 转写加速卡 → 资产库。
+ * 语音识别 ASR 段（§10.4 第 2 段）：当前生效卡（参数即改即存 + 该模型的安装态内联）→ 资产库。
  *
  * P6 的修法是结构性的：选择与安装态同在一张卡上，不再一个在页首、一个在页尾。
- * 设备语义归本 tab 的「转写加速」卡，容量语义归总览的「本机运行条件」卡（P7）。
+ * 单页六段后「转写加速（GPU）」卡归入环境段（EnvSection），本段只留选择与资产。
  */
 import { Button } from 'antd';
 import type { DefaultOptionType } from 'antd/es/select';
 import type { ReactElement } from 'react';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
-import { GpuCard } from './GpuCard';
-import { useGpuInfo } from './useGpuInfo';
 import type { DomainTabProps } from './EnginesPage';
 import type { Reports } from './assetState';
 import {
@@ -62,7 +60,6 @@ export function AsrTab({
   onForget,
   onImport,
 }: DomainTabProps): ReactElement {
-  const { info: gpu, refresh } = useGpuInfo();
   const domainModels = models.filter((model) => model.kind === 'asr');
   const active = activeAsset(models, 'asr', settings);
   return (
@@ -76,7 +73,6 @@ export function AsrTab({
         onSave={onSave}
         onVerify={onVerify}
       />
-      <GpuCard info={gpu} device={settings['asr.device'] ?? 'auto'} onRefresh={refresh} />
       <AssetLibrary
         models={domainModels}
         externals={externalAssets(imported, 'asr')}
@@ -142,7 +138,7 @@ function ActiveCard({
       { label: '磁盘实占', value: active === undefined ? '—' : formatBytes(active.size_bytes ?? 0) },
       { label: '生效时机', value: '保存后下次分析' },
     ],
-    footnote: '「自动」＝检测到可用 GPU 即启用，否则回退 CPU；显卡与运行库的实际情况见下方转写加速卡。',
+    footnote: '「自动」＝检测到可用 GPU 即启用，否则回退 CPU；显卡与运行库的实际情况见「环境」段的转写加速卡。',
   };
   return <ActiveEngineCard {...card} />;
 }

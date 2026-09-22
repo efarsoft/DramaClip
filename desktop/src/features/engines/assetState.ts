@@ -6,7 +6,13 @@
  *
  * 就绪口径（§10.1）：**校验通过 + 自检通过**，两层缺一不可——文件在 ≠ 能推。
  */
-import type { ImportRecord, ModelInfo, SelftestResult, VerifyReport } from '@dramaclip/protocol';
+import type {
+  ImportRecord,
+  ModelInfo,
+  SelftestResult,
+  SelftestResults,
+  VerifyReport,
+} from '@dramaclip/protocol';
 
 export type Reports = ReadonlyMap<string, VerifyReport>;
 
@@ -106,30 +112,6 @@ export function partitionAssets(models: readonly ModelInfo[]): {
   };
 }
 
-export interface AssetSummary {
-  readonly installed: number;
-  readonly total: number;
-  readonly bytes: number;
-  readonly incomplete: number;
-  readonly reserve: number;
-}
-
-export function assetSummary(models: readonly ModelInfo[], reports: Reports): AssetSummary {
-  let installed = 0;
-  let bytes = 0;
-  let incomplete = 0;
-  let reserve = 0;
-  for (const model of models) {
-    if (!model.engine_ready) reserve += 1;
-    if (model.status === 'installed') {
-      installed += 1;
-      bytes += model.size_bytes ?? 0;
-    }
-    if (assetState(model, reportFor(reports, model.model_id)) === 'incomplete') incomplete += 1;
-  }
-  return { installed, total: models.length, bytes, incomplete, reserve };
-}
-
 export function formatBytes(bytes: number): string {
   if (bytes <= 0) return '—';
   const gb = bytes / 1024 ** 3;
@@ -137,49 +119,71 @@ export function formatBytes(bytes: number): string {
   return `${gb.toFixed(2)}GB`;
 }
 
-/** 域内概览：几件可用（引擎已接入）、几件待修（体检不通过）。 */
-export interface DomainStats {
-  readonly wired: number;
-  readonly incomplete: number;
-}
-
-export function domainStats(
-  models: readonly ModelInfo[],
-  reports: Reports,
-  kind: string,
-): DomainStats {
-  const domainModels = models.filter((model) => model.kind === kind);
-  return {
-    wired: domainModels.filter((model) => model.engine_ready).length,
-    incomplete: incompleteAssets(domainModels, reports).length,
-  };
-}
-
-export interface IncompleteAsset {
+/** 「就绪与修复」段的一条待办：现象 + 后果（§10.5 三要素的前两件，动作在行内按钮上）。 */
+export interface AttentionAsset {
   readonly model: ModelInfo;
+  readonly report: VerifyReport | undefined;
+  readonly selftest: SelftestResult | undefined;
+  /** 现象：后端判据原文优先，状态类的给一句能回溯到判据的话。 */
   readonly note: string;
+  /** 后果：影响什么——切过去会失败 / 没证实能用 / 只是占盘存疑。 */
+  readonly consequence: string;
+  readonly severity: 'fail' | 'unconfirmed' | 'warn';
   readonly tab: EngineTab;
 }
 
 /**
- * 「待修」清单：装了但体检不通过的已接入资产。
- * 没落盘的算缺模型（走下载），未接入的算储备（本来就不能生效），都不进这里。
+ * 待办清单（§10.2：每个异常态自带修法；行内动作由 RepairActions 按判据召唤）。
+ * fail = 切过去会直接失败；unconfirmed = 没有证据能用（未校验/自检没过或没跑）；
+ * warn = 能用但有事要做（残留占盘、无从对账、多余副本）。没落盘/储备档不进清单——
+ * 前者走下载、后者本来就不能生效，就绪度格子里各有说法。
  */
-export function incompleteAssets(
+export function attentionAssets(
   models: readonly ModelInfo[],
   reports: Reports,
-): IncompleteAsset[] {
-  const items: IncompleteAsset[] = [];
+  selftests?: SelftestResults,
+): AttentionAsset[] {
+  const items: AttentionAsset[] = [];
   for (const model of models) {
+    if (!model.engine_ready || model.status !== 'installed') continue;
     const report = reportFor(reports, model.model_id);
-    if (assetState(model, report) !== 'incomplete') continue;
-    items.push({
-      model,
-      note: failureNote(report) ?? '体检未通过',
-      tab: model.kind === 'asr' ? 'asr' : 'tts',
-    });
+    const selftest = selftests?.[model.model_id];
+    const state = assetState(model, report, selftest);
+    const tab: EngineTab = model.kind === 'asr' ? 'asr' : 'tts';
+    const base = { model, report, selftest, tab };
+    if (state === 'incomplete') {
+      items.push({
+        ...base,
+        note: failureNote(report) ?? '体检未通过',
+        consequence: '现在切过去会直接失败',
+        severity: 'fail',
+      });
+    } else if (state === 'unverified') {
+      items.push({
+        ...base,
+        note: '未校验：文件在，但还没按任何判据核过',
+        consequence: '没有证据能用',
+        severity: 'unconfirmed',
+      });
+    } else if (state === 'untested') {
+      items.push({
+        ...base,
+        note:
+          selftest === undefined
+            ? '文件校验通过，但能力自检还没跑过'
+            : `自检未通过：${selftest.error ?? '未知原因'}`,
+        consequence: '文件在不等于能推——没证实能加载',
+        severity: 'unconfirmed',
+      });
+    } else {
+      const note = warnNote(report);
+      if (note !== undefined) {
+        items.push({ ...base, note, consequence: '不影响推理，但占磁盘或存疑', severity: 'warn' });
+      }
+    }
   }
-  return items;
+  const rank = { fail: 0, unconfirmed: 1, warn: 2 } as const;
+  return [...items].sort((a, b) => rank[a.severity] - rank[b.severity]);
 }
 
 /**

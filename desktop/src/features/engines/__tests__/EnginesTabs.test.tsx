@@ -149,7 +149,7 @@ describe('配音 TTS · 生效卡与资产库', () => {
 describe('语音识别 ASR · 同构骨架', () => {
   afterEach(cleanup);
 
-  it('生效卡 + 转写加速卡 + 资产库三段齐全，档位状态来自资产库', () => {
+  it('生效卡 + 资产库两段齐全，档位状态来自资产库（GPU 卡已归「环境」段，§10.4）', () => {
     render(
       <AsrTab
         models={[
@@ -175,7 +175,7 @@ describe('语音识别 ASR · 同构骨架', () => {
       />,
     );
     expect(screen.getByText('当前生效')).toBeTruthy();
-    expect(screen.getByText('转写加速（GPU）')).toBeTruthy();
+    expect(screen.queryByText('转写加速（GPU）')).toBeNull();
     expect(screen.getByText('资产库')).toBeTruthy();
     expect(screen.getAllByText('Whisper Small').length).toBeGreaterThan(0);
     expect(screen.getAllByText('就绪').length).toBeGreaterThan(0);

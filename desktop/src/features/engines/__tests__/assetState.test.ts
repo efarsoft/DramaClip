@@ -8,21 +8,18 @@ import {
   activateSettings,
   activeAsset,
   assetState,
-  assetSummary,
   canActivate,
   deleteNote,
-  domainStats,
   externalAssets,
   failureNote,
   formatBytes,
-  incompleteAssets,
   partitionAssets,
   stateLabel,
   warnCount,
   warnNote,
   warnSummary,
 } from '../assetState';
-import { externalRecord, importRecord, model, report, reportsOf, selftestOk } from './fixtures';
+import { externalRecord, importRecord, model, report, selftestOk } from './fixtures';
 
 describe('assetState', () => {
   it('已装 + 引擎接入 + 校验通过 + 自检通过 → ready（唯一能报「就绪」的组合，§10.1）', () => {
@@ -148,31 +145,6 @@ describe('formatBytes', () => {
   });
 });
 
-describe('assetSummary', () => {
-  it('已装数、实占字节、不完整数、未接入数各自独立', () => {
-    const models = [
-      model(),
-      model({ model_id: 'faster-whisper-medium', kind: 'asr', engine: 'faster_whisper', size_bytes: 1024 }),
-      model({ model_id: 'indextts2', engine: 'indextts2', engine_ready: false }),
-      model({
-        model_id: 'faster-whisper-small',
-        kind: 'asr',
-        engine: 'faster_whisper',
-        status: 'not_installed',
-        size_bytes: 0,
-      }),
-    ];
-    const reports = reportsOf(report({ model_id: 'faster-whisper-medium', ok: false }));
-
-    const summary = assetSummary(models, reports);
-    // 未安装那项：既不计入已装数，也不贡献字节。
-    expect(summary.installed).toBe(3);
-    expect(summary.bytes).toBe(350 * 1024 * 1024 * 2 + 1024);
-    expect(summary.incomplete).toBe(1);
-    expect(summary.reserve).toBe(1);
-  });
-});
-
 describe('activateSettings', () => {
   const whisper = (tier: string): ModelInfo =>
     model({
@@ -203,88 +175,6 @@ describe('activateSettings', () => {
     const values = activateSettings(item);
     expect(values).toEqual({ 'tts.engine': 'kokoro' });
     expect(activeAsset([item], 'tts', values)?.model_id).toBe('kokoro-82m');
-  });
-});
-
-describe('incompleteAssets', () => {
-  const medium = model({
-    model_id: 'faster-whisper-medium',
-    kind: 'asr',
-    engine: 'faster_whisper',
-    name: 'Whisper Medium',
-  });
-  const broken = report({
-    model_id: 'faster-whisper-medium',
-    kind: 'asr',
-    engine: 'faster_whisper',
-    ok: false,
-    checks: [
-      { name: '必需文件齐全', status: 'fail', detail: '缺 3 项：tokenizer.json' },
-      { name: '唯一路径', status: 'warn', detail: '两处候选' },
-    ],
-  });
-
-  it('引擎已接入 + 已装 + 体检不通过 → 进「待修」清单，带 fail 判据与落点域', () => {
-    const items = incompleteAssets([model(), medium], reportsOf(broken));
-    expect(items).toHaveLength(1);
-    expect(items[0]?.model.name).toBe('Whisper Medium');
-    expect(items[0]?.note).toContain('缺 3 项');
-    expect(items[0]?.note).not.toContain('两处候选');
-    expect(items[0]?.tab).toBe('asr');
-  });
-
-  it('当前没在用它也要列——一旦切过去就直接失败', () => {
-    const active = model({ model_id: 'faster-whisper-small', kind: 'asr', engine: 'faster_whisper' });
-    expect(activeAsset([active, medium], 'asr', { 'asr.model': 'small' })?.model_id).toBe(
-      'faster-whisper-small',
-    );
-    expect(incompleteAssets([active, medium], reportsOf(broken))).toHaveLength(1);
-  });
-
-  it('储备项（引擎未接入）坏了不算待修：它本来就不能生效，点了也没用', () => {
-    const reserve = model({ model_id: 'indextts2', engine: 'indextts2', engine_ready: false });
-    const bad = report({ model_id: 'indextts2', engine: 'indextts2', engine_ready: false, ok: false });
-    expect(incompleteAssets([reserve], reportsOf(bad))).toHaveLength(0);
-  });
-
-  it('没落盘的不算待修——那是缺模型，走下载而不是修复', () => {
-    const missing = model({ ...medium, status: 'not_installed', size_bytes: 0 });
-    expect(incompleteAssets([missing], reportsOf(broken))).toHaveLength(0);
-  });
-});
-
-describe('domainStats', () => {
-  const ttsModels: ModelInfo[] = [
-    model({ kind: 'tts' }),
-    model({ kind: 'tts', model_id: 'indextts2', engine: 'indextts2', engine_ready: false }),
-  ];
-
-  it('可用 = 本域引擎已接入的件数，未接入的储备项不计入', () => {
-    expect(domainStats(ttsModels, reportsOf(), 'tts')).toEqual({ wired: 1, incomplete: 0 });
-  });
-
-  it('待修 = 本域体检不通过的件数，别域的不串进来', () => {
-    const withAsr = [
-      ...ttsModels,
-      model({ kind: 'asr', model_id: 'faster-whisper-medium', engine: 'faster_whisper' }),
-      // 撤下 sherpa 后本域只剩一件已接入资产，「缺模型照样计入可用」这一维改在 ASR 上验：
-      // 计的是 engine_ready，不是安装态。
-      model({
-        kind: 'asr',
-        model_id: 'faster-whisper-large-v3',
-        engine: 'faster_whisper',
-        status: 'not_installed',
-        size_bytes: 0,
-      }),
-    ];
-    const broken = report({
-      model_id: 'faster-whisper-medium',
-      kind: 'asr',
-      engine: 'faster_whisper',
-      ok: false,
-    });
-    expect(domainStats(withAsr, reportsOf(broken), 'asr')).toEqual({ wired: 2, incomplete: 1 });
-    expect(domainStats(withAsr, reportsOf(broken), 'tts')).toEqual({ wired: 1, incomplete: 0 });
   });
 });
 
