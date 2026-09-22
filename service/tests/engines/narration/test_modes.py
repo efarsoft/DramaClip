@@ -33,7 +33,7 @@ def test_raw_clip_opens_with_highest_conflict() -> None:
     starts = [seg.start for seg in plan.timeline[1:]]
     assert starts == sorted(starts), "开场预告式前置，其余按原片时间线"
     total = sum(seg.end - seg.start for seg in plan.timeline)
-    assert total <= _STRATEGY.max_duration_s, "截断预算（只有首场景豁免）"
+    assert total >= 24, "冲突够的场景要讲完，不再按 30s 预算腰斩"
 
 
 def test_raw_clip_all_original_audio() -> None:
@@ -48,7 +48,9 @@ def test_intro_marks_first_segment_as_narration() -> None:
     assert plan.timeline[0].narration_id == "intro-1"
     assert plan.timeline[0].audio == "narration"
     assert plan.timeline[0].end - plan.timeline[0].start <= 30
-    assert all(seg.audio == "original" for seg in plan.timeline[1:])
+    assert plan.timeline[-1].narration_id == "cta-1"
+    assert plan.timeline[-1].audio == "narration"
+    assert all(seg.audio == "original" for seg in plan.timeline[1:-1])
 
 
 def test_intro_empty_scenes() -> None:

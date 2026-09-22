@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -67,7 +68,12 @@ def _voiced_plan(tmp_path: Path, mode: str = "full_narration") -> PlanData:
             )
         ],
         narration_texts=[
-            NarrationText(id="full-1", text="第一段解说", audio_path=str(audio), duration=1.25)
+            NarrationText(
+                id="full-1",
+                text="第一段解说，后面更狠——点进去看全集",
+                audio_path=str(audio),
+                duration=1.25,
+            )
         ],
     )
 
@@ -136,10 +142,10 @@ def test_submit_rejects_each_bad_plan_with_its_own_reason(
     assert "不存在" in result["rejected"][0]["reason"]
 
 
-def test_submit_rejects_an_unvoiced_narration_plan(
+def test_submit_accepts_an_unvoiced_narration_plan(
     memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """守卫本体：有旁白段却没有 audio_path 的方案，渲染出来是一部哑片。"""
+    """规划阶段故意不配音：有文案即可排队，导出作业里再合成。"""
     monkeypatch.setattr(export_api, "_run_export", lambda *_a, **_k: None)
     unvoiced = PlanData(
         mode="full_narration",
@@ -148,20 +154,20 @@ def test_submit_rejects_an_unvoiced_narration_plan(
                 episode_id="ep1", start=0.0, end=2.0, audio="ducked", narration_id="full-1"
             )
         ],
-        narration_texts=[NarrationText(id="full-1", text="第一段解说")],
+        narration_texts=[NarrationText(id="full-1", text="第一段解说，后面更狠——点进去看全集")],
     )
     _project_id, plan_id = _seed_plan(memory_db, tmp_path, unvoiced)
     harness = _harness(memory_db, tmp_path)
 
     result = _rpc(harness, "export.submit", {"plan_ids": [plan_id]})
-    assert result["exports"] == []
-    assert "没有配音音频" in result["rejected"][0]["reason"]
+    assert result["rejected"] == []
+    assert len(result["exports"]) == 1
 
 
-def test_submit_rejects_a_plan_whose_audio_file_is_gone(
+def test_submit_accepts_a_plan_whose_audio_file_is_gone(
     memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """配音文件是承重存储，丢了就地拒绝。"""
+    """音频丢了不挡提交：导出时按文案重合成。"""
     monkeypatch.setattr(export_api, "_run_export", lambda *_a, **_k: None)
     plan_data = _voiced_plan(tmp_path)
     _project_id, plan_id = _seed_plan(memory_db, tmp_path, plan_data)
@@ -169,8 +175,8 @@ def test_submit_rejects_a_plan_whose_audio_file_is_gone(
     harness = _harness(memory_db, tmp_path)
 
     result = _rpc(harness, "export.submit", {"plan_ids": [plan_id]})
-    assert result["exports"] == []
-    assert "配音音频已丢失" in result["rejected"][0]["reason"]
+    assert result["rejected"] == []
+    assert len(result["exports"]) == 1
 
 
 def test_submit_rejects_a_plan_that_is_not_ready(
@@ -185,6 +191,21 @@ def test_submit_rejects_a_plan_that_is_not_ready(
     result = _rpc(harness, "export.submit", {"plan_ids": [plan_id]})
     assert result["exports"] == []
     assert "generating" in result["rejected"][0]["reason"]
+
+
+def test_submit_rejects_a_draft_plan(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """draft 过不了转化门禁，不能排队渲染。"""
+    monkeypatch.setattr(export_api, "_run_export", lambda *_a, **_k: None)
+    _project_id, plan_id = _seed_plan(
+        memory_db, tmp_path, _voiced_plan(tmp_path), status="draft"
+    )
+    harness = _harness(memory_db, tmp_path)
+
+    result = _rpc(harness, "export.submit", {"plan_ids": [plan_id]})
+    assert result["exports"] == []
+    assert "方案状态为 draft，不可渲染" in result["rejected"][0]["reason"]
 
 
 def test_submit_rejects_an_empty_timeline(
@@ -239,7 +260,12 @@ def _cross_episode_plan(tmp_path: Path, *, unvoiced: str = "") -> PlanData:
             )
         )
         texts.append(
-            NarrationText(id=slot_id, text=f"第{index}段解说", audio_path=audio_path, duration=1.25)
+            NarrationText(
+                id=slot_id,
+                text=f"第{index}段解说，后面更狠——点进去看全集",
+                audio_path=audio_path,
+                duration=1.25,
+            )
         )
     return PlanData(mode="full_narration", timeline=timeline, narration_texts=texts)
 
@@ -259,21 +285,18 @@ def test_submit_accepts_a_plan_spanning_two_episodes(
     assert len(result["exports"]) == 1
 
 
-def test_submit_rejects_an_unvoiced_slot_in_the_second_episode(
+def test_submit_accepts_an_unvoiced_slot_in_the_second_episode(
     memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """守卫必须逐段查配音，包括第二集那段——跨集才存在的哑片形态。"""
+    """第二集尚未配音也可以提交：导出时补合成。"""
     monkeypatch.setattr(export_api, "_run_export", lambda *_a, **_k: None)
     plan_data = _cross_episode_plan(tmp_path, unvoiced="ep2")
     _project_id, plan_id = _seed_plan(memory_db, tmp_path, plan_data)
     harness = _harness(memory_db, tmp_path)
 
     result = _rpc(harness, "export.submit", {"plan_ids": [plan_id]})
-    assert result["exports"] == [], f"第二集的哑段被放行了：{result['exports']}"
-    reason = result["rejected"][0]["reason"]
-    assert "没有配音音频" in reason and "ep2" in reason, (
-        f"拒绝理由没点名到出问题的集：{reason}"
-    )
+    assert result["rejected"] == []
+    assert len(result["exports"]) == 1
 
 
 @pytest.mark.parametrize("params", [{}, {"plan_ids": []}, {"plan_ids": "一个字符串"}])
@@ -285,21 +308,21 @@ def test_bad_plan_ids_are_rejected_at_the_rpc_boundary(
     assert response.error is not None and response.error.code == -32406, response
 
 
-def test_retry_shares_the_renderability_guard(
+def test_retry_rejects_empty_copy(
     memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """守卫必须被 submit 与 retry 共用：只装一侧的话，重试会把哑片渲出来。"""
+    """守卫必须被 submit 与 retry 共用：没文案的旁白段不能渲。"""
     monkeypatch.setattr(export_api, "_run_export", lambda *_a, **_k: None)
-    unvoiced = PlanData(
+    empty = PlanData(
         mode="full_narration",
         timeline=[
             TimelineSegment(
                 episode_id="ep1", start=0.0, end=2.0, audio="ducked", narration_id="full-1"
             )
         ],
-        narration_texts=[NarrationText(id="full-1", text="第一段解说")],
+        narration_texts=[NarrationText(id="full-1", text="")],
     )
-    project_id, plan_id = _seed_plan(memory_db, tmp_path, unvoiced)
+    project_id, plan_id = _seed_plan(memory_db, tmp_path, empty)
     export_id = exports_repo.create(memory_db, project_id, plan_id, "full_narration")
     exports_repo.mark_failed(memory_db, export_id, "上一轮渲染失败")
     harness = _harness(memory_db, tmp_path)
@@ -309,3 +332,90 @@ def test_retry_shares_the_renderability_guard(
     assert exports_repo.get(memory_db, export_id)["status"] == exports_repo.STATUS_FAILED, (
         "拒绝必须发生在 CAS 复位之前"
     )
+
+
+def test_cancelled_export_is_not_a_failure(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """点取消必须落 cancelled，不能演成出片失败。"""
+    from dramaclip.infra.ffmpeg.runner import FfmpegError
+
+    plan = _voiced_plan(tmp_path)
+    project_id, plan_id = _seed_plan(memory_db, tmp_path, plan)
+    export_id = exports_repo.create(memory_db, project_id, plan_id, "full_narration")
+    harness = _harness(memory_db, tmp_path)
+    job_id = harness.context.job_store.create("export", ref_id=export_id)
+
+    def boom(*_a: object, **_k: object) -> None:
+        raise FfmpegError("已取消", cancelled=True)
+
+    monkeypatch.setattr(export_api, "render_export", boom)
+    monkeypatch.setattr(export_api, "_ensure_voiced", lambda _c, _r, data: data)
+
+    export_api._run_export(
+        harness.context,  # type: ignore[arg-type]
+        job_id,
+        export_api.ExportRun(
+            export_id=export_id,
+            project_id=project_id,
+            plan_row=plans_repo.get(memory_db, plan_id) or {},
+            plan_data=plan,
+            cancel_event=threading.Event(),
+        ),
+    )
+    assert harness.context.job_store.get(job_id)["status"] == "cancelled"
+    row = exports_repo.get(memory_db, export_id)
+    assert row is not None and row["status"] == exports_repo.STATUS_CANCELLED
+
+
+def test_pre_cancelled_export_never_renders(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan = _voiced_plan(tmp_path)
+    project_id, plan_id = _seed_plan(memory_db, tmp_path, plan)
+    export_id = exports_repo.create(memory_db, project_id, plan_id, "full_narration")
+    harness = _harness(memory_db, tmp_path)
+    job_id = harness.context.job_store.create("export", ref_id=export_id)
+    called: list[int] = []
+    monkeypatch.setattr(export_api, "render_export", lambda *_a, **_k: called.append(1))
+    cancel = threading.Event()
+    cancel.set()
+    export_api._run_export(
+        harness.context,  # type: ignore[arg-type]
+        job_id,
+        export_api.ExportRun(
+            export_id=export_id,
+            project_id=project_id,
+            plan_row=plans_repo.get(memory_db, plan_id) or {},
+            plan_data=plan,
+            cancel_event=cancel,
+        ),
+    )
+    assert called == []
+    assert harness.context.job_store.get(job_id)["status"] == "cancelled"
+    row = exports_repo.get(memory_db, export_id)
+    assert row is not None and row["status"] == exports_repo.STATUS_CANCELLED
+
+
+def test_ensure_voiced_fails_when_synthesis_leaves_a_slot_silent(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """合成失败留下无音槽位：必须失败，绝不静默改播原声出片。"""
+    plan = PlanData(
+        mode="full_narration",
+        timeline=[
+            TimelineSegment(
+                episode_id="ep1", start=0.0, end=2.0, audio="narration", narration_id="a"
+            )
+        ],
+        narration_texts=[NarrationText(id="a", text="后面更狠——点进去看全集")],
+    )
+    project_id, plan_id = _seed_plan(memory_db, tmp_path, plan)
+    harness = _harness(memory_db, tmp_path)
+    plan_row = plans_repo.get(memory_db, plan_id)
+    assert plan_row is not None
+    from dramaclip.api import narration as narration_api
+
+    monkeypatch.setattr(narration_api, "_voice", lambda _c, data, _s, _d: data)
+    with pytest.raises(ValueError, match="旁白音频合成失败"):
+        export_api._ensure_voiced(harness.context, plan_row, plan)  # type: ignore[arg-type]

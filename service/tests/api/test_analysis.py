@@ -14,10 +14,11 @@ import pytest
 
 from dramaclip.api import analysis as analysis_api
 from dramaclip.api import project as project_api
-from dramaclip.engines.analysis.models import AsrSegment
+from dramaclip.engines.analysis.models import AsrSegment, AudioFeatures
 from dramaclip.infra import jobs
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
+from dramaclip.infra.storage.repos import projects as projects_repo
 from dramaclip.transport.notify import Notifier
 from dramaclip.transport.rpc import Router, RpcRequest
 from tests.conftest import register_job_executor
@@ -51,6 +52,16 @@ class Harness:
         self.sent: list[dict[str, Any]] = []
         self.executor = ThreadPoolExecutor(max_workers=2)
         register_job_executor(self.executor)
+        self._futures: list[Any] = []
+        # 捕获型 submit：future 完成即留存，wait_done 超时能拿到作业线程里被吞的异常
+        inner_submit = self.executor.submit
+
+        def capturing_submit(fn: Any, *args: Any, **kwargs: Any) -> Any:
+            future = inner_submit(fn, *args, **kwargs)
+            self._futures.append(future)
+            return future
+
+        self.executor.submit = capturing_submit  # type: ignore[method-assign]
         from types import SimpleNamespace
 
         prescreen_repo_stub = SimpleNamespace(get=lambda _episode_id: None)
@@ -71,16 +82,44 @@ class Harness:
         project_api.register(self.router, self.context)  # type: ignore[arg-type]
 
     def rpc(self, method: str, params: dict[str, Any]) -> Any:
-        return self.router.dispatch(RpcRequest(id=method, method=method, params=params)).result
+        response = self.router.dispatch(RpcRequest(id=method, method=method, params=params))
+        if response.error is not None:
+            raise AssertionError(
+                f"{method} RPC 错误: [{response.error.code}] {response.error.message}"
+            )
+        return response.result
 
     def wait_done(self, job_id: str, timeout_s: float = 30.0) -> dict[str, Any]:
         deadline = time.time() + timeout_s
+        status: dict[str, Any] | None = None
         while time.time() < deadline:
             status = self.rpc("analysis.status", {"job_id": job_id})
             if status["status"] in ("completed", "failed", "cancelled"):
                 return status
             time.sleep(0.05)
-        raise AssertionError("任务超时未完成")
+        import io
+        import sys
+        import threading
+        import traceback
+
+        dump = io.StringIO()
+        dump.write(f"任务超时未完成：最后状态 {status}\n")
+        dump.write(f"队列积压 {self.executor._work_queue.qsize()} 项\n")  # noqa: SLF001 - 诊断
+        for future in self._futures:
+            if future.done() and future.exception() is not None:
+                dump.write("--- 作业线程未落库的异常 ---\n")
+                dump.write("".join(
+                    traceback.format_exception(future.exception())
+                ))
+        for thread_id, frame in sys._current_frames().items():  # noqa: SLF001 - 诊断
+            name = next(
+                (t.name for t in threading.enumerate() if t.ident == thread_id), str(thread_id)
+            )
+            if name == "MainThread":
+                continue
+            dump.write(f"--- {name} ---\n")
+            traceback.print_stack(frame, file=dump)
+        raise AssertionError(dump.getvalue())
 
     def close(self) -> None:
         self.executor.shutdown(wait=True)
@@ -298,3 +337,107 @@ def test_start_reanalyzes_stale_analyzing_episode(
     assert status["status"] == "completed"
     refreshed = episodes_repo.list_by_project(memory_db, project_id)
     assert all(ep["status"] == "done" for ep in refreshed)
+
+
+def test_scan_at_or_below_threshold_autostarts_analysis(
+    harness: Harness, tmp_path: Path, sample_video: Path
+) -> None:
+    """≤N 集导入扫完即交全量分析，不用人点「批量分析」。"""
+    harness.context.settings["analysis.full_threshold"] = "15"
+    project_id = _make_project(harness, tmp_path, sample_video, copies=2)
+    jobs = [
+        job
+        for job in harness.context.job_store.list_recent()
+        if job["type"] == "analysis" and job["ref_id"] == project_id
+    ]
+    assert len(jobs) == 1, "扫集后应自动提交 analysis 任务"
+    status = harness.wait_done(str(jobs[0]["id"]))
+    assert status["status"] == "completed"
+    results = harness.rpc("analysis.results", {"project_id": project_id})
+    assert [ep["status"] for ep in results["episodes"]] == ["done", "done"]
+
+
+def test_scan_above_threshold_prescreens_then_analyzes_recommended(
+    harness: Harness, tmp_path: Path, sample_video: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """>N 集先预筛，入选的再全量分析。"""
+    harness.context.settings["analysis.full_threshold"] = "1"
+
+    def fake_prescreen(video_path: Path, wav_path: Path, *, threshold: float) -> dict[str, float]:
+        wav_path.parent.mkdir(parents=True, exist_ok=True)
+        wav_path.write_bytes(b"")
+        return {
+            "audio_peak_density": 1.0,
+            "scene_cut_density": 1.0,
+            "voice_activity_ratio": 1.0,
+            "motion_intensity": 1.0,
+            "prescreen_score": 90.0,
+            "recommended": 1.0,
+        }
+
+    monkeypatch.setattr(analysis_api.prescreen_engine, "prescreen_episode", fake_prescreen)
+    project_id = _make_project(harness, tmp_path, sample_video, copies=2)
+    prescreen_jobs = [
+        job
+        for job in harness.context.job_store.list_recent()
+        if job["type"] == "prescreen" and job["ref_id"] == project_id
+    ]
+    assert len(prescreen_jobs) == 1, "超阈值应先预筛而不是直接全量"
+    harness.wait_done(str(prescreen_jobs[0]["id"]))
+    deadline = time.time() + 30.0
+    analysis_jobs: list[dict[str, Any]] = []
+    while time.time() < deadline:
+        analysis_jobs = [
+            job
+            for job in harness.context.job_store.list_recent()
+            if job["type"] == "analysis" and job["ref_id"] == project_id
+        ]
+        if analysis_jobs:
+            break
+        time.sleep(0.05)
+    assert analysis_jobs, "预筛入选后应自动开全量分析"
+    status = harness.wait_done(str(analysis_jobs[0]["id"]))
+    assert status["status"] == "completed"
+
+
+def test_scan_without_threshold_setting_does_not_autostart(
+    harness: Harness, tmp_path: Path, sample_video: Path
+) -> None:
+    """测试夹具不带 analysis.full_threshold 时保持原行为：扫集不等于分析。"""
+    assert "analysis.full_threshold" not in harness.context.settings
+    project_id = _make_project(harness, tmp_path, sample_video, copies=1)
+    jobs = [job for job in harness.context.job_store.list_recent() if job["ref_id"] == project_id]
+    assert jobs == []
+
+
+def test_results_sets_clipping_when_audio_features_clip(
+    memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """源音频削顶：results 透出 clipping + peak_dbfs，不跑 ASR。"""
+    from types import SimpleNamespace
+
+    project_id = str(projects_repo.create(memory_db, "削顶剧", str(tmp_path))["id"])
+    episodes_repo.replace_all(
+        memory_db,
+        project_id,
+        [
+            {
+                "episode_number": 1,
+                "source_path": str(tmp_path / "ep1.mp4"),
+                "duration": 3.0,
+                "name": "ep1",
+            }
+        ],
+    )
+    episode_id = str(episodes_repo.list_by_project(memory_db, project_id)[0]["id"])
+    analysis_repo.upsert(
+        memory_db,
+        episode_id,
+        asr_segments="[]",
+        scene_data="[]",
+        audio_features=AudioFeatures(clipping=True, peak_dbfs=0.0).model_dump_json(),
+    )
+    payload = analysis_api.results(SimpleNamespace(conn=memory_db), {"project_id": project_id})
+    entry = payload["episodes"][0]
+    assert entry["clipping"] is True
+    assert entry["peak_dbfs"] == 0.0

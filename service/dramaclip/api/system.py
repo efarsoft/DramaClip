@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from dramaclip.infra import gpu, machine
+from dramaclip.infra.ffmpeg import binaries
 from dramaclip.transport.rpc import Router
 
 _STARTED_AT = time.monotonic()
@@ -33,6 +34,7 @@ def register(
             "ram_total_gb": machine.specs(force=force_refresh).get("ram_total_gb"),
             "ram_free_gb": machine.specs().get("ram_free_gb"),
             "disk_free_gb": machine.specs().get("disk_free_gb"),
+            "ffmpeg_version": binaries.version(force=force_refresh),
         }
 
     def _shutdown(_params: dict[str, Any]) -> dict[str, Any]:

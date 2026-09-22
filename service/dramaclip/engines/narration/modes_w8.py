@@ -20,7 +20,7 @@ def _slot_brief(index: int, count: int, score: int) -> str:
     if index == 0:
         return "开篇：一句话把人推到冲突跟前，交代处境但不解释设定"
     if index == count - 1:
-        return "收尾：留结局缺口 + 一句点击引导"
+        return "收尾：留缺口，一句指向看全集，禁止关注/点赞"
     if score >= 85:
         return "高潮：只讲这一幕最狠的那个信息点"
     return "推进：承接上一幕，说清冲突又升级了什么"

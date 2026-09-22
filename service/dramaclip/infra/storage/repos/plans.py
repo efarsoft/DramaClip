@@ -31,6 +31,15 @@ def set_titles(conn: sqlite3.Connection, plan_id: str, titles: str) -> None:
     conn.commit()
 
 
+def update_plan_data(conn: sqlite3.Connection, plan_id: str, plan_data: dict[str, Any]) -> None:
+    """配音回填后把 plan_data 写回（audio_path / duration）。"""
+    conn.execute(
+        "UPDATE narration_plans SET plan_data = ? WHERE id = ?",
+        (json.dumps(plan_data, ensure_ascii=False), plan_id),
+    )
+    conn.commit()
+
+
 def create(
     conn: sqlite3.Connection,
     project_id: str,

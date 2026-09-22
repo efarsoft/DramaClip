@@ -115,7 +115,7 @@ def _render(
 
     commands: list[list[str]] = []
     loudness_targets: list[Any] = []
-    monkeypatch.setattr(encoder, "_run_cut", lambda args: commands.append(args))
+    monkeypatch.setattr(encoder, "_run_cut", lambda args, *_a, **_k: commands.append(args))
     monkeypatch.setattr(encoder, "_concat", lambda _files, _out: None)
     # Phase C 不真跑 ffmpeg，但记录它收到的目标值——接线证明靠这份记录
     monkeypatch.setattr(

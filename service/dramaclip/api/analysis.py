@@ -50,6 +50,34 @@ def register(router: Router, context: AppContext) -> None:
     router.register("analysis.results", lambda params: results(context, params))
 
 
+def autostart_after_scan(
+    context: AppContext, project_id: str, episode_count: int
+) -> dict[str, Any] | None:
+    """扫集成功后按 analysis.full_threshold 调度：≤N 全量分析，>N 预筛后再分析入选集。
+
+    设置里没有该键（测试夹具）或没有 job 运行时：什么都不做。
+    生产 load() 必带默认 15。
+    """
+    settings = getattr(context, "settings", None)
+    if not isinstance(settings, dict) or "analysis.full_threshold" not in settings:
+        return None
+    if getattr(context, "job_store", None) is None or getattr(context, "executor", None) is None:
+        return None
+    if _active_ingest_job(context, project_id) is not None:
+        return None
+    threshold = max(1, min(config.get_int(settings, "analysis.full_threshold"), 80))
+    if episode_count <= threshold:
+        return start(context, {"project_id": project_id})
+    return prescreen(context, {"project_id": project_id, "then_analyze": True})
+
+
+def _active_ingest_job(context: AppContext, project_id: str) -> dict[str, Any] | None:
+    for job in context.job_store.list_recent(limit=50, active_only=True):
+        if job.get("ref_id") == project_id and job.get("type") in ("analysis", "prescreen"):
+            return job
+    return None
+
+
 def prescreen(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     """阶段一：批量轻量预筛（原案 3附），结果落 episode_prescreen 并推荐。"""
     project_id = str(params.get("project_id", ""))
@@ -65,8 +93,11 @@ def prescreen(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     job_id = context.job_store.create("prescreen", ref_id=project_id)
     cancel_event = threading.Event()
     context.cancel_events[job_id] = cancel_event
+    then_analyze = bool(params.get("then_analyze", False))
     context.executor.submit(
-        context.notifier.tracked(job_id, _run_prescreen, context, job_id, targets, cancel_event)
+        context.notifier.tracked(
+            job_id, _run_prescreen, context, job_id, project_id, targets, cancel_event, then_analyze
+        )
     )
     return {"job_id": job_id}
 
@@ -74,8 +105,10 @@ def prescreen(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
 def _run_prescreen(
     context: AppContext,
     job_id: str,
+    project_id: str,
     targets: list[dict[str, Any]],
     cancel_event: threading.Event,
+    then_analyze: bool = False,
 ) -> None:
     context.job_store.mark_running(job_id)
     total = len(targets)
@@ -107,11 +140,24 @@ def _run_prescreen(
         context.job_store.set_progress(job_id, 100.0, "预筛完成")
         context.notifier.progress(job_id, 100.0, "预筛完成")
         context.job_store.mark_completed(job_id)
+        if then_analyze:
+            recommended_ids = [
+                str(episode["id"])
+                for episode in targets
+                if _prescreen_recommended(context, str(episode["id"]))
+            ]
+            if recommended_ids:
+                start(context, {"project_id": project_id, "episode_ids": recommended_ids})
     except Exception as exc:
         context.job_store.mark_failed(job_id, str(exc))
         context.notifier.log("error", f"预筛失败: {exc}")
     finally:
         context.cancel_events.pop(job_id, None)
+
+
+def _prescreen_recommended(context: AppContext, episode_id: str) -> bool:
+    row = prescreen_repo.get(context.conn, episode_id)
+    return bool(row and row.get("recommended"))
 
 
 def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -324,6 +370,11 @@ def results(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         genre = record["genre"] if record else None
         if genre:
             entry["genre"] = str(genre)
+        peak_dbfs, clipping = _audio_peak(record)
+        if clipping:
+            entry["clipping"] = True
+            if peak_dbfs is not None:
+                entry["peak_dbfs"] = peak_dbfs
         summary.append(entry)
     return {
         "episodes": summary,
@@ -338,6 +389,17 @@ def _scene_count(record: dict[str, Any] | None) -> int:
     if record is None or not record["scene_data"]:
         return 0
     return len(json.loads(record["scene_data"]))
+
+
+def _audio_peak(record: dict[str, Any] | None) -> tuple[float | None, bool]:
+    """源音频削顶：成片限幅只能压电平，不能把平顶长回来。"""
+    if record is None or not record["audio_features"]:
+        return None, False
+    try:
+        audio = AudioFeatures.model_validate(json.loads(record["audio_features"]))
+    except (json.JSONDecodeError, ValueError):
+        return None, False
+    return audio.peak_dbfs, audio.clipping
 
 
 def _run_job(

@@ -43,7 +43,7 @@ class StrategySpec(BaseModel):
 
     platform: str = "douyin"
     min_duration_s: float = 30.0
-    max_duration_s: float = 120.0
+    max_duration_s: float = 300.0
 
 
 class PlanData(BaseModel):

@@ -30,6 +30,16 @@ def test_match_emotion_label_and_keywords() -> None:
     assert match_emotion("今天天气不错") == "default"
 
 
+def test_build_ass_uses_explicit_emotion_label() -> None:
+    """段上盖的情绪标签优先于文案关键词：没有脏话的钩子也能走高潮色。"""
+    preset = presets.get_preset("conflict-impact")
+    ass = build_ass(
+        [{"start": 0, "end": 2, "text": "今天天气不错", "emotion_label": "angry"}],
+        preset,
+    )
+    assert "&H000000FF" in ass, "显式 angry 必须烧成冲突红，不能因文案平静掉进 default"
+
+
 def test_build_ass_structure() -> None:
     preset = presets.get_preset("conflict-impact")
     ass = build_ass(

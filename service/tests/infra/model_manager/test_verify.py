@@ -40,6 +40,48 @@ def _whisper_cache(base: Path, *, model: str = "medium", rev: str = _REV) -> Pat
     return cache
 
 
+def test_detect_status_reports_actual_bytes(tmp_path: Path) -> None:
+    """就绪度条要说「占用 0.63GB」——那必须是磁盘实占，不是清单里写的标称大小。
+
+    两者不是一回事：标称 ~350MB 的 Kokoro 加上缓存骨架与词典会超；而中断的下载
+    只落了 192MB 半截文件，按标称报就把磁盘真实占用瞒过去了。
+    """
+    spec = _spec("sensevoice-small")
+    base = tmp_path / "models" / spec.placement
+    base.mkdir(parents=True)
+    (base / "model.pt").write_bytes(bytes(2048))
+    (base / "jam" / "nested").mkdir(parents=True)
+    (base / "jam" / "nested" / "extra.bin").write_bytes(bytes(1024))
+
+    status = registry.detect_status(tmp_path / "models", spec)
+
+    assert status["size_bytes"] == 3072
+    # 未安装：没有目录可统计，报 0 而不是缺字段——前端不得拿 undefined 当 0。
+    other = registry.detect_status(tmp_path / "models", _spec("kokoro-82m"))
+    assert other["size_bytes"] == 0
+
+
+def test_detect_status_whisper_size_covers_its_own_cache_only(tmp_path: Path) -> None:
+    """四个 whisper 档位共用一个 placement 目录——体积必须按各自缓存目录切分。
+
+    否则「small 占用」会把 medium/large 的几 GB 一并算进来。且要统计整个缓存根：
+    HF 布局下权重实体落在 blobs/，``path`` 指向的 snapshots/<rev>/ 只是入口目录，
+    只算它等于把真实磁盘占用漏掉。
+    """
+    models = tmp_path / "models"
+    base = models / "asr/faster-whisper"
+    small = _whisper_cache(base, model="small")
+    (small / "blobs").mkdir()
+    (small / "blobs" / "model.bin.incomplete").write_bytes(bytes(4096))
+    # 邻居缓存：一字节都不该算进 small。
+    _whisper_cache(base, model="medium")
+
+    status = registry.detect_status(models, _spec("faster-whisper-small"))
+
+    # 本缓存实占 = snapshots 4×16 + refs/main 40 + trees/<rev>.json 2 + blobs 4096
+    assert status["size_bytes"] == 64 + 40 + 2 + 4096
+
+
 # ---------------------------------------------------------------- 引擎接入态
 
 
@@ -47,7 +89,9 @@ def test_engine_ready_is_true_only_for_engines_the_factory_can_build() -> None:
     from dramaclip.engines.tts.factory import supported as tts_supported
 
     assert registry.engine_ready(_spec("kokoro-82m")) is True
-    assert registry.engine_ready(_spec("indextts2")) is False
+    assert registry.engine_ready(_spec("indextts2")) is True, (
+        "indextts2 已接进工厂（a88da7b），断言不得停留在接入前"
+    )
     assert registry.engine_ready(_spec("vibevoice-1.5b")) is False
     # 防漂移：清单里出现过的 TTS 引擎，「已接入」必须等价于「工厂认得」，两边不得各存一份名单。
     listed = {s.engine for s in builtin_specs() if s.kind == "tts"}

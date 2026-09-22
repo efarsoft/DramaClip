@@ -13,7 +13,7 @@ from dramaclip.engines.narration.models import (
     TimelineSegment,
 )
 
-_CTA_TEXT = "结局太爽了！点下方看全集 →"
+_CTA_TEXT = "后面更狠——点进去看全集"
 _FLOW_SCENE_S = 8.0
 _CTA_FALLBACK_S = 3.0
 _MAX_SCENES = 6

@@ -51,6 +51,8 @@ class AudioFeatures(BaseModel):
     silence_ratio: float = 0.0
     speech_zones: list[SpeechZone] = Field(default_factory=list)
     bpm: float | None = None
+    peak_dbfs: float | None = None
+    clipping: bool = False
 
 
 class EpisodeRawAnalysis(BaseModel):

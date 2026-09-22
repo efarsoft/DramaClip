@@ -503,7 +503,9 @@ def _stub_language_and_tts(
             if "风格库" in system:  # styles._SELECT_SYSTEM_PROMPT
                 return {"style_id": "shuanggan", "reason": "全剧靠反问推进"}
             slots = re.findall(r"^\[([^\]]+)\] 要做的事：", user, flags=re.MULTILINE)
-            return {"lines": [{"id": slot, "text": f"{slot} 的解说"} for slot in slots]}
+            return {"lines": [
+                {"id": slot, "text": f"{slot} 的解说，后面更狠——点进去看全集"} for slot in slots
+            ]}
 
     monkeypatch.setattr(angles, "LlmClient", _Llm)
     monkeypatch.setattr(copywriter, "LlmClient", _Llm)
@@ -555,7 +557,12 @@ def test_plan_variants_writes_k_plans_without_rendering(
     for row in plans:
         plan = PlanData.model_validate(row["plan_data"])
         assert plan.planner == "llm_script"
-        assert all(text.audio_path for text in plan.narration_texts), "方案落库时必须已配音"
+        assert all(not text.audio_path for text in plan.narration_texts), (
+            "规划不得配音，勾选导出时再合成"
+        )
+    assert all(row["status"] == "ready" for row in plans), (
+        "过转化门禁的方案必须是 ready，draft 不能出片"
+    )
 
     selection_calls = sum(1 for system, _user in calls if "选题操盘手" in system)
     assert selection_calls == 1, f"选题应每模式一次，实得 {selection_calls} 次"
@@ -1062,18 +1069,16 @@ def test_plan_variants_cancel_releases_the_event(
     calls: list[tuple[str, str]] = []
     _stub_language_and_tts(monkeypatch, calls)
 
-    real_voice = narration_api._voice
+    real_plan = narration_api._plan_one
 
-    def voice_then_cancel(
-        context: Any, plan: Any, settings: Any, source_durations: Any
-    ) -> Any:
-        """配完第一条就取消：`_voice` 四个入参（Task 5 重写后无 job_id/mode/index）。"""
-        voiced = real_voice(context, plan, settings, source_durations)
-        for event in context.cancel_events.values():
+    def plan_then_cancel(*args: Any, **kwargs: Any) -> Any:
+        """编完第一条就取消：规划阶段不再走配音。"""
+        planned = real_plan(*args, **kwargs)
+        for event in harness.context.cancel_events.values():
             event.set()
-        return voiced
+        return planned
 
-    monkeypatch.setattr(narration_api, "_voice", voice_then_cancel)
+    monkeypatch.setattr(narration_api, "_plan_one", plan_then_cancel)
     result = harness.rpc(
         "narration.plan_variants",
         {"project_id": project_id, "modes": ["full_narration"], "k": 3},
@@ -1088,7 +1093,7 @@ def test_get_plan_returns_row_and_cost(
     sample_video: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """模式选 intro：3 段 1 槽，段数与槽位数不等，tts_calls 的字面断言才有鉴别力。"""
+    """模式选 intro：正文段 + 片尾 CTA 槽，段数与槽位数不等，tts_calls 才有鉴别力。"""
     project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     harness.context.settings.update(_LLM_SETTINGS)
@@ -1106,8 +1111,8 @@ def test_get_plan_returns_row_and_cost(
     assert detail["plan"]["id"] == plan_id
     assert detail["plan"]["angle"] == "角度1"
     plan = PlanData.model_validate(detail["plan"]["plan_data"])
-    assert len(plan.timeline) == 6 and len(plan.narration_texts) == 1
-    assert detail["cost"] == {"copy_llm_calls": 1, "tts_calls": 1}
+    assert len(plan.timeline) == 7 and len(plan.narration_texts) == 2
+    assert detail["cost"] == {"copy_llm_calls": 1, "tts_calls": 2}
 
 
 def test_get_plan_of_a_silent_mode_costs_no_llm_call(

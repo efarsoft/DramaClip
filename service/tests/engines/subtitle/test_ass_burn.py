@@ -22,7 +22,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from dramaclip.engines.subtitle import presets
+from dramaclip.engines.subtitle import ass_generator, caption_font, presets
 from dramaclip.engines.subtitle.ass_generator import build_ass, line_char_cap, split_subtitle_text
 
 _FFMPEG = Path(__file__).resolve().parents[4] / "resources" / "ffmpeg" / "ffmpeg.exe"
@@ -34,19 +34,21 @@ _SAFE_RIGHT = 1080 - 40 - 1
 
 
 def _paint(tmp_path: Path, ass_text: str, name: str) -> np.ndarray:
-    """把一份 ASS 烧到纯色底上，返回该帧像素矩阵（bundled ffmpeg + 系统微软雅黑）。
+    """把一份 ASS 烧到纯色底上，返回该帧像素矩阵（bundled ffmpeg + **随包字体**）。
 
     `-ss 0.7` 取的是淡入**之后**的一帧：预设都带 fad 标签，第 0 帧全透明，量不到墨。
     滤镜串走相对路径：encoder 的 `_escape_filter_path` 同样优先相对路径，盘符冒号在
-    滤镜串里会被当成选项分隔符。
+    滤镜串里会被当成选项分隔符。`fontsdir` 用 encoder 生产那份同一构造的选项——量的
+    必须是被烧出来的那个字面，否则这条门禁测的是系统里恰好装着的字体。
     """
     assert _FFMPEG.is_file(), f"缺 bundled ffmpeg：{_FFMPEG}"
     (tmp_path / f"{name}.ass").write_text(ass_text, encoding="utf-8")
+    fontsdir = caption_font.fontsdir_option(caption_font.caption_font())
     subprocess.run(  # noqa: S603 - 受控参数
         [
             str(_FFMPEG), "-hide_banner", "-loglevel", "error", "-y",
             "-f", "lavfi", "-i", "color=c=0x101010:s=1080x1920:d=2:r=25",
-            "-vf", f"ass={name}.ass",
+            "-vf", f"ass={name}.ass:{fontsdir}",
             "-ss", "0.7", "-frames:v", "1", f"{name}.png",
         ],
         cwd=str(tmp_path),
@@ -174,4 +176,39 @@ def test_a_bigger_font_tightens_the_cap_and_that_cap_is_the_edge(
     assert out_left < _SAFE_LEFT or out_right > _SAFE_RIGHT, (
         f"{preset_id}: {cap + 1} 字竟然没越界（x=[{out_left},{out_right}]），"
         "上限比真实需要更保守，保护对象需要重估"
+    )
+
+
+def _ass_only_style(ass_text: str, **overrides: object) -> str:
+    """换掉样式行的 Fontname/Fontsize，其余字段一字不动地沿用生产产物。"""
+    lines = ass_text.splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith("Style:"):
+            fields = line[len("Style: ") :].split(",")
+            fields[1] = str(overrides["family"])
+            fields[2] = str(overrides["size"])
+            lines[index] = "Style: " + ",".join(fields)
+    return "\n".join(lines) + "\n"
+
+
+def test_the_advance_constant_is_the_bundled_face_measured_advance(tmp_path: Path) -> None:
+    """拆行上限里那个「每字步进占字号百分之几十」必须是**随包字面**量出来的数。
+
+    常数是这套几何唯一的经验输入：它一变，上限就跟着变，而越界只有烧出来才看得见。
+    换字体（或换了字体没重标常数）都会在这里红——差的这一头就是真机越界的那一头。
+    """
+    size = 64
+    head = build_ass([{"start": 0, "end": 2, "text": "她"}], {"font": {"size": size}})
+    ass = _ass_only_style(head, family=caption_font.caption_font().family, size=size)
+    short = _span(_ink(_paint(tmp_path, ass.replace("她", "她" * 8), "adv_short")))
+    long_ = _span(_ink(_paint(tmp_path, ass.replace("她", "她" * 16), "adv_long")))
+    assert short[2] == 1 and long_[2] == 1, "同一行被排成了多行：这份产物不再能量步进"
+    advance = (long_[1] - long_[0] - (short[1] - short[0])) / 8
+    model = size * ass_generator._GLYPH_ADVANCE_PERCENT / 100
+    assert advance <= model + 1.0, (
+        f"随包字面实测每字步进 {advance:.1f}px > 常数允许的 {model:.1f}px（+1px 取整余量）："
+        "上限会放过放不下的行，正是业主立案②的越界形状"
+    )
+    assert advance > model - 4.0, (
+        f"实测步进 {advance:.1f}px 远小于常数允许的 {model:.1f}px：上限白留了余量，重标它"
     )

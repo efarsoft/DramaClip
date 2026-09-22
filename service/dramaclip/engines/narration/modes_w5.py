@@ -12,7 +12,6 @@ from dramaclip.engines.narration.models import (
 )
 
 _CROSS_SCENE_S = 8.0        # 交叉解说单场景原声段基准时长
-_CROSS_MAX_S = 120.0
 _HOOK_TTS_FALLBACK_S = 4.0  # TTS 时长回填前的保守估算
 _ULTRA_CONFLICT_S = 8.0     # 超短版冲突画面时长
 
@@ -30,8 +29,6 @@ def build_cross(
 
     segments: list[TimelineSegment] = []
     texts: list[NarrationText] = []
-    budget = min(strategy.max_duration_s, _CROSS_MAX_S)
-    used = 0.0
     for index, scene in enumerate(picked):
         duration = min(scene.end - scene.start, _CROSS_SCENE_S)
         segments.append(
@@ -42,9 +39,6 @@ def build_cross(
                 audio="original",
             )
         )
-        used += duration
-        if used >= budget:
-            break
         # 场景间插入旁白段（画面延续到下一场景开头；末尾场景后用本场景尾部）
         anchor = picked[index + 1] if index + 1 < len(picked) else scene
         narration_seconds = _HOOK_TTS_FALLBACK_S
@@ -52,7 +46,9 @@ def build_cross(
         texts.append(
             NarrationText(
                 id=slot_id,
-                brief="原声片段之间的串联：承接上一幕，给下一幕留半句钩",
+                brief="原声片段之间的串联：承接上一幕，给下一幕留半句钩"
+                if index + 1 < len(picked)
+                else "收尾：留缺口，一句指向看全集，禁止关注/点赞",
             )
         )
         segments.append(
@@ -67,7 +63,6 @@ def build_cross(
                 narration_id=slot_id,
             )
         )
-        used += narration_seconds
     return PlanData(
         mode="cross_narration", timeline=segments, narration_texts=texts, strategy=strategy
     )
@@ -90,7 +85,7 @@ def build_ultra_short(
         NarrationText(id="hook-1", brief="开场钩子：一句，最大反差或最狠的悬念，不超过 20 字"),
         NarrationText(
             id="cta-1",
-            brief="收尾引导：一句，指向「结局更狠」并引导点击，不超过 15 字",
+            brief="收尾引导：一句，留缺口并指向看全集，不超过 15 字，禁止关注/点赞",
         ),
     ]
     timeline = [

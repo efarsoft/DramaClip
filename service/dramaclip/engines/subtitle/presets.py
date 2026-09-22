@@ -43,13 +43,7 @@ def get_preset(preset_id: str | None) -> dict[str, Any]:
         {
             "preset_id": FALLBACK_PRESET_ID,
             "dimensions": {},
-            "font": {
-                "name": "Microsoft YaHei",
-                "size": 64,
-                "bold": True,
-                "outline_width": 3,
-                "shadow": 1,
-                "margin_v": 80,
-            },
+            # 没有 "name"：字幕字面是随包资产（engines.subtitle.caption_font），不由预设指定
+            "font": {"size": 64, "bold": True, "outline_width": 3, "shadow": 1, "margin_v": 80},
         },
     )

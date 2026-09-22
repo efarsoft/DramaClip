@@ -36,6 +36,7 @@ def _now_ms() -> int:
 STATUS_PENDING = "pending"
 STATUS_FAILED = "failed"
 STATUS_COMPLETED = "completed"
+STATUS_CANCELLED = "cancelled"
 
 
 def create(
@@ -86,6 +87,15 @@ def mark_failed(conn: sqlite3.Connection, export_id: str, error: str) -> None:
     conn.execute(
         "UPDATE export_jobs SET status = ?, error = ? WHERE id = ?",
         (STATUS_FAILED, error, export_id),
+    )
+    conn.commit()
+
+
+def mark_cancelled(conn: sqlite3.Connection, export_id: str) -> None:
+    """取消不是失败：作品库不收，队列不当出错。"""
+    conn.execute(
+        "UPDATE export_jobs SET status = ?, error = NULL WHERE id = ?",
+        (STATUS_CANCELLED, export_id),
     )
     conn.commit()
 

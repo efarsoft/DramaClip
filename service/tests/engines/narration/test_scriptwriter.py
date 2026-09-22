@@ -188,7 +188,7 @@ def test_system_carries_the_rules_the_sanitizer_enforces() -> None:
 
 def test_user_block_points_at_the_band_instead_of_canceling_it() -> None:
     """同输入的自然实验：相隔 10 分钟的两次跑，「段数不设上限」措辞出 6 段，
-    「正文 12-20 段」出 17 段。user 层再讲一遍「不设上限/由剧情需要决定」
+    「正文 12-28 段」出更完整的冲突链。user 层再讲一遍「不设上限/由剧情需要决定」
     正好抵消掉 system 的段数区间。
     """
     user = _user_sent()
@@ -200,14 +200,14 @@ def test_user_block_points_at_the_band_instead_of_canceling_it() -> None:
 def test_default_system_carries_both_layers() -> None:
     system = _system_sent()
     assert "【解说基本功——逐条强制遵守】" in system
-    assert "正文 12-20 段" in system
+    assert "正文 12-28 段" in system
 
 
 def test_structure_override_replaces_only_the_structure() -> None:
     """换掉结构指令不该把基本功层一起带走：两层各自独立才可分别调。"""
     system = _system_sent(**{"prompt.scriptwriter_system": "只回 JSON。"})
     assert system.startswith("只回 JSON。")
-    assert "正文 12-20 段" not in system
+    assert "正文 12-28 段" not in system
     assert "【解说基本功——逐条强制遵守】" in system
 
 

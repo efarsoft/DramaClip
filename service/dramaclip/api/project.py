@@ -131,6 +131,9 @@ def scan_episodes(context: AppContext, params: dict[str, Any]) -> list[dict[str,
     _ensure_cover(context, project)
     for episode in episodes_repo.list_by_project(context.conn, project_id):
         _ensure_episode_cover(context, episode)
+    from dramaclip.api.analysis import autostart_after_scan
+
+    autostart_after_scan(context, project_id, len(scanned))
     return scanned
 
 

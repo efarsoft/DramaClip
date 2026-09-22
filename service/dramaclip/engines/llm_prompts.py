@@ -78,7 +78,7 @@ SPECS: list[PromptSpec] = [
     PromptSpec(
         "prompt.scriptwriter_fundamentals",
         "解说基本功（编剧与填词共用）",
-        "说书人视角/半句钩/悬念管理等常驻手艺底线，两条成稿链路都拼上这一段",
+        "说书人视角/半句钩/导看全集/片长服从故事等常驻手艺底线，两条成稿链路都拼上这一段",
         _default("dramaclip.engines.narration.scriptwriter", "FUNDAMENTALS"),
     ),
     PromptSpec(
@@ -90,7 +90,7 @@ SPECS: list[PromptSpec] = [
     PromptSpec(
         "prompt.titles_system",
         "候选标题",
-        "成片详情页 8 条候选标题生成",
+        "成片信息流标题：8 条候选，让人点进去看全集",
         _default("dramaclip.engines.narration.titles", "_SYSTEM_PROMPT"),
     ),
 ]

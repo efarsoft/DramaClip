@@ -30,7 +30,7 @@ def _plan(source_start: float = 1.0, source_end: float = 3.0) -> PlanData:
     return PlanData(
         mode="full_narration",
         timeline=[
-            TimelineSegment(episode_id="ep1", start=source_start, end=source_end, audio="ducked")
+            TimelineSegment(episode_id="ep1", start=source_start, end=source_end, audio="original")
         ],
     )
 
@@ -48,7 +48,7 @@ def _zones_seen(
         return start, end
 
     monkeypatch.setattr(encoder.jitter, "safe_times", _capture)
-    monkeypatch.setattr(encoder, "_run_cut", lambda _args: None)
+    monkeypatch.setattr(encoder, "_run_cut", lambda *_a, **_k: None)
     monkeypatch.setattr(encoder, "_concat", lambda _files, _out: None)
     encoder.export_plan(
         _plan(), {"ep1": str(_source(tmp_path))}, tmp_path / "out.mp4", tmp_path / "work",

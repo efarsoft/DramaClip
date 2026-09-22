@@ -18,6 +18,8 @@ _RAW_CLIP_MIN_S = 3.0
 _RAW_CLIP_MAX_S = 25.0
 _INTRO_MAX_S = 30.0  # 片头段保守时长（TTS 实际时长在导出时回填）
 _INTRO_SLOT_ID = "intro-1"
+_CTA_SLOT_ID = "cta-1"
+_CTA_FALLBACK_S = 2.0
 
 
 def build_raw_clip(
@@ -63,14 +65,29 @@ def build_intro(
     if not timeline:
         return PlanData(mode="intro_narration", timeline=timeline, strategy=strategy)
     timeline[0] = timeline[0].model_copy(update={"narration_id": _INTRO_SLOT_ID})
+    last = timeline[-1]
+    cta_start = round(max(last.start, last.end - _CTA_FALLBACK_S), 3)
+    timeline.append(
+        TimelineSegment(
+            episode_id=last.episode_id,
+            start=cta_start,
+            end=round(last.end, 3),
+            audio="narration",
+            narration_id=_CTA_SLOT_ID,
+        )
+    )
     return PlanData(
         mode="intro_narration",
         timeline=timeline,
         narration_texts=[
             NarrationText(
                 id=_INTRO_SLOT_ID,
-                brief="片头钩子：两三句把最大冲突抛出来，收尾留悬念，不要复述剧情梗概",
-            )
+                brief="片头钩子：两三句把最大冲突抛出来，不要复述剧情梗概",
+            ),
+            NarrationText(
+                id=_CTA_SLOT_ID,
+                brief="收尾引导：一句，留缺口并指向看全集，不超过 15 字，禁止关注/点赞",
+            ),
         ],
         strategy=strategy,
     )
@@ -82,24 +99,11 @@ def _fit_duration(
     *,
     intro_first: bool = False,
 ) -> list[TimelineSegment]:
-    """按时长目标截断：首场景无条件保留，其余在预算内按叙事顺序填充（不打乱顺序）。
-    """
-    # 片头解说要在预算里**预留**引子槽位的最坏长度：段长是 TTS 回填时才定的
-    # （`pipeline.synthesize_narration_texts` 把段 end 改成 start + 实测音频时长），
-    # 编排期只知道 `_INTRO_MAX_S` 这个保守估计。不预留就会两头都吃满预算：
-    # 活库实测四集的一手给出 planned 298.80s，而 ep1 的引子实测音频 22.48s
-    # （编排期只给它 5.17s），成片因此约 313s——顶穿 `strategy.max_duration_s`=300，
-    # 而九模式门禁的时长断言正是 `duration_s > strategy.max_duration_s`。
-    budget = strategy.max_duration_s - (_INTRO_MAX_S if intro_first else 0.0)
-    kept: list[EpisodeScene] = []
-    used = 0.0
-    for index, scene in enumerate(ordered):
-        duration = scene.end - scene.start
-        if index != 0 and used + duration > budget:
-            continue
-        kept.append(scene)
-        used += duration
+    """保留编排器已选出的场景；片长服从故事，不再按 max_duration 截断。
 
+    片头解说仍把首段画面钳到 `_INTRO_MAX_S`（TTS 槽位估计，不是成片门禁）。
+    """
+    del strategy  # 软参考，编排器挑选场景时可读；这里不再用来砍轴
     segments = [
         TimelineSegment(
             episode_id=scene.episode_id,
@@ -107,7 +111,7 @@ def _fit_duration(
             end=round(scene.end, 3),
             audio="narration" if intro_first and index == 0 else "original",
         )
-        for index, scene in enumerate(kept)
+        for index, scene in enumerate(ordered)
     ]
     if intro_first and segments:
         first = segments[0]

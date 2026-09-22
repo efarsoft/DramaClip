@@ -128,14 +128,8 @@ def test_segments_follow_broadcast_order_not_clock_order() -> None:
     ]
 
 
-def test_fit_duration_never_overshoots_the_budget() -> None:
-    """末场景不再享受预算豁免：跨集之后豁免会把成片顶过 `strategy.max_duration_s`。
-
-    夹具按活库的量级造：每集 20 个 7.9s 的场景（活库实测最长单场景就是 7.9s），
-    三集共 474 场景秒，预算 30s。**实测**：新实现给出 23.7s（≤30），恢复末场景豁免
-    给出 **31.6s**（>30）——而九模式门禁的时长断言是 `duration_s > strategy.max_duration_s`
-    即失败。活库尺度上同一个差值是 300 → **307.9s**。
-    """
+def test_fit_duration_keeps_story_past_budget() -> None:
+    """片长服从故事：不再按 max_duration 砍轴。"""
     scenes = stamp(
         [
             (
@@ -152,17 +146,11 @@ def test_fit_duration_never_overshoots_the_budget() -> None:
         ("intro_narration", build_intro(scenes, strategy)),
     ):
         total = sum(segment.end - segment.start for segment in plan.timeline)
-        assert total <= strategy.max_duration_s, f"{mode} 顶穿了预算：{total}s > 30s"
+        assert total > strategy.max_duration_s, f"{mode} 仍在按预算砍片：{total}s"
 
 
-def test_intro_reserves_headroom_for_the_hook_slot() -> None:
-    """引子槽位的段长是 TTS 回填时才定的，故编排期必须给它**预留**预算。
-
-    不预留就两头都吃满：活库实测四集的一手 planned 298.80s、引子实测音频 22.48s
-    （编排期只给它 5.17s）⇒ 成片约 313s，顶穿 `strategy.max_duration_s`=300，
-    而九模式门禁的时长断言正是 `duration_s > strategy.max_duration_s`。
-    预留 `_INTRO_MAX_S` 之后同一手 planned 269.06s ⇒ 成片约 283.6s，落回窗口内。
-    """
+def test_intro_still_caps_the_hook_slot() -> None:
+    """引子槽位画面仍钳在 _INTRO_MAX_S，但不为此丢掉后面的冲突。"""
     scenes = stamp(
         [
             (number, f"ep{number}", [_scene(index, index * 8.0, 90) for index in range(20)])
@@ -171,18 +159,18 @@ def test_intro_reserves_headroom_for_the_hook_slot() -> None:
     )
     strategy = StrategySpec(min_duration_s=10, max_duration_s=300)
     plan = build_intro(scenes, strategy)
-    total = sum(segment.end - segment.start for segment in plan.timeline)
-    assert total <= strategy.max_duration_s - 30.0, (
-        f"引子没预留槽位余量：正文吃掉了 {total}s，预算只有 {strategy.max_duration_s}s"
-    )
+    assert plan.timeline[0].end - plan.timeline[0].start <= 30
+    assert len(plan.timeline) == 61
+    assert plan.timeline[-1].narration_id == "cta-1"
 
 
 def test_intro_keeps_its_slot_when_the_first_scene_alone_exceeds_the_budget() -> None:
     """首场景仍然无条件保留：`intro_narration` 的旁白槽位挂在它上面，丢了就没有解说。"""
     scenes = stamp([(1, "ep1", [ConflictScore(scene_index=0, start=0.0, end=90.0, score=90)])])
     plan = build_intro(scenes, StrategySpec(min_duration_s=10, max_duration_s=30))
-    assert len(plan.timeline) == 1
+    assert len(plan.timeline) == 2
     assert plan.timeline[0].narration_id == "intro-1"
+    assert plan.timeline[-1].narration_id == "cta-1"
     assert_slots_paired(plan, "intro_narration")
 
 
@@ -251,5 +239,5 @@ def test_subtitle_flow_takes_each_line_from_its_own_episode() -> None:
     assert lines == [
         ("ep1", "第一集的金句"),
         ("ep2", "第二集的金句"),
-        ("ep2", "结局太爽了！点下方看全集 →"),
+        ("ep2", "后面更狠——点进去看全集"),
     ], lines

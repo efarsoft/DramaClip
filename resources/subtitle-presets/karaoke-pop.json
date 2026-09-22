@@ -3,18 +3,41 @@
   "preset_name": "卡拉OK金句",
   "description": "逐字高亮填充，居中大字，适合字幕金句流与高潮台词。",
   "dimensions": {
-    "rhythm": { "type": "karaoke" },
-    "animation": { "entrance": "bounce", "fade_ms": 150 },
-    "layout": { "default": "center_single", "climax": "center_single" },
+    "rhythm": {
+      "type": "karaoke"
+    },
+    "animation": {
+      "entrance": "bounce",
+      "fade_ms": 150
+    },
+    "layout": {
+      "default": "center_single",
+      "climax": "center_single"
+    },
     "emotion_style": {
-      "default": { "primary": "&H00FFFFFF", "outline": "&H00000000", "effect": "none" },
-      "anger": { "primary": "&H000000FF", "outline": "&H00FFFFFF", "effect": "shake" },
-      "triumph": { "primary": "&H0000D7FF", "outline": "&H00000000", "effect": "scale_glow" },
-      "suspense": { "primary": "&H0000FFFF", "outline": "&H00000000", "effect": "none" }
+      "default": {
+        "primary": "&H00FFFFFF",
+        "outline": "&H00000000",
+        "effect": "none"
+      },
+      "anger": {
+        "primary": "&H000000FF",
+        "outline": "&H00FFFFFF",
+        "effect": "shake"
+      },
+      "triumph": {
+        "primary": "&H0000D7FF",
+        "outline": "&H00000000",
+        "effect": "scale_glow"
+      },
+      "suspense": {
+        "primary": "&H0000FFFF",
+        "outline": "&H00000000",
+        "effect": "none"
+      }
     }
   },
   "font": {
-    "name": "Microsoft YaHei",
     "size": 80,
     "bold": true,
     "outline_width": 3,

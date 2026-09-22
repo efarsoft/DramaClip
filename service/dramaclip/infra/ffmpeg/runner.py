@@ -69,6 +69,8 @@ def run(
     """
     if on_progress is not None and total_duration_s is not None:
         args = ["-progress", "pipe:1", "-nostats", *args]
+    if cancel is not None and cancel.is_set():
+        raise FfmpegError("ffmpeg 已取消", cancelled=True)
     process = subprocess.Popen(  # noqa: S603 - 参数为受控列表
         [resolve_ffmpeg(), *args],
         stdout=subprocess.PIPE,
@@ -79,13 +81,28 @@ def run(
     )
     stderr_lines: list[str] = []
     watcher: threading.Timer | None = None
+    stop_killer = threading.Event()
+    killer: threading.Thread | None = None
     try:
+        if cancel is not None and cancel.is_set():
+            raise FfmpegError("ffmpeg 已取消", cancelled=True)
         threading.Thread(
             target=_drain_stderr, args=(process, stderr_lines), daemon=True
         ).start()
         if timeout_s is not None:
             watcher = threading.Timer(timeout_s, process.kill)
             watcher.start()
+        if cancel is not None:
+            def _kill_if_cancelled() -> None:
+                while process.poll() is None:
+                    if cancel.is_set():
+                        process.kill()
+                        return
+                    if stop_killer.wait(0.05):
+                        return
+
+            killer = threading.Thread(target=_kill_if_cancelled, daemon=True)
+            killer.start()
         if process.stdout is not None:
             for line in process.stdout:
                 seconds = _parse_out_time(line)
@@ -105,6 +122,7 @@ def run(
             seconds_processed=None,
         )
     finally:
+        stop_killer.set()
         if watcher is not None:
             watcher.cancel()
         if process.poll() is None:

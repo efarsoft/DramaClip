@@ -26,6 +26,7 @@ from dramaclip.engines.narration.models import (
     TimelineSegment,
 )
 from dramaclip.engines.narration.scriptwriter import Script, estimate_duration
+from dramaclip.engines.narration.transitions import apply as apply_transitions
 from dramaclip.engines.semantic.models import HighlightSegment
 from dramaclip.engines.tts import base as tts_base
 from dramaclip.engines.tts.factory import create as create_tts
@@ -55,28 +56,28 @@ def build_plan(
     strategy = StrategySpec(
         platform="douyin",
         min_duration_s=float(settings.get("strategy.min_duration_s", "30")),
-        max_duration_s=float(settings.get("strategy.max_duration_s", "120")),
+        max_duration_s=float(settings.get("strategy.max_duration_s", "300")),
     )
     if mode == "raw_clip":
-        return modes.build_raw_clip(scenes, highlights, strategy)
+        return apply_transitions(modes.build_raw_clip(scenes, highlights, strategy))
     if mode == "intro_narration":
-        return modes.build_intro(scenes, strategy)
+        return apply_transitions(modes.build_intro(scenes, strategy))
     if mode == "cross_narration":
-        return modes_w5.build_cross(scenes, strategy)
+        return apply_transitions(modes_w5.build_cross(scenes, strategy))
     if mode == "ultra_short_hook":
-        return modes_w5.build_ultra_short(scenes, strategy)
+        return apply_transitions(modes_w5.build_ultra_short(scenes, strategy))
     if mode == "dialogue_narration":
         raise ValueError(
             "剧情解说为剧本驱动，不经规则编排（走 script_driver.script_dialogue_plan）"
         )
     if mode == "full_narration":
-        return modes_w8.build_full(scenes, strategy)
+        return apply_transitions(modes_w8.build_full(scenes, strategy))
     if mode == "subtitle_flow":
-        return modes_w9.build_subtitle_flow(scenes, material, strategy)
+        return apply_transitions(modes_w9.build_subtitle_flow(scenes, material, strategy))
     if mode == "dual_host_chat":
-        return modes_p2.build_dual_host(scenes, strategy)
+        return apply_transitions(modes_p2.build_dual_host(scenes, strategy))
     if mode == "inner_monologue":
-        return modes_p2.build_monologue(scenes, strategy)
+        return apply_transitions(modes_p2.build_monologue(scenes, strategy))
     raise ValueError(f"模式暂未支持: {mode}（{MODE_LABELS.get(mode, mode)} 将随后续阶段启用）")
 
 
@@ -172,12 +173,14 @@ def build_from_script_episodes(
         )
         texts.append(NarrationText(id=cta_id, text=script.cta))
 
-    return PlanData(
-        mode="dialogue_narration",
-        timeline=timeline,
-        narration_texts=texts,
-        strategy=strategy,
-        planner="llm_script",
+    return apply_transitions(
+        PlanData(
+            mode="dialogue_narration",
+            timeline=timeline,
+            narration_texts=texts,
+            strategy=strategy,
+            planner="llm_script",
+        )
     )
 
 

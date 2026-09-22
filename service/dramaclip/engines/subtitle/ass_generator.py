@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from dramaclip.engines.subtitle import caption_font
 from dramaclip.engines.subtitle.emotion_matcher import match_emotion
 
 _ALIGNMENT = {"bottom_bar": 2, "center_single": 5, "center_multi": 5, "top_title": 8}
@@ -22,8 +23,11 @@ _PLAY_RES_X = 1080
 _PLAY_RES_Y = 1920
 _SIDE_MARGIN_PX = 40
 _DEFAULT_FONT_SIZE = 64
-# 一个全角字的步进宽度对字号的百分比。三套预设逐字量墨迹斜率实测 75.7–77.1，取整留余量到 78
-_GLYPH_ADVANCE_PERCENT = 78
+# 一个全角字的步进宽度对 ASS 字号的百分比。随包字面（resources/fonts 那份 Noto Sans SC
+# Regular）在 bundled ffmpeg 8.1.1 上逐字量得 0.6906 em——它等于 unitsPerEm 1000 ÷
+# (ascender 1160 + descender 288)，即 libass 经 DirectWrite 把 ASS 字号换算成字身的那
+# 一步。常数由 test_ass_burn 在同一份字面上重标，换字体不改这里必红。
+_GLYPH_ADVANCE_PERCENT = 69
 # 一条字幕放几个字读得完：业主立案②的分段规格，与「放得下」取更紧的一个
 _CAPTION_PACE_CHARS = 16
 
@@ -55,12 +59,11 @@ def _font_size(preset: dict[str, Any]) -> int:
 def line_char_cap(preset: dict[str, Any]) -> int:
     """单行字幕最多放几个字：「读得完」与「放得下」取更紧的那个。
 
-    放得下 = 演示区宽度 ÷ 每字步进。步进按字号 64/72/80 逐字量真机墨迹斜率，得到
-    49.3/54.7/60.6 px（75.7%–77.1% em，bundled ffmpeg 8.1.1 + 微软雅黑），超出后 libass
-    **不会换行**：整行照样居中铺出去，两端被画框切掉（实测 karaoke-pop 17 字时墨迹占到
-    x=[25,1053]，越出 40/1040 演示区）。三套内置预设的几何档是 20/17/16 字，都不比
-    「读得完」更紧；字号 81 起才轮到几何档接管——实测把它设到 96，上限降到 13 字且 14
-    字就真的越界。`max(1, ...)` 只是硬切循环的终止保证，不是承诺。
+    放得下 = 演示区宽度 ÷ 每字步进，步进按随包字面量出来（见 `_GLYPH_ADVANCE_PERCENT`
+    的来历）。超出后 libass **不会换行**：整行照样居中铺出去，两端被画框切掉——实测
+    17 字时墨迹占到 x=[25,1053]，越出 40/1040 演示区。三套内置预设的字号（64/72/80）
+    几何档各是 22/20/17 字，都不比「读得完」更紧；字号 96 起才轮到几何档接管（实测
+    上限收到 15 字，16 字就越界）。`max(1, ...)` 只是硬切循环的终止保证，不是承诺。
     """
     usable = _PLAY_RES_X - 2 * _SIDE_MARGIN_PX
     advance = _font_size(preset) * _GLYPH_ADVANCE_PERCENT // 100
@@ -78,8 +81,9 @@ _EVENT_FORMAT = "Format: Layer, Start, End, Style, Name, MarginL, MarginR, Margi
 def _header(preset: dict[str, Any]) -> str:
     font = preset.get("font", {})
     alignment, margin_v = _placement(_layout_of(preset), _margin_v(preset))
+    # 族名不接受预设指定：预设能换字号/边距，但字面是随包资产，拆行上限按它标定
     style = (
-        f"Style: DC,{font.get('name', 'Microsoft YaHei')},{_font_size(preset)},"
+        f"Style: DC,{caption_font.caption_font().family},{_font_size(preset)},"
         f"&H00FFFFFF,&H00FFFFFF,&H00000000,&H7F000000,"
         f"{-1 if font.get('bold', False) else 0},0,0,0,100,100,0,0,1,"
         f"{int(font.get('outline_width', 3))},{int(font.get('shadow', 1))},{alignment},"
@@ -167,9 +171,10 @@ def _event_row(start: str, end: str, margin_v: int, body: str) -> str:
     """按 `_EVENT_FORMAT` 拼一条 Dialogue：字段用 join，逗号数不可能多写。
 
     字面量拼接时多一个逗号，libass 会把那一位当成文本开头的字面量**画**出来——
-    实测（bundled ffmpeg 8.1.1 + 微软雅黑，同一份生产 ASS 只改这个逗号）：
-    conflict-impact「第一行」墨迹 3669→3747 像素、横向占据 458–620→451–628；
-    karaoke-pop 4269→4403 像素。即字幕前面挂一个逗号、整行重新居中。
+    实测（bundled ffmpeg 8.1.1，同一份生产 ASS 只改这个逗号）：conflict-impact
+    「第一行」墨迹 3669→3747 像素、横向占据 458–620→451–628；karaoke-pop 4269→4403
+    像素。即字幕前面挂一个逗号、整行重新居中。这组数今天仍由 test_ass_burn 在随包字面
+    上重量，字面变了数量级不变——保护的是同一件事。
     """
     fields = ["0", start, end, "DC", "", "0", "0", str(margin_v), "", body]
     return f"Dialogue: {','.join(fields)}"

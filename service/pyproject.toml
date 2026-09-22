@@ -61,9 +61,12 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = [
+  "cv2",
+  "cv2.*",
   "faster_whisper.*",
   "funasr.*",
   "kokoro.*",
+  "librosa",
   "librosa.*",
   "rapidocr_onnxruntime.*",
   "scenedetect.*",

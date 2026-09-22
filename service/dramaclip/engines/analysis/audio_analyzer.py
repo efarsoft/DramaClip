@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 import wave
 from pathlib import Path
 
@@ -28,10 +29,14 @@ def analyze_audio(wav_path: Path) -> AudioFeatures:
     if samples.size == 0:
         return AudioFeatures(silence_ratio=1.0)
 
+    peak = float(np.max(np.abs(samples)))
+    peak_dbfs = round(20.0 * math.log10(peak), 2) if peak > 0 else None
+    clipping = peak >= 0.999
+
     chunk_size = max(1, int(sample_rate * _CHUNK_MS / 1000))
     chunk_count = samples.size // chunk_size
     if chunk_count == 0:
-        return AudioFeatures(silence_ratio=1.0)
+        return AudioFeatures(silence_ratio=1.0, peak_dbfs=peak_dbfs, clipping=clipping)
     trimmed = samples[: chunk_count * chunk_size].reshape(chunk_count, chunk_size)
     rms = np.sqrt(np.mean(np.square(trimmed), axis=1))
 
@@ -46,6 +51,8 @@ def analyze_audio(wav_path: Path) -> AudioFeatures:
         silence_ratio=round(1.0 - (speech_s / total_s if total_s > 0 else 0.0), 4),
         speech_zones=speech_zones,
         bpm=_estimate_bpm(samples, sample_rate),
+        peak_dbfs=peak_dbfs,
+        clipping=clipping,
     )
 
 
@@ -91,11 +98,16 @@ def _downsample_curve(
 
 def _estimate_bpm(samples: np.ndarray, sample_rate: int) -> float | None:  # type: ignore[name-defined] # noqa: F821
     try:
-        import librosa  # 可选依赖懒加载
+        # importlib 绕开静态导入：librosa.beat 是惰性重导出，mypy 在 strict 下
+        # 必报 attr-defined，而它又是 ml extras 的可选依赖——类型检查不该决定
+        # 运行时行为，拿不到模块就是 None。
+        import importlib
+
+        beat = importlib.import_module("librosa.beat")
     except ImportError:
         return None
     import numpy as np  # ml extras 懒加载
 
-    tempo, _ = librosa.beat.beat_track(y=samples, sr=sample_rate)
+    tempo, _ = beat.beat_track(y=samples, sr=sample_rate)
     value = float(np.asarray(tempo).reshape(-1)[0]) if np.asarray(tempo).size else None
     return round(value, 1) if value else None

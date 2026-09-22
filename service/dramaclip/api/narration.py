@@ -21,6 +21,7 @@ from dramaclip.engines.narration import (
 from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration import styles as styles_lib
 from dramaclip.engines.narration.casting import EpisodeScene, MaterialByEpisode
+from dramaclip.engines.narration.conversion import defects, grade
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
@@ -86,12 +87,27 @@ def list_plans(context: AppContext, params: dict[str, Any]) -> list[dict[str, An
     project_id = str(params.get("project_id", ""))
     batch_id = params.get("batch_id")
     if batch_id is not None:
-        return plans_repo.list_by_batch(context.conn, project_id, str(batch_id))
-    return plans_repo.list_by_project(context.conn, project_id)
+        rows = plans_repo.list_by_batch(context.conn, project_id, str(batch_id))
+    else:
+        rows = plans_repo.list_by_project(context.conn, project_id)
+    return [_annotate_gate(row) for row in rows]
+
+
+def _annotate_gate(row: dict[str, Any]) -> dict[str, Any]:
+    """给方案卡补上过不了门禁的原因；不改落库 status。"""
+    try:
+        issues = defects(PlanData.model_validate(row["plan_data"]))
+    except (TypeError, ValueError):
+        issues = ["方案数据损坏"]
+    if not issues:
+        return row
+    annotated = dict(row)
+    annotated["block_reason"] = issues[0]
+    return annotated
 
 
 def generate_titles(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
-    """LLM 生成候选标题并落库（手动触发，不随出片自动生成）。"""
+    """LLM 生成候选标题并落库（导出时自动补；也可手动再生成）。"""
     from dramaclip.engines.narration import titles as titles_engine
 
     plan_id = str(params.get("plan_id", ""))
@@ -140,7 +156,7 @@ def get_plan(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     row = plans_repo.get(context.conn, plan_id)
     if row is None:
         raise RpcDomainError(_ERR_PLAN_NOT_FOUND, f"编排方案不存在: {plan_id}")
-    return {"plan": row, "cost": plan_cost(row)}
+    return {"plan": _annotate_gate(row), "cost": plan_cost(row)}
 
 
 def plan_cost(row: dict[str, Any]) -> dict[str, int]:
@@ -299,8 +315,7 @@ def _run_plan_variants(
     rerolled: bool,
     cancel_event: threading.Event,
 ) -> None:
-    """逐模式取 K 条方案意图 → 逐条 成稿+配音+落库。
-    """
+    """逐模式取 K 条方案意图 → 逐条成稿落库（配音推迟到勾选出片）。"""
     try:
         context.job_store.mark_running(job_id)
         settings = _effective_settings(context, project_id)
@@ -314,10 +329,6 @@ def _run_plan_variants(
         total = len(modes) * k
         done_count = 0
         failures: list[str] = []
-        # 源长表整批复用：这些行就是编排的取材范围，方案里的集 id 只会是它们的子集
-        source_durations = {
-            str(episode["id"]): float(episode["duration"] or 0.0) for episode in episodes
-        }
         for mode in modes:
             if cancel_event.is_set():
                 break
@@ -352,13 +363,13 @@ def _run_plan_variants(
                             f"取材与「{worst.name}」重叠 {worst.ratio:.0%}，"
                             f"超过 {overlap.OVERLAP_LIMIT:.0%}——这条角度不出（规格 §4.3）"
                         )
-                    plan = _voice(context, plan, settings, source_durations)
                     plans_repo.create(
                         context.conn,
                         project_id,
                         mode,
                         used_ids,
                         plan.model_dump(),
+                        status=grade(plan),
                         angle=variant.name,
                         angle_reason=variant.reason,
                         variant_index=index,
@@ -556,7 +567,7 @@ def _voice(
     settings: dict[str, str],
     source_durations: dict[str, float],
 ) -> PlanData:
-    """配音：plan_variants 唯一的配音出口，负责给出 tts 目录与 models 目录。
+    """出片前配音出口：规划阶段不调用。负责给出 tts 目录与 models 目录。
 
     `source_durations`（{集 id: 源片秒数}）交给回填做越界判定——回填会把段尾改成
     `start + 实测音频时长`，跑出源长的窗口 ffmpeg 不报错、只把旁白截掉（业主立案③的

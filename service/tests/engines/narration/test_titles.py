@@ -78,7 +78,7 @@ def test_unconfigured_llm_says_where_to_fix(monkeypatch) -> None:
 def test_blank_titles_from_model_are_not_shipped(monkeypatch) -> None:
     out, _ = _generate(monkeypatch, {"titles": ["甲", "  ", "", None]})
     assert [t["text"] for t in out] == ["甲"]
-    assert all(t["selected"] is False for t in out)
+    assert out[0]["selected"] is True
 
 
 def test_no_copy_raises_instead_of_inventing_titles(monkeypatch) -> None:

@@ -79,7 +79,7 @@ def build_monologue(
         if index == 0:
             brief = "第一人称开场：主角此刻的处境与误判，一句话"
         elif index == count - 1:
-            brief = "第一人称收尾：态度反转落定 + 一句点击引导"
+            brief = "第一人称收尾：态度反转落定，留缺口引导看全集"
         elif scene.score >= 85:
             brief = "第一人称高潮：这一刻主角想明白了什么，短促、带情绪"
         else:

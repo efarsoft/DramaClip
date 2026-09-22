@@ -28,10 +28,14 @@
       },
       "result": {
         "type": "object",
-        "required": ["status", "uptime_s"],
+        "required": ["status", "uptime_s", "ffmpeg_version"],
         "properties": {
           "status": { "type": "string" },
           "uptime_s": { "type": "number" },
+          "ffmpeg_version": {
+            "type": "string",
+            "description": "本机 ffmpeg 自述版本号；空串 = 渲染引擎不可用"
+          },
           "gpu": { "type": "string" },
           "gpu_info": {
             "type": "object",

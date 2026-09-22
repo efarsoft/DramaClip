@@ -3,18 +3,41 @@
   "preset_name": "冲突冲击",
   "description": "适合复仇、逆袭、打脸类短剧。力量感强，视觉冲击大。",
   "dimensions": {
-    "rhythm": { "type": "whole_line" },
-    "animation": { "entrance": "bounce", "fade_ms": 200 },
-    "layout": { "default": "bottom_bar", "climax": "center_single" },
+    "rhythm": {
+      "type": "whole_line"
+    },
+    "animation": {
+      "entrance": "bounce",
+      "fade_ms": 200
+    },
+    "layout": {
+      "default": "bottom_bar",
+      "climax": "center_single"
+    },
     "emotion_style": {
-      "default": { "primary": "&H00FFFFFF", "outline": "&H00000000", "effect": "none" },
-      "anger": { "primary": "&H000000FF", "outline": "&H00FFFFFF", "effect": "shake" },
-      "triumph": { "primary": "&H0000D7FF", "outline": "&H00000000", "effect": "scale_glow" },
-      "suspense": { "primary": "&H0000FFFF", "outline": "&H00000000", "effect": "none" }
+      "default": {
+        "primary": "&H00FFFFFF",
+        "outline": "&H00000000",
+        "effect": "none"
+      },
+      "anger": {
+        "primary": "&H000000FF",
+        "outline": "&H00FFFFFF",
+        "effect": "shake"
+      },
+      "triumph": {
+        "primary": "&H0000D7FF",
+        "outline": "&H00000000",
+        "effect": "scale_glow"
+      },
+      "suspense": {
+        "primary": "&H0000FFFF",
+        "outline": "&H00000000",
+        "effect": "none"
+      }
     }
   },
   "font": {
-    "name": "Microsoft YaHei",
     "size": 72,
     "bold": true,
     "outline_width": 3,

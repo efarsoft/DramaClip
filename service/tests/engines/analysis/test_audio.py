@@ -47,6 +47,24 @@ def test_burst_tone_detected_as_speech_zones(tmp_path: Path) -> None:
     assert len(features.speech_zones) == 3, "3 个突发段应识别为 3 个语音区"
     assert 0.4 < features.silence_ratio < 0.8
     assert features.energy_curve, "能量曲线不应为空"
+    assert features.clipping is False
+
+
+def test_full_scale_tone_is_clipping(tmp_path: Path) -> None:
+    wav = tmp_path / "hot.wav"
+    frames = int(0.4 * _RATE)
+    with wave.open(str(wav), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(_RATE)
+        handle.writeframes(
+            b"".join(
+                struct.pack("<h", 32767 if index % 2 == 0 else -32767) for index in range(frames)
+            )
+        )
+    features = audio_analyzer.analyze_audio(wav)
+    assert features.clipping is True
+    assert features.peak_dbfs is not None and features.peak_dbfs >= -0.1
 
 
 def test_full_silence_has_no_speech_zones(tmp_path: Path) -> None:

@@ -6,6 +6,7 @@ import random
 
 from dramaclip.engines.exporter import encoder
 from dramaclip.engines.exporter.encoder import cut_segment_args
+from dramaclip.engines.subtitle import caption_font
 
 
 def test_cut_segment_args_original_audio() -> None:
@@ -42,6 +43,25 @@ def test_cut_segment_args_narration_mixes_tts() -> None:
     assert "amix=inputs=2" in joined
     assert "volume=0.1" in joined, "旁白段原声压低"
     assert "intro.mp3" in joined
+
+
+def test_burned_subtitles_render_with_the_bundled_face() -> None:
+    """烧字幕的命令必须带 `fontsdir`：只给族名的话 libass 去系统字体里找，找不到就
+    静默换一个，而拆行上限是按随包那份字面标定过的（实测步进差 0.691em vs 0.789em）。
+    """
+    args = cut_segment_args(
+        "src.mp4",
+        "seg.mp4",
+        start=0,
+        end=10,
+        audio="original",
+        tts_audio=None,
+        rng=random.Random(7),
+        ass_path="seg_000.ass",
+    )
+    joined = " ".join(args)
+    ass_option = f"ass=seg_000.ass:{caption_font.fontsdir_option(caption_font.caption_font())}"
+    assert ass_option in joined, f"字幕滤镜没带上随包字体目录：{joined}"
 
 
 def test_original_audio_branch_carries_the_segment_peak_ceiling() -> None:
@@ -152,3 +172,48 @@ def test_both_branches_force_one_channel_layout() -> None:
             f"{leg} 那一路没有以共用格式级开头：{chain[:120]!r}"
         )
     assert f"channel_layouts={encoder._SEGMENT_CHANNEL_LAYOUT}" in fmt
+
+
+def test_fade_transition_pairs_video_and_audio_before_limiter() -> None:
+    args = cut_segment_args(
+        "src.mp4",
+        "seg.mp4",
+        start=0,
+        end=8,
+        audio="original",
+        tts_audio=None,
+        rng=random.Random(1),
+        transition="fade",
+    )
+    joined = " ".join(args)
+    vf = args[args.index("-vf") + 1]
+    af = args[args.index("-af") + 1]
+    assert "fade=t=in:st=0:d=0.180" in vf
+    assert "fade=t=out:" in vf
+    assert "afade=t=in:" in af
+    assert "afade=t=out:" in af
+    assert af.endswith(encoder._peak_ceiling_filter()), f"限幅器必须仍是进 AAC 前最后一级：{af}"
+    assert af.index("afade=") < af.index("alimiter=")
+    assert "flash" not in joined
+
+
+def test_cut_has_no_video_fade_but_short_afade() -> None:
+    args = cut_segment_args(
+        "src.mp4",
+        "seg.mp4",
+        start=0,
+        end=5,
+        audio="original",
+        tts_audio=None,
+        rng=random.Random(1),
+        transition="cut",
+        fade_in_s=0.0,
+        fade_out_s=0.0,
+        afade_in_s=0.10,
+        afade_out_s=0.10,
+    )
+    vf = args[args.index("-vf") + 1]
+    af = args[args.index("-af") + 1]
+    assert "fade=" not in vf
+    assert "afade=t=in:st=0:d=0.100" in af
+    assert af.endswith(encoder._peak_ceiling_filter())

@@ -33,11 +33,11 @@ def test_cross_alternates_original_and_narration() -> None:
     assert ids == [f"cross-{i + 1}" for i in range(narration_count)]
 
 
-def test_cross_respects_duration_budget() -> None:
+def test_cross_keeps_top_scenes_without_duration_chop() -> None:
     strategy = StrategySpec(min_duration_s=10, max_duration_s=60)
     plan = build_cross(stamp([(1, "ep1", _scenes())]), strategy)
-    total = sum(segment.end - segment.start for segment in plan.timeline)
-    assert total <= 60 + 4 * 6, "预算截断（含旁白估算段）"
+    originals = [seg for seg in plan.timeline if seg.audio == "original"]
+    assert len(originals) == 6, "交叉解说取冲突 top 6，不再按时长预算提前停"
 
 
 def test_ultra_short_structure() -> None:

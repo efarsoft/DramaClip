@@ -333,6 +333,9 @@ _REQUIREMENTS: dict[str, tuple[str, ...]] = {
         "Kokoro-82M-v1.1-zh/*.pth",
         "Kokoro-82M-v1.1-zh/voices",
     ),
+    # worker 加载三件套（engines/tts/workers/indextts_worker.py：cfg_path=config.yaml，
+    # IndexTTS2 按 config 再取 gpt/s2mel 权重）。bpe.model 官方 2.5 仓库不带，不列判据。
+    "indextts2": ("config.yaml", "gpt.pth", "s2mel.pth"),
 }
 _WEIGHT_SUFFIXES = (".bin", ".pth", ".pt", ".onnx", ".safetensors")
 _HEX = set("0123456789abcdef")

@@ -14,7 +14,9 @@ from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.dedup import jitter
 from dramaclip.engines.dedup import params as dedup_params
 from dramaclip.engines.exporter import loudness
+from dramaclip.engines.exporter.face_crop import face_x_ratio
 from dramaclip.engines.narration.models import PlanData
+from dramaclip.engines.subtitle import caption_font
 from dramaclip.infra import config
 from dramaclip.infra.ffmpeg import runner
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
@@ -111,6 +113,9 @@ _SEGMENT_CHANNEL_LAYOUT = "stereo"
 # 值算出该段的预测响度再去量实测，所以音量只在这里定义一次。写成字符串是因为它直接拼进滤镜。
 _NARRATION_BED_VOLUME = "0.1"
 _DUCKED_BED_VOLUME = "0.08"
+# 旁白开口时再压原声：threshold 0.05 ≈ -26 dBFS，安静 TTS 不触发（静音旁白的避让深度
+# 仍等于 volume= 声明值，见 test_duck_depth_is_acoustically_real）。限幅器仍收尾。
+_SIDECHAIN_COMPRESS = "sidechaincompress=threshold=0.05:ratio=6:attack=20:release=250"
 
 
 def _audio_format_filter() -> str:
@@ -127,12 +132,91 @@ def _peak_ceiling_filter() -> str:
     """
     return (
         f"alimiter=limit={10 ** (_SEGMENT_PEAK_CEILING_DBFS / 20):.4f}"
-        ":level=disabled:latency=true"
+        f":level=disabled:latency=true"
     )
+
+
+def _video_fade_s(transition: str) -> float:
+    """转场词表只有 cut/fade/black；flash 已在编排层停赋（transitions.assign_transitions），
+    未知值一律按 cut 处理，不是静默吞掉——将来加转场必须先来这里登记时长。"""
+    if transition == "fade":
+        return 0.18
+    if transition == "black":
+        return 0.30
+    return 0.0
+
+
+def _audio_fade_s(transition: str) -> float:
+    if transition == "fade":
+        return 0.18
+    if transition == "black":
+        return 0.30
+    return 0.10
+
+
+def _clamp_fades(duration: float, fade_in: float, fade_out: float) -> tuple[float, float]:
+    duration = max(duration, 0.05)
+    total = fade_in + fade_out
+    if total <= 0 or total <= duration - 0.02:
+        return max(fade_in, 0.0), max(fade_out, 0.0)
+    scale = max(duration - 0.02, 0.0) / total
+    return fade_in * scale, fade_out * scale
+
+
+def _xfade_filters(kind: str, duration: float, fade_in: float, fade_out: float) -> list[str]:
+    """kind: fade（画面）或 afade（声音）。两端时长钳在段长以内。
+
+    刻意**不是** ffmpeg 的 `xfade` 溶解滤镜。两阶段架构（Phase A 逐段独立编码、
+    Phase B concat 流复制）下相邻段从不同时存在于一个进程里，做真溶解就得把整条
+    时间轴塞进一个 filter_complex：重叠吃时长、字幕/混音/限幅全部要按新时间轴重排，
+    逐段并行与台词保护区切点也一并报废。成对淡（出段淡黑 + 入段淡入）观感上是
+    一次短促的「换气」，音频另有 afade 交叉，硬切已除；溶解的叠影收益不值这个重构。
+    """
+    fade_in, fade_out = _clamp_fades(duration, fade_in, fade_out)
+    parts: list[str] = []
+    if fade_in > 0.001:
+        parts.append(f"{kind}=t=in:st=0:d={fade_in:.3f}")
+    if fade_out > 0.001:
+        start = max(duration - fade_out, 0.0)
+        parts.append(f"{kind}=t=out:st={start:.3f}:d={fade_out:.3f}")
+    return parts
+
+
+def seam_fades(
+    transition: str,
+    *,
+    is_first: bool,
+    is_last: bool,
+    next_transition: str | None,
+    audio_change_in: bool,
+    audio_change_out: bool,
+) -> tuple[float, float, float, float]:
+    """返回 (video_in, video_out, afade_in, afade_out)。片头钩子不淡入，片尾 0.30s 收黑。"""
+    video_in = 0.0 if is_first else _video_fade_s(transition)
+    video_out = 0.30 if is_last else _video_fade_s(next_transition or "cut")
+    audio_in = 0.0 if is_first else _audio_fade_s(transition)
+    audio_out = 0.30 if is_last else _audio_fade_s(next_transition or "cut")
+    if audio_change_in:
+        audio_in = max(audio_in, 0.15)
+    if audio_change_out:
+        audio_out = max(audio_out, 0.15)
+    return video_in, video_out, audio_in, audio_out
 
 
 class EpisodeSourceMissing(Exception):
     """时间轴引用的源集文件缺失。"""
+
+
+def _crop_filter(scaled_w: int, scaled_h: int, crop_x_ratio: float | None) -> str:
+    """9:16 裁窗：无比例时中心裁；有人脸 x 比例时尽量把脸放进水平中心。"""
+    if crop_x_ratio is None:
+        return f"crop={scaled_w}:{scaled_h}"
+    fx = min(1.0, max(0.0, float(crop_x_ratio)))
+    return (
+        f"crop={scaled_w}:{scaled_h}"
+        f":max(0\\,min(iw-{scaled_w}\\,iw*{fx:.4f}-({scaled_w}/2)))"
+        f":(ih-{scaled_h})/2"
+    )
 
 
 def cut_segment_args(
@@ -148,6 +232,11 @@ def cut_segment_args(
     ass_path: str | None = None,
     out_size: tuple[int, int] = _DEFAULT_OUT_SIZE,
     video_codec: str = "libx264",
+    fade_in_s: float | None = None,
+    fade_out_s: float | None = None,
+    afade_in_s: float | None = None,
+    afade_out_s: float | None = None,
+    crop_x_ratio: float | None = None,
 ) -> list[str]:
     """构建单段切割命令（Phase A）。
     """
@@ -156,18 +245,27 @@ def cut_segment_args(
     speed = dedup.speed_factor
     scaled_w = int(out_w * dedup.scale_factor) // 2 * 2
     scaled_h = int(out_h * dedup.scale_factor) // 2 * 2
+    out_dur = max((end - start) / speed, 0.05)
+    vin = _video_fade_s(transition) if fade_in_s is None else fade_in_s
+    vout = _video_fade_s(transition) if fade_out_s is None else fade_out_s
+    ain = _audio_fade_s(transition) if afade_in_s is None else afade_in_s
+    aout = _audio_fade_s(transition) if afade_out_s is None else afade_out_s
+    # 音频收尾链：成对 afade + 限幅器（限幅器必须是进 AAC 前的最后一级，见混音分支注释）
+    audio_tail = ",".join([*_xfade_filters("afade", out_dur, ain, aout), _peak_ceiling_filter()])
 
     filters = [
         f"scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=increase",
-        f"crop={scaled_w}:{scaled_h}",
+        _crop_filter(scaled_w, scaled_h, crop_x_ratio),
         f"eq=contrast={dedup.contrast}:brightness={dedup.brightness}",
         f"scale={out_w}:{out_h}",
         f"setpts=PTS/{speed}",
+        *_xfade_filters("fade", out_dur, vin, vout),
     ]
-    if transition == "fade":
-        filters.append("fade=t=in:st=0:d=0.25")
     if ass_path:
-        filters.append(f"ass={_escape_filter_path(ass_path)}")
+        filters.append(
+            f"ass={_escape_filter_path(ass_path)}"
+            f":{caption_font.fontsdir_option(caption_font.caption_font())}"
+        )
 
     args = [
         "-hide_banner",
@@ -202,9 +300,10 @@ def cut_segment_args(
             # stereo"时会选 mono，把原声**下混**掉（实测数字与该选 stereo 的理由见常量注释）。
             # 两路都钉成 stereo 之后 amix 无需协商，求和保持 stereo。
             f"[0:a]{_audio_format_filter()},volume={bg_volume},atempo={speed}[bg];"
-            f"[1:a]{_audio_format_filter()},atempo={speed}[tts];"
-            f"[bg][tts]amix=inputs=2:duration=first:normalize=0,"
-            f"{_peak_ceiling_filter()}[a]",
+            f"[1:a]{_audio_format_filter()},atempo={speed},asplit=2[tts][sc];"
+            f"[bg][sc]{_SIDECHAIN_COMPRESS}[bed];"
+            f"[bed][tts]amix=inputs=2:duration=first:normalize=0,"
+            f"{audio_tail}[a]",
             "-map",
             "[v]",
             "-map",
@@ -230,7 +329,7 @@ def cut_segment_args(
             # +0.1 dBTP，见常量注释）。这一级也让 **mono 源集**的直通段落到 stereo，
             # 布局统一不再取决于素材。
             "-af",
-            f"{_audio_format_filter()},atempo={speed},{_peak_ceiling_filter()}",
+            f"{_audio_format_filter()},atempo={speed},{audio_tail}",
             "-map",
             "0:v:0",
             "-map",
@@ -301,8 +400,8 @@ def nvenc_available() -> bool:
         return _NVENC_CACHE
 
 
-def _run_cut(args: list[str]) -> None:
-    runner.run(args, timeout_s=600)
+def _run_cut(args: list[str], cancel: threading.Event | None = None) -> None:
+    runner.run(args, timeout_s=600, cancel=cancel)
 
 
 def export_plan(
@@ -335,6 +434,7 @@ def export_plan(
     # Phase A：构建每段命令参数（含台词保护区安全切点、字幕、混音）
     job_args: list[list[str]] = []
     zones_cache: dict[str, list[SpeechZone]] = {}
+    face_cache: dict[tuple[str, float], float | None] = {}
     for index, segment in enumerate(segments):
         source = episode_paths.get(segment.episode_id)
         if source is None or not Path(source).is_file():
@@ -351,6 +451,8 @@ def export_plan(
             segment.start, segment.end, zones_cache[segment.episode_id], rng=rng
         )
         tts_audio = (tts_audio_by_segment or {}).get(index)
+        if segment.audio in ("narration", "ducked") and not tts_audio:
+            raise ValueError(f"第 {index + 1} 段旁白音频缺失，不能用原声顶替")
         ass_path: str | None = None
         if subtitle_burner is not None and segment.subtitle_text:
             ass_path = str(
@@ -360,6 +462,23 @@ def export_plan(
                     max(safe_end - safe_start, 0.1),
                 )
             )
+        nxt = segments[index + 1] if index + 1 < total else None
+        prev = segments[index - 1] if index else None
+        vin, vout, ain, aout = seam_fades(
+            segment.transition,
+            is_first=index == 0,
+            is_last=nxt is None,
+            next_transition=None if nxt is None else nxt.transition,
+            audio_change_in=prev is not None and prev.audio != segment.audio,
+            audio_change_out=nxt is not None and nxt.audio != segment.audio,
+        )
+        mid = (safe_start + safe_end) / 2.0
+        face_key = (segment.episode_id, round(mid, 1))
+        if face_key not in face_cache:
+            try:
+                face_cache[face_key] = face_x_ratio(Path(source), mid)
+            except Exception:  # noqa: BLE001 - 检测失败保持中心裁
+                face_cache[face_key] = None
         job_args.append(
             cut_segment_args(
                 source,
@@ -373,15 +492,23 @@ def export_plan(
                 ass_path=ass_path,
                 out_size=out_size,
                 video_codec=video_codec,
+                fade_in_s=vin,
+                fade_out_s=vout,
+                afade_in_s=ain,
+                afade_out_s=aout,
+                crop_x_ratio=face_cache[face_key],
             )
         )
 
     if cancel is not None and cancel.is_set():
         raise runner.FfmpegError("已取消", cancelled=True)
 
+    def _cut_one(args: list[str]) -> None:
+        _run_cut(args, cancel)
+
     # Phase A 并行执行（ffmpeg 自身多线程，2 并发已接近 IO/CPU 饱和）
     with ThreadPoolExecutor(max_workers=parallel) as pool:
-        futures = [pool.submit(_run_cut, args) for args in job_args]
+        futures = [pool.submit(_cut_one, args) for args in job_args]
         for done, future in enumerate(futures, start=1):
             future.result()
             if on_progress is not None:

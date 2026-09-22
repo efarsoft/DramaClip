@@ -13,6 +13,7 @@ from typing import Any
 from dramaclip.api.context import AppContext
 from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.exporter import encoder, loudness
+from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle import presets as subtitle_presets
 from dramaclip.engines.subtitle.ass_generator import build_ass, line_char_cap, split_subtitle_text
@@ -136,23 +137,18 @@ def _assert_renderable(plan_row: dict[str, Any], plan_data: PlanData) -> None:
         raise RpcDomainError(_ERR_PLAN_NOT_RENDERABLE, f"方案状态为 {plan_row['status']}，不可渲染")
     if not plan_data.timeline:
         raise RpcDomainError(_ERR_PLAN_NOT_RENDERABLE, "编排时间轴为空")
-    voiced = {text.id: text.audio_path for text in plan_data.narration_texts}
+    voiced = {text.id: text for text in plan_data.narration_texts}
     for segment in plan_data.timeline:
-        # ducked 与 narration 同权：两者都必须配到音频，否则渲染出哑片
         if segment.audio not in ("narration", "ducked"):
             continue
-        audio_path = voiced.get(segment.narration_id or "")
-        if not audio_path:
+        slot = voiced.get(segment.narration_id or "")
+        if slot is None or not str(slot.text or "").strip():
             raise RpcDomainError(
                 _ERR_PLAN_NOT_RENDERABLE,
-                f"旁白段 {segment.episode_id}@{segment.start} 没有配音音频："
-                "这条方案未完成配音，渲染出来会是一版没有解说的哑片",
+                f"旁白段 {segment.episode_id}@{segment.start} 没有解说文案",
             )
-        if not Path(audio_path).is_file():
-            raise RpcDomainError(
-                _ERR_PLAN_NOT_RENDERABLE,
-                f"配音音频已丢失：{audio_path}（重新规划这条方案即可）",
-            )
+    for issue in defects(plan_data):
+        raise RpcDomainError(_ERR_PLAN_NOT_RENDERABLE, issue)
 
 
 def retry(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -317,11 +313,21 @@ def render_export(
         ass_path = ass_dir / f"seg_{segment_index:03d}.ass"
         chunks = split_subtitle_text(text, line_char_cap(preset))
         total_chars = sum(len(c) for c in chunks)
+        emotion = None
+        if 0 <= segment_index < len(plan_data.timeline):
+            emotion = plan_data.timeline[segment_index].emotion_label
         lines: list[dict[str, Any]] = []
         cursor = 0.0
         for chunk in chunks:
             span = duration_s * len(chunk) / total_chars
-            lines.append({"start": cursor, "end": cursor + span, "text": chunk})
+            lines.append(
+                {
+                    "start": cursor,
+                    "end": cursor + span,
+                    "text": chunk,
+                    "emotion_label": emotion,
+                }
+            )
             cursor += span
         ass_path.write_text(build_ass(lines, preset), encoding="utf-8")
         return str(ass_path)
@@ -359,6 +365,47 @@ def render_export(
     return out_path
 
 
+def _needs_voice(plan: PlanData) -> bool:
+    by_id = {text.id: text for text in plan.narration_texts}
+    for segment in plan.timeline:
+        if segment.audio not in ("narration", "ducked"):
+            continue
+        slot = by_id.get(segment.narration_id or "")
+        path = None if slot is None else slot.audio_path
+        if not path or not Path(str(path)).is_file():
+            return True
+    return False
+
+
+def _ensure_voiced(context: AppContext, plan_row: dict[str, Any], plan_data: PlanData) -> PlanData:
+    """勾选导出时才配音：规划阶段故意不合成。"""
+    if not _needs_voice(plan_data):
+        return plan_data
+    from dramaclip.api import narration as narration_api
+
+    project_id = str(plan_row["project_id"])
+    durations = {
+        str(episode["id"]): float(episode["duration"] or 0.0)
+        for episode in episodes_repo.list_by_project(context.conn, project_id)
+    }
+    settings = narration_api._effective_settings(context, project_id)
+    voiced = narration_api._voice(context, plan_data, settings, durations)
+    plans_repo.update_plan_data(context.conn, str(plan_row["id"]), voiced.model_dump())
+    if _needs_voice(voiced):
+        raise ValueError("旁白音频合成失败，不能用原声顶替")
+    return voiced
+
+
+def _ensure_titles(context: AppContext, plan_row: dict[str, Any]) -> None:
+    """成片落库时带 8 条标题；已有标题或 LLM 不可用都不挡导出。"""
+    if plan_row.get("titles"):
+        return
+    from dramaclip.api import narration as narration_api
+
+    with contextlib.suppress(Exception):
+        narration_api.generate_titles(context, {"plan_id": str(plan_row["id"])})
+
+
 def _run_export(context: AppContext, job_id: str, run: ExportRun) -> None:
     """执行池入口：把一次 ExportRun 跑成 jobs 表里的一条终态记录。
     """
@@ -370,13 +417,31 @@ def _run_export(context: AppContext, job_id: str, run: ExportRun) -> None:
         exports_repo.set_progress(context.conn, run.export_id, round(percent, 1))
 
     try:
-        out_path = render_export(context, run, report=report)
+        if run.cancel_event.is_set():
+            exports_repo.mark_cancelled(context.conn, run.export_id)
+            context.job_store.mark_cancelled(job_id)
+            context.notifier.log("info", "导出已取消")
+            return
+        voiced = ExportRun(
+            export_id=run.export_id,
+            project_id=run.project_id,
+            plan_row=run.plan_row,
+            plan_data=_ensure_voiced(context, run.plan_row, run.plan_data),
+            cancel_event=run.cancel_event,
+        )
+        out_path = render_export(context, voiced, report=report)
+        _ensure_titles(context, run.plan_row)
         context.job_store.mark_completed(job_id)
         context.notifier.log("info", f"导出完成: {out_path.name}")
     except Exception as exc:
-        exports_repo.mark_failed(context.conn, run.export_id, str(exc))
-        context.job_store.mark_failed(job_id, str(exc))
-        context.notifier.log("error", f"导出失败: {exc}")
+        if run.cancel_event.is_set() or bool(getattr(exc, "cancelled", False)):
+            exports_repo.mark_cancelled(context.conn, run.export_id)
+            context.job_store.mark_cancelled(job_id)
+            context.notifier.log("info", "导出已取消")
+        else:
+            exports_repo.mark_failed(context.conn, run.export_id, str(exc))
+            context.job_store.mark_failed(job_id, str(exc))
+            context.notifier.log("error", f"导出失败: {exc}")
     finally:
         # 与 analysis/narration/models 一致：注册的取消事件必须回收，否则字典无界增长
         context.cancel_events.pop(job_id, None)

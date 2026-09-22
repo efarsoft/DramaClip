@@ -49,7 +49,30 @@ def test_original_segment_keeps_source_audio() -> None:
 
 
 def test_narration_without_audio_falls_back_to_plain() -> None:
+    """切段滤镜图：没第二路就不要声明。出片层另有守卫，不许拿这当成功路径。"""
     assert "-filter_complex" not in _args("narration", None), "无音频时不应声明第二路输入"
+
+
+def test_export_plan_refuses_narration_without_tts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dramaclip.engines.narration.models import NarrationText, PlanData, TimelineSegment
+
+    source = tmp_path / "ep1.mp4"
+    source.write_bytes(b"x")
+    plan = PlanData(
+        mode="full_narration",
+        timeline=[
+            TimelineSegment(
+                episode_id="ep1", start=0.0, end=2.0, audio="narration", narration_id="a"
+            )
+        ],
+        narration_texts=[NarrationText(id="a", text="后面更狠——点进去看全集")],
+    )
+    monkeypatch.setattr(encoder, "_run_cut", lambda *_a, **_k: None)
+    monkeypatch.setattr(encoder, "_concat", lambda *_a, **_k: None)
+    with pytest.raises(ValueError, match="旁白音频缺失"):
+        encoder.export_plan(plan, {"ep1": str(source)}, tmp_path / "out.mp4", tmp_path / "work")
 
 
 def test_amix_does_not_normalize_inputs() -> None:
@@ -59,6 +82,21 @@ def test_amix_does_not_normalize_inputs() -> None:
     assert "volume=0.1," in joined, "narration 段原声须真压到 10%"
     joined_ducked = " ".join(_args("ducked", "n1.mp3"))
     assert "volume=0.08," in joined_ducked and "normalize=0" in joined_ducked
+
+
+def test_sidechain_ducks_bed_before_amix() -> None:
+    """旁白开口时原声再压一截：侧链在 amix 前，限幅器仍收尾。"""
+    for audio in ("narration", "ducked"):
+        graph = _args(audio, "n1.mp3")[_args(audio, "n1.mp3").index("-filter_complex") + 1]
+        assert "asplit=2" in graph, "TTS 既当侧链又进 amix，必须 asplit，标签不能消费两次"
+        assert encoder._SIDECHAIN_COMPRESS in graph
+        assert graph.index("sidechaincompress") < graph.index("amix"), (
+            "侧链必须压床再求和：挂在 amix 之后等于压已经叠好的旁白"
+        )
+        assert graph.index("amix") < graph.index("alimiter"), "限幅器必须仍是进 AAC 前最后一级"
+        assert graph.index("volume=") < graph.index("sidechaincompress"), (
+            "固定 volume 是地板，侧链是开口后再压，不能反过来"
+        )
 
 
 # ---- 求和的天花板：关掉 amix 归一化的同时，把它顺带的"削顶保护"也关掉了 ----
@@ -200,7 +238,7 @@ def _input_tp(path: Path, ffmpeg: str) -> float:
 def worst_case(
     tmp_path_factory: pytest.TempPathFactory, repo_root: Path
 ) -> tuple[Path, Path]:
-    """最坏情况素材：满幅原声床 + +3.0 dBTP 的"TTS 等价音"，**两者都必须确定性**。
+    """最坏情况素材：满幅原声床 + 热 TTS 等价音，**两者都必须确定性**。
 
     原声床用 `aevalsrc` 四条正弦相加而不是 `anoisesrc`：`-h filter=anoisesrc`
     （8.1.1-essentials）真机输出里**没有 seed 选项**，同一条命令连跑三次得到的床实测
@@ -208,10 +246,10 @@ def worst_case(
     换成 aevalsrc 之后两次生成的 mp4 **md5 逐字节相同**，床实测 `input_tp=-0.23 dBTP` /
     `input_i=-8.69 LUFS`（峰值 -0.24 dBFS，是最响的合法 PCM 那一档）。
 
-    旁白那条的数字也都是真机量的：lavfi `sine` 自带 -18.06 dBFS 峰值，`volume=11.3`
-    抬到 **+3.0 dBTP**；抬之前必须 `aformat=sample_fmts=fltp`，否则 volume 在 s16 上算、
-    抬不过 0 dBFS（实测被夹在 0.0 dB）。+3.0 dBTP 的旁白不是编出来的：真成片
-    `intro_narration_325c84` 的整片 `input_tp` 就是 **+3.26 dBTP**。
+    旁白必须热到**侧链压床之后**求和仍削顶：`volume=11.3`（+3.0 dBTP）在有侧链时
+    剥掉限幅器只剩 **-0.12 dBTP**，对照组在量空气。`volume=20` 源自报 **+7.96 dBTP**，
+    剥限幅 → **+5.44 dBTP**，限幅后 **-8.43 dBTP**。抬之前必须 `aformat=sample_fmts=fltp`，
+    否则 volume 在 s16 上算、抬不过 0 dBFS。
     """
     ffmpeg = _ffmpeg(repo_root)
     d = tmp_path_factory.mktemp("worst-case-mix")
@@ -224,8 +262,8 @@ def worst_case(
          "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-shortest", str(bed)])
     _sh([ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
          "-f", "lavfi", "-i", "sine=frequency=997:sample_rate=48000:duration=8",
-         "-af", "aformat=sample_fmts=fltp,volume=11.3", "-c:a", "pcm_f32le", str(tts)])
-    assert _input_tp(tts, ffmpeg) == pytest.approx(3.0, abs=0.05)
+         "-af", "aformat=sample_fmts=fltp,volume=20", "-c:a", "pcm_f32le", str(tts)])
+    assert _input_tp(tts, ffmpeg) == pytest.approx(7.96, abs=0.15)
     return bed, tts
 
 
@@ -252,10 +290,9 @@ def test_mix_ceiling_holds_acoustically(
     """同一个最坏情况求和，限幅 vs 剥掉限幅，两边量的都是真机 `input_tp`。
 
     对照组是这条用例的全部意义：素材要是没热到能削顶，"限幅后达标"就是句空话。
-    真机实测（原声床 -0.23 dBTP + 旁白 +3.0 dBTP，走完整条 `cut_segment_args`
-    到 AAC 128k 段）：剥掉限幅器 → `input_tp=+4.02 dBTP`（采样峰 +4.01 dB，平顶硬削，
-    听感就是破音）；挂了限幅器 → `input_tp=-2.43 dBTP`，落在天花板 -3.0 dBFS
-    + 1.5 dB AAC 预算之内。两个变异都真跑过：
+    真机实测（原声床 + 旁白 volume=20 / +7.96 dBTP，走完整条 `cut_segment_args`
+    到 AAC 128k 段，含侧链）：剥掉限幅器 → `input_tp=+5.44 dBTP`；挂了限幅器 →
+    `input_tp=-8.43 dBTP`，落在天花板 -9.0 dBFS + 1.5 dB AAC 预算之内。两个变异都真跑过：
     `level=disabled`→`level=enabled`（alimiter 的默认值）→ **+0.19 dBTP**，自动电平把
     天花板自己抵消；限幅器从求和挪到旁白单路 → **-0.98 dBTP**，单路限干净了和还是超。
     """
@@ -288,9 +325,10 @@ def hot_original_source(
     aevalsrc 床抬 +2.3 dB 但**不落 s16**（保持 fltp、无平顶）编成 AAC 128k，
     源自报 `input_tp=+6.59 dBTP`，而过一遍 `atempo` + AAC 128k 之后只剩
     **-0.39 dBTP**——128k 自己就把没过冲的峰压回去了，`else` 分支根本不 leak。
-    能带着正真峰穿过 128k 的只有**平顶**：同样这张床抬 +1.4 dB 后落 s16 饱和
-    （`aformat=sample_fmts=s16` 用的是 `av_clip_int16`，即硬削），源 `input_tp=+1.98`，
-    过 `atempo` + AAC 128k 出来还有 **+1.41 dBTP**。真机片源正是这一档
+    能带着正真峰穿过 128k 的只有**平顶**：同样这张床抬 **2.0** 倍后落 s16 饱和
+    （`aformat=sample_fmts=s16` 用的是 `av_clip_int16`，即硬削），源 `input_tp=+3.82`，
+    过 `atempo` + AAC 128k 出来还有 **+0.76 dBTP**。volume=1.4 那档在 stereo + 段尾
+    afade 之后剥限幅只剩 −0.01，对照组在量空气。真机片源正是这一档
     （`intro_narration_c3eb30` 整片 +3.38 / `ultra_short_hook_2c9b87` +1.88 dBTP）。
     """
     ffmpeg = _ffmpeg(repo_root)
@@ -300,7 +338,7 @@ def hot_original_source(
          "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=8",
          "-f", "lavfi", "-i", _BED_EXPR,
          "-filter_complex",
-         "[1:a]aformat=sample_fmts=fltp,volume=1.4,aformat=sample_fmts=s16[a]",
+         "[1:a]aformat=sample_fmts=fltp,volume=2.0,aformat=sample_fmts=s16[a]",
          "-map", "0:v", "-map", "[a]",
          "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
          "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-shortest", str(src)])
@@ -387,14 +425,13 @@ def test_original_ceiling_holds_acoustically(
 ) -> None:
     """同一段已削顶的源，限幅 vs 剥掉限幅，两边量的都是真机 `input_tp`。
 
-    真机实测（8.1.1-essentials，源 `input_tp=+1.98 dBTP`，走完整条
+    真机实测（8.1.1-essentials，源 `input_tp=+3.82 dBTP`，走完整条
     `cut_segment_args(audio="original")` 到 AAC 128k 段）：
-    剥掉限幅器 → **+1.41 dBTP**；挂上限幅器 → **-0.87 dBTP**（掉 2.28 dB，回到 0 以下）；
-    把 `level=disabled` 翻成 alimiter 默认的 `level=enabled` → **+1.34 dBTP**
-    （自动电平按 1/limit 又抬回 +3.0 dB，等于只压掉 0.07 dB，天花板形同不存在）。
+    剥掉限幅器 → **+0.76 dBTP**；挂上限幅器 → **-6.71 dBTP**；
+    把 `level=disabled` 翻成 alimiter 默认的 `level=enabled` → **+1.46 dBTP**。
     三条腿都是真机量的，所以"删限幅器"和"顺手清理掉 level=disabled"这两种改法都会红。
 
-    诚实记账：-0.87 **没有**落进混音分支那条 `天花板 -3.0 + AAC 预算 1.5 = -1.5` 之内。
+    诚实记账：限幅后 **-6.71 dBTP**，这条用例仍只断言方向（过 0 → 不过 0、掉 ≥1 dB）。
     那 1.5 dB 预算是按"限幅器把波形限干净再交给编码器"实测出来的（0.57–1.06 dB 过冲），
     而这里的源**进仓就是平顶**——限幅器能把电平压回 -3.0 dBFS，却不能把已经削平的顶
     长回来，AAC 重编平顶波形的过冲照旧（同一素材实测过冲 2.13 dB）。所以直通分支的

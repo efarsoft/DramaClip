@@ -126,6 +126,9 @@ export interface EpisodeAnalysisResult {
   readonly highlight_count: number;
   readonly genre?: string;
   readonly error?: string;
+  /** 源音频进仓已削顶：成片限幅只能压电平，不能把平顶长回来。 */
+  readonly clipping?: boolean;
+  readonly peak_dbfs?: number | null;
 }
 
 export interface HighlightSegment {
@@ -231,6 +234,8 @@ export interface NarrationPlan {
   readonly overlap_max?: number | null;
   /** 一次 plan_variants 调用产出全组的标识（= 该作业 job_id）。 */
   readonly batch_id?: string | null;
+  /** 过不了转化门禁时的第一条原因；ready 方案无此字段。 */
+  readonly block_reason?: string;
 }
 
 /** 一条方案的成本账（规格 4.4 成本预估卡数据源）。 */
