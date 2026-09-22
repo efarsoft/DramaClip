@@ -8,10 +8,7 @@ import { PageHeader, PageSection, PageShell } from '../../components/layout/Page
 import { appPaths, appVersion, revealInFolder, systemApi } from '../../services/client';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
-
-/** 开源组件清单（分发含第三方二进制与字体，许可清单是发版应有项）。 */
-const OPEN_SOURCE =
-  'Electron · React · Ant Design · FFmpeg · PySceneDetect · OpenCV · faster-whisper · edge-tts · Kokoro';
+import { OPEN_SOURCE } from './openSource';
 
 /** 授权与合规声明（素材授权责任归使用者；全本机处理，素材不上传）。 */
 const COMPLIANCE =
@@ -27,7 +24,7 @@ export function AboutPage(): ReactElement {
         <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.space2xl, minWidth: 0 }}>
           <VersionBlock />
           <PageSection title="开源许可">
-            <div style={COPY}>{OPEN_SOURCE}</div>
+            <div style={COPY}>{OPEN_SOURCE.join(' · ')}</div>
           </PageSection>
           <PageSection title="授权与合规声明">
             <div style={COPY}>{COMPLIANCE}</div>

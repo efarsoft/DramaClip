@@ -296,9 +296,28 @@
 
 ### 7.2 许可与合规
 
-- **OFL 1.1 要求许可文本随包**：`resources/fonts/` 今天是 `NotoSansSC-Regular.otf`（8,331,336 字节）+ `OFL-NotoSansSC.txt` ——**一份许可、一个字重**（⚠️ 该目录**尚未入库**：`git ls-tree -r HEAD` 无 `resources/fonts`，它是立案 D #92 在飞的未跟踪产物，HEAD 里根本没有随包字体）。本批新增 Inter 与思源 500 档，各自的 `OFL.txt` 一并进目录，**一份许可覆盖两种字面是不成立的**。
+- **OFL 1.1 要求许可文本随包**：`resources/fonts/` 是 `NotoSansSC-Regular.otf`（8,331,336 字节）+ `OFL-NotoSansSC.txt` ——**一份许可、一个字重**（2026-09-22 复核更正：原文写「该目录尚未入库」，现在 `git ls-tree -r HEAD` 两个文件都在，随 v1 之后的立案 D 收尾一起进了版本库）。本批新增 Inter 与思源其余字重，各自的 `OFL.txt` 一并进目录，**一份许可覆盖两种字面是不成立的**。
 - **「关于」页开源清单必须新增这两条字体**：`AboutPage.tsx:14` 今天是一行九个名字的字符串常量（Electron / React / Ant Design / FFmpeg / PySceneDetect / OpenCV / faster-whisper / edge-tts / Kokoro），**没有任何字体项**——分发含字体的二进制包本就该有。
 - 本批不新增任何对外文案。合规红线照旧：**「消重 / 抗比对」不得作为用户可见卖点**（¥1.85M 判例）；AI 生成图片须带显式标识（2025-09-01 施行）。见 [[project-compliance-red-lines]]。
+
+### 7.3 施工回写（§7.1 / §7.2 落地时对本节口径的偏离，全部记账）
+
+**① 字重带三档，不是两档**：思源简体 woff2 实测 `400 / 500 / 600 = 1,142,704 / 1,159,068 / 1,163,544` 字节，加 Inter 可变字体 `48,444`，界面字面合计 **3,513,760 字节（3.51 MB）**，比 §7.1 写的 2.3 MB 多 1.18 MB。多出来的那一档是**故意加的**：§1.1 的卡标题与统计大数字要中文 600，只带 400/500 等于让 Chromium 对 600 做合成假粗——那正是本节开头要消灭的「同一构建在不同机器上长得不一样」。**不再回头砍**：1.18 MB 换确定性，与本批已随包的 8.3 MB 字幕 OTF、GB 量级模型同口径。
+
+**② 思源在界面侧用自别名 `'DramaClip SC'`，不占本名**：随包的是「简体子集、无西文」，占用 `Noto Sans SC` 本名会把使用者机器上可能装着的完整版顶掉，反而不可复核。栈序 `Inter, 'DramaClip SC', Segoe UI, PingFang SC, Microsoft YaHei, system-ui, sans-serif`——Inter 只含拉丁，中文自然落到别名档，西文兜底才是系统字面。门禁断言**前两位**恰好是 `Inter` / `DramaClip SC`。
+
+**③ 色值与字体栈进 CSS 的机制 = CSS 变量单点注入**：CSS 不能 `import` TS，故 `theme.ts` 额外导出 `cssVars`（13 项，值一律 `tokens.*` 引用，不许自己藏字面量），`main.tsx` 首行前调 `applyCssVars()` 注到 `:root`，`global.css` 只准写 `var(--dc-*)`。新增门禁 `src/__tests__/cssContract.test.ts`（10 条）双向锁：用到的变量必须都声明、`cssVars` 的每个值必须能在 `tokens` 里找到出处、`applyCssVars()` 必须真被调用——**写了不注入 = 全站悬空 var 静默变无样式**。`tokens.fontFamilyUi` 同时喂给 `dramaTheme.token.fontFamily`（§1.4 同源逻辑：antd 组件内的文字也得吃到随包字面，否则 `ConfigProvider` 会把栈覆盖回去）。
+
+**④ 许可文本「在场」不等于「进包」**：Vite 只把**被代码引用**的资源带进 `dist/`，两份 `OFL-*.txt` 没人引用，因此 `electron-builder.yml` 的 `files` 段显式列入 `src/assets/fonts/OFL-*.txt`。门禁读的是配置里 `files:` 那一段的**列表项**（注释里写 OFL 不算，实测两种变异都红）。**打包侧实测**：`npm run build` 后 `dist/assets/` 见四个 woff2 且字节数与源文件逐一对齐；`npx electron-builder --win zip` 后 `npx asar list app.asar` 见 `\dist\assets\*.woff2` ×4 与 `\src\assets\fonts\OFL-*.txt` ×2 全在包内。
+
+**⑤ 许可文本的出处**：Inter/思源官方仓库的若干规范 URL 当下 404（`rsms/inter` master 路径、`notofonts/noto-cjk`、`google/fonts` 各试过一轮），改用 **fontsource 分发包自带的 LICENSE**——即本次下载这些字节的同一条分发链，许可文本与被分发的字节同源，比去第三方镜像另找一份更可对账。
+
+**⑥ 关于页清单改成可门禁的数据**：`AboutPage.tsx` 原来那行九个名字的字符串常量拆成 `features/about/openSource.ts` 导出的 `readonly string[]`（新增 Inter / Noto Sans SC 两条并**逐条**标 OFL），页面渲染 `{OPEN_SOURCE.join(' · ')}` 保持观感不变。拆文件的唯一理由是门禁要直接断言数组，不为此渲染整页（关于页要打通服务握手）。原断言「整份清单里含 OFL」被实测证伪过一次——只有一条标 OFL 也算过，故改成逐条。
+
+**⑦ 本节没做到的（诚实项，留给 §8.2 与后续批次）**：
+- `tokens.fontFamilyMono`（JetBrains Mono）**仍是系统字面栈，没随包**——统计数字、时长、日志位点在不同机器上仍不确定，与本节立论相冲。随包与否是独立一批字节决策，不混进本批。
+- **界面一次没跑过**：`npm run dev` / 截图 / 成对对比全部未做，§8.2 的「改前基线 + 同参数重拍」门禁仍未满足。两处正文底色（`#10141C→#0F1526`、`#e8eaed→#F0F4FF`）目前只有源码可查，没有眼睛验过。
+
 
 ---
 

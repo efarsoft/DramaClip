@@ -1,3 +1,39 @@
+/* ── 随包字面（规格 §7.1）：界面渲染确定性靠的是字面在场，不是"这台机器装了雅黑" ──
+   路径由 Vite 解析进 dist/，随 asar 一起打包；许可文本在同目录 OFL-*.txt。
+   Inter 是可变字体（100–900 一档覆盖全部字重）；思源按 §1.1 需要 400/500/600 三档静态。
+   font-display 用 swap：本地文件加载近乎瞬时，不给 FOIT 机会。 */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../assets/fonts/InterVariable-latin-wght.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'DramaClip SC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/NotoSansSC-ChineseSimplified-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'DramaClip SC';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../assets/fonts/NotoSansSC-ChineseSimplified-500.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'DramaClip SC';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../assets/fonts/NotoSansSC-ChineseSimplified-600.woff2') format('woff2');
+}
+
 html,
 body,
 #root {
@@ -6,14 +42,9 @@ body,
 }
 
 body {
-  background: #10141C;
-  color: #e8eaed;
-  font-family:
-    'Segoe UI',
-    'PingFang SC',
-    'Microsoft YaHei',
-    system-ui,
-    sans-serif;
+  background: var(--dc-bg-layout);
+  color: var(--dc-text-primary);
+  font-family: var(--dc-font-ui);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -24,12 +55,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #262f47;
+  background: var(--dc-scroll-thumb);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3d4d73;
+  background: var(--dc-scroll-thumb-hover);
 }
 
 ::-webkit-scrollbar-track {
@@ -37,20 +68,20 @@ body {
 }
 
 ::selection {
-  background: rgba(124, 156, 255, 0.28);
+  background: var(--dc-selection-bg);
 }
 
 /* ── DSS 氛围层：克制的双辐射光斑（左上主靛 4% / 右下紫 3%）── */
 body {
   background:
-    radial-gradient(900px 620px at 6% -8%, rgba(124, 156, 255, 0.05), transparent 62%),
-    radial-gradient(820px 540px at 102% 108%, rgba(155, 123, 255, 0.038), transparent 62%),
-    #10141c;
+    radial-gradient(900px 620px at 6% -8%, var(--dc-ambient-primary), transparent 62%),
+    radial-gradient(820px 540px at 102% 108%, var(--dc-ambient-accent), transparent 62%),
+    var(--dc-bg-layout);
 }
 
 /* ── 卡片质感：顶部 1px 高光 + 悬浮上浮 ── */
 .ant-card {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  box-shadow: inset 0 1px 0 var(--dc-card-top-highlight);
 }
 .ant-card-hoverable {
   transition:
@@ -60,7 +91,7 @@ body {
 }
 .ant-card-hoverable:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--dc-shadow-hover);
 }
 
 /* ── 输入控件：边框与底色过渡，hover 微亮 ── */
@@ -76,9 +107,9 @@ body {
 
 /* ── 主按钮品牌渐变（禁用态除外）── */
 .ant-btn-primary:not(.ant-btn-disabled):not([disabled]) {
-  background: linear-gradient(135deg, #7c9cff 0%, #9b7bff 100%);
+  background: var(--dc-gradient-primary);
   border: none;
-  box-shadow: 0 2px 8px rgba(124, 156, 255, 0.28);
+  box-shadow: var(--dc-shadow-primary);
 }
 .ant-btn-primary:not(.ant-btn-disabled):not([disabled]):hover {
   filter: brightness(1.08);

@@ -46,7 +46,23 @@ export const tokens = {
   textPrimary: '#F0F4FF',
   textSecondary: '#A8B4CE',
   textTertiary: '#5E6C8C',
+  /** 界面字面栈（§7.1）：随包 Inter + 思源子集打头，系统字面只作兜底。
+   *  思源用自别名 'DramaClip SC' 而非本名：随包的是「简体子集、无西文」，
+   *  占用本名会把使用者机器上完整版的 Noto Sans SC 顶掉，反而不可复核。 */
+  fontFamilyUi: "'Inter', 'DramaClip SC', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif",
   fontFamilyMono: "'JetBrains Mono', 'Cascadia Mono', Consolas, monospace",
+  // ---- CSS 侧氛围与控件色（§7.1：global.css 不得藏第二处色值真相，全部在此登记） ----
+  scrollThumb: '#262F47',
+  scrollThumbHover: '#3D4D73',
+  selectionBg: 'rgba(124,156,255,0.28)',
+  /** 背景双辐射光斑：左上主靛 5% / 右下紫 3.8%，克制到近乎看不出来才叫氛围层。 */
+  ambientPrimary: 'rgba(124,156,255,0.05)',
+  ambientAccent: 'rgba(155,123,255,0.038)',
+  cardTopHighlight: 'rgba(255,255,255,0.045)',
+  shadowHover: '0 6px 18px rgba(0,0,0,0.35)',
+  shadowPrimary: '0 2px 8px rgba(124,156,255,0.28)',
+  /** 主按钮渐变 = 主色→强调色；与 gradientAccent（#6D9BFF 起）不是同一枚，别合并。 */
+  gradientPrimary: 'linear-gradient(135deg, #7C9CFF 0%, #9B7BFF 100%)',
 
   // ---- 间距（px 字符串，模板插值安全） ----
   spaceXs: `${String(SPACING.xs)}px`,
@@ -140,6 +156,34 @@ export const layout = {
   split: { initial: 24, min: 20, max: 40, minWidth: 250, handle: 6, paddingX: tokens.spaceLg },
 } as const;
 
+/**
+ * global.css 用的 CSS 自定义属性（§7.1）。
+ * 值一律直接取自 tokens——`cssContract` 门禁逐条验：派生表自己藏了值，就等于
+ * CSS 是第二处色值真相，而这次重设计要收的正是「同一语义两档值」。
+ * 名字不带 `--`：注入时统一加，CSS 侧写 `var(--dc-…)`。
+ */
+export const cssVars = {
+  'dc-font-ui': tokens.fontFamilyUi,
+  'dc-bg-layout': tokens.bgLayout,
+  'dc-text-primary': tokens.textPrimary,
+  'dc-scroll-thumb': tokens.scrollThumb,
+  'dc-scroll-thumb-hover': tokens.scrollThumbHover,
+  'dc-selection-bg': tokens.selectionBg,
+  'dc-ambient-primary': tokens.ambientPrimary,
+  'dc-ambient-accent': tokens.ambientAccent,
+  'dc-card-top-highlight': tokens.cardTopHighlight,
+  'dc-shadow-hover': tokens.shadowHover,
+  'dc-shadow-primary': tokens.shadowPrimary,
+  'dc-gradient-primary': tokens.gradientPrimary,
+} as const;
+
+/** 把 cssVars 注到 :root。CSS 拿不到 TS，只能在此单点导出后由入口注入——不注入这些 var 全部悬空。 */
+export function applyCssVars(root: HTMLElement = document.documentElement): void {
+  for (const [name, value] of Object.entries(cssVars)) {
+    root.style.setProperty(`--${name}`, value);
+  }
+}
+
 export const dramaTheme: ThemeConfig = {
   algorithm: antdTheme.darkAlgorithm,
   token: {
@@ -160,6 +204,8 @@ export const dramaTheme: ThemeConfig = {
     // 与 tokens.text.body 同值：漏这一条，Table/Input/Modal/Select 继续 13，
     // 界面变成一半 13 一半 14，比改之前更糟（规格 §1.4）。
     fontSize: 14,
+    // 同理：不写这条，antd 组件继续用它自己的系统字面栈，随包字体只覆盖到自绘元素。
+    fontFamily: tokens.fontFamilyUi,
   },
   components: {
     Card: { colorBorderSecondary: tokens.borderSecondary, paddingLG: SPACING.lg },

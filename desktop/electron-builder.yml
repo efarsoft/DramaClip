@@ -15,6 +15,10 @@ electronDist: ../node_modules/electron/dist
 files:
   - dist/**
   - dist-electron/**
+  # 界面字体由 Vite 从 src/assets/fonts 解析进 dist 随包；两份 OFL 许可文本不被代码
+  # 引用、Vite 不会带它们，须在此显式列入——OFL 1.1 要求分发字体必须附带许可文本。
+  # 门禁：src/__tests__/cssContract.test.ts
+  - src/assets/fonts/OFL-*.txt
 extraResources:
   - from: ../resources
     to: app-resources
