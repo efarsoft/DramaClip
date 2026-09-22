@@ -225,10 +225,12 @@ export const ttsApi = {
 } as const;
 
 export const jobsApi = {
-  list: (limit: number): Promise<JobsListResult> =>
-    rpc<JobsListResult>('jobs.list', { limit }),
+  list: (limit: number, activeOnly = false): Promise<JobsListResult> =>
+    rpc<JobsListResult>('jobs.list', activeOnly ? { limit, active_only: true } : { limit }),
   /** 单只作业的当下状态：导入这类长活的收尾只有作业自己知道。 */
   get: (jobId: string): Promise<{ job: JobInfo }> => rpc<{ job: JobInfo }>('jobs.get', { job_id: jobId }),
+  cancel: (jobId: string): Promise<{ job_id: string; cancelling: boolean; reason?: string }> =>
+    rpc<{ job_id: string; cancelling: boolean; reason?: string }>('jobs.cancel', { job_id: jobId }),
 } as const;
 
 export const settingsApi = {
