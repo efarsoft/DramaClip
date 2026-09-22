@@ -28,7 +28,7 @@ DEFAULTS: dict[str, str] = {
     "llm.base_url": "",
     "llm.api_key": "",
     "llm.model": "",
-    "tts.engine": "kokoro",
+    "tts.engine": "edge",
     # 音色按引擎独立成键：两引擎音色体系互不相通（Kokoro 音色名 / 微软官方名）
     "tts.voice.kokoro": "zf_001",
     "tts.voice.edge": "zh-CN-XiaoxiaoNeural",

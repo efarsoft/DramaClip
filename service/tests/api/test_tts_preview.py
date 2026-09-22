@@ -73,14 +73,15 @@ def test_preview_uses_engine_and_voice_from_settings(
     tmp_path: Path, fake_engine: FakeEngine
 ) -> None:
     context = _context(tmp_path)
-    _install_kokoro_voice(context.data_dir / "models", "zf_001")
 
     result = tts_api.preview(context, {})
 
-    assert context.settings["tts.engine"] == "kokoro"
-    assert [voice for (_text, voice, _path) in fake_engine.calls] == ["zf_001"]
-    assert result["engine"] == "kokoro"
-    assert result["voice"] == "zf_001"
+    assert context.settings["tts.engine"] == "edge"
+    assert [voice for (_text, voice, _path) in fake_engine.calls] == [
+        "zh-CN-XiaoxiaoNeural"
+    ]
+    assert result["engine"] == "edge"
+    assert result["voice"] == "zh-CN-XiaoxiaoNeural"
     assert result["duration_s"] == 2.5
     assert result["text"].strip() != ""
     assert Path(result["path"]).is_file()
