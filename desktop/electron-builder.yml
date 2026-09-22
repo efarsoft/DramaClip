@@ -1,7 +1,8 @@
 # electron-builder 打包配置（W14）：
 # - asar 内：渲染层 dist/ + 主进程/preload dist-electron/
 # - asar 外（extraResources → resources/app-resources/）：
-#   resources/ 全部（ffmpeg/fonts/subtitle-presets + PyInstaller sidecar dramaclip-service/）
+#   白名单运行时目录（ffmpeg/fonts/自检样例/预设/解说风格 + sidecar dramaclip-service/）
+#   模型一律不随包，引擎中心按需下载
 #   主进程经 process.resourcesPath/app-resources 定位，并注入 DRAMACLIP_RESOURCES_DIR
 appId: com.dramaclip.desktop
 productName: DramaClip
@@ -19,11 +20,18 @@ files:
   # 引用、Vite 不会带它们，须在此显式列入——OFL 1.1 要求分发字体必须附带许可文本。
   # 门禁：src/__tests__/cssContract.test.ts
   - src/assets/fonts/OFL-*.txt
+# 白名单显式列出运行时目录——禁止 **/* 全拷：将来谁在 resources/ 下放了
+# 模型/缓存（手册指引的手动导入是放 data/models，但保不齐有人放错），都不许混进安装包。
+# 模型一律走引擎中心按需下载，不随包。
 extraResources:
-  - from: ../resources
-    to: app-resources
-    filter:
-      - "**/*"
+  - { from: ../resources/ffmpeg, to: app-resources/ffmpeg }
+  - { from: ../resources/fonts, to: app-resources/fonts }
+  - { from: ../resources/face-detect, to: app-resources/face-detect }
+  - { from: ../resources/selftest, to: app-resources/selftest }
+  - { from: ../resources/subtitle-presets, to: app-resources/subtitle-presets }
+  - { from: ../resources/narration-styles, to: app-resources/narration-styles }
+  # CI 先跑 dist:service 产出到 resources/dramaclip-service（gitignored），此处随包
+  - { from: ../resources/dramaclip-service, to: app-resources/dramaclip-service }
 win:
   target:
     - target: nsis
