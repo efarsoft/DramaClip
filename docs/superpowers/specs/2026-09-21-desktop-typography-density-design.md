@@ -351,6 +351,17 @@
 - **颜色三条**（§3.4）：hex 字面量、`rgb()/rgba()` 字面量、`` `${tokens.…}XY` `` 模板拼色、组件内裸 `boxShadow` 字面量——一律只准出现在 `theme.ts`。
   ⚠️ **这三条的覆盖面边界必须写明，否则是假门禁**：eslint 只解析 `.ts/.tsx`，**`src/styles/global.css` 里那 7 枚裸 hex**（`:9 #10141C`、`:10 #e8eaed`、`:27 #262f47`、`:32 #3d4d73`、`:48`、`:79` 渐变两枚）**在机器判据够不着的地方**——其中 `#7c9cff / #9b7bff` 与 `tokens.gradientAccent`（`theme.ts:30`）逐字重复，是第二处品牌渐变真相。收口方式不是假装 eslint 管得到，而是 §7.1 改 `global.css`（加 `@font-face`）时同批把这些值改成 CSS 变量、由 `theme.ts` 单点导出；人工复核项进 §8.2 的成对截图。
 
+**施工回写（§8.3 落地时对本节口径的偏离，全部记账）**：
+
+1. **门禁实现位在 `src/__tests__/styleContract.test.ts`，不在 eslint**。规格原写"eslint 棘轮扩面"，三条实测让它撑不住：① "只对改动文件生效"在 eslint 里要落成 per-file overrides 清单，23 个文件 23 条配置，配置本身成了债务的第二处真相；② 台账要**逐文件计数**，eslint 规则只有开/关，给不出"新增即红、降了不销账也红"；③ 注释行豁免（`#FF4D4F` 的禁令本身写在注释里）在 AST selector 层做不到。测试侧一趟遍历三个判据齐备，且与 §3.4 色值门禁同文件同扫描器。eslint 只保留原有 `fontSize` / `borderRadius` 两条（`eslint.config.mjs:46-63`，实测均已零命中，仍留着当第二道）。
+2. **度量禁令是台账，不是归零**：同 §8.2 口径实测 **23 个文件 / 36 个位点**（`padding` `margin` `gap` `lineHeight` 四族共 16 个属性位）。三种退化都算红：新加字面量、迁完不销账、销了账代码没动。为什么不按 §8.1"四块参照页归零、其余不动"：那四块的 §8.2 成对截图尚未跑过，把未验收屏的既成事实写成规则等于拿没验的东西定口径。
+3. **口径写死并用夹具钉住**：`tokens.* / layout.*` 引用（`space2xl` 这类档名自带数字，不先抹掉就是把正解判成违规）、`${…}` 插值（`0 ${tokens.spaceMd}` 是标准写法、`${count}px` 是运行时宽度）、百分数、裸 `0`、`auto` / `none` / `transparent` 结构值——都不算字面量。正反各配夹具，口径被人顺手放宽或收窄都当场红。
+4. **宽高族在台账外，记为边界**：同口径实测 48 处，里面 `100vh`、滚动条 `width: 1`、发丝线 `height: 1`、弹窗与图表尺寸（`170 / 380 / 260 / 860`）都不是排版度量。§1.3 已把图标与图形尺寸收进 `glyph.*`，串位矩阵守住"读到的必须是 glyph"这一半；`width: 34` 这类裸数值**目前无机检**，这是承认的缺口，不为凑"归零"数字把 `100vh` 塞进 token。
+5. **两条比规格更严**：命名空间串位与 mono 反向判据实测**全站零命中**，故直接立成通用禁令而不是棘轮。本节点名的两处串位（`Rail.tsx`、`StepsNav.tsx` 的 `borderRadius: tokens.fontIcon`）已改读 `radiusControl`，实测 `grep -rn "borderRadius: tokens.font" src` 零命中。串位矩阵豁免 `styles/`（`mixins.ts:45 minHeight: tokens.text.cardTitle.leading` 正是契约的组成处，与 §3.4 的 `OWN_TRUTH` 同一边界）。
+6. **mono 判据的中文范围收窄**为 CJK 标点（U+3000–303F）+ 汉字（U+4E00–9FFF）+ 全角形式（U+FF00–FFEF）三段；**省略号、弯引号、间隔号不收**——JetBrains Mono 有这三枚码位，`AboutPage.tsx:134` 的空值占位 `…` 是被误判的实测一条，判据宽过头会逼人绕开门禁。三段范围与反向三枚各配夹具。
+7. **机器判据够不着的两处仍走 §8.2 人工**：跨行 JSX 文本与变量内容（`{draft}`、用户提示词正文）不在行级扫描内；`global.css` 的色值 eslint 与本测试都扫不到（§7.3 已改 CSS 变量，位点由 `cssContract.test.ts` 盯）。
+8. **一处规格缺口，立案未做：字重**。§8.3 的禁令清单只列了 `padding/margin/gap/lineHeight` 与颜色，**没有 `fontWeight`**；实测渲染层 **22 处裸数值字重**（20 处 `600`、2 处 `700`，`styles/` 内那 1 处是真相源本身），而直读 `tokens.text.*.weight` 的只有 4 处（另有若干 `active ? weightActive : weight` 的三元式是正解）。`600` 在档内（各 tier 的 `weight/weightLatin/weightActive` 就是 600），**`700` 无档**（`TitleBar.tsx:45`、`StatChips.tsx:80`）——要么立一档 `weightEmphasis`，要么降回 600，这是设计裁决不是搬运，故单独立案不混进本批。11 处在 `features/engines/`（另一位工程师的属主区，正在改），此刻批量搬运必撞车。
+
 ### 8.4 参照页一（分析工作台）的已知清单
 
 P4 是整站唯一 `mixins.ts` 与 `PageKit.tsx` **零引用**的 feature（`features/analysis/` 11 个组件全裸写 AntD 卡）。按 §0.2 口径实测本屏 **45 处内联数值字面量**（`EpisodeListRow 14`、`WorkbenchPage 8`、`PlayerCard 5`、`TranscriptCard 5`、`StepsNav 5`、其余 8）；本屏 **26 处 `fontSize` 声明里只有 2 处配了行高**（`EpisodeListRow:190` 与 `TranscriptCard:176`，而后者给 12px 中文配的是 14px 行高）。本屏要一次改齐：卡容器统一、字面量进度量层、字阶+行高成对、三态分道、批量条与回声、默认勾选改读 `analysis.full_threshold`。
