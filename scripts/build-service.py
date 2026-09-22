@@ -94,6 +94,11 @@ def main() -> int:
         cmd += ["--exclude-module", module]
     # 汉化/音素化数据 + 包内迁移 SQL（PyInstaller 静态分析收不全）
     cmd += ["--collect-data", "dramaclip"]
+    # IndexTTS worker 源码：从未被 import（子进程按路径执行），静态分析不会收集；
+    # 落位 _internal/dramaclip/engines/tts/workers/ 与适配器 __file__ 相对寻址吻合
+    workers_src = SERVICE_DIR / "dramaclip" / "engines" / "tts" / "workers"
+    if workers_src.is_dir():
+        cmd += ["--add-data", f"{workers_src};dramaclip/engines/tts/workers"]
     for module in ("misaki", "kokoro", "jieba", "num2words"):
         cmd += ["--collect-data", module]
     if args.cuda:
