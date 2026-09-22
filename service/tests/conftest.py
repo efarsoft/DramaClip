@@ -45,8 +45,11 @@ def drain_job_executors() -> None:
 
 @pytest.fixture
 def memory_db() -> Iterator[sqlite3.Connection]:
-    """已迁移的内存库（每个测试独立；与 db.connect 同参数保证跨线程行为一致）。"""
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    """已迁移的内存库（每个测试独立；与 db.connect 同一串行化形态，
+    否则测试测不出生产共享连接上的并发事务互踩）。"""
+    conn = sqlite3.connect(
+        ":memory:", check_same_thread=False, factory=db.SerializedConnection
+    )
     conn.execute("PRAGMA foreign_keys=ON")
     db.migrate(conn)
     yield conn
