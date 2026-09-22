@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from dramaclip.infra.model_manager import downloader, fetch
-from dramaclip.infra.model_manager.registry import builtin_specs
+from dramaclip.infra.model_manager.registry import ModelSpec, builtin_specs
 
 _EPS = {
     "hf_mirror": "https://hf-mirror.com",
@@ -271,3 +271,49 @@ def test_relayout_rejects_non_whisper_and_missing_cache(tmp_path: Path) -> None:
         downloader.relayout_whisper_cache(_spec("kokoro-82m"), tmp_path, _EPS)
     with pytest.raises(ValueError, match="没有 whisper 缓存目录"):
         downloader.relayout_whisper_cache(_spec("faster-whisper-base"), tmp_path, _EPS)
+
+
+# ---------------------------------------------------------------- 失败分类与预算
+
+
+def test_classify_failure_maps_signals_to_actions() -> None:
+    """分类只按可证信号；猜不出类别就原样带出——错误归因比不归因更坏。"""
+    classify = downloader.classify_failure
+    assert classify(fetch.DownloadCancelled("x")) == "已取消"
+    disk = OSError("write failed")
+    disk.errno = 28
+    assert "磁盘空间不足" in classify(disk)
+    assert "校验失败" in classify(OSError("大小校验失败：期望 1 字节，实际 2 字节"))
+    assert "校验失败" in classify(OSError("SHA256 校验失败：期望 ab…"))
+    assert "网络超时" in classify(TimeoutError("timed out"))
+    assert "换个源" in classify(OSError("urlopen error 连接被重置"))
+    assert "源站说没有这个文件" in classify(RuntimeError("HTTP Error 404: Not Found"))
+    assert "源站临时故障" in classify(RuntimeError("HTTP Error 503: Unavailable"))
+    assert "所有下载源都失败" in classify(RuntimeError("全部来源失败：boom"))
+    # 认不出的：异常名 + 原文，不硬套类别
+    assert classify(ValueError("weird")) == "ValueError: weird"
+
+
+def test_estimated_bytes_parses_size_label() -> None:
+    assert downloader.estimated_bytes(_spec("faster-whisper-base")) == int(145 * 1024**2)
+    assert downloader.estimated_bytes(_spec("faster-whisper-medium")) == int(1.5 * 1024**3)
+    blank = ModelSpec(
+        model_id="x", kind="tts", engine="kokoro", repo_id="", placement="p", name="n"
+    )
+    assert downloader.estimated_bytes(blank) is None, "解析不出=未知，未知不瞎猜"
+
+
+def test_eta_and_speed_formats() -> None:
+    assert downloader._fmt_eta(45) == "45秒"
+    assert downloader._fmt_eta(200) == "3分20秒"
+    assert downloader._fmt_eta(3725) == "1小时02分"
+    assert downloader._fmt_speed(2.5 * 1024 * 1024) == "2.5MB/s"
+    assert downloader._fmt_speed(512 * 1024) == "512KB/s"
+
+
+def test_rate_meter_starts_without_guessing() -> None:
+    """没有采样窗就没有速度：ETA 显示未知（前端渲染「—」），不拿 0 除出个假无穷。"""
+    meter = downloader._RateMeter(1000)
+    speed, eta = meter.update(0)
+    assert speed == 0.0
+    assert eta is None

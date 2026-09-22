@@ -14,7 +14,9 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 import urllib.parse
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -71,28 +73,122 @@ def download_in_background(
     *,
     endpoints: Endpoints,
     source: str = "auto",
+    on_result: Callable[[str, str], None] | None = None,
 ) -> threading.Thread:
-    """后台线程逐文件下载；所选源失败自动降级其余源（国内优先）。"""
+    """后台线程逐文件下载；所选源失败自动降级其余源（国内优先）。
+
+    ``on_result(status, message)``：在 ``on_done`` 置位**之前**回报结局
+    （done / failed / cancelled，failed 附分类后的原因）——作业收尾据此走
+    mark_failed/mark_cancelled，而不是把失败也收成了 completed。
+    """
 
     def _work() -> None:
         try:
             _run_chain(spec, models_dir, notifier, cancel, endpoints, source)
             notifier.model_download(spec.model_id, 100.0, status="done")
+            if on_result is not None:
+                on_result("done", "")
         except DownloadCancelled:
             notifier.log("warn", f"{spec.name} 下载已取消")
+            if on_result is not None:
+                on_result("cancelled", "已取消")
         except Exception as exc:
-            notifier.model_download(spec.model_id, 0.0, status="failed")
+            reason = classify_failure(exc)
+            notifier.model_download(spec.model_id, 0.0, status="failed", message=reason)
             notifier.log(
                 "warn",
-                f"{spec.name} 下载失败。可手动下载后放入 {models_dir / spec.placement} "
-                f"并点击「重新检测」导入（{exc}）",
+                f"{spec.name} 下载失败：{reason}。也可手动下载后放入 "
+                f"{models_dir / spec.placement} 并点击「重新检测」导入（原始错误：{exc}）",
             )
+            if on_result is not None:
+                on_result("failed", reason)
         finally:
             on_done.set()
 
     thread = threading.Thread(target=_work, name=f"dl-{spec.model_id}", daemon=True)
     thread.start()
     return thread
+
+
+def classify_failure(exc: Exception) -> str:
+    """异常 → 业主看得懂、做得动的一句话（§10.5：现象 + 动作，不说正确的废话）。
+
+    分类只按**可证的信号**（errno、校验文案、超时/连接类异常），猜不出类别就
+    原样带出异常名与原文——错误的归因比不归因更坏。
+    """
+    if isinstance(exc, DownloadCancelled):
+        return "已取消"
+    text = str(exc)
+    lowered = text.lower()
+    errno = getattr(exc, "errno", None)
+    if errno in (28, 112) or "no space left" in lowered:
+        return "磁盘空间不足——清理磁盘后重试（「环境」段可看各盘剩余空间）"
+    if "大小校验失败" in text or "SHA256 校验失败" in text:
+        return "下载内容校验失败（半成品已删，不会污染续传）——直接重试；反复失败请换下载源"
+    if isinstance(exc, (TimeoutError, ConnectionError)) or "timed out" in lowered:
+        return "网络超时或连接被断——稍后重试，或在下载气泡里换个源"
+    if (
+        "urlopen error" in lowered
+        or "getaddrinfo" in lowered
+        or "name or service not known" in lowered
+    ):
+        return "网络不通/域名解析失败——检查网络或代理后重试，或换个源"
+    if "http error 4" in lowered:
+        return "源站说没有这个文件（404/403）——仓库可能已迁移，换个源或手动下载后导入"
+    if "http error 5" in lowered:
+        return "源站临时故障（5xx）——稍后重试，或换个源"
+    if "仓库文件清单为空" in text:
+        return "仓库清单为空——源站临时故障或仓库已迁移，换个源试试"
+    if "全部来源失败" in text:
+        return f"所有下载源都失败了——{text.removeprefix('全部来源失败：')}"
+    return f"{type(exc).__name__}: {text}"
+
+
+_SIZE_LABEL_RE = re.compile(r"([\d.]+)\s*(kb|mb|gb|tb)", re.I)
+
+
+def estimated_bytes(spec: ModelSpec) -> int | None:
+    """从 size_label（如 "~1.5GB"）解析标称体积；解析不出返回 None（未知不瞎猜）。"""
+    match = _SIZE_LABEL_RE.search(spec.size_label)
+    if match is None:
+        return None
+    units = {"kb": 1024, "mb": 1024**2, "gb": 1024**3, "tb": 1024**4}
+    return int(float(match.group(1)) * units[match.group(2).lower()])
+
+
+class _RateMeter:
+    """EMA 速率与剩余时间：有速度没 ETA 等于让用户干等（§4 进度三件套）。"""
+
+    def __init__(self, total: int) -> None:
+        self._total = total
+        self._last_t = time.monotonic()
+        self._last_bytes = 0
+        self._speed = 0.0
+
+    def update(self, done_bytes: int) -> tuple[float, float | None]:
+        now = time.monotonic()
+        elapsed = now - self._last_t
+        if elapsed >= 0.4:  # 采样要够一个时间窗，否则瞬时值抖得没法看
+            instant = (done_bytes - self._last_bytes) / elapsed
+            self._speed = instant if self._speed <= 0 else self._speed * 0.6 + instant * 0.4
+            self._last_t, self._last_bytes = now, done_bytes
+        remaining = max(self._total - done_bytes, 0)
+        return self._speed, (remaining / self._speed if self._speed > 0 else None)
+
+
+def _fmt_speed(bps: float) -> str:
+    if bps >= 1024 * 1024:
+        return f"{bps / 1024 / 1024:.1f}MB/s"
+    return f"{max(bps / 1024, 1):.0f}KB/s"
+
+
+def _fmt_eta(seconds: float) -> str:
+    total = int(round(seconds))
+    if total >= 3600:
+        return f"{total // 3600}小时{total % 3600 // 60:02d}分"
+    if total >= 60:
+        return f"{total // 60}分{total % 60:02d}秒"
+    return f"{total}秒"
 
 
 def _run_chain(
@@ -165,13 +261,21 @@ def _download_from(
     notifier.log("info", f"开始从 {kind} 下载 {spec.name}（{len(files)} 个文件）")
     total = sum(size for _rel, size, _sha in files)
     state = {"done": 0, "base": 0, "percent": -1}
+    meter = _RateMeter(total)
 
     def _report(position: int) -> None:
-        percent = (state["base"] + position) / total * 100 if total > 0 else 0
+        done_bytes = state["base"] + position
+        percent = done_bytes / total * 100 if total > 0 else 0
         whole = int(percent)
         if whole != state["percent"]:
             state["percent"] = whole
-            notifier.model_download(spec.model_id, min(percent, 99.0), status="downloading")
+            extra: dict[str, Any] = {"status": "downloading"}
+            speed, eta = meter.update(done_bytes)
+            if speed > 0:
+                extra["speed"] = _fmt_speed(speed)
+            if eta is not None:
+                extra["eta"] = _fmt_eta(eta)
+            notifier.model_download(spec.model_id, min(percent, 99.0), **extra)
 
     manifest: list[dict[str, Any]] = []
     for rel, size, sha256 in files:

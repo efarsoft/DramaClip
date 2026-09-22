@@ -131,6 +131,7 @@ def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     if source != "auto" and source not in dict(spec.sources()):
         raise RpcDomainError(_ERR_MODEL_STATE, f"{spec.name} 不支持来源 {source}")
     models_dir = context.data_dir / "models"
+    _assert_download_slot(context, spec, models_dir)
     has_existing = registry.find(spec, models_dir) is not None or any(
         record.get("model_id") == model_id for record in importer.records(models_dir)
     )
@@ -153,13 +154,24 @@ def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     cancel_event = threading.Event()
     context.cancel_events[job_id] = cancel_event
     done_event = threading.Event()
+    outcome = {"status": "done", "message": ""}
+
+    def _on_result(status: str, message: str) -> None:
+        outcome["status"], outcome["message"] = status, message
 
     def _watch() -> None:
         done_event.wait()
         job = context.job_store.get(job_id)
         if job is not None and job["status"] == STATUS_RUNNING:
-            context.job_store.mark_completed(job_id)
-            _auto_verify(context, models_dir, spec)
+            # 结局来自下载器的回报，不是「线程结束了」这个事件本身——
+            # 失败收成 completed 会让队列页对着一堆坏下载报「已完成」。
+            if outcome["status"] == "failed":
+                context.job_store.mark_failed(job_id, outcome["message"] or "下载失败")
+            elif outcome["status"] == "cancelled":
+                context.job_store.mark_cancelled(job_id)
+            else:
+                context.job_store.mark_completed(job_id)
+                _auto_verify(context, models_dir, spec)
         context.cancel_events.pop(job_id, None)
 
     downloader.download_in_background(
@@ -170,9 +182,43 @@ def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         done_event,
         endpoints=endpoints(context),
         source=source,
+        on_result=_on_result,
     )
     threading.Thread(target=_watch, daemon=True, name=f"dl-watch-{model_id}").start()
     return {"job_id": job_id}
+
+
+def _assert_download_slot(context: AppContext, spec: registry.ModelSpec, models_dir: Path) -> None:
+    """下载前置闸：串行队列（一次一件）+ 磁盘预算——都在起线程**之前**拦住。
+
+    并发闸：多件大模型同时下会互相抢带宽，ETA 全部失真，取消语义也纠缠；
+    默认串行，正在下载的那件在错误话术里点名。
+    磁盘预算：标称体积解析得出来才查（解析不出=未知，未知不瞎拦），
+    余量按 1.25 倍留——下载中途爆盘留下的是半成品和一条难懂的 OSError。
+    """
+    active = [
+        job
+        for job in context.job_store.list_recent(limit=50, active_only=True)
+        if job["type"] == "model_download"
+    ]
+    if active:
+        current = str(active[0].get("ref_id") or "")
+        raise RpcDomainError(
+            _ERR_MODEL_STATE,
+            f"已有下载任务进行中（{current}）——模型下载串行执行，请等它完成或先取消",
+        )
+    estimate = downloader.estimated_bytes(spec)
+    if estimate is None:
+        return
+    probe = models_dir if models_dir.is_dir() else context.data_dir
+    free = shutil.disk_usage(probe).free
+    if free < estimate * 1.25:
+        raise RpcDomainError(
+            _ERR_MODEL_STATE,
+            f"磁盘空间不足：{spec.name} 标称 {importer.human_bytes(estimate)}（含续传余量需 "
+            f"{importer.human_bytes(int(estimate * 1.25))}），当前盘仅剩 "
+            f"{importer.human_bytes(free)}——清理磁盘后再下",
+        )
 
 
 def _auto_verify(context: AppContext, models_dir: Path, spec: registry.ModelSpec) -> None:

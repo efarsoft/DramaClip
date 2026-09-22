@@ -70,7 +70,14 @@
     { "name": "log.append", "params": { "level": "info|warn|error", "message": "string", "job_id": "string?" } },
     {
       "name": "models.download_progress",
-      "params": { "model_id": "string", "percent": "number", "speed": "string?", "eta": "string?" }
+      "params": {
+        "model_id": "string",
+        "percent": "number",
+        "status": "downloading|done|failed",
+        "speed": "string?",
+        "eta": "string?",
+        "message": "string?（status=failed 时的分类原因，§10.5 现象+动作话术）"
+      }
     }
   ]
 }

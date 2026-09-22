@@ -205,3 +205,113 @@ def test_download_never_touches_the_network(
     assert call["source"] == "auto"
     assert isinstance(call["endpoints"], dict)
     assert str(tmp_path / "models") in str(call["models_dir"])
+
+
+# ---------------------------------------------------------------- P3：编排闸与结局收尾
+
+
+def test_second_download_is_rejected_while_one_is_active(
+    memory_db: sqlite3.Connection, tmp_path: Path, stub_download: _StubDownload
+) -> None:
+    """串行队列（默认 1）：多件大模型同时下会互相抢带宽，ETA 全部失真。"""
+    from dramaclip.transport.rpc import RpcDomainError
+
+    context = _context(memory_db, tmp_path)
+    _download(context, stub_download)
+
+    with pytest.raises(RpcDomainError, match="已有下载任务进行中"):
+        _download(context, stub_download, "faster-whisper-small")
+    assert len(stub_download.calls) == 1, "被闸住的那件不许起下载线程"
+
+
+def test_disk_budget_blocks_before_starting(
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    stub_download: _StubDownload,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """下载中途爆盘留下的是半成品和难懂的 OSError——预算在起线程之前拦。"""
+    from types import SimpleNamespace
+
+    from dramaclip.transport.rpc import RpcDomainError
+
+    context = _context(memory_db, tmp_path)
+    monkeypatch.setattr(
+        models_api.shutil,
+        "disk_usage",
+        lambda _path: SimpleNamespace(free=10 * 1024 * 1024, total=0, used=0),
+    )
+    with pytest.raises(RpcDomainError, match="磁盘空间不足"):
+        _download(context, stub_download)
+    assert stub_download.calls == []
+
+    # 余量充足：同一只替身正常放行（1.25 倍余量后仍够）
+    monkeypatch.setattr(
+        models_api.shutil,
+        "disk_usage",
+        lambda _path: SimpleNamespace(free=10 * 1024**3, total=0, used=0),
+    )
+    job_id = _download(context, stub_download)
+    assert context.job_store.get(job_id) is not None
+
+
+class _OutcomeDownload:
+    """下载替身：按给定结局回报 on_result 后立即置位 on_done。"""
+
+    def __init__(self, status: str, message: str) -> None:
+        self.status, self.message = status, message
+
+    def __call__(
+        self,
+        spec: object,
+        models_dir: Path,
+        notifier: Notifier,
+        cancel: threading.Event,
+        on_done: threading.Event,
+        **kwargs: object,
+    ) -> None:
+        on_result = kwargs.get("on_result")
+        assert callable(on_result), "api 必须挂 on_result，否则失败会被收成 completed"
+        on_result(self.status, self.message)
+        on_done.set()
+
+
+def _download_and_join(context: SimpleNamespace, model_id: str = _MODEL_ID) -> str:
+    before = {t.name for t in threading.enumerate()}
+    job_id = str(models_api.download(context, {"model_id": model_id})["job_id"])
+    for thread in threading.enumerate():
+        if thread.name not in before and thread.name.startswith("dl-watch-"):
+            thread.join(5.0)
+    return job_id
+
+
+def test_watchdog_marks_failed_with_classified_reason(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """失败必须收成 failed 并带上分类后的原因——队列页不许对坏下载报「已完成」。"""
+    reason = "网络超时或连接被断——稍后重试，或在下载气泡里换个源"
+    monkeypatch.setattr(downloader, "download_in_background", _OutcomeDownload("failed", reason))
+    context = _context(memory_db, tmp_path)
+
+    job_id = _download_and_join(context)
+
+    job = context.job_store.get(job_id)
+    assert job is not None
+    assert job["status"] == "failed"
+    assert job["error"] == reason
+    assert context.cancel_events == {}, "失败收尾也要回收取消事件"
+
+
+def test_watchdog_marks_cancelled(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        downloader, "download_in_background", _OutcomeDownload("cancelled", "已取消")
+    )
+    context = _context(memory_db, tmp_path)
+
+    job_id = _download_and_join(context)
+
+    job = context.job_store.get(job_id)
+    assert job is not None
+    assert job["status"] == "cancelled"

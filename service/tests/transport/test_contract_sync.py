@@ -74,6 +74,7 @@ def test_notifier_payloads_match_declared_notifications(repo_root: Path) -> None
     notifier.progress("job-1", 10.0, "跑起来了", detail={"step": 1})
     notifier.log("info", "第一段解说已配音", job_id="job-1")
     notifier.model_download("model-1", 42.0, speed="3MB/s", eta="00:10")
+    notifier.model_download("model-1", 0.0, status="failed", message="网络超时——稍后重试")
 
     assert {str(item["method"]) for item in sent} == set(declared), (
         "声明的通知与实际发出的不是一套"
