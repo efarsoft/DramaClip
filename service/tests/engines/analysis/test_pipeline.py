@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,33 @@ def test_analyze_episode_runs_full_chain(sample_video: Path, tmp_path: Path) -> 
     percents = [percent for percent, _ in reports]
     assert percents == sorted(percents), "进度应单调递增"
     assert percents[-1] == 1.0
+
+
+def test_source_signature_stable_and_sensitive(tmp_path: Path) -> None:
+    """签名纯函数：同输入同输出；size/mtime/path 任一变化必变；缺文件返回 None。"""
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"x" * 100)
+    os.utime(video, ns=(1_700_000_000_000_000_000, 1_700_000_000_000_000_000))
+    base = pipeline.source_signature(video)
+    assert base is not None
+    assert pipeline.source_signature(video) == base, "同输入必须同输出"
+
+    os.utime(video, ns=(1_700_000_001_000_000_000, 1_700_000_001_000_000_000))
+    assert pipeline.source_signature(video) != base, "mtime 变必须换签名"
+
+    video.write_bytes(b"x" * 101)
+    os.utime(video, ns=(1_700_000_000_000_000_000, 1_700_000_000_000_000_000))
+    assert pipeline.source_signature(video) != base, "size 变必须换签名（mtime 已复原）"
+
+    twin = tmp_path / "b.mp4"
+    twin.write_bytes(b"x" * 100)
+    os.utime(twin, ns=(1_700_000_000_000_000_000, 1_700_000_000_000_000_000))
+    assert pipeline.source_signature(twin) != base, "路径参与签名"
+
+    assert pipeline.source_signature(tmp_path / "missing.mp4") is None
+    assert pipeline.source_signature(video) != pipeline.source_signature(
+        video, ocr_channel=False
+    ), "OCR 通道可用性参与签名：降级产物在依赖就绪后强制重算"
 
 
 def test_extract_audio_wav_is_16k_mono(sample_video: Path, tmp_path: Path) -> None:

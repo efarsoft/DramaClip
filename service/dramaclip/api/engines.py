@@ -12,6 +12,7 @@ from typing import Any
 
 from dramaclip.api import engine_configs
 from dramaclip.api.context import AppContext
+from dramaclip.engines.tts import factory
 from dramaclip.infra.model_manager import downloader, registry
 from dramaclip.infra.model_manager import selftest as selftest_mod
 from dramaclip.infra.storage.repos import engine_configs as configs_repo
@@ -80,7 +81,33 @@ def _tts(context: AppContext, models_dir: Path, spec: registry.ModelSpec) -> dic
     voice = str(
         context.settings.get(f"tts.voice.{spec.engine}") or context.settings.get("tts.voice") or ""
     )
-    return selftest_mod.run_tts(models_dir, context.work_dir, spec, voice)
+    result = selftest_mod.run_tts(models_dir, context.work_dir, spec, voice)
+    # A3 能力声明并入自检结果（不新增 RPC：protocol 方法集合被契约用例钉死）。
+    # factory.capabilities 自己兜住探测异常，这里只需掩码 reason 里的敏感路径段。
+    caps = factory.capabilities(spec.engine, models_dir)
+    result["caps"] = _mask_paths(caps.to_dict(), models_dir, context)
+    return result
+
+
+def _mask_paths(caps: dict[str, Any], models_dir: Path, context: AppContext) -> dict[str, Any]:
+    """reason 是给人读的，但可能带出本机目录布局（models_dir/data_dir/用户主目录）：
+    自检结果会落账 models/selftest.json 并经 RPC 出到前端，路径段一律掩码。"""
+    reason = str(caps.get("reason") or "")
+    secrets = {
+        str(models_dir),
+        str(context.data_dir),
+        str(context.work_dir),
+        str(Path.home()),
+    }
+    for value in sorted(secrets, key=len, reverse=True):
+        if value and value in reason:
+            reason = reason.replace(value, "<本机路径>")
+    # Windows 路径两种斜杠都要掩（Path 的 str 是反斜杠，异常消息里可能是正斜杠）
+    for value in sorted({s.replace("\\", "/") for s in secrets}, key=len, reverse=True):
+        if value and value in reason:
+            reason = reason.replace(value, "<本机路径>")
+    caps["reason"] = reason
+    return caps
 
 
 def _cloud(context: AppContext, domain: str) -> dict[str, Any]:

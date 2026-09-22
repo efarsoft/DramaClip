@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
 import time
@@ -14,6 +15,7 @@ import pytest
 
 from dramaclip.api import analysis as analysis_api
 from dramaclip.api import project as project_api
+from dramaclip.engines.analysis import pipeline
 from dramaclip.engines.analysis.models import AsrSegment, AudioFeatures
 from dramaclip.infra import jobs
 from dramaclip.infra.storage.repos import analysis as analysis_repo
@@ -27,6 +29,7 @@ from tests.conftest import register_job_executor
 class FakeTranscriber:
     def __init__(self, delay_s: float = 0.0) -> None:
         self.delay_s = delay_s
+        self.calls = 0
 
     @property
     def name(self) -> str:
@@ -35,6 +38,7 @@ class FakeTranscriber:
     def transcribe(
         self, wav_path: Path, language: str = "zh", *, hotwords: str = ""
     ) -> list[AsrSegment]:
+        self.calls += 1
         if self.delay_s:
             time.sleep(self.delay_s)
         return [AsrSegment(start=0.2, end=1.0, text="测试台词")]
@@ -51,6 +55,7 @@ class Harness:
     ) -> None:
         self.sent: list[dict[str, Any]] = []
         self.executor = ThreadPoolExecutor(max_workers=2)
+        self.transcriber = transcriber
         register_job_executor(self.executor)
         self._futures: list[Any] = []
         # 捕获型 submit：future 完成即留存，wait_done 超时能拿到作业线程里被吞的异常
@@ -441,3 +446,146 @@ def test_results_sets_clipping_when_audio_features_clip(
     entry = payload["episodes"][0]
     assert entry["clipping"] is True
     assert entry["peak_dbfs"] == 0.0
+
+
+# ── B8：源签名失效判定（防「源换了还静默用旧 ASR」）───────────────────────────
+
+
+def _force_mtime(path: Path, seconds: int = 1_800_000_000) -> None:
+    os.utime(path, ns=(seconds * 10**9, seconds * 10**9))
+
+
+def _expected_signature(harness: Harness, source: Path) -> str | None:
+    return pipeline.source_signature(
+        source, ocr_channel=analysis_api._ocr_channel_available(harness.context)
+    )
+
+
+def test_changed_source_forces_reanalysis_of_done_episode(
+    harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    """done 集源被换（同路径不同 mtime/size）→ 强制重分析 + 新签名落库 + 留痕。"""
+    project_id = _make_project(harness, tmp_path, sample_video, copies=1)
+    first = harness.rpc("analysis.start", {"project_id": project_id})
+    assert harness.wait_done(str(first["job_id"]))["status"] == "completed"
+    episode = episodes_repo.list_by_project(memory_db, project_id)[0]
+    assert episode["status"] == "done"
+    source = Path(str(episode["source_path"]))
+    stored = episode["source_signature"]
+    assert stored == _expected_signature(harness, source), "分析成功后应落库源签名"
+    calls_before = harness.transcriber.calls
+
+    _force_mtime(source)  # 源被替换：同路径，mtime 变
+    second = harness.rpc("analysis.start", {"project_id": project_id})
+    assert harness.wait_done(str(second["job_id"]))["status"] == "completed"
+
+    refreshed = episodes_repo.list_by_project(memory_db, project_id)[0]
+    assert refreshed["status"] == "done"
+    assert harness.transcriber.calls > calls_before, "源变更后必须真实重转写，不得静默用旧结果"
+    assert refreshed["source_signature"] != stored
+    assert refreshed["source_signature"] == _expected_signature(harness, source), "新签名落库"
+    logs = [m["params"]["message"] for m in harness.sent if m["method"] == "log.append"]
+    assert any("源已变更" in message for message in logs), "源变更重分析必须留痕"
+
+
+def test_unchanged_source_keeps_done_episode_skipped(
+    harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    """源不变 → 签名一致 → done 集照旧跳过（现有行为不变）。"""
+    project_id = _make_project(harness, tmp_path, sample_video, copies=1)
+    first = harness.rpc("analysis.start", {"project_id": project_id})
+    harness.wait_done(str(first["job_id"]))
+    calls_before = harness.transcriber.calls
+
+    response = harness.router.dispatch(
+        RpcRequest(id=1, method="analysis.start", params={"project_id": project_id})
+    )
+    assert response.error is not None and response.error.code == -32202, "源不变的 done 集应被跳过"
+    response = harness.router.dispatch(
+        RpcRequest(id=1, method="analysis.prescreen", params={"project_id": project_id})
+    )
+    assert response.error is not None and response.error.code == -32202
+    assert harness.transcriber.calls == calls_before
+
+
+def test_null_signature_done_episode_is_reanalyzed(
+    harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    """旧库升级：done 集签名为 NULL → 首次判定视为需分析，重跑后签名补齐。"""
+    project_id = _make_project(harness, tmp_path, sample_video, copies=1)
+    first = harness.rpc("analysis.start", {"project_id": project_id})
+    harness.wait_done(str(first["job_id"]))
+    memory_db.execute("UPDATE episodes SET source_signature = NULL")
+    memory_db.commit()
+    calls_before = harness.transcriber.calls
+
+    second = harness.rpc("analysis.start", {"project_id": project_id})
+    assert harness.wait_done(str(second["job_id"]))["status"] == "completed"
+    assert harness.transcriber.calls > calls_before, "空签名（旧库首次）必须视为需分析"
+    episode = episodes_repo.list_by_project(memory_db, project_id)[0]
+    assert episode["status"] == "done"
+    assert episode["source_signature"] == _expected_signature(
+        harness, Path(str(episode["source_path"]))
+    )
+
+
+def test_ocr_capability_change_invalidates_done_episode(
+    harness: Harness,
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """降级路径：OCR 通道不可用 → 纯 ASR 产物打降级留痕；依赖就绪后签名失配强制重算。"""
+    monkeypatch.setattr(analysis_api, "_ocr_channel_available", lambda _context: False)
+    project_id = _make_project(harness, tmp_path, sample_video, copies=1)
+    first = harness.rpc("analysis.start", {"project_id": project_id})
+    assert harness.wait_done(str(first["job_id"]))["status"] == "completed"
+    episode = episodes_repo.list_by_project(memory_db, project_id)[0]
+    source = Path(str(episode["source_path"]))
+    assert episode["source_signature"] == pipeline.source_signature(source, ocr_channel=False)
+    logs = [m["params"]["message"] for m in harness.sent if m["method"] == "log.append"]
+    assert any("降级" in message for message in logs), "降级产物必须打标留痕"
+    calls_before = harness.transcriber.calls
+
+    monkeypatch.setattr(analysis_api, "_ocr_channel_available", lambda _context: True)
+    second = harness.rpc("analysis.start", {"project_id": project_id})
+    assert harness.wait_done(str(second["job_id"]))["status"] == "completed"
+    assert harness.transcriber.calls > calls_before, "OCR 就绪后纯 ASR 降级产物必须重算"
+    refreshed = episodes_repo.list_by_project(memory_db, project_id)[0]
+    assert refreshed["source_signature"] == pipeline.source_signature(source, ocr_channel=True)
+
+
+def test_prescreen_repcreens_done_episode_with_changed_source(
+    harness: Harness,
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """done 集源被换 → prescreen 也纳入重筛（预筛产物同样由源派生）。"""
+    project_id = _make_project(harness, tmp_path, sample_video, copies=1)
+    first = harness.rpc("analysis.start", {"project_id": project_id})
+    harness.wait_done(str(first["job_id"]))
+    episode = episodes_repo.list_by_project(memory_db, project_id)[0]
+    source = Path(str(episode["source_path"]))
+    _force_mtime(source)
+
+    def fake_prescreen(video_path: Path, wav_path: Path, *, threshold: float) -> dict[str, float]:
+        wav_path.parent.mkdir(parents=True, exist_ok=True)
+        wav_path.write_bytes(b"")
+        return {
+            "audio_peak_density": 1.0,
+            "scene_cut_density": 1.0,
+            "voice_activity_ratio": 1.0,
+            "motion_intensity": 1.0,
+            "prescreen_score": 90.0,
+            "recommended": 1.0,
+        }
+
+    monkeypatch.setattr(analysis_api.prescreen_engine, "prescreen_episode", fake_prescreen)
+    result = harness.rpc("analysis.prescreen", {"project_id": project_id})
+    assert harness.wait_done(str(result["job_id"]))["status"] == "completed"
+    refreshed = episodes_repo.list_by_project(memory_db, project_id)[0]
+    assert refreshed["status"] == "prescreened", "源变更的 done 集应被重新预筛"
+    assert refreshed["source_signature"] == _expected_signature(harness, source)

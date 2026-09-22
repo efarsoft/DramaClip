@@ -17,6 +17,7 @@ _COLUMNS = (
     "created_at",
     "name",
     "cover_path",
+    "source_signature",
 )
 
 
@@ -87,6 +88,15 @@ def set_status(conn: sqlite3.Connection, episode_id: str, status: str) -> None:
 
 def set_cover(conn: sqlite3.Connection, episode_id: str, cover_path: str) -> None:
     conn.execute("UPDATE episodes SET cover_path = ? WHERE id = ?", (cover_path, episode_id))
+    conn.commit()
+
+
+def set_source_signature(conn: sqlite3.Connection, episode_id: str, signature: str) -> None:
+    """记录「当前分析/预筛产物对应哪份源」（B8 失效判据）。逐集 WHERE id 写，
+    共享连接上与 set_status 同形，多集作业互不覆盖。"""
+    conn.execute(
+        "UPDATE episodes SET source_signature = ? WHERE id = ?", (signature, episode_id)
+    )
     conn.commit()
 
 

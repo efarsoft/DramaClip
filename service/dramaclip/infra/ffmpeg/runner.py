@@ -13,7 +13,14 @@ _STDERR_TAIL_LINES = 30
 
 
 class FfmpegError(RuntimeError):
-    """ffmpeg 非零退出/超时/取消。"""
+    """ffmpeg 非零退出/超时/取消。
+
+    ``kind``（A4-3 错误分类）：从 stderr 关键词粗分——
+    ``codec``（编码器不可用/参数不识别，换软编重跑有意义）、
+    ``io``（输入文件缺失/损坏，回退也没用）、
+    ``invalid``（参数非法，回退也没用）、``unknown``（分类不出，按可回退处理）。
+    供 encoder 段级回退决策用（tests/infra/ffmpeg/test_error_kind.py 钉住）。
+    """
 
     def __init__(
         self,
@@ -21,10 +28,32 @@ class FfmpegError(RuntimeError):
         *,
         returncode: int | None = None,
         cancelled: bool = False,
+        kind: str = "unknown",
     ) -> None:
         super().__init__(message)
         self.returncode = returncode
         self.cancelled = cancelled
+        self.kind = kind
+
+
+_KIND_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("codec", ("unknown encoder", "unrecognized option", "encoder not found")),
+    (
+        "io",
+        ("no such file", "invalid data found", "permission denied",
+         "does not contain any stream"),
+    ),
+    ("invalid", ("invalid argument", "invalid duration", "invalid timestamp")),
+)
+
+
+def _classify_error(stderr_text: str) -> str:
+    """stderr 关键词 → 错误分类（顺序敏感：codec 特征词比 invalid 更具体）。"""
+    lowered = stderr_text.lower()
+    for kind, keywords in _KIND_KEYWORDS:
+        if any(keyword in lowered for keyword in keywords):
+            return kind
+    return "unknown"
 
 
 @dataclass(frozen=True)
@@ -112,9 +141,11 @@ def run(
         if cancel is not None and cancel.is_set():
             raise FfmpegError("ffmpeg 已取消", returncode=returncode, cancelled=True)
         if returncode != 0:
+            stderr_tail = "".join(stderr_lines[-_STDERR_TAIL_LINES:])
             raise FfmpegError(
-                f"ffmpeg 退出码 {returncode}：{''.join(stderr_lines[-_STDERR_TAIL_LINES:])}",
+                f"ffmpeg 退出码 {returncode}：{stderr_tail}",
                 returncode=returncode,
+                kind=_classify_error(stderr_tail),
             )
         return FfmpegResult(
             returncode=returncode,

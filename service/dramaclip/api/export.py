@@ -584,10 +584,13 @@ def render_export(
         ass_path.write_text(build_ass(lines, preset), encoding="utf-8")
         return str(ass_path)
 
-    # 输出编码：auto=探测到 NVENC 可用即 GPU 编码（黑帧实编验证），失败/关闭回退 libx264
+    # 输出编码：auto=硬编探测（黑帧实编验证，NVENC/QSV/VT 按平台候选），失败/关闭回退 libx264
     codec_setting = str(context.settings.get("export.encoder", "auto") or "auto").lower()
     if codec_setting == "auto":
-        video_codec = "h264_nvenc" if encoder.nvenc_available() else "libx264"
+        # A4：auto 用硬编探测选中的编码器（NVENC/QSV/VideoToolbox 按平台候选序），
+        # 全不可用回 libx264。硬编某段真编失败时段级自动回退 libx264（encoder 内），
+        # 签名不齐的 concat 自动整体重编码——「导出到 90% 崩」由回退链兜住。
+        video_codec = encoder.pick_hw_encoder() or "libx264"
     else:
         video_codec = codec_setting
     encoder.export_plan(

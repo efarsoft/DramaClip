@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dramaclip.engines.tts.base import TtsEngine
+from dramaclip.engines.tts.base import EngineCaps, TtsEngine
 
 # 引擎 → 模型子目录（相对 models_dir）；None = 云端引擎，不需要本地模型。
 _MODEL_DIRS: dict[str, Path | None] = {
@@ -50,6 +50,19 @@ def create(engine: str, models_dir: Path | None = None) -> TtsEngine:
         return IndexTts2Engine(_local_dir(engine, models_dir))
     available = " / ".join(sorted(supported()))
     raise ValueError(f"未知 TTS 引擎: {engine}（可用: {available}）")
+
+
+def capabilities(engine: str, models_dir: Path | None = None) -> EngineCaps:
+    """探测单个引擎的能力声明：任何探测异常都收进 reason，绝不向外抛。
+
+    「单引擎探测炸了不许拖垮整体」——引擎卡列表逐个调这里，一个引擎缺依赖
+    或探测代码有 bug，其余引擎的卡照常亮。构造失败（缺 models_dir、未知引擎）
+    同样按不可用回答，因为那本来就是「这台机器上现在用不了」的一种。
+    """
+    try:
+        return create(engine, models_dir).capabilities()
+    except Exception as exc:  # noqa: BLE001 - 探测失败是一条诚实结果，不是异常
+        return EngineCaps(available=False, reason=f"能力探测失败：{type(exc).__name__}: {exc}")
 
 
 def _local_dir(engine: str, models_dir: Path | None) -> Path:

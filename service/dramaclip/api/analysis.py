@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import threading
 from pathlib import Path
@@ -78,6 +79,42 @@ def _active_ingest_job(context: AppContext, project_id: str) -> dict[str, Any] |
     return None
 
 
+# ── B8 源失效判据：签名 = md5(path|size|mtime_ns|ocr_channel)，见 pipeline.source_signature ──
+
+
+def _ocr_channel_available(context: AppContext) -> bool:
+    """OCR 字幕通道是否可用：设置开关开启 + rapidocr（ml extras）已安装。
+
+    可用性参与源签名：通道缺失时产物是纯 ASR 降级版，依赖装好后签名失配即强制重算，
+    降级结果不会在「条件已修复」后永久滞留。
+    """
+    if context.settings.get("analysis.ocr_enabled", "1") != "1":
+        return False
+    try:
+        importlib.import_module("rapidocr_onnxruntime")
+    except ImportError:
+        return False
+    return True
+
+
+def _current_signature(context: AppContext, episode: dict[str, Any]) -> str | None:
+    return pipeline.source_signature(
+        Path(str(episode["source_path"])),
+        ocr_channel=_ocr_channel_available(context),
+    )
+
+
+def _source_stale(context: AppContext, episode: dict[str, Any]) -> bool:
+    """库里签名 ≠ 当前源签名（含旧库 NULL 首次）→ 既有分析/预筛产物不可信，需重算。
+
+    源文件不可读时返回 False：缺文件的失败交给分析引擎自己报错留痕，不做签名失效。
+    """
+    current = _current_signature(context, episode)
+    if current is None:
+        return False
+    return episode.get("source_signature") != current
+
+
 def prescreen(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     """阶段一：批量轻量预筛（原案 3附），结果落 episode_prescreen 并推荐。"""
     project_id = str(params.get("project_id", ""))
@@ -87,6 +124,8 @@ def prescreen(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         episode
         for episode in episodes_repo.list_by_project(context.conn, project_id)
         if episode["status"] in ("pending", "prescreened")
+        # done 集源被换 → 预筛产物同样由源派生，纳入重筛（B8）
+        or (episode["status"] == "done" and _source_stale(context, episode))
     ]
     if not targets:
         raise RpcDomainError(_ERR_NO_EPISODES, "没有待预筛的集")
@@ -136,6 +175,15 @@ def _run_prescreen(
                 prescreen_score=result["prescreen_score"],
                 recommended=bool(result["recommended"]),
             )
+            if episode["status"] == "done":
+                context.notifier.log(
+                    "warn",
+                    f"第{episode['episode_number']}集 源已变更，重新预筛",
+                    job_id=job_id,
+                )
+            signature = _current_signature(context, episode)
+            if signature is not None:
+                episodes_repo.set_source_signature(context.conn, episode_id, signature)
             episodes_repo.set_status(context.conn, episode_id, "prescreened")
         context.job_store.set_progress(job_id, 100.0, "预筛完成")
         context.notifier.progress(job_id, 100.0, "预筛完成")
@@ -167,9 +215,11 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     episode_ids = params.get("episode_ids")
     if episode_ids is None:
         # analyzing 一并纳入：能开新任务即说明无并发分析，该状态必为崩溃/中断残留
+        # done 但源签名失配（B8）：源被换过，旧 ASR/场景结果不可信，强制重分析
         targets = [
             ep for ep in episodes_repo.list_by_project(context.conn, project_id)
             if ep["status"] in ("pending", "prescreened", "failed", "analyzing")
+            or (ep["status"] == "done" and _source_stale(context, ep))
         ]
     else:
         wanted = [str(item) for item in episode_ids]
@@ -415,6 +465,17 @@ def _run_job(
     total = len(targets)
     failures = 0
     language = runtime.language(context.settings)
+    if context.settings.get("analysis.ocr_enabled", "1") == "1" and not _ocr_channel_available(
+        context
+    ):
+        # 降级打标：OCR 通道缺失 → 本轮产物是纯 ASR 降级版（无硬字幕融合）。
+        # ocr_channel 参与源签名，装好 rapidocr 后签名失配自动强制重算。
+        context.notifier.log(
+            "warn",
+            "OCR 字幕通道不可用（rapidocr 未安装），分析产物为纯 ASR 降级版；"
+            "依赖就绪后相关集将自动重新分析",
+            job_id=job_id,
+        )
     try:
         bars_by_episode, hotwords = _mine_hotwords(context, targets, cancel_event)
         for index, episode in enumerate(targets):
@@ -460,6 +521,16 @@ def _analyze_one(
         context.job_store.set_progress(job_id, round(overall, 1), f"{label} {message}")
         context.notifier.progress(job_id, round(overall, 1), f"{label} {message}")
 
+    # 分析开始前取签名：产物对应的是这份源；分析中途源被换则存的是旧签名，
+    # 下轮判定必然失配重算——宁多算一轮，不把新签名盖在旧源产物上。
+    signature = _current_signature(context, episode)
+    if (
+        episode["status"] == "done"
+        and signature is not None
+        and episode.get("source_signature") != signature
+    ):
+        # B8 失效重算（源被换或旧库 NULL 签名）：留痕，防「源换了还静默用旧 ASR」
+        context.notifier.log("warn", f"{label} 源已变更，重新分析", job_id=job_id)
     episodes_repo.set_status(context.conn, episode_id, "analyzing")
     try:
         raw = pipeline.analyze_episode(
@@ -495,6 +566,8 @@ def _analyze_one(
             json.dumps([o.model_dump() for o in ocr_segments]) if ocr_segments else None
         ),
     )
+    if signature is not None:
+        episodes_repo.set_source_signature(context.conn, episode_id, signature)
     episodes_repo.set_status(context.conn, episode_id, "done")
     return True
 

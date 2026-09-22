@@ -3,8 +3,12 @@
 
 from __future__ import annotations
 
+import contextlib
+import json
+import logging
 import random
 import subprocess  # noqa: S404 - 参数为受控列表
+import sys
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -18,8 +22,11 @@ from dramaclip.engines.exporter.face_crop import face_x_ratio
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle import caption_font
 from dramaclip.infra import config
+from dramaclip.infra.ffmpeg import probe as ffprobe_mod
 from dramaclip.infra.ffmpeg import runner
-from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
+from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg, resolve_ffprobe
+
+_LOGGER = logging.getLogger(__name__)
 
 # 画幅数值不在这里定义（docs/04 §5.2）：源是 infra.config，settings 默认值读的是同一个常量。
 _DEFAULT_OUT_SIZE = (config.EXPORT_WIDTH, config.EXPORT_HEIGHT)
@@ -335,12 +342,10 @@ def cut_segment_args(
             "-map",
             "0:a:0?",
         ]
-    nvenc = video_codec == "h264_nvenc"
     args += [
         "-c:v",
         video_codec,
-        *(["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", "22"] if nvenc
-          else ["-preset", "veryfast", "-crf", "20"]),
+        *_video_codec_params(video_codec),
         "-c:a",
         "aac",
         "-b:a",
@@ -380,30 +385,98 @@ def _escape_filter_path(path: str) -> str:
     return normalized.replace(":", r"\\:").replace("'", r"\'")
 
 
-_NVENC_LOCK = threading.Lock()
-_NVENC_CACHE: bool | None = None
+# ---- A4-1 硬编探测：平台候选序 + 同形状质量参数真试编 + 会话级缓存 ----
+
+# 硬编候选序按平台：Windows/Linux 先 NVENC 后 QSV（Intel 核显），macOS 只有
+# VideoToolbox。编码器「列表里有」≠「真编能过」（驱动残缺/GPU 会话数满），所以每个
+# 候选都要做 0.1s 黑帧**真试编**——且必须带与正式合成**同形状**的质量参数
+# （`_video_codec_params`），只 `-f null` 探不出「参数不识别」这类实编挂。
+_HW_CANDIDATES_BY_PLATFORM: dict[str, tuple[str, ...]] = {
+    "win32": ("h264_nvenc", "h264_qsv"),
+    "darwin": ("h264_videotoolbox",),
+}
+_HW_CANDIDATES_LINUX: tuple[str, ...] = ("h264_nvenc", "h264_qsv")
+
+# 驱动挂起兜底：探测真编不许拖住导出超过 15s（正式段编码仍走 _run_cut 默认 600s）。
+_HW_PROBE_TIMEOUT_S = 15.0
+
+
+def _hw_candidates(platform: str | None = None) -> list[str]:
+    """当前平台的硬编候选序（win32/darwin 显式表，其余平台按 linux 序）。"""
+    key = sys.platform if platform is None else platform
+    if key in _HW_CANDIDATES_BY_PLATFORM:
+        return list(_HW_CANDIDATES_BY_PLATFORM[key])
+    return list(_HW_CANDIDATES_LINUX)
+
+
+def _video_codec_params(video_codec: str) -> list[str]:
+    """各编码器的质量参数——正式合成与探测真试编读**同一处**构造（不许各写一份）。"""
+    if video_codec == "h264_nvenc":
+        return ["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", "22"]
+    if video_codec == "h264_qsv":
+        # QSV 用全局质量（ICQ）对齐 NVENC 的 VBR+CQ 语义；preset 名与 x264 系不同。
+        return ["-preset", "medium", "-global_quality", "22"]
+    if video_codec == "h264_videotoolbox":
+        return ["-q:v", "55"]
+    return ["-preset", "veryfast", "-crf", "20"]
+
+
+def _hw_probe_args(video_codec: str) -> list[str]:
+    """0.1s 黑帧真试编命令：与正式段编码同形状的质量参数，输出到 null。"""
+    return [
+        "-f", "lavfi", "-i", "color=black:s=256x256:d=0.1",
+        "-c:v", video_codec, *_video_codec_params(video_codec),
+        "-f", "null", "-",
+    ]
+
+
+_HW_LOCK = threading.Lock()
+# 缓存「选中的编码器名」（None=全失败也缓存）：会话级结果，防换卡/驱动更新后陈旧
+# 的代价由进程生命周期界定；旧 _NVENC_CACHE(bool) 形状被 pick_hw_encoder 取代。
+_HW_ENCODER_CACHE: str | None = None
+
+
+def pick_hw_encoder() -> str | None:
+    """返回第一个真试编通过的硬编编码器名；全失败/探测自身异常返回 None。
+
+    探测自身的任何异常（驱动崩溃、OSError）都吞掉按不可用处理——best-effort 增强
+    绝不反过来把本来能软编成功的导出挡死。
+    """
+    global _HW_ENCODER_CACHE  # noqa: PLW0603
+    with _HW_LOCK:
+        if _HW_ENCODER_CACHE is None:
+            chosen: str | None = None
+            for candidate in _hw_candidates():
+                try:
+                    _run_cut(_hw_probe_args(candidate), timeout_s=_HW_PROBE_TIMEOUT_S)
+                except Exception:  # noqa: BLE001 - 驱动/会话异常一律按该候选不可用
+                    continue
+                chosen = candidate
+                break
+            # 用哨兵区分「还没探过」与「探过、全失败」：全失败缓存为 ""，
+            # 避免每次导出都重试真编（黑帧 0.1s×候选数，机器慢时是秒级）。
+            _HW_ENCODER_CACHE = chosen if chosen is not None else ""
+            if chosen is None:
+                _LOGGER.info("硬编探测：所有候选不可用，回退 libx264")
+            else:
+                _LOGGER.info("硬编探测：选用 %s", chosen)
+        return _HW_ENCODER_CACHE or None
 
 
 def nvenc_available() -> bool:
-    """NVENC 可用性真编码探针：编码器存在≠可用，黑帧实编一次验证；进程内缓存。"""
-    global _NVENC_CACHE
-    with _NVENC_LOCK:
-        if _NVENC_CACHE is None:
-            try:
-                _run_cut([
-                    "-f", "lavfi", "-i", "color=black:s=256x256:d=0.1",
-                    "-c:v", "h264_nvenc", "-f", "null", "-",
-                ])
-                _NVENC_CACHE = True
-            except Exception:  # noqa: BLE001 - 驱动/会话异常一律按不可用
-                _NVENC_CACHE = False
-        return _NVENC_CACHE
+    """旧签名兼容（api/export.py 无参调用）：严格语义 = pick_hw_encoder() 选中 NVENC。
+
+    不放宽成「任何硬编可用」：调用方拿到 True 后写死 h264_nvenc，若这里在 mac 上因
+    videotoolbox 返回 True 就会用 NVENC 真编挂掉。新调用方直接用 pick_hw_encoder()。
+    """
+    return pick_hw_encoder() == "h264_nvenc"
 
 
 def _run_cut(
     args: list[str],
     cancel: threading.Event | None = None,
     *,
+    timeout_s: float = 600,
     total_duration_s: float | None = None,
     on_progress: runner.ProgressCallback | None = None,
 ) -> None:
@@ -411,11 +484,35 @@ def _run_cut(
     # 默认 None 时与旧行为逐字节一致。测试桩是 lambda *_a, **_k 形状，吸收新 kwargs。
     runner.run(
         args,
-        timeout_s=600,
+        timeout_s=timeout_s,
         cancel=cancel,
         total_duration_s=total_duration_s,
         on_progress=on_progress,
     )
+
+
+# ---- A4-2 段级运行时回退：硬编某段失败→清半成品→libx264 重跑一次 ----
+
+_HW_ENCODERS = frozenset({"h264_nvenc", "h264_qsv", "h264_videotoolbox"})
+_FALLBACK_CODEC = "libx264"
+# 输入侧错误（文件缺失/损坏、参数非法）换编码器重跑也没用，直接抛；
+# cancelled 不是编码失败；其余（含分类不出的 unknown，如超时被杀 stderr 空）按可回退。
+_NO_FALLBACK_KINDS = frozenset({"io", "invalid"})
+
+
+def _args_with_codec(args: list[str], video_codec: str) -> list[str]:
+    """把已构建段命令的 `-c:v <codec> <质量参数>` 区间整体换成目标编码器的，其余不动。"""
+    start = args.index("-c:v")
+    end = args.index("-c:a")
+    return [*args[: start + 1], video_codec, *_video_codec_params(video_codec), *args[end:]]
+
+
+def _fallback_eligible(exc: runner.FfmpegError, args: list[str]) -> bool:
+    if exc.cancelled or exc.kind in _NO_FALLBACK_KINDS:
+        return False
+    if "-c:v" not in args:
+        return False
+    return args[args.index("-c:v") + 1] in _HW_ENCODERS
 
 
 def export_plan(
@@ -545,7 +642,12 @@ def export_plan(
 
     def _cut_one(index: int, args: list[str]) -> None:
         if on_progress is None:
-            _run_cut(args, cancel)  # 旧路径逐字节不变（不追加 -progress）
+            try:
+                _run_cut(args, cancel)  # 旧路径逐字节不变（不追加 -progress）
+            except runner.FfmpegError as exc:
+                if not _fallback_eligible(exc, args):
+                    raise
+                _retry_with_libx264(index, args, exc, cancel)
             return
 
         def _intra(fraction: float) -> None:
@@ -553,11 +655,46 @@ def export_plan(
                 done = progress_state["done"]
             _emit((done + min(fraction, 1.0)) / total * 90, f"切割第 {index + 1} 段")
 
+        try:
+            _run_cut(
+                args,
+                cancel,
+                total_duration_s=segment_durations[index],
+                on_progress=_intra,
+            )
+        except runner.FfmpegError as exc:
+            if not _fallback_eligible(exc, args):
+                raise
+            _retry_with_libx264(
+                index, args, exc, cancel,
+                total_duration_s=segment_durations[index],
+                on_progress=_intra,
+            )
+
+    def _retry_with_libx264(
+        index: int,
+        args: list[str],
+        exc: runner.FfmpegError,
+        cancel: threading.Event | None,
+        *,
+        total_duration_s: float | None = None,
+        on_progress: runner.ProgressCallback | None = None,
+    ) -> None:
+        """A4-2 段级回退：清半成品 → libx264 重跑一次；重跑仍失败才抛。"""
+        seg_path = Path(args[-1])
+        with contextlib.suppress(OSError):
+            seg_path.unlink(missing_ok=True)  # 半成品不删会被 Phase B concat 拼进去
+        fallback_args = _args_with_codec(args, _FALLBACK_CODEC)
+        hw_codec = args[args.index("-c:v") + 1]
+        _LOGGER.warning(
+            "第 %d 段硬编 %s 失败（kind=%s）：已清半成品，回退 %s 重跑：%s",
+            index + 1, hw_codec, exc.kind, _FALLBACK_CODEC, str(exc)[:200],
+        )
         _run_cut(
-            args,
+            fallback_args,
             cancel,
-            total_duration_s=segment_durations[index],
-            on_progress=_intra,
+            total_duration_s=total_duration_s,
+            on_progress=on_progress,
         )
 
     # Phase A 并行执行（ffmpeg 自身多线程，2 并发已接近 IO/CPU 饱和）
@@ -583,13 +720,35 @@ def export_plan(
 
 
 def _concat(segment_files: list[Path], out_path: Path) -> None:
-    """Phase B：concat demuxer 拼接（流复制）+ 元数据擦除。"""
+    """Phase B：concat demuxer 拼接 + 元数据擦除。
+
+    A4-2 签名守卫：各段视频流签名（codec_name/profile/level/pix_fmt/宽高）一致才走
+    `-c copy` 流复制；不齐（典型：某段硬编失败回退了 libx264）或签名探测自身失败时
+    保守整体重编码 concat——流复制混拼不一致的流是「导出到 90% 崩」的一条路。
+    拼完做时长审计（实测 vs 各段声明和，超阈值只 warn 不失败；审计自身异常静默）。
+    """
     if len(segment_files) == 1:
         out_path.write_bytes(segment_files[0].read_bytes())
+        _audit_film_duration(out_path, segment_files)
         return
+    signatures = [_video_signature(segment) for segment in segment_files]
+    uniform = signatures[0] is not None and all(sig == signatures[0] for sig in signatures)
+    if not uniform:
+        _LOGGER.warning(
+            "段视频流签名不齐或不可测（%s）：concat 整体重编码而非流复制",
+            signatures,
+        )
     list_file = out_path.parent / "concat.txt"
     lines = "".join(f"file '{segment.resolve().as_posix()}'\n" for segment in segment_files)
     list_file.write_text(lines, encoding="utf-8")
+    codec_args = (
+        ["-c", "copy"]
+        if uniform
+        else [
+            "-c:v", _FALLBACK_CODEC, "-preset", "veryfast", "-crf", "20",
+            "-c:a", "aac", "-b:a", "128k", "-ar", str(_SEGMENT_SAMPLE_RATE),
+        ]
+    )
     subprocess.run(  # noqa: S603
         [
             resolve_ffmpeg(),
@@ -603,14 +762,74 @@ def _concat(segment_files: list[Path], out_path: Path) -> None:
             "0",
             "-i",
             str(list_file),
-            "-c",
-            "copy",
+            *codec_args,
             "-map_metadata",
             "-1",
             str(out_path),
         ],
         check=True,
         capture_output=True,
-        timeout=300,
+        # 重编码 concat 是整片再编一遍，预算要比流复制宽（300s 对长片不够）
+        timeout=300 if uniform else 3600,
     )
     list_file.unlink(missing_ok=True)
+    _audit_film_duration(out_path, segment_files)
+
+
+def _video_signature(path: Path) -> tuple[str, str, int, str, int, int] | None:
+    """段的视频流签名（concat 流复制的一致性前提）；测不出返回 None（→保守重编码）。"""
+    try:
+        result = subprocess.run(  # noqa: S603
+            [
+                resolve_ffprobe(),
+                "-v", "error",
+                "-print_format", "json",
+                "-select_streams", "v:0",
+                "-show_streams",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        streams = json.loads(result.stdout).get("streams") or []
+        if not streams:
+            return None
+        stream = streams[0]
+        return (
+            str(stream.get("codec_name") or ""),
+            str(stream.get("profile") or ""),
+            int(stream.get("level") or 0),
+            str(stream.get("pix_fmt") or ""),
+            int(stream.get("width") or 0),
+            int(stream.get("height") or 0),
+        )
+    except Exception:  # noqa: BLE001 - 签名探测失败按不齐处理，绝不挡已成功的段编码
+        return None
+
+
+# 时长审计阈值与 api 层 _audit_duration 同思路（encoder 层不依赖 api，独立定义）：
+# 容得下 dedup 微变速（±0.4%）与 AAC/concat 的毫秒级出入，只抓缺段/重复级真偏差。
+_AUDIT_REL_TOLERANCE = 0.08
+_AUDIT_ABS_TOLERANCE_S = 3.0
+
+
+def _audit_film_duration(out_path: Path, segment_files: list[Path]) -> None:
+    """成片实测时长 vs 各段声明和：超阈值 warn 明账；审计自身任何异常静默吞掉。"""
+    with contextlib.suppress(Exception):
+        declared = sum(ffprobe_mod.probe(segment).duration_s for segment in segment_files)
+        if declared <= 0:
+            return
+        actual = ffprobe_mod.probe(out_path).duration_s
+        diff = actual - declared
+        tolerance = max(declared * _AUDIT_REL_TOLERANCE, _AUDIT_ABS_TOLERANCE_S)
+        if abs(diff) > tolerance:
+            _LOGGER.warning(
+                "成片时长审计：实测 %.1fs vs 段声明和 %.1fs（差 %+.1fs，超阈值 ±%.1fs）",
+                actual, declared, diff, tolerance,
+            )
