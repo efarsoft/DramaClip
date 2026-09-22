@@ -138,7 +138,7 @@ function PosterMedia({ work }: { work: WorkItem }): React.ReactElement {
       <span
         style={{
           position: 'absolute', inset: 0,
-          background: 'linear-gradient(180deg, rgba(0,0,0,0) 50%, rgba(0,0,0,0.68) 100%)',
+          background: tokens.posterScrim,
         }}
       />
       <PosterBadges work={work} />
@@ -152,7 +152,7 @@ function PosterBadges({ work }: { work: WorkItem }): React.ReactElement {
       <span
         style={{
           position: 'absolute', right: 6, bottom: 6,
-          background: 'rgba(0,0,0,0.72)', color: tokens.colorWhite,
+          background: tokens.posterCaption, color: tokens.colorWhite,
           fontSize: tokens.text.badge.size,
           lineHeight: tokens.text.badge.leading, padding: '1px 6px',
           borderRadius: tokens.radiusChip, fontFamily: tokens.fontFamilyMono,
@@ -163,7 +163,7 @@ function PosterBadges({ work }: { work: WorkItem }): React.ReactElement {
       <span
         style={{
           position: 'absolute', left: 6, top: 6,
-          background: 'rgba(0,0,0,0.72)', color: tokens.colorWhite,
+          background: tokens.posterCaption, color: tokens.colorWhite,
           fontSize: tokens.text.badge.size,
           lineHeight: tokens.text.badge.leading, padding: '1px 6px', borderRadius: tokens.radiusChip,
         }}

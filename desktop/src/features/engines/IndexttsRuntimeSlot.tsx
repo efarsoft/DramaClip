@@ -17,8 +17,8 @@ const SLOT_BOX = {
   gap: tokens.spaceMd,
   padding: `${tokens.spaceSm} ${tokens.spaceMd}`,
   borderRadius: tokens.radiusControl,
-  border: `1px solid ${tokens.colorWarning}44`,
-  background: `${tokens.colorWarning}0d`,
+  border: `1px solid ${tokens.border}`,
+  background: tokens.warningSoft,
   fontSize: tokens.text.meta.size,
   lineHeight: tokens.text.meta.leading,
 } as const;

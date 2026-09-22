@@ -26,7 +26,7 @@ export function PlayerCard({
         ref={videoRef}
         src={mediaUrl(videoPath)}
         controls
-        style={{ width: '100%', maxHeight: 380, borderRadius: tokens.radiusControl, background: '#000' }}
+        style={{ width: '100%', maxHeight: 380, borderRadius: tokens.radiusControl, background: tokens.posterBase }}
       />
       <div
         style={{

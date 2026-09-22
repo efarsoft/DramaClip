@@ -29,7 +29,8 @@ export const tokens = {
   accentSoft: 'rgba(124,156,255,0.12)',
   /** 已勾选行底（§3.2 唯一铺底语义）：比 accentSoft 更浅一档，不与悬停、当前查看抢通道。 */
   checkedSoft: 'rgba(124,156,255,0.07)',
-  /** 状态色软底（§3.4）：原先 1A/44/0d/55/12 五种模板拼色表达的是同一件语义。 */
+  /** 状态色软底（§3.4）：原先 1A/44/0d/55/12 五种模板拼色表达的是同一件语义。
+   * 半透明档只管铺色；框线一律读 border——用同档 Soft 描边等于描了条看不见的边。 */
   successSoft: 'rgba(52,211,153,0.12)',
   warningSoft: 'rgba(251,191,36,0.12)',
   errorSoft: 'rgba(248,113,113,0.12)',
@@ -39,6 +40,8 @@ export const tokens = {
   posterBase: '#000000',
   posterScrim: 'linear-gradient(180deg, rgba(0,0,0,0) 50%, rgba(0,0,0,0.68) 100%)',
   posterCaption: 'rgba(0,0,0,0.72)',
+  /** 压在海报上的浮板（集数芯片、更多按钮）：原先 0.55 / 0.45 两档表达同一件语义。 */
+  posterPlate: 'rgba(0,0,0,0.55)',
   gradientAccent: 'linear-gradient(135deg, #6D9BFF 0%, #9B7BFF 100%)',
   textPrimary: '#F0F4FF',
   textSecondary: '#A8B4CE',
@@ -95,6 +98,8 @@ export const tokens = {
   radiusDot: 3,         // 圆点/竖条装饰
   shadowPop: '0 12px 32px rgba(0,0,0,0.45)',
   shadowCard: '0 6px 20px rgba(4,8,20,0.35)',
+  /** 吸底操作栏：与 shadowCard 同色同一档，只是投影朝上（组件里不得再手写这串）。 */
+  shadowSticky: '0 -6px 18px rgba(4,8,20,0.35)',
 } as const;
 
 /**

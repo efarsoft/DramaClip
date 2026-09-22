@@ -107,7 +107,7 @@ function SettingsView(props: {
             gap: tokens.spaceMd,
             background: tokens.bgElevated,
             borderTop: `1px solid ${tokens.border}`,
-            boxShadow: '0 -6px 18px rgba(4,8,20,0.35)',
+            boxShadow: tokens.shadowSticky,
           }}
         >
           <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textSecondary }}>

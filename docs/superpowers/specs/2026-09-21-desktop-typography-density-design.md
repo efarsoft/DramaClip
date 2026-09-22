@@ -164,6 +164,15 @@
 - **红色 `#FF4D4F` 只给钩子语义**（既有定案，不因本批改动）。角度名沿用 warning 金 `#FBBF24`，不得占用钩子红。
   **本批不为钩子红新增 token**：实测桌面渲染层今天**没有任何钩子色位点**——`#FF4D4F` 在 `desktop/` 只出现在 3 处注释与测试里（`EpisodeListRow:233`、`TodoList:7`、`TodoList.test:83`），全作为"**不得**使用"的引用。为一个不存在的用法造 token 是投机；等钩子视觉真进界面（封面 / 字幕侧）时再进 `theme.ts`。
 
+**施工回写（§3.4 落地时对本节三处口径的偏离，全部记账）**：
+1. **"七个位点全部改读 `…Soft`" 字面执行会得到一条看不见的边**。`LlmTab`、`IndexttsRuntimeSlot`、`ModePicker` 三处是 *边框 + 铺底* 成对写同一状态色（`55/44` 在边框、`12/0d` 在铺底），本来的两种 alpha 分别承担两种角色。若边框也读 0.12 的 `…Soft`，等于描一条与填充同色的边——即不描。落地口径收窄为：**`…Soft` 只管铺底，框线一律读 `tokens.border`**（与全站盒子的中性描边一致，`EpisodeListRow:201` 等已是此形）。状态色相仍由填充 + 有色文本承载，语义不丢。
+2. **两处"同一语义两档值"按较深一档合并，改了观感**（§2 的"读现值、不改"只约束登记进 `layout` 的度量，此处是 §3.4 的合并裁决）：`ProjectCard` 浮板 `0.45 / 0.55` → 单枚 `posterPlate: rgba(0,0,0,0.55)`（更多按钮略深）；`OverviewTab` 域卡状态点 `8px + radiusThumb` → 改调 `mixins.statusDot`（6px + `radiusDot`），消灭第三份手抄光晕。
+3. **新增两枚 token 而非复用**：`shadowSticky: 0 -6px 18px rgba(4,8,20,0.35)`（吸底栏向上投影，与 `shadowCard` 同色同档、方向相反，故不复用）与上述 `posterPlate`。`TitleBar:170` 的裸 `boxShadow` 在 `bf5144d` 前已改读 `shadowPop`，本节所列位点据此少一处。
+
+复核命令（三条都应零命中；仅两行注释里的 `#FF4D4F`/`#F87171` 禁令不计位点，与 §3.4 原文一致）：
+`cd desktop && grep -rnE "rgba?\(" src --include=*.ts --include=*.tsx | grep -v "src/styles/theme.ts" | grep -vE "__tests__|\.test\."`；
+把 `rgba?\(` 换成 `#[0-9A-Fa-f]{6}\b|#[0-9A-Fa-f]{3}\b` 与 `\$\{tokens\.[A-Za-z]+\}[0-9A-Fa-f]{2}` 各跑一次。机检版在 `src/__tests__/styleContract.test.ts`（四条禁令含 `boxShadow` 字面量，`'none'` 重置豁免）。
+
 ---
 
 ## 4. 长作业进度契约（P5 / C 外框）

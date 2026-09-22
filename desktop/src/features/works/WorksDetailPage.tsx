@@ -85,7 +85,7 @@ function PreviewColumn({ job }: { job: ExportJob }): ReactElement {
         <video
           src={mediaUrl(job.output_path ?? '')}
           controls
-          style={{ width: '100%', aspectRatio: '9 / 16', objectFit: 'contain', background: '#000', display: 'block' }}
+          style={{ width: '100%', aspectRatio: '9 / 16', objectFit: 'contain', background: tokens.posterBase, display: 'block' }}
         />
       </PageSection>
       <PageSection title="文件">

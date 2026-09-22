@@ -97,7 +97,7 @@ function CoverArea({
           lineHeight: tokens.text.badge.leading,
           padding: '2px 8px',
           borderRadius: tokens.radiusChip,
-          background: 'rgba(0,0,0,0.55)',
+          background: tokens.posterPlate,
           color: tokens.colorWhite,
         }}
       >
@@ -112,7 +112,7 @@ function MoreButton(props: React.ComponentProps<typeof Button>): ReactElement {
     <Button
       type="text"
       size="small"
-      style={{ background: 'rgba(0,0,0,0.45)', color: tokens.colorWhite }}
+      style={{ background: tokens.posterPlate, color: tokens.colorWhite }}
       {...props}
     >
       ⋯

@@ -29,7 +29,7 @@ function StepDot({ index }: { index: number }): React.ReactElement {
         lineHeight: tokens.text.badge.leading,
         marginRight: 7,
         background: index === 0 ? tokens.colorPrimary : tokens.bgElevated,
-        color: index === 0 ? '#FFFFFF' : tokens.textTertiary,
+        color: index === 0 ? tokens.colorWhite : tokens.textTertiary,
       }}
     >
       {String(index + 1)}

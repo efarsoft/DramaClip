@@ -10,7 +10,15 @@ import { tokens } from '../../styles/theme';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import { MODE_INFO, modeLabel } from '../../components/modeMeta';
 
-const MODE_COLORS = ['#7C9CFF', '#9B7BFF', '#34D399', '#FBBF24', '#F87171', '#60A5FA'];
+/** 模式色板（§3.4）：六枚全部从 tokens 派生，九种模式按序循环取用——色值只在 theme.ts 有一份。 */
+const MODE_COLORS = [
+  tokens.colorPrimary,
+  tokens.colorAccent,
+  tokens.colorSuccess,
+  tokens.colorWarning,
+  tokens.colorError,
+  tokens.colorInfo,
+] as const;
 
 function modeColor(mode: string | undefined): string {
   if (mode === undefined) return tokens.textTertiary;
@@ -223,7 +231,7 @@ function WorkPoster({
       <span
         style={{
           position: 'absolute', inset: 0,
-          background: 'linear-gradient(180deg, rgba(0,0,0,0) 50%, rgba(0,0,0,0.68) 100%)',
+          background: tokens.posterScrim,
         }}
       />
       <PosterBadges work={work} />
@@ -240,7 +248,7 @@ function PosterBadges({ work }: { work: WorkItem }): React.ReactElement {
       <span
         style={{
           position: 'absolute', left: 6, top: 6,
-          background: 'rgba(0,0,0,0.72)', color: tokens.colorWhite,
+          background: tokens.posterCaption, color: tokens.colorWhite,
           fontSize: tokens.text.badge.size,
           lineHeight: tokens.text.badge.leading, padding: '1px 6px', borderRadius: tokens.radiusChip,
         }}
@@ -250,7 +258,7 @@ function PosterBadges({ work }: { work: WorkItem }): React.ReactElement {
       <span
         style={{
           position: 'absolute', right: 6, bottom: 6,
-          background: 'rgba(0,0,0,0.72)', color: tokens.colorWhite,
+          background: tokens.posterCaption, color: tokens.colorWhite,
           fontSize: tokens.text.badge.size,
           lineHeight: tokens.text.badge.leading, padding: '1px 6px', borderRadius: tokens.radiusChip,
           fontFamily: tokens.fontFamilyMono,

@@ -10,6 +10,7 @@ import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
+import { mixins } from '../../styles/mixins';
 import type { SettingsMap } from './EnginesPage';
 import { type DomainStats, type EngineTab, type Reports, assetSummary, domainStats, formatBytes } from './assetState';
 import type { ReadinessStep } from './workReadiness';
@@ -89,17 +90,7 @@ function DomainCard({
         <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs, minWidth: 0, flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
             <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, fontWeight: 600, color: tokens.textPrimary }}>{name}</span>
-            <span
-              style={{
-                marginLeft: 'auto',
-                width: 8,
-                height: 8,
-                borderRadius: tokens.radiusThumb,
-                background: tint,
-                boxShadow: `0 0 6px ${tint}`,
-                flexShrink: 0,
-              }}
-            />
+            <span style={{ ...mixins.statusDot(tint), marginLeft: 'auto' }} />
           </div>
           <div style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tint }}>{step?.detail ?? '—'}</div>
           <div

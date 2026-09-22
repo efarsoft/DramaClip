@@ -163,8 +163,8 @@ function NeedBadge({ text, muted = false }: { text: string; muted?: boolean }): 
         padding: `${String(layout.chip.paddingBlock)}px ${layout.chip.paddingInline}`,
         borderRadius: tokens.radiusChip,
         color: muted ? tokens.textTertiary : tokens.colorSuccess,
-        border: `1px solid ${muted ? tokens.border : `${tokens.colorSuccess}55`}`,
-        background: muted ? 'transparent' : `${tokens.colorSuccess}12`,
+        border: `1px solid ${tokens.border}`,
+        background: muted ? 'transparent' : tokens.successSoft,
       }}
     >
       {text}

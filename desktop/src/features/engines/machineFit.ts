@@ -4,6 +4,7 @@
  * GPU 只影响加速不影响可行性——本地图全部设计为 CPU 可跑。
  */
 import type { HealthResult } from '@dramaclip/protocol';
+import { tokens } from '../../styles/theme';
 
 export interface MachineSpecs {
   readonly ramTotalGb?: number;
@@ -81,10 +82,10 @@ export const FIT_VERDICT_LABEL: Record<FitVerdict, string> = {
 
 export const FIT_VERDICT_COLOR: Record<FitVerdict, string> = {
   unknown: 'transparent',
-  ok: '#34D399',
-  tight: '#FBBF24',
-  disk: '#F87171',
-  ram: '#F87171',
+  ok: tokens.colorSuccess,
+  tight: tokens.colorWarning,
+  disk: tokens.colorError,
+  ram: tokens.colorError,
 };
 
 /** health 快照 → 判定输入。 */
