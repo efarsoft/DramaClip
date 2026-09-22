@@ -135,7 +135,7 @@ function NarrationSection({ texts, mode }: { texts: { id: string; text: string }
       dense
     >
       {noCopy ? (
-        <div style={{ padding: tokens.spaceMd, fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
+        <div style={{ padding: tokens.spaceMd, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
           {mode === 'raw_clip' || mode === 'subtitle_flow'
             ? '该模式无解说文案（纯原片/字幕流）'
             : '解说文案加载中或为空'}
@@ -152,7 +152,8 @@ function NarrationRow({ id, text }: { id: string; text: string }): ReactElement 
     <div style={{ ...mixins.listRow(), alignItems: 'flex-start' }}>
       <span
         style={{
-          fontSize: tokens.fontMicro,
+          fontSize: tokens.text.badge.size,
+          lineHeight: tokens.text.badge.leading,
           color: tokens.textTertiary,
           fontFamily: tokens.fontFamilyMono,
           flexShrink: 0,
@@ -163,9 +164,9 @@ function NarrationRow({ id, text }: { id: string; text: string }): ReactElement 
       </span>
       <span
         style={{
-          fontSize: tokens.fontCaption,
+          fontSize: tokens.text.body.size,
           color: tokens.textSecondary,
-          lineHeight: '19px',
+          lineHeight: tokens.text.body.leading,
           minWidth: 0,
           whiteSpace: 'pre-wrap',
         }}
@@ -179,8 +180,8 @@ function NarrationRow({ id, text }: { id: string; text: string }): ReactElement 
 function MetaRow({ label, value }: { label: string; value: string }): ReactElement {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', padding: `${tokens.spaceXs} 0` }}>
-      <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>{label}</span>
-      <span style={{ fontSize: tokens.fontCaption, color: tokens.textSecondary, fontFamily: tokens.fontFamilyMono }}>
+      <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>{label}</span>
+      <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textSecondary, fontFamily: tokens.fontFamilyMono }}>
         {value}
       </span>
     </div>

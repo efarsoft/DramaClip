@@ -42,7 +42,7 @@ export function LandStep({
             }}
           >
             {MODE_LABEL[choice]}
-            <div style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>
+            <div style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
               {modeHint(choice, report)}
             </div>
           </Radio>

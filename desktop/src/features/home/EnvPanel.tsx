@@ -60,7 +60,8 @@ function EnvItem({ row, onAction }: { row: EnvRow; onAction: (path: string) => v
         gap: tokens.spaceSm,
         padding: '9px 0',
         borderBottom: `1px solid ${tokens.borderSecondary}`,
-        fontSize: tokens.fontCaption,
+        fontSize: tokens.text.meta.size,
+        lineHeight: tokens.text.meta.leading,
       }}
     >
       <span style={{ width: 110, flexShrink: 0, color: tokens.textSecondary }}>{row.name}</span>
@@ -79,7 +80,8 @@ function EnvItem({ row, onAction }: { row: EnvRow; onAction: (path: string) => v
             background: 'none',
             border: 'none',
             color: tokens.colorPrimary,
-            fontSize: tokens.fontCaption,
+            fontSize: tokens.text.meta.size,
+            lineHeight: tokens.text.meta.leading,
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
@@ -88,7 +90,7 @@ function EnvItem({ row, onAction }: { row: EnvRow; onAction: (path: string) => v
           }}
         >
           {row.action.label}
-          <RightOutlined style={{ fontSize: tokens.fontIcon }} />
+          <RightOutlined style={{ fontSize: tokens.glyph.icon }} />
         </button>
       )}
     </div>
@@ -105,8 +107,8 @@ export function TipsPanel(): ReactElement {
     <RightPanel title="快速上手">
       {TIPS.map((tip) => (
         <div key={tip.text} style={{ display: 'flex', gap: tokens.spaceSm, padding: '7px 0', alignItems: 'flex-start' }}>
-          <span style={{ color: tokens.colorPrimary, fontSize: tokens.fontBodyLg, marginTop: 1 }}>{tip.icon}</span>
-          <span style={{ fontSize: tokens.fontCaption, lineHeight: '19px', color: tokens.textTertiary }}>{tip.text}</span>
+          <span style={{ color: tokens.colorPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, marginTop: 1 }}>{tip.icon}</span>
+          <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>{tip.text}</span>
         </div>
       ))}
     </RightPanel>
@@ -118,7 +120,8 @@ function RightPanel({ title, children }: { title: string; children: ReactNode })
     <Card size="small" styles={{ body: { padding: '6px 16px 10px' } }}>
       <div
         style={{
-          fontSize: tokens.fontBody,
+          fontSize: tokens.text.body.size,
+          lineHeight: tokens.text.body.leading,
           fontWeight: 600,
           color: tokens.textPrimary,
           padding: '10px 0 4px',

@@ -75,7 +75,7 @@ export function EpisodeListPanel(props: ListProps): React.ReactElement {
         );
       })}
       {props.orderedIds.length === 0 && (
-        <div style={{ padding: tokens.spaceLg, fontSize: tokens.fontCaption, color: tokens.textTertiary }}>暂无剧集</div>
+        <div style={{ padding: tokens.spaceLg, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>暂无剧集</div>
       )}
     </Card>
   );
@@ -98,9 +98,9 @@ function ListHeader({
           onToggleAll(event.target.checked);
         }}
       >
-        <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>全选</span>
+        <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>全选</span>
       </Checkbox>
-      <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>拖拽行可调顺序</span>
+      <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>拖拽行可调顺序</span>
       {running && (
         <Button size="small" type="primary" style={{ marginLeft: 'auto' }} loading>
           分析中

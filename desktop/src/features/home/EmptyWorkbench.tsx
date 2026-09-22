@@ -37,13 +37,13 @@ export function EmptyWorkbench({
         textAlign: 'center',
       }}
     >
-      <FolderAddOutlined style={{ fontSize: tokens.fontEmptyIcon, color: tokens.textTertiary, opacity: 0.4 }} />
+      <FolderAddOutlined style={{ fontSize: tokens.glyph.empty, color: tokens.textTertiary, opacity: 0.4 }} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
-        <div style={{ fontSize: tokens.fontTitle, fontWeight: 600, color: tokens.textPrimary }}>还没有剧</div>
+        <div style={{ fontSize: tokens.text.cardTitle.size, lineHeight: tokens.text.cardTitle.leading, fontWeight: 600, color: tokens.textPrimary }}>还没有剧</div>
         <div
           style={{
-            fontSize: tokens.fontCaption,
-            lineHeight: '20px',
+            fontSize: tokens.text.meta.size,
+            lineHeight: tokens.text.meta.leading,
             color: tokens.textTertiary,
             maxWidth: 420,
           }}

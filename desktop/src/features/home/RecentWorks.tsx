@@ -1,5 +1,6 @@
 /** 最近成品：海报卡片网格（16:9 逐片封面 + 时长角标 + 模式标签）。 */
 import { useNavigate } from 'react-router-dom';
+import { PlayCircleFilled } from '@ant-design/icons';
 import type { WorkItem } from '@dramaclip/protocol';
 import { PageSection } from '../../components/layout/PageKit';
 import { modeLabel } from '../../components/modeMeta';
@@ -33,7 +34,7 @@ export function RecentWorks({ works }: { works: readonly WorkItem[] }): React.Re
             }}
             style={{
               background: 'none', border: 'none', padding: 0,
-              color: tokens.colorPrimary, fontSize: tokens.fontCaption, cursor: 'pointer',
+              color: tokens.colorPrimary, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, cursor: 'pointer',
             }}
           >
             查看全部
@@ -46,7 +47,8 @@ export function RecentWorks({ works }: { works: readonly WorkItem[] }): React.Re
         <div
           style={{
             padding: tokens.spaceLg,
-            fontSize: tokens.fontCaption,
+            fontSize: tokens.text.meta.size,
+            lineHeight: tokens.text.meta.leading,
             color: tokens.textTertiary,
             textAlign: 'center',
             border: `1px dashed ${tokens.borderSecondary}`,
@@ -81,7 +83,8 @@ function WorkPoster({ work, onClick }: { work: WorkItem; onClick: () => void }):
       <PosterMedia work={work} />
       <div
         style={{
-          fontSize: tokens.fontCaption, color: tokens.textSecondary,
+          fontSize: tokens.text.meta.size,
+          lineHeight: tokens.text.meta.leading, color: tokens.textSecondary,
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         }}
       >
@@ -129,7 +132,7 @@ function PosterMedia({ work }: { work: WorkItem }): React.ReactElement {
             background: tokens.accentSoft,
           }}
         >
-          <span style={{ fontSize: tokens.fontHeading }}>▶</span>
+          <PlayCircleFilled style={{ fontSize: tokens.glyph.poster }} />
         </div>
       )}
       <span
@@ -150,7 +153,8 @@ function PosterBadges({ work }: { work: WorkItem }): React.ReactElement {
         style={{
           position: 'absolute', right: 6, bottom: 6,
           background: 'rgba(0,0,0,0.72)', color: tokens.colorWhite,
-          fontSize: tokens.fontMicro, padding: '1px 6px',
+          fontSize: tokens.text.badge.size,
+          lineHeight: tokens.text.badge.leading, padding: '1px 6px',
           borderRadius: tokens.radiusChip, fontFamily: tokens.fontFamilyMono,
         }}
       >
@@ -160,7 +164,8 @@ function PosterBadges({ work }: { work: WorkItem }): React.ReactElement {
         style={{
           position: 'absolute', left: 6, top: 6,
           background: 'rgba(0,0,0,0.72)', color: tokens.colorWhite,
-          fontSize: tokens.fontMicro, padding: '1px 6px', borderRadius: tokens.radiusChip,
+          fontSize: tokens.text.badge.size,
+          lineHeight: tokens.text.badge.leading, padding: '1px 6px', borderRadius: tokens.radiusChip,
         }}
       >
         {modeLabel(work.narration_mode)}

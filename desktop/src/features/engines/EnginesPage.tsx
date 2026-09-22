@@ -131,6 +131,6 @@ function TabBody({
 }
 
 function tabFromPath(pathname: string): EngineTabKey {
-  const match = /\/engines\/(asr|tts|llm)/.exec(pathname);
+  const match = /\/engines\/(asr|tts|llm|prompts)/.exec(pathname);
   return (match?.[1] as EngineTabKey | undefined) ?? 'overview';
 }

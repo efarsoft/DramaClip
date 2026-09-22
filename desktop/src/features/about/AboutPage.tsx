@@ -2,8 +2,8 @@
  *
  * 「检查更新」与公众号/打赏二维码未实装——缺席而非假控件，实装后在此补。
  */
-import { InfoOutlined } from '@ant-design/icons';
-import { useEffect, useState, type ReactElement } from 'react';
+import { InfoOutlined, PlayCircleFilled } from '@ant-design/icons';
+import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import { appPaths, appVersion, revealInFolder, systemApi } from '../../services/client';
 import { mixins } from '../../styles/mixins';
@@ -27,23 +27,33 @@ export function AboutPage(): ReactElement {
         <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.space2xl, minWidth: 0 }}>
           <VersionBlock />
           <PageSection title="开源许可">
-            <div style={{ fontSize: tokens.fontMicro, lineHeight: '18px', color: tokens.textTertiary }}>
-              {OPEN_SOURCE}
-            </div>
+            <div style={COPY}>{OPEN_SOURCE}</div>
           </PageSection>
           <PageSection title="授权与合规声明">
-            <div style={{ fontSize: tokens.fontMicro, lineHeight: '18px', color: tokens.textTertiary }}>
-              {COMPLIANCE}
-            </div>
+            <div style={COPY}>{COMPLIANCE}</div>
           </PageSection>
         </div>
       </div>
-      <div style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary, textAlign: 'center' }}>
+      <div
+        style={{
+          fontSize: tokens.text.meta.size,
+          lineHeight: tokens.text.meta.leading,
+          color: tokens.textTertiary,
+          textAlign: 'center',
+        }}
+      >
         © 2026 DramaClip · 本地优先的短剧高光剪辑工具
       </div>
     </PageShell>
   );
 }
+
+/** 卡内说明文案：完整句子最低 body 14/22（§1.2 ①），行高随字阶成对走。 */
+const COPY: CSSProperties = {
+  fontSize: tokens.text.body.size,
+  lineHeight: tokens.text.body.leading,
+  color: tokens.textTertiary,
+};
 
 /** 品牌块：Logo + 名称 + 一句话定位。 */
 function ProjectBlock(): ReactElement {
@@ -52,24 +62,37 @@ function ProjectBlock(): ReactElement {
       <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceMd }}>
         <span
           style={{
-            width: 40,
-            height: 40,
+            width: tokens.glyph.brandBox,
+            height: tokens.glyph.brandBox,
             borderRadius: tokens.radiusControl,
             background: tokens.gradientAccent,
             color: tokens.colorWhite,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: tokens.fontTitleLg,
+            fontSize: tokens.glyph.brandMd,
           }}
         >
-          ▶
+          <PlayCircleFilled />
         </span>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-          <span style={{ fontSize: tokens.fontBodyLg, fontWeight: 600, color: tokens.textPrimary }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs, minWidth: 0 }}>
+          <span
+            style={{
+              fontSize: tokens.text.body.size,
+              lineHeight: tokens.text.body.leading,
+              fontWeight: tokens.text.body.weightLatin,
+              color: tokens.textPrimary,
+            }}
+          >
             DramaClip
           </span>
-          <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
+          <span
+            style={{
+              fontSize: tokens.text.body.size,
+              lineHeight: tokens.text.body.leading,
+              color: tokens.textTertiary,
+            }}
+          >
             本地优先的短剧高光剪辑工具——分析、编剧、配音、成片全在本机完成。
           </span>
         </div>
@@ -93,14 +116,26 @@ function VersionBlock(): ReactElement {
   return (
     <PageSection title="版本">
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}>
-        <span style={{ fontSize: tokens.fontCaption, color: tokens.textSecondary }}>
-          应用 {app === '' ? '…' : `v${app}`}
-        </span>
-        <span style={{ fontSize: tokens.fontCaption, color: tokens.textSecondary }}>
-          Python 服务 {service === '' ? '…' : `v${service}`}
-        </span>
+        <VersionRow label="应用" value={app} />
+        <VersionRow label="Python 服务" value={service} />
       </div>
     </PageSection>
+  );
+}
+
+/** 版本行：元信息字阶，版本号本身走等宽（§1.3 数字必配 mono）。 */
+function VersionRow({ label, value }: { label: string; value: string }): ReactElement {
+  return (
+    <span
+      style={{
+        fontSize: tokens.text.meta.size,
+        lineHeight: tokens.text.meta.leading,
+        color: tokens.textSecondary,
+      }}
+    >
+      {label}{' '}
+      <span style={{ fontFamily: tokens.fontFamilyMono }}>{value === '' ? '…' : `v${value}`}</span>
+    </span>
   );
 }
 
@@ -138,7 +173,15 @@ function DataPathRow({
   };
   return (
     <div style={{ ...mixins.listRow(), padding: `${tokens.spaceSm} ${tokens.spaceLg}` }}>
-      <span style={{ fontSize: tokens.fontCaption, color: tokens.textSecondary }}>{label}</span>
+      <span
+        style={{
+          fontSize: tokens.text.body.size,
+          lineHeight: tokens.text.body.leading,
+          color: tokens.textSecondary,
+        }}
+      >
+        {label}
+      </span>
       <button
         type="button"
         onClick={open}
@@ -148,14 +191,15 @@ function DataPathRow({
           border: 'none',
           padding: 0,
           color: tokens.colorPrimary,
-          fontSize: tokens.fontCaption,
+          fontSize: tokens.text.body.size,
+          lineHeight: tokens.text.body.leading,
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
           gap: tokens.spaceXs,
         }}
       >
-        <InfoOutlined style={{ fontSize: tokens.fontIcon }} />
+        <InfoOutlined style={{ fontSize: tokens.glyph.icon }} />
         打开
       </button>
     </div>

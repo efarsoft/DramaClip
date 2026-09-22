@@ -53,7 +53,7 @@ function TodoRow({
   onRestartService: () => void;
 }): ReactElement {
   return (
-    <div style={{ ...mixins.listRow(), padding: `${tokens.spaceSm} ${tokens.spaceLg}` }}>
+    <div style={{ ...mixins.listRow(), padding: `0 ${tokens.spaceLg}` }}>
       <span data-testid="severity-dot" style={mixins.statusDot(DOT_COLOR[item.severity])} />
       <span
         title={item.detail === '' ? undefined : item.detail}
@@ -62,7 +62,8 @@ function TodoRow({
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          fontSize: tokens.fontBody,
+          fontSize: tokens.text.body.size,
+          lineHeight: tokens.text.body.leading,
           color: tokens.textPrimary,
         }}
       >
@@ -101,7 +102,8 @@ function GhostAction({
         border: 'none',
         padding: 0,
         color: tokens.colorPrimary,
-        fontSize: tokens.fontCaption,
+        fontSize: tokens.text.meta.size,
+        lineHeight: tokens.text.meta.leading,
         cursor: 'pointer',
       }}
     >

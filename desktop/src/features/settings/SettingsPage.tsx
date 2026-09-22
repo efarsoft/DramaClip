@@ -110,7 +110,7 @@ function SettingsView(props: {
             boxShadow: '0 -6px 18px rgba(4,8,20,0.35)',
           }}
         >
-          <span style={{ fontSize: tokens.fontCaption, color: tokens.textSecondary }}>
+          <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textSecondary }}>
             已修改 {String(changedKeys.length)} 项
           </span>
           <span style={{ marginLeft: 'auto', display: 'flex', gap: tokens.spaceSm }}>
@@ -258,14 +258,14 @@ function FieldRow({
   return (
     <div style={{ ...rowStyle, padding: `0 ${tokens.spaceLg}` }}>
       <div style={mixins.fieldLabelCol()}>
-        <div style={{ fontSize: tokens.fontBody, color: tokens.textPrimary }}>{spec.label}</div>
+        <div style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textPrimary }}>{spec.label}</div>
         {spec.help !== undefined && (
           <div
             style={{
-              fontSize: tokens.fontCaption,
+              fontSize: tokens.text.meta.size,
               color: tokens.textTertiary,
               marginTop: 3,
-              lineHeight: '17px',
+              lineHeight: tokens.text.meta.leading,
             }}
           >
             {spec.help}

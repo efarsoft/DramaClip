@@ -22,7 +22,7 @@ export function PromptCard({
       extra={
         <span style={{ display: 'flex', gap: tokens.spaceSm }}>
           {info.overridden && (
-            <span style={{ fontSize: tokens.fontMicro, color: tokens.colorWarning, alignSelf: 'center' }}>
+            <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.colorWarning, alignSelf: 'center' }}>
               已修改
             </span>
           )}
@@ -41,19 +41,19 @@ export function PromptCard({
         </span>
       }
     >
-      <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginBottom: tokens.spaceSm }}>
+      <div style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary, marginBottom: tokens.spaceSm }}>
         {info.description}
       </div>
       <div
         style={{
           ...mixins.cardBody(),
           fontFamily: tokens.fontFamilyMono,
-          fontSize: tokens.fontMicro,
+          fontSize: tokens.text.badge.size,
           color: tokens.textSecondary,
           whiteSpace: 'pre-wrap',
           maxHeight: 96,
           overflow: 'hidden',
-          lineHeight: '18px',
+          lineHeight: tokens.text.badge.leading,
         }}
       >
         {info.current}
@@ -85,7 +85,7 @@ function EditButton({
 /** tab 顶部使用说明。 */
 export function PromptHint(): ReactElement {
   return (
-    <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
+    <div style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
       这些指令喂给出片链路里的每一次 LLM 调用。改坏了一条，点「重置」立即回代码默认；
       保存后下一次出片生效，不影响已生成的成片。
     </div>

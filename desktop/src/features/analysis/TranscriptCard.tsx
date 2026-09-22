@@ -28,7 +28,7 @@ export function TranscriptCard({
       }
     >
       {segments.length === 0 ? (
-        <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>尚未转写</span>
+        <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>尚未转写</span>
       ) : (
         <div
           style={{
@@ -60,7 +60,8 @@ const INPUT_STYLE = {
   border: `1px solid ${tokens.colorPrimary}`,
   background: tokens.bgInput,
   color: tokens.textPrimary,
-  fontSize: tokens.fontCaption,
+  fontSize: tokens.text.body.size,
+  lineHeight: tokens.text.body.leading,
   padding: '3px 8px',
   outline: 'none',
 } as const;
@@ -81,9 +82,9 @@ function SegmentRow({
 
   if (!editing) {
     return (
-      <div style={{ display: 'flex', gap: tokens.spaceSm, fontSize: tokens.fontCaption, alignItems: 'baseline' }}>
+      <div style={{ display: 'flex', gap: tokens.spaceSm, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, alignItems: 'baseline' }}>
         <SeekButton seconds={segment.start} onSeek={onSeek} />
-        <span style={{ fontFamily: tokens.fontFamilyMono, fontSize: tokens.fontMicro, color: tokens.textTertiary, flexShrink: 0 }}>
+        <span style={{ fontFamily: tokens.fontFamilyMono, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary, flexShrink: 0 }}>
           -{formatClock(segment.end)}
         </span>
         <SourceBadge source={segment.source} />
@@ -146,7 +147,8 @@ function SeekButton({
         border: 'none',
         color: tokens.textTertiary,
         fontFamily: tokens.fontFamilyMono,
-        fontSize: tokens.fontMicro,
+        fontSize: tokens.text.badge.size,
+        lineHeight: tokens.text.badge.leading,
         cursor: 'pointer',
         padding: 0,
         flexShrink: 0,
@@ -172,8 +174,8 @@ function Chip({ text, color }: { text: string; color: string }): React.ReactElem
     <span
       style={{
         flexShrink: 0,
-        fontSize: tokens.fontMicro,
-        lineHeight: '14px',
+        fontSize: tokens.text.badge.size,
+        lineHeight: tokens.text.badge.leading,
         padding: '0 6px',
         borderRadius: tokens.radiusChip,
         border: `1px solid ${color}`,

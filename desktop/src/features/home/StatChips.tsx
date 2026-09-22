@@ -68,7 +68,7 @@ function ChipView({ chip }: { chip: Chip }): ReactElement {
           style={{
             width: 38, height: 38, borderRadius: tokens.radiusControl,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: tokens.accentSoft, color: tokens.colorPrimary, fontSize: tokens.fontChipIcon,
+            background: tokens.accentSoft, color: tokens.colorPrimary, fontSize: tokens.glyph.chipIcon,
           }}
         >
           {chip.icon}
@@ -76,20 +76,20 @@ function ChipView({ chip }: { chip: Chip }): ReactElement {
         <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
           <span
             style={{
-              fontSize: tokens.fontStat,
+              fontSize: tokens.text.sectionTitle.size,
               fontWeight: 700,
-              lineHeight: '28px',
+              lineHeight: tokens.text.sectionTitle.leading,
               color: tokens.textPrimary,
               fontFamily: tokens.fontFamilyMono,
             }}
           >
             {chip.value}
           </span>
-          <span style={{ fontSize: tokens.fontMicro, color: tokens.textSecondary }}>{chip.label}</span>
+          <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textSecondary }}>{chip.label}</span>
         </span>
       </span>
       {chip.note !== '' && (
-        <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>{chip.note}</span>
+        <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>{chip.note}</span>
       )}
     </div>
   );

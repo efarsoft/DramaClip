@@ -1,4 +1,4 @@
-/** 引擎中心左侧 tab 导航：与素材列表行同构（主色左条 + 选中底色，DSS §4.2）。 */
+/** 引擎中心左侧 tab 导航：与素材列表行同构（当前查看 = 左 3px 竖条 + 主色，不铺底，DSS §3.2）。 */
 import {
   ApiOutlined,
   AudioOutlined,
@@ -56,20 +56,18 @@ export function EngineTabNav({
               onPick(key);
             }}
             style={{
-              ...mixins.listRow(active),
-              height: 38,
+              ...mixins.listRow({ active }),
               width: '100%',
               border: 'none',
-              borderLeft: `3px solid ${active ? tokens.colorPrimary : 'transparent'}`,
               borderRadius: tokens.radiusControl,
               color: active ? tokens.colorPrimary : tokens.textSecondary,
-              fontSize: tokens.fontBody,
-              fontWeight: active ? 600 : 400,
+              fontSize: tokens.text.body.size,
+              lineHeight: tokens.text.body.leading,
+              fontWeight: active ? tokens.text.body.weightActive : tokens.text.body.weight,
               cursor: 'pointer',
-              marginBottom: 2,
             }}
           >
-            <Icon style={{ fontSize: tokens.fontBodyLg }} />
+            <Icon style={{ fontSize: tokens.glyph.iconMd }} />
             {TAB_LABELS[key]}
           </button>
         );
@@ -77,7 +75,8 @@ export function EngineTabNav({
       <div
         style={{
           padding: `${tokens.spaceSm} ${tokens.spaceMd}`,
-          fontSize: tokens.fontMicro,
+          fontSize: tokens.text.badge.size,
+          lineHeight: tokens.text.badge.leading,
           color: tokens.textTertiary,
         }}
       >

@@ -31,14 +31,15 @@ export function StateBadge({
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: tokens.spaceXs, minWidth: 0 }}>
       <StateDot state={state} />
-      <span style={{ fontSize: tokens.fontCaption, color: tone, flexShrink: 0 }}>
+      <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tone, flexShrink: 0 }}>
         {progress !== undefined ? `下载中 ${String(Math.floor(progress))}%` : stateLabel(state)}
       </span>
       {note !== undefined && (
         <span
           title={note}
           style={{
-            fontSize: tokens.fontMicro,
+            fontSize: tokens.text.badge.size,
+            lineHeight: tokens.text.badge.leading,
             color: tokens.textTertiary,
             whiteSpace: 'nowrap',
             overflow: 'hidden',
@@ -58,7 +59,7 @@ export function RatingDots({ label, level }: { label: string; level: number }): 
       style={{ display: 'inline-flex', alignItems: 'center', gap: tokens.spaceXs }}
       title={`${label} ${String(level)}/5`}
     >
-      <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>{label}</span>
+      <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>{label}</span>
       {[1, 2, 3, 4, 5].map((i) => (
         <span
           key={i}
@@ -99,15 +100,15 @@ export function GroupHead({
         marginBottom: tokens.spaceSm,
       }}
     >
-      <span style={{ fontSize: tokens.fontCaption, fontWeight: 600, color: tokens.textSecondary }}>
+      <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, fontWeight: 600, color: tokens.textSecondary }}>
         {`${title}（${String(count)}）`}
       </span>
-      {hint !== undefined && <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>{hint}</span>}
+      {hint !== undefined && <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>{hint}</span>}
       {collapsible && (
         <Button
           type="text"
           size="small"
-          style={{ marginLeft: 'auto', fontSize: tokens.fontMicro }}
+          style={{ marginLeft: 'auto', fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading }}
           onClick={onToggle}
         >
           {open ? '收起' : '展开'}

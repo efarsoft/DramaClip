@@ -1,5 +1,5 @@
 /** 候选标题区：LLM 生成/再生成 + 单条选用（星标互斥）+ 复制。 */
-import { CopyOutlined, ReloadOutlined } from '@ant-design/icons';
+import { CopyOutlined, ReloadOutlined, StarFilled } from '@ant-design/icons';
 import { App as AntdApp, Button } from 'antd';
 import type { ReactElement } from 'react';
 import type { TitleCandidate } from '@dramaclip/protocol';
@@ -45,7 +45,7 @@ export function TitlesSection({
       dense
     >
       {titles.length === 0 ? (
-        <div style={{ padding: tokens.spaceMd, fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
+        <div style={{ padding: tokens.spaceMd, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
           {generating ? '生成中…' : '点击「生成候选标题」，LLM 将基于解说文案产出 8 条风格多样的标题'}
         </div>
       ) : (
@@ -80,12 +80,12 @@ function TitleRow({
       <span
         onClick={onToggle}
         style={{
-          flex: 1, minWidth: 0, fontSize: tokens.fontCaption,
+          flex: 1, minWidth: 0, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading,
           color: title.selected ? tokens.colorPrimary : tokens.textSecondary,
-          fontWeight: title.selected ? 600 : 400, cursor: 'pointer',
+          fontWeight: title.selected ? tokens.text.body.weightActive : tokens.text.body.weight, cursor: 'pointer',
         }}
       >
-        {title.selected ? '★ ' : ''}
+        {title.selected && <StarFilled style={{ marginRight: tokens.spaceXs }} />}
         {title.text}
       </span>
       <Button size="small" type="text" icon={<CopyOutlined />} onClick={onCopy} />

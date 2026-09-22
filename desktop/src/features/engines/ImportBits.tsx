@@ -13,7 +13,7 @@ import { tokens } from '../../styles/theme';
 export function Field({ label, children }: { label: string; children: ReactNode }): ReactElement {
   return (
     <div style={{ display: 'flex', gap: tokens.spaceMd, alignItems: 'flex-start' }}>
-      <span style={{ width: 64, flexShrink: 0, fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
+      <span style={{ width: 64, flexShrink: 0, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
         {label}
       </span>
       <div
@@ -33,12 +33,12 @@ export function Field({ label, children }: { label: string; children: ReactNode 
 }
 
 export function Hint({ children }: { children: ReactNode }): ReactElement {
-  return <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>{children}</span>;
+  return <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>{children}</span>;
 }
 
 /** 实测事实的标签摆法：路径长就让它折行，不裁掉业主要看的那串字符。 */
 export function Chip({ children, style }: { children: ReactNode; style?: CSSProperties }): ReactElement {
-  return <span style={{ ...mixins.chip(), fontSize: tokens.fontMicro, ...style }}>{children}</span>;
+  return <span style={{ ...mixins.chip(), fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, ...style }}>{children}</span>;
 }
 
 /** 一组带一句话说明的单选项（冲突裁决与落位方式共用）。 */

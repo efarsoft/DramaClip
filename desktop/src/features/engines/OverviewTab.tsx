@@ -88,7 +88,7 @@ function DomainCard({
         <DomainIcon>{icon}</DomainIcon>
         <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs, minWidth: 0, flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
-            <span style={{ fontSize: tokens.fontBody, fontWeight: 600, color: tokens.textPrimary }}>{name}</span>
+            <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, fontWeight: 600, color: tokens.textPrimary }}>{name}</span>
             <span
               style={{
                 marginLeft: 'auto',
@@ -101,21 +101,22 @@ function DomainCard({
               }}
             />
           </div>
-          <div style={{ fontSize: tokens.fontCaption, color: tint }}>{step?.detail ?? '—'}</div>
+          <div style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tint }}>{step?.detail ?? '—'}</div>
           <div
             style={{
               marginTop: 'auto',
               display: 'flex',
               alignItems: 'center',
               gap: tokens.spaceXs,
-              fontSize: tokens.fontCaption,
+              fontSize: tokens.text.meta.size,
+              lineHeight: tokens.text.meta.leading,
               color: tokens.colorPrimary,
             }}
           >
             {ok ? '去调整' : step?.key === 'llm' ? '去配置' : '去处理'}
-            <RightOutlined style={{ fontSize: tokens.fontIcon }} />
+            <RightOutlined style={{ fontSize: tokens.glyph.icon }} />
             {stats !== undefined && (
-              <span style={{ marginLeft: 'auto', fontSize: tokens.fontMicro, color: tokens.textTertiary }}>
+              <span style={{ marginLeft: 'auto', fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
                 {`${String(stats.wired)} 可用`}
                 {stats.incomplete > 0 ? ` · ${String(stats.incomplete)} 待修` : ''}
               </span>
@@ -136,7 +137,7 @@ function DomainIcon({ children }: { children: ReactNode }): React.ReactElement {
         borderRadius: tokens.radiusControl,
         background: tokens.accentSoft,
         color: tokens.colorPrimary,
-        fontSize: tokens.fontChipIcon,
+        fontSize: tokens.glyph.chipIcon,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -177,16 +178,16 @@ function AssetSummaryCard({
   ];
   return (
     <SectionCard>
-      <div style={{ fontSize: tokens.fontBody, fontWeight: 600, color: tokens.textPrimary }}>模型资产</div>
+      <div style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, fontWeight: 600, color: tokens.textPrimary }}>模型资产</div>
       <div style={{ display: 'flex', gap: tokens.space2xl, marginTop: tokens.spaceMd, flexWrap: 'wrap' }}>
         {cells.map((cell) => (
           <div key={cell.label} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: tokens.fontBodyLg, fontWeight: 600, color: cell.color }}>{cell.value}</span>
-            <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>{cell.label}</span>
+            <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, fontWeight: 600, color: cell.color }}>{cell.value}</span>
+            <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>{cell.label}</span>
           </div>
         ))}
       </div>
-      <div style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary, marginTop: tokens.spaceMd }}>
+      <div style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary, marginTop: tokens.spaceMd }}>
         磁盘实占按落盘文件真实字节统计，与清单标称体积不是一回事；逐件判据在域内资产库的「体检」里。
       </div>
     </SectionCard>

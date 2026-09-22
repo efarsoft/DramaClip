@@ -96,7 +96,7 @@ export function GpuCard({
     >
       <div style={{ ...mixins.sectionTitleRow(), marginBottom: tokens.spaceSm }}>
         <span style={{ ...mixins.sectionBar(), marginRight: tokens.spaceSm }} />
-        <span style={{ fontSize: tokens.fontBody, fontWeight: 600, color: tokens.textPrimary }}>
+        <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, fontWeight: 600, color: tokens.textPrimary }}>
           转写加速（GPU）
         </span>
         <Tooltip title="重新检测显卡与驱动" placement="top">
@@ -111,23 +111,29 @@ export function GpuCard({
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
         <span style={mixins.statusDot(status.color)} />
-        <span style={{ fontSize: tokens.fontCaption, fontWeight: 600, color: status.color }}>
+        <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, fontWeight: 600, color: status.color }}>
           {status.text}
         </span>
       </div>
-      {meta !== '' && (
-        <div
-          style={{
-            marginTop: tokens.spaceXs,
-            marginLeft: tokens.spaceLg,
-            fontSize: tokens.fontMicro,
-            color: tokens.textTertiary,
-          }}
-        >
-          {meta}
-        </div>
-      )}
+      {meta !== '' && <MetaLine text={meta} />}
       {showRuntime && <RuntimeRow installing={installing} onInstall={onInstall} />}
+    </div>
+  );
+}
+
+/** 显卡型号 / 显存一行：徽标字阶的纯元信息。 */
+function MetaLine({ text }: { text: string }): ReactElement {
+  return (
+    <div
+      style={{
+        marginTop: tokens.spaceXs,
+        marginLeft: tokens.spaceLg,
+        fontSize: tokens.text.badge.size,
+        lineHeight: tokens.text.badge.leading,
+        color: tokens.textTertiary,
+      }}
+    >
+      {text}
     </div>
   );
 }
@@ -143,7 +149,7 @@ function RuntimeRow({ installing, onInstall }: { installing: boolean; onInstall:
         gap: tokens.spaceSm,
       }}
     >
-      <span style={{ fontSize: tokens.fontMicro, color: tokens.colorWarning }}>
+      <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.colorWarning }}>
         {installing ? 'CUDA 运行库下载中…（约 600MB，完成后重启服务生效）' : 'CUDA 运行库未安装 · 转写将以 CPU 运行'}
       </span>
       {!installing && (

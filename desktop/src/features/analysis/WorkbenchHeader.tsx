@@ -14,6 +14,7 @@ export function WorkbenchHeader({
   running,
   progressPercent,
   onBatchAnalyze,
+  onCancel,
 }: {
   projectId: string;
   project: Project | null;
@@ -22,6 +23,7 @@ export function WorkbenchHeader({
   running: boolean;
   progressPercent: number;
   onBatchAnalyze: () => void;
+  onCancel: () => void;
 }): React.ReactElement {
   const navigate = useNavigate();
   return (
@@ -30,28 +32,49 @@ export function WorkbenchHeader({
         <Button size="small" icon={<LeftOutlined />} onClick={() => { void navigate('/projects'); }}>
           项目
         </Button>
-        <h1 style={{ margin: 0, fontSize: tokens.fontHeading, fontWeight: 700, color: tokens.textPrimary }}>
-          {project?.name ?? '…'}
-        </h1>
-        <Tag color="blue">共 {String(total)} 集</Tag>
+        <h1 style={PAGE_TITLE}>{project?.name ?? '…'}</h1>
+        <Tag color="blue">共 <span style={NUM}>{String(total)}</span> 集</Tag>
         <Tag color={doneCount === total && total > 0 ? 'success' : 'processing'}>
-          已分析 {String(doneCount)}/{String(total)}
+          已分析 <span style={NUM}>{String(doneCount)}/{String(total)}</span>
         </Tag>
         {running && (
-          <span style={{ fontSize: tokens.fontCaption, color: tokens.colorInfo }}>
-            分析中 {String(Math.round(progressPercent))}%
+          <span style={{ ...TEXT_META, color: tokens.colorInfo }}>
+            分析中 <span style={NUM}>{String(Math.round(progressPercent))}%</span>
           </span>
         )}
-        <Button
-          size="small"
-          style={{ marginLeft: 'auto' }}
-          disabled={running || total === 0}
-          onClick={onBatchAnalyze}
-        >
-          批量分析所选
-        </Button>
+        {running ? (
+          <Button size="small" danger style={{ marginLeft: 'auto' }} onClick={onCancel}>
+            取消分析
+          </Button>
+        ) : (
+          <Button
+            size="small"
+            style={{ marginLeft: 'auto' }}
+            disabled={total === 0}
+            onClick={onBatchAnalyze}
+          >
+            批量分析所选
+          </Button>
+        )}
       </div>
       <StepsNav projectId={projectId} stepReady={doneCount > 0} />
     </div>
   );
 }
+
+/** 页标题：与 PageHeader 同一档（§1.1 唯一用处），中文走 500。 */
+const PAGE_TITLE = {
+  margin: 0,
+  fontSize: tokens.text.pageTitle.size,
+  lineHeight: tokens.text.pageTitle.leading,
+  fontWeight: tokens.text.pageTitle.weight,
+  color: tokens.textPrimary,
+} as const;
+
+const TEXT_META = {
+  fontSize: tokens.text.meta.size,
+  lineHeight: tokens.text.meta.leading,
+} as const;
+
+/** 计数与百分比的数字位（§1.3）：只包数字，中文留给界面字体。 */
+const NUM = { fontFamily: tokens.fontFamilyMono } as const;

@@ -254,7 +254,8 @@ function AssetList({
           gridTemplateColumns: GRID,
           gap: tokens.spaceMd,
           padding: `0 ${tokens.spaceMd}`,
-          fontSize: tokens.fontMicro,
+          fontSize: tokens.text.badge.size,
+          lineHeight: tokens.text.badge.leading,
           color: tokens.textTertiary,
         }}
       >

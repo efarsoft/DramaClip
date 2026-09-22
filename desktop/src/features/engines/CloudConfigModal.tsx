@@ -114,7 +114,7 @@ function LabeledInput({
 }): ReactElement {
   return (
     <label style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceMd }}>
-      <span style={{ width: 64, flexShrink: 0, fontSize: tokens.fontCaption, color: tokens.textSecondary }}>
+      <span style={{ width: 64, flexShrink: 0, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textSecondary }}>
         {label}
       </span>
       <Input size="small" type={type} value={value} onChange={onChange} placeholder={placeholder} />

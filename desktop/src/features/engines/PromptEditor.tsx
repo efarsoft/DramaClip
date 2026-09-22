@@ -33,7 +33,7 @@ export function PromptEditor({
       onCancel={onClose}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceMd }}>
-        <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
+        <div style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
           {editing?.description ?? ''}
         </div>
         <Input.TextArea
@@ -42,7 +42,7 @@ export function PromptEditor({
             onDraft(event.target.value);
           }}
           rows={16}
-          style={{ fontFamily: tokens.fontFamilyMono, fontSize: tokens.fontCaption }}
+          style={{ fontFamily: tokens.fontFamilyMono, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading }}
         />
         <Button
           icon={<UndoOutlined />}

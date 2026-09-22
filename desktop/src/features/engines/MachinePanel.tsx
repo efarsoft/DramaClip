@@ -54,7 +54,7 @@ export function MachinePanel({ models }: { models: readonly ModelInfo[] }): Reac
   ];
   return (
     <SectionCard>
-      <div style={{ fontSize: tokens.fontBody, fontWeight: 600, color: tokens.textPrimary }}>
+      <div style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, fontWeight: 600, color: tokens.textPrimary }}>
         本机运行条件
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: tokens.spaceLg, marginTop: tokens.spaceMd }}>
@@ -63,7 +63,7 @@ export function MachinePanel({ models }: { models: readonly ModelInfo[] }): Reac
         ))}
       </div>
       {verdict.verdict !== 'unknown' && <VerdictLine verdict={verdict} maxSizeGb={maxSizeGb} />}
-      <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.fontMicro, color: tokens.textTertiary }}>
+      <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
         本卡只回答硬件「装得下 / 跑得动」；某次转写实际走了哪张卡，看语音识别域内的转写加速卡。
       </div>
     </SectionCard>
@@ -73,10 +73,11 @@ export function MachinePanel({ models }: { models: readonly ModelInfo[] }): Reac
 function SpecCell({ label, value }: { label: string; value: string }): ReactElement {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-      <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>{label}</span>
+      <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>{label}</span>
       <span
         style={{
-          fontSize: tokens.fontCaption,
+          fontSize: tokens.text.meta.size,
+          lineHeight: tokens.text.meta.leading,
           color: tokens.textSecondary,
           fontFamily: tokens.fontFamilyMono,
           whiteSpace: 'nowrap',
@@ -110,7 +111,8 @@ function VerdictLine({
         display: 'flex',
         alignItems: 'center',
         gap: tokens.spaceSm,
-        fontSize: tokens.fontCaption,
+        fontSize: tokens.text.meta.size,
+        lineHeight: tokens.text.meta.leading,
       }}
     >
       <span

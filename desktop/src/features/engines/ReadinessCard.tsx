@@ -51,13 +51,14 @@ function Headline({ pending }: { pending: number }): ReactElement {
   return (
     <div style={{ ...mixins.sectionTitleRow(), marginBottom: tokens.spaceMd }}>
       <span style={{ ...mixins.sectionBar(), marginRight: tokens.spaceSm }} />
-      <span style={{ fontSize: tokens.fontBody, fontWeight: 600, color: tokens.textPrimary }}>
+      <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, fontWeight: 600, color: tokens.textPrimary }}>
         开工就绪度
       </span>
       <span
         style={{
           marginLeft: tokens.spaceMd,
-          fontSize: tokens.fontMicro,
+          fontSize: tokens.text.badge.size,
+          lineHeight: tokens.text.badge.leading,
           color: pending === 0 ? tokens.colorSuccess : tokens.colorWarning,
         }}
       >
@@ -88,7 +89,8 @@ function BrokenRow({
       <span style={mixins.statusDot(tokens.colorError)} />
       <span
         style={{
-          fontSize: tokens.fontCaption,
+          fontSize: tokens.text.meta.size,
+          lineHeight: tokens.text.meta.leading,
           color: tokens.textSecondary,
           minWidth: 0,
           overflow: 'hidden',
@@ -125,7 +127,7 @@ function StepNode({
   return (
     <>
       {!first && (
-        <span style={{ alignSelf: 'center', color: tokens.textTertiary, fontSize: tokens.fontBody }}>›</span>
+        <span style={{ alignSelf: 'center', color: tokens.textTertiary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading }}>›</span>
       )}
       <div
         onClick={() => {
@@ -143,14 +145,15 @@ function StepNode({
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceXs }}>
           <span style={mixins.statusDot(tone)} />
-          <span style={{ fontSize: tokens.fontCaption, fontWeight: 600, color: tokens.textPrimary }}>
+          <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, fontWeight: 600, color: tokens.textPrimary }}>
             {step.index} {step.label}
           </span>
         </div>
         <div
           style={{
             marginTop: 2,
-            fontSize: tokens.fontMicro,
+            fontSize: tokens.text.badge.size,
+            lineHeight: tokens.text.badge.leading,
             color: step.ok ? tokens.textSecondary : tone,
             whiteSpace: 'nowrap',
             overflow: 'hidden',

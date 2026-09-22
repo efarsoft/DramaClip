@@ -125,7 +125,7 @@ function GroupList({
         <PageSection
           key={group.projectId}
           title={group.name}
-          extra={<span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>{`${String(group.works.length)} 条`}</span>}
+          extra={<span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>{`${String(group.works.length)} 条`}</span>}
           dense
         >
           <div style={{ display: 'flex', gap: tokens.spaceMd, overflowX: 'auto', paddingBottom: tokens.spaceSm }}>
@@ -181,7 +181,7 @@ function WorkCard({
       style={{ width: 150, flexShrink: 0, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}
     >
       <WorkPoster work={work} cover={cover} onFolder={folder} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, fontSize: tokens.fontMicro, color: tokens.textTertiary }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
         <span>{formatDate(work.completed_at)}</span>
         <span style={{ marginLeft: 'auto', fontFamily: tokens.fontFamilyMono }}>{formatSize(work.size_bytes)}</span>
       </div>
@@ -218,7 +218,7 @@ function WorkPoster({
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
         />
       ) : (
-        <PlayCircleOutlined style={{ fontSize: tokens.fontPlayGlyph, color: tint, position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
+        <PlayCircleOutlined style={{ fontSize: tokens.glyph.poster, color: tint, position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
       )}
       <span
         style={{
@@ -241,7 +241,8 @@ function PosterBadges({ work }: { work: WorkItem }): React.ReactElement {
         style={{
           position: 'absolute', left: 6, top: 6,
           background: 'rgba(0,0,0,0.72)', color: tokens.colorWhite,
-          fontSize: tokens.fontMicro, padding: '1px 6px', borderRadius: tokens.radiusChip,
+          fontSize: tokens.text.badge.size,
+          lineHeight: tokens.text.badge.leading, padding: '1px 6px', borderRadius: tokens.radiusChip,
         }}
       >
         {modeLabel(work.narration_mode)}
@@ -250,7 +251,8 @@ function PosterBadges({ work }: { work: WorkItem }): React.ReactElement {
         style={{
           position: 'absolute', right: 6, bottom: 6,
           background: 'rgba(0,0,0,0.72)', color: tokens.colorWhite,
-          fontSize: tokens.fontMicro, padding: '1px 6px', borderRadius: tokens.radiusChip,
+          fontSize: tokens.text.badge.size,
+          lineHeight: tokens.text.badge.leading, padding: '1px 6px', borderRadius: tokens.radiusChip,
           fontFamily: tokens.fontFamilyMono,
         }}
       >
@@ -269,7 +271,7 @@ function FolderButton({ onClick }: { onClick: (event: React.MouseEvent) => void 
       style={{
         display: 'flex', alignItems: 'center', gap: 4,
         background: 'none', border: 'none', padding: 0,
-        color: tokens.colorWhite, fontSize: tokens.fontMicro, cursor: 'pointer',
+        color: tokens.colorWhite, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, cursor: 'pointer',
       }}
       onMouseEnter={(event) => {
         event.currentTarget.style.color = tokens.colorPrimary;

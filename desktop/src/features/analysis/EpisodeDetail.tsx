@@ -1,6 +1,6 @@
 /** 右栏·复合面板：播放器(高光标记) → 高光列表 → 转写编辑 → 操作。 */
 import { tokens } from '../../styles/theme';
-import { App as AntdApp, Card, Empty } from 'antd';
+import { App as AntdApp, Alert, Card, Empty } from 'antd';
 import { useMemo } from 'react';
 import type { AnalysisResults, AsrSegment, Episode } from '@dramaclip/protocol';
 import { ActionsCard, PlayerHighlightsRow } from './DetailCards';
@@ -39,6 +39,7 @@ export function EpisodeDetail({
   const transcript = transcriptOf(results, activeEpisodeId);
   const saveEdit = useTranscriptSave(projectId, activeEpisodeId, transcript, onReload);
   const episode = episodes.find((item) => item.id === activeEpisodeId) ?? null;
+  const clipping = results?.episodes.find((item) => item.episode_id === activeEpisodeId)?.clipping === true;
   const highlights = useMemo(
     () => (activeEpisodeId === null ? [] : (results?.highlights?.[activeEpisodeId] ?? [])),
     [activeEpisodeId, results],
@@ -51,6 +52,13 @@ export function EpisodeDetail({
     if (episode === null) return <EmptyDetail />;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
+      {clipping && (
+        <Alert
+          type="warning"
+          showIcon
+          title="这集源音频已经削顶。成片限幅只能压电平，不能把平顶长回来。"
+        />
+      )}
       <PlayerHighlightsRow
         episode={episode}
         highlights={highlights}

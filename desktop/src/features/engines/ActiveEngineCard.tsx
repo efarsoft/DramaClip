@@ -53,7 +53,7 @@ export function ActiveEngineCard({
       <TitleLine title={title} hint={hint} state={state} stateNote={stateNote} progress={progress} />
       <PropGrid props={props} />
       {footnote !== undefined && (
-        <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.fontMicro, color: tokens.textTertiary }}>
+        <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
           {footnote}
         </div>
       )}
@@ -81,8 +81,8 @@ function CardHead({
       }}
     >
       <span style={{ width: 3, height: 13, borderRadius: tokens.radiusDot, background: tokens.gradientAccent }} />
-      <span style={{ fontSize: tokens.fontTitle, fontWeight: 600, color: tokens.textPrimary }}>当前生效</span>
-      <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>{domain}</span>
+      <span style={{ fontSize: tokens.text.cardTitle.size, lineHeight: tokens.text.cardTitle.leading, fontWeight: 600, color: tokens.textPrimary }}>当前生效</span>
+      <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>{domain}</span>
       <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
         {picker}
         {actions}
@@ -114,9 +114,9 @@ function TitleLine({
         flexWrap: 'wrap',
       }}
     >
-      <span style={{ fontSize: tokens.fontBodyLg, fontWeight: 600, color: tokens.textPrimary }}>{title}</span>
+      <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, fontWeight: 600, color: tokens.textPrimary }}>{title}</span>
       {state === null ? (
-        <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>{hint ?? '无需本地模型'}</span>
+        <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>{hint ?? '无需本地模型'}</span>
       ) : (
         <StateBadge state={state} note={stateNote} progress={progress} />
       )}
@@ -137,10 +137,11 @@ function PropGrid({ props }: { props: readonly ActiveProp[] }): React.ReactEleme
     >
       {props.map((prop) => (
         <div key={prop.label} style={{ minWidth: 0 }}>
-          <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>{prop.label}</span>
+          <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>{prop.label}</span>
           <div
             style={{
-              fontSize: tokens.fontCaption,
+              fontSize: tokens.text.meta.size,
+              lineHeight: tokens.text.meta.leading,
               color: tokens.textSecondary,
               marginTop: 2,
               whiteSpace: 'nowrap',

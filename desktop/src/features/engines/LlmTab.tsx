@@ -10,7 +10,8 @@ export function LlmTab({ onChanged }: { onChanged: () => void }): React.ReactEle
       <PageSection title="云端 / 本地端点（OpenAI 兼容）">
         <div
           style={{
-            fontSize: tokens.fontCaption,
+            fontSize: tokens.text.meta.size,
+            lineHeight: tokens.text.meta.leading,
             color: tokens.textTertiary,
             marginBottom: tokens.spaceMd,
           }}
@@ -22,7 +23,7 @@ export function LlmTab({ onChanged }: { onChanged: () => void }): React.ReactEle
         <CloudConfigSection domain="llm" onChanged={onChanged} />
       </PageSection>
       <PageSection title="本地大模型">
-        <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
+        <div style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
           不内置本地推理。要跑本地模型，请经 Ollama / LM Studio 的 OpenAI
           兼容端点接入——添加一条配置、填本地服务地址即可。
         </div>
@@ -39,8 +40,8 @@ function UnconfiguredNotice(): React.ReactElement {
       style={{
         display: 'flex',
         gap: tokens.spaceSm,
-        fontSize: tokens.fontCaption,
-        lineHeight: '20px',
+        fontSize: tokens.text.meta.size,
+        lineHeight: tokens.text.meta.leading,
         color: tokens.colorWarning,
         border: `1px solid ${tokens.colorWarning}55`,
         background: `${tokens.colorWarning}12`,
@@ -50,7 +51,7 @@ function UnconfiguredNotice(): React.ReactElement {
         maxWidth: 860,
       }}
     >
-      <WarningOutlined style={{ fontSize: tokens.fontBodyLg, marginTop: 1 }} />
+      <WarningOutlined style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, marginTop: 1 }} />
       <span>
         未配置时：分析（转写、冲突打分）改用关键词打分，仍可跑完；但解说文案必须由编剧模型产出，
         没有兜底——七个解说模式的每条方案都会失败并在任务里说明原因。

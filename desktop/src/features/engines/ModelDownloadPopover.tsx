@@ -86,7 +86,7 @@ function SourcePicker({
   }
   return (
     <div style={{ width: 264, display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
-      <div style={{ fontSize: tokens.fontCaption, fontWeight: 600, color: tokens.textSecondary }}>下载源</div>
+      <div style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, fontWeight: 600, color: tokens.textSecondary }}>下载源</div>
       <SourceOptions sources={sources} kind={selected.kind} onPick={setKind} />
       <div style={{ display: 'flex', gap: tokens.spaceSm }}>
         <Button
@@ -137,10 +137,10 @@ function SourceOptions({
     >
       {sources.map((item) => (
         <Radio key={item.kind} value={item.kind} style={{ alignItems: 'flex-start' }}>
-          <span style={{ fontSize: tokens.fontCaption, color: tokens.textPrimary }}>
+          <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textPrimary }}>
             {sourceLabel(item.kind)}
           </span>
-          <div style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>
+          <div style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
             {SOURCE_META[item.kind]?.hint ?? ''}
           </div>
         </Radio>

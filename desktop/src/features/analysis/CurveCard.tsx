@@ -20,7 +20,15 @@ const TOOLTIP_STYLE = {
   background: tokens.bgElevated,
   border: `1px solid ${tokens.border}`,
   borderRadius: tokens.radiusControl,
-  fontSize: tokens.fontCaption,
+  fontSize: tokens.text.meta.size,
+  lineHeight: tokens.text.meta.leading,
+} as const;
+
+/** 坐标刻度：纯数字，走等宽（§1.3）；tick 是 SVG 属性位，只取字号不取行高。 */
+const TICK_STYLE = {
+  fill: tokens.textTertiary,
+  fontSize: tokens.text.badge.size,
+  fontFamily: tokens.fontFamilyMono,
 } as const;
 
 function handleActivate(state: { activeLabel?: number | string } | null, onSeek: (s: number) => void): void {
@@ -60,7 +68,14 @@ export function CurveCard({
         </ResponsiveContainer>
       </div>
       {peak > 0 && (
-        <div style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary, marginTop: tokens.spaceXs }}>
+        <div
+          style={{
+            fontSize: tokens.text.meta.size,
+            lineHeight: tokens.text.meta.leading,
+            color: tokens.textTertiary,
+            marginTop: tokens.spaceXs,
+          }}
+        >
           峰值 {String(peak)} 分 · 点击曲线可定位播放
         </div>
       )}
@@ -71,16 +86,8 @@ export function CurveCard({
 function chartAxes(): React.ReactElement {
   return (
     <>
-      <XAxis
-        dataKey="time"
-        tick={{ fill: tokens.textTertiary, fontSize: tokens.fontMicro }}
-        stroke={tokens.border}
-      />
-      <YAxis
-        domain={[0, 100]}
-        tick={{ fill: tokens.textTertiary, fontSize: tokens.fontMicro }}
-        stroke={tokens.border}
-      />
+      <XAxis dataKey="time" tick={TICK_STYLE} stroke={tokens.border} />
+      <YAxis domain={[0, 100]} tick={TICK_STYLE} stroke={tokens.border} />
       <Tooltip
         contentStyle={{ ...TOOLTIP_STYLE }}
         labelFormatter={(label) => `${String(Number(label))}s`}

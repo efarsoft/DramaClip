@@ -96,22 +96,22 @@ function NameCell({
     <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceMd, minWidth: 0 }}>
       <StateDot state={state} />
       <div style={{ minWidth: 0 }}>
-        <span style={{ fontSize: tokens.fontBody, fontWeight: 600, color: tokens.textPrimary }}>{model.name}</span>
+        <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, fontWeight: 600, color: tokens.textPrimary }}>{model.name}</span>
         {active && (
-          <span style={{ marginLeft: tokens.spaceSm, fontSize: tokens.fontMicro, color: tokens.colorPrimary }}>
+          <span style={{ marginLeft: tokens.spaceSm, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.colorPrimary }}>
             使用中
           </span>
         )}
         {imported !== undefined && imported !== null && (
           <span
-            style={{ marginLeft: tokens.spaceSm, fontSize: tokens.fontMicro, color: tokens.colorInfo }}
+            style={{ marginLeft: tokens.spaceSm, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.colorInfo }}
             title={`不是下载来的，是导入向导落位的：${imported.path}`}
           >
             本地导入
           </span>
         )}
         {!table && (
-          <span style={{ marginLeft: tokens.spaceSm, fontSize: tokens.fontCaption, color: tokens.textTertiary }}>
+          <span style={{ marginLeft: tokens.spaceSm, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
             {model.desc ?? model.repo_id}
           </span>
         )}
@@ -123,7 +123,7 @@ function NameCell({
 /** 未接入的资产不参与「生效」，所以这一列只是事实，不是邀请。 */
 function WiredCell({ ok }: { ok: boolean }): ReactElement {
   return (
-    <span style={{ fontSize: tokens.fontMicro, color: ok ? tokens.colorSuccess : tokens.textTertiary }}>
+    <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: ok ? tokens.colorSuccess : tokens.textTertiary }}>
       {ok ? '已接入' : '未接入'}
     </span>
   );
@@ -144,7 +144,7 @@ function StateCell({
     <span style={{ minWidth: 0 }}>
       <StateBadge state={state} progress={progress} />
       {note !== undefined && (
-        <div style={{ fontSize: tokens.fontMicro, color: tokens.colorError }}>{note}</div>
+        <div style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.colorError }}>{note}</div>
       )}
     </span>
   );
@@ -160,7 +160,7 @@ function SizeCell({ model }: { model: ModelInfo }): ReactElement {
 
 function RatingCell({ model }: { model: ModelInfo }): ReactElement {
   if ((model.speed ?? 0) === 0 && (model.quality ?? 0) === 0) {
-    return <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary }}>—</span>;
+    return <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>—</span>;
   }
   return (
     <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -187,7 +187,8 @@ function DescCell({
   return (
     <span
       style={{
-        fontSize: tokens.fontMicro,
+        fontSize: tokens.text.badge.size,
+        lineHeight: tokens.text.badge.leading,
         color: blocked ? FIT_VERDICT_COLOR[fit.verdict] : tokens.textTertiary,
         minWidth: 0,
         overflow: 'hidden',

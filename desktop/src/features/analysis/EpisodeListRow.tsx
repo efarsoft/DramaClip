@@ -1,8 +1,10 @@
 /** 素材列表行：封面缩略 + 文件名 + 状态，可拖拽排序、单击激活、勾选批量。 */
 import { Checkbox } from 'antd';
+import { DownOutlined, PlayCircleFilled, UpOutlined } from '@ant-design/icons';
 import type { Episode } from '@dramaclip/protocol';
 import { mediaUrl } from '../../services/client';
-import { tokens } from '../../styles/theme';
+import { hoverBg, mixins } from '../../styles/mixins';
+import { layout, tokens } from '../../styles/theme';
 
 export function EpisodeListRow({
   episode,
@@ -32,6 +34,7 @@ export function EpisodeListRow({
   return (
     <DragShell
       active={active}
+      checked={checked}
       dropTarget={dropTarget}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
@@ -49,8 +52,14 @@ export function EpisodeListRow({
   );
 }
 
+/**
+ * 行壳：三态分道（§3.2）由 mixins.listRow 承担——
+ * 勾选只铺底、当前查看只画左竖条，两者不再抢同一通道。
+ * dropTarget 是拖放目标提示（顶部 2px），与三态无关，故留在本地。
+ */
 function DragShell({
   active,
+  checked,
   dropTarget,
   children,
   onDragStart,
@@ -59,6 +68,7 @@ function DragShell({
   onActivate,
 }: {
   active: boolean;
+  checked: boolean;
   dropTarget: boolean;
   children: React.ReactNode;
   onDragStart: () => void;
@@ -80,20 +90,16 @@ function DragShell({
       }}
       onClick={onActivate}
       style={{
-        display: 'flex',
-        alignItems: 'center',
+        ...mixins.listRow({ checked, active, rows: 2 }),
         gap: tokens.spaceSm,
-        padding: '6px 10px',
         cursor: 'grab',
-        borderLeft: active ? `3px solid ${tokens.colorPrimary}` : '3px solid transparent',
         borderTop: dropTarget ? `2px solid ${tokens.colorPrimary}` : '2px solid transparent',
-        background: active ? tokens.accentSoft : 'transparent',
       }}
       onMouseEnter={(event) => {
-        if (!active) event.currentTarget.style.background = tokens.bgElevated;
+        event.currentTarget.style.background = checked ? tokens.checkedSoft : hoverBg;
       }}
       onMouseLeave={(event) => {
-        if (!active) event.currentTarget.style.background = 'transparent';
+        event.currentTarget.style.background = checked ? tokens.checkedSoft : 'transparent';
       }}
     >
       {children}
@@ -101,13 +107,15 @@ function DragShell({
   );
 }
 
+/** 行名：列表主行第一列，字阶最低 body（§1.2 ①）；当前查看时加主色与字重，不加底色。 */
 function RowName({ episode, active }: { episode: Episode; active: boolean }): React.ReactElement {
   return (
     <span
       title={episode.name}
       style={{
-        fontSize: tokens.fontCaption,
-        fontWeight: 600,
+        fontSize: tokens.text.body.size,
+        lineHeight: tokens.text.body.leading,
+        fontWeight: active ? tokens.text.body.weightActive : tokens.text.body.weight,
         color: active ? tokens.colorPrimary : tokens.textPrimary,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
@@ -115,6 +123,35 @@ function RowName({ episode, active }: { episode: Episode; active: boolean }): Re
       }}
     >
       {episode.name === '' ? `第${String(episode.episode_number)}集` : episode.name}
+    </span>
+  );
+}
+
+function RowThumb({ episode }: { episode: Episode }): React.ReactElement {
+  const frame = {
+    width: tokens.glyph.thumbW,
+    height: tokens.glyph.thumbH,
+    borderRadius: tokens.radiusThumb,
+    flexShrink: 0,
+  } as const;
+  return episode.cover_path !== undefined ? (
+    <img
+      src={mediaUrl(episode.cover_path)}
+      alt=""
+      style={{ ...frame, objectFit: 'cover' }}
+    />
+  ) : (
+    <span
+      style={{
+        ...frame,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: tokens.colorPrimary,
+        background: tokens.accentSoft,
+      }}
+    >
+      <PlayCircleFilled style={{ fontSize: tokens.glyph.poster }} />
     </span>
   );
 }
@@ -131,45 +168,18 @@ function MoveButtons({
         event.stopPropagation();
       }}
     >
-      <MoveButton label="▲" direction={-1} onMove={onMove} />
-      <MoveButton label="▼" direction={1} onMove={onMove} />
-    </span>
-  );
-}
-
-function RowThumb({ episode }: { episode: Episode }): React.ReactElement {
-  return episode.cover_path !== undefined ? (
-    <img
-      src={mediaUrl(episode.cover_path)}
-      alt=""
-      style={{ width: 34, height: 46, objectFit: 'cover', borderRadius: tokens.radiusThumb, flexShrink: 0 }}
-    />
-  ) : (
-    <span
-      style={{
-        width: 34,
-        height: 46,
-        borderRadius: tokens.radiusThumb,
-        flexShrink: 0,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: tokens.fontBody,
-        color: tokens.textTertiary,
-        background: `${tokens.colorPrimary}1A`,
-      }}
-    >
-      ▶
+      <MoveButton icon={<UpOutlined />} direction={-1} onMove={onMove} />
+      <MoveButton icon={<DownOutlined />} direction={1} onMove={onMove} />
     </span>
   );
 }
 
 function MoveButton({
-  label,
+  icon,
   direction,
   onMove,
 }: {
-  label: string;
+  icon: React.ReactNode;
   direction: -1 | 1;
   onMove: (direction: -1 | 1) => void;
 }): React.ReactElement {
@@ -181,21 +191,20 @@ function MoveButton({
         onMove(direction);
       }}
       style={{
-        width: 18,
-        height: 13,
+        width: layout.row.moveButton.width,
+        height: layout.row.moveButton.height,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontSize: tokens.fontIcon,
-        lineHeight: 1,
-        borderRadius: tokens.radiusDot,
+        padding: 0,
+        borderRadius: tokens.radiusThumb,
         border: `1px solid ${tokens.border}`,
         background: 'transparent',
         color: tokens.textTertiary,
         cursor: 'pointer',
       }}
     >
-      {label}
+      <span style={{ fontSize: tokens.glyph.icon }}>{icon}</span>
     </button>
   );
 }
@@ -210,7 +219,7 @@ function RowCheckbox({
   return (
     <Checkbox
       checked={checked}
-      style={{ marginRight: 2 }}
+      style={{ flexShrink: 0 }}
       onClick={(event) => {
         event.stopPropagation();
       }}
@@ -239,11 +248,22 @@ function RowMeta({
         ? { label: '分析失败', color: tokens.colorError }
         : { label: '待分析', color: tokens.textTertiary };
   return (
-    <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary, display: 'flex', gap: tokens.spaceSm }}>
-      <span>{Math.round(duration)}s</span>
+    <span
+      style={{
+        fontSize: tokens.text.badge.size,
+        lineHeight: tokens.text.badge.leading,
+        color: tokens.textTertiary,
+        display: 'flex',
+        gap: tokens.spaceSm,
+      }}
+    >
+      {/* 时长与计数是数字位：等宽（§1.3）。 */}
+      <span style={{ fontFamily: tokens.fontFamilyMono }}>{Math.round(duration)}s</span>
       <span style={{ color: state.color }}>● {state.label}</span>
       {highlightCount > 0 && (
-        <span style={{ color: tokens.colorWarning }}>高光 {String(highlightCount)}</span>
+        <span style={{ color: tokens.colorWarning, fontFamily: tokens.fontFamilyMono }}>
+          高光 {String(highlightCount)}
+        </span>
       )}
     </span>
   );

@@ -264,7 +264,8 @@ function RefVoiceSelect({
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          fontSize: tokens.fontMicro,
+          fontSize: tokens.text.badge.size,
+          lineHeight: tokens.text.badge.leading,
           color: value === '' ? tokens.colorWarning : tokens.textTertiary,
         }}
         title={value}

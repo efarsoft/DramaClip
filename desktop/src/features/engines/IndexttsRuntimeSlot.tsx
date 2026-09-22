@@ -19,7 +19,8 @@ const SLOT_BOX = {
   borderRadius: tokens.radiusControl,
   border: `1px solid ${tokens.colorWarning}44`,
   background: `${tokens.colorWarning}0d`,
-  fontSize: tokens.fontCaption,
+  fontSize: tokens.text.meta.size,
+  lineHeight: tokens.text.meta.leading,
 } as const;
 
 function RuntimeSlotView(state: RuntimeState): ReactElement {

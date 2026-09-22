@@ -41,10 +41,11 @@ const ANALYSIS_SECTION: SectionSpec = {
     },
     {
       key: 'analysis.full_threshold',
-      label: '全量分析推荐阈值',
+      label: '自动全量分析集数上限',
       type: 'number',
-      min: 0,
-      max: 100,
+      min: 1,
+      max: 80,
+      help: '导入扫集后：集数 ≤ 此值则自动全量分析；超过则先预筛，只分析推荐集。改完对下一次导入生效。',
     },
   ],
 };
@@ -59,7 +60,7 @@ const EXPORT_SECTION: SectionSpec = {
       type: 'number',
       min: 30,
       max: 1200,
-      help: '编排按此预算挑选场景；它是规划预算不是交付硬上限，成片逐段外移切点、微变速后会略长（实测 ≤6%）。推广建议 60-180，解说涨粉建议 180-300',
+      help: '软参考，不是砍片门禁。片长服从故事：几分钟到十几分钟都可以，冲突讲完再收。超短悬念版仍是单独的短模式。',
     },
     {
       key: 'strategy.min_duration_s',
@@ -67,6 +68,7 @@ const EXPORT_SECTION: SectionSpec = {
       type: 'number',
       min: 10,
       max: 120,
+      help: '软参考，不是拉片门禁。片长服从故事，不会为了凑够秒数垫镜头。',
     },
     {
       key: 'export.loudness_target_lufs',

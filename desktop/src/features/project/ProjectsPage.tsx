@@ -166,7 +166,7 @@ function CreateProjectForm({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
       <label style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
-        <span style={{ fontSize: tokens.fontBody, color: tokens.textSecondary }}>项目名称</span>
+        <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textSecondary }}>项目名称</span>
         <Input
           value={name}
           onChange={(event) => {
@@ -176,7 +176,7 @@ function CreateProjectForm({
         />
       </label>
       <label style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
-        <span style={{ fontSize: tokens.fontBody, color: tokens.textSecondary }}>剧集文件夹</span>
+        <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textSecondary }}>剧集文件夹</span>
         <div style={{ display: 'flex', gap: tokens.spaceSm }}>
           <Input value={folder} readOnly placeholder="选择包含视频文件的文件夹" />
           <Button onClick={onPick}>选择文件夹</Button>

@@ -32,7 +32,7 @@ export function VerifyDetail({
   }, [report, modelId, onVerify]);
   if (report === undefined) {
     return (
-      <div style={{ padding: `0 ${tokens.spaceMd} ${tokens.spaceMd}`, fontSize: tokens.fontMicro }}>
+      <div style={{ padding: `0 ${tokens.spaceMd} ${tokens.spaceMd}`, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading }}>
         <span style={{ color: tokens.textTertiary }}>体检中…</span>
       </div>
     );
@@ -59,7 +59,7 @@ export function VerifyDetail({
 /** 一条判据：名字 + 结论 + 后端原话。导入向导第 ② 步共用同一份翻译。 */
 export function CheckRow({ check }: { check: VerifyCheck }): ReactElement {
   return (
-    <div style={{ display: 'flex', gap: tokens.spaceMd, fontSize: tokens.fontMicro }}>
+    <div style={{ display: 'flex', gap: tokens.spaceMd, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading }}>
       <span style={{ width: 96, flexShrink: 0, color: tokens.textTertiary }}>{check.name}</span>
       <span style={{ width: 40, flexShrink: 0, color: CHECK_COLOR[check.status] }}>
         {CHECK_LABEL[check.status]}

@@ -68,8 +68,8 @@ function Notice({ text, failed }: { text: string; failed: boolean }): ReactEleme
   return (
     <span
       style={{
-        fontSize: tokens.fontMicro,
-        lineHeight: '16px',
+        fontSize: tokens.text.badge.size,
+        lineHeight: tokens.text.badge.leading,
         color: failed ? tokens.colorError : tokens.textTertiary,
         maxWidth: 460,
       }}

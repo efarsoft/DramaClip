@@ -7,7 +7,7 @@
  * 用 `<a href="#…">` 而不是 useNavigate：HashRouter 下 hash 链接天然可用，
  * 组件因此不需要 Router 上下文，也不必在测试里包 MemoryRouter。
  */
-import { RightOutlined } from '@ant-design/icons';
+import { PlayCircleFilled, RightOutlined } from '@ant-design/icons';
 import type { ReactElement } from 'react';
 import type { Project } from '@dramaclip/protocol';
 import { dramaEntryPath } from '../../app/routes';
@@ -36,10 +36,11 @@ export function ContinueCard({ projects, nowMs }: { projects: Project[]; nowMs: 
     >
       <CoverThumb cover={cover} />
       <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 2 }}>
-        <span style={{ fontSize: tokens.fontCaption, color: tokens.textTertiary }}>继续上次</span>
+        <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>继续上次</span>
         <span
           style={{
-            fontSize: tokens.fontBodyLg,
+            fontSize: tokens.text.body.size,
+            lineHeight: tokens.text.body.leading,
             fontWeight: 600,
             color: tokens.textPrimary,
             overflow: 'hidden',
@@ -57,12 +58,13 @@ export function ContinueCard({ projects, nowMs }: { projects: Project[]; nowMs: 
           alignItems: 'center',
           gap: tokens.spaceSm,
           flexShrink: 0,
-          fontSize: tokens.fontMicro,
+          fontSize: tokens.text.badge.size,
+          lineHeight: tokens.text.badge.leading,
           color: tokens.textTertiary,
         }}
       >
         {whenLabel(last.visitedAtMs, nowMs)}
-        <RightOutlined style={{ fontSize: tokens.fontIcon }} />
+        <RightOutlined style={{ fontSize: tokens.glyph.icon }} />
       </span>
     </a>
   );
@@ -80,7 +82,7 @@ function CoverThumb({ cover }: { cover: string | undefined }): ReactElement {
       {cover !== undefined ? (
         <img src={mediaUrl(cover)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
       ) : (
-        <span style={{ fontSize: tokens.fontBody }}>▶</span>
+        <PlayCircleFilled style={{ fontSize: tokens.glyph.poster }} />
       )}
     </span>
   );

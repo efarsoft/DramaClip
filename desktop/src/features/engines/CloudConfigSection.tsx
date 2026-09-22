@@ -83,10 +83,10 @@ function ConfigRow({
           flexShrink: 0,
         }}
       />
-      <span style={{ fontSize: tokens.fontCaption, fontWeight: 600, color: tokens.textPrimary }}>
+      <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, fontWeight: 600, color: tokens.textPrimary }}>
         {config.name}
       </span>
-      <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary, flex: 1 }}>
+      <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary, flex: 1 }}>
         {config.model} · {config.base_url}
       </span>
       <RowAction
@@ -121,7 +121,8 @@ function RowAction({
         padding: 0,
         color,
         cursor: 'pointer',
-        fontSize: tokens.fontMicro,
+        fontSize: tokens.text.badge.size,
+        lineHeight: tokens.text.badge.leading,
         display: 'flex',
         alignItems: 'center',
       }}
@@ -140,6 +141,7 @@ const ADD_BUTTON: React.CSSProperties = {
   background: 'none',
   color: tokens.textTertiary,
   cursor: 'pointer',
-  fontSize: tokens.fontCaption,
+  fontSize: tokens.text.meta.size,
+  lineHeight: tokens.text.meta.leading,
   marginTop: tokens.spaceSm,
 };

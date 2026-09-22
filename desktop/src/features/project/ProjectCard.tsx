@@ -1,4 +1,5 @@
 /** 项目卡片：封面 + 集数 + 操作菜单。 */
+import { PlayCircleFilled } from '@ant-design/icons';
 import { Button, Card, Dropdown } from 'antd';
 import type { Project } from '@dramaclip/protocol';
 import type { ReactElement } from 'react';
@@ -28,11 +29,12 @@ export function ProjectCard({
     >
       <CoverArea project={project} handlers={{ onRename, onDuplicate, onDelete }} />
       <div style={{ padding: `${tokens.spaceSm} ${tokens.spaceLg} ${tokens.spaceMd}` }}>
-        <div style={{ fontSize: tokens.fontBodyLg, fontWeight: 600, color: tokens.textPrimary }}>{project.name}</div>
+        <div style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, fontWeight: 600, color: tokens.textPrimary }}>{project.name}</div>
         <div
           style={{
             marginTop: tokens.spaceXs,
-            fontSize: tokens.fontMicro,
+            fontSize: tokens.text.badge.size,
+            lineHeight: tokens.text.badge.leading,
             color: tokens.textTertiary,
             whiteSpace: 'nowrap',
             overflow: 'hidden',
@@ -68,12 +70,12 @@ function CoverArea({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: tokens.fontPoster,
+            fontSize: tokens.glyph.poster,
             color: tokens.textTertiary,
             background: `linear-gradient(135deg, ${tokens.bgElevated}, ${tokens.bgContainer})`,
           }}
         >
-          ▶
+          <PlayCircleFilled />
         </div>
       )}
       <span
@@ -91,7 +93,8 @@ function CoverArea({
           position: 'absolute',
           left: 10,
           bottom: 10,
-          fontSize: tokens.fontMicro,
+          fontSize: tokens.text.badge.size,
+          lineHeight: tokens.text.badge.leading,
           padding: '2px 8px',
           borderRadius: tokens.radiusChip,
           background: 'rgba(0,0,0,0.55)',

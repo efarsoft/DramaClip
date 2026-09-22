@@ -55,11 +55,11 @@ function ExternalRow({
       }}
     >
       <div style={{ minWidth: 0, flex: 1 }}>
-        <span style={{ fontSize: tokens.fontBody, fontWeight: 600, color: tokens.textPrimary }}>
+        <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, fontWeight: 600, color: tokens.textPrimary }}>
           {record.label ?? record.path}
         </span>
         {record.incomplete && (
-          <span style={{ marginLeft: tokens.spaceSm, fontSize: tokens.fontMicro, color: tokens.colorError }}>
+          <span style={{ marginLeft: tokens.spaceSm, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.colorError }}>
             按现状登记，当时体检未通过
           </span>
         )}
@@ -76,7 +76,7 @@ function ExternalRow({
           {record.path}
         </div>
       </div>
-      <span style={{ fontSize: tokens.fontMicro, color: tokens.textTertiary, flexShrink: 0 }}>
+      <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary, flexShrink: 0 }}>
         {MODE_LABEL[record.mode]}
       </span>
       <Popconfirm
