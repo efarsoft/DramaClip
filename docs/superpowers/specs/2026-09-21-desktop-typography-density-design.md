@@ -3,6 +3,7 @@
 **日期**：2026-09-21 · **状态**：待用户审阅 · **分支**：`feat/correctness-wiring`
 **起因**：用户对现状观感不满意（原话「感觉好廉价的感觉」），要求做一次全局 UI 与 UX 设计。
 **范围裁决（用户亲手收窄）**：四个候选方向里只勾了**排版与密度**，UX 侧另加四项（长作业进度反馈 / 空·失败·部分成功统一表达 / 导入→分析→解说→出片动线 / **出片取材范围可见且可收窄**——最后一项是审阅时业主点名补上的，见 §6.5）。**品牌图形资产、层次材质、结构导航三类只作"统一来源"式收拾，不重做。**
+**2026-09-22 追加（用户裁决「按②一起做，把异常修复也加进去」）**：**引擎中心的异常修复与五 tab 合一并入本批**，见 §10；合一边界是**只合并引擎中心 5 个 tab**，`/settings`、`/about`、导轨结构不动。这一追加使本批多出**两条新 RPC（`models.clean_residue`、`engines.selftest`）+ 一处既有接口的 `force` 入参**（§10.2、§10.3），故 §9 风险 6 从"唯一一处"改为两批。
 **上位文件**：`docs/superpowers/specs/2026-09-10-dramaclip-ui-redesign-design.md`（信息架构与页面职责）与 `docs/desktop/04-设计系统方案.md`（DSS v1 视觉真相源）。本文件**不推翻**前者；两者冲突时，**结构以 09-10 为准、本文件的 token 与状态契约优先级高于 DSS v1 的对应条目**。
 **本文件不重复**：09-10 已定的导轨分组、剧空间四阶段、工具箱、后端接口缺口清单。
 
@@ -296,8 +297,9 @@
 1. **分析工作台**（P4，"廉价"最重的一屏，见 §8.4）
 2. **成品库**（P2 卡片库 + 海报 + 角标）
 3. **成片详情**（P3 详情双栏）
+4. **引擎中心**（P6 配置中心，§10.4 合一后的单页六段）——**2026-09-22 追加**：它既是本批唯一一处功能级改动，也是 P6 原型的唯一代表屏，不进参照页 = P6 的契约没人验过。
 
-截图定版、用户认可后再按页推其余屏。**先做全站再截图 = 用 16 屏返工换一次判断机会。**
+截图定版、用户认可后再按页推其余屏。**先做全站再截图 = 用 15 屏返工换一次判断机会。**
 
 ### 8.2 基线截图与机检断言
 
@@ -305,6 +307,7 @@
 - 机器侧断言：脚本按 §0.2 口径扫 `style={{…}}`（实测份额——分析屏 45、成品库 `WorksPage` 11 + `TitlesSection` 3、成品详情 4）。**"归零"的准确对象是带 px 语义的度量**（宽高、内边距、外边距、间隙、圆角、行高）；同一口径里还含 `flex: 1`、`minWidth: 0`、`zIndex` 这类**无单位结构值**，它们不是度量、不进 token，也就**不该被算作未改**——把它们混进"归零"会让门禁变成数字游戏。判据两句：① 度量类字面量归零；② 改后用同口径复算并按文件公布差值，剩余项逐条标注为结构值或写进本屏例外。**口径一旦写下就不再改**：改口径 = 重测全部基线。
   ⚠️ **一处必须撤回的草案数字**：讨论中我说过"分析屏 45 → 38"，那是**估的**，没有复算依据（本屏实际会消失的是 `WorkbenchPage` 的 250 / 6 / 14 与 `EpisodeListRow` 移入 `glyph.*` 的 34 / 46 / 18 / 13 等，减几取决于改到哪一步）。规格不预测差值，只在改后复算并公布。同理，§8.1 里"用 40 处返工"一句按可推导的口径改成屏数。其余 16 屏不进这条门禁，由 §8.3 棘轮接管（一碰就必须归零）。
 - 每屏改前 / 改后成对图，**对比结论在聊天里给，不写文件**。每张图必须带**四项标注，缺一不可**：字阶档位、该行高成对值、栅格落点（token 名）、状态变体。不带字阶档位的图 = 没做，因为下一屏无法据此复现。
+- **引擎页额外两条机器判据（§10 的验收，排版门禁管不到它）**：① 组件测试断言"每个异常态行都渲染出至少一个动作按钮，且该按钮的 handler 不是 `navigate`"——这条封掉 §10.0 第 2 类缺陷复发（`ReadinessCard.tsx:104-109` 那种跳转穿修复外衣）；② 契约测试断言 Small / Medium（warn 降级后）两类校验结果下 `canActivate` 为真、warn 文案进入 `failureNote`（§10.1 三条改法的直接回归网）。**判据用 §10.0 量到的真实文件形态做 fixture，不用编造样例。**
 
 ### 8.3 eslint 棘轮
 
@@ -332,7 +335,121 @@ P4 是整站唯一 `mixins.ts` 与 `PageKit.tsx` **零引用**的 feature（`fea
 3. **契约写在原型层，可能掩盖屏级特殊需求**。→ 附录 A 的"本屏特有例外"列是强制项；空着即视为没审这屏。
 4. **根因判定可能是错的**。→ §0 的反证条件必须在 8.1 截图定版时显式判定并记录结论。
 5. **执行期与另一位工程师同树同分支**（**复测 2026-09-21：索引为空，工作树有 75 个已改未提交 + 13 个未跟踪文件，其中 `desktop/` 下 16 个**——含本规格引用的 `WorkbenchHeader.tsx`、`useAnalysisWorkspace.ts`、`ModePicker.tsx`、`PlanPickList.tsx`）。→ 提交只 add 显式路径，先 `git diff --cached --name-only`；本批不碰 `engine_configs*`、`docs/05-开发路线图.md`、`tests/api/test_analysis.py`。**同树期间不 `git stash`、不 `git add -A`、不在脏树上用 `git checkout/restore` 求"干净"**；基线复算走 §0.2 的 `git archive HEAD` 快照，不在工作树上做。
-6. **本批唯一一处越出 09-10 计划范围的结构改动 = §6.5 的取材契约**（`protocol/schemas/narration.json` + `api/narration.py` 的 `episode_ids` + 契约测试）。其余全是排版、状态与动线表层，不动任何方法签名。→ 单独成一个提交，与视觉改动分开，坏了能只回滚它。
+6. **越出 09-10 计划范围的结构改动共两批**：§6.5 的取材契约（`protocol/schemas/narration.json` + `api/narration.py` 的 `episode_ids` + 契约测试），以及 §10 的引擎异常修复（两条新 RPC `models.clean_residue` / `engines.selftest`，加 `models.download` 的 `force` 入参，再加判据 severity 重划）。其余全是排版、状态与动线表层，不动任何方法签名。→ 各自单独成提交，与视觉改动分开，坏了能只回滚它（§10.6）。
+
+---
+
+## 10. 引擎中心：异常自带修法 + 五 tab 合一
+
+**追加时间与裁决**：2026-09-22。用户看引擎资产页的截图后原话：「引擎设置相关页面需要重点规划和设计一下，引擎失效，我怎么处理，重新下载，还是怎么说，给我看看异常，我没办法修复吗，这个还有意思么 / 将所有UI汇总到一个页面。」范围收窄经选定为**只合并引擎中心 5 个 tab**（设置页 `/settings`、关于页 `/about`、导轨结构都不动），且**异常修复与本批一起做**、不另立规格。
+
+### 10.0 为什么这不是排版问题，而是六条可证的缺陷
+
+这一节只列**实测到位置**的事实，不列观感。每条都在 §10.1–§10.5 有一个对应的改法。
+
+1. **修复路径在接口层就是堵死的**。`api/models.py:107-108`：`models.download` 先查 `registry.find(spec, models_dir)`，命中即 `raise RpcDomainError(_ERR_MODEL_STATE, "… 已安装")`。而 `RowActions.tsx:33-48` 的分支是 `!installed → 下载` / `installed → InstalledActions（体检 `:104` / 打开目录 / 删除 `:118-131`）`——**已安装且异常的行，界面上没有任何一个动作能重下**。用户问的「重新下载，还是怎么说」，答案是：今天说不了，界面和接口两边都不给这条路。
+2. **「去修复」是一个穿着修复外衣的跳转按钮**。`ReadinessCard.tsx:104-109` 的按钮体只有 `onGo(item.tab)`（`:106`），而 `onGo` 就是 `EnginesPage.tsx:58` 的 `navigate('/engines/<key>')`。点完到的那一屏正是那张红卡本身，没有任何新信息、没有任何可执行动作。
+3. **文件层的判据把"完整可用"的资产判成不可用**。判据同源 `infra/model_manager/registry.py` 的 `verify()`（`:389-443`，八条 checks 在 `:407-433`）；本机实测（`data/models/asr/faster-whisper/`，逐文件量过）：
+   - **Small**：`snapshots/536b0662742c02347bc0e980a01041f333bce120/` 里 `_REQUIREMENTS["faster_whisper"]`（`registry.py:328-336`，faster_whisper 在 `:329`）要求的 4 个文件**全在**，`model.bin` 483,546,902 B；`refs/main` 40 B、`trees/<提交号>.json` 也在。**唯一问题是 `blobs/3e3059…997b98bc.incomplete` = 201,173,173 B ≈ 192 MB 的中断残留**——`_verify_residue`（`:490-496`）在 `:494` 判 **fail**。显示为「不完整」，但**残留不参与推理**。而 `assetState.ts:43-46` 的 `canActivate` 只放行 `ready|unverified` → **「选为生效」被禁**，第 1 条又堵死了重下。
+   - **Medium**：`snapshots/main/`（目录名字面是 `main`，不是提交号）4 个文件齐全、`model.bin` 1,527,906,378 B、`refs/main` **4 B**、**无 `trees/`**。`_verify_snapshot_revision`（`:463-478`）在 `:472-473` 判 fail「快照目录名不是提交号：main」，`_verify_manifest`（`:481-487`）在 `:487` 出 warn「无 trees 清单」。**这正是那条 docstring（`:466-467`）举的例子本身**：「真机形态：`models--Systran--faster-whisper-medium/snapshots/main` + 4 字节的 `refs/main`——下载没解析到提交号就收工了，这种缓存随时可能少文件」。
+   - **诚实边界**：Small 的"其实能用"是强推断（快照已解析到提交号、清单齐、四文件全）；**Medium 能不能加载恰好就是没被验证的那件事**——文件全在不等于 huggingface 按 `refs/main="main"` 能解析出快照。所以 §10.1 只把它从"红"降为"看得见但拦住动作"，**判定留给 §10.3 的能力层自检**，不是留给推断。
+   - 两处形态差异都是**落盘方式**（导入 / 下载 / 缓存布局版本）造成的，不是权重缺损。判据把它们和"缺 `model.bin`"混成同一个「不完整」，是第 3 条缺陷的本质。
+4. **未验证却发通行证（直接违反 09-10 主张 3）**。`workReadiness.ts:34` 的 `OK_STATES = new Set(['ready', 'unverified'])`（`:53` 使用），`unverified`（从没校验过）算就绪；于是 `ReadinessCard.tsx:64` 显示「全绿 · 可提交任务」。**未验证的东西不能发通行证**——这条在 09-10 已定案，引擎页是它唯一被违反的地方。
+5. **界面知道、但不告诉用户的 1.43 GB**。`data/models/models--Systran--faster-whisper-medium/`（**在 `placement` 之外**，即 `models_dir` 根下；注册表按 `base = models_dir / spec.placement` 找，`registry.py:261`（`detect_status`）与 `:402`（`verify`）都是这个根）里有**同一权重的一份完整副本**：`snapshots/08e178d48790749d25932bbc082711ddcfdfbc4f/` 同 4 文件同大小、`refs/main` 40 B、`trees/08e178d4….json` 在、mtime 2026-09-16。**它确定不是引擎实际加载的那一份**：ASR 的 `download_root` 就是 placement 根（`runtime.py:48` 传 `models_dir / "asr" / "faster-whisper"` → `transcriber.py:121`（CPU 回退分支 `:131`）传给 `WhisperModel`），所以这 1.43 GB 是纯磁盘代价，不是"加载错了来源"。`_verify_unique_path`（`:506-523`，它按 `models_dir.rglob` 全根扫，`:514-518`）确实扫到了并出 **warn**（`:521`「另有 N 处同名缓存」）——但 `assetState.ts:49-56` 的 `failureNote` **只过滤 `check.status === 'fail'`**（`:51`），warn 在列表行上被折叠掉，全站只有展开 `VerifyDetail.tsx:52` 才看得到。**来源未查明**（不猜是导入还是旧版本落盘），但它占 1.43 GB 是量出来的。
+6. **能力层没有自检**。`api/engine_configs.py:94` 的 `test()` 只打云端端点（LLM/VLM/TTS 的 HTTP 连通）。本地 ASR **从来没有"真跑一段音频"的自检**——所以"引擎失效"这件事今天只能在真实批量任务里撞出来，UI 无从预告。`TtsPreviewButton`（`TtsTab.tsx:185`，另 `:95,:192`）是唯一的例外，它已经是能力层自检，只是没被叫成这个名字。
+
+> **反证条件**：若 §10.1 的 severity 重划落地后，Small 仍因一条残留文件被禁选、或 Medium 仍只能靠人肉推断"应该能用"（没有自检入口）、或「去修复」仍只能跳转，则本批只做到了表层，须回来升级判据层与接口层，而不是继续调文案。
+
+### 10.1 判据按"能不能用"分级，不按"有没有异常现象"
+
+现状八条 checks 一律按"查出了什么"上色，因此 192 MB 残留（不影响加载）和缺 `model.bin`（100% 不能加载）在界面上是同一个红。**改成一条判据：这项失败会不会让引擎在真实任务里跑不起来。**
+
+| 校验项（`registry.py` 位点） | 现判 | 新判 | 依据 |
+|---|---|---|---|
+| 目录存在（`verify` `:407-414`） | fail | **fail** | 没目录一定跑不起来 |
+| 必需文件齐全（`_REQUIREMENTS` `:328-336`、判定 `:415-424`） | fail | **fail** | 缺权重一定跑不起来 |
+| 权重非空（`_verify_weights`，调用 `:426`） | fail | **fail** | 同上 |
+| 快照提交号（`_verify_snapshot_revision` `:463-478`） | fail（`:472-473`） | **目录名非提交号：有 `trees/` 清单才 fail，无清单降 warn**；`refs/main` 与快照不一致（`:475-476`）**保持 fail** | 目录名叫 `main` 只是没解析到提交号，本体是"无从逐文件对账"；而 refs 与快照对不上是真矛盾，不能降 |
+| 下载清单（`_verify_manifest` `:481-487`） | warn（`:487`） | **warn** | 已是 warn，保持 |
+| 中断残留（`_verify_residue` `:490-496`） | fail（`:494`） | **warn，但必须上行到行内可见** | 残留占磁盘、不占推理；代价是空间与"上次没下完"这个事实 |
+| 唯一路径（`_verify_unique_path` `:506-523`） | warn（`:521`） | **warn，但必须上行到行内可见** | 重复副本不改可用性，改磁盘 |
+| 引擎接入（`:432-433`） | 状态降级 | **状态降级（保持）** | 「选为生效不行」在这里是对的，因为工厂确实没接 |
+
+三条契约随之改死：
+
+- **`canActivate`（`assetState.ts:43-46`）只由 fail 决定**：`state` 不再参与，改读 `report.checks` 有无 `status === 'fail'`（后端已有的 `report.ok` 就是这句判据，`:441`）。→ Small 从"不完整且不可选"变成"可选用 + 行内一条 warn 说清 192 MB 残留"；Medium 降 warn 后**可选，但要 §10.3 自检过了才叫就绪**。
+- **`failureNote`（`:49-56`）不再过滤 warn**：warn 与 fail 都上行，用 §10.5 的文案纪律区分（fail 给动作、warn 给代价）。第 5 条那个 1.43 GB 从此在列表行上就能看到。
+- **五态口径（`assetState.ts:10,31-36`）与 `workReadiness.ts:34,53` 收拢**：`unverified` **不再算就绪**（第 4 条缺陷的根），显示为「未校验」并给「校验」动作；`ready` 才是绿。措辞见 §10.5——「全绿 · 可提交任务」只在全部 `ready` 时出现。
+
+### 10.2 异常态自带修法：三档，一行一个动作
+
+**设计法则（本批新增，全站适用）**：每个异常态必须自带修法，且修法分三档写死——**能自动 / 要确认 / 只能给路**。只有"给路"而没有动作的异常态，视同没做。
+
+| 异常 | 档位 | 动作与代价 | 接口 |
+|---|---|---|---|
+| 中断残留（`.incomplete`） | **能自动** | 「清理残留」（回收 192 MB，不动已完成的权重） | **新 `models.clean_residue`**：删除范围必须与 `_verify_residue` 的作用域**同一条**（`registry.py:430`：faster-whisper 是 cache 目录、其余是 `base`），返回释放字节数。**否则清完再校验还是红** |
+| 已安装但异常，且用户想重来 | **要确认** | 「重新下载」→ 二次确认「将删除现有 N GB 并重下」 | **`models.download` 加 `force`**（解禁 `api/models.py:107-108` 的"已安装"硬拒；`force=False` 行为不变） |
+| 重复副本（1.43 GB） | **要确认** | 「删除多余副本」——**只删 `placement` 之外那条路径**，列出全路径与大小再确认 | 复用既有删除路径（`api/models.py:228,235` 的 `shutil.rmtree`），但需一个只作用于 orphan 路径的入口 |
+| 缺模型 / 无源（`api/models.py:100-103`） | **只能给路** | 「导入本地模型」（打开 `ImportModelModal`，当前已存在但入口在 `AssetLibrary.tsx:165-167` 顶部、异常行够不着）+ 说清去哪拿 | 已有 |
+| 引擎接入未接（储备档） | **只能给路** | 说清**何时**接入（哪个模式用到它），不是「待接入」了事（`AssetLibrary.tsx:90-97` 现文案） | 无 |
+| 未校验 | **能自动** | 「校验」单资产（`AssetLibrary.tsx:162` 的批量校验已存在，缺的是行内单发） | 已有 |
+
+**按钮名与动作同权重**：写「重新下载」就必须真的重下，写「清理残留」就必须真的删文件——不允许再出现第 2 条那种名字叫修复、行为是跳转的按钮（`ReadinessCard.tsx:104-109`）。
+
+### 10.3 能力层自检：`engines.selftest`
+
+补第 6 条缺陷。**新 RPC `engines.selftest`**，按域三实现：
+
+- **ASR**：真跑一段随包的 10 秒样例音频，返回「加载成功 / 识别出 N 字 / 耗时」。这是唯一能证明"这个本地权重在这台机器上能用"的判据——文件校验只证明文件在，不证明能推。样例音频随包，不进 `data/`。
+- **TTS**：复用 `TtsPreviewButton` 现成的合成路径，只是把它提升为自检结果的一部分（而不是一个孤立的试听按钮）。
+- **LLM / VLM**：复用既有 `engine_configs.test()`（`api/engine_configs.py:94`），不新造第二条连通测试。
+
+自检结果进 §10.1 的就绪口径：**校验 = 文件层，自检 = 能力层，两者都过才叫 `ready`**。未自检的显示「未自检」，不发绿（§10.5）。
+
+**契约触点（三处改动各自都要"注册 + schema 条目"成对，因为 `test_contract_sync.py:33-41` 断言 `Router.method_names` 与 `protocol/schemas/*.json` 的 `x-methods` 集合**相等**——只注册不写 schema、或只写 schema 不注册，两边都红）**：
+
+| 改动 | 服务端注册 | schema |
+|---|---|---|
+| `models.clean_residue` | `api/models.py`（`router.register`，同 `:38` 那条 `models.download` 的写法） | `protocol/schemas/models.json` 的 `x-methods` 新条目 |
+| `models.download` 加 `force` | 同上文件的 `download()` | `protocol/schemas/models.json:387-399` 该条目的 `params.properties`（实测整个 `models.json` 里 `additionalProperties` **零命中**，即默认宽容，加字段不破坏既有客户端） |
+| `engines.selftest` | **新 `api/engines.py`，并在 `api/__init__.py` 的 `build_router` 里挂上**（契约同步测试就是用 `build_router` 数方法的） | **新 `protocol/schemas/engines.json`**（当前 14 个 schema 文件里没有 `engines.*` 命名空间，最近邻是 `engine_configs.json`） |
+
+客户端三处 `modelsApi` / 新 `enginesApi` 调用点 + 契约测试按 §6.5 同规矩扩到 client 调用集。
+
+### 10.4 五 tab 合一：单页六段
+
+`EnginesPage.tsx:53` 现在是 `216px minmax(0,1fr)` 的左导航 + 右侧 tab 体（`EngineTabNav` 在 `:58` 用 `navigate('/engines/<key>')` 切屏），`tabFromPath`（`:133-135`）的正则决定进哪一屏。**合一 = 五个 tab 变成同一页的六段纵向流**，用户不必在"总览看到红卡 → 点去修复 → 到 ASR 屏 → 滚动找那一行"之间来回跳：
+
+1. **就绪与修复**——今日 `ReadinessCard` 的升级体：每行「现象 + 后果 + 动作」，动作即 §10.2 的那五档。
+2. **转写（ASR）**——引擎档选择 + 资产行内联（含五态、校验、自检、修复动作）。
+3. **配音（TTS）**。
+4. **文本与视觉（LLM / VLM）**——两块凭据独立、留空=继承（09-10 定案，不改）。
+5. **提示词**。
+6. **环境**——`GpuCard` + 磁盘 / 运行时 / 字体检查。**注意归属**：`features/home/EnvPanel.tsx` 是**工作台右栏**，不搬进来（搬它 = 动 §9 非目标里的工作台）；两处的行数据同源，本段只呈现引擎视角 + 修复入口。
+
+**迁移与兼容**：`/engines/:tab` 五个子路由降级为**同页锚点深链**——`navigate('/engines/asr')` 变成滚到第 2 段。既有三处调用点**一行都不用重写**：`ReadinessCard.tsx:106` 的 `onGo`、`home/EnvPanel.tsx:29,33,36` 的三条 `path: '/engines/<tab>'`（经 `:47` 的 `navigate`）。这是选锚点而不是选"删路由"的直接理由。216 px 左导航取消，段标题进 §1 的 `text.sectionTitle 20/28`；段间分隔走 §2 的 `space.*`，不新增材质。
+
+**这不是全局导航重做**：导轨 6 项、`/settings`、`/about`、`AppLayout` 都不动，09-10 那套导轨 8 项计划仍按"不作废、不在本批"处理。
+
+### 10.5 异常文案纪律（含本机两行的改写前后对照）
+
+三条规矩：**① 现象 + 后果 + 动作与代价**三要素齐，缺任一即未做；**② 按钮名与动作同权重**；**③ 未验证不发通行证**。
+
+| 行 | 现状文案 | 改写后 |
+|---|---|---|
+| Whisper Small | 「不完整 · 中断残留 192MB」+「选为生效」禁用 | 「可用 · 有一条待办」／「上次下载留有 192 MB 残留，不影响识别，只占磁盘」／按钮「清理残留」 |
+| Whisper Medium | 「不完整 · 快照目录名不是提交号：main」+ 禁用 | 「待确认 · 无从对账」／「这份没解析到提交号、也没有下载清单，文件看着齐但**没验证过能不能加载**」／按钮「自检」＋「重新下载」（自检通过才转绿，见 §10.3——**不许写"识别可用"**，那是我们恰好没证的东西） |
+
+「全绿 · 可提交任务」（`ReadinessCard.tsx:64`）改为只在**全部参与就绪判定的资产都是 `ready`** 时出现；只要有一项是 `unverified`/未自检，那句就得写成「N 项未校验——未确认能用」并给出校验入口。
+
+### 10.6 边界与风险
+
+- **不改落盘约定**：`placement`（`registry.py:261,402`）与 ASR 的 `download_root`（`engines/analysis/runtime.py:48` → `transcriber.py:121,131`）、下载落盘根（`downloader.py:189-190`）本批一律不动。改它要动已下载资产的迁移，风险与本批收益不成比例。
+- **那 1.43 GB 的来源未查明**，因此本批**只提供删除入口，不实际删 `data/models` 下任何文件**，也不在规格里断言它是谁留下的。执行时先查明再落 UI 文案（若要命名，得有证据）。
+- **`models.download` 加 `force` 是真删真下**：默认 `False`，且二次确认必须显示将删除的体量——误点即重下数 GB。
+- **`engines.selftest` 会真的加载权重**：ASR 自检在 CPU 上可能十几秒，期间该资产行必须是**进行中态**而不是"看起来卡死"（复用 §4 进度三件套，缺 ETA 显示 `—`）。
+- **判据重划会改变已存库里的显示状态**，但不改数据库里存的任何字段——`state` 是每次校验时算出来的，本批只改算法。
+- **`engine_configs*` 文件属另一位工程师**（§9 风险 5）：§10.3 的 LLM 分支只**调用**既有 `test()`，不改其实现。
 
 ---
 
@@ -349,8 +466,8 @@ P4 是整站唯一 `mixins.ts` 与 `PageKit.tsx` **零引用**的 feature（`fea
 | 4 | 成品详情 `/works/:exportId` | P3 | `minmax(300px,420px) + 1fr`；行复用 `listRow` | 空 ✓ 失败 ✓ **无部分成功** | `:168` 内联 `lineHeight 19px` |
 | 5 | 分析工作台 `/projects/:id/analysis` | P4 | 左栏按百分比可拖（`useSplit.ts:4` 默认 24、`:22` 带宽 20~40、`WorkbenchPage.tsx:106` `minWidth 250`、`:126` 把手 6px）——**五个数**全部收进 `layout.split` 且不改数值；勾选 + 全选 + **批量条**；右栏三卡；底栏 46（`StepFooter:26` 写死） | 空 ✓ **无骨架 无失败横幅** 部分成功仅计数 | **45 处内联字面量**（§0.2 口径）；`mixins/PageKit` **整屏零引用**；26 处字号仅 2 处配行高；三态撞道；初始空选须改读 `full_threshold`（§6.2） |
 | 6 | 出片 `/projects/:id/produce` | P5 | 四段纵向：风格 → 模式 → 方案 → 产出；**顶部常驻「本次取材：已完成分析 X / Y 集」+ 可收窄**（§6.5） | 空 ✓ 失败 ✓ 部分成功 ✓ | `poll.ts:2` 1500ms 轮询**有百分比无 ETA**；取材候选池**服务端硬取全部 done 集、不可改**，卡片只有「取材 N 集」计数、无集号（§6.5 实测） |
-| 7 | 引擎·总览 `/engines` | P6 | 5 tab 收进同一 `tabs` 契约；卡容器一律 `PageSection` | 未就绪 ✓ **下载失败永不显示** | `EnginesPage.tsx:134` 正则漏 `prompts`（**按 HEAD 成立，工作区已被另一位工程师就地修好、未提交**——见附录 B ①） |
-| 8 | 引擎·分 tab `/engines/:tab` | P6 | 同上；`asr / tts / llm / prompts` 四 tab 同契约 | 同 7 | 开工前复查上一条是否已入库，勿重复修 |
+| 7 | 引擎·总览 `/engines` | P6 | **§10.4 单页六段**（就绪与修复 / ASR / TTS / LLM·VLM / 提示词 / 环境），5 tab 合一、卡容器一律 `PageSection` | 未就绪 ✓ **下载失败永不显示** | `EnginesPage.tsx:134` 正则漏 `prompts`（**按 HEAD 成立，工作区已被另一位工程师就地修好、未提交**——见附录 B ①）；就绪判据与修复动作见 §10.1–§10.2 |
+| 8 | 引擎·分 tab `/engines/:tab` | P6 | **降级为同页锚点深链**（§10.4）：既有 `navigate('/engines/<tab>')` 调用点不改，行为变滚动定位 | 同 7 | 合并后本行与 7 是同一屏，表中分列只为留证据；开工前复查附录 B ① 是否已入库，勿重复修 |
 | 9 | 设置 `/settings` | P6 | 单列表单；`labelWidth/controlWidth` 收进 `layout` | 仅"加载中…" | `:268` 内联 `lineHeight 17px` + 自带 shadow 字面量 |
 | 10 | 关于 `/about` | P7 | 窄单列 `max-width 720`；开源清单**必须含两条字体** | 静态，无需 | `:30,35` 两处内联 `lineHeight 18px`；`▶` 假图标 |
 | 11 | 新建项目弹窗 | O | 统一 `Overlay`：标题 16/24、宽 720、footer 右对齐 | 提交失败需内联 | `ProjectsPage:225` 自带一套 footer |
@@ -371,6 +488,7 @@ P4 是整站唯一 `mixins.ts` 与 `PageKit.tsx` **零引用**的 feature（`fea
 
 1. `EnginesPage.tsx:134`（HEAD `381f32c5`）的 `/\/engines\/(asr|tts|llm)/` 漏 `prompts` → `EngineTabNav.tsx:30` 的 `TAB_ORDER` 有 `prompts`、`EnginesPage` 已渲染 `<PromptsTab />`，但**永远回落到总览**，「提示词」点不进。
    ⚠️ **开工前必查**：写本规格期间，**同一工作树里另一位工程师已就地把这行改成 `(asr|tts|llm|prompts)`，但尚未提交**（`git status` 显示 `M desktop/src/features/engines/EnginesPage.tsx`，`git blame` 该行为 "Not Committed Yet"）。所以这条缺陷**按 HEAD 成立、按工作区已修**——本批开工前先 `git log -S'llm|prompts'` 确认它是否已入库，已入库即结案，**不得重复修一遍、更不得把自己的改动盖在同一段上**。
+   ⚠️ **与 §10.4 的关系**：五 tab 合一后 `tabFromPath` 的职责从"选屏"变成"选锚点"，这行正则可能被整体吸收掉。**结案方式由此变为"确认合一后锚点解析覆盖 `prompts`"**，而不是单独修一行正则——但在工作树那份改动入库前，本节仍按原样成立，不抢先动手。
 2. 下载失败态永不渲染：`stores/ui.ts:15` 有 `'failed'`，`useDownloadProgress.ts:9` 只读 `'downloading'`。
 3. `StepFooter.tsx:6-55` 与 `PageKit.PageFooter:126-172` 是一对分叉，且 **`PageFooter` 全站零调用点**（详见 §3.3：活的那份在功能目录里、原语是一份死副本）。本批 §3.3 要删的是**分叉**，其承载的批量判据缺陷另案。
 4. 「批量分析所选」空选可点、点了静默无事：`canStart`（`useAnalysisWorkspace.ts:95` 算、`:111` 声明进接口）**全站零消费**；按钮用 `disabled={total === 0}`（`WorkbenchHeader.tsx:55`），点下去撞 `:68` 的早退。与设计里的批量条是同一问题的两面。
