@@ -15,6 +15,7 @@ from typing import Any
 from dramaclip.api.context import AppContext
 from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.exporter import encoder, loudness, selfcheck
+from dramaclip.engines.exporter.face_crop import face_x_ratio
 from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle import presets as subtitle_presets
@@ -218,15 +219,80 @@ def _cover_title(context: AppContext, plan_row: dict[str, Any]) -> str | None:
         return None
 
 
+def _cover_source_frame(
+    plan_data: PlanData, episode_paths: dict[str, str], out_size: tuple[int, int]
+) -> tuple[Path, float, str] | None:
+    """A1：封面源截帧的输入——(源文件, 源时间戳, 构图滤镜链)；拿不到就 None（退回成片截）。
+
+    映射公式：源时间戳 = 时间轴**首段** start + 1.5（与成片钩帧「1.5s 处」同一画面
+    内容，但取自源素材、无烧录字幕）。构图链复现 encoder.cut_segment_args 的三级：
+    `scale=force_original_aspect_ratio=increase` 填充 → `_crop_filter(crop_x_ratio)`
+    跟脸裁窗 → `scale=out_w:out_h`；crop_x_ratio 用同一个 face_x_ratio、同一时间点
+    算（跟脸不同步 = 封面构图≠成片构图 = 骗点击），拿不到脸/异常返回 None 即中心裁，
+    与 encoder 降级口径一致。eq/fade/setpts/ass 不接（理由见 infra/ffmpeg/cover.py）。
+
+    None 的判据（每条都走 _extract_cover 的成片回退）：时间轴为空 / episode_paths
+    无首段那集 / 源文件不存在。
+    """
+    if not plan_data.timeline:
+        return None
+    first = plan_data.timeline[0]
+    raw = episode_paths.get(first.episode_id)
+    if raw is None:
+        return None
+    source = Path(raw)
+    if not source.is_file():
+        return None
+    seek_s = first.start + 1.5
+    out_w, out_h = out_size
+    try:
+        crop_x_ratio = face_x_ratio(source, seek_s)
+    except Exception:  # noqa: BLE001 - 封面属增强项：检测炸了一律中心裁
+        crop_x_ratio = None
+    composition = (
+        f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
+        f"{encoder._crop_filter(out_w, out_h, crop_x_ratio)},"
+        f"scale={out_w}:{out_h}"
+    )
+    return source, seek_s, composition
+
+
 def _extract_cover(
-    context: AppContext, export_id: str, out_path: Path, *, title: str | None = None
+    context: AppContext,
+    export_id: str,
+    out_path: Path,
+    *,
+    title: str | None = None,
+    plan_data: PlanData | None = None,
+    episode_paths: dict[str, str] | None = None,
+    out_size: tuple[int, int] | None = None,
 ) -> None:
-    """成品逐片钩帧：失败静默（封面缺失退化为占位图，不影响导出成功）。"""
+    """成品封面：优先从**源素材**截帧（无烧录字幕），失败退回成片截帧。
+
+    降级顺序（全程不 raise，封面属增强项）：
+    1. 源截帧（plan_data/episode_paths/out_size 齐备且源文件在盘上）；
+    2. 源截帧失败或未提供源输入 → 成片截帧（现状行为，带字幕仍比没封面强）；
+    3. 都失败 → 不落库（UI 占位图兜底）。
+    封面已存在直接 return（幂等）。
+    """
     covers_dir = context.data_dir / "covers" / "exports"
     covers_dir.mkdir(parents=True, exist_ok=True)
     cover_path = covers_dir / f"{export_id}.jpg"
     if cover_path.is_file():
         return
+    source_frame: tuple[Path, float, str] | None = None
+    if plan_data is not None and episode_paths is not None and out_size is not None:
+        try:
+            source_frame = _cover_source_frame(plan_data, episode_paths, out_size)
+        except Exception:  # noqa: BLE001 - 增强项自诊断失败也退回成片截
+            source_frame = None
+    if source_frame is not None:
+        source, seek_s, composition = source_frame
+        if ffmpeg_cover.extract_cover(
+            source, cover_path, seek_s=seek_s, title=title, composition_vf=composition
+        ):
+            exports_repo.set_cover(context.conn, export_id, str(cover_path))
+            return
     if ffmpeg_cover.extract_cover(out_path, cover_path, title=title):
         exports_repo.set_cover(context.conn, export_id, str(cover_path))
 
@@ -671,12 +737,31 @@ def render_export(
     # 原声段台词字幕的源（批次二）：同一份 asr_segments JSON 的**原始 dict** 视图，
     # 带 text/words（SpeechZone 只有 start/end，是 jitter 保护区的最小形状，不改它）。
     dialogue_items: dict[str, list[dict[str, Any]]] = {}
+    # A2 源硬字幕带（避让，不是擦除）：episode_id → (top, bottom) 归一化区间。
+    # 与 asr 同一趟预取循环顺带解析（每集一次 get，不逐段查库）；缺集/坏 JSON/
+    # 形状不对（非两元素数值对）一律不进缓存 → build_ass 收 None → 现状 margin_v，
+    # 逐字节不变。
+    subtitle_bands: dict[str, tuple[float, float]] = {}
     for segment in plan_data.timeline:
         episode_id = segment.episode_id
         if episode_id in dialogue_zones:
             continue
         record = analysis_repo.get(context.conn, episode_id)
-        if record is None or not record["asr_segments"]:
+        if record is None:
+            continue
+        band_raw = record.get("subtitle_band")
+        if band_raw:
+            try:
+                parsed = json.loads(str(band_raw))
+            except (TypeError, json.JSONDecodeError):
+                parsed = None
+            if (
+                isinstance(parsed, list)
+                and len(parsed) == 2
+                and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in parsed)
+            ):
+                subtitle_bands[episode_id] = (float(parsed[0]), float(parsed[1]))
+        if not record["asr_segments"]:
             continue
         try:
             raw_items = json.loads(record["asr_segments"])
@@ -734,7 +819,18 @@ def render_export(
                 }
             )
             cursor += span
-        ass_path.write_text(build_ass(lines, preset), encoding="utf-8")
+        ass_path.write_text(
+            build_ass(
+                lines,
+                preset,
+                source_band=subtitle_bands.get(
+                    plan_data.timeline[segment_index].episode_id
+                    if 0 <= segment_index < len(plan_data.timeline)
+                    else ""
+                ),
+            ),
+            encoding="utf-8",
+        )
         return str(ass_path)
 
     def dialogue_subtitle(segment_index: int, win_start: float, win_end: float) -> str | None:
@@ -760,7 +856,10 @@ def render_export(
         ass_dir = context.work_dir / "export" / export_id
         ass_dir.mkdir(parents=True, exist_ok=True)
         ass_path = ass_dir / f"seg_{segment_index:03d}.ass"
-        ass_path.write_text(build_ass(lines, preset), encoding="utf-8")
+        ass_path.write_text(
+            build_ass(lines, preset, source_band=subtitle_bands.get(episode_id)),
+            encoding="utf-8",
+        )
         return str(ass_path)
 
     # 输出编码：auto=硬编探测（黑帧实编验证，NVENC/QSV/VT 按平台候选），失败/关闭回退 libx264
@@ -803,8 +902,14 @@ def render_export(
         _selfcheck_one(context, export_id)
     with contextlib.suppress(OSError, ValueError):
         _extract_cover(
-            context, export_id, out_path, title=_cover_title(context, plan_row)
-        )  # 封面失败不影响导出成功
+            context,
+            export_id,
+            out_path,
+            title=_cover_title(context, plan_row),
+            plan_data=plan_data,
+            episode_paths=episode_paths,
+            out_size=out_size,
+        )  # 封面失败不影响导出成功（源截帧→成片截帧的降级链在 _extract_cover 内）
     return out_path
 
 

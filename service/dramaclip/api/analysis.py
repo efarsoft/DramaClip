@@ -217,7 +217,8 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         # analyzing 一并纳入：能开新任务即说明无并发分析，该状态必为崩溃/中断残留
         # done 但源签名失配（B8）：源被换过，旧 ASR/场景结果不可信，强制重分析
         targets = [
-            ep for ep in episodes_repo.list_by_project(context.conn, project_id)
+            ep
+            for ep in episodes_repo.list_by_project(context.conn, project_id)
             if ep["status"] in ("pending", "prescreened", "failed", "analyzing")
             or (ep["status"] == "done" and _source_stale(context, ep))
         ]
@@ -348,8 +349,7 @@ def _run_resync(
                 AsrSegment.model_validate(item) for item in json.loads(record["asr_segments"])
             ],
             scenes=[
-                SceneInfo.model_validate(item)
-                for item in json.loads(record["scene_data"] or "[]")
+                SceneInfo.model_validate(item) for item in json.loads(record["scene_data"] or "[]")
             ],
             audio=AudioFeatures.model_validate(json.loads(record["audio_features"] or "{}")),
         )
@@ -477,7 +477,9 @@ def _run_job(
             job_id=job_id,
         )
     try:
-        bars_by_episode, hotwords = _mine_hotwords(context, targets, cancel_event)
+        bars_by_episode, bands_by_episode, hotwords = _mine_hotwords(
+            context, targets, cancel_event
+        )
         for index, episode in enumerate(targets):
             if cancel_event.is_set():
                 context.job_store.mark_cancelled(job_id)
@@ -485,8 +487,16 @@ def _run_job(
             episode_id = str(episode["id"])
             bars = bars_by_episode.get(episode_id)
             if not _analyze_one(
-                context, job_id, episode, index, total, language, cancel_event,
-                ocr_bars=bars, hotwords=hotwords,
+                context,
+                job_id,
+                episode,
+                index,
+                total,
+                language,
+                cancel_event,
+                ocr_bars=bars,
+                ocr_band=bands_by_episode.get(episode_id),
+                hotwords=hotwords,
             ):
                 failures += 1
         context.job_store.mark_completed(job_id)
@@ -510,6 +520,7 @@ def _analyze_one(
     cancel_event: threading.Event,
     *,
     ocr_bars: list[OcrSegment] | None = None,
+    ocr_band: tuple[float, float] | None = None,
     hotwords: str = "",
 ) -> bool:
     """分析单集；返回是否成功（失败标记后继续其余集）。"""
@@ -552,7 +563,9 @@ def _analyze_one(
         episodes_repo.set_status(context.conn, episode_id, "failed")
         context.notifier.log("error", f"{label} 分析失败: {exc}")
         return False
-    asr_segments, ocr_segments = _fuse_ocr(context, episode, raw.asr_segments, ocr_bars)
+    asr_segments, ocr_segments, band = _fuse_ocr(
+        context, episode, raw.asr_segments, ocr_bars, ocr_band
+    )
     analysis_repo.upsert(
         context.conn,
         episode_id,
@@ -562,9 +575,9 @@ def _analyze_one(
         conflict_scores=json.dumps([s.model_dump() for s in semantic_result.conflict_scores]),
         highlights=json.dumps([h.model_dump() for h in semantic_result.highlights]),
         genre=semantic_result.genre or None,
-        ocr_segments=(
-            json.dumps([o.model_dump() for o in ocr_segments]) if ocr_segments else None
-        ),
+        ocr_segments=(json.dumps([o.model_dump() for o in ocr_segments]) if ocr_segments else None),
+        # A2 避让数据链落库：NULL=无硬字幕带/未探测/OCR 未装，烧录端对 NULL 回退现状边距
+        subtitle_band=(json.dumps([band[0], band[1]]) if band is not None else None),
     )
     if signature is not None:
         episodes_repo.set_source_signature(context.conn, episode_id, signature)
@@ -577,52 +590,66 @@ def _fuse_ocr(
     episode: dict[str, Any],
     asr: list[AsrSegment],
     ocr_bars: list[OcrSegment] | None = None,
-) -> tuple[list[AsrSegment], list[OcrSegment] | None]:
+    ocr_band: tuple[float, float] | None = None,
+) -> tuple[list[AsrSegment], list[OcrSegment] | None, tuple[float, float] | None]:
     """硬字幕 OCR 通道 + 融合（analysis.ocr_enabled 默认开）。
+
+    第三元是探测到的源字幕带（A2 避让）：即便没融合出字幕条也要回传落库——
+    带的位置是源片属性，与本轮台词抽取成败无关。
     """
     if context.settings.get("analysis.ocr_enabled", "1") != "1":
-        return asr, None
+        return asr, None, ocr_band
     if ocr_bars is None:
-        ocr_bars = _extract_bars(context, episode)
+        ocr_bars, ocr_band = _extract_bars(context, episode)
         if ocr_bars is None:
-            return asr, None
+            return asr, None, ocr_band
     if not ocr_bars:
-        return asr, None
-    return fusion.fuse(asr, ocr_bars), ocr_bars
+        return asr, None, ocr_band
+    return fusion.fuse(asr, ocr_bars), ocr_bars, ocr_band
 
 
-def _extract_bars(context: AppContext, episode: dict[str, Any]) -> list[OcrSegment] | None:
-    """单集 OCR 抽取；失败返回 None 并留痕（不阻塞分析主链路）。"""
+def _extract_bars(
+    context: AppContext, episode: dict[str, Any]
+) -> tuple[list[OcrSegment] | None, tuple[float, float] | None]:
+    """单集 OCR 抽取，返回 (字幕条, 源字幕带)；失败返回 (None, None) 并留痕（不阻塞分析主链路）。
+
+    字幕带随字幕条一起回传（A2 避让数据链）：调用方落库 episode_analysis.subtitle_band，
+    烧录字幕据此抬 MarginV 避开源片硬字幕——是避让不是擦除，源片像素不动。
+    """
     duration = float(episode["duration"] or 0)
     if duration <= 0:
-        return None
+        return None, None
     try:
         return subtitle_ocr.extract_subtitles(
             Path(str(episode["source_path"])),
-            context.work_dir / f"ocr_{episode["id"]}",
+            context.work_dir / f"ocr_{episode['id']}",
             duration_s=duration,
         )
     except ImportError:
-        return None  # rapidocr 未安装：ml extras 约定的纯 ASR 路径
+        return None, None  # rapidocr 未安装：ml extras 约定的纯 ASR 路径
     except Exception as exc:  # noqa: BLE001 - OCR 失败不影响分析主链路
         context.notifier.log("warn", f"OCR 字幕通道失败（不影响分析）: {exc}")
-        return None
+        return None, None
 
 
 def _mine_hotwords(
     context: AppContext,
     targets: list[dict[str, Any]],
     cancel_event: threading.Event,
-) -> tuple[dict[str, list[OcrSegment]], str]:
-    """阶段 A：全剧 OCR 抽取（落库）→ 挖掘全剧热词表。"""
+) -> tuple[dict[str, list[OcrSegment]], dict[str, tuple[float, float]], str]:
+    """阶段 A：全剧 OCR 抽取（落库）→ 挖掘全剧热词表；字幕带按集回传给逐集分析落库。"""
     bars_by_episode: dict[str, list[OcrSegment]] = {}
+    bands_by_episode: dict[str, tuple[float, float]] = {}
     if context.settings.get("analysis.ocr_enabled", "1") != "1":
-        return bars_by_episode, ""
+        return bars_by_episode, bands_by_episode, ""
     for episode in targets:
         if cancel_event.is_set():
             break
         episode_id = str(episode["id"])
-        bars = _extract_bars(context, episode)
+        bars, band = _extract_bars(context, episode)
+        if band is not None:
+            # 带是源片属性：即使本集没抽出字幕条（bars 为空）也记下来，逐集分析时落库
+            bands_by_episode[episode_id] = band
         if not bars:
             continue
         bars_by_episode[episode_id] = bars
@@ -632,5 +659,4 @@ def _mine_hotwords(
     hotwords = hotwords_engine.mine([b for bars in bars_by_episode.values() for b in bars])
     if hotwords:
         context.notifier.log("info", f"全剧热词表：{hotwords}")
-    return bars_by_episode, hotwords
-
+    return bars_by_episode, bands_by_episode, hotwords

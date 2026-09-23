@@ -63,14 +63,21 @@ def test_empty_scenes_safe() -> None:
 
 
 # ---- B9 节拍吸附 ---------------------------------------------------------
-# 夹具沿用本文件既有的场景表：top6 按叙事顺序，各段窗口 = [scene.start,
-# scene.start + 8s]（场景都长 12s，所以每个 end 都是「起点+8」的任意点，
-# 正是该被吸附到节拍上的那类切点；场景 start 不动——镜头边界语义点）。
+# 夹具用**空台词表**（asr=[]，与 w5 侧 B9 夹具同口径）：A3 之后有台词的场景窗长
+# 会收缩到台词 span+尾垫，而本组钉的是纯吸附行为。空台词 → 不收缩 → 各段窗口 =
+# [scene.start, scene.start + 8s]（场景都长 12s，所以每个 end 都是「起点+8」的
+# 任意点，正是该被吸附到节拍上的那类切点；场景 start 不动——镜头边界语义点）。
 # 基线（无 beats）各 end：8.0 / 18.0 / 28.0 / 38.0 / 48.0 / 58.0，CTA 59.0→62.0。
+# A3 的「吸附在收缩之后」由 test_scene_window_fit.py 带台词夹具单独钉。
 
 
 def _material_with_beats(beats: list[float]) -> casting.MaterialByEpisode:
-    return {"ep1": casting.EpisodeMaterial(number=1, asr=_segments(), beats=beats)}
+    return {"ep1": casting.EpisodeMaterial(number=1, asr=[], beats=tuple(beats))}
+
+
+def _material_no_beats() -> casting.MaterialByEpisode:
+    """无台词、无 beats 字段（默认 ()）：吸附基线的对照面。"""
+    return {"ep1": casting.EpisodeMaterial(number=1, asr=[])}
 
 
 def _ends(plan: object) -> list[float]:
@@ -115,7 +122,9 @@ def test_cta_card_is_never_snapped() -> None:
 def test_empty_beats_plan_is_byte_identical_to_the_unsnapped_baseline() -> None:
     """旧库降级（beats=[]）：计划必须与现状逐字节一致——这是 B9 的硬验收标准，
     钉成可执行断言而不是口头承诺。"""
-    baseline = build_subtitle_flow(stamp([(1, "ep1", _scenes())]), _material(), _STRATEGY)
+    baseline = build_subtitle_flow(
+        stamp([(1, "ep1", _scenes())]), _material_no_beats(), _STRATEGY
+    )
     degraded = build_subtitle_flow(
         stamp([(1, "ep1", _scenes())]), _material_with_beats([]), _STRATEGY
     )

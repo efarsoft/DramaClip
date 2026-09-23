@@ -1,5 +1,11 @@
 """项目封面：从视频截一帧生成缩略图（封面属增强项，失败不阻塞主流程）。
 
+A1 源截帧：成品封面必须从**源素材**截（api/export 侧传入源文件 + `composition_vf`），
+因为成片帧上烧着解说字幕，再叠 drawtext 大标题就是两行字打架、砸信息流点击率。
+`composition_vf` 只复现成片的**构图三级链**（increase 填充 → 跟脸裁窗 → 输出分辨率，
+见 encoder.cut_segment_args）；eq/fade/setpts/ass 一律不接——eq 不改构图、fade 会让
+封面发灰、ass 正是本次要去掉的字幕、setpts 属变速不改单帧几何。
+
 可选标题字层：给了 `title` 时在截帧上烧标题（drawtext）。转义方案选 `textfile=`——
 标题内容写临时 UTF-8 文件，drawtext 的 `:` `'` `\\` 文本转义坑全部绕开；滤镜串里
 只剩两处路径值，用与 `caption_font.fontsdir_option` 同款（真机验证过）的
@@ -26,12 +32,22 @@ _SPLIT_PUNCTUATION = "，。！？；：、,.!?;:"
 
 
 def extract_cover(
-    video_path: Path, out_path: Path, *, seek_s: float = 1.5, title: str | None = None
+    video_path: Path,
+    out_path: Path,
+    *,
+    seek_s: float = 1.5,
+    title: str | None = None,
+    composition_vf: str | None = None,
 ) -> bool:
     """先试钩子帧（默认成片 1.5s），越界回退 1s、再回退第一帧；均失败返回 False。
 
     给了 title（非空白）时先试烧标题字层；字层失败（drawtext 不支持/字体缺失）
     降级为无字层截帧并 warn，仍失败才返回 False。
+
+    `composition_vf`（A1 源截帧）：非空时作为滤镜链**前缀**叠在缩略图 scale/drawtext
+    之前，用于从源素材截帧时复现成片构图（increase 填充 → 跟脸裁窗 → 输出分辨率，
+    三级链由调用方拼好，见 api/export._cover_source_frame）；默认 None 时命令与旧
+    形状逐字节一致。
     """
     lines = _wrap_title(title) if title is not None else None
     if lines is not None:
@@ -40,12 +56,20 @@ def extract_cover(
             _LOGGER.warning("随包字体不可用，封面标题字层降级为无字层截帧：%r", title)
         else:
             try:
-                if _try_titled_cover(video_path, out_path, seek_s, face, lines):
+                if _try_titled_cover(video_path, out_path, seek_s, face, lines, composition_vf):
                     return True
             except OSError:
                 pass  # 连临时 textfile 都写不出：同样降级
             _LOGGER.warning("封面标题字层烧制失败，降级无字层截帧：%r", title)
-    return _seek_and_grab(video_path, out_path, seek_s, "scale=480:-2")
+    vf = _compose_vf("scale=480:-2", composition_vf)
+    return _seek_and_grab(video_path, out_path, seek_s, vf)
+
+
+def _compose_vf(thumbnail_vf: str, composition_vf: str | None) -> str:
+    """构图链前缀 + 缩略图链；composition_vf 为 None/空白时原样返回（旧形状逐字节一致）。"""
+    if composition_vf is None or not composition_vf.strip():
+        return thumbnail_vf
+    return f"{composition_vf},{thumbnail_vf}"
 
 
 def _seek_and_grab(video_path: Path, out_path: Path, seek_s: float, vf: str) -> bool:
@@ -129,7 +153,9 @@ def _filter_path(path: Path) -> str:
     return "'" + path.as_posix().replace(":", "\\:") + "'"
 
 
-def _drawtext_vf(font_face: Path, textfile: Path, lines: list[str]) -> str:
+def _drawtext_vf(
+    font_face: Path, textfile: Path, lines: list[str], composition_vf: str | None = None
+) -> str:
     opts = [
         f"fontfile={_filter_path(font_face)}",
         f"textfile={_filter_path(textfile)}",
@@ -141,11 +167,16 @@ def _drawtext_vf(font_face: Path, textfile: Path, lines: list[str]) -> str:
         "y=h-text_h-h/16",
         "line_spacing=8",
     ]
-    return "scale=480:-2,drawtext=" + ":".join(opts)
+    return _compose_vf("scale=480:-2,drawtext=" + ":".join(opts), composition_vf)
 
 
 def _try_titled_cover(
-    video_path: Path, out_path: Path, seek_s: float, font_face: Path, lines: list[str]
+    video_path: Path,
+    out_path: Path,
+    seek_s: float,
+    font_face: Path,
+    lines: list[str],
+    composition_vf: str | None = None,
 ) -> bool:
     """标题写 out_path 同目录临时 textfile，三段 seek 试烧字层；finally 删临时文件。"""
     fd, name = tempfile.mkstemp(prefix=".cover-title-", suffix=".txt", dir=out_path.parent)
@@ -153,7 +184,7 @@ def _try_titled_cover(
     textfile = Path(name)
     try:
         textfile.write_text("\n".join(lines), encoding="utf-8")
-        vf = _drawtext_vf(font_face, textfile, lines)
+        vf = _drawtext_vf(font_face, textfile, lines, composition_vf)
         return _seek_and_grab(video_path, out_path, seek_s, vf)
     finally:
         # Windows 上 ffmpeg 刚退出时句柄可能未释放：清理尽力而为，不许炸掉已成功的返回值

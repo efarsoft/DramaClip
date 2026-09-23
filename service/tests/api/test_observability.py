@@ -258,8 +258,8 @@ def test_start_job_leaves_conflict_and_genre_traces(
         audio={},
     )
     monkeypatch.setattr(analysis_api.pipeline, "analyze_episode", lambda **_kw: raw)
-    monkeypatch.setattr(analysis_api, "_mine_hotwords", lambda *_a, **_k: ({}, ""))
-    monkeypatch.setattr(analysis_api, "_fuse_ocr", lambda *_a, **_k: ([], None))
+    monkeypatch.setattr(analysis_api, "_mine_hotwords", lambda *_a, **_k: ({}, {}, ""))
+    monkeypatch.setattr(analysis_api, "_fuse_ocr", lambda *_a, **_k: ([], None, None))
 
     _rpc(harness, "analysis.start", {"project_id": project_id})
     traces = _traces(tmp_path)

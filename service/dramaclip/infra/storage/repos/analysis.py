@@ -19,18 +19,20 @@ def upsert(
     highlights: str | None = None,
     genre: str | None = None,
     ocr_segments: str | None = None,
+    subtitle_band: str | None = None,
 ) -> None:
     now = int(time.time() * 1000)
     conn.execute(
         "INSERT INTO episode_analysis"
         " (id, episode_id, asr_segments, scene_data, audio_features,"
-        "  conflict_scores, highlights, genre, ocr_segments, analyzed_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "  conflict_scores, highlights, genre, ocr_segments, subtitle_band, analyzed_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         " ON CONFLICT(episode_id) DO UPDATE SET"
         " asr_segments = excluded.asr_segments, scene_data = excluded.scene_data,"
         " audio_features = excluded.audio_features, conflict_scores = excluded.conflict_scores,"
         " highlights = excluded.highlights, genre = excluded.genre,"
         " ocr_segments = COALESCE(excluded.ocr_segments, episode_analysis.ocr_segments),"
+        " subtitle_band = COALESCE(excluded.subtitle_band, episode_analysis.subtitle_band),"
         " analyzed_at = excluded.analyzed_at",
         (
             uuid4().hex,
@@ -42,6 +44,7 @@ def upsert(
             highlights,
             genre,
             ocr_segments,
+            subtitle_band,
             now,
         ),
     )
@@ -53,6 +56,16 @@ def update_ocr_segments(conn: sqlite3.Connection, episode_id: str, segments_json
     cursor = conn.execute(
         "UPDATE episode_analysis SET ocr_segments = ?, analyzed_at = ? WHERE episode_id = ?",
         (segments_json, int(time.time() * 1000), episode_id),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def update_subtitle_band(conn: sqlite3.Connection, episode_id: str, band_json: str) -> bool:
+    """仅覆盖 subtitle_band（A2 源硬字幕带，JSON [top, bottom]），其余列保留。"""
+    cursor = conn.execute(
+        "UPDATE episode_analysis SET subtitle_band = ?, analyzed_at = ? WHERE episode_id = ?",
+        (band_json, int(time.time() * 1000), episode_id),
     )
     conn.commit()
     return cursor.rowcount > 0
@@ -89,7 +102,7 @@ def update_semantic(
 def get(conn: sqlite3.Connection, episode_id: str) -> dict[str, Any] | None:
     row = conn.execute(
         "SELECT id, episode_id, asr_segments, scene_data, audio_features, conflict_scores,"
-        " highlights, genre, characters, ocr_segments, analyzed_at"
+        " highlights, genre, characters, ocr_segments, subtitle_band, analyzed_at"
         " FROM episode_analysis WHERE episode_id = ?",
         (episode_id,),
     ).fetchone()
@@ -106,6 +119,7 @@ def get(conn: sqlite3.Connection, episode_id: str) -> dict[str, Any] | None:
         "genre",
         "characters",
         "ocr_segments",
+        "subtitle_band",
         "analyzed_at",
     )
     return dict(zip(keys, row, strict=True))

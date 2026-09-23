@@ -9,7 +9,9 @@ from dramaclip.engines.narration.casting import (
     MaterialByEpisode,
     beats_of,
     episode_order,
+    fit_scene_window,
     score_order,
+    strongest_span_of,
 )
 from dramaclip.engines.narration.models import (
     NarrationText,
@@ -18,11 +20,8 @@ from dramaclip.engines.narration.models import (
     TimelineSegment,
 )
 
-_CROSS_SCENE_S = 8.0        # 交叉解说单场景原声段基准时长
 _HOOK_TTS_FALLBACK_S = 4.0  # TTS 时长回填前的保守估算
-_ULTRA_CONFLICT_S = 8.0     # 超短版冲突画面时长
-# 节拍吸附后的段长下限（B9）：低于两秒的画面在竖屏上就是「闪了一下」，
-# 比不卡点更伤。现有测试没有钉这两个模式的段长下限，取 2.0s。
+# 节拍吸附后的段长下限（B9）；与 A3 收缩下限同口径（casting.SCENE_WINDOW_MIN_S）。
 _SNAP_MIN_LEN_S = 2.0
 
 
@@ -47,7 +46,11 @@ def build_cross(
     segments: list[TimelineSegment] = []
     texts: list[NarrationText] = []
     for index, scene in enumerate(picked):
-        duration = min(scene.end - scene.start, _CROSS_SCENE_S)
+        # A3：原声窗长跟随该场景最强金句的台词 span（+呼吸尾垫，收进 [2,8]，
+        # 不超场景边界；无台词保持 8s 满窗）。**吸附排在收缩之后**——见 casting.fit_scene_window。
+        duration = fit_scene_window(
+            scene.end - scene.start, strongest_span_of(material, scene)
+        )
         start = round(scene.start, 3)
         end = round(
             snap_window_end(
@@ -112,7 +115,11 @@ def build_ultra_short(
     # 而输入顺序来自 episodes_repo.list_by_project，没有契约（活库实测 333 个场景只有
     # 19 个不同分值）。score_order 已带 (集号, 起点, scene_index) 三个次键。
     best = min(scenes, key=score_order)
-    scene_span = min(best.end - best.start, _ULTRA_CONFLICT_S)
+    # A3：冲突窗长跟随该场景最强金句的台词 span；口径与 cross/金句流同一处真相
+    # （casting.fit_scene_window）。**吸附排在收缩之后**。
+    scene_span = fit_scene_window(
+        best.end - best.start, strongest_span_of(material, best)
+    )
     conflict_start = round(best.start, 3)
     conflict_end = round(
         snap_window_end(

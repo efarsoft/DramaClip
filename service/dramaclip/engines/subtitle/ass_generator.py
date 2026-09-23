@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
@@ -38,18 +39,62 @@ def _layout_of(preset: dict[str, Any], key: str = "default") -> str:
     return str(layout_map.get(key, _DEFAULT_LAYOUT))
 
 
-def _placement(layout: str, preset_margin_v: int) -> tuple[int, int]:
+def _placement(
+    layout: str, preset_margin_v: int, source_band: tuple[float, float] | None = None
+) -> tuple[int, int]:
     """布局名 → (ASS 九宫格对齐, MarginV)。
 
     居中档（5）下 MarginV 不参与纵向定位，给 0：沿用贴底那档的小留白会把整行字
     沉到画面底缘之外（业主截图「字幕下半被裁」即此形状）。
+
+    避让（A2）只作用于 bottom_bar（\an2）：居中档 MarginV 本就无意义，top_title
+    （\an8）的 MarginV 是距**顶**距离，底部源带与它不相干——两者零改动。
     """
     alignment = _ALIGNMENT.get(layout, _ALIGNMENT[_DEFAULT_LAYOUT])
-    return (alignment, 0) if alignment == 5 else (alignment, preset_margin_v)
+    if alignment == 5:
+        return (alignment, 0)
+    if alignment == 2:
+        return (alignment, avoid_source_band_margin_v(source_band, preset_margin_v))
+    return (alignment, preset_margin_v)
 
 
 def _margin_v(preset: dict[str, Any]) -> int:
     return int(preset.get("font", {}).get("margin_v", 80))
+
+
+# ── A2 源硬字幕带避让（不是擦除：源片像素不动，只把我们烧的字幕抬到源带顶之上）──
+#
+# 业主立锁「硬字幕擦除不当核心」约束的是擦除那条线；这里是避让——短剧源片常自带
+# 底部硬字幕，我们默认也烧底部，两行叠加观感崩。抬到不重叠为止，别的不做。
+#
+# 换算几何（单一真相，两处写死的数字都会在这里被测试钉住）：
+# - PlayResY = 1920（本文件 `_PLAY_RES_Y`，头部唯一来源）；视频按 PlayRes 坐标渲染，
+#   源带是「占画面高度比例」的归一化值，直接乘 PlayResY 就是像素，无需知道真实分辨率。
+# - \an2（bottom_bar）下 MarginV = 字幕**底边**距画面**底边**的像素数。
+# - 源带 top 是距画面**顶**的比例，故源带顶距画面底 = (1 - top) × PlayResY。
+# - 不重叠 ⇔ 我们字幕底边 ≥ 源带顶（像素）⇔ MarginV ≥ (1 - band.top) × PlayResY。
+#   仅在真重叠（所需 > 预设值）时抬：预设 80/90 只占画面底 ~4%，源带顶低于它时
+#   根本不重叠，无谓抬字幕会压画面主体、也偏离既有审美。
+# - 封顶 PlayResY×2/3：避让不能把字幕抬出演示区（源带探到画面中部属异常形状）。
+_AVOID_MARGIN_CAP_RATIO = 2 / 3
+
+
+def avoid_source_band_margin_v(
+    band: tuple[float, float] | None, preset_margin_v: int
+) -> int:
+    """归一化源字幕带 → bottom_bar 布局的 MarginV（避让源硬字幕，只抬不降）。
+
+    band 为 None（未探测/无硬字幕带/OCR 未装）或与预设边距不重叠时原样返回
+    preset_margin_v——降级不可见，生成的 ASS 与现状逐字节一致。
+    """
+    if band is None:
+        return preset_margin_v
+    top = min(max(float(band[0]), 0.0), 1.0)
+    # ceil 不是 int：(1-0.85)×1920 在浮点里是 287.999…，截断成 287 就压回源带顶 1px，
+    # 「不重叠」的验收（margin ≥ 源带顶距底像素）直接失守。
+    required = math.ceil((1.0 - top) * _PLAY_RES_Y)
+    cap = int(_PLAY_RES_Y * _AVOID_MARGIN_CAP_RATIO)
+    return max(preset_margin_v, min(required, cap))
 
 
 def _font_size(preset: dict[str, Any]) -> int:
@@ -78,9 +123,9 @@ _STYLE_FORMAT = (
 _EVENT_FORMAT = "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
 
 
-def _header(preset: dict[str, Any]) -> str:
+def _header(preset: dict[str, Any], source_band: tuple[float, float] | None = None) -> str:
     font = preset.get("font", {})
-    alignment, margin_v = _placement(_layout_of(preset), _margin_v(preset))
+    alignment, margin_v = _placement(_layout_of(preset), _margin_v(preset), source_band)
     # 族名不接受预设指定：预设能换字号/边距，但字面是随包资产，拆行上限按它标定
     style = (
         f"Style: DC,{caption_font.caption_font().family},{_font_size(preset)},"
@@ -184,7 +229,9 @@ def _span_body(
     return "".join(pieces)
 
 
-def _event_line(line: dict[str, Any], preset: dict[str, Any]) -> str | None:
+def _event_line(
+    line: dict[str, Any], preset: dict[str, Any], source_band: tuple[float, float] | None = None
+) -> str | None:
     text = str(line.get("text", "")).strip()
     if not text:
         return None
@@ -210,7 +257,9 @@ def _event_line(line: dict[str, Any], preset: dict[str, Any]) -> str | None:
     layout_key = (
         "climax" if emotion in ("anger", "triumph") and "climax" in layout_map else "default"
     )
-    alignment, margin_v = _placement(_layout_of(preset, layout_key), _margin_v(preset))
+    alignment, margin_v = _placement(
+        _layout_of(preset, layout_key), _margin_v(preset), source_band
+    )
 
     rhythm = str(dimensions.get("rhythm", {}).get("type", "whole_line"))
     duration_s = float(line["end"]) - float(line["start"])
@@ -306,8 +355,24 @@ def split_subtitle_text(text: str, max_len: int) -> list[str]:
     return [piece for piece in cleaned if piece] or [""]
 
 
-def build_ass(lines: list[dict[str, Any]], preset: dict[str, Any]) -> str:
+def build_ass(
+    lines: list[dict[str, Any]],
+    preset: dict[str, Any],
+    *,
+    source_band: tuple[float, float] | None = None,
+) -> str:
     """生成 ASS 字幕全文。
+
+    `source_band`（A2 避让口子）：源片硬字幕带的归一化 (top, bottom)，来自
+    episode_analysis.subtitle_band（JSON 两元数组）。给了且与 bottom_bar 布局真重叠
+    时抬 MarginV 避让；None/不重叠 → 输出与不给时逐字节一致（降级不可见）。
+    只影响 bottom_bar：center_single/center_multi/top_title 零改动。
+    接线（api/export.py，另一子任务名下）：从 analysis_repo.get(...)["subtitle_band"]
+    读 JSON 两元数组转 tuple，作关键字参传进来即可。
     """
-    events = [event for line in lines if (event := _event_line(line, preset)) is not None]
-    return "\n".join([_header(preset), *events]) + "\n"
+    events = [
+        event
+        for line in lines
+        if (event := _event_line(line, preset, source_band)) is not None
+    ]
+    return "\n".join([_header(preset, source_band), *events]) + "\n"

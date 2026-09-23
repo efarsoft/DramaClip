@@ -589,3 +589,49 @@ def test_prescreen_repcreens_done_episode_with_changed_source(
     refreshed = episodes_repo.list_by_project(memory_db, project_id)[0]
     assert refreshed["status"] == "prescreened", "源变更的 done 集应被重新预筛"
     assert refreshed["source_signature"] == _expected_signature(harness, source)
+
+
+# ── A2：源硬字幕带落库（避让数据链：探测 → episode_analysis.subtitle_band）──────
+
+
+def test_detected_subtitle_band_is_persisted(
+    harness: Harness,
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """extract_subtitles 回传的 band 必须落库，不能用完即弃。"""
+
+    def fake_extract(*_a: Any, **_k: Any) -> Any:
+        return ([], (0.76, 0.9))
+
+    monkeypatch.setattr(analysis_api.subtitle_ocr, "extract_subtitles", fake_extract)
+    project_id = _make_project(harness, tmp_path, sample_video, copies=1)
+    first = harness.rpc("analysis.start", {"project_id": project_id})
+    assert harness.wait_done(str(first["job_id"]))["status"] == "completed"
+    episode_id = str(episodes_repo.list_by_project(memory_db, project_id)[0]["id"])
+    record = analysis_repo.get(memory_db, episode_id)
+    assert record is not None
+    assert json.loads(str(record["subtitle_band"])) == [0.76, 0.9]
+
+
+def test_ocr_import_error_leaves_band_null_and_does_not_crash(
+    harness: Harness,
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """降级不可见：rapidocr 未装（ImportError）→ 分析照常完成，band 落 NULL。"""
+
+    def fake_extract(*_a: Any, **_k: Any) -> Any:
+        raise ImportError("rapidocr_onnxruntime")
+
+    monkeypatch.setattr(analysis_api.subtitle_ocr, "extract_subtitles", fake_extract)
+    project_id = _make_project(harness, tmp_path, sample_video, copies=1)
+    first = harness.rpc("analysis.start", {"project_id": project_id})
+    assert harness.wait_done(str(first["job_id"]))["status"] == "completed"
+    episode_id = str(episodes_repo.list_by_project(memory_db, project_id)[0]["id"])
+    record = analysis_repo.get(memory_db, episode_id)
+    assert record is not None and record["subtitle_band"] is None

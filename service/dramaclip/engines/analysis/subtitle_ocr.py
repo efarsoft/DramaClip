@@ -63,8 +63,14 @@ def extract_subtitles(
     duration_s: float,
     ocr: OcrCallable | None = None,
     band: tuple[float, float] | None = None,
-) -> list[OcrSegment]:
-    """抽取全集硬字幕条。ocr 可注入（测试）；band 可传入已探测的字幕带。"""
+) -> tuple[list[OcrSegment], tuple[float, float] | None]:
+    """抽取全集硬字幕条，并回传字幕带 (segments, band)。
+
+    ocr 可注入（测试）；band 可传入已探测的字幕带（原样回传）。回传 band 是 A2
+    避让数据链的起点：调用方落库 episode_analysis.subtitle_band，烧录字幕据此抬
+    MarginV，不把我们的字幕叠到源片硬字幕上。未探到带时 band 为 None（NULL 语义：
+    无硬字幕带/未探测，消费端一律回退现状边距）。
+    """
     work_dir.mkdir(parents=True, exist_ok=True)
     if ocr is None:
         ocr = _rapidocr()
@@ -76,7 +82,7 @@ def extract_subtitles(
         picked_band = _pick_band([boxes for _t, boxes in probes])
     if picked_band is None:
         _LOGGER.info("未定位到字幕带，跳过 OCR 通道：%s", video_path.name)
-        return []
+        return [], None
     frames = _sample_frames(video_path, work_dir, picked_band)
     results: list[tuple[float, FrameResult]] = []
     for index, frame in enumerate(frames):
@@ -84,7 +90,7 @@ def extract_subtitles(
         t0 = index / _SAMPLE_FPS
         results.append((t0, boxes))
         frame.unlink(missing_ok=True)
-    return _merge_runs(results)
+    return _merge_runs(results), (picked_band.top, picked_band.bottom)
 
 
 def _probe_frames(
