@@ -1,6 +1,6 @@
 /** preload：contextBridge 暴露 window.dramaclip（渲染层唯一入口，docs/desktop/00 §3）。 */
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { DataPaths, DramaClipBridge, ServiceEvent } from '@dramaclip/protocol';
+import type { CopyFilesResult, DataPaths, DramaClipBridge, RevealResult, ServiceEvent } from '@dramaclip/protocol';
 
 const api = {
   rpc: (method: string, params: Record<string, unknown> = {}): Promise<unknown> =>
@@ -14,8 +14,10 @@ const api = {
     ipcRenderer.invoke('dialog:pickVideoFile') as Promise<string | null>,
   pickAudioFile: (): Promise<string | null> =>
     ipcRenderer.invoke('dialog:pickAudioFile') as Promise<string | null>,
-  revealInFolder: (path: string): Promise<void> =>
-    ipcRenderer.invoke('shell:reveal', path) as Promise<void>,
+  revealInFolder: (path: string): Promise<RevealResult> =>
+    ipcRenderer.invoke('shell:reveal', path) as Promise<RevealResult>,
+  copyFiles: (files: readonly string[], destDir: string): Promise<CopyFilesResult> =>
+    ipcRenderer.invoke('shell:copyFiles', [...files], destDir) as Promise<CopyFilesResult>,
   windowControl: (action: 'minimize' | 'maximize-toggle' | 'close'): Promise<void> =>
     ipcRenderer.invoke('window:control', action) as Promise<void>,
   onServiceEvent: (callback: (event: ServiceEvent) => void): (() => void) => {

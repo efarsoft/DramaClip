@@ -1,156 +1,220 @@
-/** 成品库：按剧分组（规格 §4.5）——每部剧一个分区，片单横向滑动，点击进详情。 */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+/** 成品库（09-10 §4.5 定案A + 卷三图5）：按剧分组、组内网格；卡片带四项自检徽章；
+ * 批量三件（打开文件夹/复制到/删除入回收）+ 自检筛选 + 历史成片补测。
+ * 失败态纪律（意见01）：取不到 ≠ 一直在取——原文上屏 + 真重试，旧数据在手时横幅压顶。 */
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { App as AntdApp, Card, Empty } from 'antd';
-import { FolderOpenOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Empty } from 'antd';
+import { SafetyCertificateOutlined } from '@ant-design/icons';
 import type { WorkItem } from '@dramaclip/protocol';
-import { listWorks, mediaUrl, projectApi, revealInFolder } from '../../services/client';
-import { useUiStore } from '../../stores/ui';
+import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
-import { MODE_INFO, modeLabel } from '../../components/modeMeta';
+import { BatchBar } from './BatchBar';
+import { PreviewModal } from './PreviewModal';
+import { WorkCard } from './WorkCard';
+import { useWorksBatch } from './useWorksBatch';
+import { useWorksLoad, useWorksPageActions } from './useWorksData';
+import { groupWorks, WORKS_FILTERS, type WorkGroup, type WorksFilterKey } from './worksView';
 
-/** 模式色板（§3.4）：六枚全部从 tokens 派生，九种模式按序循环取用——色值只在 theme.ts 有一份。 */
-const MODE_COLORS = [
-  tokens.colorPrimary,
-  tokens.colorAccent,
-  tokens.colorSuccess,
-  tokens.colorWarning,
-  tokens.colorError,
-  tokens.colorInfo,
-] as const;
-
-function modeColor(mode: string | undefined): string {
-  if (mode === undefined) return tokens.textTertiary;
-  const index = MODE_INFO.findIndex((item) => item.mode === mode);
-  return MODE_COLORS[index % MODE_COLORS.length] ?? tokens.colorPrimary;
-}
-
-function durationLabel(s: number | undefined): string {
-  if (s === undefined || s <= 0) return '';
-  const m = Math.floor(s / 60);
-  const sec = Math.round(s % 60);
-  return `${String(m)}:${String(sec).padStart(2, '0')}`;
-}
-
-function formatDate(ms: number | undefined): string {
-  if (ms === undefined) return '';
-  const date = new Date(ms);
-  return `${String(date.getMonth() + 1)}/${String(date.getDate())}`;
-}
-
-interface WorkGroup {
-  readonly projectId: string;
-  readonly name: string;
-  readonly works: WorkItem[];
-}
-
-/** 按剧分组；剧内按完成时间倒序，剧间按最新成片时间倒序。 */
-function groupWorks(works: WorkItem[]): WorkGroup[] {
-  const map = new Map<string, WorkGroup>();
-  for (const work of works) {
-    const group = map.get(work.project_id) ?? {
-      projectId: work.project_id,
-      name: work.project_name,
-      works: [],
-    };
-    group.works.push(work);
-    map.set(work.project_id, group);
-  }
-  const list = [...map.values()];
-  for (const group of list) {
-    group.works.sort(
-      (a, b) => (b.completed_at ?? b.id.localeCompare(a.id)) - ((a.completed_at ?? 0)),
-    );
-  }
-  return list.sort((a, b) => {
-    const aLatest = Math.max(...a.works.map((w) => w.completed_at ?? 0));
-    const bLatest = Math.max(...b.works.map((w) => w.completed_at ?? 0));
-    return bLatest - aLatest;
-  });
-}
-
-/** 成品库页（导航「成品」）：按剧分组，剧内片单横向滑动。 */
-export function WorksPage() {
+/** 成品库页（导航「成品」）。 */
+export function WorksPage(): React.ReactElement {
   const navigate = useNavigate();
-  const serviceState = useUiStore((state) => state.serviceState);
-  const [works, setWorks] = useState<WorkItem[] | null>(null);
-  const [covers, setCovers] = useState<Map<string, string>>(new Map());
-
-  const load = useCallback(async () => {
-    const [items, projects] = await Promise.all([
-      listWorks(),
-      projectApi.list().catch(() => []),
-    ]);
-    setWorks(items);
-    setCovers(new Map(projects.map((p) => [p.id, p.cover_path ?? ''])));
-  }, []);
-
-  // 服务就绪前 RPC 会失败（首进偶发 -32603 即此因）；ready 后（重）加载一次
-  useEffect(() => {
-    if (serviceState !== 'ready') return;
-    void load().catch(() => undefined);
-  }, [load, serviceState]);
-
+  const [filter, setFilter] = useState<WorksFilterKey>('all');
+  const [preview, setPreview] = useState<WorkItem | null>(null);
+  const { works, error, covers, load } = useWorksLoad(filter);
+  const { onSelfcheck, onFolder } = useWorksPageActions();
+  const batch = useWorksBatch(works ?? [], () => {
+    void load();
+  });
   const groups = useMemo<WorkGroup[]>(() => (works === null ? [] : groupWorks(works)), [works]);
-
-  const total = works?.length ?? 0;
-
   return (
     <PageShell>
       <PageHeader
         title="成品库"
-        chip={`共 ${String(total)} 个`}
-        desc="按剧分组的全部成片；点击卡片查看详情、文案与候选标题"
+        chip={`共 ${String(works?.length ?? 0)} 个`}
+        desc="按剧分组的全部成片：质检挑片、批量整理、追溯回方案"
+        actions={
+          <Button icon={<SafetyCertificateOutlined />} onClick={onSelfcheck}>
+            补测自检
+          </Button>
+        }
       />
-
-      {works === null ? (
-        <Card loading />
-      ) : groups.length === 0 ? (
-        <Card>
-          <Empty description="还没有完成的成片——去项目里生成并导出第一个作品吧" />
-        </Card>
-      ) : (
-        <GroupList groups={groups} covers={covers} onOpen={(id) => { void navigate(`/works/${id}`); }} />
-      )}
+      <FilterRow filter={filter} onChange={setFilter} />
+      <FailureBanner error={error} stale={works !== null} onRetry={load} />
+      <WorksBody
+        works={works}
+        error={error}
+        filter={filter}
+        groups={groups}
+        covers={covers}
+        selectedIds={batch.selectedIds}
+        onOpen={(id) => { void navigate(`/works/${id}`); }}
+        onPreview={setPreview}
+        onJumpPlan={(work) => { void navigate(`/projects/${work.project_id}/produce?focus=planning`); }}
+        onFolder={onFolder}
+        onToggleSelect={batch.toggle}
+      />
+      <BatchBar
+        selected={batch.selected}
+        actions={{
+          onOpenFolders: () => { void batch.openFolders(); },
+          onCopyTo: () => { void batch.copyTo(); },
+          onDelete: batch.confirmDelete,
+          onClear: batch.clear,
+        }}
+      />
+      <PreviewModal work={preview} onClose={() => { setPreview(null); }} />
     </PageShell>
   );
 }
 
-function GroupList({
-  groups,
-  covers,
-  onOpen,
+/** 加载失败横幅：错误原文不截断；手里还有旧数据时如实标注「可能已过期」。 */
+function FailureBanner({
+  error,
+  stale,
+  onRetry,
 }: {
+  error: string;
+  stale: boolean;
+  onRetry: () => Promise<void>;
+}): React.ReactElement | null {
+  if (error === '') return null;
+  return (
+    <Alert
+      type="error"
+      showIcon
+      title={
+        stale
+          ? `成品列表刷新失败（下列内容可能已过期）：${error}`
+          : `成品列表加载失败：${error}`
+      }
+      action={
+        <Button size="small" onClick={() => { void onRetry(); }}>
+          重试
+        </Button>
+      }
+    />
+  );
+}
+
+/** 自检筛选 chip 行（#30「筛选·自检通过」）：选中态用主色描边+软底，不与勾选铺底抢通道。 */
+function FilterRow({
+  filter,
+  onChange,
+}: {
+  filter: WorksFilterKey;
+  onChange: (key: WorksFilterKey) => void;
+}): React.ReactElement {
+  return (
+    <div style={{ display: 'flex', gap: tokens.spaceSm, alignItems: 'center', flexWrap: 'wrap' }}>
+      {WORKS_FILTERS.map((item) => {
+        const active = item.key === filter;
+        return (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => { onChange(item.key); }}
+            style={{
+              ...mixins.chip(),
+              cursor: 'pointer',
+              background: active ? tokens.accentSoft : tokens.bgElevated,
+              color: active ? tokens.colorPrimary : tokens.textSecondary,
+              border: `1px solid ${active ? tokens.colorPrimary : 'transparent'}`,
+            }}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+interface WorksBodyProps {
+  works: WorkItem[] | null;
+  error: string;
+  filter: WorksFilterKey;
   groups: WorkGroup[];
   covers: Map<string, string>;
+  selectedIds: ReadonlySet<string>;
   onOpen: (exportId: string) => void;
-}): React.ReactElement {
-  const { message } = AntdApp.useApp();
+  onPreview: (work: WorkItem) => void;
+  onJumpPlan: (work: WorkItem) => void;
+  onFolder: (work: WorkItem) => void;
+  onToggleSelect: (id: string) => void;
+}
+
+function WorksBody(props: WorksBodyProps): React.ReactElement {
+  const { works, error, filter, groups } = props;
+  if (works === null) {
+    return error === '' ? <Card loading /> : <Empty description="什么都没取到——先修复上面的错误" />;
+  }
+  if (groups.length === 0) {
+    const label = WORKS_FILTERS.find((item) => item.key === filter)?.label ?? '';
+    return (
+      <Card>
+        <Empty
+          description={
+            filter === 'all'
+              ? '还没有完成的成片——去项目里生成并导出第一个作品吧'
+              : `「${label}」筛选下没有成片${filter === 'unchecked' ? '（全部都已自检）' : ''}`
+          }
+        />
+      </Card>
+    );
+  }
+  return <GroupGrid {...props} />;
+}
+
+function GroupGrid({
+  groups,
+  covers,
+  selectedIds,
+  onOpen,
+  onPreview,
+  onJumpPlan,
+  onFolder,
+  onToggleSelect,
+}: WorksBodyProps): React.ReactElement {
   return (
     <>
       {groups.map((group) => (
         <PageSection
           key={group.projectId}
           title={group.name}
-          extra={<span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>{`${String(group.works.length)} 条`}</span>}
+          extra={
+            <span
+              style={{
+                fontSize: tokens.text.badge.size,
+                lineHeight: tokens.text.badge.leading,
+                color: tokens.textTertiary,
+              }}
+            >
+              {`${String(group.works.length)} 条`}
+            </span>
+          }
           dense
         >
-          <div style={{ display: 'flex', gap: tokens.spaceMd, overflowX: 'auto', paddingBottom: tokens.spaceSm }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
+              gap: tokens.spaceLg,
+              padding: tokens.spaceLg,
+            }}
+          >
             {group.works.map((work) => (
               <WorkCard
                 key={work.id}
                 work={work}
-                cover={covers.get(work.project_id) ?? undefined}
-                onOpen={() => {
-                  onOpen(work.id);
-                }}
-                onFolder={async () => {
-                  try {
-                    await revealInFolder(work.output_path);
-                  } catch (error: unknown) {
-                    message.error(error instanceof Error ? error.message : String(error));
-                  }
+                projectCover={covers.get(work.project_id)}
+                selected={selectedIds.has(work.id)}
+                actions={{
+                  onOpen: () => { onOpen(work.id); },
+                  onPreview: () => { onPreview(work); },
+                  onJumpPlan: () => { onJumpPlan(work); },
+                  onFolder: () => { onFolder(work); },
+                  onToggleSelect: () => { onToggleSelect(work.id); },
                 }}
               />
             ))}
@@ -159,142 +223,4 @@ function GroupList({
       ))}
     </>
   );
-}
-
-function WorkCard({
-  work,
-  cover,
-  onOpen,
-  onFolder,
-}: {
-  work: WorkItem;
-  cover?: string;
-  onOpen: () => void;
-  onFolder: () => Promise<void>;
-}): React.ReactElement {
-  const { message } = AntdApp.useApp();
-
-  const folder = (event: React.MouseEvent): void => {
-    event.stopPropagation();
-    void onFolder().catch((error: unknown) => {
-      message.error(error instanceof Error ? error.message : String(error));
-    });
-  };
-
-  return (
-    <div
-      onClick={() => {
-        onOpen();
-      }}
-      style={{ width: 150, flexShrink: 0, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}
-    >
-      <WorkPoster work={work} cover={cover} onFolder={folder} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
-        <span>{formatDate(work.completed_at)}</span>
-        <span style={{ marginLeft: 'auto', fontFamily: tokens.fontFamilyMono }}>{formatSize(work.size_bytes)}</span>
-      </div>
-    </div>
-  );
-}
-
-function WorkPoster({
-  work,
-  cover,
-  onFolder,
-}: {
-  work: WorkItem;
-  cover?: string;
-  onFolder: (event: React.MouseEvent) => void;
-}): React.ReactElement {
-  const tint = modeColor(work.narration_mode);
-  return (
-    <div
-      className="work-poster"
-      style={{
-        position: 'relative',
-        aspectRatio: '9 / 16',
-        borderRadius: tokens.radiusCard,
-        overflow: 'hidden',
-        background: tokens.bgElevated,
-        border: `1px solid ${tokens.borderSecondary}`,
-      }}
-    >
-      {cover !== undefined ? (
-        <img
-          src={mediaUrl(cover)}
-          alt=""
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-        />
-      ) : (
-        <PlayCircleOutlined style={{ fontSize: tokens.glyph.poster, color: tint, position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
-      )}
-      <span
-        style={{
-          position: 'absolute', inset: 0,
-          background: tokens.posterScrim,
-        }}
-      />
-      <PosterBadges work={work} />
-      <div className="work-poster-folder">
-        <FolderButton onClick={onFolder} />
-      </div>
-    </div>
-  );
-}
-
-function PosterBadges({ work }: { work: WorkItem }): React.ReactElement {
-  return (
-    <>
-      <span
-        style={{
-          position: 'absolute', left: 6, top: 6,
-          background: tokens.posterCaption, color: tokens.colorWhite,
-          fontSize: tokens.text.badge.size,
-          lineHeight: tokens.text.badge.leading, padding: '1px 6px', borderRadius: tokens.radiusChip,
-        }}
-      >
-        {modeLabel(work.narration_mode)}
-      </span>
-      <span
-        style={{
-          position: 'absolute', right: 6, bottom: 6,
-          background: tokens.posterCaption, color: tokens.colorWhite,
-          fontSize: tokens.text.badge.size,
-          lineHeight: tokens.text.badge.leading, padding: '1px 6px', borderRadius: tokens.radiusChip,
-          fontFamily: tokens.fontFamilyMono,
-        }}
-      >
-        {durationLabel(work.duration_s)}
-      </span>
-    </>
-  );
-}
-
-function FolderButton({ onClick }: { onClick: (event: React.MouseEvent) => void }): React.ReactElement {
-  return (
-    <button
-      type="button"
-      title="打开所在文件夹"
-      onClick={onClick}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 4,
-        background: 'none', border: 'none', padding: 0,
-        color: tokens.colorWhite, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, cursor: 'pointer',
-      }}
-      onMouseEnter={(event) => {
-        event.currentTarget.style.color = tokens.colorPrimary;
-      }}
-      onMouseLeave={(event) => {
-        event.currentTarget.style.color = tokens.colorWhite;
-      }}
-    >
-      <FolderOpenOutlined />
-      打开文件夹
-    </button>
-  );
-}
-
-function formatSize(bytes: number | undefined): string {
-  if (bytes === undefined || bytes <= 0) return '—';
-  return `${(bytes / 1048576).toFixed(1)} MB`;
 }

@@ -573,11 +573,25 @@ export interface DramaClipBridge {
   /** 原生视频文件选择；用户取消返回 null。 */
   pickVideoFile(): Promise<string | null>;
   pickAudioFile(): Promise<string | null>;
-  /** 在系统文件管理器中定位文件。 */
-  revealInFolder(path: string): Promise<void>;
+  /** 在系统文件管理器中定位文件；路径不存在时 ok=false 带原因（按钮不装死）。 */
+  revealInFolder(path: string): Promise<RevealResult>;
+  /** 复制文件到指定目录（成品库批量「复制到…」）；同名不覆盖，逐个报成败。 */
+  copyFiles(files: readonly string[], destDir: string): Promise<CopyFilesResult>;
   /** 自定义标题栏窗口控制（frame:false）。 */
   windowControl(action: 'minimize' | 'maximize-toggle' | 'close'): Promise<void>;
   onServiceEvent(callback: (event: ServiceEvent) => void): () => void;
+}
+
+/** shell:reveal 的结果：定位失败要有原因原文，不做无声按钮。 */
+export interface RevealResult {
+  readonly ok: boolean;
+  readonly reason?: string;
+}
+
+/** shell:copyFiles 的结果：逐文件成败，失败带原因原文。 */
+export interface CopyFilesResult {
+  readonly copied: readonly string[];
+  readonly failed: readonly { readonly path: string; readonly reason: string }[];
 }
 
 /** 本地数据目录（主进程 dataDir 锚点 + 服务端 _SUBDIRS 同名约定）。 */
@@ -586,6 +600,8 @@ export interface DataPaths {
   readonly outputs: string;
   readonly models: string;
   readonly logs: string;
+  /** 已删除成片的暂存目录（<root>/.trash/<日期>/，§3.4 危险操作规矩）。 */
+  readonly trash: string;
 }
 
 export const METHOD_NAMES = [

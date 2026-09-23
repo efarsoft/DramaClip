@@ -1,6 +1,7 @@
 /** 渲染层唯一 IPC 出口（docs/desktop/01 §4）。组件禁止直接调 window.dramaclip。 */
 import type {
   AnalysisJobStatus,
+  CopyFilesResult,
   EngineConfig,
   StyleInfo,
   WorkItem as WorksItem,
@@ -13,6 +14,7 @@ import type {
   ExportSubmitResult,
   JobsListResult,
   PlanDetail,
+  RevealResult,
   TitleCandidate,
   HealthResult,
   ImportInspection,
@@ -63,8 +65,13 @@ export function pickAudioFile(): Promise<string | null> {
   return bridge().pickAudioFile();
 }
 
-export function revealInFolder(path: string): Promise<void> {
+export function revealInFolder(path: string): Promise<RevealResult> {
   return bridge().revealInFolder(path);
+}
+
+/** 复制文件到指定目录（成品库批量「复制到…」）；同名不覆盖，逐文件报成败。 */
+export function copyFiles(files: readonly string[], destDir: string): Promise<CopyFilesResult> {
+  return bridge().copyFiles(files, destDir);
 }
 
 export function windowControl(action: 'minimize' | 'maximize-toggle' | 'close'): Promise<void> {
@@ -126,9 +133,12 @@ export const analysisApi = {
     rpc<AnalysisResults>('analysis.results', { project_id: projectId }),
 } as const;
 
+/** 作品库筛选（09-10 #30「筛选·自检通过」）；'all' 只在界面层存在，不发服务端。 */
+export type WorksFilter = 'passed' | 'failed' | 'partial' | 'unchecked';
+
 /** 作品库：跨项目已完成成片。 */
-export function listWorks(limit = 60): Promise<WorksItem[]> {
-  return rpc<WorksItem[]>('export.list_works', { limit });
+export function listWorks(limit = 60, state?: WorksFilter): Promise<WorksItem[]> {
+  return rpc<WorksItem[]>('export.list_works', state === undefined ? { limit } : { limit, state });
 }
 
 export const narrationApi = {
@@ -167,6 +177,20 @@ export const exportApi = {
     rpc<{ ok: boolean; generated: number }>('export.ensure_covers', { limit }),
   get: (exportId: string): Promise<ExportJob> =>
     rpc<ExportJob>('export.get', { export_id: exportId }),
+  /** 删除成片（§3.4）：服务端把文件移入 .trash/<日期>/ 后删记录；missing=盘上已缺的文件。 */
+  delete: (exportId: string): Promise<{ ok: boolean; trashed: string[]; missing: string[] }> =>
+    rpc<{ ok: boolean; trashed: string[]; missing: string[] }>('export.delete', { export_id: exportId }),
+  /** 历史成片补测四项自检（job 化）；给 exportIds 则重测指定条目。 */
+  selfcheck: (
+    exportIds?: string[],
+    limit?: number,
+  ): Promise<{ ok: boolean; job_id: string | null; queued: number }> =>
+    rpc<{ ok: boolean; job_id: string | null; queued: number }>(
+      'export.selfcheck',
+      exportIds === undefined
+        ? limit === undefined ? {} : { limit }
+        : { export_ids: exportIds },
+    ),
 } as const;
 
 export const titlesApi = {

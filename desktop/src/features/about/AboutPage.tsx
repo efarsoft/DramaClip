@@ -3,6 +3,7 @@
  * 「检查更新」与公众号/打赏二维码未实装——缺席而非假控件，实装后在此补。
  */
 import { InfoOutlined, PlayCircleFilled } from '@ant-design/icons';
+import { App as AntdApp } from 'antd';
 import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import { appPaths, appVersion, revealInFolder, systemApi } from '../../services/client';
@@ -137,11 +138,12 @@ function VersionRow({ label, value }: { label: string; value: string }): ReactEl
 }
 
 function LocalDataBlock(): ReactElement {
-  const rows: readonly { label: string; key: 'root' | 'outputs' | 'models' | 'logs' }[] = [
+  const rows: readonly { label: string; key: 'root' | 'outputs' | 'models' | 'logs' | 'trash' }[] = [
     { label: '成品目录', key: 'outputs' },
     { label: '数据与数据库', key: 'root' },
     { label: '模型目录', key: 'models' },
     { label: '日志（含 LLM 留痕）', key: 'logs' },
+    { label: '回收站（删除的成片按日期暂存，清空才真删）', key: 'trash' },
   ];
   return (
     <PageSection title="本地数据" dense>
@@ -159,12 +161,14 @@ function DataPathRow({
   pathKey,
 }: {
   label: string;
-  pathKey: 'root' | 'outputs' | 'models' | 'logs';
+  pathKey: 'root' | 'outputs' | 'models' | 'logs' | 'trash';
 }): ReactElement {
+  const { message } = AntdApp.useApp();
   const open = (): void => {
     void appPaths()
-      .then((paths) => {
-        return revealInFolder(paths[pathKey]);
+      .then((paths) => revealInFolder(paths[pathKey]))
+      .then((result) => {
+        if (!result.ok) message.info(result.reason ?? '打不开该目录');
       })
       .catch(() => undefined);
   };

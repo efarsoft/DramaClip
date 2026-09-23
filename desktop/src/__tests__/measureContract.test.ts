@@ -62,7 +62,6 @@ function measureDebt(): Record<string, number> {
  */
 const MEASURE_DEBT: Readonly<Record<string, number>> = {
   'features/home/EnvPanel.tsx': 6,
-  'features/works/WorksPage.tsx': 3,
   'features/analysis/EpisodeListPanel.tsx': 2,
   'features/analysis/StepsNav.tsx': 2,
   'features/analysis/TranscriptCard.tsx': 2,
@@ -78,7 +77,6 @@ const MEASURE_DEBT: Readonly<Record<string, number>> = {
   'features/narration/ExportsCard.tsx': 1,
   'features/narration/StyleSelectCard.tsx': 1,
   'features/settings/SettingsPage.tsx': 1,
-  'features/works/WorksDetailPage.tsx': 1,
 };
 
 describe('§8.3 度量口径与棘轮', () => {
@@ -124,9 +122,10 @@ describe('§8.3 度量口径与棘轮', () => {
   it('扫描面不得缩水：债务表非空且真扫到已知债文件', () => {
     const found = measureDebt();
     // 下限随合法还债下移（只减不增，§8.3）：P-B2 把 RecentWorks/StatChips/ContinueCard
-    // 三块吸收进 DramaMatrix，P-B3 把 ProjectCard 重写成零字面量的 DramaCard，22 → 18。
+    // 三块吸收进 DramaMatrix，P-B3 把 ProjectCard 重写成零字面量的 DramaCard，22 → 18；
+    // P-D 重写 WorksPage（拆成 worksView/WorkCard 等）与 WorksDetailPage 归零，18 → 16。
     // 它防的是扫描面被删窄，不是禁止还债——逐文件对账在下面那条，才是真棘轮。
-    expect(Object.keys(found).length).toBeGreaterThanOrEqual(18);
+    expect(Object.keys(found).length).toBeGreaterThanOrEqual(16);
     expect(found, 'EnvPanel 的 6 处是最密的一屏，扫不到就是扫描面被删窄').toHaveProperty(
       'features/home/EnvPanel.tsx',
       6,
@@ -150,6 +149,8 @@ const TEXT_FIELDS: Readonly<Record<string, readonly string[]>> = {
   leading: ['lineHeight'],
   weight: ['fontWeight'],
   weightLatin: ['fontWeight'],
+  // §3.2「当前查看」通道的加粗档（theme.ts text.body/badge 实有字段）：属性位与 weight 同
+  weightActive: ['fontWeight'],
 };
 const GLYPH_PROPS = ['fontSize', 'width', 'height'] as const;
 const PLACEMENT_RE = /(?:^|[{,\s])([A-Za-z]+)\s*:\s*tokens\.(text|glyph)\.([A-Za-z]+)(?:\.([A-Za-z]+))?/g;

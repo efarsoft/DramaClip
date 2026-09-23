@@ -152,6 +152,10 @@ export const layout = {
   sectionBar: { width: 3, height: 13 },
   /** 芯片内边距：纵向 2px 不在阶梯上，本批只搬进唯一真相源，不改值。 */
   chip: { paddingBlock: 2, paddingInline: tokens.spaceSm },
+  /** 海报角标与自检徽章芯片的 '1px 6px' 内边距：脱阶值按 §8.3 登记成具名值，不留在组件里。 */
+  posterChip: { paddingBlock: 1, paddingInline: 6 },
+  /** mono 小字与相邻正文的顶对齐微调（原 WorksDetailPage 的 paddingTop:2）。 */
+  monoAlignTop: 2,
   /** 主从编辑器左栏：五值原样搬入，只消灭散落在三处的同源数（§2）。 */
   split: { initial: 24, min: 20, max: 40, minWidth: 250, handle: 6, paddingX: tokens.spaceLg },
 } as const;

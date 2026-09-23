@@ -12,6 +12,7 @@ export const JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   analysis: '分析',
   narration: '编剧',
   export: '渲染',
+  export_selfcheck: '成片自检',
   semantic: '语义重对齐',
   model_download: '模型下载',
   model_import: '模型导入',
@@ -39,6 +40,7 @@ export function jobRoute(job: JobInfo): string | null {
   if (job.type === 'export' && job.ref_id !== null && job.ref_id !== '') {
     return `/works/${job.ref_id}`;
   }
+  if (job.type === 'export_selfcheck') return '/works';  // 批次作业没有单条落点，去成品库看结果
   const sub = PROJECT_REF_ROUTES[job.type];
   if (sub === undefined || job.ref_id === null || job.ref_id === '') return null;
   return `/projects/${job.ref_id}/${sub}`;
@@ -62,6 +64,7 @@ export function jobSubject(job: JobInfo, names: JobSubjectNames): string {
   if (job.type === 'model_import') return ref === '' ? '本地文件' : `导入 ${ref}`;
   if (job.type === 'cuda_runtime') return 'CUDA 运行环境';
   if (job.type === 'indextts_runtime') return 'IndexTTS 配音环境';
+  if (job.type === 'export_selfcheck') return '历史成片补测';
   if (job.type === 'semantic') return '单集语义重对齐';
   return shortId(ref);
 }

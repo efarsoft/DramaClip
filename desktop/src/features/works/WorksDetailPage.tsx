@@ -1,16 +1,18 @@
-/** 成片详情页：播放器 + 元数据 + 解说文案 + 候选标题（规格 §七 成片详情设计）。 */
-import { FolderOpenOutlined, CopyOutlined } from '@ant-design/icons';
-import { App as AntdApp, Button, Empty } from 'antd';
+/** 成片详情页：预览 + 文件（完整路径）+ 追溯（角度·取材集·方案区）+ 自检四项 + 文案与标题。 */
+import { CopyOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { App as AntdApp, Button, Empty, Tag } from 'antd';
 import type { ReactElement } from 'react';
-import { useParams } from 'react-router-dom';
-import type { ExportJob } from '@dramaclip/protocol';
+import { useNavigate, useParams } from 'react-router-dom';
+import type { Episode, ExportJob } from '@dramaclip/protocol';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import { modeLabel } from '../../components/modeMeta';
-import { mediaUrl } from '../../services/client';
+import { copyFiles, mediaUrl, pickFolder, revealInFolder } from '../../services/client';
 import { mixins } from '../../styles/mixins';
-import { tokens } from '../../styles/theme';
+import { layout, tokens } from '../../styles/theme';
+import { SelfCheckSection } from './SelfCheckSection';
 import { TitlesSection } from './TitlesSection';
 import { useWorkDetail } from './useWorkDetail';
+import { episodeLabel } from './worksView';
 
 function formatDuration(s: number | undefined): string {
   if (s === undefined || s <= 0) return '—';
@@ -45,7 +47,7 @@ export function WorksDetailPage(): ReactElement {
     <PageShell>
       <PageHeader
         title={`${detail.projectName} · ${detail.job === null ? '…' : modeLabel(detail.job.narration_mode)}`}
-        desc="成片详情：预览、解说文案与候选标题"
+        desc="成片详情：预览、文件、追溯、自检与文案"
         onBack={() => {
           window.history.back();
         }}
@@ -61,8 +63,22 @@ export function WorksDetailPage(): ReactElement {
             alignItems: 'start',
           }}
         >
-          <PreviewColumn job={detail.job} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
+            <PreviewColumn job={detail.job} />
+            <TraceSection
+              projectId={detail.job.project_id}
+              angle={detail.angle}
+              episodeIds={detail.episodeIds}
+              episodes={detail.episodes}
+              hasPlan={detail.planId !== ''}
+            />
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg, minWidth: 0 }}>
+            <SelfCheckSection
+              selfcheck={detail.job.selfcheck}
+              onSelfcheck={detail.onSelfcheck}
+              onReload={detail.reload}
+            />
             <NarrationSection texts={detail.narrationTexts} mode={detail.job.narration_mode} />
             <TitlesSection
               titles={detail.titles}
@@ -79,6 +95,29 @@ export function WorksDetailPage(): ReactElement {
 }
 
 function PreviewColumn({ job }: { job: ExportJob }): ReactElement {
+  const { message } = AntdApp.useApp();
+  const onReveal = (): void => {
+    const path = job.output_path;
+    if (path === undefined || path === '') return;
+    void revealInFolder(path).then((result) => {
+      if (!result.ok) message.error(result.reason ?? '打开文件夹失败');
+    });
+  };
+  const onCopyTo = (): void => {
+    const path = job.output_path;
+    if (path === undefined || path === '') return;
+    void pickFolder()
+      .then((dest) => {
+        if (dest === null || dest === '') return null;
+        return copyFiles([path], dest).then((result) => {
+          if (result.copied.length > 0) message.success(`已复制到 ${dest}`);
+          for (const fail of result.failed) message.error(`复制失败：${fail.reason}`);
+        });
+      })
+      .catch((error: unknown) => {
+        message.error(error instanceof Error ? error.message : String(error));
+      });
+  };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
       <PageSection title="预览" dense>
@@ -93,22 +132,63 @@ function PreviewColumn({ job }: { job: ExportJob }): ReactElement {
         <MetaRow label="时长" value={formatDuration(job.duration_s)} />
         <MetaRow label="大小" value={formatSize(job.size_bytes)} />
         <MetaRow label="完成时间" value={formatDate(job.completed_at)} />
-        <Button
-          block
-          icon={<FolderOpenOutlined />}
-          onClick={() => {
-            if (job.output_path) {
-              void import('../../services/client').then(({ revealInFolder }) =>
-                revealInFolder(job.output_path ?? ''),
-              );
-            }
-          }}
-          style={{ marginTop: tokens.spaceSm }}
-        >
-          打开文件夹
-        </Button>
+        <PathRow path={job.output_path ?? ''} />
+        <div style={{ display: 'flex', gap: tokens.spaceSm, marginTop: tokens.spaceSm }}>
+          <Button block icon={<FolderOpenOutlined />} onClick={onReveal}>
+            打开文件夹
+          </Button>
+          <Button block icon={<CopyOutlined />} onClick={onCopyTo}>
+            复制到…
+          </Button>
+        </div>
       </PageSection>
     </div>
+  );
+}
+
+/** 追溯（09-10 §4.5）：角度名（金）+ 取材集区间 + 跳回出片中心方案区；方案已删如实说断链。 */
+function TraceSection({
+  projectId,
+  angle,
+  episodeIds,
+  episodes,
+  hasPlan,
+}: {
+  projectId: string;
+  angle: string | null;
+  episodeIds: string[] | null;
+  episodes: Episode[];
+  hasPlan: boolean;
+}): ReactElement {
+  const navigate = useNavigate();
+  const trace = episodeLabel(episodeIds, episodes);
+  return (
+    <PageSection title="追溯">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
+          {angle !== null && angle !== '' ? (
+            <Tag color="gold" style={{ marginRight: 0 }}>{angle}</Tag>
+          ) : (
+            <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
+              {hasPlan ? '该方案无角度标签' : '方案已删除，追溯链断'}
+            </span>
+          )}
+        </div>
+        <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textSecondary }}>
+          {trace === '' ? (hasPlan ? '取材集未知' : '取材集随方案一并不可考') : trace}
+        </span>
+        <Button
+          block
+          disabled={!hasPlan}
+          onClick={() => {
+            void navigate(`/projects/${projectId}/produce?focus=planning`);
+          }}
+          style={{ marginTop: tokens.spaceXs }}
+        >
+          去方案区
+        </Button>
+      </div>
+    </PageSection>
   );
 }
 
@@ -157,7 +237,7 @@ function NarrationRow({ id, text }: { id: string; text: string }): ReactElement 
           color: tokens.textTertiary,
           fontFamily: tokens.fontFamilyMono,
           flexShrink: 0,
-          paddingTop: 2,
+          paddingTop: layout.monoAlignTop,
         }}
       >
         {id}
@@ -183,6 +263,35 @@ function MetaRow({ label, value }: { label: string; value: string }): ReactEleme
       <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>{label}</span>
       <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textSecondary, fontFamily: tokens.fontFamilyMono }}>
         {value}
+      </span>
+    </div>
+  );
+}
+
+/** 完整路径（§4.5 单片动作「显示完整路径」）：mono 可换行，不截断不省略。 */
+function PathRow({ path }: { path: string }): ReactElement {
+  const { message } = AntdApp.useApp();
+  if (path === '') {
+    return <MetaRow label="路径" value="—" />;
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs, padding: `${tokens.spaceXs} 0` }}>
+      <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>路径</span>
+      <span
+        onClick={() => {
+          void navigator.clipboard.writeText(path).then(() => message.success('路径已复制'));
+        }}
+        title="点击复制完整路径"
+        style={{
+          fontSize: tokens.text.meta.size,
+          lineHeight: tokens.text.meta.leading,
+          color: tokens.textSecondary,
+          fontFamily: tokens.fontFamilyMono,
+          wordBreak: 'break-all',
+          cursor: 'pointer',
+        }}
+      >
+        {path}
       </span>
     </div>
   );
