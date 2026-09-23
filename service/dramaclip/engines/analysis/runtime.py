@@ -45,7 +45,10 @@ def _build_transcriber(settings: config.Settings, models_dir: Path) -> AsrEngine
     model_size = settings.get("asr.model", "base")
     device = settings.get("asr.device", "cpu")
     return FasterWhisperEngine(
-        model_size, device=device, models_dir=models_dir / "asr" / "faster-whisper"
+        model_size,
+        device=device,
+        models_dir=models_dir / "asr" / "faster-whisper",
+        compute_type=settings.get("asr.compute_type", "int8"),
     )
 
 

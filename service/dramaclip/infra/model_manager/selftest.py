@@ -30,7 +30,9 @@ def sample_wav() -> Path:
     return resolve_resources_dir() / "selftest" / "sample_zh.wav"
 
 
-def run_asr(models_dir: Path, spec: ModelSpec, *, device: str = "cpu") -> dict[str, Any]:
+def run_asr(
+    models_dir: Path, spec: ModelSpec, *, device: str = "cpu", compute_type: str = "int8"
+) -> dict[str, Any]:
     """ASR 自检：真加载、真转写。调用方保证模型已安装（缺模型是前置错误，不是自检结果）。"""
     sample = sample_wav()
     if not sample.is_file():
@@ -39,7 +41,7 @@ def run_asr(models_dir: Path, spec: ModelSpec, *, device: str = "cpu") -> dict[s
     try:
         # 构建也在自检范围内：「加载成功」本身就是判据的一半（缺 cuDNN、权重损坏
         # 都在构建期炸），不许把加载失败抛成 RPC 内部错误冒充「自检没跑」。
-        engine = _build_asr(models_dir, spec, device)
+        engine = _build_asr(models_dir, spec, device, compute_type)
         segments = engine.transcribe(sample, "zh")
     except Exception as exc:  # noqa: BLE001 - 自检要的就是真异常原文，不包装不吞
         return _fail(f"加载/推理失败：{type(exc).__name__}: {exc}")
@@ -84,13 +86,16 @@ def run_tts(models_dir: Path, work_dir: Path, spec: ModelSpec, voice: str) -> di
     }
 
 
-def _build_asr(models_dir: Path, spec: ModelSpec, device: str) -> Any:
+def _build_asr(models_dir: Path, spec: ModelSpec, device: str, compute_type: str) -> Any:
     from dramaclip.engines.analysis.transcriber import FasterWhisperEngine, SenseVoiceEngine
 
     if spec.engine == "faster_whisper":
         size = spec.model_id.removeprefix("faster-whisper-")
         return FasterWhisperEngine(
-            size, device=device, models_dir=models_dir / "asr" / "faster-whisper"
+            size,
+            device=device,
+            models_dir=models_dir / "asr" / "faster-whisper",
+            compute_type=compute_type,
         )
     if spec.engine == "sensevoice":
         return SenseVoiceEngine(models_dir=models_dir)

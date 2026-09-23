@@ -61,3 +61,16 @@ def test_sensevoice_path_matches_the_registry_placement(tmp_path: Path) -> None:
     models_dir = tmp_path / "models"
     engine = SenseVoiceEngine(models_dir=models_dir)
     assert engine._model_dir == models_dir / spec.placement
+
+
+def test_compute_type_setting_reaches_the_engine(tmp_path: Path) -> None:
+    """asr.compute_type 曾是死设置：DEFAULTS 里有、构造时没人传（GPU 闲置的根因之一）。
+
+    接线验收：设置里写的档位必须原样到引擎手里——传没传得到，比传什么更先要命。
+    """
+    engine = runtime._build_transcriber(_settings(**{"asr.compute_type": "float16"}), tmp_path)
+    assert isinstance(engine, FasterWhisperEngine)
+    assert engine._compute_type == "float16"
+    default = runtime._build_transcriber(_settings(), tmp_path)
+    assert isinstance(default, FasterWhisperEngine)
+    assert default._compute_type == config.DEFAULTS["asr.compute_type"]

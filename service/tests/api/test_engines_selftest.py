@@ -111,6 +111,34 @@ def test_asr_selftest_engine_failure_is_an_honest_result(
     assert engines_api.results(context)["faster-whisper-small"]["ok"] is False
 
 
+def test_asr_selftest_forwards_device_and_compute_type_from_settings(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """自检与正式转写必须同一副嗓子：asr.device/asr.compute_type 从设置一路传到构建。
+
+    曾经 _build_asr 只收 device，compute_type 用引擎默认——自检过了不代表正式转写
+    用同一档位跑（设置里的 float16 到不了自检，int8 到不了 GPU）。
+    """
+    _install_whisper_small(tmp_path)
+    captured: list[tuple[object, ...]] = []
+
+    def recorder(*args: object) -> _FakeAsr:
+        captured.append(args)
+        return _FakeAsr()
+
+    monkeypatch.setattr(selftest_mod, "_build_asr", recorder)
+    context = _context(memory_db, tmp_path)
+    context.settings = {"asr.device": "cuda", "asr.compute_type": "float16"}
+
+    result = engines_api.run(context, {"model_id": "faster-whisper-small"})
+
+    assert result["ok"] is True
+    assert len(captured) == 1
+    _models_dir, _spec, device, compute_type = captured[0]
+    assert device == "cuda"
+    assert compute_type == "float16"
+
+
 def test_asr_selftest_refuses_when_model_missing(
     memory_db: sqlite3.Connection, tmp_path: Path
 ) -> None:
