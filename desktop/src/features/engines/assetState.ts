@@ -119,6 +119,51 @@ export function formatBytes(bytes: number): string {
   return `${gb.toFixed(2)}GB`;
 }
 
+/** 总览·模型资产：装了几件、占多少盘、几件待修、几件还是储备。 */
+export interface AssetSummary {
+  readonly installed: number;
+  readonly total: number;
+  readonly bytes: number;
+  readonly incomplete: number;
+  readonly reserve: number;
+}
+
+export function assetSummary(models: readonly ModelInfo[], reports: Reports): AssetSummary {
+  let installed = 0;
+  let bytes = 0;
+  let incomplete = 0;
+  let reserve = 0;
+  for (const model of models) {
+    if (!model.engine_ready) reserve += 1;
+    if (model.status === 'installed') {
+      installed += 1;
+      bytes += model.size_bytes ?? 0;
+    }
+    if (assetState(model, reportFor(reports, model.model_id)) === 'incomplete') incomplete += 1;
+  }
+  return { installed, total: models.length, bytes, incomplete, reserve };
+}
+
+/** 总览·域卡概览：几件可用（引擎已接入）、几件待修（体检不通过）。 */
+export interface DomainStats {
+  readonly wired: number;
+  readonly incomplete: number;
+}
+
+export function domainStats(
+  models: readonly ModelInfo[],
+  reports: Reports,
+  kind: string,
+): DomainStats {
+  const domainModels = models.filter((model) => model.kind === kind);
+  return {
+    wired: domainModels.filter((model) => model.engine_ready).length,
+    incomplete: domainModels.filter(
+      (model) => assetState(model, reportFor(reports, model.model_id)) === 'incomplete',
+    ).length,
+  };
+}
+
 /** 生效卡的状态补充行：fail 给判据原文；待自检/未校验给能落地的下一步，不替业主下结论。 */
 export function activeStateNote(
   state: AssetState,

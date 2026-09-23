@@ -8,12 +8,15 @@ import {
   activateSettings,
   activeAsset,
   assetState,
+  assetSummary,
   canActivate,
   deleteNote,
+  domainStats,
   externalAssets,
   failureNote,
   formatBytes,
   partitionAssets,
+  reportsOf,
   stateLabel,
   warnCount,
   warnNote,
@@ -200,5 +203,64 @@ describe('本地导入的两种货：清单内多一个来源标记，清单外�
   it('向导交回的 model_id 折算成设置值；库里查不到这一行就不猜', () => {
     expect(activateById([model()], 'kokoro-82m')).toEqual({ 'tts.engine': 'kokoro' });
     expect(activateById([], 'kokoro-82m')).toBeNull();
+  });
+});
+
+describe('assetSummary', () => {
+  it('已装数、实占字节、不完整数、未接入数各自独立', () => {
+    const models = [
+      model(),
+      model({ model_id: 'faster-whisper-medium', kind: 'asr', engine: 'faster_whisper', size_bytes: 1024 }),
+      model({ model_id: 'indextts2', engine: 'indextts2', engine_ready: false }),
+      model({
+        model_id: 'faster-whisper-small',
+        kind: 'asr',
+        engine: 'faster_whisper',
+        status: 'not_installed',
+        size_bytes: 0,
+      }),
+    ];
+    const reports = reportsOf([report({ model_id: 'faster-whisper-medium', ok: false })]);
+
+    const summary = assetSummary(models, reports);
+    // 未安装那项：既不计入已装数，也不贡献字节。
+    expect(summary.installed).toBe(3);
+    expect(summary.bytes).toBe(350 * 1024 * 1024 * 2 + 1024);
+    expect(summary.incomplete).toBe(1);
+    expect(summary.reserve).toBe(1);
+  });
+});
+
+describe('domainStats', () => {
+  const ttsModels: ModelInfo[] = [
+    model({ kind: 'tts' }),
+    model({ kind: 'tts', model_id: 'indextts2', engine: 'indextts2', engine_ready: false }),
+  ];
+
+  it('可用 = 本域引擎已接入的件数，未接入的储备项不计入', () => {
+    expect(domainStats(ttsModels, reportsOf([]), 'tts')).toEqual({ wired: 1, incomplete: 0 });
+  });
+
+  it('待修 = 本域体检不通过的件数，别域的不串进来', () => {
+    const withAsr = [
+      ...ttsModels,
+      model({ kind: 'asr', model_id: 'faster-whisper-medium', engine: 'faster_whisper' }),
+      // 「缺模型照样计入可用」：计的是 engine_ready，不是安装态。
+      model({
+        kind: 'asr',
+        model_id: 'faster-whisper-large-v3',
+        engine: 'faster_whisper',
+        status: 'not_installed',
+        size_bytes: 0,
+      }),
+    ];
+    const broken = report({
+      model_id: 'faster-whisper-medium',
+      kind: 'asr',
+      engine: 'faster_whisper',
+      ok: false,
+    });
+    expect(domainStats(withAsr, reportsOf([broken]), 'asr')).toEqual({ wired: 2, incomplete: 1 });
+    expect(domainStats(withAsr, reportsOf([broken]), 'tts')).toEqual({ wired: 1, incomplete: 0 });
   });
 });

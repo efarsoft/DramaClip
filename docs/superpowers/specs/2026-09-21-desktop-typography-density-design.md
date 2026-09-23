@@ -476,6 +476,8 @@ P4 是整站唯一 `mixins.ts` 与 `PageKit.tsx` **零引用**的 feature（`fea
 
 **这不是全局导航重做**：导轨 6 项、`/settings`、`/about`、`AppLayout` 都不动，09-10 那套导轨 8 项计划仍按"不作废、不在本批"处理。
 
+**修订（2026-09-23，业主定向，取代本节的单页六段方案）**：引擎中心回到定稿 D 的 tab 骨架——五个 tab（总览 / 语音识别 ASR / 配音 TTS / 文案 LLM / 提示词），216 px 左导航（`EngineTabNav`）恢复；`/engines/:tab` 深链恢复「选 tab」语义，`tabFromPath` 正则必须继续覆盖 `prompts`（附录 B① 的纪律原样继承，由 `enginesDeepLink.test.tsx` 钉住）。原第 6 段「环境」不再独立成段/tab：`GpuCard` 与 `MachinePanel` 并入总览的本机条件区，总览 = 开工就绪度流程条 + 待修清单 + 三域卡 + 本机条件 + 模型资产（即 09-19 设计文档定稿 D 的总览构图）。全局导轨不动；分析与出片仍归项目内路由（`/projects/:id/analysis|produce`），不上全局导航。排版契约不变：§1 字阶、§2 间距、§3.2 三态、§8.3 度量棘轮照旧全守，恢复的 `EngineTabNav`/`OverviewTab` 保持零度量字面量。§10.1–§10.3、§10.5 的判据与文案纪律不受本次修订影响。
+
 ### 10.5 异常文案纪律（含本机两行的改写前后对照）
 
 三条规矩：**① 现象 + 后果 + 动作与代价**三要素齐，缺任一即未做；**② 按钮名与动作同权重**；**③ 未验证不发通行证**。
@@ -511,8 +513,8 @@ P4 是整站唯一 `mixins.ts` 与 `PageKit.tsx` **零引用**的 feature（`fea
 | 4 | 成品详情 `/works/:exportId` | P3 | `minmax(300px,420px) + 1fr`；行复用 `listRow` | 空 ✓ 失败 ✓ **无部分成功** | `:168` 内联 `lineHeight 19px` |
 | 5 | 分析工作台 `/projects/:id/analysis` | P4 | 左栏按百分比可拖（`useSplit.ts:4` 默认 24、`:22` 带宽 20~40、`WorkbenchPage.tsx:106` `minWidth 250`、`:126` 把手 6px）——**五个数**全部收进 `layout.split` 且不改数值；勾选 + 全选 + **批量条**；右栏三卡；底栏 46（`StepFooter:26` 写死） | 空 ✓ **无骨架 无失败横幅** 部分成功仅计数 | **45 处内联字面量**（§0.2 口径）；`mixins/PageKit` **整屏零引用**；26 处字号仅 2 处配行高；三态撞道；初始空选须改读 `full_threshold`（§6.2） |
 | 6 | 出片 `/projects/:id/produce` | P5 | 四段纵向：风格 → 模式 → 方案 → 产出；**顶部常驻「本次取材：已完成分析 X / Y 集」+ 可收窄**（§6.5） | 空 ✓ 失败 ✓ 部分成功 ✓ | `poll.ts:2` 1500ms 轮询**有百分比无 ETA**；取材候选池**服务端硬取全部 done 集、不可改**，卡片只有「取材 N 集」计数、无集号（§6.5 实测） |
-| 7 | 引擎·总览 `/engines` | P6 | **§10.4 单页六段**（就绪与修复 / ASR / TTS / LLM·VLM / 提示词 / 环境），5 tab 合一、卡容器一律 `PageSection` | 未就绪 ✓ **下载失败永不显示** | `EnginesPage.tsx:134` 正则漏 `prompts`（**按 HEAD 成立，工作区已被另一位工程师就地修好、未提交**——见附录 B ①）；就绪判据与修复动作见 §10.1–§10.2 |
-| 8 | 引擎·分 tab `/engines/:tab` | P6 | **降级为同页锚点深链**（§10.4）：既有 `navigate('/engines/<tab>')` 调用点不改，行为变滚动定位 | 同 7 | 合并后本行与 7 是同一屏，表中分列只为留证据；开工前复查附录 B ① 是否已入库，勿重复修 |
+| 7 | 引擎·总览 `/engines` | P6 | ~~§10.4 单页六段~~ **已被 §10.4 修订段（2026-09-23）取代：五 tab 恢复，总览 = 就绪度流程 + 三域卡 + 本机条件 + 模型资产** | 未就绪 ✓ **下载失败永不显示** | `EnginesPage.tsx:134` 正则漏 `prompts`（**按 HEAD 成立，工作区已被另一位工程师就地修好、未提交**——见附录 B ①）；就绪判据与修复动作见 §10.1–§10.2 |
+| 8 | 引擎·分 tab `/engines/:tab` | P6 | ~~降级为同页锚点深链~~ **修订后恢复「选 tab」语义**（§10.4 修订段）：既有 `navigate('/engines/<tab>')` 调用点不改，行为是切屏 | 同 7 | 附录 B ① 已结案（tab 解析覆盖 `prompts`，`enginesDeepLink.test.tsx` 钉住） |
 | 9 | 设置 `/settings` | P6 | 单列表单；`labelWidth/controlWidth` 收进 `layout` | 仅"加载中…" | `:268` 内联 `lineHeight 17px` + 自带 shadow 字面量 |
 | 10 | 关于 `/about` | P7 | 窄单列 `max-width 720`；开源清单**必须含两条字体** | 静态，无需 | `:30,35` 两处内联 `lineHeight 18px`；`▶` 假图标 |
 | 11 | 新建项目弹窗 | O | 统一 `Overlay`：标题 16/24、宽 720、footer 右对齐 | 提交失败需内联 | `ProjectsPage:225` 自带一套 footer |
@@ -534,6 +536,7 @@ P4 是整站唯一 `mixins.ts` 与 `PageKit.tsx` **零引用**的 feature（`fea
 1. `EnginesPage.tsx:134`（HEAD `381f32c5`）的 `/\/engines\/(asr|tts|llm)/` 漏 `prompts` → `EngineTabNav.tsx:30` 的 `TAB_ORDER` 有 `prompts`、`EnginesPage` 已渲染 `<PromptsTab />`，但**永远回落到总览**，「提示词」点不进。
    ⚠️ **开工前必查**：写本规格期间，**同一工作树里另一位工程师已就地把这行改成 `(asr|tts|llm|prompts)`，但尚未提交**（`git status` 显示 `M desktop/src/features/engines/EnginesPage.tsx`，`git blame` 该行为 "Not Committed Yet"）。所以这条缺陷**按 HEAD 成立、按工作区已修**——本批开工前先 `git log -S'llm|prompts'` 确认它是否已入库，已入库即结案，**不得重复修一遍、更不得把自己的改动盖在同一段上**。
    ⚠️ **与 §10.4 的关系**：五 tab 合一后 `tabFromPath` 的职责从"选屏"变成"选锚点"，这行正则可能被整体吸收掉。**结案方式由此变为"确认合一后锚点解析覆盖 `prompts`"**，而不是单独修一行正则——但在工作树那份改动入库前，本节仍按原样成立，不抢先动手。
+   ✅ **结案（2026-09-23）**：§10.4 修订回 tab 骨架后，深链恢复"选屏"语义，`tabFromPath` 正则覆盖 `prompts`，并有 `enginesDeepLink.test.tsx` 的用例钉住（prompts 深链不得回落总览、认不出的路径回落总览）。本条关闭。
 2. 下载失败态永不渲染：`stores/ui.ts:15` 有 `'failed'`，`useDownloadProgress.ts:9` 只读 `'downloading'`。
 3. `StepFooter.tsx:6-55` 与 `PageKit.PageFooter:126-172` 是一对分叉，且 **`PageFooter` 全站零调用点**（详见 §3.3：活的那份在功能目录里、原语是一份死副本）。本批 §3.3 要删的是**分叉**，其承载的批量判据缺陷另案。
 4. 「批量分析所选」空选可点、点了静默无事：`canStart`（`useAnalysisWorkspace.ts:95` 算、`:111` 声明进接口）**全站零消费**；按钮用 `disabled={total === 0}`（`WorkbenchHeader.tsx:55`），点下去撞 `:68` 的早退。与设计里的批量条是同一问题的两面。

@@ -148,7 +148,7 @@ describe('配音 TTS · 生效卡与资产库', () => {
 describe('语音识别 ASR · 同构骨架', () => {
   afterEach(cleanup);
 
-  it('生效卡 + 资产库两段齐全，档位状态来自资产库（GPU 卡已归「环境」段，§10.4）', () => {
+  it('生效卡 + 资产库两段齐全，档位状态来自资产库（GPU 卡归总览 tab）', () => {
     render(
       <AsrTab
         models={[
