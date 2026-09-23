@@ -524,14 +524,15 @@ def _fallback_eligible(exc: runner.FfmpegError, args: list[str]) -> bool:
 # 选型（b）sidecar 签名，不选（a）按 export_id 播种 rng。理由：
 # - rng 同时喂 jitter.safe_times 与 dedup_params.generate，「每片段独立随机、避免
 #   批量成品呈规律性」是消重设计的一部分（docs/06 §1）。按 export_id 播种会把
-#   一次导出的全部抖动/消重参数变成可复现常量，等于削弱平台侧消重指纹的随机性；
+#   一次导出的全部抖动/消重参数变成可复现常量，等于取消「每片段独立随机、
+#   逐次渲染各不相同」这一设计前提；
 # - 播种也救不了新鲜渲染的行为一致性：现状 rng 无种子，任何「复现上次切点」的
 #   方案都改变了 fresh run 的输出分布（硬验收：空 work_dir 行为与现状一致）；
 # - 即便播种，跳过判定仍需要「产物在不在、输入变没变」的签名——（a）不能替代（b）。
 #
 # 签名判据：**声明输入**一致才复用——源文件身份（path+size+mtime_ns）、episode_id、
 # 声明 start/end、audio 角色、transition、seam 淡入淡出、out_size、字幕接线形状、
-# 字幕文本 hash、TTS 音频 path+内容 sha256、台词保护区指纹（srt/ASR zones）、
+# 字幕文本 hash、TTS 音频 path+内容 sha256、台词保护区内容哈希（srt/ASR zones）、
 # 请求 codec == sig 记录的**实际成功** codec（A4 回退自洽）。
 # **不含 jitter 后的实际切点**：复用即接受上次的抖动切点与消重参数（它们本来就是
 # 每次渲染要不同的量）；上次窗口只作为「recorded」元数据存着，用来确定性地重新
@@ -595,7 +596,7 @@ def _file_identity(path: str | Path) -> dict[str, object]:
 
 
 def _zones_fingerprint(zones: list[SpeechZone]) -> str:
-    """台词保护区指纹：手工 .srt 或库内 ASR 变了，切点语义就变了，不许复用。"""
+    """台词保护区内容哈希：手工 .srt 或库内 ASR 变了，切点语义就变了，不许复用。"""
     payload = json.dumps([[zone.start, zone.end] for zone in zones])
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

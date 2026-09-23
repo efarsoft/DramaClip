@@ -310,7 +310,7 @@ def test_zone_fingerprint_change_reencodes(
         plan, {"ep1": str(_source(tmp_path))}, tmp_path / "out.mp4", work,
         dialogue_zones=zones_b, parallel=1,
     )
-    assert len(second.calls) == 2, "保护区指纹变了必须重编"
+    assert len(second.calls) == 2, "保护区内容哈希变了必须重编"
 
 
 # ---- 3. 成对性：一边丢了就重编 ----
