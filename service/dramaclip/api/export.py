@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import contextlib
 import json
+import shutil
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext
 from dramaclip.engines.analysis.models import SpeechZone
-from dramaclip.engines.exporter import encoder, loudness
+from dramaclip.engines.exporter import encoder, loudness, selfcheck
 from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle import presets as subtitle_presets
@@ -37,6 +39,8 @@ _ERR_NO_PLANS = -32406
 _ERR_PLAN_NOT_RENDERABLE = -32407
 _ERR_EXPORT_NOT_FOUND = -32404
 _ERR_EXPORT_NOT_RETRYABLE = -32405  # 导出域 -32400~-32499（见 common.json x-error-codes）
+_ERR_TRASH_FENCE = -32408  # 产物不在数据目录内，拒绝搬移（models.delete 围栏的同款规矩）
+_ERR_TRASH_MOVE = -32409  # 移入回收失败（OSError）：宁留记录，不产无法追溯的孤儿文件
 
 def _safe_filename(name: str) -> str:
     """项目名 → 安全文件名段（去除路径/非法字符）。"""
@@ -52,6 +56,8 @@ def register(router: Router, context: AppContext) -> None:
     router.register("export.list_works", lambda params: list_works(context, params))
     router.register("export.get", lambda params: get_export(context, params))
     router.register("export.ensure_covers", lambda params: ensure_covers(context, params))
+    router.register("export.delete", lambda params: delete_export(context, params))
+    router.register("export.selfcheck", lambda params: selfcheck_batch(context, params))
 
 
 @dataclass(frozen=True)
@@ -190,7 +196,8 @@ def retry(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_exports(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:
-    return exports_repo.list_by_project(context.conn, str(params.get("project_id", "")))
+    rows = exports_repo.list_by_project(context.conn, str(params.get("project_id", "")))
+    return [_decode_json_columns(row, ("selfcheck",)) for row in rows]
 
 
 def _cover_title(context: AppContext, plan_row: dict[str, Any]) -> str | None:
@@ -253,13 +260,34 @@ def get_export(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     row = exports_repo.get(context.conn, export_id)
     if row is None:
         raise RpcDomainError(_ERR_EXPORT_NOT_FOUND, f"导出记录不存在: {export_id}")
-    return row
+    return _decode_json_columns(row, ("selfcheck",))
+
+
+def _decode_json_columns(row: dict[str, Any], columns: tuple[str, ...]) -> dict[str, Any]:
+    """TEXT→JSON 列还原成协议形状（selfcheck/episode_ids）；坏 JSON 按缺失处理成
+    None（灰），不让一条脏数据把整页列表打成 500。"""
+    out = dict(row)
+    for column in columns:
+        raw = out.get(column)
+        if isinstance(raw, str):
+            try:
+                out[column] = json.loads(raw)
+            except json.JSONDecodeError:
+                out[column] = None
+    return out
 
 
 def list_works(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:
-    """作品库：跨项目已完成成片（附项目名），limit 可调。"""
+    """作品库：跨项目已完成成片（附项目名/角度/取材集/自检），limit 可调。
+
+    state 过滤 = 09-10 #30「筛选·自检通过」：passed/failed/partial/unchecked，
+    词表外的值当作不筛（缺席容忍，不报错）。
+    """
     limit = int(params.get("limit", 60))
-    return exports_repo.list_completed_works(context.conn, limit=limit)
+    raw_state = params.get("state")
+    state = str(raw_state) if raw_state in exports_repo.WORKS_STATE_FILTERS else None
+    rows = exports_repo.list_completed_works(context.conn, limit=limit, state=state)
+    return [_decode_json_columns(row, ("selfcheck", "episode_ids")) for row in rows]
 
 
 def tts_audio_by_segment(plan: PlanData) -> dict[int, str]:
@@ -460,6 +488,157 @@ def _audit_duration(context: AppContext, plan_data: PlanData, actual_s: float) -
         )
 
 
+def _declared_duration_s(plan_data: PlanData) -> float | None:
+    """时间轴声明总时长（Σ end-start）；<=0 视为拿不到预算（None，自检该项归灰）。"""
+    declared = sum(max(seg.end - seg.start, 0.0) for seg in plan_data.timeline)
+    return declared if declared > 0 else None
+
+
+def _planned_narration_segments(plan_data: PlanData) -> int:
+    """方案里的旁白段数（narration/ducked）：自检「含配音」的判据源。"""
+    return sum(1 for seg in plan_data.timeline if seg.audio in ("narration", "ducked"))
+
+
+def _load_plan_data(context: AppContext, plan_id: Any) -> PlanData | None:
+    """按 id 回读方案并校验；方案被删/数据损坏都返回 None（追溯断链不猜）。"""
+    if not plan_id:
+        return None
+    row = plans_repo.get(context.conn, str(plan_id))
+    if row is None:
+        return None
+    with contextlib.suppress(Exception):
+        return PlanData.model_validate(row["plan_data"])
+    return None
+
+
+def _selfcheck_one(context: AppContext, export_id: str) -> bool:
+    """单条成片自检并落库；行不在/未完成/产物不在盘上返回 False（保持 NULL，诚实）。
+
+    probe 抛错（文件损坏/无视频轨）也走 False：量不到就不发成绩单，徽章灰「—」。
+    """
+    row = exports_repo.get(context.conn, export_id)
+    if row is None or row["status"] != exports_repo.STATUS_COMPLETED or not row["output_path"]:
+        return False
+    out_path = Path(str(row["output_path"]))
+    if not out_path.is_file():
+        return False
+    media = probe.probe(out_path)
+    plan_data = _load_plan_data(context, row.get("narration_plan_id"))
+    payload = selfcheck.run(
+        out_path,
+        measured_s=media.duration_s,
+        has_audio=media.has_audio,
+        mode=str(row["narration_mode"] or ""),
+        budget_s=None if plan_data is None else _declared_duration_s(plan_data),
+        planned_segments=None if plan_data is None else _planned_narration_segments(plan_data),
+    )
+    exports_repo.set_selfcheck(
+        context.conn,
+        export_id,
+        json.dumps(payload, ensure_ascii=False),
+        selfcheck.overall_state(payload),
+    )
+    return True
+
+
+def selfcheck_batch(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """历史成片补测四项自检（幂等，job 化）：默认只处理已完成且从未自检的记录。
+
+    与 ensure_covers 的同步形状不同：四项度量要整片解码（合并一遍也是秒到分钟
+    级），同步 RPC 会卡住界面，所以走作业池由抽屉呈现进度。显式给 export_ids
+    则重测指定条目（已有成绩单也覆盖重跑）。
+    """
+    raw_ids = params.get("export_ids")
+    limit = max(min(int(params.get("limit", 200)), 500), 1)
+    if isinstance(raw_ids, list) and raw_ids:
+        wanted = list(dict.fromkeys(str(item) for item in raw_ids))
+        targets = [
+            export_id
+            for export_id in wanted
+            if _selfcheck_target(context, export_id)
+        ]
+    else:
+        missing_rows = exports_repo.list_missing_selfcheck(context.conn, limit)
+        targets = [str(row["id"]) for row in missing_rows]
+    if not targets:
+        return {"ok": True, "job_id": None, "queued": 0}
+    job_id = context.job_store.create("export_selfcheck")
+    context.executor.submit(
+        context.notifier.tracked(job_id, _run_selfcheck_batch, context, job_id, targets)
+    )
+    return {"ok": True, "job_id": job_id, "queued": len(targets)}
+
+
+def _selfcheck_target(context: AppContext, export_id: str) -> bool:
+    """指定重测的资格：行在、已完成、有产物路径（盘上文件由 _selfcheck_one 再验）。"""
+    row = exports_repo.get(context.conn, export_id)
+    return bool(
+        row is not None
+        and row["status"] == exports_repo.STATUS_COMPLETED
+        and row["output_path"]
+    )
+
+
+def _run_selfcheck_batch(context: AppContext, job_id: str, export_ids: list[str]) -> None:
+    """作业体：逐条自检，单条失败不断批（那条保持 NULL 灰），进度按条报。"""
+    context.job_store.mark_running(job_id)
+    total = len(export_ids)
+    checked = 0
+    try:
+        for index, export_id in enumerate(export_ids, start=1):
+            context.job_store.set_progress(
+                job_id, round((index - 1) / total * 100, 1), f"成片自检 {index}/{total}"
+            )
+            with contextlib.suppress(Exception):
+                if _selfcheck_one(context, export_id):
+                    checked += 1
+        context.job_store.mark_completed(job_id)
+        context.notifier.log("info", f"成片自检完成：{checked}/{total} 条拿到成绩单")
+    except Exception as exc:
+        context.job_store.mark_failed(job_id, str(exc))
+        context.notifier.log("error", f"成片自检批次失败: {exc}")
+
+
+def delete_export(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """删除一条成片（09-10 §3.4 危险操作规矩）：文件先移入 <data>/.trash/<日期>/ 再删行。
+
+    可恢复性落在文件层：成片与封面都搬（不搬封面就成孤儿），「关于 → 本地数据」
+    入口可达 .trash；DB 行硬删（与 project.delete 同先例）。两类失败分开对待：
+    文件不在盘上 → 如实报 missing、不挡删行（记录指向的东西本来已经没了）；
+    围栏/OSError → 整单拒绝（宁留记录，不产无法追溯的孤儿文件）。
+    """
+    export_id = str(params.get("export_id", ""))
+    row = exports_repo.get(context.conn, export_id)
+    if row is None:
+        raise RpcDomainError(_ERR_EXPORT_NOT_FOUND, f"导出记录不存在: {export_id}")
+    root = context.data_dir.resolve()
+    trash_dir = root / ".trash" / date.today().isoformat()
+    trashed: list[str] = []
+    missing: list[str] = []
+    for key in ("output_path", "cover_path"):
+        raw = row.get(key)
+        if not raw:
+            continue
+        path = Path(str(raw))
+        if not path.is_file():
+            missing.append(str(path))
+            continue
+        resolved = path.resolve()
+        if not resolved.is_relative_to(root):
+            raise RpcDomainError(_ERR_TRASH_FENCE, f"产物不在数据目录内，拒绝搬移: {path}")
+        try:
+            trash_dir.mkdir(parents=True, exist_ok=True)
+            dest = trash_dir / resolved.name
+            if dest.exists():
+                dest = trash_dir / f"{export_id[:6]}_{resolved.name}"
+            shutil.move(str(resolved), str(dest))
+        except OSError as exc:
+            raise RpcDomainError(_ERR_TRASH_MOVE, f"移入回收失败: {exc}") from exc
+        trashed.append(str(dest))
+    exports_repo.delete(context.conn, export_id)
+    return {"ok": True, "trashed": trashed, "missing": missing}
+
+
 def render_export(
     context: AppContext,
     run: ExportRun,
@@ -619,6 +798,9 @@ def render_export(
         _audit_duration(context, plan_data, media.duration_s)
     except (ValueError, OSError):
         pass  # 元信息回填/时长审计失败不影响导出成功
+    # 四项自检（09-10 #29：导出期产出字段）：增强项绝不挡导出，任何异常都留 NULL
+    with contextlib.suppress(Exception):
+        _selfcheck_one(context, export_id)
     with contextlib.suppress(OSError, ValueError):
         _extract_cover(
             context, export_id, out_path, title=_cover_title(context, plan_row)

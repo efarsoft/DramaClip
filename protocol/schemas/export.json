@@ -4,6 +4,79 @@
   "title": "export 命名空间",
   "namespace": "export",
   "x-models": {
+    "SelfCheckItem": {
+      "type": "object",
+      "required": [
+        "pass"
+      ],
+      "properties": {
+        "pass": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "三态：true=实测过线 / false=实测不过 / null=量不到（徽章灰「—」，宁灰勿假绿）"
+        },
+        "measured_s": {
+          "type": "number"
+        },
+        "budget_s": {
+          "type": "number"
+        },
+        "tolerance_s": {
+          "type": "number"
+        },
+        "has_audio": {
+          "type": "boolean"
+        },
+        "expected": {
+          "type": "string"
+        },
+        "planned_segments": {
+          "type": "integer"
+        },
+        "mean_volume_db": {
+          "type": "number"
+        },
+        "max_freeze_s": {
+          "type": "number"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "SelfCheck": {
+      "type": "object",
+      "description": "成片自检成绩单（09-10 §4.5 四项；engines/exporter/selfcheck.py 度量，判据与 scripts/verify_modes.py 同源）",
+      "required": [
+        "checked_at",
+        "duration",
+        "narration",
+        "silence",
+        "freeze"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "checked_at": {
+          "type": "integer"
+        },
+        "duration": {
+          "$ref": "#/x-models/SelfCheckItem"
+        },
+        "narration": {
+          "$ref": "#/x-models/SelfCheckItem"
+        },
+        "silence": {
+          "$ref": "#/x-models/SelfCheckItem"
+        },
+        "freeze": {
+          "$ref": "#/x-models/SelfCheckItem"
+        }
+      }
+    },
     "ExportJob": {
       "type": "object",
       "required": [
@@ -46,6 +119,28 @@
         },
         "narration_plan_id": {
           "type": "string"
+        },
+        "selfcheck": {
+          "oneOf": [
+            {
+              "$ref": "#/x-models/SelfCheck"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selfcheck_state": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "passed",
+            "failed",
+            "partial",
+            null
+          ]
         }
       }
     },
@@ -84,6 +179,51 @@
         },
         "cover_path": {
           "type": "string"
+        },
+        "narration_plan_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "angle": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "卖点角度名（金色标签）；方案已删或无解说模式为 null"
+        },
+        "episode_ids": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "取材集（追溯链的源集区间）；方案已删为 null"
+        },
+        "selfcheck": {
+          "oneOf": [
+            {
+              "$ref": "#/x-models/SelfCheck"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selfcheck_state": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "passed",
+            "failed",
+            "partial",
+            null
+          ]
         }
       }
     }
@@ -181,12 +321,22 @@
     },
     {
       "name": "export.list_works",
-      "summary": "作品库：跨项目已完成成片（附项目名，按完成时间倒序）",
+      "summary": "作品库：跨项目已完成成片（附项目名/角度/取材集/自检，按完成时间倒序）",
       "params": {
         "type": "object",
         "properties": {
           "limit": {
             "type": "integer"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "failed",
+              "partial",
+              "unchecked"
+            ],
+            "description": "自检汇总态筛选（09-10 #30）；缺省或词表外不筛"
           }
         }
       },
@@ -236,6 +386,90 @@
       },
       "result": {
         "$ref": "#/x-models/ExportJob"
+      }
+    },
+    {
+      "name": "export.delete",
+      "summary": "删除成片（§3.4 危险操作）：文件移入 <data>/.trash/<日期>/ 后删记录行",
+      "params": {
+        "type": "object",
+        "required": [
+          "export_id"
+        ],
+        "properties": {
+          "export_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "ok",
+          "trashed",
+          "missing"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "trashed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "实际搬入 .trash 的文件路径"
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "记录指向但盘上已不存在的文件（如实报，不挡删行）"
+          }
+        }
+      }
+    },
+    {
+      "name": "export.selfcheck",
+      "summary": "历史成片补测四项自检（job 化，幂等）：默认只处理已完成且从未自检的记录",
+      "params": {
+        "type": "object",
+        "properties": {
+          "export_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "显式重测指定条目（已有成绩单也覆盖重跑）；缺省走补测队列"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "补测队列上限，钳制 1..500，默认 200"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "ok",
+          "queued"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "job_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "queued": {
+            "type": "integer"
+          }
+        }
       }
     }
   ]

@@ -68,7 +68,8 @@ api/project.py      create / list / get / delete / rename / duplicate /
 api/analysis.py     prescreen / start / status / cancel / results /
                     resync_semantic / update_asr                          （7）
 api/narration.py    generate_plans / list_plans / produce / list_styles   （4）
-api/export.py       start / retry / list / list_works                     （4）
+api/export.py       submit / retry / list / list_works / get /
+                    ensure_covers / delete / selfcheck                  （8）
 api/subtitle.py     list_presets                                          （1）
 api/models.py       list / download / scan_local / delete                 （4）
 api/settings.py     get / update / test_llm                               （3）

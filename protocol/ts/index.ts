@@ -276,6 +276,35 @@ export interface ExportSubmitResult {
   readonly rejected: readonly ExportRejection[];
 }
 
+/** 自检单项（09-10 §4.5）：pass 三态——true 实测过线 / false 实测不过 / null 量不到。
+ * 量不到的项徽章显示灰「—」，绝不发未验证绿勾（宁灰勿假绿）；其余字段是实测原文，
+ * 供「看度量原文」展示，判据与 scripts/verify_modes.py 同源。 */
+export interface SelfCheckItem {
+  readonly pass: boolean | null;
+  readonly measured_s?: number;
+  readonly budget_s?: number;
+  readonly tolerance_s?: number;
+  readonly has_audio?: boolean;
+  readonly expected?: string;
+  readonly planned_segments?: number;
+  readonly mean_volume_db?: number;
+  readonly max_freeze_s?: number;
+  readonly reason?: string;
+}
+
+/** 成片自检成绩单（export_jobs.selfcheck，导出期产出字段 = 接口改动点 #29）。 */
+export interface SelfCheck {
+  readonly version?: number;
+  readonly checked_at: number;
+  readonly duration: SelfCheckItem;
+  readonly narration: SelfCheckItem;
+  readonly silence: SelfCheckItem;
+  readonly freeze: SelfCheckItem;
+}
+
+/** 自检汇总态：passed 四项全绿 / failed 任一红 / partial 有灰无红；null = 从未自检。 */
+export type SelfCheckState = 'passed' | 'failed' | 'partial';
+
 export interface ExportJob {
   readonly id: string;
   readonly project_id: string;
@@ -291,6 +320,9 @@ export interface ExportJob {
   readonly completed_at?: number;
   /** 关联的编排方案（成片详情页据此取文案与标题）。 */
   readonly narration_plan_id?: string;
+  /** 四项自检成绩单；从未自检为 null（徽章整排「—」）。 */
+  readonly selfcheck?: SelfCheck | null;
+  readonly selfcheck_state?: SelfCheckState | null;
 }
 
 /** 作品库条目（跨项目已完成成片，export.list_works）。 */
@@ -305,6 +337,14 @@ export interface WorkItem {
   readonly completed_at?: number;
   /** 逐片钩帧封面（渲染完成时生成；历史成片由 export.ensure_covers 补拍）。 */
   readonly cover_path?: string;
+  /** 追溯链（09-10 §4.5）：跳回方案卡与源集区间的关联键。 */
+  readonly narration_plan_id?: string | null;
+  /** 卖点角度名（界面金色标签）；方案已删或无解说模式为 null。 */
+  readonly angle?: string | null;
+  /** 取材集 id（源集区间由此派生）；方案已删为 null。 */
+  readonly episode_ids?: string[] | null;
+  readonly selfcheck?: SelfCheck | null;
+  readonly selfcheck_state?: SelfCheckState | null;
 }
 
 /** 模型下载源（kind ∈ modelscope | hf_mirror | huggingface）。 */
@@ -579,6 +619,8 @@ export const METHOD_NAMES = [
   'export.list',
   'export.list_works',
   'export.ensure_covers',
+  'export.delete',
+  'export.selfcheck',
   'models.runtime_status',
   'models.install_runtime',
   'models.indextts_status',
