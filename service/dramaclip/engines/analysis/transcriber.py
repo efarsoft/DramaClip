@@ -48,7 +48,7 @@ class FasterWhisperEngine:
         *,
         device: str = "auto",
         models_dir: Path | None = None,
-        compute_type: str = "int8",
+        compute_type: str = "auto",
     ) -> None:
         self._model_size = model_size
         self._device = device
@@ -135,9 +135,10 @@ class FasterWhisperEngine:
     def _compute_for(self, device: str) -> str:
         """int8 是 CPU 档：ctranslate2 的 CUDA 后端在没有高效 int8 GEMM 的卡上直接拒绝
         （"Requested int8 compute type…"），硬塞的后果只是触发回退——GPU 在场却永远用不上
-        （本机 Quadro M4000 实测，medium 自检 556s 全烧在 CPU）。设备不是 cpu 时把精度
-        决定权还给 auto：库按实际解析到的设备挑最快可用档（CUDA→float16/float32，
-        CPU→int8）。其余显式档位原样透传——业主自己选的，尊重。
+        （本机 Quadro M4000 实测）。默认档已改 auto；这层映射兜的是存量——老设置库里
+        落盘的 int8、或调用方显式传入的 int8：设备不是 cpu 时改交 auto，由库按实际
+        解析到的设备挑最快可用档（CUDA→float16/float32，CPU→int8，行为与 auto 等价）。
+        其余显式档位原样透传——业主自己选的，尊重。
         """
         if device != "cpu" and self._compute_type == "int8":
             return "auto"

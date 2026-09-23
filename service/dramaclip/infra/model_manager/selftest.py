@@ -31,7 +31,7 @@ def sample_wav() -> Path:
 
 
 def run_asr(
-    models_dir: Path, spec: ModelSpec, *, device: str = "cpu", compute_type: str = "int8"
+    models_dir: Path, spec: ModelSpec, *, device: str = "cpu", compute_type: str = "auto"
 ) -> dict[str, Any]:
     """ASR 自检：真加载、真转写。调用方保证模型已安装（缺模型是前置错误，不是自检结果）。"""
     sample = sample_wav()

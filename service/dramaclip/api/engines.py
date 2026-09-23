@@ -74,7 +74,7 @@ def _asr(context: AppContext, models_dir: Path, spec: registry.ModelSpec) -> dic
             _ERR_SELFTEST_STATE, f"{spec.name} 未安装——自检需要真实权重，请先下载或导入"
         )
     device = str(context.settings.get("asr.device") or "cpu")
-    compute_type = str(context.settings.get("asr.compute_type") or "int8")
+    compute_type = str(context.settings.get("asr.compute_type") or "auto")
     return selftest_mod.run_asr(models_dir, spec, device=device, compute_type=compute_type)
 
 

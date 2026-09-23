@@ -123,11 +123,11 @@ class _ComputeRecorder:
         self.device = device
 
 
-def test_default_int8_is_never_sent_to_a_gpu(monkeypatch) -> None:
-    """默认 int8 + 非 cpu 设备 → 交给 ctranslate2 按卡挑档（auto）。
+def test_default_auto_goes_to_every_device_untouched(monkeypatch) -> None:
+    """默认档 auto 原样直达各设备：精度由 ctranslate2 按实际解析到的卡挑。
 
-    这就是本机 Quadro M4000 的实况修复：CUDA 后端拒绝纯 int8（无高效 int8 GEMM），
-    旧行为是硬塞→被拒→回退 CPU，medium 自检 556s 全烧在 CPU——GPU 在场却永远用不上。
+    曾经默认 int8（CPU 档）硬塞 CUDA 被拒→注定回退 CPU，GPU 在场却永远用不上
+    （本机 Quadro M4000 实证）。auto 在 CPU 上也挑 int8——CPU 用户零回退。
     """
     fake = types.SimpleNamespace(WhisperModel=_ComputeRecorder)
     monkeypatch.setitem(sys.modules, "faster_whisper", fake)
@@ -137,11 +137,27 @@ def test_default_int8_is_never_sent_to_a_gpu(monkeypatch) -> None:
     FasterWhisperEngine("base", device="auto")._ensure_model()
     assert _ComputeRecorder.created[-1] == ("auto", "auto")
     FasterWhisperEngine("base", device="cpu")._ensure_model()
+    assert _ComputeRecorder.created[-1] == ("cpu", "auto")
+
+
+def test_legacy_int8_is_never_sent_to_a_gpu(monkeypatch) -> None:
+    """存量兜底：老设置库落盘的 int8（或调用方显式传入）不许发往 GPU。
+
+    设备非 cpu 时映射成 auto；CPU 路径保留 int8（本来就是它的档）。
+    """
+    fake = types.SimpleNamespace(WhisperModel=_ComputeRecorder)
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake)
+    _ComputeRecorder.created.clear()
+    FasterWhisperEngine("base", device="cuda", compute_type="int8")._ensure_model()
+    assert _ComputeRecorder.created[-1] == ("cuda", "auto")
+    FasterWhisperEngine("base", device="auto", compute_type="int8")._ensure_model()
+    assert _ComputeRecorder.created[-1] == ("auto", "auto")
+    FasterWhisperEngine("base", device="cpu", compute_type="int8")._ensure_model()
     assert _ComputeRecorder.created[-1] == ("cpu", "int8")
 
 
 def test_explicit_compute_type_is_respected_on_gpu(monkeypatch) -> None:
-    """业主显式选的档位（float16/int8_float16/auto）原样透传：映射只动默认 int8。"""
+    """业主显式选的档位（float16/int8_float16/auto）原样透传：映射只动 int8。"""
     fake = types.SimpleNamespace(WhisperModel=_ComputeRecorder)
     monkeypatch.setitem(sys.modules, "faster_whisper", fake)
     _ComputeRecorder.created.clear()
