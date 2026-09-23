@@ -20,6 +20,7 @@ htmlcov/
 
 # ── 运行时数据 / 参考资料（永不入库）──
 data/
+data-scale/
 resources/models/
 resources/cache/
 
