@@ -41,6 +41,7 @@ export function CloudConfigSection({
         <ConfigModal
           initial={initial}
           saving={actions.saving}
+          saveError={actions.saveError}
           onSave={actions.save}
           onClose={actions.close}
         />

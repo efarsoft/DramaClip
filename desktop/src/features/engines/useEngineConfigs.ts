@@ -15,6 +15,8 @@ interface Editing {
 export interface EngineConfigActions {
   readonly configs: readonly EngineConfig[];
   readonly saving: boolean;
+  /** 保存失败的原因原文：进弹窗内联横幅，不再只闪一次 toast（卷二 P-A）。 */
+  readonly saveError: string | null;
   readonly editing: Editing | null;
   readonly adding: boolean;
   readonly openAdd: () => void;
@@ -45,23 +47,28 @@ function persistCall(editingId: string | null, domain: string, payload: ReturnTy
 }
 
 function saveConfig(
-  app: AppApi,
   editingId: string | null,
   domain: string,
   form: FormState,
-  settle: { readonly setSaving: (value: boolean) => void; readonly onDone: () => void },
+  settle: {
+    readonly setSaving: (value: boolean) => void;
+    readonly setSaveError: (value: string | null) => void;
+    readonly onDone: () => void;
+  },
 ): void {
   if (form.name.trim() === '') {
-    app.message.warning('请填写配置名称');
+    settle.setSaveError('请填写配置名称：名称为空时服务端无法建档');
     return;
   }
   settle.setSaving(true);
+  settle.setSaveError(null);
   persistCall(editingId, domain, trim(form))
     .then(() => {
       settle.onDone();
     })
     .catch((error: unknown) => {
-      app.message.error(errorText(error, '保存失败'));
+      // 弹窗保持打开、草稿不丢：原因原文进表单顶部横幅，改完可直接再存
+      settle.setSaveError(errorText(error, '保存失败'));
     })
     .finally(() => {
       settle.setSaving(false);
@@ -99,13 +106,16 @@ function confirmRemove(app: AppApi, config: EngineConfig, onDone: (text: string)
 function editActions(
   setAdding: (value: boolean) => void,
   setEditing: (value: Editing | null) => void,
+  clearError: () => void,
 ): Pick<EngineConfigActions, 'openAdd' | 'openEdit' | 'close'> {
   return {
     openAdd: () => {
+      clearError();
       setEditing(null);
       setAdding(true);
     },
     openEdit: (config) => {
+      clearError();
       setAdding(false);
       setEditing({
         id: config.id,
@@ -118,6 +128,7 @@ function editActions(
       });
     },
     close: () => {
+      clearError();
       setAdding(false);
       setEditing(null);
     },
@@ -130,6 +141,7 @@ export function useEngineConfigs(domain: string, onChanged?: () => void): Engine
   const [editing, setEditing] = useState<Editing | null>(null);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const reload = useCallback(() => {
     engineConfigsApi
@@ -161,11 +173,18 @@ export function useEngineConfigs(domain: string, onChanged?: () => void): Engine
   return {
     configs,
     saving,
+    saveError,
     editing,
     adding,
-    ...editActions(setAdding, setEditing),
+    ...editActions(setAdding, setEditing, () => {
+      setSaveError(null);
+    }),
     save: (form) => {
-      saveConfig(app, editing?.id ?? null, domain, form, { setSaving, onDone: closeAndReload });
+      saveConfig(editing?.id ?? null, domain, form, {
+        setSaving,
+        setSaveError,
+        onDone: closeAndReload,
+      });
     },
     enable: (config) => {
       enableConfig(app, config, afterChange);

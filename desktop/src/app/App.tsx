@@ -1,9 +1,10 @@
 import { useEffect } from 'react';
 import { AppLayout } from '../components/layout/AppLayout';
+import { JobsFeed } from '../features/jobs/JobsFeed';
 import { onServiceEvent, systemApi } from '../services/client';
 import { subscribeAnalysisProgress, subscribeModelDownloadProgress, useUiStore } from '../stores/ui';
 
-/** 应用壳：装配全局事件订阅 + 布局（docs/desktop/01 §1）。 */
+/** 应用壳：装配全局事件订阅 + 布局 + 任务喂数（docs/desktop/01 §1）。 */
 export function App() {
   const setServiceState = useUiStore((state) => state.setServiceState);
 
@@ -28,5 +29,10 @@ export function App() {
       });
   }, [setServiceState]);
 
-  return <AppLayout />;
+  return (
+    <>
+      <AppLayout />
+      <JobsFeed />
+    </>
+  );
 }

@@ -1,4 +1,4 @@
-/** 应用壳：自定义标题栏 + 图标导航栏 + 内容 + 底部状态栏。 */
+/** 应用壳：自定义标题栏 + 图标导航栏 + 内容 + 底部状态栏。任务喂数挂在 App（components 层不得反向依赖 features）。 */
 import { tokens } from '../../styles/theme';
 import { Outlet } from 'react-router-dom';
 import { Rail } from './Rail';

@@ -33,7 +33,9 @@ export function useIndexttsRuntime(): RuntimeState {
         .get(jobId)
         .then(({ job }) => {
           setProgress(job.progress);
-          setStage(job.stage ?? '');
+          // 线上字段叫 label（infra/jobs.py 原样出库）；旧代码读 job.stage 恒为空，
+          // 进度文案永远停在「准备中…」——协议类型已同步改真。
+          setStage(job.label ?? '');
           if (job.status === 'completed') {
             setJobId('');
             setInstalled(true);

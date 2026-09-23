@@ -163,8 +163,8 @@ export interface JobInfo {
   readonly ref_id: string | null;
   readonly status: JobStatus;
   readonly progress: number;
-  /** 人读阶段（服务端 jobs.label），如「第3集 预筛中」 */
-  readonly stage?: string | null;
+  /** 人读阶段文本（服务端字段就叫 label，见 protocol/schemas/jobs.json JobInfo）。 */
+  readonly label?: string | null;
   readonly error?: string | null;
   readonly created_at: number;
   readonly updated_at: number;

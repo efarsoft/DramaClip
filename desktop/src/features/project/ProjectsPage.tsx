@@ -1,4 +1,4 @@
-import { App as AntdApp, Button, Card, Input, Modal } from 'antd';
+import { App as AntdApp, Alert, Button, Card, Input, Modal } from 'antd';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Project } from '@dramaclip/protocol';
@@ -25,17 +25,29 @@ function confirmDeleteProject(modal: AppModal, project: Project, remove: () => P
   });
 }
 
-export function ProjectsPage() {
-  const navigate = useNavigate();
-  const { modal } = AntdApp.useApp();
-  const controller = useProjects();
-  const [createOpen, setCreateOpen] = useState(false);
-
+/** 挂载时补拍一次封面；失败要说出现象与后果，不静默吞（附录 A 行 2 的另一半）。 */
+function useCoverBackfill(reload: () => Promise<void>, warn: (text: string) => void): void {
   useEffect(() => {
-    void projectApi.ensureCovers().then(() => controller.reload()).catch(() => undefined);
+    void projectApi
+      .ensureCovers()
+      .then(() => reload())
+      .catch(() => {
+        warn('部分封面补拍未完成：列表照常可用，缺封面项显示占位图');
+      });
     // 仅挂载时补一次封面
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+}
+
+export function ProjectsPage() {
+  const navigate = useNavigate();
+  const { modal, message } = AntdApp.useApp();
+  const controller = useProjects();
+  const [createOpen, setCreateOpen] = useState(false);
+  // message.warning 返回 thenable，直接当 (text)=>void 传会被 lint 判成误用 Promise——包一层
+  useCoverBackfill(controller.reload, (text) => {
+    message.warning(text);
+  });
   const [renameTarget, setRenameTarget] = useState<Project | null>(null);
 
   const confirmDelete = (project: Project): void => {
@@ -55,6 +67,10 @@ export function ProjectsPage() {
       />
       <ProjectGrid
         projects={controller.projects}
+        loadError={controller.loadError}
+        onRetry={() => {
+          void controller.reload();
+        }}
         onOpen={(project) => {
           rememberDrama(project.id, project.name);
           void navigate(dramaEntryPath(project.id));
@@ -124,30 +140,55 @@ function RenameModal({
 
 function ProjectGrid({
   projects,
+  loadError,
+  onRetry,
   onOpen,
   onRename,
   onDuplicate,
   onDelete,
 }: {
   projects: Project[] | null;
+  loadError: string | null;
+  onRetry: () => void;
   onOpen: (project: Project) => void;
   onRename: (project: Project) => void;
   onDuplicate: (project: Project) => void;
   onDelete: (project: Project) => void;
 }) {
-  if (projects === null) return <Card loading />;
+  // 失败态优先于一切：原文上屏 + 真重试按钮。已有旧数据时横幅压顶、网格保留（数据旧但可看）。
+  const banner =
+    loadError !== null ? (
+      <Alert
+        type="error"
+        showIcon
+        style={{ marginBottom: tokens.spaceLg }}
+        title={`项目列表加载失败：${loadError}`}
+        description={projects === null ? '取到列表之前这里无法渲染；重试会重新拉取。' : '显示的是上一次取到的列表，可能已过期；重试会重新拉取。'}
+        action={
+          <Button size="small" danger onClick={onRetry}>
+            重试
+          </Button>
+        }
+      />
+    ) : undefined;
+  if (projects === null) {
+    return loadError !== null ? <div>{banner}</div> : <Card loading />;
+  }
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(236px, 1fr))', gap: tokens.spaceLg }}>
-      {projects.map((project) => (
-        <ProjectCard
-          key={project.id}
-          project={project}
-          onOpen={onOpen}
-          onRename={onRename}
-          onDuplicate={onDuplicate}
-          onDelete={onDelete}
-        />
-      ))}
+    <div>
+      {banner}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(236px, 1fr))', gap: tokens.spaceLg }}>
+        {projects.map((project) => (
+          <ProjectCard
+            key={project.id}
+            project={project}
+            onOpen={onOpen}
+            onRename={onRename}
+            onDuplicate={onDuplicate}
+            onDelete={onDelete}
+          />
+        ))}
+      </div>
     </div>
   );
 }

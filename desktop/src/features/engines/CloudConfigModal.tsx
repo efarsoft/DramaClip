@@ -1,5 +1,5 @@
-/** 端点配置弹窗：新增/编辑表单 + 保存前连通性测试。 */
-import { App as AntdApp, Button, Input, Modal } from 'antd';
+/** 端点配置弹窗：新增/编辑表单 + 保存前连通性测试；失败原文进内联横幅，不闪一次就消失。 */
+import { App as AntdApp, Alert, Button, Input, Modal } from 'antd';
 import { useState, type ChangeEvent, type ReactElement } from 'react';
 import { engineConfigsApi } from '../../services/client';
 import { tokens } from '../../styles/theme';
@@ -18,16 +18,22 @@ const FIELDS = [
   { key: 'model', label: '模型名', placeholder: 'qwen-plus' },
 ] as const;
 
-/** 连通性测试：按当前草稿直测端点（保存前即可验证）。 */
-function useConnectionTest(draft: FormState): { readonly testing: boolean; readonly test: () => void } {
+/** 连通性测试：按当前草稿直测端点（保存前即可验证）；失败原因进弹窗内横幅。 */
+function useConnectionTest(draft: FormState): {
+  readonly testing: boolean;
+  readonly testError: string | null;
+  readonly test: () => void;
+} {
   const { message } = AntdApp.useApp();
   const [testing, setTesting] = useState(false);
+  const [testError, setTestError] = useState<string | null>(null);
   const test = (): void => {
     if (draft.base_url.trim() === '' || draft.model.trim() === '') {
-      message.warning('先填写 API 地址与模型名');
+      setTestError('先填写 API 地址与模型名：这两项为空时无从测起');
       return;
     }
     setTesting(true);
+    setTestError(null);
     engineConfigsApi
       .test({
         base_url: draft.base_url.trim(),
@@ -35,32 +41,37 @@ function useConnectionTest(draft: FormState): { readonly testing: boolean; reado
         model: draft.model.trim(),
       })
       .then((res) => {
-        if (res.ok) message.success(`连接正常 · 延迟 ${String(res.latency_s ?? 0)}s`);
-        else message.error(res.error ?? '连接失败');
+        if (res.ok) {
+          message.success(`连接正常 · 延迟 ${String(res.latency_s ?? 0)}s`);
+          return;
+        }
+        setTestError(res.error ?? '端点拒绝连接，未给出原因');
       })
       .catch((error: unknown) => {
-        message.error(error instanceof Error && error.message !== '' ? error.message : '连接失败');
+        setTestError(error instanceof Error && error.message !== '' ? error.message : '连接失败');
       })
       .finally(() => {
         setTesting(false);
       });
   };
-  return { testing, test };
+  return { testing, testError, test };
 }
 
 export function ConfigModal({
   initial,
   saving,
+  saveError,
   onSave,
   onClose,
 }: {
   initial: FormState;
   saving: boolean;
+  saveError: string | null;
   onSave: (form: FormState) => void;
   onClose: () => void;
 }): ReactElement {
   const [draft, setDraft] = useState<FormState>(initial);
-  const { testing, test } = useConnectionTest(draft);
+  const { testing, testError, test } = useConnectionTest(draft);
   const field = (key: keyof FormState) => ({
     value: draft[key],
     onChange: (event: ChangeEvent<HTMLInputElement>) => {
@@ -85,6 +96,7 @@ export function ConfigModal({
       ]}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceMd, paddingTop: tokens.spaceSm }}>
+        <FailureBanners saveError={saveError} testError={testError} />
         {FIELDS.map((spec) => (
           <LabeledInput
             key={spec.key}
@@ -96,6 +108,37 @@ export function ConfigModal({
         ))}
       </div>
     </Modal>
+  );
+}
+
+/** 失败横幅组：常驻弹窗内直到下一次动作，各说清后果边界（卷二 P-A）。 */
+function FailureBanners({
+  saveError,
+  testError,
+}: {
+  saveError: string | null;
+  testError: string | null;
+}): ReactElement | null {
+  if (saveError === null && testError === null) return null;
+  return (
+    <>
+      {saveError !== null && (
+        <Alert
+          type="error"
+          showIcon
+          title={`保存失败：${saveError}`}
+          description="草稿仍在表单里，改完可直接再存；本次修改尚未生效。"
+        />
+      )}
+      {testError !== null && (
+        <Alert
+          type="warning"
+          showIcon
+          title={`连接测试未通过：${testError}`}
+          description="测试只验当前草稿；仍可保存，但该端点在被选中前不会产文案。"
+        />
+      )}
+    </>
   );
 }
 

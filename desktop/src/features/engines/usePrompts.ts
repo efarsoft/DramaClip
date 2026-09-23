@@ -10,6 +10,8 @@ export function usePrompts(): PromptsState {
   const [editing, setEditing] = useState<PromptInfo | null>(null);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  // 保存失败的原因原文：进编辑框内的常驻横幅，不再只闪一次 toast（卷二 P-A）
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const reload = useCallback(async (): Promise<void> => {
     setPrompts((await promptsApi.list()).prompts);
@@ -43,13 +45,15 @@ export function usePrompts(): PromptsState {
   const save = async (): Promise<void> => {
     if (editing === null) return;
     setSaving(true);
+    setSaveError(null);
     try {
       await promptsApi.save(editing.key, draft);
       message.success('已保存，下一次出片即生效');
       setEditing(null);
       await reload();
     } catch (error: unknown) {
-      showError(error);
+      // 弹窗保持打开、草稿不丢：横幅把原因原文放在保存按钮旁边
+      setSaveError(error instanceof Error && error.message !== '' ? error.message : String(error));
     } finally {
       setSaving(false);
     }
@@ -63,13 +67,15 @@ export function usePrompts(): PromptsState {
   const openEdit = (info: PromptInfo): void => {
     setDraft(info.current);
     setEditing(info);
+    setSaveError(null);
   };
 
   const closeEdit = (): void => {
     setEditing(null);
+    setSaveError(null);
   };
 
-  return { prompts, editing, openEdit, closeEdit, draft, setDraft, saving, save, reset };
+  return { prompts, editing, openEdit, closeEdit, draft, setDraft, saving, saveError, save, reset };
 }
 
 export interface PromptsState {
@@ -80,6 +86,8 @@ export interface PromptsState {
   draft: string;
   setDraft: (text: string) => void;
   saving: boolean;
+  /** 保存失败的原因原文；null = 没有待呈现的失败。 */
+  saveError: string | null;
   save: () => Promise<void>;
   reset: (info: PromptInfo) => void;
 }

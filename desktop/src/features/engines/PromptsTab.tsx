@@ -6,7 +6,7 @@ import { tokens } from '../../styles/theme';
 import { usePrompts } from './usePrompts';
 
 export function PromptsTab(): ReactElement {
-  const { prompts, editing, openEdit, closeEdit, draft, setDraft, saving, save, reset } = usePrompts();
+  const { prompts, editing, openEdit, closeEdit, draft, setDraft, saving, saveError, save, reset } = usePrompts();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
       <PromptHint />
@@ -17,6 +17,7 @@ export function PromptsTab(): ReactElement {
         editing={editing}
         draft={draft}
         saving={saving}
+        saveError={saveError}
         onDraft={setDraft}
         onSave={() => {
           void save();
