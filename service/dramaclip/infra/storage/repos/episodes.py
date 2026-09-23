@@ -18,6 +18,7 @@ _COLUMNS = (
     "name",
     "cover_path",
     "source_signature",
+    "has_audio",
 )
 
 
@@ -34,9 +35,10 @@ def replace_all(
     now = _now_ms()
     conn.execute("DELETE FROM episodes WHERE project_id = ?", (project_id,))
     for episode in episodes:
+        has_audio = episode.get("has_audio")
         conn.execute(
             "INSERT INTO episodes (id, project_id, episode_number, source_path, duration,"
-            " status, created_at, name) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
+            " status, created_at, name, has_audio) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
             (
                 uuid4().hex,
                 project_id,
@@ -45,6 +47,7 @@ def replace_all(
                 float(episode["duration"]),
                 now,
                 str(episode.get("name", "")),
+                None if has_audio is None else int(bool(has_audio)),
             ),
         )
     conn.commit()

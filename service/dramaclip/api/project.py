@@ -57,7 +57,10 @@ def get(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     project = projects_repo.get(context.conn, project_id)
     if project is None:
         raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
-    return {"project": project, "episodes": episodes_repo.list_by_project(context.conn, project_id)}
+    episodes = [
+        _episode_out(row) for row in episodes_repo.list_by_project(context.conn, project_id)
+    ]
+    return {"project": project, "episodes": episodes}
 
 
 def delete(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -125,6 +128,7 @@ def scan_episodes(context: AppContext, params: dict[str, Any]) -> list[dict[str,
                 "source_path": str(video),
                 "duration": round(media.duration_s, 3),
                 "size_bytes": video.stat().st_size,
+                "has_audio": media.has_audio,
             }
         )
     episodes_repo.replace_all(context.conn, project_id, scanned)
@@ -161,6 +165,15 @@ def reorder_episodes(context: AppContext, params: dict[str, Any]) -> dict[str, A
     if not ok:
         raise RpcDomainError(_ERR_NO_EPISODES, "episode_ids 与项目剧集不一致")
     return {"ok": True}
+
+
+def _episode_out(row: dict[str, Any]) -> dict[str, Any]:
+    """episodes 出参：库里的 0/1 还原成布尔；NULL（迁移前的旧集，未重扫）原样保留——
+    取不到 ≠ 没有，渲染层据此不发缺音轨告警。"""
+    out = dict(row)
+    if out.get("has_audio") is not None:
+        out["has_audio"] = bool(out["has_audio"])
+    return out
 
 
 def _ensure_episode_cover(context: AppContext, episode: dict[str, Any]) -> bool:

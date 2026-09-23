@@ -6,7 +6,17 @@
     {
       "name": "analysis.prescreen",
       "summary": "阶段一轻量预筛（批量；结果落库并推荐，供两阶段分析交互）",
-      "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
+      "params": {
+        "type": "object",
+        "required": ["project_id"],
+        "properties": {
+          "project_id": { "type": "string" },
+          "then_analyze": {
+            "type": "boolean",
+            "description": "预筛完成后自动对推荐集启动精准分析（转写档位「仅推荐集精转」的消费端）"
+          }
+        }
+      },
       "result": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } }
     }
   ]

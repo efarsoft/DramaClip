@@ -90,6 +90,8 @@ export interface Episode {
   readonly duration?: number;
   readonly status: string;
   readonly cover_path?: string;
+  /** ffprobe 音轨判定；null/缺省 = 迁移前旧集尚未重扫（取不到 ≠ 没有，界面不发缺音轨告警）。 */
+  readonly has_audio?: boolean | null;
 }
 
 export interface ScannedEpisode {
@@ -98,6 +100,7 @@ export interface ScannedEpisode {
   readonly source_path: string;
   readonly duration: number;
   readonly size_bytes: number;
+  readonly has_audio: boolean;
 }
 
 export interface ProjectGetResult {
@@ -126,9 +129,26 @@ export interface EpisodeAnalysisResult {
   readonly highlight_count: number;
   readonly genre?: string;
   readonly error?: string;
+  /** 预筛综合分（0-100）；null = 该集没预筛过。 */
+  readonly prescreen_score?: number | null;
+  /** 预筛推荐判定（金色覆盖度告警的数据源）；null = 没预筛过。 */
+  readonly recommended?: boolean | null;
   /** 源音频进仓已削顶：成片限幅只能压电平，不能把平顶长回来。 */
   readonly clipping?: boolean;
   readonly peak_dbfs?: number | null;
+}
+
+/** episode_prescreen 原始行（analysis.results 的 prescreen 映射值）。
+ * 注意 recommended 在此是库内 0/1 整数；界面判定请用 EpisodeAnalysisResult.recommended（已转布尔）。 */
+export interface PrescreenRow {
+  readonly episode_id?: string;
+  readonly audio_peak_density?: number;
+  readonly scene_cut_density?: number;
+  readonly voice_activity_ratio?: number;
+  readonly motion_intensity?: number;
+  readonly prescreen_score: number;
+  readonly recommended: number;
+  readonly created_at?: number;
 }
 
 export interface HighlightSegment {
@@ -184,6 +204,7 @@ export interface AnalysisResults {
   readonly asr_segments?: Readonly<Record<string, AsrSegment[]>>;
   readonly highlights?: Readonly<Record<string, HighlightSegment[]>>;
   readonly conflict_scores?: Readonly<Record<string, ConflictScorePoint[]>>;
+  readonly prescreen?: Readonly<Record<string, PrescreenRow>>;
 }
 
 /** ---- narration / export 命名空间（W4）---- */

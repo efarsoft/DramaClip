@@ -26,7 +26,20 @@
         "scene_count": { "type": "integer" },
         "highlight_count": { "type": "integer" },
         "genre": { "type": "string" },
-        "error": { "type": "string" }
+        "error": { "type": "string" },
+        "prescreen_score": {
+          "type": ["number", "null"],
+          "description": "预筛综合分（0-100）；null = 该集没预筛过"
+        },
+        "recommended": {
+          "type": ["boolean", "null"],
+          "description": "预筛推荐判定（金色覆盖度告警的数据源）；null = 没预筛过"
+        },
+        "clipping": {
+          "type": "boolean",
+          "description": "源音频进仓已削顶：成片限幅只能压电平，不能把平顶长回来"
+        },
+        "peak_dbfs": { "type": ["number", "null"] }
       }
     },
     "AnalysisJobStatus": {
@@ -158,6 +171,24 @@
                   "score": { "type": "integer" },
                   "reason": { "type": "string" }
                 }
+              }
+            }
+          },
+          "prescreen": {
+            "type": "object",
+            "description": "预筛原始行（每集一条）。注意 recommended 在此是库内 0/1 整数；界面判定请用 episodes[].recommended（已转布尔）",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["prescreen_score", "recommended"],
+              "properties": {
+                "episode_id": { "type": "string" },
+                "audio_peak_density": { "type": "number" },
+                "scene_cut_density": { "type": "number" },
+                "voice_activity_ratio": { "type": "number" },
+                "motion_intensity": { "type": "number" },
+                "prescreen_score": { "type": "number" },
+                "recommended": { "type": "integer" },
+                "created_at": { "type": "integer" }
               }
             }
           }

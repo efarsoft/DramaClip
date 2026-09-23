@@ -72,6 +72,10 @@
         },
         "cover_path": {
           "type": "string"
+        },
+        "has_audio": {
+          "type": ["boolean", "null"],
+          "description": "ffprobe 音轨判定；null = 迁移前旧集尚未重扫（取不到 ≠ 没有，界面不发缺音轨告警）"
         }
       }
     },
@@ -82,7 +86,8 @@
         "name",
         "source_path",
         "duration",
-        "size_bytes"
+        "size_bytes",
+        "has_audio"
       ],
       "properties": {
         "episode_number": {
@@ -99,6 +104,9 @@
         },
         "size_bytes": {
           "type": "integer"
+        },
+        "has_audio": {
+          "type": "boolean"
         }
       }
     }
