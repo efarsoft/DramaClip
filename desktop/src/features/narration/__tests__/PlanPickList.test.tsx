@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 /**
  * 方案卡勾选 → 出片提交的是这批的 id；换批之后旧勾选必须作废。
- *
  * 规划一次、出片一次之间隔着一次「再生成」，方案 id 是按批次新建的。
  * 上一批的勾选如果留着，`export.submit` 就会收到本批根本不存在的 id。
+ * 另钉（卷三图4 / 意见08 / 静默清单第2条）：覆盖度行常驻、成本预估一期口径。
  */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -14,12 +14,12 @@ afterEach(() => {
   cleanup();
 });
 
-function plan(id: string): NarrationPlan {
+function plan(id: string, episodeIds: string[] = ['e1']): NarrationPlan {
   return {
     id,
     project_id: 'proj',
     narration_mode: 'cross_narration',
-    episode_ids: ['e1'],
+    episode_ids: episodeIds,
     plan_data: {
       mode: 'cross_narration',
       timeline: [],
@@ -32,13 +32,10 @@ function plan(id: string): NarrationPlan {
 }
 
 const idleQueue = {
-  running: false,
-  percent: 0,
-  stageText: '',
+  submitting: false,
   rejected: [],
   error: '',
   run: vi.fn(),
-  cancel: vi.fn(),
 };
 
 const idleBatch = {
@@ -50,37 +47,32 @@ const idleBatch = {
   cancel: vi.fn(),
 };
 
+function pickList(plans: NarrationPlan[], queue = idleQueue, episodeCount = 2, avgBytes: number | null = null) {
+  return render(
+    <PlanPickList batch={{ ...idleBatch, plans }} queue={queue} episodeCount={episodeCount} avgBytes={avgBytes} />,
+  );
+}
+
 it('勾选后出片，提交的是勾了的方案 id', () => {
   const run = vi.fn();
-  render(
-    <PlanPickList
-      batch={{ ...idleBatch, plans: [plan('a'), plan('b')] }}
-      queue={{ ...idleQueue, run }}
-    />,
-  );
+  pickList([plan('a'), plan('b')], { ...idleQueue, run });
   fireEvent.click(screen.getByText('角度 a'));
-  fireEvent.click(screen.getByRole('button', { name: /出片所选/ }));
+  fireEvent.click(screen.getByRole('button', { name: /开始出片/ }));
   expect(run).toHaveBeenCalledWith(['a']);
 });
 
 it('换了批次，上一批的勾选自动作废', () => {
   const { rerender } = render(
-    <PlanPickList
-      batch={{ ...idleBatch, plans: [plan('a')] }}
-      queue={idleQueue}
-    />,
+    <PlanPickList batch={{ ...idleBatch, plans: [plan('a')] }} queue={idleQueue} episodeCount={2} avgBytes={null} />,
   );
   fireEvent.click(screen.getByText('角度 a'));
   expect(screen.getByText('已选 1 / 1 条方案')).not.toBeNull();
 
   rerender(
-    <PlanPickList
-      batch={{ ...idleBatch, plans: [plan('c'), plan('d')] }}
-      queue={idleQueue}
-    />,
+    <PlanPickList batch={{ ...idleBatch, plans: [plan('c'), plan('d')] }} queue={idleQueue} episodeCount={2} avgBytes={null} />,
   );
   expect(screen.getByText('已选 0 / 2 条方案')).not.toBeNull();
-  expect(screen.getByRole('button', { name: /出片所选/ }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('button', { name: /开始出片/ }).hasAttribute('disabled')).toBe(true);
 });
 
 it('剧本清洗丢了几段就写在卡上：不说出口，方案看起来像天生只有这么长', () => {
@@ -88,12 +80,7 @@ it('剧本清洗丢了几段就写在卡上：不说出口，方案看起来像�
     ...plan('a'),
     plan_data: { ...plan('a').plan_data, dropped_segments: 3 },
   };
-  render(
-    <PlanPickList
-      batch={{ ...idleBatch, plans: [dropped, plan('b')] }}
-      queue={idleQueue}
-    />,
-  );
+  pickList([dropped, plan('b')]);
   expect(screen.getByText('剧本丢弃 3 段')).not.toBeNull();
   expect(screen.getAllByText(/剧本丢弃/)).toHaveLength(1);
 });
@@ -105,15 +92,39 @@ it('过不了转化门禁的方案不能勾选出片', () => {
     status: 'draft',
     block_reason: '收尾没有指向看全集',
   };
-  render(
-    <PlanPickList
-      batch={{ ...idleBatch, plans: [blocked, plan('b')] }}
-      queue={{ ...idleQueue, run }}
-    />,
-  );
+  pickList([blocked, plan('b')], { ...idleQueue, run });
   fireEvent.click(screen.getByText('角度 a'));
   fireEvent.click(screen.getByText('角度 b'));
-  fireEvent.click(screen.getByRole('button', { name: /出片所选/ }));
+  fireEvent.click(screen.getByRole('button', { name: /开始出片/ }));
   expect(run).toHaveBeenCalledWith(['b']);
   expect(screen.getByText('收尾没有指向看全集')).not.toBeNull();
+});
+
+it('覆盖度行常驻卡头：取材集去重 n / 全剧 m', () => {
+  pickList([plan('a', ['e1', 'e2']), plan('b', ['e2'])], idleQueue, 3);
+  expect(screen.getByText(/本次规划覆盖/)).toBeTruthy();
+  expect(screen.getByText('2/3')).toBeTruthy();
+});
+
+it('集数拿不到时覆盖度行缺席，不拿 0/0 充数', () => {
+  pickList([plan('a')], idleQueue, 0);
+  expect(screen.queryByText(/本次规划覆盖/)).toBeNull();
+});
+
+it('成本预估一期口径：条数照实、磁盘带「估」字、耗时与 LLM 就是「—」', () => {
+  pickList([plan('a'), plan('b')], idleQueue, 2, 1073741824);
+  expect(screen.getByText('成本预估')).toBeTruthy();
+  expect(screen.getByText('0 条')).toBeTruthy(); // 未勾选：条数照实是 0
+  fireEvent.click(screen.getByText('角度 a'));
+  expect(screen.getByText('1 条')).toBeTruthy();
+  expect(screen.getByText('约 1.0 GB（估）')).toBeTruthy();
+  // 耗时与 LLM 成稿没有实测口径：两个「—」芯片常驻
+  expect(screen.getAllByText('—')).toHaveLength(2);
+});
+
+it('没有已完成成片：磁盘项显示「—」而不是编一个系数', () => {
+  pickList([plan('a')], idleQueue, 2, null);
+  fireEvent.click(screen.getByText('角度 a'));
+  expect(screen.getByText('1 条')).toBeTruthy();
+  expect(screen.queryByText(/GB（估）/)).toBeNull();
 });

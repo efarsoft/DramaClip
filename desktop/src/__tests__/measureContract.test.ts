@@ -74,8 +74,6 @@ const MEASURE_DEBT: Readonly<Record<string, number>> = {
   'features/engines/MachinePanel.tsx': 1,
   'features/engines/ReadinessCard.tsx': 1,
   'features/engines/TtsPreviewButton.tsx': 1,
-  'features/narration/ExportsCard.tsx': 1,
-  'features/narration/StyleSelectCard.tsx': 1,
   'features/settings/SettingsPage.tsx': 1,
 };
 
@@ -123,9 +121,11 @@ describe('§8.3 度量口径与棘轮', () => {
     const found = measureDebt();
     // 下限随合法还债下移（只减不增，§8.3）：P-B2 把 RecentWorks/StatChips/ContinueCard
     // 三块吸收进 DramaMatrix，P-B3 把 ProjectCard 重写成零字面量的 DramaCard，22 → 18；
-    // P-D 重写 WorksPage（拆成 worksView/WorkCard 等）与 WorksDetailPage 归零，18 → 16。
-    // 它防的是扫描面被删窄，不是禁止还债——逐文件对账在下面那条，才是真棘轮。
-    expect(Object.keys(found).length).toBeGreaterThanOrEqual(16);
+    // P-D 重写 WorksPage（拆成 worksView/WorkCard 等）与 WorksDetailPage 归零，18 → 16；
+    // P-C④ 出片段重排顺手清掉 ExportsCard/StyleSelectCard（'10px 14px' 登记为
+    // layout.cardBodyCompact），16 → 14。它防的是扫描面被删窄，不是禁止还债——
+    // 逐文件对账在下面那条，才是真棘轮。
+    expect(Object.keys(found).length).toBeGreaterThanOrEqual(14);
     expect(found, 'EnvPanel 的 6 处是最密的一屏，扫不到就是扫描面被删窄').toHaveProperty(
       'features/home/EnvPanel.tsx',
       6,

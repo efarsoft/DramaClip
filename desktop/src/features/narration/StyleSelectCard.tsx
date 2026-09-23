@@ -3,7 +3,7 @@ import { App as AntdApp, Card, Select } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import type { StyleInfo } from '@dramaclip/protocol';
 import { narrationApi, settingsApi } from '../../services/client';
-import { tokens } from '../../styles/theme';
+import { layout, tokens } from '../../styles/theme';
 
 const AUTO_ID = 'auto';
 const DEFAULT_ID = AUTO_ID;
@@ -71,7 +71,7 @@ export function StyleSelectCard(): React.ReactElement {
     <Card
       size="small"
       title="解说风格"
-      styles={{ body: { padding: '10px 14px' } }}
+      styles={{ body: { padding: `${String(layout.cardBodyCompact.paddingBlock)}px ${String(layout.cardBodyCompact.paddingInline)}px` } }}
       loading={styles.length === 0 && !saving}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceMd }}>

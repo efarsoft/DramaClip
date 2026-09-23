@@ -35,7 +35,7 @@ function ExportRow({ job }: { job: ExportJob }) {
         display: 'flex',
         alignItems: 'center',
         gap: tokens.spaceMd,
-        padding: '8px 0',
+        padding: `${tokens.spaceSm} 0`,
         borderBottom: `1px solid ${tokens.borderSecondary}`,
         fontSize: tokens.text.body.size,
         lineHeight: tokens.text.body.leading,

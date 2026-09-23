@@ -68,7 +68,6 @@ function PlanToolbar({
           options={K_OPTIONS.map((n) => ({ value: n, label: `${String(n)} 条` }))}
         />
         <Button
-          type="primary"
           style={{ marginLeft: 'auto' }}
           disabled={modes.length === 0}
           loading={batch.planning}

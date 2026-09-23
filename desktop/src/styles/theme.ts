@@ -154,6 +154,8 @@ export const layout = {
   chip: { paddingBlock: 2, paddingInline: tokens.spaceSm },
   /** 海报角标与自检徽章芯片的 '1px 6px' 内边距：脱阶值按 §8.3 登记成具名值，不留在组件里。 */
   posterChip: { paddingBlock: 1, paddingInline: 6 },
+  /** 紧凑卡身 '10px 14px' 内边距（StyleSelectCard 等小卡）：脱阶值照实登记，不新造一档。 */
+  cardBodyCompact: { paddingBlock: 10, paddingInline: 14 },
   /** mono 小字与相邻正文的顶对齐微调（原 WorksDetailPage 的 paddingTop:2）。 */
   monoAlignTop: 2,
   /** 主从编辑器左栏：五值原样搬入，只消灭散落在三处的同源数（§2）。 */

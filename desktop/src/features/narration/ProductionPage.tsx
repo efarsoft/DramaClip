@@ -1,5 +1,5 @@
 /** 出片中心：③ 选模式出 K 条方案 → 勾选方案 → ④ 出片所选，成品入作品库。 */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { ExportJob, NarrationMode, Project } from '@dramaclip/protocol';
 import { PageHeader as PageKitHeader, PageShell } from '../../components/layout/PageKit';
@@ -11,6 +11,7 @@ import { layout, tokens } from '../../styles/theme';
 import { ExportsCard } from './ExportsCard';
 import { ModePicker } from './ModePicker';
 import { PlanPickList } from './PlanPickList';
+import { avgCompletedBytes } from './produceView';
 import { StyleSelectCard } from './StyleSelectCard';
 import { useExportQueue } from './useExportQueue';
 import { useFocusScroll } from './useFocusScroll';
@@ -35,6 +36,7 @@ export function ProductionPage() {
   const setCurrentProjectId = useUiStore((state) => state.setCurrentProjectId);
   const serviceState = useUiStore((state) => state.serviceState);
   const [project, setProject] = useState<Project | null>(null);
+  const [episodeCount, setEpisodeCount] = useState(0);
   const [modes, setModes] = useState<NarrationMode[]>([]);
   const [k, setK] = useState<number>(DEFAULT_K);
   const [exports, setExports] = useState<ExportJob[] | null>(null);
@@ -44,6 +46,7 @@ export function ProductionPage() {
     setCurrentProjectId(projectId === '' ? null : projectId);
     void projectApi.get(projectId).then((detail) => {
       setProject(detail.project);
+      setEpisodeCount(detail.episodes.length);
       rememberDrama(detail.project.id, detail.project.name);
     });
     return () => {
@@ -61,7 +64,9 @@ export function ProductionPage() {
   }, [reloadExports, serviceState]);
 
   const batch = usePlanBatch(projectId);
-  const queue = useExportQueue(projectId, reloadExports);
+  const queue = useExportQueue(reloadExports);
+  // 磁盘预估系数：本剧已完成成片的实测均值（意见08「估」字要带得出出处）
+  const avgBytes = useMemo(() => avgCompletedBytes(exports), [exports]);
 
   return (
     <PageShell>
@@ -80,7 +85,7 @@ export function ProductionPage() {
           }}
           onKChange={setK}
         />
-        <PlanPickList batch={batch} queue={queue} />
+        <PlanPickList batch={batch} queue={queue} episodeCount={episodeCount} avgBytes={avgBytes} />
       </div>
       <div ref={exportRef}>
         <ExportsCard exports={exports} />
