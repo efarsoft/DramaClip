@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
 /**
- * 引擎中心页把登记本与向导真的接上了吗——这条只能在页面上验。
- *
- * 组件级用例（ExternalAssets.test.tsx）是喂着 props 渲染的：页面忘了拉 models.import_records、
- * 把配音域的登记串进识别域、向导落位后不刷新资产库，那边一律发现不了。所以这里走真挂载：
- * load() 的取数、按域过滤、撤销登记的回传与「划完再拉一次」、向导第 ④ 步交回 model_id 后
- * 页面怎么写设置（查不到这一行就一句也不写），都在这一份里验。
+ * 引擎中心页级真挂载：组件级用例（ExternalAssets.test.tsx）喂着 props 渲染，发现不了
+ * 页面忘拉 models.import_records、跨域串登记、向导落位后不刷新这类接线遗漏。
+ * 这里验 load() 取数、按域过滤、撤销登记回传与「划完再拉一次」、向导第 ④ 步交回
+ * model_id 后页面怎么写设置（查不到这一行就一句也不写）。
  */
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -122,7 +120,7 @@ afterEach(() => {
 });
 
 describe('引擎中心页接登记本', () => {
-  /** 单页六段后「别域不串台」按段判：ASR 段只有 ASR 的货，TTS 段只有 TTS 的。 */
+  /** 页面是单页六段，「别域不串台」要按段判：ASR 段只有 ASR 的货，TTS 段只有 TTS 的。 */
   async function sectionOf(id: string): Promise<HTMLElement> {
     return waitFor(() => {
       const el = document.getElementById(id);
@@ -224,7 +222,6 @@ describe('向导落位后由页面写设置', () => {
     });
   });
 
-  /** 反面：库里压根没这一行时宁可说一句，也不能把设置写成一个查无此物的引擎。 */
   it('库里查不到这一行：不写设置，把原因说出来', async () => {
     api.list.mockResolvedValue([]);
     api.importRecords.mockResolvedValue({ records: [importRecord()], error: '' });

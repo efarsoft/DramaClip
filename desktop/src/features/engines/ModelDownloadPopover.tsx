@@ -58,7 +58,7 @@ export function DownloadSourceButton({
   );
 }
 
-/** 失败态（附录 B② 根治）：分类原因挂在悬停上，按钮直接给「重试」——名字与动作同权重。 */
+/** 失败态（附录 B②）：分类原因挂在悬停上，按钮直接给「重试」——名字与动作同权重。 */
 function RetryDownload({
   model,
   reason,

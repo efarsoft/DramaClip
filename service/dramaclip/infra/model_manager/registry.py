@@ -271,8 +271,7 @@ def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
         if spec.engine == "faster_whisper":
             # HF 缓存布局，模型级精确探测：
             # placement/models--Systran--faster-whisper-<size>/snapshots/<hash>/model.bin
-            # refs/main 解析出的快照优先——引擎按 refs 加载，探测口径必须与加载口径一致，
-            # 否则会出现「体检报的修订」与「引擎真加载的修订」不是同一份。
+            # 快照枚举序见 _snapshot_candidates（与引擎加载同口径）。
             short = spec.model_id.removeprefix("faster-whisper-")
             for cache_dir in sorted(base.glob(f"models--*faster-whisper-{short}")):
                 for snapshot in _snapshot_candidates(cache_dir):
@@ -413,8 +412,8 @@ def verify(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
     """资产体检：逐项判据，任何一项 ``fail`` 都不许被当成「可用」。
 
     为什么不复用 ``detect_status`` 的 ``status``：那个判据是「placement 下存在一个权重
-    文件」，下载中断留下的半截目录一样过——10 集分析白跑就是这么来的。这里按引擎各自的
-    必需文件、快照提交号、下载清单、中断残留、重复缓存五道查，全部有真机形态对应
+    文件」，下载中断留下的半截目录一样过。这里按引擎各自的必需文件、快照提交号、
+    下载清单、中断残留、重复缓存五道查，全部有真机形态对应
     （见 tests/infra/model_manager/test_verify.py 的模块 docstring）。
     """
     checks: list[dict[str, Any]] = []
@@ -493,9 +492,9 @@ def _verify_snapshot_revision(cache: Path, root: Path | None, add: Any) -> None:
 
     - **fail**：refs 与快照不一致（两个权威对「加载哪个修订」意见不同，是真矛盾）；
       或目录名非提交号**却有** trees 清单（清单自称可对账，与目录名互相打脸）。
-    - **warn**：目录名非提交号且无清单——只是当年下载没解析到提交号（历史版本
-      下载器就落 ``snapshots/main``，这形态多半是我们自己制造的，不是手动放置），
-      无从逐文件对账 ≠ 权重缺损，能不能加载留给能力层自检，不在文件层判死。
+    - **warn**：目录名非提交号且无清单——下载时解析不到提交号的退化形态（多为
+      下载器自己制造，不是手动放置），无从逐文件对账 ≠ 权重缺损，能不能加载
+      留给能力层自检，不在文件层判死。
     """
     name = root.name if root is not None else ""
     ref = cache / "refs" / "main"
@@ -565,7 +564,7 @@ def _looks_like_assets(path: Path) -> bool:
 def _verify_unique_path(models_dir: Path, base: Path, cache: Path | None, add: Any) -> None:
     """同一份缓存出现在第二个路径：引擎只会读登记路径那份，另一份纯占磁盘。
 
-    只数「目录里真有模型」的：本机 ``models/.locks/models--…`` 与登记项同名却是 hf_hub 的空锁
+    只数「目录里真有模型」的：``models/.locks/models--…`` 与登记项同名却是 hf_hub 的空锁
     目录，按名字判重复会把每个正常模型都报成脏。
     """
     probe = cache.name if cache is not None else base.name

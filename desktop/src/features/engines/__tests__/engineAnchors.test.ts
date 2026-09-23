@@ -1,5 +1,5 @@
-// §10.4 锚点深链：/engines/:tab 从「选屏」变「选锚点」。
-// 附录 B① 的结案口径：锚点解析必须覆盖 prompts（HEAD 381f32c5 的正则漏过它）。
+// §10.4 锚点深链：/engines/:tab 解析为对应分段的锚点。
+// 附录 B①：锚点解析必须覆盖 prompts，不得回落到总览。
 import { describe, expect, it } from 'vitest';
 import { anchorFromPath, SECTION_IDS } from '../engineAnchors';
 

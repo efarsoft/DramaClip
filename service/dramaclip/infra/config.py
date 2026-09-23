@@ -22,10 +22,9 @@ DEFAULTS: dict[str, str] = {
     "asr.model": "small",
     "asr.device": "auto",
     # auto = 把精度决定权交给 ctranslate2 按实际设备挑最快可用档（CPU→int8，
-    # CUDA→float16/float32），与 faster-whisper 上游默认一致。曾默认 int8（CPU 档）：
-    # CUDA 后端在无高效 int8 GEMM 的卡上直接拒绝，GPU 在场却永远回退 CPU（本机
-    # M4000 实证）。存量库已落 int8 的不动（load 不覆盖显式值）——transcriber 的
-    # _compute_for 映射兜底，行为与 auto 等价，不做踩掉业主选择的迁移。
+    # CUDA→float16/float32），与 faster-whisper 上游默认一致。存量库已落 int8 的
+    # 不迁移（load 不覆盖显式值）——由 transcriber 的 _compute_for 映射兜底，
+    # 行为与 auto 等价，原因见该处 docstring。
     "asr.compute_type": "auto",
     "asr.language": "zh",
     "subtitle.default_preset": "conflict-impact",

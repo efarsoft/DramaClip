@@ -1,9 +1,7 @@
 /**
  * 配音 TTS：当前生效卡（引擎切换 + 音色 + 该引擎模型的安装态内联）→ 资产库。
- *
- * 旧的三张平铺引擎卡上有写死的 `ok: true`（P1 缺陷本体）；这里一律以
- * models.list 的 engine_ready/status 与 models.verify 的结论为准，
- * 免模型的云端引擎单独走「无需本地模型」这条说明，不冒充体检结果。
+ * 状态一律以 models.list 的 engine_ready/status 与 models.verify 的结论为准，前端不写死；
+ * 免模型的云端引擎单独走「无需本地模型」说明，不冒充体检结果。
  */
 import { Button, Segmented } from 'antd';
 import type { ReactElement } from 'react';
@@ -98,7 +96,7 @@ export function TtsTab({
   );
 }
 
-/** 行内试听节点：音色取该引擎自己的设置值，放行判断照旧只挡「必然听不到」的确定情况。 */
+/** 行内试听节点：音色取该引擎自己的设置值，放行判断只挡「必然听不到」的确定情况。 */
 function previewRenderer(
   settings: DomainTabProps['settings'],
   reports: Reports,

@@ -126,8 +126,8 @@ class _ComputeRecorder:
 def test_default_auto_goes_to_every_device_untouched(monkeypatch) -> None:
     """默认档 auto 原样直达各设备：精度由 ctranslate2 按实际解析到的卡挑。
 
-    曾经默认 int8（CPU 档）硬塞 CUDA 被拒→注定回退 CPU，GPU 在场却永远用不上
-    （本机 Quadro M4000 实证）。auto 在 CPU 上也挑 int8——CPU 用户零回退。
+    写死的 CPU 档（int8）硬塞 CUDA 会被拒→注定回退 CPU，GPU 在场却永远用不上；
+    auto 在 CPU 上也挑 int8——CPU 用户零回退。
     """
     fake = types.SimpleNamespace(WhisperModel=_ComputeRecorder)
     monkeypatch.setitem(sys.modules, "faster_whisper", fake)

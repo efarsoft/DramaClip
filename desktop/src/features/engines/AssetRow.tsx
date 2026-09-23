@@ -151,10 +151,9 @@ function StateCell({
 }): ReactElement {
   const download = useDownloadState(model);
   const note = failureNote(report);
-  // warn 上卡（§10.1 降级的另一半：可见 + 有修法）；储备资产的「引擎接入」warn
-  // 是分区自带的事实，不再重复喊一遍。
+  // warn 上卡（§10.1 降级的另一半：可见 + 有修法）；储备资产的「引擎接入」warn 是分区自带的事实，不重复展示。
   const warns = note === undefined && state !== 'reserve' ? warnSummary(report) : undefined;
-  // 失败态上屏（附录 B② 根治）：分类原因写在行里，不只在一次性 toast 里闪一下
+  // 失败态上屏（附录 B②）：分类原因写在行里，不只在一次性 toast 里闪一下
   const failed = download?.status === 'failed' && download.message !== '' ? download.message : undefined;
   return (
     <span style={{ minWidth: 0 }}>

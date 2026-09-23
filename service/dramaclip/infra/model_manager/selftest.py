@@ -1,13 +1,9 @@
 """能力层自检（规格 §10.3）：文件校验只证明文件在，不证明能推——真跑一段才算数。
 
-- ASR：真转写随包的 ``resources/selftest/sample_zh.wav``（固定一句中文，16k 单声道），
-  回报「加载成功 / 识别出 N 字 / 耗时」。这是唯一能证明「这份本地权重在这台机器上
-  能用」的判据；样例随包、不进 data/，来历见 resources/selftest/README.md。
-- TTS：真合成一句短话（与 tts.preview 同一条工厂路径），出声且时长有效才算过。
-
-结果落盘 ``models/selftest.json``：「就绪」= 文件层校验过 + 能力层自检过（§10.1），
-两层缺一不可——不落盘则每次重启都退回「未自检」，就绪口径就成了摆设。
-自检失败**不是异常**而是一条诚实结果（ok=False + error 原文）：失败本身就是答案。
+ASR 真转写随包样例 ``resources/selftest/sample_zh.wav``（来历见 resources/selftest/README.md）；
+TTS 走与 tts.preview 同一条工厂路径真合成一句。结果落盘 ``models/selftest.json``（不落盘则
+每次重启都退回「未自检」）：「就绪」= 文件层校验过 + 能力层自检过（§10.1）；
+自检失败**不是异常**而是一条诚实结果（ok=False + error 原文）。
 """
 
 from __future__ import annotations

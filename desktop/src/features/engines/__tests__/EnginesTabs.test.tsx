@@ -1,7 +1,6 @@
 /**
- * 两段式骨架的自红验收（P1）：卡上每句状态都由传入的 models/reports 折算。
- * 把装好的模型改成未落盘，卡片必须从「就绪」翻成「缺模型」，行内也不给「选为生效」——
- * 这条断言就是旧三张引擎卡写死 ok:true 的照妖镜。
+ * 两段式骨架：卡上每句状态都由传入的 models/reports 折算，不得是组件里写死的常量。
+ * 把装好的模型改成未落盘，卡片必须从「就绪」翻成「缺模型」，行内也不给「选为生效」。
  */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';

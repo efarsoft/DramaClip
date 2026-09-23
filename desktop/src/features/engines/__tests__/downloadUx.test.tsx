@@ -1,4 +1,4 @@
-// 下载 UX（P3b）：进度三件套上屏、failed 态可见且可重试（附录 B② 根治）、
+// 下载 UX：进度三件套上屏、failed 态可见且可重试（附录 B②）、
 // 事件解析不瞎猜缺字段——每一条都对着 stores/ui 与 ModelDownloadPopover 的真实行为。
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { App as AntdApp } from 'antd';

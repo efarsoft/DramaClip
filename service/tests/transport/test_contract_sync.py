@@ -20,7 +20,6 @@ def _schema_methods(schema_dir: Path) -> set[str]:
 
 
 def _schema_method(schema_dir: Path, name: str) -> dict[str, Any]:
-    """取单个方法的 schema 条目（按 x-methods 的 name 匹配）。"""
     for file in sorted(schema_dir.glob("*.json")):
         data = json.loads(file.read_text(encoding="utf-8"))
         for method in data.get("x-methods", []):
@@ -44,7 +43,7 @@ def test_jobs_limit_constants_match_schema(repo_root: Path) -> None:
 
     Router 不做 schema 校验，服务端必须自己钳制；而 protocol/schemas/ 不随 sidecar
     打包（scripts/build-service.py 未收录），运行时读不到声明值——所以副本留着，
-    一致性由本用例强制。改 schema 不改代码（或反之）都会在这里红。
+    一致性由本用例强制。
     """
     from dramaclip.api import jobs as jobs_api
 
@@ -56,10 +55,9 @@ def test_jobs_limit_constants_match_schema(repo_root: Path) -> None:
 
 
 def test_notifier_payloads_match_declared_notifications(repo_root: Path) -> None:
-    """Notifier 实际发出的字段必须都在 protocol 声明里，一条不落。
+    """通知面无运行时校验，渲染层拿到什么全凭约定：实际发出的字段必须都在 protocol 声明里。
 
-    通知面无运行时校验，渲染层拿到什么全凭约定；字段悄悄多出来（如 log.append 的
-    job_id），protocol 追不上的话第三方案例里就是永久黑户。
+    字段悄悄多出来（如 log.append 的 job_id），protocol 追不上的话第三方案例里就是永久黑户。
     """
     from dramaclip.transport.notify import Notifier
 

@@ -1,8 +1,7 @@
 """ASR 引擎选择的分派面：`supported()` 与工厂分支必须同源，未知引擎显式拒绝。
 
-钉的是 registry 15 个登记项里只有 7 项接进了工厂这一事实：曾经 `asr.engine=paraformer`
-能一路走到 `_build_transcriber` 的 if 分支再 ImportError（分支里引的是不存在的类），
-而「静默回退到 faster_whisper」更糟——业主以为在用 Paraformer，实际换了引擎。
+守卫口径：接进工厂的引擎才许构建；清单里登记而工厂没接的（如 paraformer）必须显式
+拒绝并报出可用引擎——不许 ImportError，更不许静默回退（业主以为在用 A，实际被换了 B）。
 """
 
 from __future__ import annotations
@@ -52,11 +51,7 @@ def test_no_registry_entry_builds_unless_engine_ready(tmp_path: Path) -> None:
 
 
 def test_sensevoice_path_matches_the_registry_placement(tmp_path: Path) -> None:
-    """引擎自己拼的路径必须等于清单里的 placement，否则探测与加载会各读一份。
-
-    sherpa 就是这条的受害者：模型在 ``models/sherpa-onnx/…``，工厂读的是
-    ``models/tts/sherpa-onnx/…``——两边都不是登记路径（2026-09-19 本机实测）。
-    """
+    """引擎自己拼的路径必须等于清单里的 placement，否则探测与加载会各读一份。"""
     spec = next(s for s in builtin_specs() if s.engine == "sensevoice")
     models_dir = tmp_path / "models"
     engine = SenseVoiceEngine(models_dir=models_dir)
@@ -64,9 +59,9 @@ def test_sensevoice_path_matches_the_registry_placement(tmp_path: Path) -> None:
 
 
 def test_compute_type_setting_reaches_the_engine(tmp_path: Path) -> None:
-    """asr.compute_type 曾是死设置：DEFAULTS 里有、构造时没人传（GPU 闲置的根因之一）。
+    """接线验收：asr.compute_type 里写的档位必须原样到引擎手里——传没传得到，比传什么更先要命。
 
-    接线验收：设置里写的档位必须原样到引擎手里——传没传得到，比传什么更先要命。
+    反面即死设置：DEFAULTS 里写着、构造时没人传，GPU 白白闲置。
     """
     engine = runtime._build_transcriber(_settings(**{"asr.compute_type": "float16"}), tmp_path)
     assert isinstance(engine, FasterWhisperEngine)

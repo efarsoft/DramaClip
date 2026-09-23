@@ -1,5 +1,5 @@
 // 开工就绪度：四格绿/红一律由设置值 + 资产状态（校验+自检两层）+ 真实探测到的渲染版本折算，
-// 前端不得写死任何「免装 / 已就绪」（旧的三张引擎卡正是这么翻车的）。
+// 前端不得写死任何「免装 / 已就绪」。
 import { describe, expect, it } from 'vitest';
 import { workReadiness } from '../workReadiness';
 import { model, report, reportsOf, selftestOk, selftestsOf } from './fixtures';

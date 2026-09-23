@@ -1,8 +1,7 @@
 /**
- * 引擎中心：单页六段（§10.4）——就绪与修复 / 转写 / 配音 / 文案 / 提示词 / 环境。
- * 五个 tab 合并为同一页的纵向流，用户不必在「看到异常 → 跳屏 → 滚动找那一行」之间来回跳；
- * `/engines/:tab` 降级为同页锚点深链（engineAnchors），既有 navigate 调用点一行不改。
- * 216px 左导航随 tab 骨架一起退场；段标题走 text.sectionTitle（§10.4），段间分隔用 space.*。
+ * 引擎中心：单页六段（§10.4）——就绪与修复 / 转写 / 配音 / 文案 / 提示词 / 环境，无 tab 切屏。
+ * `/engines/:tab` 是同页锚点深链（engineAnchors），既有 navigate 调用点一行不改。
+ * 段标题走 text.sectionTitle（§10.4），段间分隔用 space.*。
  */
 import { useEffect } from 'react';
 import type { ReactElement, ReactNode } from 'react';

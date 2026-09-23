@@ -1,8 +1,8 @@
 """engines 命名空间：能力层自检（规格 §10.3）。
 
 校验 = 文件层（models.verify），自检 = 能力层（本文件），两者都过才叫 ready。
-云端域（llm 等）不新造第二条连通测试——委托既有 engine_configs.test()，
-这里只负责「找到启用中的那份配置」并把结果并入同一张自检账本。
+云端域不新造第二条连通测试：委托既有 engine_configs.test()，只负责找到启用中的
+那份配置并把结果并入同一张自检账本。
 """
 
 from __future__ import annotations

@@ -29,8 +29,7 @@ class AnalysisRuntime:
 def supported() -> frozenset[str]:
     """真能构建出来的转写引擎名——``registry.engine_ready`` 读这里，两边不各存一份名单。
 
-    ``paraformer`` / ``firedred`` 在模型清单里有登记项但这里没有实现，所以它们不是
-    「已接入」；旧代码里那条 ``paraformer`` 分支 import 的是一个不存在的类，走到就炸。
+    ``paraformer`` / ``firedred`` 在模型清单里有登记项但这里没有实现，不算「已接入」。
     """
     return frozenset({"faster_whisper", "sensevoice"})
 

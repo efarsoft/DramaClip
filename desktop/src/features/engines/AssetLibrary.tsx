@@ -1,9 +1,7 @@
 /**
  * 资产库：一个域的全部模型，按「引擎已接入 / 待接入 / 外部登记」分区，列表与表格两种视图共用同一批列。
- *
- * 分区取代了原来那行黄字（P2）：未接入引擎的资产照样列，但不给「选为生效」——
- * 判据是后端下发的 engine_ready 与体检结论，前端一处都不写死。登记本读坏了也要明说，
- * 不能把「imported.json 打不开」演成「库里没货」。
+ * 未接入的资产照样列，但不给「选为生效」——判据是后端的 engine_ready 与体检结论，前端不写死。
+ * 登记本读坏了要明说（importError），不能把「imported.json 打不开」演成「库里没货」。
  */
 import { useState } from 'react';
 import type { ReactElement } from 'react';

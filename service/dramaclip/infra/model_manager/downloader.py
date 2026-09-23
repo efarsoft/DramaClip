@@ -1,12 +1,10 @@
 """模型多源下载：ModelScope / HF 镜像 / HF 官方，所选源优先 + 国内优先降级。
 
-落盘形态纪律（whisper 系）：**下载产物必须就是体检认可的合规资产**。历史版本把快照
-写死成 ``snapshots/main``、不解析提交号、不写 ``refs/``/``trees/``——自家下载器批量
-制造「体检判 fail、界面禁激活」的异常缓存，修复动作永远在替下载器擦地。本模块现在：
-下载前解析默认分支提交号（HF 系 API），落 ``snapshots/<提交号>/``，全部文件落齐后
-补写 ``refs/main`` 与 ``trees/<提交号>.json``（逐文件 path/size/sha256 清单）；
-解析不到提交号才退化 ``snapshots/main``（体检如实报「无从对账」，warn 不 fail）。
-存量 ``snapshots/main`` 走 :func:`relayout_whisper_cache` 就地迁移，零重新下载。
+落盘形态纪律（whisper 系）：**下载产物必须就是体检认可的合规资产**——下载前解析
+默认分支提交号（HF 系 API），落 ``snapshots/<提交号>/``，全部文件落齐后补写
+``refs/main`` 与 ``trees/<提交号>.json``；解析不到提交号才退化 ``snapshots/main``
+（体检如实报「无从对账」，warn 不 fail）。存量走 :func:`relayout_whisper_cache`
+就地迁移，零重新下载。
 """
 
 from __future__ import annotations
@@ -34,7 +32,7 @@ FileEntry = tuple[str, int, str | None]
 
 _HEX = "0123456789abcdef"
 
-# 国内优先的规范源序；用户所选源永远排第一
+# 国内优先的规范源序（所选源排第一由 source_chain 负责）
 SOURCE_ORDER: tuple[str, ...] = ("modelscope", "hf_mirror", "huggingface")
 _SKIP_RE = re.compile(
     r"\.(wav|mp3|flac|m4a|aac|ogg|jpg|jpeg|png|gif|webp|mp4|avi|mkv|zip|gz|xz|7z|md|pdf)$",

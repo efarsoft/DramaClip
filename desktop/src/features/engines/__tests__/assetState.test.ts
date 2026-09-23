@@ -1,6 +1,6 @@
 // 资产状态：UI 上每一句「就绪 / 缺模型 / 不完整 / 待接入」都必须能回溯到
 // models.list 的 engine_ready + status + size_bytes 与 models.verify 的体检结论，
-// 而不是前端写死的常量（那是 P1 缺陷的成因）。
+// 而不是前端写死的常量。
 import { describe, expect, it } from 'vitest';
 import type { ModelInfo } from '@dramaclip/protocol';
 import {

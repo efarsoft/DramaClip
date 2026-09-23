@@ -74,7 +74,7 @@ def list_models(context: AppContext) -> list[dict[str, Any]]:
 def verify(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:
     """资产体检报告：给 model_id 报那一项，不给则报所有已落盘的。
 
-    为什么批量只覆盖已安装：总览页一次拉全，把 11 个未安装项逐条报「目录不存在」是噪声
+    为什么批量只覆盖已安装：总览页一次拉全，把未安装项逐条报「目录不存在」是噪声
     ——它们的状态在 models.list 里已经有了。指定 model_id 时未安装照样回完整报告，
     体检弹窗要能告诉业主「缺哪一项」而不是弹个异常。
     """

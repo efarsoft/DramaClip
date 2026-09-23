@@ -33,8 +33,8 @@ export interface ReadinessInput {
 }
 
 /**
- * 只有 ready（校验过 + 自检过）算「能开工」（§10.1 缺陷 4 的修复）：
- * 「未校验」「待自检」都不再冒充就绪——文件在 ≠ 能推，没证据就不发绿灯。
+ * 只有 ready（校验过 + 自检过）算「能开工」（§10.1 缺陷 4）：
+ * 「未校验」「待自检」都不算就绪——文件在 ≠ 能推，没证据就不发绿灯。
  */
 const OK_STATES: ReadonlySet<AssetState> = new Set<AssetState>(['ready']);
 

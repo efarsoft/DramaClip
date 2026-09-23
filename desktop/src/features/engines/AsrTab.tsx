@@ -1,8 +1,6 @@
 /**
  * 语音识别 ASR 段（§10.4 第 2 段）：当前生效卡（参数即改即存 + 该模型的安装态内联）→ 资产库。
- *
- * P6 的修法是结构性的：选择与安装态同在一张卡上，不再一个在页首、一个在页尾。
- * 单页六段后「转写加速（GPU）」卡归入环境段（EnvSection），本段只留选择与资产。
+ * 选择与安装态同在一张卡上；「转写加速（GPU）」卡归环境段（EnvSection），本段只留选择与资产。
  */
 import { Button } from 'antd';
 import type { DefaultOptionType } from 'antd/es/select';

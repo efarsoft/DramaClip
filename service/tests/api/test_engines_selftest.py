@@ -1,12 +1,8 @@
 """engines.selftest：能力层自检（§10.3）——文件在 ≠ 能推，真跑一段才算数。
 
-守卫的口径：
-  · 随包样例必须真在包里、真是 16k 单声道 wav（样例丢了自检就是假绿灯）；
-  · ASR 自检走真引擎构建路径（本文件打桩引擎，不打桩「是否安装」的前置判据）；
-  · 加载/推理失败是**诚实结果**（ok=false + 原文），不是 RPC 异常；
-  · 未安装/储备资产是前置错误——没有自检对象，不许假装跑过；
-  · 云端域委托 engine_configs.test，不新造第二条连通测试；
-  · 每次结果都落账（重启不丢），账本是「就绪=校验+自检」的能力层那一半。
+守卫口径：随包样例真在包里、真是 16k 单声道 wav；ASR 自检打桩引擎、不打桩「是否安装」
+前置判据；加载/推理失败是诚实结果（ok=false + 原文），不是 RPC 异常；未安装/储备资产是
+前置错误，不许假装跑过；云端域委托 engine_configs.test；每次结果落账（重启不丢）。
 """
 
 from __future__ import annotations
@@ -116,8 +112,7 @@ def test_asr_selftest_forwards_device_and_compute_type_from_settings(
 ) -> None:
     """自检与正式转写必须同一副嗓子：asr.device/asr.compute_type 从设置一路传到构建。
 
-    曾经 _build_asr 只收 device，compute_type 用引擎默认——自检过了不代表正式转写
-    用同一档位跑（设置里的 float16 到不了自检，int8 到不了 GPU）。
+    档位到不了构建，自检过了也不代表正式转写会用设置里的同一档位跑。
     """
     _install_whisper_small(tmp_path)
     captured: list[tuple[object, ...]] = []

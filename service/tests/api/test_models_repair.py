@@ -1,12 +1,9 @@
-"""修复动作 RPC：clean_residue / orphan_list / clean_orphan / download force。
+"""修复动作 RPC：clean_residue / orphan_list / clean_orphan / download force（§10.2 三条纪律）。
 
-钉的是规格 §10.2 的三条纪律：
-  · 「清理残留」的删除范围与体检「中断残留」判据同一条——清完再校验不许还是红；
-  · 「删除多余副本」是白名单制——只删体检/orphan_list 列出的路径，名单外一律拒绝
-    （删除入口拿到用户可影响的字符串就 rmtree，等于给整个磁盘开洞）；
-  · force 重下 = 真删真下——先按 models.delete 同口径清掉现有资产再起下载，
-    不带 force 时「已安装」照旧硬拒。
-下载器全程打桩，本文件不触网。
+「清理残留」与体检「中断残留」判据同一条，清完再校验不许还是红；「删除多余副本」白名单制，
+只删体检/orphan_list 列出的路径，名单外一律拒绝（否则等于给整个磁盘开 rmtree 的洞）；
+force 重下 = 真删真下，先按 models.delete 口径清掉现有资产再起下载，不带 force「已安装」照旧
+硬拒。下载器全程打桩，本文件不触网。
 """
 
 from __future__ import annotations
@@ -91,7 +88,7 @@ def test_clean_residue_removes_only_the_models_own_leftovers(tmp_path: Path) -> 
     assert result == {"removed": 2, "freed_bytes": 3072}
     assert not list(cache.rglob("*.incomplete"))
     assert len(list(neighbor.rglob("*.incomplete"))) == 1, "邻居档位的残留不许被顺手删掉"
-    # 清完再校验不许还是红：残留判据转 pass，整体 ok
+    # 清完再校验不许还是红：用体检同款判据复验
     report = registry.verify(tmp_path / "models", _spec("faster-whisper-small"))
     assert next(c for c in report["checks"] if c["name"] == "中断残留")["status"] == "pass"
 

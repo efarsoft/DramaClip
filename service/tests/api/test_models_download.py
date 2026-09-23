@@ -1,10 +1,7 @@
 """api/models.download 的任务生命周期：`model_download` 必须**建在 running 上**。
 
-钉的是 dec059d 那一处真 bug：漏掉 mark_running 时，下载成功的任务永远停在 pending，
-队列页显示一只永不结束的「下载中」——看门狗只认 running 才收尾，成功路径无人回写。
-（原先这里还写着"重启也清不掉"，那半句已不成立：启动清扫现已连 pending 一并复位，
-见 `infra/jobs.py::sweep_interrupted`。收尾那一头仍然只认 running，本守卫照旧必要。）
-下载器全程打桩，本文件不触网。
+看门狗收尾只认 running：停在 pending 的任务下载成功也无人回写，队列页永远显示「下载中」；
+崩溃残留另由启动清扫复位（见 `infra/jobs.py::sweep_interrupted`）。下载器全程打桩，不触网。
 """
 
 from __future__ import annotations
@@ -81,7 +78,7 @@ def stub_download(
 def _download(
     context: SimpleNamespace, stub: _StubDownload, model_id: str = _MODEL_ID
 ) -> str:
-    """跑一次 models.download，返回 job_id（顺带登记本次起的看门狗线程）。
+    """返回 job_id，顺带登记本次起的看门狗线程。
 
     看门狗是 api/models.py 内部起的，起线程发生在 download() 返回之前，
     所以调用前后各取一次线程快照即可精确拿到本次那一条。
@@ -104,9 +101,8 @@ def test_download_creates_job_in_running_state(
 ) -> None:
     """核心守卫：任务建出来就是 running，不是 pending。
 
-    看门狗的回写条件是 status == running；停在 pending 的下载任务它不认，下载明明成功
-    也无人收尾，队列页永远显示「下载中」。（崩溃残留那一头已不再是本守卫的理由：
-    启动清扫现已连 pending 一并复位，见 `infra/jobs.py::sweep_interrupted`。）
+    看门狗的回写条件只认 running：停在 pending 的任务下载成功也无人收尾，队列页永远
+    显示「下载中」。崩溃残留另由启动清扫复位（sweep_interrupted）。
     """
     context = _context(memory_db, tmp_path)
 
@@ -127,9 +123,7 @@ def test_download_creates_job_in_running_state(
 def test_watchdog_completes_running_job_on_download_done(
     memory_db: sqlite3.Connection, tmp_path: Path, stub_download: _StubDownload
 ) -> None:
-    """下载完成（on_done 置位）→ 看门狗收尾该 running 任务并回收取消事件。
-
-    先 join 再读库：测试与真实服务共用同一条 sqlite 连接，而
+    """先 join 再读库：测试与真实服务共用同一条 sqlite 连接，而
     check_same_thread=False 只放宽线程归属断言、不提供并发安全，
     看门狗写库时主线程并发读会抛 InterfaceError。
     """
@@ -169,8 +163,8 @@ def test_download_rejects_a_model_without_any_source(
 ) -> None:
     """没有下载源还点下载：明确拒绝并指向「导入」，而不是拼出一个坏 URL。
 
-    清单里如今没有无源行（原先是 sherpa-melo-zh，引擎已撤下），所以按替身注入一只：
-    判据要跟着 ``ModelSpec.sources()`` 这条类型契约走，不能钉在某一行资产上。
+    清单里没有无源行，所以按替身注入一只：判据要跟着 ``ModelSpec.sources()``
+    这条类型契约走，不能钉在某一行资产上。
     """
     from dramaclip.infra.model_manager.registry import ModelSpec
     from dramaclip.transport.rpc import RpcDomainError
