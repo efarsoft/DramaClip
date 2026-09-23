@@ -86,10 +86,18 @@ function createMainWindow(): void {
   }
 }
 
+/** 开发态数据目录：默认仓库 data/；DRAMACLIP_DATA_DIR 可重定向——
+ * scripts/seed_scale_data.py 印的实跑步骤靠它成立（规模实测不碰真实数据）。
+ * 打包态不认环境变量：产品数据永远落 userData/data。 */
+function devDataDir(): string {
+  const override = (process.env.DRAMACLIP_DATA_DIR ?? '').trim();
+  return override === '' ? path.join(REPO_ROOT, 'data') : override;
+}
+
 function buildIpcContext(managerInstance: ServiceManager): IpcContext {
   const dataDir = app.isPackaged
     ? path.join(app.getPath('userData'), 'data')
-    : path.join(REPO_ROOT, 'data');
+    : devDataDir();
   return {
     rpc: (method, params) => managerInstance.rpc(method, params),
     restartService: () => { managerInstance.restart(); },
@@ -112,7 +120,7 @@ async function bootstrap(): Promise<void> {
     cwd: app.isPackaged ? process.resourcesPath : REPO_ROOT,
     dataDir: app.isPackaged
       ? path.join(app.getPath('userData'), 'data')
-      : path.join(REPO_ROOT, 'data'),
+      : devDataDir(),
     appVersion: app.getVersion(),
     isPackaged: app.isPackaged,
     onStateChange: (state) => { console.log(`[ServiceManager] state=${state}`); },
