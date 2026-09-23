@@ -1,35 +1,31 @@
-/** 工作台（规格 §4.1）：回答"今天该干什么"。
+/** 工作台（规格 §4.1 + 卷三意见 04）：回答"今天该干什么"。
  *
- * 主区 = 今日待办（首要）+ 3 统计芯片 + 最近成品 6 条 + 继续上次
+ * 主区 = 今日待办（首要）+ 我的剧矩阵（吸收原三统计芯片/最近成品/继续上次）
  * 右栏 = 环境就绪度 + 快速上手
  *
- * 右栏的「工具箱」槽位缺席：今天那个叫工具箱的面板里一个工具都没有，三项全是
- * 导轨已有目的地的重复跳转，已随本任务删除。真工具箱属 P-3.4。缺席而非假控件。
+ * 原六块变四块的理由：芯片/成品/继续卡片各自只有一行信息量，摊开是三块地皮；
+ * 矩阵一行一部剧，把同一部剧的阶段、卡点、成品数、继续入口收进一眼（卷三图 1）。
+ * 「继续上次」不再是独立卡片——最近打开的剧在矩阵置顶 + 铺底 + 芯片点名。
  *
- * 「最近成品」不出缩略图：逐片封面不存在（repos/exports.py 无 cover_path），
- * 拿项目封面冒充逐片封面正是 §4.5 要治的"同剧 9 条片共用一张封面"。缩略图归 P-3.3。
+ * 右栏的「工具箱」槽位缺席：真工具箱属 P-3.4。缺席而非假控件。
  */
 import { FolderAddOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button } from 'antd';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { JobInfo } from '@dramaclip/protocol';
 import { PageHeader, PageShell } from '../../components/layout/PageKit';
-import { exportApi, restartService } from '../../services/client';
+import { restartService } from '../../services/client';
 import { tokens } from '../../styles/theme';
-import { ContinueCard } from './ContinueCard';
 import { createDramaFromFolder } from './createDrama';
+import { DramaMatrix } from './DramaMatrix';
 import { EmptyWorkbench } from './EmptyWorkbench';
 import { EnvPanel, TipsPanel } from './EnvPanel';
-import { RecentWorks } from './RecentWorks';
-import { StatChips } from './StatChips';
 import { TodoList } from './TodoList';
 import { buildStats, type WorkbenchStats } from './stats';
 import { buildDramas, buildTodos, type FailedJob, type TodoItem } from './todos';
 import { useWorkbench, type WorkbenchData } from './useWorkbench';
 
-/** 主区最近成品的条数（规格 §4.1：6 条）。 */
-const RECENT_WORKS = 6;
 /** ref_id 是 project_id 的任务类型——与 todos.ts 的 JOB_ROUTES 同一批。
  *  这里再判一次是因为 ref_id 语义异构（export 的是 export_id、model_download 的是
  *  model_id），把它们的 ref_id 当 project_id 拼路径会跳错剧。 */
@@ -67,23 +63,8 @@ function useHomeActions() {
 }
 
 export function HomePage() {
-  const { data, ready, reload } = useWorkbench();
+  const { data, ready } = useWorkbench();
   const { creating, onCreate, onRestart } = useHomeActions();
-
-  // 逐片封面补拍（幂等）：历史成片缺封面时后台补，完成刷新一次
-  useEffect(() => {
-    if (!ready || data.works.length === 0) return;
-    let cancelled = false;
-    void exportApi
-      .ensureCovers()
-      .then((result) => {
-        if (!cancelled && result.generated > 0) void reload();
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [ready, reload, data.works.length]);
 
   const dramas = buildDramas(data.projects, data.works);
   const todos = buildTodos({
@@ -126,7 +107,7 @@ export function HomePage() {
   );
 }
 
-/** 双栏主体：左 = 待办 + 芯片/成品/继续上次（或空态引导），右 = 环境 + 上手。 */
+/** 双栏主体：左 = 待办 + 我的剧矩阵（或空态引导），右 = 环境 + 上手。 */
 function HomeBody({
   data,
   todos,
@@ -155,7 +136,6 @@ function HomeBody({
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXl, minWidth: 0 }}>
-        {hasDramas && <StatChips stats={stats} />}
         <TodoList
           items={todos}
           onNavigate={(path) => {
@@ -164,10 +144,16 @@ function HomeBody({
           onRestartService={onRestart}
         />
         {hasDramas ? (
-          <>
-            <RecentWorks works={data.works.slice(0, RECENT_WORKS)} />
-            <ContinueCard projects={data.projects} nowMs={data.serverTimeMs} />
-          </>
+          <DramaMatrix
+            projects={data.projects}
+            works={data.works}
+            jobs={data.jobs}
+            serverTimeMs={data.serverTimeMs}
+            etaLabel={stats.runningEtaLabel}
+            onNavigate={(route) => {
+              void navigate(route);
+            }}
+          />
         ) : (
           <EmptyWorkbench creating={creating} onCreate={onCreate} />
         )}

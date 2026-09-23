@@ -13,6 +13,8 @@ import { ProjectsPage } from '../ProjectsPage';
 const api = vi.hoisted(() => ({
   list: vi.fn(),
   ensureCovers: vi.fn(),
+  listWorks: vi.fn(),
+  jobsList: vi.fn(),
 }));
 
 vi.mock('../../../services/client', () => ({
@@ -25,6 +27,8 @@ vi.mock('../../../services/client', () => ({
     duplicate: vi.fn(),
     scanEpisodes: vi.fn(),
   },
+  listWorks: api.listWorks,
+  jobsApi: { list: api.jobsList },
   pickFolder: vi.fn(),
   mediaUrl: (path: string) => `dramaclip://local/${path}`,
 }));
@@ -82,6 +86,8 @@ function page(): void {
 beforeEach(() => {
   api.list.mockResolvedValue([]);
   api.ensureCovers.mockResolvedValue({ ok: true, generated: 0 });
+  api.listWorks.mockResolvedValue([]);
+  api.jobsList.mockResolvedValue({ jobs: [], server_time_ms: 0 });
 });
 
 afterEach(() => {
