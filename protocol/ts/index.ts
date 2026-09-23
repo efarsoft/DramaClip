@@ -374,6 +374,16 @@ export interface OrphanCopy {
   readonly size_bytes: number;
 }
 
+/** TTS 自检顺带落盘的引擎能力快照（EngineCaps.to_dict；reason 已脱敏）。ASR/云端域不带。 */
+export interface SelftestCaps {
+  readonly sample_rate: number;
+  readonly supports_cloning: boolean;
+  readonly supports_emotion: boolean;
+  readonly speed_control: 'native' | 'ssml' | 'none';
+  readonly available: boolean;
+  readonly reason: string;
+}
+
 /** 能力层自检结果（engines.selftest；账本值同形，多一个 at）。 */
 export interface SelftestResult {
   readonly ok: boolean;
@@ -394,6 +404,8 @@ export interface SelftestResult {
   readonly error?: string | null;
   /** epoch 毫秒：这次自检发生在何时（落账后才有）。 */
   readonly at?: number;
+  /** TTS：引擎能力快照。 */
+  readonly caps?: SelftestCaps;
 }
 
 /** 自检账本（engines.selftest_results）：key → 结果。 */

@@ -53,6 +53,35 @@
         "at": {
           "type": "integer",
           "description": "epoch 毫秒：这次自检发生在何时（落账时补上）"
+        },
+        "caps": {
+          "type": "object",
+          "description": "TTS：自检顺带落盘的引擎能力快照（EngineCaps.to_dict；reason 已脱敏——库内绝对路径换成相对）。ASR/云端域不带此字段。",
+          "properties": {
+            "sample_rate": {
+              "type": "integer"
+            },
+            "supports_cloning": {
+              "type": "boolean"
+            },
+            "supports_emotion": {
+              "type": "boolean"
+            },
+            "speed_control": {
+              "type": "string",
+              "enum": [
+                "native",
+                "ssml",
+                "none"
+              ]
+            },
+            "available": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
         }
       }
     }
