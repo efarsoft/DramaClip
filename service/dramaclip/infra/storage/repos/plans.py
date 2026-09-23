@@ -11,6 +11,7 @@ from uuid import uuid4
 _COLUMNS = (
     "id", "project_id", "narration_mode", "episode_ids", "plan_data", "status", "created_at",
     "angle", "angle_reason", "variant_index", "overlap_max", "batch_id", "titles",
+    "score_total", "score_dims", "suggestion",
 )
 
 
@@ -23,11 +24,29 @@ def _row_to_dict(row: tuple) -> dict[str, Any]:  # type: ignore[type-arg]
     data["episode_ids"] = json.loads(data["episode_ids"])
     data["plan_data"] = json.loads(data["plan_data"])
     data["titles"] = json.loads(data["titles"]) if data["titles"] else []
+    # B10 评分三列：NULL=未评分（score_dims 学 titles 列的解析形状）
+    data["score_dims"] = json.loads(data["score_dims"]) if data["score_dims"] else None
     return data
 
 
 def set_titles(conn: sqlite3.Connection, plan_id: str, titles: str) -> None:
     conn.execute("UPDATE narration_plans SET titles = ? WHERE id = ?", (titles, plan_id))
+    conn.commit()
+
+
+def set_scores(
+    conn: sqlite3.Connection,
+    plan_id: str,
+    score_total: float,
+    score_dims: dict[str, Any],
+    suggestion: str,
+) -> None:
+    """B10 评分三列落库；只写软信号，绝不触碰 status（grade 是硬门禁的地盘）。"""
+    conn.execute(
+        "UPDATE narration_plans SET score_total = ?, score_dims = ?, suggestion = ?"
+        " WHERE id = ?",
+        (score_total, json.dumps(score_dims, ensure_ascii=False), suggestion, plan_id),
+    )
     conn.commit()
 
 
@@ -91,6 +110,10 @@ def create(
         "variant_index": variant_index,
         "overlap_max": overlap_max,
         "batch_id": batch_id,
+        # B10 评分三列：新建行恒未评分（与迁移的 NULL 默认一致）
+        "score_total": None,
+        "score_dims": None,
+        "suggestion": None,
     }
 
 

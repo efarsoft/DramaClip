@@ -4,22 +4,27 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import logging
+import os
 import random
 import subprocess  # noqa: S404 - 参数为受控列表
 import sys
 import threading
+import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.dedup import jitter
 from dramaclip.engines.dedup import params as dedup_params
 from dramaclip.engines.exporter import loudness
 from dramaclip.engines.exporter.face_crop import face_x_ratio
-from dramaclip.engines.narration.models import PlanData
+from dramaclip.engines.narration.models import PlanData, TimelineSegment
 from dramaclip.engines.subtitle import caption_font
 from dramaclip.infra import config
 from dramaclip.infra.ffmpeg import probe as ffprobe_mod
@@ -514,6 +519,179 @@ def _fallback_eligible(exc: runner.FfmpegError, args: list[str]) -> bool:
         return False
     return args[args.index("-c:v") + 1] in _HW_ENCODERS
 
+# ---- B4 段级断点续跑：sidecar 签名（seg_NNN.sig）决定哪些段可以不重编 ----
+#
+# 选型（b）sidecar 签名，不选（a）按 export_id 播种 rng。理由：
+# - rng 同时喂 jitter.safe_times 与 dedup_params.generate，「每片段独立随机、避免
+#   批量成品呈规律性」是消重设计的一部分（docs/06 §1）。按 export_id 播种会把
+#   一次导出的全部抖动/消重参数变成可复现常量，等于削弱平台侧消重指纹的随机性；
+# - 播种也救不了新鲜渲染的行为一致性：现状 rng 无种子，任何「复现上次切点」的
+#   方案都改变了 fresh run 的输出分布（硬验收：空 work_dir 行为与现状一致）；
+# - 即便播种，跳过判定仍需要「产物在不在、输入变没变」的签名——（a）不能替代（b）。
+#
+# 签名判据：**声明输入**一致才复用——源文件身份（path+size+mtime_ns）、episode_id、
+# 声明 start/end、audio 角色、transition、seam 淡入淡出、out_size、字幕接线形状、
+# 字幕文本 hash、TTS 音频 path+内容 sha256、台词保护区指纹（srt/ASR zones）、
+# 请求 codec == sig 记录的**实际成功** codec（A4 回退自洽）。
+# **不含 jitter 后的实际切点**：复用即接受上次的抖动切点与消重参数（它们本来就是
+# 每次渲染要不同的量）；上次窗口只作为「recorded」元数据存着，用来确定性地重新
+# 生成字幕 ass 并比对内容 hash——预设/拆行逻辑/emotion 这些编码器看不见的隐藏
+# 输入全靠这一步兜住。只查文件存在不查签名 = autoclip 的反例，禁止。
+#
+# 成对性与原子性：sig 与 seg 同生命周期——任何一边缺失/损坏都重编；sig 只在段
+# 编码成功且产物存在后写，tmp+replace 原子落盘（与 A5 TTS 缓存同形状），崩溃留下
+# 的半成品（cancel/进程被杀）永远没有 sig，下次自然重编。
+# 陈旧尾段：上次更长的计划留下的 seg/sig（索引 >= 本次段数）必须清掉，否则会被
+# Phase B 的 glob("seg_*.mp4") 捡进 concat。
+_SIG_VERSION = 1
+
+
+@dataclass
+class _SegmentJob:
+    """一段的编码任务 + 写 sidecar 签名所需的全部上下文。
+
+    reuse=True 的段不进线程池：产物与 sig 都已在盘上且输入签名一致。
+    人脸裁窗比例（crop_x_ratio）刻意不进签名输入：它由源帧内容决定，源身份
+    （path+size+mtime_ns）一致即帧内容一致，复用即接受上次检测值——与「复用即
+    接受上次抖动切点」同一哲学（mid 随 jitter 微动，重测也不可复现）。
+    """
+
+    index: int
+    args: list[str]
+    seg_path: Path
+    inputs: dict[str, object]
+    safe_start: float
+    safe_end: float
+    progress_duration: float
+    burner_duration: float
+    subtitle_source: str
+    ass_sha256: str | None
+    reuse: bool
+
+
+def _sig_path_for(seg_path: Path) -> Path:
+    return seg_path.with_suffix(".sig")
+
+
+def _sha256_file(path: str | Path) -> str | None:
+    """文件内容 sha256；读不到返回 None（调用方按不可复用处理）。"""
+    try:
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def _file_identity(path: str | Path) -> dict[str, object]:
+    """源文件身份：path+size+mtime_ns。stat 失败给 -1（必与任何真实签名不等）。"""
+    try:
+        stat = Path(path).stat()
+    except OSError:
+        return {"path": str(path), "size": -1, "mtime_ns": -1}
+    return {"path": str(path), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+
+
+def _zones_fingerprint(zones: list[SpeechZone]) -> str:
+    """台词保护区指纹：手工 .srt 或库内 ASR 变了，切点语义就变了，不许复用。"""
+    payload = json.dumps([[zone.start, zone.end] for zone in zones])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _read_sig(seg_path: Path) -> dict[str, Any] | None:
+    """读 sidecar 签名：缺任何一边/损坏/版本或形状不对都返回 None（按不可复用）。
+
+    产物必须非空（与 A5 缓存的 `_usable` 同判据）：0 字节残留不是可复用产物。
+    """
+    sig_path = _sig_path_for(seg_path)
+    if not sig_path.is_file():
+        return None
+    try:
+        if not (seg_path.is_file() and seg_path.stat().st_size > 0):
+            return None
+        payload = json.loads(sig_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # ValueError 含 JSONDecodeError：损坏按不可复用
+        return None
+    if not isinstance(payload, dict) or payload.get("version") != _SIG_VERSION:
+        return None
+    inputs = payload.get("inputs")
+    recorded = payload.get("recorded")
+    if not isinstance(inputs, dict) or not isinstance(recorded, dict):
+        return None
+    return {"inputs": inputs, "recorded": recorded}
+
+
+def _write_sig_atomic(seg_path: Path, payload: dict[str, Any]) -> None:
+    """签名原子落盘（tmp+replace，A5 缓存同形状）：崩溃只会丢 sig，不会留半截可误读的。"""
+    sig_path = _sig_path_for(seg_path)
+    tmp = seg_path.with_name(f"{seg_path.stem}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+        )
+        os.replace(tmp, sig_path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _reusable_subtitles(
+    index: int,
+    segment: TimelineSegment,
+    recorded: dict[str, Any],
+    subtitle_source: str,
+    subtitle_burner: Callable[[int, str, float], str] | None,
+    original_subtitle_provider: Callable[[int, float, float], str | None] | None,
+) -> bool:
+    """复用候选段的字幕校验：用**上次记录的窗口**重新生成 ass，内容 hash 必须与记录一致。
+
+    为什么必须重新生成而不是「旧 ass 文件还在就行」：ass 字节由预设、拆行逻辑、
+    emotion 标签共同决定，编码器看不见这些量；重新生成一遍才证明它们没变。
+    生成窗口取 sig 里记的上次值而非本次 jitter 切点——否则时间字段必然不同，
+    复用永不命中（rng 无种子）。任何异常/hash 不一致→不可复用（重编）。
+    """
+    if recorded.get("subtitle_source") != subtitle_source:
+        return False
+    want = recorded.get("ass_sha256")
+    produced: str | None = None
+    try:
+        if subtitle_source == "burner":
+            if subtitle_burner is None:
+                return False
+            produced = subtitle_burner(
+                index, str(segment.subtitle_text or ""), float(recorded["duration_s"])
+            )
+        elif subtitle_source == "provider":
+            if original_subtitle_provider is None:
+                return False
+            produced = original_subtitle_provider(
+                index, float(recorded["safe_start"]), float(recorded["safe_end"])
+            )
+        elif subtitle_source != "none":
+            return False
+    except Exception:  # noqa: BLE001 - 校验失败按不可复用处理，绝不挡正常编码
+        return False
+    if produced is None:
+        return want is None
+    return want is not None and _sha256_file(produced) == want
+
+
+def _prune_stale_segments(work_dir: Path, segment_count: int) -> None:
+    """清掉上次更长的计划留下的 seg/sig 尾段（索引 >= 本次段数）。
+
+    不清就会被 Phase B 的 glob("seg_*.mp4") 捡进 concat——旧尾段的输入签名再对
+    也没人要它了。只按 seg_NNN 命名清 .mp4/.sig 两种，不碰 api 层的 seg_NNN.ass。
+    """
+    for pattern in ("seg_*.mp4", "seg_*.sig"):
+        for path in work_dir.glob(pattern):
+            try:
+                index = int(path.stem.rsplit("_", 1)[-1])
+            except ValueError:
+                continue
+            if index >= segment_count:
+                path.unlink(missing_ok=True)
+
 
 def export_plan(
     plan: PlanData,
@@ -533,6 +711,11 @@ def export_plan(
     video_codec: str = "libx264",
 ) -> Path:
     """执行两阶段导出，返回成片路径。
+
+    B4 断点续跑：Phase A 每段先看 sidecar 签名（seg_NNN.sig）——声明输入一致、
+    产物在盘、请求 codec 等于上次实际成功 codec、字幕按上次窗口重生成后内容 hash
+    一致，才跳过重编（接受上次的抖动切点与消重参数）。新鲜渲染（空 work_dir）
+    路径与无签名时代逐字节一致，只是每段成功后多写一个 sig。
     """
 
     segments = plan.timeline
@@ -542,12 +725,14 @@ def export_plan(
     rng = random.Random()
 
     total = len(segments)
+    _prune_stale_segments(work_dir, total)
 
-    # Phase A：构建每段命令参数（含台词保护区安全切点、字幕、混音）
-    job_args: list[list[str]] = []
-    segment_durations: list[float] = []  # 与 job_args 同序：段内进度换算 0-1 比例的分母
+    # Phase A：构建每段命令参数（含台词保护区安全切点、字幕、混音）；
+    # 命中复用判据的段不建令、不动 rng、不抽帧——直接进 jobs 标记 reuse。
+    jobs: list[_SegmentJob] = []
     zones_cache: dict[str, list[SpeechZone]] = {}
     face_cache: dict[tuple[str, float], float | None] = {}
+    reused_count = 0
     for index, segment in enumerate(segments):
         source = episode_paths.get(segment.episode_id)
         if source is None or not Path(source).is_file():
@@ -560,30 +745,9 @@ def export_plan(
                 if srt is not None
                 else list((dialogue_zones or {}).get(segment.episode_id) or [])
             )
-        safe_start, safe_end = jitter.safe_times(
-            segment.start, segment.end, zones_cache[segment.episode_id], rng=rng
-        )
+        zones = zones_cache[segment.episode_id]
+        seg_path = work_dir / f"seg_{index:03d}.mp4"
         tts_audio = (tts_audio_by_segment or {}).get(index)
-        if segment.audio in ("narration", "ducked") and not tts_audio:
-            raise ValueError(f"第 {index + 1} 段旁白音频缺失，不能用原声顶替")
-        ass_path: str | None = None
-        if subtitle_burner is not None and segment.subtitle_text:
-            ass_path = str(
-                subtitle_burner(
-                    index,
-                    segment.subtitle_text,
-                    max(safe_end - safe_start, 0.1),
-                )
-            )
-        elif (
-            original_subtitle_provider is not None
-            and segment.audio == "original"
-            and not segment.subtitle_text
-        ):
-            # 原声段没有 subtitle_text（字幕是台词本身，不是解说文案），走独立回调：
-            # 它拿到的是 **safe_times 之后的真实窗口**，词级裁剪才能按实际切点重定基；
-            # 在调用方按 segment.start/end 预生成字幕的话，抖动挪过的段会整体错位。
-            ass_path = original_subtitle_provider(index, safe_start, safe_end)
         nxt = segments[index + 1] if index + 1 < total else None
         prev = segments[index - 1] if index else None
         vin, vout, ain, aout = seam_fades(
@@ -594,6 +758,83 @@ def export_plan(
             audio_change_in=prev is not None and prev.audio != segment.audio,
             audio_change_out=nxt is not None and nxt.audio != segment.audio,
         )
+        # 字幕接线形状（声明字段即可判定，与下面建令分支同源）：
+        # burner=旁白文案烧录；provider=原声段台词字幕；none=无字幕。
+        if subtitle_burner is not None and segment.subtitle_text:
+            subtitle_source = "burner"
+        elif (
+            original_subtitle_provider is not None
+            and segment.audio == "original"
+            and not segment.subtitle_text
+        ):
+            subtitle_source = "provider"
+        else:
+            subtitle_source = "none"
+        # 声明输入签名：任何影响产物字节的**可声明**输入都在里面；jitter 后的实际
+        # 切点与消重参数刻意不在（每次渲染本就不同，复用=接受上次抽样）。
+        inputs: dict[str, object] = {
+            "source": _file_identity(source),
+            "episode_id": segment.episode_id,
+            "start": segment.start,
+            "end": segment.end,
+            "audio": segment.audio,
+            "transition": segment.transition,
+            "fades": [vin, vout, ain, aout],
+            "out_size": [out_size[0], out_size[1]],
+            "subtitle_text_sha256": hashlib.sha256(
+                (segment.subtitle_text or "").encode("utf-8")
+            ).hexdigest(),
+            "subtitle_source": subtitle_source,
+            "tts_audio": (
+                None
+                if tts_audio is None
+                else {"path": str(tts_audio), "sha256": _sha256_file(tts_audio)}
+            ),
+            "zones_sha256": _zones_fingerprint(zones),
+        }
+        existing = _read_sig(seg_path)
+        if (
+            existing is not None
+            and existing["inputs"] == inputs
+            and existing["recorded"].get("actual_codec") == video_codec
+            and _reusable_subtitles(
+                index,
+                segment,
+                existing["recorded"],
+                subtitle_source,
+                subtitle_burner,
+                original_subtitle_provider,
+            )
+        ):
+            reused_count += 1
+            jobs.append(
+                _SegmentJob(
+                    index=index, args=[], seg_path=seg_path, inputs=inputs,
+                    safe_start=0.0, safe_end=0.0, progress_duration=0.05,
+                    burner_duration=0.0, subtitle_source=subtitle_source,
+                    ass_sha256=None, reuse=True,
+                )
+            )
+            continue
+
+        safe_start, safe_end = jitter.safe_times(
+            segment.start, segment.end, zones, rng=rng
+        )
+        if segment.audio in ("narration", "ducked") and not tts_audio:
+            raise ValueError(f"第 {index + 1} 段旁白音频缺失，不能用原声顶替")
+        ass_path: str | None = None
+        # 字幕生成窗口与段内进度分母同源：safe_times 之后的真实窗口
+        burner_duration = max(safe_end - safe_start, 0.1)
+        if subtitle_source == "burner" and subtitle_burner is not None:
+            ass_path = str(
+                subtitle_burner(index, str(segment.subtitle_text), burner_duration)
+            )
+        elif subtitle_source == "provider" and original_subtitle_provider is not None:
+            # 原声段没有 subtitle_text（字幕是台词本身，不是解说文案），走独立回调：
+            # 它拿到的是 **safe_times 之后的真实窗口**，词级裁剪才能按实际切点重定基；
+            # 在调用方按 segment.start/end 预生成字幕的话，抖动挪过的段会整体错位。
+            ass_path = original_subtitle_provider(index, safe_start, safe_end)
+        ass_sha256 = None if ass_path is None else _sha256_file(ass_path)
         mid = (safe_start + safe_end) / 2.0
         face_key = (segment.episode_id, round(mid, 1))
         if face_key not in face_cache:
@@ -601,36 +842,56 @@ def export_plan(
                 face_cache[face_key] = face_x_ratio(Path(source), mid)
             except Exception:  # noqa: BLE001 - 检测失败保持中心裁
                 face_cache[face_key] = None
-        job_args.append(
-            cut_segment_args(
-                source,
-                str(work_dir / f"seg_{index:03d}.mp4"),
-                start=safe_start,
-                end=safe_end,
-                audio=segment.audio,
-                tts_audio=tts_audio,
-                rng=rng,
-                transition=segment.transition,
-                ass_path=ass_path,
-                out_size=out_size,
-                video_codec=video_codec,
-                fade_in_s=vin,
-                fade_out_s=vout,
-                afade_in_s=ain,
-                afade_out_s=aout,
-                crop_x_ratio=face_cache[face_key],
+        jobs.append(
+            _SegmentJob(
+                index=index,
+                args=cut_segment_args(
+                    source,
+                    str(seg_path),
+                    start=safe_start,
+                    end=safe_end,
+                    audio=segment.audio,
+                    tts_audio=tts_audio,
+                    rng=rng,
+                    transition=segment.transition,
+                    ass_path=ass_path,
+                    out_size=out_size,
+                    video_codec=video_codec,
+                    fade_in_s=vin,
+                    fade_out_s=vout,
+                    afade_in_s=ain,
+                    afade_out_s=aout,
+                    crop_x_ratio=face_cache[face_key],
+                ),
+                seg_path=seg_path,
+                inputs=inputs,
+                safe_start=safe_start,
+                safe_end=safe_end,
+                # 段内进度分母：声明时长（dedup 微变速 ±0.4% 忽略，runner 侧
+                # min(fraction,1) 钳住）
+                progress_duration=max(safe_end - safe_start, 0.05),
+                burner_duration=burner_duration,
+                subtitle_source=subtitle_source,
+                ass_sha256=ass_sha256,
+                reuse=False,
             )
         )
-        # 段内进度分母：声明时长（dedup 微变速 ±0.4% 忽略，runner 侧 min(fraction,1) 钳住）
-        segment_durations.append(max(safe_end - safe_start, 0.05))
 
     if cancel is not None and cancel.is_set():
         raise runner.FfmpegError("已取消", cancelled=True)
 
     # 段内进度平滑（调研②）：总进度 = (已完成段 + 当前段内比例)/总段数 × 90。
     # Phase A 并行时段收集序 ≠ 完成序，peak 钳住保证单调不减——进度条回退比冻结更像 bug。
+    # B4：复用段直接预置进 completed 基线，续跑时进度条从已完成处起算，不从 0 爬。
+    #
+    # 完成基线用 **worker 侧写入的 completed 集合**而不是主线程 result() 之后才更新的
+    # 计数：parallel=1 时同一 worker 顺序跑段，上一段 _finish 里的 completed.add
+    # 必然 happens-before 下一段的 _intra——基线确定；主线程计数跑在 result() 之后，
+    # 与 worker 抢跑会输（B4 落地时实测：sig 落盘的毫秒级 I/O 就足以让第二段的段内
+    # 回调读到旧计数，67.5 被 peak 钳成 22.5，test_progress 红）。
     progress_lock = threading.Lock()
-    progress_state = {"done": 0, "peak": 0.0}
+    completed: set[int] = {job.index for job in jobs if job.reuse}
+    progress_state = {"peak": 0.0}
 
     def _emit(percent: float, label: str) -> None:
         if on_progress is None:
@@ -640,7 +901,35 @@ def export_plan(
             progress_state["peak"] = percent
         on_progress(percent, label)
 
-    def _cut_one(index: int, args: list[str]) -> None:
+    def _cut_one(job: _SegmentJob) -> None:
+        index = job.index
+        args = job.args
+        actual_codec = args[args.index("-c:v") + 1]
+
+        def _finish() -> None:
+            """段编码成功后写 sidecar 签名（产物存在才写；写签名失败不挡导出）。"""
+            if job.seg_path.is_file() and job.seg_path.stat().st_size > 0:
+                with contextlib.suppress(OSError):
+                    _write_sig_atomic(
+                        job.seg_path,
+                        {
+                            "version": _SIG_VERSION,
+                            "inputs": job.inputs,
+                            "recorded": {
+                                # A4 自洽：记**实际成功**的 codec（回退过就是 libx264），
+                                # 下次请求同 codec 才跳过；concat 签名检查零改动。
+                                "actual_codec": actual_codec,
+                                "safe_start": job.safe_start,
+                                "safe_end": job.safe_end,
+                                "duration_s": job.burner_duration,
+                                "subtitle_source": job.subtitle_source,
+                                "ass_sha256": job.ass_sha256,
+                            },
+                        },
+                    )
+            with progress_lock:
+                completed.add(index)
+
         if on_progress is None:
             try:
                 _run_cut(args, cancel)  # 旧路径逐字节不变（不追加 -progress）
@@ -648,18 +937,20 @@ def export_plan(
                 if not _fallback_eligible(exc, args):
                     raise
                 _retry_with_libx264(index, args, exc, cancel)
+                actual_codec = _FALLBACK_CODEC
+            _finish()
             return
 
         def _intra(fraction: float) -> None:
             with progress_lock:
-                done = progress_state["done"]
+                done = len(completed)
             _emit((done + min(fraction, 1.0)) / total * 90, f"切割第 {index + 1} 段")
 
         try:
             _run_cut(
                 args,
                 cancel,
-                total_duration_s=segment_durations[index],
+                total_duration_s=job.progress_duration,
                 on_progress=_intra,
             )
         except runner.FfmpegError as exc:
@@ -667,9 +958,11 @@ def export_plan(
                 raise
             _retry_with_libx264(
                 index, args, exc, cancel,
-                total_duration_s=segment_durations[index],
+                total_duration_s=job.progress_duration,
                 on_progress=_intra,
             )
+            actual_codec = _FALLBACK_CODEC
+        _finish()
 
     def _retry_with_libx264(
         index: int,
@@ -697,13 +990,20 @@ def export_plan(
             on_progress=on_progress,
         )
 
-    # Phase A 并行执行（ffmpeg 自身多线程，2 并发已接近 IO/CPU 饱和）
+    if reused_count:
+        _LOGGER.info(
+            "断点续跑：%d/%d 段输入签名一致，跳过重编", reused_count, total
+        )
+        _emit(reused_count / total * 90, f"复用 {reused_count}/{total} 段")
+
+    # Phase A 并行执行（ffmpeg 自身多线程，2 并发已接近 IO/CPU 饱和）；复用段不进池
+    encode_jobs = [job for job in jobs if not job.reuse]
     with ThreadPoolExecutor(max_workers=parallel) as pool:
-        futures = [pool.submit(_cut_one, index, args) for index, args in enumerate(job_args)]
-        for done, future in enumerate(futures, start=1):
+        futures = [pool.submit(_cut_one, job) for job in encode_jobs]
+        done = reused_count
+        for future in futures:
             future.result()
-            with progress_lock:
-                progress_state["done"] = done
+            done += 1
             _emit(done / total * 90, f"切割 {done}/{total}")
             if cancel is not None and cancel.is_set():
                 raise runner.FfmpegError("已取消", cancelled=True)

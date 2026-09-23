@@ -93,6 +93,12 @@ SPECS: list[PromptSpec] = [
         "成片信息流标题：8 条候选，让人点进去看全集",
         _default("dramaclip.engines.narration.titles", "_SYSTEM_PROMPT"),
     ),
+    PromptSpec(
+        "prompt.variant_scoring_system",
+        "方案评分",
+        "六维行为锚点评分 + 一句具体改进建议（软信号：只排序，不参与门禁）",
+        _default("dramaclip.engines.narration.variant_scoring", "_SYSTEM_PROMPT"),
+    ),
 ]
 
 SPEC_BY_KEY = {spec.key: spec for spec in SPECS}

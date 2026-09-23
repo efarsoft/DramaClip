@@ -18,13 +18,14 @@ from dramaclip.engines.narration import (
     overlap,
     script_driver,
     scriptwriter,
+    variant_scoring,
 )
 from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration import styles as styles_lib
 from dramaclip.engines.narration.casting import EpisodeScene, MaterialByEpisode
 from dramaclip.engines.narration.conversion import defects, grade
 from dramaclip.engines.narration.models import PlanData
-from dramaclip.engines.semantic.llm_client import LlmUnavailable
+from dramaclip.engines.semantic.llm_client import LlmConfig, LlmUnavailable
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from dramaclip.infra import config
 from dramaclip.infra.storage.repos import analysis as analysis_repo
@@ -84,14 +85,19 @@ def register(router: Router, context: AppContext) -> None:
 
 
 def list_plans(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:
-    """项目方案列表；给了 batch_id 就只取那一组（阶段③ 按组显示）。"""
+    """项目方案列表；给了 batch_id 就只取那一组（阶段③ 按组显示）。
+
+    B10 软排序：有分数的方案按 score_total 降序（平局按 variant_index 确定性），
+    全无分数时 `rank_variants` 原样返回——顺序与评分上线前逐字节一致。
+    排序只动列表顺序，不动任何行的字段，更不动 grade。
+    """
     project_id = str(params.get("project_id", ""))
     batch_id = params.get("batch_id")
     if batch_id is not None:
         rows = plans_repo.list_by_batch(context.conn, project_id, str(batch_id))
     else:
         rows = plans_repo.list_by_project(context.conn, project_id)
-    return [_annotate_gate(row) for row in rows]
+    return variant_scoring.rank_variants([_annotate_gate(row) for row in rows])
 
 
 def _annotate_gate(row: dict[str, Any]) -> dict[str, Any]:
@@ -397,10 +403,47 @@ def _run_plan_variants(
         else:
             context.job_store.set_progress(job_id, 100.0)
             context.job_store.mark_completed(job_id)
+        # B10 尾部评分在 job 落终态**之后**跑：job 的成败与时长只由方案生成决定，
+        # 评分慢/炸都不影响已定的终态（业主红线：评分失败不挡方案生成）。
+        # 取消的作业不评分：用户已经不要这批的后续动作了。
+        if not cancel_event.is_set():
+            _score_batch(context, job_id, project_id, settings)
     except Exception as exc:  # noqa: BLE001 - 逐变体守卫之外的抛出没人接就是一行永停 running
         _settle_failed(context, job_id, f"规划任务异常终止: {type(exc).__name__}: {exc}")
     finally:
         context.cancel_events.pop(job_id, None)
+
+
+def _score_batch(
+    context: AppContext, job_id: str, project_id: str, settings: dict[str, str]
+) -> None:
+    """B10 尾部评分：整批一次 LLM 往返，写三列软信号。
+
+    任何失败（未配置/网关坏/产出全废）都只留一句日志：评分是排序信号，
+    绝不让规划 job 因它变红——job 的成败只由方案生成本身决定。
+    grade/defects 在此零触碰：`set_scores` 只写 score_* 与 suggestion 三列。
+    """
+    if not LlmConfig.from_settings(settings).configured:
+        return  # 没配 LLM 的项目：静默跳过，不发请求不留错误
+    rows = plans_repo.list_by_batch(context.conn, project_id, job_id)
+    if not rows:
+        return
+    try:
+        scored = variant_scoring.score_variants(
+            rows, settings, trace_dir=llm_trace_dir(context)
+        )
+    except Exception as exc:  # noqa: BLE001 - 评分失败不挡规划 job（业主红线）
+        context.notifier.log("warn", f"方案评分跳过（不影响方案生成）: {exc}")
+        return
+    for plan_id, entry in scored.items():
+        plans_repo.set_scores(
+            context.conn,
+            plan_id,
+            float(entry["total"]),
+            entry["dims"],
+            str(entry.get("suggestion") or ""),
+        )
+    context.notifier.log("info", f"方案评分完成：{len(scored)}/{len(rows)} 条")
 
 
 def _angle_variants(
