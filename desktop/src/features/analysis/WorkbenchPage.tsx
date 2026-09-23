@@ -119,7 +119,7 @@ interface TwoColumnsProps {
   episodes: ReturnType<typeof useAnalysisWorkspace>['episodes'];
   results: ReturnType<typeof useAnalysisWorkspace>['results'];
   activeEpisodeId: string | null;
-  selectedIds: string[];
+  selectedIds: readonly string[];
   running: boolean;
   onActivate: (id: string) => void;
   onToggle: (id: string, checked: boolean) => void;

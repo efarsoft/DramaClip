@@ -8,6 +8,7 @@ import type {
   ProjectGetResult,
 } from '@dramaclip/protocol';
 import { analysisApi, jobsApi, projectApi } from '../../services/client';
+import { syncSelectionOnEpisodes, useDramaSelectionStore } from '../../stores/dramaSelection';
 import { useUiStore } from '../../stores/ui';
 
 /** status 轮询间隔：progress 通知仅驱动进度条，轮询是可靠性兜底。 */
@@ -16,9 +17,8 @@ const JOB_POLL_MS = 3000;
 /** 终态作业：到达即触发整页重载，轮询随之停。 */
 const SETTLED_STATUSES: readonly AnalysisJobStatus['status'][] = ['completed', 'failed', 'cancelled'];
 
-function defaultSelection(episodes: Episode[]): string[] {
-  return episodes.filter((e) => e.status !== 'done').map((e) => e.id);
-}
+/** 勾选集住在壳级 store（跨页保勾选）；本剧还没进过 store 时的空视图。 */
+const EMPTY_SELECTION: readonly string[] = [];
 
 /** 找本项目在跑的分析/预筛作业并取其状态；没有或取不到都是 null（不阻塞页面）。 */
 async function fetchActiveJob(projectId: string): Promise<AnalysisJobStatus | null> {
@@ -51,7 +51,7 @@ function useJobPolling(job: AnalysisJobStatus | null, refreshJob: (jobId: string
 function useStartActions(
   projectId: string,
   refreshJob: (jobId: string) => Promise<void>,
-  selectedIds: string[],
+  selectedIds: readonly string[],
 ) {
   const start = useCallback(async (): Promise<void> => {
     if (selectedIds.length === 0) return;
@@ -71,18 +71,25 @@ function useStartActions(
 export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
   const [project, setProject] = useState<Project | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(null);
   const [results, setResults] = useState<AnalysisResults | null>(null);
   const [job, setJob] = useState<AnalysisJobStatus | null>(null);
   const serviceState = useUiStore((state) => state.serviceState);
+  const selectedIds = useDramaSelectionStore((state) =>
+    state.projectId === projectId ? state.episodeIds : EMPTY_SELECTION,
+  );
+  const toggleEpisode = useDramaSelectionStore((state) => state.toggleEpisode);
 
-  const applyDetail = useCallback((detail: ProjectGetResult): void => {
-    setProject(detail.project);
-    setEpisodes(detail.episodes);
-    setSelectedIds(defaultSelection(detail.episodes));
-    setActiveEpisodeId(detail.episodes[0]?.id ?? null);
-  }, []);
+  const applyDetail = useCallback(
+    (detail: ProjectGetResult): void => {
+      setProject(detail.project);
+      setEpisodes(detail.episodes);
+      // 首进默认勾未完成集；同剧重载保留用户勾选（卷二 §6.5）
+      syncSelectionOnEpisodes(projectId, detail.episodes);
+      setActiveEpisodeId(detail.episodes[0]?.id ?? null);
+    },
+    [projectId],
+  );
 
   const loadAll = useCallback(async (): Promise<void> => {
     applyDetail(await projectApi.get(projectId));
@@ -117,7 +124,7 @@ export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
     episodes,
     selectedIds,
     toggleSelected: (episodeId, checked) => {
-      setSelectedIds((prev) => (checked ? [...prev, episodeId] : prev.filter((id) => id !== episodeId)));
+      toggleEpisode(projectId, episodeId, checked);
     },
     activeEpisodeId,
     setActiveEpisodeId,
@@ -134,7 +141,7 @@ export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
 export interface AnalysisWorkspace {
   project: Project | null;
   episodes: Episode[];
-  selectedIds: string[];
+  selectedIds: readonly string[];
   toggleSelected: (episodeId: string, checked: boolean) => void;
   activeEpisodeId: string | null;
   setActiveEpisodeId: (id: string) => void;

@@ -125,7 +125,7 @@ export const projectApi = {
 } as const;
 
 export const analysisApi = {
-  start: (projectId: string, episodeIds?: string[]): Promise<{ job_id: string }> =>
+  start: (projectId: string, episodeIds?: readonly string[]): Promise<{ job_id: string }> =>
     rpc<{ job_id: string }>(
       'analysis.start',
       episodeIds ? { project_id: projectId, episode_ids: episodeIds } : { project_id: projectId },

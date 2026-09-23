@@ -12,7 +12,7 @@ interface ListProps {
   byId: Map<string, Episode>;
   highlights: Partial<Record<string, HighlightSegment[]>>;
   activeEpisodeId: string | null;
-  selectedIds: string[];
+  selectedIds: readonly string[];
   running: boolean;
   onActivate: (id: string) => void;
   onToggle: (id: string, checked: boolean) => void;
