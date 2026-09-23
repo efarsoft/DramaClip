@@ -186,16 +186,110 @@ function scanOf(surface: Surface): Scan {
   for (const file of files) {
     readCounts.set(surface.label, (readCounts.get(surface.label) ?? 0) + 1);
     const rel = path.relative(surface.base, file);
-    readFileSync(file, 'utf8').split('\n').forEach((line, index) => {
-      for (const { phrase } of surface.banned) {
-        if (line.includes(phrase)) hits.get(phrase)?.push(`${rel}:${String(index + 1)}`);
-      }
-    });
+    // 整档抹一遍空白，所有红线词共用这份正文——每词重抹一次会让读盘次数对不上文件数
+    // 整档抹一遍空白，所有红线词共用这份正文——每词重抹一次会让读盘次数对不上文件数。
+    // 判据必须是 phraseLines 那一套（夹具「句中折行探针」把它经 scanOf 再跑一遍真实文件）：
+    // 换成逐行 includes 会让折行的红线词静默判绿，而语料本身零命中，从结果上看不出来。
+    const body = compactText(readFileSync(file, 'utf8'));
+    for (const { phrase } of surface.banned) {
+      const list = hits.get(phrase);
+      if (list === undefined) continue;
+      for (const line of matchLines(body, phrase)) list.push(`${rel}:${String(line)}`);
+    }
   }
   const scan: Scan = { files, hits };
   scans.set(surface.label, scan);
   return scan;
 }
+
+/**
+ * 判据的单位是**整档正文**，不是行。中文可以在任意字符处断行：按列硬折的 markdown 会把
+ * 一个红线词劈成两段，渲染出来照旧是那个词，逐行 `includes` 却一个字也看不见
+ * （实测口径：docs/ 里有 6 处「跨行才拼得出六字纯中文串、任一行都不成立」的句中折行，
+ * 这条路不需要刻意规避就能走到）。
+ * 只抹空白，别的字符照旧是屏障：`# 绕` 换行 `# 过平台` 拼不成「绕过平台」，注释符挡在中间。
+ * ⚠️ 因此红线词表里的词必须**不含空白**（含空白的词在抹掉空白的正文里永远配不上，
+ * 会变成一条看不见的假绿）——本 describe 第二条用例钉着这条。
+ * 下面三枚是这套判据的全部构件：Body = 抹掉空白后的正文 + 每个保留字符在原文里的偏移。
+ */
+interface Body {
+  readonly text: string;
+  readonly starts: readonly number[];
+  readonly src: string;
+}
+
+function compactText(src: string): Body {
+  const starts: number[] = [];
+  let text = '';
+  src.replace(/\S/g, (ch: string, offset: number) => {
+    text += ch;
+    starts.push(offset);
+    return ch;
+  });
+  return { text, starts, src };
+}
+
+/** 命中按紧凑正文下标回查原文偏移，行号指得改的那一行（折行时是首字所在行）。 */
+function matchLines(body: Body, phrase: string): number[] {
+  const out: number[] = [];
+  for (let from = 0; ; ) {
+    const at = body.text.indexOf(phrase, from);
+    if (at < 0) return out;
+    out.push(lineAt(body.src, body.starts[at] ?? 0));
+    from = at + phrase.length;
+  }
+}
+
+/** 单档单词的入口，只有口径夹具走它；scanOf 为了「每文件只抹一次」自己串这两枚构件。 */
+function phraseLines(src: string, phrase: string): number[] {
+  return matchLines(compactText(src), phrase);
+}
+
+/** 数换行换算行号：整档匹配只有偏移，报告要指得改的那一行。 */
+function lineAt(src: string, offset: number): number {
+  let line = 1;
+  for (let i = 0; i < offset; i += 1) if (src.charCodeAt(i) === 10) line += 1;
+  return line;
+}
+
+describe('判据的单位是整档正文，不是行', () => {
+  it('中文按列硬折不得把红线词劈成看不见的一段，行号按命中首字换算', () => {
+    // 逐行 includes 的旧写法对第一段判绿：渲染出来仍是「绕过平台」，门禁却一个字也看不见。
+    expect(phraseLines('本产品的目的是\n绕\n过平台的重复判定', '绕过平台')).toEqual([2]);
+    expect(phraseLines('绕过平台', '绕过平台')).toEqual([1]);
+    expect(phraseLines('绕过平台\n别的\n再绕\n过平台一次', '绕过平台')).toEqual([1, 3]);
+    // 只抹空白，别的字符照旧挡在中间：两行各是各的注释，拼不成一个词
+    expect(phraseLines('# 绕\n# 过平台', '绕过平台')).toEqual([]);
+    expect(phraseLines("{ a: '绕',\n  b: '过平台' }", '绕过平台')).toEqual([]);
+    expect(phraseLines('这一段是中性表述', '绕过平台')).toEqual([]);
+    // 同一行两处各计一次：命中表要数得出位点，不是数行
+    expect(phraseLines('绕过平台，以及绕过平台', '绕过平台')).toEqual([1, 1]);
+  });
+
+  it('红线词表不得含空白：抹掉空白的正文里带空白的词永远配不上，那是条静默假绿', () => {
+    const spaced = SURFACES.flatMap((surface) =>
+      surface.banned.filter(({ phrase }) => /\s/.test(phrase)).map(({ phrase }) => `${surface.label}·${phrase}`),
+    );
+    expect(spaced, `含空白的红线词在本判据下不可能命中：${spaced.join(', ')}`).toEqual([]);
+  });
+
+  it('句中折行探针走的是 scanOf 本身：换回逐行匹配即红', () => {
+    // 上面两条只测得到 phraseLines——scanOf 若被改回 split('\n')，夹具照样绿、
+    // 真扫描照样瞎（语料零命中，从结果上看不出任何异样）。这条把跨行词经生产路径跑一遍。
+    const probe: Surface = {
+      label: '折行探针',
+      files: () => [path.join(SRC_DIR, '__tests__', 'fixtures', 'wrapped-copy.md')],
+      base: SRC_DIR,
+      probe: 'wrapped-copy.md',
+      minFiles: 1,
+      minPhrases: 1,
+      banned: [{ phrase: '绕过平台', reason: '夹具专用：只以跨行形态在场' }],
+    };
+    const expected = `${path.join('__tests__', 'fixtures', 'wrapped-copy.md')}:8`;
+    const hits = [...scanOf(probe).hits.values()].flat();
+    expect(hits, `折行的红线词没被扫出来（命中行应为 ${expected}）：${hits.join(', ')}`).toEqual([expected]);
+  });
+});
 
 describe('文案真值门禁', () => {
   for (const surface of SURFACES) {
