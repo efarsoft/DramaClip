@@ -16,20 +16,7 @@ import {
   type StageMap,
   type StageState,
 } from './stageState';
-
-const STATE_COLOR: Readonly<Record<StageState, string>> = {
-  idle: tokens.textTertiary,
-  active: tokens.colorInfo,
-  done: tokens.colorSuccess,
-  stale: tokens.colorWarning,
-  unknown: tokens.textTertiary,
-};
-
-const TONE_META: Readonly<Record<BlockTone, { color: string; soft: string; danger: boolean }>> = {
-  error: { color: tokens.colorError, soft: tokens.errorSoft, danger: true },
-  warning: { color: tokens.colorWarning, soft: tokens.warningSoft, danger: false },
-  action: { color: tokens.colorInfo, soft: tokens.accentSoft, danger: false },
-};
+import { STATE_COLOR, TONE_META } from './stageColors';
 
 /** 四阶段灯排。卡点所在阶段用 note.tone 改色，其余灯照常——一眼看出卡在哪。 */
 export function StageMicro({ stages, note }: { stages: StageMap; note?: BlockNote | null }): ReactElement {

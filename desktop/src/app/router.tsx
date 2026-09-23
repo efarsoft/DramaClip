@@ -2,6 +2,7 @@ import { HashRouter, Navigate, Route, Routes, useParams } from 'react-router-dom
 import { App } from './App';
 import { HomePage } from '../features/home/HomePage';
 import { ProjectsPage } from '../features/project/ProjectsPage';
+import { DramaShell } from '../features/project/DramaShell';
 import { WorkbenchPage } from '../features/analysis/WorkbenchPage';
 import { ProductionPage } from '../features/narration/ProductionPage';
 import { EnginesPage } from '../features/engines/EnginesPage';
@@ -24,8 +25,23 @@ export function Router() {
           <Route path="/engines/:tab" element={<EnginesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/about" element={<AboutPage />} />
-          <Route path="/projects/:projectId/analysis" element={<WorkbenchPage />} />
-          <Route path="/projects/:projectId/produce" element={<ProductionPage />} />
+          {/* 剧空间壳（卷三意见 06 第一刀）：组合挂载，path 字面量与 IA 登记表零漂移 */}
+          <Route
+            path="/projects/:projectId/analysis"
+            element={
+              <DramaShell>
+                <WorkbenchPage />
+              </DramaShell>
+            }
+          />
+          <Route
+            path="/projects/:projectId/produce"
+            element={
+              <DramaShell>
+                <ProductionPage />
+              </DramaShell>
+            }
+          />
           {Object.entries(LEGACY_REDIRECTS).map(([from, to]) => (
             <Route key={from} path={from} element={<Navigate to={to} replace />} />
           ))}

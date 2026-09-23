@@ -134,7 +134,8 @@ function activeStageOf(activeTypes: ReadonlySet<string>): StageKey | null {
   return null;
 }
 
-function stageRoute(dramaId: string, stage: StageKey): string {
+/** 阶段 → 剧空间真实路由：①② 的界面在分析页里，③④ 的界面在出片页里。 */
+export function stageRoute(dramaId: string, stage: StageKey): string {
   if (stage === 'intake' || stage === 'analysis') return `/projects/${dramaId}/analysis`;
   return `/projects/${dramaId}/produce`;
 }
