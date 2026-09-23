@@ -132,7 +132,7 @@ export const layout = {
   listSection: { padding: 0, rowPadding: tokens.spaceMd },
   /** 列表行高派生自字阶（body 22 + 上下留白），不再由内容撑。 */
   row: { single: 36, double: 52, moveButton: { width: 18, height: 13 } },
-  field: { labelWidth: 250, controlWidth: 320, labelPaddingTop: 6 },
+  field: { labelWidth: 250, controlWidth: 320, labelPaddingTop: 6, helpMarginTop: 3 },
   controlHeight: { sm: 28, md: 32 },
   rail: {
     width: 68,

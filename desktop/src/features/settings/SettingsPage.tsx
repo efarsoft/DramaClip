@@ -1,12 +1,13 @@
-/** 偏好设置页：settings.get 全量载入 → 分区编辑 → 差异保存（settings.update）。 */
+/** 偏好设置页：settings.get 全量载入 → 分区编辑 → 差异保存（settings.update）。
+ * 目录类选项（解说风格 / 字幕预设）异步取回后注入 spec；取不到就空目录，控件照实显示当前值。 */
 import { App as AntdApp, Button, Input, InputNumber, Select, Switch } from 'antd';
 import type { CSSProperties } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
-import { rpc } from '../../services/client';
+import { narrationApi, rpc, subtitleApi } from '../../services/client';
 import { mixins } from '../../styles/mixins';
-import { tokens } from '../../styles/theme';
-import { buildSections, type FieldSpec, type SettingsMap } from './sections';
+import { layout, tokens } from '../../styles/theme';
+import { buildSections, type DynamicOptions, type FieldSpec, type SectionSpec, type SettingsMap } from './sections';
 
 const PAGE_DESC = '分析阈值、字幕与出片参数；LLM/ASR/TTS 引擎配置在「引擎中心」管理。';
 
@@ -39,6 +40,7 @@ export function SettingsPage() {
   const [original, setOriginal] = useState<SettingsMap | null>(null);
   const [draft, setDraft] = useState<SettingsMap | null>(null);
   const [saving, setSaving] = useState(false);
+  const [dynamic, setDynamic] = useState<DynamicOptions>({ styles: [], presets: [] });
 
   const load = useCallback(async () => {
     const values = await rpc<SettingsMap>('settings.get');
@@ -49,6 +51,30 @@ export function SettingsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 目录类选项各自独立取：一个失败不拖垮另一个，失败侧目录为空（不编选项）
+  useEffect(() => {
+    void narrationApi
+      .listStyles()
+      .catch(() => [])
+      .then((styles) => {
+        setDynamic((prev) => ({
+          ...prev,
+          styles: styles.map((style) => ({ label: style.name, value: style.style_id })),
+        }));
+      });
+    void subtitleApi
+      .listPresets()
+      .catch(() => [])
+      .then((presets) => {
+        setDynamic((prev) => ({
+          ...prev,
+          presets: presets.map((preset) => ({ label: preset.preset_name, value: preset.preset_id })),
+        }));
+      });
+  }, []);
+
+  const sections = useMemo(() => buildSections(dynamic), [dynamic]);
 
   if (draft === null || original === null) {
     return (
@@ -68,6 +94,7 @@ export function SettingsPage() {
       original={original}
       draft={draft}
       saving={saving}
+      sections={sections}
       onDraft={setDraft}
       onSave={() => {
         void save();
@@ -80,6 +107,7 @@ function SettingsView(props: {
   original: SettingsMap;
   draft: SettingsMap;
   saving: boolean;
+  sections: readonly SectionSpec[];
   onDraft: (next: SettingsMap) => void;
   onSave: () => void;
 }): React.ReactElement {
@@ -92,7 +120,7 @@ function SettingsView(props: {
   return (
     <PageShell>
       <PageHeader title="偏好设置" desc={PAGE_DESC} />
-      <SettingsBody draft={props.draft} onPatch={patchDraft} />
+      <SettingsBody draft={props.draft} sections={props.sections} onPatch={patchDraft} />
       {/* 吸底保存栏：仅在存在改动时出现，长表单滚动到底也能看见动作 */}
       {changedKeys.length > 0 && (
         <div
@@ -133,14 +161,16 @@ function SettingsView(props: {
 
 function SettingsBody({
   draft,
+  sections,
   onPatch,
 }: {
   draft: SettingsMap;
+  sections: readonly SectionSpec[];
   onPatch: (key: string, value: string) => void;
 }) {
   return (
     <>
-      {buildSections().map((section) => (
+      {sections.map((section) => (
         <PageSection key={section.id} title={section.title}>
           {section.fields.map((field, index, all) => (
             <FieldRow
@@ -264,7 +294,7 @@ function FieldRow({
             style={{
               fontSize: tokens.text.meta.size,
               color: tokens.textTertiary,
-              marginTop: 3,
+              marginTop: layout.field.helpMarginTop,
               lineHeight: tokens.text.meta.leading,
             }}
           >

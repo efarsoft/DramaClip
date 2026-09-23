@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import type { ExportJob, NarrationMode, Project } from '@dramaclip/protocol';
 import { PageHeader as PageKitHeader, PageShell } from '../../components/layout/PageKit';
 import { MODE_INFO } from '../../components/modeMeta';
-import { exportApi, projectApi } from '../../services/client';
+import { exportApi, projectApi, settingsApi } from '../../services/client';
 import { rememberDrama } from '../../stores/lastDrama';
 import { useUiStore } from '../../stores/ui';
 import { layout, tokens } from '../../styles/theme';
@@ -18,11 +18,29 @@ import { useFocusScroll } from './useFocusScroll';
 import { usePlanBatch } from './usePlanBatch';
 
 const ALL_MODES = MODE_INFO.map((item) => item.mode) as NarrationMode[];
-/** 与 ModePicker 的下拉、服务端 narration.variants_per_mode 默认值同口径。 */
+/** K 的兜底值：设置读不到/读脏时用，与服务端 narration.variants_per_mode 默认值同口径。 */
 const DEFAULT_K = 3;
+/** K 下拉的合法区间（ModePicker K_OPTIONS 1–8）；设置值越界就不采用。 */
+const K_MIN = 1;
+const K_MAX = 8;
 
 function toggleMode(setModes: React.Dispatch<React.SetStateAction<NarrationMode[]>>, mode: NarrationMode): void {
   setModes((prev) => (prev.includes(mode) ? prev.filter((m) => m !== mode) : [...prev, mode]));
+}
+
+/** K 默认初值读设置页同键 narration.variants_per_mode（键与消费端同源）；
+ * 读不到、读脏或越界（K 下拉只有 1–8）就保持兜底值，不硬塞。 */
+function useKDefault(serviceState: string, setK: (k: number) => void): void {
+  useEffect(() => {
+    if (serviceState !== 'ready') return;
+    void settingsApi
+      .get()
+      .then((values) => {
+        const parsed = Number.parseInt(values['narration.variants_per_mode'] ?? '', 10);
+        if (Number.isFinite(parsed) && parsed >= K_MIN && parsed <= K_MAX) setK(parsed);
+      })
+      .catch(() => undefined);
+  }, [serviceState, setK]);
 }
 
 /** ③ 区段容器：与 PageShell 同一节奏的纵向排布，focus 滚动的锚。 */
@@ -62,6 +80,9 @@ export function ProductionPage() {
     if (serviceState !== 'ready') return;
     void reloadExports();
   }, [reloadExports, serviceState]);
+
+  // K 默认（09-10 §4.6「生产线默认值」）：初值读设置页同键，不写死 3
+  useKDefault(serviceState, setK);
 
   const batch = usePlanBatch(projectId);
   const queue = useExportQueue(reloadExports);

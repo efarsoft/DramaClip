@@ -1,4 +1,11 @@
-/** 系统偏好设置项（引擎类配置在「引擎中心」；键权威源：service config.DEFAULTS）。 */
+/** 系统偏好设置项（引擎类配置在「引擎中心」；键权威源：service config.DEFAULTS）。
+ *
+ * 分区口径（09-10 §4.6 / 卷二 #9）：「生产线默认值」与「字幕」两分区补入——
+ * 键与消费端同源：K 默认 = narration.variants_per_mode（出片中心 K 下拉初值 + 服务端
+ * 缺省 k），风格默认 = narration.style_id（出片中心风格选择器同键），内封字幕预设 =
+ * subtitle.default_preset（export 渲染消费）。subtitle.smart_match 至今无消费端，
+ * 不做假控件——键留在服务端等裁决，界面不摆没人听的开关。
+ */
 
 export type SettingsMap = Record<string, string>;
 
@@ -27,6 +34,14 @@ export interface SectionSpec {
   readonly fields: readonly FieldSpec[];
 }
 
+/** 目录类选项的注入源（SettingsPage 异步取回后传入，spec 本身保持纯数据）。 */
+export interface DynamicOptions {
+  /** narration.list_styles 的风格目录（不含「自动匹配」，由 spec 自己置顶）。 */
+  readonly styles: readonly Option[];
+  /** subtitle.list_presets 的预设目录；取不到时为空数组，控件照实显示当前值。 */
+  readonly presets: readonly Option[];
+}
+
 const ANALYSIS_SECTION: SectionSpec = {
   id: 'analysis',
   title: '智能分析',
@@ -50,26 +65,67 @@ const ANALYSIS_SECTION: SectionSpec = {
   ],
 };
 
+function productionSection(dynamic: DynamicOptions): SectionSpec {
+  return {
+    id: 'production',
+    title: '生产线默认值',
+    fields: [
+      {
+        key: 'narration.variants_per_mode',
+        label: '每个模式出几条方案 (K)',
+        type: 'number',
+        min: 1,
+        max: 8,
+        help: '出片中心「每个模式 N 条」的初值；不显式传 K 时服务端也按这个数出方案',
+      },
+      {
+        key: 'narration.style_id',
+        label: '解说风格默认',
+        type: 'select',
+        help: '与出片中心的风格选择器同键同源；改动对下一次规划生效',
+        options: () => [{ label: '自动匹配（推荐）', value: 'auto' }, ...dynamic.styles],
+      },
+      {
+        key: 'strategy.max_duration_s',
+        label: '成片目标时长上限 (秒)',
+        type: 'number',
+        min: 30,
+        max: 1200,
+        help: '软参考，不是砍片门禁。片长服从故事：几分钟到十几分钟都可以，冲突讲完再收。超短悬念版仍是单独的短模式。',
+      },
+      {
+        key: 'strategy.min_duration_s',
+        label: '成片最短时长 (秒)',
+        type: 'number',
+        min: 10,
+        max: 120,
+        help: '软参考，不是拉片门禁。片长服从故事，不会为了凑够秒数垫镜头。',
+      },
+    ],
+  };
+}
+
+/** 字幕分区：只放真有消费端的键（export 渲染时取 default_preset 烧录内封字幕）。 */
+function subtitleSection(dynamic: DynamicOptions): SectionSpec {
+  return {
+    id: 'subtitle',
+    title: '字幕',
+    fields: [
+      {
+        key: 'subtitle.default_preset',
+        label: '内封字幕默认预设',
+        type: 'select',
+        help: '出片时烧录内封字幕所用的预设；预设目录取不到时此处照实显示当前值',
+        options: () => dynamic.presets,
+      },
+    ],
+  };
+}
+
 const EXPORT_SECTION: SectionSpec = {
   id: 'export',
   title: '出片',
   fields: [
-    {
-      key: 'strategy.max_duration_s',
-      label: '成片目标时长上限 (秒)',
-      type: 'number',
-      min: 30,
-      max: 1200,
-      help: '软参考，不是砍片门禁。片长服从故事：几分钟到十几分钟都可以，冲突讲完再收。超短悬念版仍是单独的短模式。',
-    },
-    {
-      key: 'strategy.min_duration_s',
-      label: '成片最短时长 (秒)',
-      type: 'number',
-      min: 10,
-      max: 120,
-      help: '软参考，不是拉片门禁。片长服从故事，不会为了凑够秒数垫镜头。',
-    },
     {
       key: 'export.loudness_target_lufs',
       label: '成片响度目标 (LUFS)',
@@ -137,11 +193,13 @@ const HARDWARE_SECTION: SectionSpec = {
   ],
 };
 
-/** 分区按使用频率排序：出片 → 分析 → 字幕 → 下载 → 硬件（DSS §4.1）。 */
-export function buildSections(): readonly SectionSpec[] {
+/** 分区按使用频率排序：出片 → 生产线默认值 → 分析 → 字幕 → 下载 → 硬件（DSS §4.1）。 */
+export function buildSections(dynamic: DynamicOptions): readonly SectionSpec[] {
   return [
     EXPORT_SECTION,
+    productionSection(dynamic),
     ANALYSIS_SECTION,
+    subtitleSection(dynamic),
     DOWNLOAD_SECTION,
     HARDWARE_SECTION,
   ];

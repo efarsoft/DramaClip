@@ -33,6 +33,7 @@ import type {
   ServiceEvent,
   PromptsListResult,
   RelayoutResult,
+  SubtitlePresetInfo,
   TtsPreviewResult,
   VerifyReport,
 } from '@dramaclip/protocol';
@@ -164,6 +165,12 @@ export const narrationApi = {
       project_id: projectId,
       ...(batchId ? { batch_id: batchId } : {}),
     }),
+} as const;
+
+export const subtitleApi = {
+  /** 内封字幕预设目录（subtitle.list_presets）：设置页「字幕」分区的选项源。 */
+  listPresets: (): Promise<SubtitlePresetInfo[]> =>
+    rpc<SubtitlePresetInfo[]>('subtitle.list_presets', {}),
 } as const;
 
 export const exportApi = {
