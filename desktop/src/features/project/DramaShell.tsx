@@ -1,8 +1,10 @@
-/** 剧空间壳（卷三意见 06 第一刀）：只管布局，不动分析/出片两个域页内部。
+/** 剧空间壳（卷三意见 06）：布局 + 大阶段条；第二刀完成任务账状态提升。
  *
- * 壳 = 顶部只读大阶段条 + children。用组合而不是嵌套路由：router.tsx 的 path
- * 字面量与 IA 登记表（iaContract）零漂移，域页一行未改——属主纪律：第一刀只加壳，
- * 第二刀再谈状态提升与路由嵌套。
+ * 壳 = 顶部大阶段条 + 子区滚动容器。用组合而不是嵌套路由：router.tsx 的 path
+ * 字面量与 IA 登记表（iaContract）零漂移。任务账来自全局 stores/jobs（JobsFeed
+ * 唯一轮询点），壳不自拉 jobs.list——阶段灯随快照实时点亮。
+ * 高度链要显式接管：分析页根部 height:100% 需要确定高度的父级，出片页长内容
+ * 在壳内滚动（main 不再二次滚动）——壳不给高度链，域页会被压扁。
  * 剧找不到时横幅压顶但 children 照渲染：壳是加法，不替域页做「渲染与否」的决定，
  * 账本暂时取不到也不连坐白屏。
  */
@@ -24,7 +26,7 @@ export function DramaShell({ children }: { children: ReactNode }): ReactElement 
   const current: StageKey = location.pathname.endsWith('/produce') ? 'planning' : 'analysis';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
+    <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
       {state.kind === 'missing' && (
         <Alert
           type="warning"
@@ -50,9 +52,11 @@ export function DramaShell({ children }: { children: ReactNode }): ReactElement 
           note={state.kind === 'ok' ? state.note : null}
           factsError={state.kind === 'ok' ? state.factsError : null}
           current={current}
+          activeStage={state.kind === 'ok' ? state.activeStage : null}
+          activeProgress={state.kind === 'ok' ? state.activeProgress : null}
         />
       )}
-      <div>{children}</div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>{children}</div>
     </div>
   );
 }

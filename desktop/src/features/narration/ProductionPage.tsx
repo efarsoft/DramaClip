@@ -7,17 +7,27 @@ import { MODE_INFO } from '../../components/modeMeta';
 import { exportApi, projectApi } from '../../services/client';
 import { rememberDrama } from '../../stores/lastDrama';
 import { useUiStore } from '../../stores/ui';
-import { tokens } from '../../styles/theme';
+import { layout, tokens } from '../../styles/theme';
 import { ExportsCard } from './ExportsCard';
 import { ModePicker } from './ModePicker';
 import { PlanPickList } from './PlanPickList';
 import { StyleSelectCard } from './StyleSelectCard';
 import { useExportQueue } from './useExportQueue';
+import { useFocusScroll } from './useFocusScroll';
 import { usePlanBatch } from './usePlanBatch';
 
 const ALL_MODES = MODE_INFO.map((item) => item.mode) as NarrationMode[];
 /** 与 ModePicker 的下拉、服务端 narration.variants_per_mode 默认值同口径。 */
 const DEFAULT_K = 3;
+
+function toggleMode(setModes: React.Dispatch<React.SetStateAction<NarrationMode[]>>, mode: NarrationMode): void {
+  setModes((prev) => (prev.includes(mode) ? prev.filter((m) => m !== mode) : [...prev, mode]));
+}
+
+/** ③ 区段容器：与 PageShell 同一节奏的纵向排布，focus 滚动的锚。 */
+function sectionStyle(): React.CSSProperties {
+  return { display: 'flex', flexDirection: 'column', gap: layout.page.gap };
+}
 
 /** 规划和渲染是两步：先看清 K 条方案各说什么，再决定出哪几条。 */
 export function ProductionPage() {
@@ -28,6 +38,7 @@ export function ProductionPage() {
   const [modes, setModes] = useState<NarrationMode[]>([]);
   const [k, setK] = useState<number>(DEFAULT_K);
   const [exports, setExports] = useState<ExportJob[] | null>(null);
+  const { planningRef, exportRef } = useFocusScroll();
 
   useEffect(() => {
     setCurrentProjectId(projectId === '' ? null : projectId);
@@ -55,21 +66,25 @@ export function ProductionPage() {
   return (
     <PageShell>
       <PageHeader projectName={project?.name} />
-      <StyleSelectCard />
-      <ModePicker
-        batch={batch}
-        modes={modes}
-        k={k}
-        onToggleMode={(mode) => {
-          setModes((prev) => (prev.includes(mode) ? prev.filter((m) => m !== mode) : [...prev, mode]));
-        }}
-        onSelectAll={() => {
-          setModes(ALL_MODES);
-        }}
-        onKChange={setK}
-      />
-      <PlanPickList batch={batch} queue={queue} />
-      <ExportsCard exports={exports} />
+      <div ref={planningRef} style={sectionStyle()}>
+        <StyleSelectCard />
+        <ModePicker
+          batch={batch}
+          modes={modes}
+          k={k}
+          onToggleMode={(mode) => {
+            toggleMode(setModes, mode);
+          }}
+          onSelectAll={() => {
+            setModes(ALL_MODES);
+          }}
+          onKChange={setK}
+        />
+        <PlanPickList batch={batch} queue={queue} />
+      </div>
+      <div ref={exportRef}>
+        <ExportsCard exports={exports} />
+      </div>
     </PageShell>
   );
 }

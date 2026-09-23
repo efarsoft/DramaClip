@@ -5,6 +5,8 @@
  *
  * 三个聚合字段（analyzedCount/planCount/staleHint）暂无 RPC 供数：传 null 即进
  * 「宁灰勿假绿」分支——阶段态取不到就标 unknown，绝不倒推绿灯（卷三意见 03）。
+ * 账本粒度同样诚实：workCount=null（成品账缺）→ ③④ 灰；jobsPresent=false
+ * （任务账缺）→ ② 灰、任务类卡点句沉默。缺哪本账灰哪几盏灯，不连坐。
  * export 类任务的 ref_id=export_id 挂不到剧上，因此「正在导出」在剧维度看不见；
  * 成品数是硬数据，「已出片」灯不受影响（聚合 RPC 落地后补 active）。
  */
@@ -37,11 +39,14 @@ export function stageLabel(key: StageKey): string {
 
 export interface StageFacts {
   readonly episodeCount: number;
-  readonly workCount: number;
+  /** 成品数；null = 成品账缺席，③④ 只亮灰，「还没有成品」类卡点句闭嘴。 */
+  readonly workCount: number | null;
   /** 该剧在跑（pending/running）的任务类型；只收 ref_id=project_id 的类型。 */
   readonly activeTypes: ReadonlySet<string>;
   /** 最近在跑任务的人读阶段文本（线上字段 job.label）；没有则 null。 */
   readonly activeLabel: string | null;
+  /** 最近在跑任务的进度（0-100，服务端在跑时封顶 99）；没有在跑则 null，不本地推算。 */
+  readonly activeProgress: number | null;
   /** 该剧最近一条失败任务；error 保留原文不截断。 */
   readonly failed: { readonly type: string; readonly error: string } | null;
   /** 已转写集数（聚合 RPC 字段）：null = 数据源未落地，② 只亮灰。 */
@@ -52,6 +57,8 @@ export interface StageFacts {
   readonly staleHint: boolean | null;
   /** 任务账里是否有过完成的 analysis/prescreen——卡点兜底句区分「没跑过」与「跑过但账缺」。 */
   readonly analysisEverCompleted: boolean;
+  /** 任务账是否在场：false = jobs.list 还没取到或取失败，② 亮灰、卡点句不装知道。 */
+  readonly jobsPresent: boolean;
 }
 
 export function deriveStages(facts: StageFacts): StageMap {
@@ -64,6 +71,8 @@ export function deriveStages(facts: StageFacts): StageMap {
 }
 
 function deriveAnalysis(facts: StageFacts): StageState {
+  // 任务账缺席：在跑与完成都看不见，亮灰——不拿成品倒推，也不假装「没在跑」。
+  if (!facts.jobsPresent) return 'unknown';
   if (facts.activeTypes.has('analysis') || facts.activeTypes.has('prescreen')) return 'active';
   // 宁灰勿假绿：没有聚合计数时，即便有成品也不点绿——分析可能已被追加的剧集作废。
   if (facts.analyzedCount === null) return 'unknown';
@@ -76,12 +85,13 @@ function derivePlanning(facts: StageFacts): StageState {
   if (facts.activeTypes.has('narration')) return 'active';
   if (facts.staleHint === true) return 'stale';
   if (facts.planCount !== null) return facts.planCount > 0 ? 'done' : 'idle';
-  // 成品是「规划过且渲染过」的硬证据；没有成品时方案账缺失，亮灰不猜。
-  return facts.workCount > 0 ? 'done' : 'unknown';
+  // 成品是「规划过且渲染过」的硬证据；成品账或方案账缺失都亮灰不猜。
+  return facts.workCount !== null && facts.workCount > 0 ? 'done' : 'unknown';
 }
 
 function deriveExport(facts: StageFacts): StageState {
   if (facts.activeTypes.has('export')) return 'active';
+  if (facts.workCount === null) return 'unknown';
   return facts.workCount > 0 ? 'done' : 'idle';
 }
 
@@ -127,7 +137,8 @@ function failedStage(type: string): StageKey {
   return 'analysis';
 }
 
-function activeStageOf(activeTypes: ReadonlySet<string>): StageKey | null {
+/** 最近在跑任务落在哪一段：阶段条把进度百分比钉在这一段上，别段不沾光。 */
+export function activeStageOf(activeTypes: ReadonlySet<string>): StageKey | null {
   if (activeTypes.has('narration')) return 'planning';
   if (activeTypes.has('export')) return 'export';
   if (activeTypes.has('analysis') || activeTypes.has('prescreen')) return 'analysis';
@@ -198,8 +209,10 @@ function activeNote(facts: StageFacts, ctx: BlockContext): BlockNote | null {
   };
 }
 
-/** 没在跑也没失败、还没出片的剧：停滞催办 > 没开跑 > 跑过但账缺。有成品则无卡点。 */
+/** 没在跑也没失败、还没出片的剧：停滞催办 > 没开跑 > 跑过但账缺。有成品或账缺则无卡点。 */
 function notShippedNote(facts: StageFacts, ctx: BlockContext): BlockNote | null {
+  // 成品账缺席：断不了「还没有成品」，卡点句闭嘴——缺账的沉默比编一句诚实。
+  if (facts.workCount === null) return null;
   if (facts.workCount > 0) return null;
   const ageDays = (ctx.serverTimeMs - ctx.createdAtMs) / DAY_MS;
   if (ageDays >= STALLED_DAYS) {
@@ -211,6 +224,8 @@ function notShippedNote(facts: StageFacts, ctx: BlockContext): BlockNote | null 
       route: stageRoute(ctx.dramaId, 'export'),
     };
   }
+  // 任务账缺席：「还没开跑」是任务账里的话，账不在就不装知道。
+  if (!facts.jobsPresent) return null;
   if (!facts.analysisEverCompleted) {
     return {
       stage: 'analysis',
@@ -247,12 +262,26 @@ export function continueRoute(dramaId: string, stages: StageMap): { readonly rou
 const PROJECT_JOB_TYPES: ReadonlySet<string> = new Set(['analysis', 'prescreen', 'narration']);
 const ANALYSIS_TYPES: ReadonlySet<string> = new Set(['analysis', 'prescreen']);
 
-export type JobFacts = Pick<StageFacts, 'activeTypes' | 'activeLabel' | 'failed' | 'analysisEverCompleted'>;
+export type JobFacts = Pick<
+  StageFacts,
+  'activeTypes' | 'activeLabel' | 'activeProgress' | 'failed' | 'analysisEverCompleted' | 'jobsPresent'
+>;
+
+/** 任务账缺席（还没取到/取失败）时的占位：一切沉默，jobsPresent=false 让灯与卡点句都不装知道。 */
+export const NO_JOB_FACTS: JobFacts = {
+  activeTypes: new Set<string>(),
+  activeLabel: null,
+  activeProgress: null,
+  failed: null,
+  analysisEverCompleted: false,
+  jobsPresent: false,
+};
 
 /** jobs.list 按 updated_at 倒序（服务端默认排序），所以「第一条命中」即「最近一条」。 */
 export function jobFactsFor(dramaId: string, jobs: readonly JobInfo[]): JobFacts {
   const activeTypes = new Set<string>();
   let activeLabel: string | null = null;
+  let activeProgress: number | null = null;
   let failed: JobFacts['failed'] = null;
   let analysisEverCompleted = false;
   for (const job of jobs) {
@@ -260,19 +289,20 @@ export function jobFactsFor(dramaId: string, jobs: readonly JobInfo[]): JobFacts
     if (job.status === 'pending' || job.status === 'running') {
       activeTypes.add(job.type);
       activeLabel ??= job.label ?? null;
+      activeProgress ??= job.progress;
     } else if (job.status === 'failed' && failed === null) {
       failed = { type: job.type, error: job.error ?? '' };
     } else if (job.status === 'completed' && ANALYSIS_TYPES.has(job.type)) {
       analysisEverCompleted = true;
     }
   }
-  return { activeTypes, activeLabel, failed, analysisEverCompleted };
+  return { activeTypes, activeLabel, activeProgress, failed, analysisEverCompleted, jobsPresent: true };
 }
 
 /** 聚合 RPC 未落地期间的常量事实：三个可空字段全 null（宁灰勿假绿），账目字段来自 jobs 扫描。 */
 export function degradedFacts(
   episodeCount: number,
-  workCount: number,
+  workCount: number | null,
   jobFacts: JobFacts,
 ): StageFacts {
   return {

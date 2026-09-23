@@ -8,6 +8,7 @@ import {
   deriveBlockNote,
   deriveStages,
   jobFactsFor,
+  NO_JOB_FACTS,
   type BlockContext,
   type StageFacts,
 } from '../stageState';
@@ -23,11 +24,13 @@ function facts(partial: Partial<StageFacts> = {}): StageFacts {
     workCount: 0,
     activeTypes: new Set(),
     activeLabel: null,
+    activeProgress: null,
     failed: null,
     analyzedCount: null,
     planCount: null,
     staleHint: null,
     analysisEverCompleted: false,
+    jobsPresent: true,
     ...partial,
   };
 }
@@ -87,6 +90,37 @@ describe('deriveStages 四阶段灯', () => {
     expect(deriveStages(facts({ workCount: 1 })).export).toBe('done');
     expect(deriveStages(facts({ workCount: 0 })).export).toBe('idle');
     expect(deriveStages(facts({ workCount: 0, activeTypes: new Set(['export']) })).export).toBe('active');
+  });
+});
+
+describe('账本粒度降级（缺哪本账灰哪几盏灯，不连坐）', () => {
+  it('成品账缺（workCount=null）：③④ 灰，① 照硬数据走', () => {
+    const stages = deriveStages(facts({ workCount: null }));
+    expect(stages.intake).toBe('done');
+    expect(stages.planning).toBe('unknown');
+    expect(stages.export).toBe('unknown');
+    expect(deriveStages(facts({ workCount: null, activeTypes: new Set(['export']) })).export).toBe('active');
+  });
+
+  it('任务账缺（jobsPresent=false）：② 灰，「还没开跑」类卡点句沉默', () => {
+    const f = facts({ jobsPresent: false });
+    expect(deriveStages(f).analysis).toBe('unknown');
+    expect(deriveBlockNote(f, deriveStages(f), CTX)).toBeNull();
+  });
+
+  it('成品账缺：停滞催办也不说——「还没有成品」断不了', () => {
+    const stalled = { ...CTX, createdAtMs: NOW - 20 * DAY };
+    const f = facts({ workCount: null });
+    expect(deriveBlockNote(f, deriveStages(f), stalled)).toBeNull();
+  });
+
+  it('任务账缺但成品账在且停滞超 14 天：催办照说（只依赖成品与建库时间）', () => {
+    const stalled = { ...CTX, createdAtMs: NOW - 20 * DAY };
+    const f = facts({ jobsPresent: false });
+    expect(deriveBlockNote(f, deriveStages(f), stalled)).toMatchObject({
+      stage: 'export',
+      text: '6 集已就位 20 天，还没有成品',
+    });
   });
 });
 
@@ -209,5 +243,14 @@ describe('jobFactsFor 从任务账提取', () => {
     const f = degradedFacts(6, 2, jobFactsFor('p1', []));
     expect(f).toMatchObject({ episodeCount: 6, workCount: 2, analyzedCount: null, planCount: null, staleHint: null });
     expect(deriveStages(f).analysis).toBe('unknown');
+    expect(degradedFacts(6, null, NO_JOB_FACTS).workCount).toBeNull();
+  });
+
+  it('activeProgress 取最近在跑任务的进度；NO_JOB_FACTS 全沉默', () => {
+    const f = jobFactsFor('p1', [job({ progress: 40 }), job({ id: 'b', progress: 90, updated_at: NOW - DAY })]);
+    expect(f.activeProgress).toBe(40);
+    expect(f.jobsPresent).toBe(true);
+    expect(NO_JOB_FACTS).toMatchObject({ activeProgress: null, jobsPresent: false, analysisEverCompleted: false });
+    expect(NO_JOB_FACTS.activeTypes.size).toBe(0);
   });
 });
