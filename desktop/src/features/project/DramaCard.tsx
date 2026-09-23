@@ -123,7 +123,8 @@ function NoteSlot({
 function CoverArea({ project, handlers }: { project: Project; handlers: MenuHandlers }): ReactElement {
   return (
     <div className="project-cover" style={{ position: 'relative' }}>
-      {project.cover_path !== undefined ? (
+      {/* 真值判断挡掉 null/''（库内 NULL 原样过线）：缺封面走占位，不请求 mediaUrl(null) */}
+      {project.cover_path ? (
         <img
           src={mediaUrl(project.cover_path)}
           alt={project.name}

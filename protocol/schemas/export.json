@@ -178,7 +178,8 @@
           "type": "integer"
         },
         "cover_path": {
-          "type": "string"
+          "type": ["string", "null"],
+          "description": "NULL = 成片封面还没补拍；渲染层显示占位图，不请求 null 路径"
         },
         "narration_plan_id": {
           "type": [

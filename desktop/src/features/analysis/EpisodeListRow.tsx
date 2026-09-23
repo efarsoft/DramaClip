@@ -139,7 +139,8 @@ function RowThumb({ episode }: { episode: Episode }): React.ReactElement {
     borderRadius: tokens.radiusThumb,
     flexShrink: 0,
   } as const;
-  return episode.cover_path !== undefined ? (
+  // 真值判断挡掉 null/''（库内 NULL 原样过线）：没有封面走占位，绝不请求 mediaUrl(null)
+  return episode.cover_path ? (
     <img
       src={mediaUrl(episode.cover_path)}
       alt=""

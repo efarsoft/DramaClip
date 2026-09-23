@@ -35,7 +35,7 @@ export function WorkCard({
   actions,
 }: {
   work: WorkItem;
-  projectCover?: string;
+  projectCover?: string | null;
   selected: boolean;
   actions: WorkCardActions;
 }): ReactElement {
@@ -137,7 +137,7 @@ function WorkPoster({
   onToggleSelect,
 }: {
   work: WorkItem;
-  cover?: string;
+  cover?: string | null;
   selected: boolean;
   onToggleSelect: () => void;
 }): ReactElement {
@@ -168,8 +168,9 @@ function WorkPoster({
   );
 }
 
-function PosterArt({ cover, mode }: { cover?: string; mode?: string }): ReactElement {
-  if (cover !== undefined && cover !== '') {
+function PosterArt({ cover, mode }: { cover?: string | null; mode?: string }): ReactElement {
+  // 真值判断挡掉 null/''（库内 NULL 原样过线）：缺封面走占位，不请求 mediaUrl(null)
+  if (cover) {
     return (
       <img
         src={mediaUrl(cover)}

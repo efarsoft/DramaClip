@@ -72,3 +72,15 @@ describe('缺音轨标记（取不到 ≠ 没有）', () => {
     expect(legacy.queryByText('无音轨')).toBeNull();
   });
 });
+
+describe('封面 NULL 防线（库内 NULL 原样过线）', () => {
+  it('cover_path 为 null：走占位，不渲染 img（绝不请求 mediaUrl(null)）', () => {
+    const { container } = renderRow({ ...episode('pending'), cover_path: null });
+    expect(container.querySelector('img')).toBeNull();
+  });
+
+  it('cover_path 有值：正常渲染 img', () => {
+    const { container } = renderRow({ ...episode('pending'), cover_path: 'D:/covers/e1.jpg' });
+    expect(container.querySelector('img')).not.toBeNull();
+  });
+});

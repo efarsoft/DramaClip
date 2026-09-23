@@ -77,7 +77,7 @@ export interface Project {
   readonly status: string;
   readonly created_at: number;
   readonly episode_count: number;
-  readonly cover_path?: string;
+  readonly cover_path?: string | null;
   /** 项目级参数覆盖（方案数 K/转写档位/解说风格/字幕预设等）；空对象=全部使用全局默认。 */
   readonly settings: Record<string, unknown>;
 }
@@ -89,7 +89,7 @@ export interface Episode {
   readonly source_path: string;
   readonly duration?: number;
   readonly status: string;
-  readonly cover_path?: string;
+  readonly cover_path?: string | null;
   /** ffprobe 音轨判定；null/缺省 = 迁移前旧集尚未重扫（取不到 ≠ 没有，界面不发缺音轨告警）。 */
   readonly has_audio?: boolean | null;
 }
@@ -357,7 +357,7 @@ export interface WorkItem {
   readonly size_bytes?: number;
   readonly completed_at?: number;
   /** 逐片钩帧封面（渲染完成时生成；历史成片由 export.ensure_covers 补拍）。 */
-  readonly cover_path?: string;
+  readonly cover_path?: string | null;
   /** 追溯链（09-10 §4.5）：跳回方案卡与源集区间的关联键。 */
   readonly narration_plan_id?: string | null;
   /** 卖点角度名（界面金色标签）；方案已删或无解说模式为 null。 */

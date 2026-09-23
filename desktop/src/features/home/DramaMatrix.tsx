@@ -209,7 +209,7 @@ function NoteSlot({ note, onNavigate }: { note: BlockNote; onNavigate: (route: s
   );
 }
 
-function CoverThumb({ cover }: { cover: string | undefined }): ReactElement {
+function CoverThumb({ cover }: { cover: string | null | undefined }): ReactElement {
   return (
     <span
       style={{
@@ -225,7 +225,8 @@ function CoverThumb({ cover }: { cover: string | undefined }): ReactElement {
         color: tokens.colorPrimary,
       }}
     >
-      {cover !== undefined ? (
+      {/* 真值判断挡掉 null/''（库内 NULL 原样过线）：缺封面走占位，不请求 mediaUrl(null) */}
+      {cover ? (
         <img src={mediaUrl(cover)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
       ) : (
         <PlayCircleFilled style={{ fontSize: tokens.glyph.poster }} />

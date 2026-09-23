@@ -34,7 +34,8 @@
           "type": "integer"
         },
         "cover_path": {
-          "type": "string"
+          "type": ["string", "null"],
+          "description": "NULL = 封面还没生成（补拍队列未跑到）；渲染层显示占位图，不请求 null 路径"
         },
         "settings": {
           "type": "object",
@@ -71,7 +72,8 @@
           "type": "string"
         },
         "cover_path": {
-          "type": "string"
+          "type": ["string", "null"],
+          "description": "NULL = 集封面还没生成；渲染层显示占位图，不请求 null 路径"
         },
         "has_audio": {
           "type": ["boolean", "null"],
