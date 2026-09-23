@@ -69,9 +69,9 @@ def build_plan(
     if mode == "intro_narration":
         return apply_transitions(modes.build_intro(scenes, strategy))
     if mode == "cross_narration":
-        return apply_transitions(modes_w5.build_cross(scenes, strategy))
+        return apply_transitions(modes_w5.build_cross(scenes, strategy, material))
     if mode == "ultra_short_hook":
-        return apply_transitions(modes_w5.build_ultra_short(scenes, strategy))
+        return apply_transitions(modes_w5.build_ultra_short(scenes, strategy, material))
     if mode == "dialogue_narration":
         raise ValueError(
             "剧情解说为剧本驱动，不经规则编排（走 script_driver.script_dialogue_plan）"

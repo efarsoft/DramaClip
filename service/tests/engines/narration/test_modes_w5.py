@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dramaclip.engines.narration import casting, pipeline
 from dramaclip.engines.narration.casting import stamp
 from dramaclip.engines.narration.models import StrategySpec
 from dramaclip.engines.narration.modes_w5 import build_cross, build_ultra_short
@@ -55,3 +56,108 @@ def test_ultra_short_structure() -> None:
 def test_ultra_short_empty_scenes() -> None:
     plan = build_ultra_short([], _STRATEGY)
     assert plan.timeline == []
+
+
+# ---- B9 节拍吸附 ---------------------------------------------------------
+# 交叉解说夹具的场景起点 [0, 20, 60, 80, 100, 140]（top6 按叙事顺序）：
+# 原声段 end = start+8（任意点，应吸附），旁白段 end = anchor.start+4
+# （由 TTS 实测回填的估计位，不吸附）。超短版冲突窗口 end = 140+8 = 148。
+_BEATS_NEAR_ORIGINAL_ENDS = [7.9, 27.9, 67.9, 87.9, 107.9, 147.9]
+
+
+def _material_with_beats(beats: tuple[float, ...]) -> casting.MaterialByEpisode:
+    return {"ep1": casting.EpisodeMaterial(number=1, asr=[], beats=beats)}
+
+
+def test_cross_original_ends_snap_but_narration_ends_do_not() -> None:
+    """原声段 end 吸附到 0.1s 外的拍点；23.9 这个拍点紧贴第一个旁白段 end（24.0），
+    旁白段仍不动——旁白段长由 TTS 实测回填（批次一逻辑），规划期吸附它没有意义。"""
+    beats = tuple(_BEATS_NEAR_ORIGINAL_ENDS) + (23.9,)
+    plan = build_cross(stamp([(1, "ep1", _scenes())]), _STRATEGY, _material_with_beats(beats))
+    originals = [seg for seg in plan.timeline if seg.audio == "original"]
+    narrations = [seg for seg in plan.timeline if seg.audio == "narration"]
+    assert [seg.end for seg in originals] == _BEATS_NEAR_ORIGINAL_ENDS
+    # 起点是镜头边界，不吸附
+    assert [seg.start for seg in originals] == [0.0, 20.0, 60.0, 80.0, 100.0, 140.0]
+    assert [seg.end for seg in narrations] == [24.0, 64.0, 84.0, 104.0, 144.0, 144.0]
+
+
+def test_ultra_short_conflict_window_snaps_hook_and_cta_do_not() -> None:
+    """冲突窗口 end 148 → 147.9；143.9/154.9 两个拍点紧贴 hook 段 end（144）与
+    CTA 段 end（155），两段都不动——旁白段的长度归 TTS 实测，不归节拍。"""
+    beats = (143.9, 147.9, 154.9)
+    plan = build_ultra_short(stamp([(1, "ep1", _scenes())]), _STRATEGY, _material_with_beats(beats))
+    hook, conflict, cta = plan.timeline
+    assert (hook.start, hook.end) == (140.0, 144.0)
+    assert (conflict.start, conflict.end) == (140.0, 147.9)
+    assert (cta.start, cta.end) == (151.0, 155.0)
+
+
+def test_cross_without_material_is_byte_identical() -> None:
+    """不传 material（现有 pipeline/测试的调用形状）：计划与现状逐字节一致。
+    material 缺该集键、beats 空同样降级——B9 的硬验收标准。"""
+    baseline = build_cross(stamp([(1, "ep1", _scenes())]), _STRATEGY)
+    assert build_cross(stamp([(1, "ep1", _scenes())]), _STRATEGY, None).model_dump_json() == (
+        baseline.model_dump_json()
+    )
+    assert build_cross(
+        stamp([(1, "ep1", _scenes())]), _STRATEGY, _material_with_beats(())
+    ).model_dump_json() == baseline.model_dump_json()
+    other_ep = _material_with_beats(tuple(_BEATS_NEAR_ORIGINAL_ENDS))
+    other_ep.pop("ep1")
+    assert build_cross(
+        stamp([(1, "ep1", _scenes())]), _STRATEGY, other_ep
+    ).model_dump_json() == baseline.model_dump_json()
+
+
+def test_ultra_short_without_material_is_byte_identical() -> None:
+    baseline = build_ultra_short(stamp([(1, "ep1", _scenes())]), _STRATEGY)
+    assert build_ultra_short(
+        stamp([(1, "ep1", _scenes())]), _STRATEGY, None
+    ).model_dump_json() == baseline.model_dump_json()
+    assert build_ultra_short(
+        stamp([(1, "ep1", _scenes())]), _STRATEGY, _material_with_beats(())
+    ).model_dump_json() == baseline.model_dump_json()
+
+
+# ---- B9 贯通：build_plan 真把 material 传进 w5 两模式（生产链路接线） ----
+# 子任务因 pipeline.py 在禁碰清单，build_cross/build_ultra_short 的 material 参数
+# 默认 None，生产端吸附未激活；parent 接线后这两条钉住「material 经 build_plan
+# 流到 w5、吸附真发生」，防止接线被回退成静默不吸附。
+
+
+def test_build_plan_threads_material_into_cross_narration() -> None:
+    """经 build_plan 的 cross_narration：带拍点的 material 真流到 build_cross 并吸附。
+
+    不传 material 时原声段 end 是任意点 start+8；传了紧贴的拍点后吸附过去——
+    证明 pipeline 把 material 透传给了 w5（否则两版会逐字节相同）。
+    """
+    beats = tuple(_BEATS_NEAR_ORIGINAL_ENDS)
+    snapped = pipeline.build_plan(
+        "cross_narration",
+        stamp([(1, "ep1", _scenes())]),
+        [],
+        _material_with_beats(beats),
+        {},
+    )
+    unsnapped = pipeline.build_plan(
+        "cross_narration", stamp([(1, "ep1", _scenes())]), [], {}, {}
+    )
+    originals = [seg for seg in snapped.timeline if seg.audio == "original"]
+    assert [seg.end for seg in originals] == _BEATS_NEAR_ORIGINAL_ENDS, "拍点已吸附"
+    assert snapped.model_dump_json() != unsnapped.model_dump_json(), "material 确实改变了产出"
+
+
+def test_build_plan_threads_material_into_ultra_short() -> None:
+    """经 build_plan 的 ultra_short_hook：冲突窗口 end 吸附，hook/CTA 段不动。"""
+    snapped = pipeline.build_plan(
+        "ultra_short_hook",
+        stamp([(1, "ep1", _scenes())]),
+        [],
+        _material_with_beats((143.9, 147.9, 154.9)),
+        {},
+    )
+    hook, conflict, cta = snapped.timeline
+    assert (hook.start, hook.end) == (140.0, 144.0), "hook 旁白段不吸附"
+    assert (conflict.start, conflict.end) == (140.0, 147.9), "冲突窗口 end 吸附到拍点"
+    assert (cta.start, cta.end) == (151.0, 155.0), "CTA 段不吸附"

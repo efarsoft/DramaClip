@@ -53,6 +53,9 @@ class AudioFeatures(BaseModel):
     bpm: float | None = None
     peak_dbfs: float | None = None
     clipping: bool = False
+    # B9：librosa beat_track 的拍点时刻（秒，3 位小数，升序），供编排层节拍吸附。
+    # 旧库记录没有这个字段：model_validate 默认空列表，天然兼容、不强制重分析。
+    beats: list[float] = Field(default_factory=list)
 
 
 class EpisodeRawAnalysis(BaseModel):

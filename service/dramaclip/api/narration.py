@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from dramaclip.api.context import AppContext, llm_trace_dir
+from dramaclip.engines.analysis.models import AudioFeatures
 from dramaclip.engines.narration import (
     angles,
     casting,
@@ -515,8 +516,24 @@ def _casting_for(
         material[episode_id] = casting.EpisodeMaterial(
             number=number,
             asr=narration_pipeline.parse_asr_segments(record["asr_segments"]),
+            beats=_parse_beats(record["audio_features"]),
         )
     return casting.stamp(scenes_by_episode), highlights, material
+
+
+def _parse_beats(raw: str | None) -> tuple[float, ...]:
+    """从落库的 audio_features JSON 取拍点表（B9）。
+
+    缺失/坏 JSON 一律返回空元组、**不 raise**：节拍吸附是编排层的意图增强
+    （见 engines/narration/beat_align），装配层不为它付「这条方案出不了片」的
+    代价；旧库记录没有 beats 字段时同样落到这里，降级为不吸附。
+    """
+    if not raw:
+        return ()
+    try:
+        return tuple(AudioFeatures.model_validate(json.loads(raw)).beats)
+    except (json.JSONDecodeError, ValueError):
+        return ()
 
 
 def _inject_run_settings(

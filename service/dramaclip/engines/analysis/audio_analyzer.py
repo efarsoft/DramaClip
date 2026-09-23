@@ -15,6 +15,9 @@ _ABS_RMS_FLOOR = 120.0 / _INT16_FULL_SCALE
 _MEAN_MULTIPLIER = 1.65
 _MIN_SPEECH_S = 0.28
 _CURVE_POINT_S = 0.5  # 能量曲线采样间隔
+# beats 上限是防御不是常态：45 分钟集 120bpm ≈ 5400 个拍点，20000 远够不着；
+# 防的是异常音频让 beat_track 吐出病态长的帧表把 JSON 列撑爆。
+_BEATS_CAP = 20000
 
 
 def analyze_audio(wav_path: Path) -> AudioFeatures:
@@ -46,13 +49,15 @@ def analyze_audio(wav_path: Path) -> AudioFeatures:
 
     total_s = chunk_count * chunk_size / sample_rate
     speech_s = sum(zone.end - zone.start for zone in speech_zones)
+    bpm, beats = _estimate_bpm(samples, sample_rate)
     return AudioFeatures(
         energy_curve=_downsample_curve(rms, chunk_size, sample_rate),
         silence_ratio=round(1.0 - (speech_s / total_s if total_s > 0 else 0.0), 4),
         speech_zones=speech_zones,
-        bpm=_estimate_bpm(samples, sample_rate),
+        bpm=bpm,
         peak_dbfs=peak_dbfs,
         clipping=clipping,
+        beats=beats,
     )
 
 
@@ -96,7 +101,16 @@ def _downsample_curve(
     ]
 
 
-def _estimate_bpm(samples: np.ndarray, sample_rate: int) -> float | None:  # type: ignore[name-defined] # noqa: F821
+def _estimate_bpm(
+    samples: np.ndarray, sample_rate: int  # type: ignore[name-defined] # noqa: F821
+) -> tuple[float | None, list[float]]:
+    """BPM + 拍点时刻（秒，3 位小数，升序）。
+
+    B9 之前这里是 `tempo, _ = beat.beat_track(...)`——beat 帧被丢弃，落库的只有
+    一个没人消费的 BPM 数字。现在把帧转秒保留下来，编排层（narration/beat_align）
+    用它做切点吸附。任何失败（无 librosa / beat_track 抛错）都降级为
+    (None, [])：音频特征缺一块不该让整条分析失败。
+    """
     try:
         # importlib 绕开静态导入：librosa.beat 是惰性重导出，mypy 在 strict 下
         # 必报 attr-defined，而它又是 ml extras 的可选依赖——类型检查不该决定
@@ -105,9 +119,14 @@ def _estimate_bpm(samples: np.ndarray, sample_rate: int) -> float | None:  # typ
 
         beat = importlib.import_module("librosa.beat")
     except ImportError:
-        return None
+        return None, []
     import numpy as np  # ml extras 懒加载
 
-    tempo, _ = beat.beat_track(y=samples, sr=sample_rate)
-    value = float(np.asarray(tempo).reshape(-1)[0]) if np.asarray(tempo).size else None
-    return round(value, 1) if value else None
+    try:
+        tempo, frames = beat.beat_track(y=samples, sr=sample_rate)
+        tempo_value = float(np.asarray(tempo).reshape(-1)[0]) if np.asarray(tempo).size else None
+        times = beat.frames_to_time(np.asarray(frames), sr=sample_rate)
+        beats = sorted(round(float(t), 3) for t in np.asarray(times).reshape(-1))[:_BEATS_CAP]
+    except Exception:  # noqa: BLE001 - 节拍提取是增强，不是分析正确性的一部分
+        return None, []
+    return (round(tempo_value, 1) if tempo_value else None), beats

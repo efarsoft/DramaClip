@@ -3,7 +3,14 @@
 
 from __future__ import annotations
 
-from dramaclip.engines.narration.casting import EpisodeScene, episode_order, score_order
+from dramaclip.engines.narration.beat_align import snap_window_end
+from dramaclip.engines.narration.casting import (
+    EpisodeScene,
+    MaterialByEpisode,
+    beats_of,
+    episode_order,
+    score_order,
+)
 from dramaclip.engines.narration.models import (
     NarrationText,
     PlanData,
@@ -14,13 +21,23 @@ from dramaclip.engines.narration.models import (
 _CROSS_SCENE_S = 8.0        # 交叉解说单场景原声段基准时长
 _HOOK_TTS_FALLBACK_S = 4.0  # TTS 时长回填前的保守估算
 _ULTRA_CONFLICT_S = 8.0     # 超短版冲突画面时长
+# 节拍吸附后的段长下限（B9）：低于两秒的画面在竖屏上就是「闪了一下」，
+# 比不卡点更伤。现有测试没有钉这两个模式的段长下限，取 2.0s。
+_SNAP_MIN_LEN_S = 2.0
 
 
 def build_cross(
     scenes: list[EpisodeScene],
     strategy: StrategySpec,
+    material: MaterialByEpisode | None = None,
 ) -> PlanData:
     """交叉解说：场景原声与旁白交替；旁白压住下一场景开头，承担串联与悬念。
+
+    `material`（B9）只为节拍吸附而来，可选：不传 / 缺该集键 / beats 空时计划与
+    之前逐字节一致。原声段 end=起点+8s 是任意点，有拍点就吸附；**旁白段不吸附**
+    ——它的 end 是 TTS 实测回填前的占位（批次一逻辑），吸附它会被回填覆盖，
+    没有意义。规划层吸附是意图点：导出层 jitter.safe_times 为避台词还可能再挪
+    ±0.3s（台词保护 > 节拍，见 beat_align 模块 docstring）。
     """
     ranked = sorted(scenes, key=score_order)
     picked = sorted(ranked[:6], key=episode_order)  # 取 top 6 按叙事顺序
@@ -31,11 +48,21 @@ def build_cross(
     texts: list[NarrationText] = []
     for index, scene in enumerate(picked):
         duration = min(scene.end - scene.start, _CROSS_SCENE_S)
+        start = round(scene.start, 3)
+        end = round(
+            snap_window_end(
+                start,
+                round(scene.start + duration, 3),
+                beats_of(material, scene.episode_id),
+                min_len=_SNAP_MIN_LEN_S,
+            ),
+            3,
+        )
         segments.append(
             TimelineSegment(
                 episode_id=scene.episode_id,
-                start=round(scene.start, 3),
-                end=round(scene.start + duration, 3),
+                start=start,
+                end=end,
                 audio="original",
             )
         )
@@ -71,8 +98,13 @@ def build_cross(
 def build_ultra_short(
     scenes: list[EpisodeScene],
     strategy: StrategySpec,
+    material: MaterialByEpisode | None = None,
 ) -> PlanData:
     """超短悬念版（10-20s）：钩子旁白 → 最高冲突原声画面 → 收尾引导。
+
+    `material`（B9）只为节拍吸附而来，可选，降级同 `build_cross`。冲突窗口
+    end=起点+8s 是任意点，有拍点就吸附；**hook 段与 CTA 段不吸附**——两段都是
+    旁白，段长由 TTS 实测回填，规划期的 end 只是占位。
     """
     if not scenes:
         return PlanData(mode="ultra_short_hook", strategy=strategy)
@@ -81,6 +113,16 @@ def build_ultra_short(
     # 19 个不同分值）。score_order 已带 (集号, 起点, scene_index) 三个次键。
     best = min(scenes, key=score_order)
     scene_span = min(best.end - best.start, _ULTRA_CONFLICT_S)
+    conflict_start = round(best.start, 3)
+    conflict_end = round(
+        snap_window_end(
+            conflict_start,
+            round(best.start + scene_span, 3),
+            beats_of(material, best.episode_id),
+            min_len=_SNAP_MIN_LEN_S,
+        ),
+        3,
+    )
     texts = [
         NarrationText(id="hook-1", brief="开场钩子：一句，最大反差或最狠的悬念，不超过 20 字"),
         NarrationText(
@@ -91,15 +133,15 @@ def build_ultra_short(
     timeline = [
         TimelineSegment(
             episode_id=best.episode_id,
-            start=round(best.start, 3),
+            start=conflict_start,
             end=round(best.start + _HOOK_TTS_FALLBACK_S, 3),
             audio="narration",
             narration_id=texts[0].id,
         ),
         TimelineSegment(
             episode_id=best.episode_id,
-            start=round(best.start, 3),
-            end=round(best.start + scene_span, 3),
+            start=conflict_start,
+            end=conflict_end,
             audio="original",
         ),
         TimelineSegment(

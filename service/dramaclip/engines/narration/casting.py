@@ -26,10 +26,15 @@ class EpisodeScene(ConflictScore):
 @dataclass(frozen=True)
 class EpisodeMaterial:
     """一集的取材原料：集号（人读标签 + 叙事排序）与台词表（编剧的唯一事实来源）。
+
+    `beats`（B9）是该集音频的拍点时刻（秒，升序），供编排层把任意切点吸附到
+    节拍上（engines/narration/beat_align）。默认空元组：旧库分析记录没有拍点、
+    或装配层拿不到 audio_features 时，编排行为与 B9 之前逐字节一致。
     """
 
     number: int
     asr: list[AsrSegment]
+    beats: tuple[float, ...] = ()
 
     @property
     def label(self) -> str:
@@ -75,6 +80,19 @@ def dialogue_of(material: MaterialByEpisode, episode_id: str) -> list[AsrSegment
             f"集 {episode_id} 的台词转写没有装配进来：跨集取材的槽位必须按集取台词，"
             "缺键不是「这一集没有台词」"
         ) from None
+
+
+def beats_of(material: MaterialByEpisode | None, episode_id: str) -> tuple[float, ...]:
+    """某一集的拍点表（B9 节拍吸附用）。
+
+    与 `dialogue_of` 相反，**缺键/缺表返回空而不抛**：台词是编剧的硬输入（缺了
+    写不出解说），拍点只是切点吸附的意图来源——material 没传、这一集没装配、
+    旧库分析记录没有 beats，都降级为「不吸附」，计划与 B9 之前一致。
+    """
+    if material is None:
+        return ()
+    entry = material.get(episode_id)
+    return tuple(entry.beats) if entry is not None else ()
 
 
 def label_of(material: MaterialByEpisode, episode_id: str) -> str:

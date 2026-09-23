@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import casting
+from dramaclip.engines.narration.beat_align import snap_window_end
 from dramaclip.engines.narration.casting import EpisodeScene, episode_order, score_order
 from dramaclip.engines.narration.line_scoring import score_line
 from dramaclip.engines.narration.models import (
@@ -17,6 +18,9 @@ _CTA_TEXT = "后面更狠——点进去看全集"
 _FLOW_SCENE_S = 8.0
 _CTA_FALLBACK_S = 3.0
 _MAX_SCENES = 6
+# 节拍吸附后的段长下限。现有测试没有钉金句流的段长下限（转换门禁只查首段 ≥0.5s），
+# 这里取 2.0s：低于两秒的画面在竖屏上就是「闪了一下」，比不卡点更伤（B9 规则）。
+_SNAP_MIN_LEN_S = 2.0
 
 
 def strongest_line(
@@ -53,11 +57,26 @@ def build_subtitle_flow(
     segments: list[TimelineSegment] = []
     for scene in picked:
         duration = min(scene.end - scene.start, _FLOW_SCENE_S)
+        start = round(scene.start, 3)
+        end = round(scene.start + duration, 3)
+        # B9 节拍吸附：end=起点+8s 是任意点（不是镜头边界），该集有拍点就微调到
+        # 最近拍上（卡点优先质量线）。start 不动——它是镜头切换语义点。
+        # 导出层 jitter.safe_times 为避台词还可能再挪 ±0.3s：台词保护 > 节拍，
+        # 意图点被挪走是可接受代价（见 beat_align 模块 docstring）。
+        end = round(
+            snap_window_end(
+                start,
+                end,
+                casting.beats_of(material, scene.episode_id),
+                min_len=_SNAP_MIN_LEN_S,
+            ),
+            3,
+        )
         segments.append(
             TimelineSegment(
                 episode_id=scene.episode_id,
-                start=round(scene.start, 3),
-                end=round(scene.start + duration, 3),
+                start=start,
+                end=end,
                 audio="original",
                 subtitle_text=strongest_line(
                     scene, casting.dialogue_of(material, scene.episode_id)
@@ -65,7 +84,8 @@ def build_subtitle_flow(
             )
         )
 
-    # 结尾 CTA 卡片段（复用最后场景尾部画面，climax 居中字幕）
+    # 结尾 CTA 卡片段（复用最后场景尾部画面，climax 居中字幕）。
+    # CTA 不吸附：收尾引导有自己的节奏（定长卡），不跟音乐拍走。
     if picked:
         last = picked[-1]
         segments.append(
