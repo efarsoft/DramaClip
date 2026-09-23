@@ -47,6 +47,27 @@ function useJobPolling(job: AnalysisJobStatus | null, refreshJob: (jobId: string
   }, [activeJobId, refreshJob]);
 }
 
+/** 两条真启动路径：全部精转 = analysis.start（勾选集）；仅推荐集精转 = prescreen(then_analyze)。 */
+function useStartActions(
+  projectId: string,
+  refreshJob: (jobId: string) => Promise<void>,
+  selectedIds: string[],
+) {
+  const start = useCallback(async (): Promise<void> => {
+    if (selectedIds.length === 0) return;
+    const { job_id } = await analysisApi.start(projectId, selectedIds);
+    await refreshJob(job_id);
+  }, [projectId, refreshJob, selectedIds]);
+
+  /** 档位「仅推荐集精转」的执行体：预筛全项目待分析集，推荐集自动接精转。 */
+  const startPrescreen = useCallback(async (): Promise<void> => {
+    const { job_id } = await analysisApi.prescreen(projectId, true);
+    await refreshJob(job_id);
+  }, [projectId, refreshJob]);
+
+  return { start, startPrescreen };
+}
+
 export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
   const [project, setProject] = useState<Project | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -83,11 +104,7 @@ export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
 
   useJobPolling(job, refreshJob);
 
-  const start = useCallback(async (): Promise<void> => {
-    if (selectedIds.length === 0) return;
-    const { job_id } = await analysisApi.start(projectId, selectedIds);
-    await refreshJob(job_id);
-  }, [projectId, refreshJob, selectedIds]);
+  const { start, startPrescreen } = useStartActions(projectId, refreshJob, selectedIds);
 
   const cancel = useCallback(async (): Promise<void> => {
     if (job === null) return;
@@ -107,6 +124,7 @@ export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
     results,
     job,
     start,
+    startPrescreen,
     cancel,
     reload: loadAll,
     canStart: selectedIds.length > 0 && !(job?.status === 'running' || job?.status === 'pending'),
@@ -123,6 +141,7 @@ export interface AnalysisWorkspace {
   results: AnalysisResults | null;
   job: AnalysisJobStatus | null;
   start: () => Promise<void>;
+  startPrescreen: () => Promise<void>;
   cancel: () => Promise<void>;
   reload: () => Promise<void>;
   canStart: boolean;

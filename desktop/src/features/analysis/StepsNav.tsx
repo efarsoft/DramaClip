@@ -1,6 +1,6 @@
 /** 横向步骤导航：1 分析 → 2 解说文案 → 3 渲染调整 → 4 成片。 */
 import { Link } from 'react-router-dom';
-import { tokens } from '../../styles/theme';
+import { layout, tokens } from '../../styles/theme';
 
 interface StepSpec {
   readonly key: string;
@@ -27,7 +27,7 @@ function StepDot({ index }: { index: number }): React.ReactElement {
         justifyContent: 'center',
         fontSize: tokens.text.badge.size,
         lineHeight: tokens.text.badge.leading,
-        marginRight: 7,
+        marginRight: layout.stepNav.dotGap,
         background: index === 0 ? tokens.colorPrimary : tokens.bgElevated,
         color: index === 0 ? tokens.colorWhite : tokens.textTertiary,
       }}
@@ -56,7 +56,7 @@ export function StepsNav({ projectId, stepReady }: { projectId: string; stepRead
                 style={{
                   width: 34,
                   height: 1,
-                  margin: '0 10px',
+                  margin: `0 ${String(layout.stepNav.connectorGap)}px`,
                   background: unlocked ? tokens.colorPrimary : tokens.border,
                 }}
               />

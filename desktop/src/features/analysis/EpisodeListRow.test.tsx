@@ -53,3 +53,22 @@ describe('EpisodeListRow 状态可辨性', () => {
     expect(getByText(/待分析/)).toBeTruthy();
   });
 });
+
+describe('缺音轨标记（取不到 ≠ 没有）', () => {
+  it('探测过且没有音频轨：行内挂「无音轨」', () => {
+    const { getByText } = renderRow({ ...episode('pending'), has_audio: false });
+    expect(getByText('无音轨')).toBeTruthy();
+  });
+
+  it('探测过且有音轨：不挂', () => {
+    const { queryByText } = renderRow({ ...episode('pending'), has_audio: true });
+    expect(queryByText('无音轨')).toBeNull();
+  });
+
+  it('未重扫的旧集（null/缺省）：不挂——未知不告警', () => {
+    const { queryByText } = renderRow({ ...episode('pending'), has_audio: null });
+    expect(queryByText('无音轨')).toBeNull();
+    const legacy = renderRow(episode('pending'));
+    expect(legacy.queryByText('无音轨')).toBeNull();
+  });
+});

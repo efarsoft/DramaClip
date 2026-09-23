@@ -62,11 +62,7 @@ function measureDebt(): Record<string, number> {
  */
 const MEASURE_DEBT: Readonly<Record<string, number>> = {
   'features/home/EnvPanel.tsx': 6,
-  'features/analysis/EpisodeListPanel.tsx': 2,
-  'features/analysis/StepsNav.tsx': 2,
-  'features/analysis/TranscriptCard.tsx': 2,
   'features/engines/CloudConfigSection.tsx': 2,
-  'features/analysis/CurveCard.tsx': 1,
   'features/engines/ActiveEngineCard.tsx': 1,
   'features/engines/AssetRow.tsx': 1,
   'features/engines/IndexttsRuntimeSlot.tsx': 1,
@@ -123,9 +119,11 @@ describe('§8.3 度量口径与棘轮', () => {
     // P-D 重写 WorksPage（拆成 worksView/WorkCard 等）与 WorksDetailPage 归零，18 → 16；
     // P-C④ 出片段重排顺手清掉 ExportsCard/StyleSelectCard（'10px 14px' 登记为
     // layout.cardBodyCompact），16 → 14；P-C⑨ 设置页两分区顺手清掉 SettingsPage
-    // （marginTop:3 登记为 layout.field.helpMarginTop），14 → 13。
+    // （marginTop:3 登记为 layout.field.helpMarginTop），14 → 13；P-C⑤ 分析域四文件
+    // （EpisodeListPanel/StepsNav/TranscriptCard/CurveCard）全部归零（脱阶值登记为
+    // layout.stepNav/inlineInput/badgeChip/cardBodyCurve），13 → 9。
     // 它防的是扫描面被删窄，不是禁止还债——逐文件对账在下面那条，才是真棘轮。
-    expect(Object.keys(found).length).toBeGreaterThanOrEqual(13);
+    expect(Object.keys(found).length).toBeGreaterThanOrEqual(9);
     expect(found, 'EnvPanel 的 6 处是最密的一屏，扫不到就是扫描面被删窄').toHaveProperty(
       'features/home/EnvPanel.tsx',
       6,

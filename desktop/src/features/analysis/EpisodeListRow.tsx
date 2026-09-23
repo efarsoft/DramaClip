@@ -45,7 +45,12 @@ export function EpisodeListRow({
       <RowThumb episode={episode} />
       <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
         <RowName episode={episode} active={active} />
-        <RowMeta duration={episode.duration ?? 0} status={episode.status} highlightCount={highlightCount} />
+        <RowMeta
+          duration={episode.duration ?? 0}
+          status={episode.status}
+          highlightCount={highlightCount}
+          hasAudio={episode.has_audio}
+        />
       </span>
       <MoveButtons onMove={onMove} />
     </DragShell>
@@ -234,10 +239,13 @@ function RowMeta({
   duration,
   status,
   highlightCount,
+  hasAudio,
 }: {
   duration: number;
   status: Episode['status'];
   highlightCount: number;
+  /** null/缺省 = 未重扫的旧集（未知不告警）；false = 探测过、确实没有音频轨。 */
+  hasAudio: boolean | null | undefined;
 }): React.ReactElement {
   // 三态各自可辨；失败用 status/error（#F87171）——#FF4D4F 只留给钩子语义，
   // colorWarning 已被同行的「高光」计数占用，挪用会让失败与提示撞色。
@@ -260,6 +268,18 @@ function RowMeta({
       {/* 时长与计数是数字位：等宽（§1.3）。 */}
       <span style={{ fontFamily: tokens.fontFamilyMono }}>{Math.round(duration)}s</span>
       <span style={{ color: state.color }}>● {state.label}</span>
+      {hasAudio === false && (
+        <span
+          style={{
+            background: tokens.warningSoft,
+            color: tokens.colorWarning,
+            borderRadius: tokens.radiusChip,
+            padding: `${String(layout.badgeChip.paddingBlock)}px ${String(layout.badgeChip.paddingInline)}px`,
+          }}
+        >
+          无音轨
+        </span>
+      )}
       {highlightCount > 0 && (
         <span style={{ color: tokens.colorWarning, fontFamily: tokens.fontFamilyMono }}>
           高光 {String(highlightCount)}

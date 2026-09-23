@@ -3,7 +3,7 @@ import { Card } from 'antd';
 import { useMemo } from 'react';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { ConflictScorePoint } from '@dramaclip/protocol';
-import { tokens } from '../../styles/theme';
+import { layout, tokens } from '../../styles/theme';
 
 interface ChartPoint {
   readonly time: number;
@@ -50,7 +50,12 @@ export function CurveCard({
     <Card
       size="small"
       title="冲突强度曲线"
-      styles={{ body: { padding: '10px 14px 6px', height: '100%' } }}
+      styles={{
+        body: {
+          padding: `${String(layout.cardBodyCurve.paddingBlock)}px ${String(layout.cardBodyCurve.paddingInline)}px ${String(layout.cardBodyCurve.paddingBottom)}px`,
+          height: '100%',
+        },
+      }}
     >
       <div style={{ height: 170 }}>
         <ResponsiveContainer width="100%" height="100%">

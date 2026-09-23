@@ -156,6 +156,14 @@ export const layout = {
   posterChip: { paddingBlock: 1, paddingInline: 6 },
   /** 紧凑卡身 '10px 14px' 内边距（StyleSelectCard 等小卡）：脱阶值照实登记，不新造一档。 */
   cardBodyCompact: { paddingBlock: 10, paddingInline: 14 },
+  /** CurveCard 卡身 '10px 14px 6px'：底部收紧贴图表，脱阶值照实登记。 */
+  cardBodyCurve: { paddingBlock: 10, paddingInline: 14, paddingBottom: 6 },
+  /** StepsNav 步骤点与连接线的间距：7/10 不在阶梯上，照实登记（§8.3）。 */
+  stepNav: { dotGap: 7, connectorGap: 10 },
+  /** 行内编辑输入框 '3px 8px' 内边距：3 脱阶照实登记。 */
+  inlineInput: { paddingBlock: 3, paddingInline: tokens.spaceSm },
+  /** 来源徽标/无音轨一类迷你芯片 '0 6px' 内边距：6 脱阶照实登记。 */
+  badgeChip: { paddingBlock: 0, paddingInline: 6 },
   /** mono 小字与相邻正文的顶对齐微调（原 WorksDetailPage 的 paddingTop:2）。 */
   monoAlignTop: 2,
   /** 主从编辑器左栏：五值原样搬入，只消灭散落在三处的同源数（§2）。 */

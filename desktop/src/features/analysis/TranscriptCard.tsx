@@ -1,8 +1,8 @@
-/** 转写卡片：分段文本可点击定位、行内编辑（清空回车删段）。 */
+/** 转写卡片：分段文本可点击定位、行内编辑（回车提交、Esc 取消、失焦提交非空修改；清空回车删段）。 */
 import { Button, Card } from 'antd';
 import { useState } from 'react';
 import type { AsrSegment } from '@dramaclip/protocol';
-import { tokens } from '../../styles/theme';
+import { layout, tokens } from '../../styles/theme';
 
 export function TranscriptCard({
   segments,
@@ -20,7 +20,7 @@ export function TranscriptCard({
   return (
     <Card
       size="small"
-      title="ASR 转写（点击文本修正；清空回车删除该段）"
+      title="ASR 转写（点击文本修正：回车提交、Esc 取消、失焦提交改动；清空回车删除该段）"
       extra={
         <Button size="small" loading={resyncing} onClick={onResync}>
           重跑语义
@@ -62,7 +62,7 @@ const INPUT_STYLE = {
   color: tokens.textPrimary,
   fontSize: tokens.text.body.size,
   lineHeight: tokens.text.body.leading,
-  padding: '3px 8px',
+  padding: `${String(layout.inlineInput.paddingBlock)}px ${layout.inlineInput.paddingInline}`,
   outline: 'none',
 } as const;
 
@@ -110,12 +110,21 @@ function SegmentRow({
           setDraft(event.target.value);
         }}
         onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            // 显式取消：明确表达「不要这次修改」，与失焦的「顺手提交」是两回事
+            setEditing(false);
+            return;
+          }
           if (event.key !== 'Enter') return;
           onSaveEdit(index, draft.trim());
           setEditing(false);
         }}
         onBlur={() => {
+          // 失焦提交非空改动（修「失焦静默丢弃」，09-10 §4.3②）；
+          // 删段是显式动作（清空回车），失焦不误删——清空后失焦视为放弃这次编辑。
+          const next = draft.trim();
           setEditing(false);
+          if (next !== '' && next !== segment.text) onSaveEdit(index, next);
         }}
       />
     </div>
@@ -176,7 +185,7 @@ function Chip({ text, color }: { text: string; color: string }): React.ReactElem
         flexShrink: 0,
         fontSize: tokens.text.badge.size,
         lineHeight: tokens.text.badge.leading,
-        padding: '0 6px',
+        padding: `${String(layout.badgeChip.paddingBlock)}px ${String(layout.badgeChip.paddingInline)}px`,
         borderRadius: tokens.radiusChip,
         border: `1px solid ${color}`,
         color,

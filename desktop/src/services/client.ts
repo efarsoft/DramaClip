@@ -112,6 +112,15 @@ export const projectApi = {
     rpc<Project>('project.duplicate', { project_id: projectId }),
   scanEpisodes: (projectId: string): Promise<ScannedEpisode[]> =>
     rpc<ScannedEpisode[]>('project.scan_episodes', { project_id: projectId }),
+  /** 项目级参数覆盖（K/转写档位/风格/字幕预设）；null 值 = 恢复该项全局默认。 */
+  updateSettings: (
+    projectId: string,
+    settings: Record<string, string | number | boolean | null>,
+  ): Promise<{ project_id: string; settings: Record<string, unknown> }> =>
+    rpc<{ project_id: string; settings: Record<string, unknown> }>('project.update_settings', {
+      project_id: projectId,
+      settings,
+    }),
   dashboardSummary: (): Promise<DashboardSummary> => rpc<DashboardSummary>('project.dashboard_summary'),
 } as const;
 
@@ -132,6 +141,14 @@ export const analysisApi = {
     }),
   results: (projectId: string): Promise<AnalysisResults> =>
     rpc<AnalysisResults>('analysis.results', { project_id: projectId }),
+  /** 轻量预筛（转写档位「仅推荐集精转」的执行体）；thenAnalyze=预筛完自动精转推荐集。 */
+  prescreen: (projectId: string, thenAnalyze?: boolean): Promise<{ job_id: string }> =>
+    rpc<{ job_id: string }>(
+      'analysis.prescreen',
+      thenAnalyze === true
+        ? { project_id: projectId, then_analyze: true }
+        : { project_id: projectId },
+    ),
 } as const;
 
 /** 作品库筛选（09-10 #30「筛选·自检通过」）；'all' 只在界面层存在，不发服务端。 */
