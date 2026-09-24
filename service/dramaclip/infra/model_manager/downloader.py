@@ -5,6 +5,13 @@
 ``refs/main`` 与 ``trees/<提交号>.json``；解析不到提交号才退化 ``snapshots/main``
 （体检如实报「无从对账」，warn 不 fail）。存量走 :func:`relayout_whisper_cache`
 就地迁移，零重新下载。
+
+``trees/<提交号>.json`` 是 huggingface_hub 的**保留地**（``_tree_cache.py``，官方
+形状 ``{"format_version": 1, "files": {...}}``）：faster_whisper 加载模型经
+``snapshot_download`` 会解析它，写自家形状会把 hf_hub 崩在
+``data.get("format_version")``（AttributeError 不在其捕获表里——2026-09-24
+data-scale 实测：应用内下载的 Whisper 文件层体检通过、引擎加载必炸）。
+本模块只写 hf 兼容形状，判据见 :func:`_write_hf_metadata`。
 """
 
 from __future__ import annotations
@@ -25,10 +32,13 @@ from dramaclip.transport.notify import Notifier
 
 Endpoints = dict[str, str]
 
-#: 仓库文件清单条目：(相对路径, 大小字节, 内容 SHA256 或 None)。
+#: 仓库文件清单条目：(相对路径, 大小字节, 内容 SHA256 或 None, git blob SHA1 或空串)。
 #: sha256 来源：HF 的 ``lfs.oid``、ModelScope 的 ``Sha256``；小文件 API 不给就是 None，
 #: 此时完整性只由字节数兜底——够不够诚实由体检的 manifest 判据说，不在这里假装。
-FileEntry = tuple[str, int, str | None]
+#: blob_id 来源：HF tree API 的 ``oid``（git blob SHA1）——trees 清单是 hf_hub 保留地，
+#: 官方条目 ``size``+``blob_id`` 必填；ModelScope 没有这个概念，恒为空串（whisper 系
+#: 只挂 HF 源，写 trees 时 blob_id 总是取得到）。
+FileEntry = tuple[str, int, str | None, str]
 
 _HEX = "0123456789abcdef"
 
@@ -257,7 +267,7 @@ def _download_from(
     if not files:
         raise RuntimeError("仓库文件清单为空")
     notifier.log("info", f"开始从 {kind} 下载 {spec.name}（{len(files)} 个文件）")
-    total = sum(size for _rel, size, _sha in files)
+    total = sum(size for _rel, size, _sha, _blob in files)
     state = {"done": 0, "base": 0, "percent": -1}
     meter = _RateMeter(total)
 
@@ -276,11 +286,13 @@ def _download_from(
             notifier.model_download(spec.model_id, min(percent, 99.0), **extra)
 
     manifest: list[dict[str, Any]] = []
-    for rel, size, sha256 in files:
+    for rel, size, sha256, blob_id in files:
         dest = _dest(models_dir, spec, rel, layout_rev)
         if dest.is_file() and (size <= 0 or dest.stat().st_size == size):
             state["done"] += size
-            manifest.append({"path": rel, "size": dest.stat().st_size, "sha256": sha256})
+            manifest.append(
+                {"path": rel, "size": dest.stat().st_size, "sha256": sha256, "blob_id": blob_id}
+            )
             continue
         url = file_url(kind, repo, rel, endpoints)
         state["base"] = state["done"]
@@ -297,7 +309,9 @@ def _download_from(
                     raise
                 notifier.log("warn", f"{rel} 下载或校验失败（第 1 次），重试")
         state["done"] += size
-        manifest.append({"path": rel, "size": dest.stat().st_size, "sha256": sha256})
+        manifest.append(
+            {"path": rel, "size": dest.stat().st_size, "sha256": sha256, "blob_id": blob_id}
+        )
     if revision is not None:
         _write_hf_metadata(models_dir, spec, revision, manifest)
 
@@ -305,15 +319,40 @@ def _download_from(
 def _write_hf_metadata(
     models_dir: Path, spec: ModelSpec, revision: str, manifest: list[dict[str, Any]]
 ) -> None:
-    """全部文件落齐后才写 refs/trees：半截下载不得拥有权威修订元数据。"""
+    """全部文件落齐后才写 refs/trees：半截下载不得拥有权威修订元数据。
+
+    trees 形状必须是 huggingface_hub 官方的（``_tree_cache.py``：顶层
+    ``{"format_version": 1, "files": {相对路径: 条目}}``，条目 ``size``+``blob_id``
+    必填，LFS 文件再带 ``lfs_sha256``/``lfs_size``）——faster_whisper 加载会经
+    ``snapshot_download`` 解析这个文件，自家 list 形状会让 hf_hub 崩在
+    ``data.get("format_version")``（AttributeError 不在其捕获表里）。
+
+    诚实降级：blob_id 形状不对的条目**宁缺毋滥**——hf_hub 读到缺条目只会把该文件
+    当未展开重拉（KeyError 在其捕获表里，整份坏清单也只会被忽略），是安全退化
+    不是崩溃；一条都凑不齐就整个不写 trees（体检报「无清单，无从对账」，不冒充）。
+    """
+    files: dict[str, Any] = {}
+    for entry in manifest:
+        blob_id = str(entry.get("blob_id") or "")
+        if len(blob_id) != 40 or not all(c in _HEX for c in blob_id):
+            continue
+        size = int(entry.get("size") or 0)
+        info: dict[str, Any] = {"size": size, "blob_id": blob_id}
+        lfs_sha256 = entry.get("sha256")
+        if lfs_sha256:
+            info["lfs_sha256"] = lfs_sha256
+            info["lfs_size"] = size
+        files[str(entry["path"])] = info
     cache = models_dir / spec.placement / f"models--{spec.repo_id.replace('/', '--')}"
     refs = cache / "refs"
     refs.mkdir(parents=True, exist_ok=True)
     (refs / "main").write_text(revision, encoding="utf-8")
+    if not files:
+        return
     trees = cache / "trees"
     trees.mkdir(parents=True, exist_ok=True)
     (trees / f"{revision}.json").write_text(
-        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+        json.dumps({"format_version": 1, "files": files}, ensure_ascii=False), encoding="utf-8"
     )
 
 
@@ -328,8 +367,9 @@ def relayout_whisper_cache(
     诚实边界：
     - 提交号必须在线解析得到——网络不通/仓库没了就如实报错，**不造假提交号**；
     - 目标快照目录已存在（本机两份修订）时不自动合并，报出来交人工裁决；
-    - trees 清单的 sha256 按本机文件现算：它证明「今后能逐文件对账」，
-      不证明「当年下载没坏」——那是上游清单才有的信息，拿不到就不假装。
+    - trees 清单的 sha256/blob_id 按本机文件现算（git blob SHA1 本机可算，不抄上游）：
+      它证明「今后能逐文件对账」，不证明「当年下载没坏」——那是上游清单才有的信息，
+      拿不到就不假装。
     """
     if spec.engine != "faster_whisper":
         raise ValueError(f"{spec.model_id} 不是 whisper 系缓存布局，无从迁移")
@@ -365,15 +405,19 @@ def relayout_whisper_cache(
     if target.exists():
         raise ValueError(f"目标快照已存在：{target}——两份修订并存，请人工裁决保留哪份")
     snapshot.rename(target)
-    manifest = [
-        {
-            "path": path.relative_to(target).as_posix(),
-            "size": path.stat().st_size,
-            "sha256": fetch.sha256_of(path),
-        }
-        for path in sorted(target.rglob("*"))
-        if path.is_file()
-    ]
+    manifest: list[dict[str, Any]] = []
+    for path in sorted(target.rglob("*")):
+        if not path.is_file():
+            continue
+        sha256, blob_id = fetch.sha256_and_blob_id_of(path)
+        manifest.append(
+            {
+                "path": path.relative_to(target).as_posix(),
+                "size": path.stat().st_size,
+                "sha256": sha256,
+                "blob_id": blob_id,
+            }
+        )
     _write_hf_metadata(models_dir, spec, revision, manifest)
     return {"path": str(target), "migrated": True}
 
@@ -395,6 +439,7 @@ def list_tree(kind: str, repo: str, endpoints: Endpoints) -> list[FileEntry]:
                 str(item["Path"]),
                 int(item.get("Size") or 0),
                 _sha_or_none(item.get("Sha256") or item.get("sha256")),
+                "",  # ModelScope 没有 git blob 概念；whisper 系不挂 ms 源，trees 用不到
             )
             for item in (files or [])
             if item.get("Type") == "blob" and _wanted(str(item["Path"]))
@@ -412,7 +457,7 @@ def list_tree(kind: str, repo: str, endpoints: Endpoints) -> list[FileEntry]:
             continue
         lfs = item.get("lfs") or {}
         size = int(lfs.get("size") or item.get("size") or 0)
-        out.append((path, size, _sha_or_none(lfs.get("oid"))))
+        out.append((path, size, _sha_or_none(lfs.get("oid")), _blob_or_empty(item.get("oid"))))
     return out
 
 
@@ -422,6 +467,16 @@ def _sha_or_none(value: object) -> str | None:
     if len(text) == 64 and all(c in _HEX for c in text):
         return text
     return None
+
+
+def _blob_or_empty(value: object) -> str:
+    """HF tree API 的 ``oid``（git blob SHA1）只认 40 位十六进制；形状不对给空串
+    ——trees 清单里缺 blob_id 的条目宁可不写（hf_hub 会把该文件当未展开重拉），
+    也不能塞个假身份进去。"""
+    text = str(value).strip().lower() if value is not None else ""
+    if len(text) == 40 and all(c in _HEX for c in text):
+        return text
+    return ""
 
 
 def file_url(kind: str, repo: str, rel: str, endpoints: Endpoints) -> str:

@@ -59,12 +59,19 @@ def test_source_chain_selected_first_then_domestic() -> None:
 
 def test_list_tree_hf_filters_junk(monkeypatch) -> None:
     payload: list[dict[str, Any]] = [
-        {"type": "file", "path": "model.bin", "size": 480 * 1024 * 1024},
-        {"type": "file", "path": ".gitattributes", "size": 512},
-        {"type": "file", "path": "README.md", "size": 1024},
-        {"type": "file", "path": "example/demo.wav", "size": 2048},
-        {"type": "file", "path": "big.bin", "size": 42, "lfs": {"size": 300, "oid": _LFS_OID}},
-        {"type": "file", "path": "odd.bin", "size": 7, "lfs": {"size": 7, "oid": "not-a-sha"}},
+        {"type": "file", "path": "model.bin", "size": 480 * 1024 * 1024, "oid": "c" * 40},
+        {"type": "file", "path": ".gitattributes", "size": 512, "oid": "d" * 40},
+        {"type": "file", "path": "README.md", "size": 1024, "oid": "e" * 40},
+        {"type": "file", "path": "example/demo.wav", "size": 2048, "oid": "f" * 40},
+        {
+            "type": "file",
+            "path": "big.bin",
+            "size": 42,
+            "oid": "1" * 40,
+            "lfs": {"size": 300, "oid": _LFS_OID},
+        },
+        {"type": "file", "path": "odd.bin", "size": 7, "oid": "not-a-blob",
+         "lfs": {"size": 7, "oid": "not-a-sha"}},
         {"type": "directory", "path": "empty"},
     ]
     seen: list[str] = []
@@ -75,11 +82,12 @@ def test_list_tree_hf_filters_junk(monkeypatch) -> None:
 
     monkeypatch.setattr(downloader.fetch, "fetch_json", fake)
     files = downloader.list_tree("hf_mirror", "Systran/faster-whisper-base", _EPS)
-    # LFS oid 即内容 SHA256，留下来给落盘后对账；形状不对的（odd.bin）宁缺毋滥退 None
+    # LFS oid 即内容 SHA256，留下来给落盘后对账；git blob oid 留给 trees 清单（hf 官方
+    # 条目必填）；形状不对的宁缺毋滥——sha256 退 None、blob_id 退空串
     assert files == [
-        ("model.bin", 480 * 1024 * 1024, None),
-        ("big.bin", 300, _LFS_OID),
-        ("odd.bin", 7, None),
+        ("model.bin", 480 * 1024 * 1024, None, "c" * 40),
+        ("big.bin", 300, _LFS_OID, "1" * 40),
+        ("odd.bin", 7, None, ""),
     ]
     assert seen == [
         "https://hf-mirror.com/api/models/Systran/faster-whisper-base/tree/main?recursive=true"
@@ -96,7 +104,7 @@ def test_list_tree_modelscope_blobs(monkeypatch) -> None:
     }
     monkeypatch.setattr(downloader.fetch, "fetch_json", lambda _url, *, timeout=30.0: payload)
     files = downloader.list_tree("modelscope", "iic/SenseVoiceSmall", _EPS)
-    assert files == [("model.pt", 900, _LFS_OID)]
+    assert files == [("model.pt", 900, _LFS_OID, "")]
 
 
 def test_file_url_and_web_url() -> None:
@@ -165,12 +173,24 @@ def _fake_download(monkeypatch, content: bytes = b"payload") -> list[Path]:
     return written
 
 
+def _blob_ids() -> dict[str, str]:
+    """四个 whisper 文件各自的 git blob oid（测试夹具：40 位十六进制即可）。"""
+    return {name: f"{(i + 1):040x}" for i, name in enumerate(_WHISPER_FILES)}
+
+
+def _whisper_tree() -> list[dict[str, Any]]:
+    tree: list[dict[str, Any]] = [
+        {"type": "file", "path": name, "size": 7, "oid": _blob_ids()[name]}
+        for name in _WHISPER_FILES
+    ]
+    tree[1]["lfs"] = {"size": 7, "oid": _LFS_OID}  # model.bin 走 LFS
+    return tree
+
+
 def test_download_from_writes_compliant_hf_cache(tmp_path: Path, monkeypatch) -> None:
     """下载产物必须就是体检认可的合规资产：snapshots/<提交号> + refs + trees 清单。"""
     spec = _spec("faster-whisper-base")
-    tree = [{"type": "file", "path": name, "size": 7} for name in _WHISPER_FILES]
-    tree[1]["lfs"] = {"size": 7, "oid": _LFS_OID}
-    _fake_hf_apis(monkeypatch, tree)
+    _fake_hf_apis(monkeypatch, _whisper_tree())
     written = _fake_download(monkeypatch)
     notifier = _Notifier()
 
@@ -182,11 +202,39 @@ def test_download_from_writes_compliant_hf_cache(tmp_path: Path, monkeypatch) ->
     snapshot = cache / "snapshots" / _SHA
     assert sorted(p.name for p in snapshot.iterdir()) == sorted(_WHISPER_FILES)
     assert (cache / "refs" / "main").read_text(encoding="utf-8") == _SHA
-    manifest = json.loads((cache / "trees" / f"{_SHA}.json").read_text(encoding="utf-8"))
-    assert {entry["path"] for entry in manifest} == set(_WHISPER_FILES)
-    assert next(e for e in manifest if e["path"] == "model.bin")["sha256"] == _LFS_OID
+    tree_doc = json.loads((cache / "trees" / f"{_SHA}.json").read_text(encoding="utf-8"))
+    # hf_hub 官方形状（_tree_cache.py）：顶层 format_version + files 字典
+    assert tree_doc["format_version"] == 1
+    assert set(tree_doc["files"]) == set(_WHISPER_FILES)
+    assert tree_doc["files"]["model.bin"]["lfs_sha256"] == _LFS_OID
+    assert tree_doc["files"]["model.bin"]["blob_id"] == _blob_ids()["model.bin"]
+    # 非 LFS 小文件只有 size + blob_id，不冒充 LFS 条目
+    assert "lfs_sha256" not in tree_doc["files"]["config.json"]
     # 落盘后对账用的 sha256 真传给了下载原语
     assert len(written) == len(_WHISPER_FILES)
+
+
+def test_written_trees_are_readable_by_the_real_hf_hub(tmp_path: Path, monkeypatch) -> None:
+    """回归（2026-09-24 data-scale 实锤）：trees 是 hf_hub 保留地，形状不兼容时
+    faster_whisper 加载经 snapshot_download 解析会崩 AttributeError（'list' object
+    has no attribute 'get'，不在 hf_hub 的捕获表里）——应用内下载的 whisper 变成
+    「文件层体检通过、引擎一加载就炸」。用真 hf_hub 解析器验收，不自说自话。"""
+    pytest.importorskip("huggingface_hub")
+    from huggingface_hub import _tree_cache
+
+    spec = _spec("faster-whisper-base")
+    _fake_hf_apis(monkeypatch, _whisper_tree())
+    _fake_download(monkeypatch)
+    downloader._download_from(
+        "hf_mirror", spec.repo_id, spec, tmp_path, _EPS, _Notifier(), threading.Event()  # type: ignore[arg-type]
+    )
+    cache = tmp_path / spec.placement / "models--Systran--faster-whisper-base"
+
+    entries = _tree_cache.read_tree_cache(str(cache), _SHA)
+    assert entries is not None, "hf_hub 认不出这份 trees——引擎加载必炸，形状回归了"
+    assert set(entries) == set(_WHISPER_FILES)
+    assert entries["model.bin"].lfs_sha256 == _LFS_OID
+    assert entries["config.json"].blob_id == _blob_ids()["config.json"]
 
 
 def test_download_from_degrades_to_main_and_tells_the_truth(
@@ -235,9 +283,14 @@ def test_relayout_migrates_legacy_main_snapshot(tmp_path: Path, monkeypatch) -> 
     assert target == cache / "snapshots" / _SHA
     assert not (cache / "snapshots" / "main").exists()
     assert (cache / "refs" / "main").read_text(encoding="utf-8") == _SHA
-    manifest = json.loads((cache / "trees" / f"{_SHA}.json").read_text(encoding="utf-8"))
-    assert {entry["path"] for entry in manifest} == set(_WHISPER_FILES)
-    assert all(len(entry["sha256"]) == 64 for entry in manifest)
+    tree_doc = json.loads((cache / "trees" / f"{_SHA}.json").read_text(encoding="utf-8"))
+    # 迁移补写的清单同样是 hf 官方形状；哈希按本机文件现算（sha256 + git blob SHA1）
+    assert tree_doc["format_version"] == 1
+    assert set(tree_doc["files"]) == set(_WHISPER_FILES)
+    assert all(
+        len(entry["lfs_sha256"]) == 64 and len(entry["blob_id"]) == 40
+        for entry in tree_doc["files"].values()
+    )
     # 幂等：已是目标布局就直接返回，不再触网
     monkeypatch.setattr(downloader, "resolve_revision", lambda *_a, **_k: None)
     noop = downloader.relayout_whisper_cache(spec, tmp_path, _EPS)

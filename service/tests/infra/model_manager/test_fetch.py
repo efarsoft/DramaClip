@@ -116,3 +116,16 @@ def test_cancelled_before_read(tmp_path: Path, server: str) -> None:
     cancel.set()
     with pytest.raises(fetch.DownloadCancelled):
         fetch.download_file(url, dest, 0, cancel=cancel)
+
+
+def test_sha256_and_blob_id_single_pass(tmp_path: Path) -> None:
+    """一次读盘两个哈希：sha256 与单算法一致；blob_id 是 git 对象 SHA1
+    （头 ``blob <字节数>\\0`` + 内容）——trees 清单的 blob_id 按本机现算，
+    不用触网抄上游 oid。对照实现故意用一把梭（非流式）：抓头格式与分块错误。"""
+    payload = b"hello world" * 100
+    path = tmp_path / "model.bin"
+    path.write_bytes(payload)
+    sha256, blob_id = fetch.sha256_and_blob_id_of(path)
+    assert sha256 == hashlib.sha256(payload).hexdigest()
+    header = b"blob " + str(len(payload)).encode("ascii") + b"\0"
+    assert blob_id == hashlib.sha1(header + payload).hexdigest()

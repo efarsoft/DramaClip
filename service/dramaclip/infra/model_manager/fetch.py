@@ -39,6 +39,24 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
+def sha256_and_blob_id_of(path: Path) -> tuple[str, str]:
+    """一次读盘同时算两个哈希：内容 SHA256 + git blob SHA1（HF trees 清单的 blob_id）。
+
+    git blob 头就是 ``blob <字节数>\\0``：本机可算、不依赖网络，算出来的是
+    「这份盘上字节的 git 身份」——relayout 补清单时比抄上游 API 的 oid 更诚实
+    （对账对的就是本机这份）。1.5GB 的权重也只读一遍。
+    """
+    sha256 = hashlib.sha256()
+    sha1 = hashlib.sha1()
+    size = path.stat().st_size
+    sha1.update(b"blob " + str(size).encode("ascii") + b"\0")
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(_CHUNK), b""):
+            sha256.update(chunk)
+            sha1.update(chunk)
+    return sha256.hexdigest(), sha1.hexdigest()
+
+
 def download_file(
     url: str,
     dest: Path,
