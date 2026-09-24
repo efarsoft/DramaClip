@@ -20,6 +20,25 @@ const SETTLED_STATUSES: readonly AnalysisJobStatus['status'][] = ['completed', '
 /** 勾选集住在壳级 store（跨页保勾选）；本剧还没进过 store 时的空视图。 */
 const EMPTY_SELECTION: readonly string[] = [];
 
+/**
+ * 把轮询拿到的实时集状态合并进列表——运行中徽章翻动的唯一通道。
+ * 此前只有终态才 loadAll()，整轮分析期间集列表冻结在旧状态（点了批量分析
+ * 界面毫无反应）。无变化返回原引用，React 跳过重渲染。
+ */
+export function mergeEpisodeStatuses(
+  episodes: Episode[],
+  live: readonly { episode_id: string; status: string }[] | undefined,
+): Episode[] {
+  if (live === undefined) return episodes;
+  const byId = new Map(live.map((item) => [item.episode_id, item.status]));
+  const next = episodes.map((episode) => {
+    const status = byId.get(episode.id) ?? episode.status;
+    return status === episode.status ? episode : { ...episode, status };
+  });
+  // 无变化返回原引用（逐项同引用比较）：React 跳过重渲染
+  return next.every((item, index) => item === episodes[index]) ? episodes : next;
+}
+
 /** 找本项目在跑的分析/预筛作业并取其状态；没有或取不到都是 null（不阻塞页面）。 */
 async function fetchActiveJob(projectId: string): Promise<AnalysisJobStatus | null> {
   try {
@@ -106,6 +125,7 @@ export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
   const refreshJob = useCallback(async (jobId: string) => {
     const status = await analysisApi.status(jobId);
     setJob(status);
+    setEpisodes((prev) => mergeEpisodeStatuses(prev, status.episodes));
     if (SETTLED_STATUSES.includes(status.status)) await loadAll();
   }, [loadAll]);
 
