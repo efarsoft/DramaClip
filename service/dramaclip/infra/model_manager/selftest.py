@@ -43,6 +43,14 @@ def run_asr(
         return _fail(f"加载/推理失败：{type(exc).__name__}: {exc}")
     elapsed = time.monotonic() - started
     text = "".join(segment.text for segment in segments).strip()
+    if not text:
+        # 随包样例是真人语音（SenseVoice/Whisper 实测都能转出全文）：空结果 = 没跑通。
+        # 2026-09-24 实测教训：paraformer 原始输出缺 timestamp 时解析整条丢弃，
+        # chars=0 却 ok=true——加载成功 ≠ 出字，假绿比红更坏。
+        return _fail(
+            "转写结果为空——随包样例是真人语音，空结果说明引擎没真跑通"
+            "（常见原因：输出解析丢字，或缺时间戳被整条丢弃）"
+        )
     return {
         "ok": True,
         "engine": engine.name,
@@ -83,7 +91,11 @@ def run_tts(models_dir: Path, work_dir: Path, spec: ModelSpec, voice: str) -> di
 
 
 def _build_asr(models_dir: Path, spec: ModelSpec, device: str, compute_type: str) -> Any:
-    from dramaclip.engines.analysis.transcriber import FasterWhisperEngine, SenseVoiceEngine
+    from dramaclip.engines.analysis.transcriber import (
+        FasterWhisperEngine,
+        ParaformerEngine,
+        SenseVoiceEngine,
+    )
 
     if spec.engine == "faster_whisper":
         size = spec.model_id.removeprefix("faster-whisper-")
@@ -95,6 +107,10 @@ def _build_asr(models_dir: Path, spec: ModelSpec, device: str, compute_type: str
         )
     if spec.engine == "sensevoice":
         return SenseVoiceEngine(models_dir=models_dir)
+    if spec.engine == "paraformer":
+        # device/compute_type 是 whisper（ctranslate2）的概念；funasr 栈自己管设备，
+        # CPU 就能跑，不硬传免得假装支持没验证过的 GPU 路径。
+        return ParaformerEngine(models_dir=models_dir)
     raise ValueError(f"{spec.engine} 没有能力层自检实现（只有 ASR/TTS 有真推理可跑）")
 
 
