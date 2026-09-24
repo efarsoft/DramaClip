@@ -5,6 +5,7 @@ import type { Project } from '@dramaclip/protocol';
 import { dramaEntryPath } from '../../app/routes';
 import { rememberDrama } from '../../stores/lastDrama';
 import { projectApi } from '../../services/client';
+import { scheduleCoverBackfill } from '../../services/coverBackfill';
 import { PageHeader, PageShell } from '../../components/layout/PageKit';
 import { FolderAddOutlined } from '@ant-design/icons';
 import { LibraryGrid } from './LibraryGrid';
@@ -25,18 +26,26 @@ function confirmDeleteProject(modal: AppModal, project: Project, remove: () => P
   });
 }
 
-/** 挂载时补拍一次封面；失败要说出现象与后果，不静默吞（附录 A 行 2 的另一半）。 */
+/** 挂载时补拍封面并把服务端预算欠账（remaining）涓流续拍；失败要说出现象与后果，
+ * 不静默吞（附录 A 行 2 的另一半）。取消器随 effect 清理走，卸载即停。 */
 function useCoverBackfill(reload: () => Promise<void>, warn: (text: string) => void): void {
-  useEffect(() => {
-    void projectApi
-      .ensureCovers()
-      .then(() => reload())
-      .catch(() => {
-        warn('部分封面补拍未完成：列表照常可用，缺封面项显示占位图');
-      });
-    // 仅挂载时补一次封面
+  useEffect(
+    () =>
+      scheduleCoverBackfill(
+        projectApi.ensureCovers,
+        () => {
+          void reload().catch(() => undefined);
+        },
+        {
+          onFailure: () => {
+            warn('部分封面补拍未完成：列表照常可用，缺封面项显示占位图');
+          },
+        },
+      ),
+    // 仅挂载时开始补拍（涓流轮次由取消器接管）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    [],
+  );
 }
 
 /** 重命名流：目标剧 + 开/关/提交三动作收拢，页面函数只剩编排。 */

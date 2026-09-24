@@ -98,8 +98,9 @@ export const projectApi = {
   create: (name: string, sourcePath: string): Promise<Project> =>
     rpc<Project>('project.create', { name, source_path: sourcePath }),
   list: (): Promise<Project[]> => rpc<Project[]>('project.list'),
-  ensureCovers: (): Promise<{ ok: boolean; generated: number }> =>
-    rpc<{ ok: boolean; generated: number }>('project.ensure_covers', {}),
+  /** remaining = 服务端时间预算收手后仍缺封面的条数（旧服务无此字段，undefined 即无欠账）。 */
+  ensureCovers: (): Promise<{ ok: boolean; generated: number; remaining?: number }> =>
+    rpc<{ ok: boolean; generated: number; remaining?: number }>('project.ensure_covers', {}),
   reorderEpisodes: (projectId: string, episodeIds: string[]): Promise<{ ok: boolean }> =>
     rpc<{ ok: boolean }>('project.reorder_episodes', { project_id: projectId, episode_ids: episodeIds }),
   get: (projectId: string): Promise<ProjectGetResult> =>

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Project } from '@dramaclip/protocol';
 import { projectApi } from '../../services/client';
+import { scheduleCoverBackfill } from '../../services/coverBackfill';
 import { useUiStore } from '../../stores/ui';
 
 export function useProjectDetail(projectId: string): {
@@ -24,14 +25,14 @@ export function useProjectDetail(projectId: string): {
     setProject(detail.project);
   }, [projectId]);
 
-  // 服务就绪前 ensureCovers/get 会失败；ready 后再执行一次
+  // 服务就绪前 ensureCovers/get 会失败；ready 后再执行一次。
+  // 补拍走涓流器：服务端单次有时间预算，欠账分轮续拍，卸载即停。
   useEffect(() => {
     if (serviceState !== 'ready') return;
     void loadProject().catch(() => undefined);
-    void projectApi
-      .ensureCovers()
-      .then(loadProject)
-      .catch(() => undefined);
+    return scheduleCoverBackfill(projectApi.ensureCovers, () => {
+      void loadProject().catch(() => undefined);
+    });
   }, [loadProject, serviceState]);
 
   const reloadProject = useCallback(async (): Promise<void> => {

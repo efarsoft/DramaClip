@@ -135,7 +135,7 @@ def test_ensure_covers_idempotent(
     project_id = created.result["id"]
     router.dispatch(_request(2, "project.scan_episodes", {"project_id": project_id}))
     result = router.dispatch(_request(3, "project.ensure_covers", {}))
-    assert result.result == {"ok": True, "generated": 0}
+    assert result.result == {"ok": True, "generated": 0, "remaining": 0}
 
 
 def test_reorder_episodes(

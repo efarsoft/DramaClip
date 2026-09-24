@@ -354,7 +354,7 @@
     },
     {
       "name": "project.ensure_covers",
-      "summary": "为缺封面的项目补截帧（幂等）",
+      "summary": "为缺封面的项目补截帧（幂等；单次有时间预算，欠账报 remaining）",
       "params": {
         "type": "object",
         "properties": {}
@@ -371,6 +371,10 @@
           },
           "generated": {
             "type": "integer"
+          },
+          "remaining": {
+            "type": "integer",
+            "description": "预算收手后仍缺封面的条数（含死路径补不成的）。RPC dispatch 单线程，长堵会连 system.health 一起堵死触发误杀重启——故单次调用限 8 秒预算；>0 且本轮有进展时渲染层可再约一轮涓流补拍，无进展（全死路径）不值得无限重试"
           }
         }
       }

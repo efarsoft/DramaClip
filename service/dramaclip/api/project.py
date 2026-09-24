@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -141,16 +142,36 @@ def scan_episodes(context: AppContext, params: dict[str, Any]) -> list[dict[str,
     return scanned
 
 
+_COVER_BUDGET_S = 8.0
+"""ensure_covers 单次时间预算（秒）。RPC dispatch 是单线程：补拍长堵会把 system.health
+一起排队堵死，ServiceManager 便误判服务已死、杀进程重启（50 剧×579 集死路径库实测
+~1900 次 ffmpeg 进程拉起）。超预算就收手，欠账用 remaining 如实上报，渲染层涓流续拍。"""
+
+
 def ensure_covers(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
-    """为缺封面的项目与各集补截帧（幂等；已有封面的跳过）。"""
+    """为缺封面的项目与各集补截帧（幂等；已有封面的跳过）。
+
+    两条纪律护住单线程 dispatch：源文件不在场直接跳过（死路径不配拉起 ffmpeg，
+    每集三段 seek 回退就是三次进程开销）；单次调用最多花 _COVER_BUDGET_S 秒，
+    预算耗尽收手，remaining 报还欠多少——封面是增强项，慢补可以，堵死服务不行。
+    """
+    deadline = time.monotonic() + _COVER_BUDGET_S
     generated = 0
+    remaining = 0
     for project in projects_repo.list_all(context.conn):
-        if _cover_missing(project["cover_path"]) and _ensure_cover(context, project):
-            generated += 1
-        for episode in episodes_repo.list_by_project(context.conn, str(project["id"])):
-            if _cover_missing(episode["cover_path"]) and _ensure_episode_cover(context, episode):
+        if _cover_missing(project["cover_path"]):
+            if time.monotonic() < deadline and _ensure_cover(context, project):
                 generated += 1
-    return {"ok": True, "generated": generated}
+            else:
+                remaining += 1
+        for episode in episodes_repo.list_by_project(context.conn, str(project["id"])):
+            if not _cover_missing(episode["cover_path"]):
+                continue
+            if time.monotonic() < deadline and _ensure_episode_cover(context, episode):
+                generated += 1
+            else:
+                remaining += 1
+    return {"ok": True, "generated": generated, "remaining": remaining}
 
 
 def reorder_episodes(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -177,10 +198,13 @@ def _episode_out(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _ensure_episode_cover(context: AppContext, episode: dict[str, Any]) -> bool:
+    source = Path(str(episode["source_path"]))
+    if not source.is_file():
+        return False  # 死路径快失败：不拉起注定失败的 ffmpeg（外置盘离线/造数库常态）
     cover_dir = context.data_dir / "covers"
     cover_dir.mkdir(parents=True, exist_ok=True)
     out_path = cover_dir / f"ep_{episode['id']}.jpg"
-    if not cover_engine.extract_cover(Path(str(episode["source_path"])), out_path):
+    if not cover_engine.extract_cover(source, out_path):
         return False
     episodes_repo.set_cover(context.conn, str(episode["id"]), str(out_path))
     return True
@@ -191,16 +215,19 @@ def _cover_missing(cover_path: Any) -> bool:
 
 
 def _ensure_cover(context: AppContext, project: dict[str, Any]) -> bool:
-    """从第一集视频截帧生成封面；无集/截帧失败返回 False。"""
+    """从第一集视频截帧生成封面；无集/源不在场/截帧失败返回 False。"""
     project_id = str(project["id"])
     episodes = episodes_repo.list_by_project(context.conn, project_id)
     if not episodes:
         return False
     first = min(episodes, key=lambda ep: int(ep["episode_number"]))
+    source = Path(str(first["source_path"]))
+    if not source.is_file():
+        return False  # 同 _ensure_episode_cover：死路径不配拉起 ffmpeg
     cover_dir = context.data_dir / "covers"
     cover_dir.mkdir(parents=True, exist_ok=True)
     out_path = cover_dir / f"{project_id}.jpg"
-    if not cover_engine.extract_cover(Path(str(first["source_path"])), out_path):
+    if not cover_engine.extract_cover(source, out_path):
         return False
     projects_repo.set_cover(context.conn, project_id, str(out_path))
     return True
