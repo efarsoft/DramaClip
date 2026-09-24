@@ -4,7 +4,10 @@ import type { Project } from '@dramaclip/protocol';
 import { pickFolder } from '../../services/client';
 import { tokens } from '../../styles/theme';
 
-/** 建剧与重命名弹窗：从 ProjectsPage 拆出，页面文件只留编排（§8 max-lines）。 */
+/** 建剧与重命名弹窗：从 ProjectsPage 拆出，页面文件只留编排（§8 max-lines）。
+ * 统一 Overlay 规格（卷二 #11/#12）：宽 720 与引擎域弹窗同宽、标题/footer 走 antd 默认
+ * （16/24 · 右对齐）——同族小表单禁第三种写法。批量新增（batch_create）落地前保持
+ * 单目录，不摆假控件。 */
 export function RenameModal({
   target,
   onClose,
@@ -20,6 +23,7 @@ export function RenameModal({
     <Modal
       title="重命名项目"
       open={target !== null}
+      width={720}
       okButtonProps={{ disabled: name.trim() === '' }}
       onOk={() => { onRename(name.trim()); }}
       onCancel={onClose}
@@ -110,6 +114,7 @@ export function CreateProjectModal({
     <Modal
       title="新建项目"
       open={open}
+      width={720}
       onOk={() => void onSubmit()}
       okText="创建并扫描"
       okButtonProps={{ disabled: name.trim() === '' || folder === '', loading: submitting }}
