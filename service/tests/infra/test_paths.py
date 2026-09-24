@@ -11,7 +11,7 @@ def test_env_override_creates_subdirs(tmp_path: Path) -> None:
     base = tmp_path / "data-home"
     result = paths.resolve_data_dir(env={"DRAMACLIP_DATA_DIR": str(base)})
     assert result == base
-    for name in ("models", "cache", "outputs", "logs"):
+    for name in ("models", "cache", "outputs", "logs", "bgm"):
         assert (base / name).is_dir()
 
 

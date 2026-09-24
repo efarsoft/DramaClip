@@ -51,6 +51,7 @@ def test_migrate_idempotent() -> None:
             "016_subtitle_band.sql",
             "017_episode_has_audio.sql",
             "018_episode_analyzed_at.sql",
+            "019_bgm_tracks.sql",
         ]
         assert db.migrate(conn) == expected_migrations
         assert db.migrate(conn) == []  # 第二次全量跳过

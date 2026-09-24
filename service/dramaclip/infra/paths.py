@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-_SUBDIRS = ("models", "cache", "outputs", "logs")
+_SUBDIRS = ("models", "cache", "outputs", "logs", "bgm")
 
 
 def resolve_data_dir(env: dict[str, str] | None = None) -> Path:
