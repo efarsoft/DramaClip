@@ -4,7 +4,7 @@ import { Card } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { BookOutlined, EditOutlined, RightOutlined } from '@ant-design/icons';
 import type { ModelInfo } from '@dramaclip/protocol';
-import { tokens } from '../../styles/theme';
+import { layout, tokens } from '../../styles/theme';
 
 interface EnvRow {
   readonly name: string;
@@ -58,7 +58,7 @@ function EnvItem({ row, onAction }: { row: EnvRow; onAction: (path: string) => v
         display: 'flex',
         alignItems: 'center',
         gap: tokens.spaceSm,
-        padding: '9px 0',
+        padding: `${String(layout.envPanel.itemPaddingBlock)}px 0`,
         borderBottom: `1px solid ${tokens.borderSecondary}`,
         fontSize: tokens.text.meta.size,
         lineHeight: tokens.text.meta.leading,
@@ -85,7 +85,7 @@ function EnvItem({ row, onAction }: { row: EnvRow; onAction: (path: string) => v
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: 2,
+            gap: layout.envPanel.actionGap,
             padding: 0,
           }}
         >
@@ -106,8 +106,8 @@ export function TipsPanel(): ReactElement {
   return (
     <RightPanel title="快速上手">
       {TIPS.map((tip) => (
-        <div key={tip.text} style={{ display: 'flex', gap: tokens.spaceSm, padding: '7px 0', alignItems: 'flex-start' }}>
-          <span style={{ color: tokens.colorPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, marginTop: 1 }}>{tip.icon}</span>
+        <div key={tip.text} style={{ display: 'flex', gap: tokens.spaceSm, padding: `${String(layout.envPanel.tipPaddingBlock)}px 0`, alignItems: 'flex-start' }}>
+          <span style={{ color: tokens.colorPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, marginTop: layout.envPanel.tipIconMarginTop }}>{tip.icon}</span>
           <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>{tip.text}</span>
         </div>
       ))}
@@ -117,14 +117,21 @@ export function TipsPanel(): ReactElement {
 
 function RightPanel({ title, children }: { title: string; children: ReactNode }): ReactElement {
   return (
-    <Card size="small" styles={{ body: { padding: '6px 16px 10px' } }}>
+    <Card
+      size="small"
+      styles={{
+        body: {
+          padding: `${String(layout.envPanel.bodyPaddingTop)}px ${String(layout.envPanel.bodyPaddingInline)}px ${String(layout.envPanel.bodyPaddingBottom)}px`,
+        },
+      }}
+    >
       <div
         style={{
           fontSize: tokens.text.body.size,
           lineHeight: tokens.text.body.leading,
           fontWeight: 600,
           color: tokens.textPrimary,
-          padding: '10px 0 4px',
+          padding: `${String(layout.envPanel.titlePaddingTop)}px 0 ${String(layout.envPanel.titlePaddingBottom)}px`,
         }}
       >
         {title}

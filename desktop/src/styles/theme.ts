@@ -164,6 +164,18 @@ export const layout = {
   inlineInput: { paddingBlock: 3, paddingInline: tokens.spaceSm },
   /** 来源徽标/无音轨一类迷你芯片 '0 6px' 内边距：6 脱阶照实登记。 */
   badgeChip: { paddingBlock: 0, paddingInline: 6 },
+  /** EnvPanel/TipsPanel 度量债偿还（全局改造批）：六处脱阶值照实登记，不新造一档。 */
+  envPanel: {
+    itemPaddingBlock: 9,
+    actionGap: 2,
+    tipPaddingBlock: 7,
+    tipIconMarginTop: 1,
+    bodyPaddingTop: 6,
+    bodyPaddingInline: 16,
+    bodyPaddingBottom: 10,
+    titlePaddingTop: 10,
+    titlePaddingBottom: 4,
+  },
   /** mono 小字与相邻正文的顶对齐微调（原 WorksDetailPage 的 paddingTop:2）。 */
   monoAlignTop: 2,
   /** 主从编辑器左栏：五值原样搬入，只消灭散落在三处的同源数（§2）。 */
