@@ -4,7 +4,7 @@ import type { JobInfo } from '@dramaclip/protocol';
 import {
   allStagesDone,
   continueRoute,
-  degradedFacts,
+  stageFactsOf,
   deriveBlockNote,
   deriveStages,
   jobFactsFor,
@@ -239,11 +239,19 @@ describe('jobFactsFor 从任务账提取', () => {
     expect(f.analysisEverCompleted).toBe(true);
   });
 
-  it('degradedFacts 三个聚合字段恒 null：宁灰勿假绿的入口', () => {
-    const f = degradedFacts(6, 2, jobFactsFor('p1', []));
-    expect(f).toMatchObject({ episodeCount: 6, workCount: 2, analyzedCount: null, planCount: null, staleHint: null });
-    expect(deriveStages(f).analysis).toBe('unknown');
-    expect(degradedFacts(6, null, NO_JOB_FACTS).workCount).toBeNull();
+  it('stageFactsOf 聚合供数：字段在场进 facts，②③ 允许点真绿', () => {
+    const f = stageFactsOf({ episode_count: 6, analyzed_count: 6, plan_count: 2 }, 2, jobFactsFor('p1', []));
+    expect(f).toMatchObject({ episodeCount: 6, workCount: 2, analyzedCount: 6, planCount: 2, staleHint: null });
+    expect(deriveStages(f).analysis).toBe('done');
+    expect(deriveStages(f).planning).toBe('done');
+  });
+
+  it('stageFactsOf 旧服务缺省：聚合字段恒 null，宁灰勿假绿', () => {
+    const f = stageFactsOf({ episode_count: 6 }, null, NO_JOB_FACTS);
+    expect(f.analyzedCount).toBeNull();
+    expect(f.planCount).toBeNull();
+    expect(f.staleHint).toBeNull();
+    expect(f.workCount).toBeNull();
   });
 
   it('activeProgress 取最近在跑任务的进度；NO_JOB_FACTS 全沉默', () => {

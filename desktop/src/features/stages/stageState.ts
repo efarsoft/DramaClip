@@ -3,14 +3,16 @@
  * 纯函数，不发 RPC：工作台矩阵与剧库五要素卡共用同一套词汇与判则——
  * 阶段词、卡点句式两处一致，改一处两处都变（卷三意见 07：共词汇不共组件）。
  *
- * 三个聚合字段（analyzedCount/planCount/staleHint）暂无 RPC 供数：传 null 即进
- * 「宁灰勿假绿」分支——阶段态取不到就标 unknown，绝不倒推绿灯（卷三意见 03）。
+ * 聚合供数（09-10 §6 核心层已落地）：analyzedCount/planCount 由 project.list/get
+ * 的阶段聚合字段（analyzed_count/plan_count）喂入 stageFactsOf；字段缺省（旧服务）
+ * 或 staleHint（过期对账仍无字段）传 null 即进「宁灰勿假绿」分支——阶段态取不到
+ * 就标 unknown，绝不倒推绿灯（卷三意见 03）。
  * 账本粒度同样诚实：workCount=null（成品账缺）→ ③④ 灰；jobsPresent=false
  * （任务账缺）→ ② 灰、任务类卡点句沉默。缺哪本账灰哪几盏灯，不连坐。
  * export 类任务的 ref_id=export_id 挂不到剧上，因此「正在导出」在剧维度看不见；
  * 成品数是硬数据，「已出片」灯不受影响（聚合 RPC 落地后补 active）。
  */
-import type { JobInfo } from '@dramaclip/protocol';
+import type { JobInfo, Project } from '@dramaclip/protocol';
 
 export type StageKey = 'intake' | 'analysis' | 'planning' | 'export';
 export type StageState = 'idle' | 'active' | 'done' | 'stale' | 'unknown';
@@ -299,17 +301,19 @@ export function jobFactsFor(dramaId: string, jobs: readonly JobInfo[]): JobFacts
   return { activeTypes, activeLabel, activeProgress, failed, analysisEverCompleted, jobsPresent: true };
 }
 
-/** 聚合 RPC 未落地期间的常量事实：三个可空字段全 null（宁灰勿假绿），账目字段来自 jobs 扫描。 */
-export function degradedFacts(
-  episodeCount: number,
+/** 事实装配：聚合计数取项目行的阶段聚合字段（analyzed_count/plan_count）。
+ * 字段缺省 = 旧服务未供数 → null 走宁灰勿假绿；staleHint 无过期对账字段，恒 null——
+ * 金灯（已过期）在对账字段落地前不点。账目字段来自 jobs 扫描。 */
+export function stageFactsOf(
+  project: Pick<Project, 'episode_count' | 'analyzed_count' | 'plan_count'>,
   workCount: number | null,
   jobFacts: JobFacts,
 ): StageFacts {
   return {
-    episodeCount,
+    episodeCount: project.episode_count,
     workCount,
-    analyzedCount: null,
-    planCount: null,
+    analyzedCount: project.analyzed_count ?? null,
+    planCount: project.plan_count ?? null,
     staleHint: null,
     ...jobFacts,
   };

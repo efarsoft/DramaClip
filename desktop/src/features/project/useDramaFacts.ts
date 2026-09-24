@@ -13,7 +13,7 @@ import { useJobsStore } from '../../stores/jobs';
 import { WORKS_SCAN_LIMIT } from '../home/stats';
 import {
   activeStageOf,
-  degradedFacts,
+  stageFactsOf,
   deriveBlockNote,
   deriveStages,
   jobFactsFor,
@@ -104,8 +104,8 @@ export function useDramaFacts(projectId: string): DramaFacts {
     if (local.kind !== 'ok') return local;
     const { project, works, worksError } = local;
     const workCount = works === null ? null : works.filter((work) => work.project_id === projectId).length;
-    const facts = degradedFacts(
-      project.episode_count,
+    const facts = stageFactsOf(
+      project,
       workCount,
       jobsAvailable ? jobFactsFor(projectId, jobs) : NO_JOB_FACTS,
     );

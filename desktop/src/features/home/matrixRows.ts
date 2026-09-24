@@ -6,7 +6,7 @@
 import type { JobInfo, Project, WorkItem } from '@dramaclip/protocol';
 import {
   continueRoute,
-  degradedFacts,
+  stageFactsOf,
   deriveBlockNote,
   deriveStages,
   jobFactsFor,
@@ -51,7 +51,7 @@ export function buildMatrixRows(
   return projects.map((project) => {
     const workCount = workCounts.get(project.id) ?? 0;
     const jobFacts = jobFactsFor(project.id, jobs);
-    const stageFacts = degradedFacts(project.episode_count, workCount, jobFacts);
+    const stageFacts = stageFactsOf(project, workCount, jobFacts);
     const stages = deriveStages(stageFacts);
     const note = deriveBlockNote(stageFacts, stages, {
       dramaId: project.id,
