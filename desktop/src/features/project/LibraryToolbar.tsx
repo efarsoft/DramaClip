@@ -1,4 +1,4 @@
-/** 剧库工具条：聚合芯片即筛选器（意见 05 同款）+ 搜剧名 + 排序。 */
+/** 剧库工具条：聚合芯片即筛选器（意见 05 同款）+ 搜剧名 + 排序 + 密度档（卷二 P-E）。 */
 import { SearchOutlined } from '@ant-design/icons';
 import { Input, Segmented } from 'antd';
 import type { ReactElement } from 'react';
@@ -6,6 +6,7 @@ import { tokens } from '../../styles/theme';
 import { FILTERS, type MatrixFilter } from '../home/matrixRows';
 import { FilterChip } from '../home/DramaMatrix';
 import type { LibraryQuery, SortKey } from './libraryRows';
+import type { LibraryDensity } from '../../stores/libraryDensity';
 
 // Segmented 要可变数组（SegmentedOptions 不吃 readonly），这里不冻
 const SORT_OPTIONS: { label: string; value: SortKey }[] = [
@@ -14,14 +15,23 @@ const SORT_OPTIONS: { label: string; value: SortKey }[] = [
   { label: '名称', value: 'name' },
 ];
 
+const DENSITY_OPTIONS: { label: string; value: LibraryDensity }[] = [
+  { label: '海报墙', value: 'grid' },
+  { label: '列表', value: 'list' },
+];
+
 export function LibraryToolbar({
   query,
   counts,
+  density,
   onChange,
+  onDensityChange,
 }: {
   query: LibraryQuery;
   counts: Readonly<Record<MatrixFilter, number>>;
+  density: LibraryDensity;
   onChange: (next: LibraryQuery) => void;
+  onDensityChange: (next: LibraryDensity) => void;
 }): ReactElement {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceMd, flexWrap: 'wrap' }}>
@@ -52,6 +62,13 @@ export function LibraryToolbar({
         options={SORT_OPTIONS}
         onChange={(value) => {
           onChange({ ...query, sort: value });
+        }}
+      />
+      <Segmented
+        value={density}
+        options={DENSITY_OPTIONS}
+        onChange={(value) => {
+          onDensityChange(value);
         }}
       />
     </div>

@@ -4,7 +4,7 @@
  * 矩阵是横排版，数据与文案同源。操作菜单（重命名/复制/删除）沿用封面角位。
  */
 import { PlayCircleFilled } from '@ant-design/icons';
-import { Button, Card, Dropdown } from 'antd';
+import { Card, Dropdown } from 'antd';
 import type { ReactElement } from 'react';
 import type { Project } from '@dramaclip/protocol';
 import { mediaUrl } from '../../services/client';
@@ -13,12 +13,8 @@ import { tokens } from '../../styles/theme';
 import type { MatrixRow } from '../home/matrixRows';
 import type { BlockNote } from '../stages/stageState';
 import { BlockNoteLine, StageMicro } from '../stages/StageMicro';
-
-export interface MenuHandlers {
-  onRename: (project: Project) => void;
-  onDuplicate: (project: Project) => void;
-  onDelete: (project: Project) => void;
-}
+import { menuFor, type MenuHandlers } from './dramaMenuItems';
+import { MoreButton } from './MoreButton';
 
 export interface DramaCardProps extends MenuHandlers {
   readonly row: MatrixRow;
@@ -160,45 +156,4 @@ function CoverArea({ project, handlers }: { project: Project; handlers: MenuHand
       </span>
     </div>
   );
-}
-
-function MoreButton(props: React.ComponentProps<typeof Button>): ReactElement {
-  return (
-    <Button
-      type="text"
-      size="small"
-      style={{ background: tokens.posterPlate, color: tokens.colorWhite }}
-      {...props}
-    >
-      ⋯
-    </Button>
-  );
-}
-
-function menuFor(project: Project, { onRename, onDuplicate, onDelete }: MenuHandlers): NonNullable<React.ComponentProps<typeof Dropdown>['menu']>['items'] {
-  return [
-    {
-      key: 'rename',
-      label: '重命名',
-      onClick: () => {
-        onRename(project);
-      },
-    },
-    {
-      key: 'duplicate',
-      label: '复制',
-      onClick: () => {
-        onDuplicate(project);
-      },
-    },
-    { type: 'divider' as const },
-    {
-      key: 'delete',
-      label: '删除',
-      danger: true,
-      onClick: () => {
-        onDelete(project);
-      },
-    },
-  ];
 }

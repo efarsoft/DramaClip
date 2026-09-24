@@ -209,7 +209,7 @@ function NoteSlot({ note, onNavigate }: { note: BlockNote; onNavigate: (route: s
   );
 }
 
-function CoverThumb({ cover }: { cover: string | null | undefined }): ReactElement {
+export function CoverThumb({ cover }: { cover: string | null | undefined }): ReactElement {
   return (
     <span
       style={{

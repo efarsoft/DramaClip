@@ -2,14 +2,16 @@ import { Alert, Button, Card } from 'antd';
 import { useState } from 'react';
 import type { Project } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
+import { readDensity, writeDensity, type LibraryDensity } from '../../stores/libraryDensity';
 import { countByFilter, type MatrixFilter, type MatrixRow } from '../home/matrixRows';
 import { DramaCard } from './DramaCard';
 import { FirstRunEmpty } from './FirstRunEmpty';
+import { LibraryList } from './LibraryList';
 import { applyQuery, buildLibraryRows, type LibraryQuery } from './libraryRows';
 import { LibraryToolbar } from './LibraryToolbar';
 import type { LibraryFacts } from './useLibraryFacts';
 
-/** 剧库主体：失败横幅 > 首启三步 > 工具条 + 五要素卡网格（卷三图 2）。 */
+/** 剧库主体：失败横幅 > 首启三步 > 工具条 + 五要素卡网格/列表档（卷三图 2 + 卷二 P-E 密度档）。 */
 const INITIAL_QUERY: LibraryQuery = { filter: 'all', search: '', sort: 'activity' };
 
 export interface LibraryGridProps {
@@ -28,6 +30,8 @@ export interface LibraryGridProps {
 
 export function LibraryGrid(props: LibraryGridProps): React.ReactElement {
   const [query, setQuery] = useState<LibraryQuery>(INITIAL_QUERY);
+  // 密度档是个人偏好：localStorage 记忆，写失败本次会话内仍然生效（store 注释同 lastDrama）
+  const [density, setDensity] = useState<LibraryDensity>(readDensity);
   const { projects, loadError } = props;
   // 失败态优先于一切：原文上屏 + 真重试按钮。已有旧数据时横幅压顶、网格保留（数据旧但可看）。
   const banner =
@@ -50,7 +54,21 @@ export function LibraryGrid(props: LibraryGridProps): React.ReactElement {
   if (projects.length === 0 && loadError === null) {
     return <FirstRunEmpty onCreate={props.onCreate} />;
   }
-  return <LibraryBody {...props} projects={projects} banner={banner} query={query} setQuery={setQuery} />;
+  const changeDensity = (next: LibraryDensity): void => {
+    setDensity(next);
+    writeDensity(next);
+  };
+  return (
+    <LibraryBody
+      {...props}
+      projects={projects}
+      banner={banner}
+      query={query}
+      setQuery={setQuery}
+      density={density}
+      onDensityChange={changeDensity}
+    />
+  );
 }
 
 function LibraryBody({
@@ -59,6 +77,8 @@ function LibraryBody({
   banner,
   query,
   setQuery,
+  density,
+  onDensityChange,
   onRetryFacts,
   onOpen,
   onGoto,
@@ -70,6 +90,8 @@ function LibraryBody({
   banner: React.ReactElement | undefined;
   query: LibraryQuery;
   setQuery: (next: LibraryQuery) => void;
+  density: LibraryDensity;
+  onDensityChange: (next: LibraryDensity) => void;
 }): React.ReactElement {
   const { rows, factsMissing } = buildLibraryRows(projects, facts);
   const shown = applyQuery(rows, query);
@@ -83,20 +105,18 @@ function LibraryBody({
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
       {banner}
       {facts.factsError !== null && <FactsBanner error={facts.factsError} onRetry={onRetryFacts} />}
-      <LibraryToolbar query={query} counts={counts} onChange={setQuery} />
-      {shown.length === 0 ? (
-        <div style={emptyHintStyle()}>没有符合筛选或搜索的剧</div>
-      ) : (
-        <CardGrid
-          rows={shown}
-          factsMissing={factsMissing}
-          onOpen={onOpen}
-          onGoto={onGoto}
-          onRename={onRename}
-          onDuplicate={onDuplicate}
-          onDelete={onDelete}
-        />
-      )}
+      <LibraryToolbar query={query} counts={counts} density={density} onChange={setQuery} onDensityChange={onDensityChange} />
+      <RowsArea
+        density={density}
+        rows={shown}
+        factsMissing={factsMissing}
+        serverTimeMs={facts.serverTimeMs}
+        onOpen={onOpen}
+        onGoto={onGoto}
+        onRename={onRename}
+        onDuplicate={onDuplicate}
+        onDelete={onDelete}
+      />
     </div>
   );
 }
@@ -114,6 +134,50 @@ function FactsBanner({ error, onRetry }: { error: string; onRetry: () => void })
           重试
         </Button>
       }
+    />
+  );
+}
+
+interface RowsAreaProps {
+  readonly density: LibraryDensity;
+  readonly rows: readonly MatrixRow[];
+  readonly factsMissing: boolean;
+  readonly serverTimeMs: number | null;
+  readonly onOpen: (project: Project) => void;
+  readonly onGoto: (route: string, project: Project) => void;
+  readonly onRename: (project: Project) => void;
+  readonly onDuplicate: (project: Project) => void;
+  readonly onDelete: (project: Project) => void;
+}
+
+/** 密度档三态：空结果占位 > 列表档 > 海报墙（默认档）。两档数据同源，只是排版密度不同。 */
+function RowsArea(props: RowsAreaProps): React.ReactElement {
+  if (props.rows.length === 0) {
+    return <div style={emptyHintStyle()}>没有符合筛选或搜索的剧</div>;
+  }
+  if (props.density === 'list') {
+    return (
+      <LibraryList
+        rows={props.rows}
+        factsMissing={props.factsMissing}
+        serverTimeMs={props.serverTimeMs}
+        onOpen={props.onOpen}
+        onGoto={props.onGoto}
+        onRename={props.onRename}
+        onDuplicate={props.onDuplicate}
+        onDelete={props.onDelete}
+      />
+    );
+  }
+  return (
+    <CardGrid
+      rows={props.rows}
+      factsMissing={props.factsMissing}
+      onOpen={props.onOpen}
+      onGoto={props.onGoto}
+      onRename={props.onRename}
+      onDuplicate={props.onDuplicate}
+      onDelete={props.onDelete}
     />
   );
 }

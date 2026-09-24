@@ -96,6 +96,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  window.localStorage.clear();
   api.list.mockResolvedValue([project('p1', '替嫁新娘'), project('p2', '赘婿归来', { created_at: 200 })]);
   api.ensureCovers.mockResolvedValue({ ok: true, generated: 0 });
   api.listWorks.mockResolvedValue([WORK]);
@@ -170,6 +171,40 @@ describe('剧库页渲染', () => {
     expect(screen.getAllByText('32 集 · — 部成品').length).toBe(2);
     expect(screen.getAllByText('② 分析 —').length).toBe(2);
     expect(screen.queryByText(/卡在分析/)).toBeNull();
+  });
+});
+
+describe('密度档（卷二 P-E）：同一份数据源两种排版，海报墙 ⇄ 列表', () => {
+  it('默认海报墙：卡片在场，工具条有档位切换', async () => {
+    page();
+    expect(await screen.findByText('替嫁新娘')).toBeTruthy();
+    expect(screen.getByText('海报墙')).toBeTruthy();
+    expect(screen.getByText('列表')).toBeTruthy();
+  });
+
+  it('切列表档：五要素压成行——剧名、meta 带相对时间、卡点、继续、管理菜单都在', async () => {
+    page();
+    await screen.findByText('替嫁新娘');
+    fireEvent.click(screen.getByText('列表'));
+    expect(screen.getByText('32 集 · 1 部成品 · 刚刚')).toBeTruthy();
+    expect(screen.getByText('卡在分析：Whisper 缺模型：转写无法开始')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /继续分析/ }).length).toBeGreaterThan(0);
+    // 管理菜单不随密度档阉割
+    const menuButton = screen.getAllByRole('button', { name: '⋯' })[0];
+    if (menuButton === undefined) throw new Error('列表档缺管理菜单按钮');
+    fireEvent.click(menuButton);
+    expect(await screen.findByText('重命名')).toBeTruthy();
+  });
+
+  it('档位记住：切换即持久化，重进直接列表档', async () => {
+    page();
+    await screen.findByText('替嫁新娘');
+    fireEvent.click(screen.getByText('列表'));
+    expect(window.localStorage.getItem('dramaclip.library-density')).toBe('list');
+    cleanup();
+    page();
+    // 列表档 meta 带相对时间，卡档不带——凭这个格式区分重进后的档位
+    expect(await screen.findByText('32 集 · 1 部成品 · 刚刚')).toBeTruthy();
   });
 });
 
