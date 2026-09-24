@@ -30,8 +30,17 @@ def _decoded(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-def _row_to_dict(row: tuple, episode_count: int = 0) -> dict[str, Any]:  # type: ignore[type-arg]
-    return _decoded(dict(zip(_COLUMNS, row, strict=True))) | {"episode_count": episode_count}
+def _row_to_dict(
+    row: tuple,  # type: ignore[type-arg]
+    episode_count: int = 0,
+    analyzed_count: int = 0,
+    plan_count: int = 0,
+) -> dict[str, Any]:
+    return _decoded(dict(zip(_COLUMNS, row, strict=True))) | {
+        "episode_count": episode_count,
+        "analyzed_count": analyzed_count,
+        "plan_count": plan_count,
+    }
 
 
 def create(conn: sqlite3.Connection, name: str, source_path: str) -> dict[str, Any]:
@@ -50,18 +59,25 @@ def create(conn: sqlite3.Connection, name: str, source_path: str) -> dict[str, A
         "status": "created",
         "created_at": now,
         "episode_count": 0,
+        "analyzed_count": 0,
+        "plan_count": 0,
         "settings": {},
     }
 
 
 def list_all(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    # 阶段聚合（09-10 §6 核心层）：analyzed_count=status'done' 集数、plan_count=方案行数。
+    # 前端 deriveStages 据此把 ②③ 灯从「宁灰勿假绿」的降级两极升级为真值（卷三意见 03）。
     rows = conn.execute(
         "SELECT p.id, p.name, p.source_path, p.status, p.created_at, p.updated_at,"
-        " p.cover_path, p.settings, COUNT(e.id) AS episode_count"
+        " p.cover_path, p.settings, COUNT(e.id) AS episode_count,"
+        " COALESCE(SUM(CASE WHEN e.status = 'done' THEN 1 ELSE 0 END), 0) AS analyzed_count,"
+        " (SELECT COUNT(*) FROM narration_plans np WHERE np.project_id = p.id) AS plan_count"
         " FROM projects p LEFT JOIN episodes e ON e.project_id = p.id"
         " GROUP BY p.id ORDER BY p.created_at DESC"
     ).fetchall()
-    return [_decoded(dict(zip((*_COLUMNS, "episode_count"), row, strict=True))) for row in rows]
+    keys = (*_COLUMNS, "episode_count", "analyzed_count", "plan_count")
+    return [_decoded(dict(zip(keys, row, strict=True))) for row in rows]
 
 
 def get(conn: sqlite3.Connection, project_id: str) -> dict[str, Any] | None:
@@ -70,10 +86,15 @@ def get(conn: sqlite3.Connection, project_id: str) -> dict[str, Any] | None:
     ).fetchone()
     if row is None:
         return None
-    count = conn.execute(
-        "SELECT COUNT(*) FROM episodes WHERE project_id = ?", (project_id,)
+    counts = conn.execute(
+        "SELECT COUNT(*), COALESCE(SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END), 0)"
+        " FROM episodes WHERE project_id = ?",
+        (project_id,),
+    ).fetchone()
+    plan_count = conn.execute(
+        "SELECT COUNT(*) FROM narration_plans WHERE project_id = ?", (project_id,)
     ).fetchone()[0]
-    return _row_to_dict(row, int(count))
+    return _row_to_dict(row, int(counts[0]), int(counts[1]), int(plan_count))
 
 
 def get_settings(conn: sqlite3.Connection, project_id: str) -> dict[str, Any]:

@@ -77,6 +77,10 @@ export interface Project {
   readonly status: string;
   readonly created_at: number;
   readonly episode_count: number;
+  /** 阶段聚合（09-10 §6）：分析落库（status=done）集数；缺省 = 旧服务未供数，阶段灯降级宁灰勿假绿。 */
+  readonly analyzed_count?: number;
+  /** 阶段聚合：narration_plans 行数；缺省同上降级。 */
+  readonly plan_count?: number;
   readonly cover_path?: string | null;
   /** 项目级参数覆盖（方案数 K/转写档位/解说风格/字幕预设等）；空对象=全部使用全局默认。 */
   readonly settings: Record<string, unknown>;

@@ -33,6 +33,14 @@
         "episode_count": {
           "type": "integer"
         },
+        "analyzed_count": {
+          "type": "integer",
+          "description": "阶段聚合（09-10 §6 核心层）：分析落库（status=done）的集数；prescreened/analyzing/failed 不算。缺省 = 旧服务未供数，前端阶段灯按「宁灰勿假绿」降级"
+        },
+        "plan_count": {
+          "type": "integer",
+          "description": "阶段聚合：narration_plans 行数；缺省同上降级。过期对账（staleHint）仍无字段，金灯不点"
+        },
         "cover_path": {
           "type": ["string", "null"],
           "description": "NULL = 封面还没生成（补拍队列未跑到）；渲染层显示占位图，不请求 null 路径"
