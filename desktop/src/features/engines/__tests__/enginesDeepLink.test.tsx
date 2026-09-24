@@ -48,6 +48,7 @@ vi.mock('../../../services/client', () => ({
   },
   ttsApi: { preview: vi.fn() },
   runtimeApi: { status: vi.fn(() => Promise.resolve({ installed: true })), install: vi.fn() },
+  indexttsApi: { status: vi.fn(() => Promise.resolve({ installed: true, dir: '' })), install: vi.fn() },
   systemApi: { health: vi.fn(() => Promise.resolve({})) },
   mediaUrl: (path: string) => `dramaclip://local/${path}`,
   pickFolder: vi.fn(),
