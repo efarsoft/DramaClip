@@ -620,8 +620,27 @@ def synthesize_narration_texts(
     # 立案③）。这里按集重走一遍编排层同款游标（`build_from_script_episodes` 的
     # `start = max(candidate, cursor)`）：只保证源时间单调不回退，旁白段长度
     # 仍等于实测音频，原声段只平移不压缩。
+    #
+    # 例外（B 项·片头闪前预告）：`build_intro` 把最高冲突镜前置做首帧，片头旁白
+    # 讲最大冲突、画面是后段的高潮镜，正文再从头讲——片头对同集后续段是**有意**的
+    # 源时间倒回（与 raw_clip 的预告式开场同构），不是立案③那种回填抖动导致的意外
+    # 重播。若让片头照常推进游标，游标会把正文挤到预告之后、甚至冲出源集末尾
+    # （真机探针：前置 94-100s 的片尾镜 + 8s 钩子 TTS，正文 0-6s 被顶到 106 > 源长
+    # 100，整条方案响亮失败）。故闪前预告段不推进游标，正文从自己的计划起点重新起算。
+    # 判据：片头段（intro-1 槽位）的计划源起点晚于其后任一**同集**段的计划源起点 ⇒
+    # 闪前预告；最高冲突镜本就是时序第一镜（未前置）时片头是普通时序段，游标照常推进，
+    # 立案③的重播保护不受影响。
+    _planned_starts = [float(segment["start"]) for segment in timeline]
+    _intro_teaser = False
+    if timeline and timeline[0].get("narration_id") == _HOOK_SLOT_ID:
+        _head_episode = str(timeline[0]["episode_id"])
+        _intro_teaser = any(
+            str(segment["episode_id"]) == _head_episode
+            and _planned_starts[index] < _planned_starts[0]
+            for index, segment in enumerate(timeline[1:], start=1)
+        )
     cursor: dict[str, float] = {}
-    for segment in timeline:
+    for index, segment in enumerate(timeline):
         episode_id = str(segment["episode_id"])
         floor = cursor.get(episode_id, 0.0)
         start = max(float(segment["start"]), floor)
@@ -646,6 +665,8 @@ def synthesize_narration_texts(
         end = start + length
         segment["start"] = round(start, 3)
         segment["end"] = round(end, 3)
+        if index == 0 and _intro_teaser:
+            continue  # 闪前预告不推进游标：正文从自己的计划起点起算（见上方判据注释）
         cursor[episode_id] = end
     _assert_within_source(timeline, source_durations)
     updated = [

@@ -136,19 +136,49 @@ def test_end_before_start_is_a_defect() -> None:
     assert any("结束不晚于开始" in issue for issue in defects(plan))
 
 
-def test_overlap_within_episode_is_a_defect() -> None:
-    """同集两段画面区间重叠＝成片重播同一段素材（业主立案③），门禁必须拦。"""
+def test_overlap_within_episode_is_a_defect_for_llm_timelines() -> None:
+    """dialogue_narration（唯一 LLM 产时间轴的模式）同集两段画面区间重叠＝
+    成片重播同一段素材（业主立案③），门禁必须拦。"""
     timeline, texts = _good_tail()
     timeline[1] = timeline[1].model_copy(update={"start": 2.0, "end": 6.0})  # 与 [0,3) 重叠
-    plan = PlanData(mode="full_narration", timeline=timeline, narration_texts=texts)
+    plan = PlanData(mode="dialogue_narration", timeline=timeline, narration_texts=texts)
     assert any("重叠" in issue for issue in defects(plan))
+
+
+def test_rule_arranged_designed_overlaps_are_not_defects() -> None:
+    """规则模式的 CTA 卡/旁白桥重叠是**设计**（尾卡叠在既有画面上），不是幻觉：
+    批次一把重叠检查扩到全部模式，四个规则模式恒 draft、生产线全断（真回归）。
+    形状取自 build_intro/build_ultra_short 的真实构造：尾段是前段的真子区间。"""
+    timeline, texts = _good_tail()
+    # intro 形状：CTA 卡复用最后场景尾部画面（_CTA_FALLBACK_S=2s）
+    timeline[1] = timeline[1].model_copy(update={"start": 1.0, "end": 3.0})  # ⊂ [0,3) 同集
+    plan = PlanData(mode="intro_narration", timeline=timeline, narration_texts=texts)
+    assert not any("重叠" in issue for issue in defects(plan))
+    # raw_clip 同样豁免重叠（规则编排），但时间轴合法性照查
+    raw = PlanData(
+        mode="raw_clip",
+        timeline=[
+            TimelineSegment(episode_id="ep1", start=0.0, end=8.0, audio="original"),
+            TimelineSegment(episode_id="ep1", start=6.0, end=8.0, audio="original"),
+        ],
+    )
+    assert not any("重叠" in issue for issue in defects(raw))
+
+
+def test_rule_modes_still_reject_corrupt_spans() -> None:
+    """重叠豁免不豁免合法性：规则模式出现负起点/结束不晚于开始照样拦
+    （生产上写不出这种段，出现即存储损坏或代码 bug）。"""
+    timeline, texts = _good_tail()
+    timeline[0] = timeline[0].model_copy(update={"start": -1.0})
+    plan = PlanData(mode="intro_narration", timeline=timeline, narration_texts=texts)
+    assert any("起点为负" in issue for issue in defects(plan))
 
 
 def test_same_span_in_different_episodes_is_not_overlap() -> None:
     """跨集本来就会重复用相似时间码：只有同集内两两比才算重叠。"""
     timeline, texts = _good_tail()
-    timeline[1] = timeline[1].model_copy(update={"episode_id": "ep2"})
-    plan = PlanData(mode="full_narration", timeline=timeline, narration_texts=texts)
+    timeline[1] = timeline[1].model_copy(update={"episode_id": "ep2", "start": 2.0})
+    plan = PlanData(mode="dialogue_narration", timeline=timeline, narration_texts=texts)
     assert not any("重叠" in issue for issue in defects(plan))
 
 

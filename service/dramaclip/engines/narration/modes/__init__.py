@@ -58,9 +58,21 @@ def build_intro(
     body_scenes: list[EpisodeScene],
     strategy: StrategySpec,
 ) -> PlanData:
-    """片头解说编排（原案 6.4）：引子旁白段（画面为正文首镜）+ 正片高光（原声）。
+    """片头解说编排（原案 6.4）：引子旁白段（画面为**最高冲突镜**）+ 正片高光（原声）。
+
+    首帧选镜与 `build_raw_clip` 同构：信息流里用户先看到画面，片头旁白讲「最大冲突」
+    而画面却是时间序的平淡开场就是音画各说各话（B 项）。故把冲突最高镜前置做首帧，
+    其余按 `episode_order` 时间序——这是「预告式开场」（先闪高潮、再回叙事），与
+    raw_clip 同款。前置用 `is` 身份比较不用 `scene_index`：scene_index 只在一集内
+    唯一，跨集时按 index 判会误认「开场已是最高冲突」而不前置（见 build_raw_clip 注释）。
+    全等分（max 取首个）时不前置，保持原时间序。
     """
     ordered = sorted(body_scenes, key=episode_order)
+    if ordered:
+        best = max(ordered, key=lambda s: s.score)
+        if ordered[0] is not best:
+            ordered.remove(best)
+            ordered.insert(0, best)
     timeline = _fit_duration(ordered, strategy, intro_first=True)
     if not timeline:
         return PlanData(mode="intro_narration", timeline=timeline, strategy=strategy)

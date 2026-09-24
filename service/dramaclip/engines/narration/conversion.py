@@ -33,9 +33,26 @@ def defects(plan: PlanData) -> list[str]:
 def _timeline_defects(plan: PlanData) -> list[str]:
     """纯 plan 数据可判的时间轴合法性：负起点、结束不晚于开始、同集区间重叠。
 
-    这些是 LLM 幻觉时间戳的三种形状，此前要到渲染期才暴雷；门禁层拦住，
-    方案卡直接给出原因。重叠按 episode_id 分组两两比：跨集用相似时间码是
-    常态（每集都有自己的相对秒），只有同集内重叠才等于成片重播素材。
+    负起点/结束不晚于开始对所有方案照查：规则编排器也写不出这种段，出现即
+    存储损坏或未来代码 bug，便宜且必须拦。
+
+    **同集重叠只查 dialogue_narration**——它是唯一时间轴由 LLM 剧本产出的模式
+    （`build_from_script_episodes`），重叠检查防的就是 LLM 幻觉时间戳这个形状
+    （scriptwriter 清洗层已先挡一道：重叠段推 start 并计数 segments_clamped，
+    这里是第二道闸；新的 LLM 时间轴模式出现时必须加进这个判据）。
+
+    其余八个模式的时间轴由规则编排器**确定性**产出，它们的重叠全是设计行为，
+    不是幻觉（真机核验过四种形状）：
+    - intro / ultra_short 的 CTA 卡复用最后场景尾部画面（`_CTA_FALLBACK_S`，
+      结尾卡叠在既有画面上，不新取素材）；
+    - cross 的场景间旁白桥「画面延续到下一场景开头」（modes_w5 注释原文）；
+    - subtitle_flow 的结尾 CTA 卡同款复用（original 音频 + subtitle_text）。
+    把设计当缺陷的后果是四个规则模式**恒为 draft、永远不能出片**（批次一引入
+    的真回归：draft 不能渲，规则模式生产线全断；当时单测夹具全是手搓的
+    full_narration 时间轴、无 CTA 卡形状，所以没兜住）。
+    注意 `planner` 不能当判据：copywriter 给所有带旁白槽的方案填文案后都会置
+    planner=llm_script（「文案来源」语义，test_plan_variants 钉死），grade 时
+    规则模式的 planner 早已不是 "rule"。
     raw_clip 同样受查——它豁免的是 CTA 文案（无旁白），不是时间轴本身。
     """
     issues: list[str] = []
@@ -48,6 +65,8 @@ def _timeline_defects(plan: PlanData) -> list[str]:
                 f"第 {index + 1} 段结束不晚于开始（{segment.start:g}s → {segment.end:g}s）"
             )
         by_episode.setdefault(segment.episode_id, []).append((segment.start, segment.end))
+    if plan.mode != "dialogue_narration":
+        return issues  # 规则编排的重叠是设计（CTA 卡复用画面/旁白桥），见 docstring
     for episode_id, spans in by_episode.items():
         ordered = sorted(spans)
         for (prev_start, prev_end), (next_start, _) in zip(ordered, ordered[1:], strict=False):

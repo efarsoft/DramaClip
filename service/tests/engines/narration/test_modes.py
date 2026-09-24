@@ -53,6 +53,44 @@ def test_intro_marks_first_segment_as_narration() -> None:
     assert all(seg.audio == "original" for seg in plan.timeline[1:-1])
 
 
+def test_intro_opens_with_highest_conflict() -> None:
+    """B 项：片头画面=最高冲突镜（与 raw_clip 同构的预告式开场）。
+
+    信息流里用户先看到画面：旁白讲「最大冲突」而画面是时间序的平淡开场
+    就是音画各说各话。_scenes() 最高分 90 在 24-30s。
+    """
+    plan = build_intro(stamp([(1, "ep1", _scenes())]), _STRATEGY)
+    assert plan.timeline[0].start == 24 and plan.timeline[0].end == 30
+    # 其余段保持时间序（预告式开场：先闪高潮、再回叙事）
+    starts = [seg.start for seg in plan.timeline[1:-1]]
+    assert starts == sorted(starts)
+
+
+def test_intro_keeps_order_when_first_scene_is_already_the_best() -> None:
+    """最高冲突镜本就是时间序第一镜：不重排（`is` 身份比较，与 raw_clip 同判据）。"""
+    scenes = [
+        ConflictScore(scene_index=0, start=0, end=6, score=95),
+        ConflictScore(scene_index=1, start=6, end=12, score=40),
+        ConflictScore(scene_index=2, start=12, end=18, score=85),
+    ]
+    plan = build_intro(stamp([(1, "ep1", scenes)]), _STRATEGY)
+    assert plan.timeline[0].start == 0
+
+
+def test_intro_teaser_swap_survives_a_scene_index_collision() -> None:
+    """跨集 `scene_index` 碰撞：最高分在 ep2 且 index 与 ep1 首镜相同，
+    按 index 比较会误认「开场已是最高分」而不前置——必须按身份前置。"""
+    scenes = stamp(
+        [
+            (1, "ep1", [ConflictScore(scene_index=1, start=0.0, end=8.0, score=60)]),
+            (2, "ep2", [ConflictScore(scene_index=1, start=30.0, end=40.0, score=95)]),
+        ]
+    )
+    plan = build_intro(scenes, _STRATEGY)
+    assert plan.timeline[0].episode_id == "ep2"
+    assert plan.timeline[0].start == 30
+
+
 def test_intro_empty_scenes() -> None:
     """无素材 ⇒ 无槽位：否则等于叫编剧对着空时间轴凭空写。"""
     plan = build_intro([], _STRATEGY)

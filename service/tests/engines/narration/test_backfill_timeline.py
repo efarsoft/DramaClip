@@ -287,3 +287,92 @@ def test_a_pulled_back_tail_leaves_later_episodes_alone(
     _assert_source_never_runs_backwards(result)
     assert _windows(result) == [("ep-a", 186.2, 192.2), ("ep-b", 5.0, 9.0)]
 
+
+# ---- B 项·片头闪前预告：回填游标豁免 -----------------------------------------
+# `build_intro` 把最高冲突镜前置做首帧（预告式开场），片头段对同集后续段是**有意**
+# 的源时间倒回；若照常推进游标，正文会被挤到预告之后甚至冲出源集末尾（真机探针
+# 实测过这个失败）。豁免判据在 pipeline.synthesize_narration_texts：intro-1 槽位
+# 的计划起点晚于其后任一**同集**段 ⇒ 闪前预告 ⇒ 不推进游标。
+
+
+def _intro_plan(*segments: tuple[str, float, float, str, str | None]) -> PlanData:
+    """intro 形状的方案：(集, 起, 止, 角色, 槽位)。文案手动填上（编排只产 brief）。"""
+    timeline: list[TimelineSegment] = []
+    texts: list[NarrationText] = []
+    for episode_id, start, end, audio, slot in segments:
+        if slot is not None:
+            texts.append(NarrationText(id=slot, text=f"{slot} 的文案"))
+        timeline.append(
+            TimelineSegment(
+                episode_id=episode_id, start=start, end=end, audio=audio,  # type: ignore[arg-type]
+                narration_id=slot,
+            )
+        )
+    return PlanData(mode="intro_narration", timeline=timeline, narration_texts=texts)
+
+
+def test_intro_teaser_head_does_not_push_the_body_past_the_source_end(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """闪前预告（片头=片尾高潮镜 94-100，正文回 0-6，CTA 取时序末场景尾部 4-6）：
+    8s 钩子 TTS 回填后片头收口到 92-100，正文从自己的计划起点 0 起算，不被游标
+    顶出源集末尾。修法②之前这里整条方案 RuntimeError（探针实测：正文被顶到
+    106 > 源长 100）。窗口形状与真机探针一致。"""
+    plan = _intro_plan(
+        ("ep1", 94.0, 100.0, "narration", "intro-1"),
+        ("ep1", 0.0, 6.0, "original", None),
+        ("ep1", 4.0, 6.0, "narration", "cta-1"),
+    )
+    # 探针键 = 槽位 id 的 "-" 前缀（_content_addressed_audio 的文件名主干形状）
+    result = _voice(
+        monkeypatch, tmp_path, plan, {"intro": 8.0, "cta": 2.0}, {"ep1": 100.0}
+    )
+    assert _windows(result) == [
+        ("ep1", 92.0, 100.0),  # 钩子 8s 收口贴着源尾
+        ("ep1", 0.0, 6.0),     # 正文回时间序起点，未被游标顶走
+        ("ep1", 6.0, 8.0),     # CTA 被正文游标推进（豁免只给片头段）
+    ]
+
+
+def test_intro_chronological_head_still_advances_the_cursor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """最高冲突镜本就是时序第一镜（未前置）：片头是普通时序段，游标照常推进——
+    立案③的重播保护不受 B 项豁免影响：8s 钩子把 0-6 的窗口拉到 0-8，
+    下一段必须从 8 起算，不许盖住被拉长的片头尾。"""
+    plan = _intro_plan(
+        ("ep1", 0.0, 6.0, "narration", "intro-1"),
+        ("ep1", 6.0, 12.0, "original", None),
+        ("ep1", 12.0, 14.0, "narration", "cta-1"),
+    )
+    result = _voice(
+        monkeypatch, tmp_path, plan, {"intro": 8.0, "cta": 2.0}, {"ep1": 100.0}
+    )
+    _assert_source_never_runs_backwards(result)
+    assert _windows(result) == [
+        ("ep1", 0.0, 8.0),
+        ("ep1", 8.0, 14.0),  # 原声段被平移，不被片头拉长后盖住
+        ("ep1", 14.0, 16.0),
+    ]
+
+
+def test_intro_teaser_exempt_is_per_episode_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """豁免只看**同集**倒回：片头预告 ep2 高潮，正文与 CTA 都在 ep1——
+    ep2 的预告不推进任何游标，ep1 的正文/CTA 照常按 ep1 游标推进。"""
+    plan = _intro_plan(
+        ("ep2", 90.0, 96.0, "narration", "intro-1"),
+        ("ep1", 0.0, 6.0, "original", None),
+        ("ep1", 4.0, 6.0, "narration", "cta-1"),
+    )
+    result = _voice(
+        monkeypatch, tmp_path, plan, {"intro": 6.0, "cta": 2.0},
+        {"ep1": 100.0, "ep2": 96.0},
+    )
+    assert _windows(result) == [
+        ("ep2", 90.0, 96.0),  # 预告原样（实测=计划长），ep2 游标未被推进
+        ("ep1", 0.0, 6.0),    # ep1 正文从计划起点起算
+        ("ep1", 6.0, 8.0),    # ep1 CTA 被 ep1 正文游标推进
+    ]
+
