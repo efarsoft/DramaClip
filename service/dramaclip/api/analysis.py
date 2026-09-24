@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -231,6 +232,11 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         raise RpcDomainError(_ERR_NO_EPISODES, "没有待分析的集")
 
     job_id = context.job_store.create("analysis", ref_id=project_id)
+    # 建单即整批标 analyzing：前置的全剧 OCR/热词挖掘要逐集跑数分钟，期间集状态
+    # 不能滞留旧值（否则界面整批显示 failed/pending 一动不动，用户无从判断是否受理）。
+    # 未真正处理到的集由 _run_job finally 回滚；崩溃残留下次启动被 reset_stale_analyzing 清扫。
+    for episode in targets:
+        episodes_repo.set_status(context.conn, str(episode["id"]), "analyzing")
     cancel_event = threading.Event()
     context.cancel_events[job_id] = cancel_event
     context.executor.submit(
@@ -452,6 +458,20 @@ def _audio_peak(record: dict[str, Any] | None) -> tuple[float | None, bool]:
     return audio.peak_dbfs, audio.clipping
 
 
+def _restore_unprocessed(context: AppContext, targets: list[dict[str, Any]]) -> None:
+    """把没真正处理到的目标集从 analyzing 回滚为入队前状态。
+
+    start() 建单时整批标了 analyzing；取消/致命失败后没轮到的集不能滞留在
+    analyzing（界面会误示仍在处理）。处理过的集已被置为 done/failed，不受影响；
+    进程崩溃没走到这里的残留，由下次启动的 reset_stale_analyzing 清扫。
+    """
+    for episode in targets:
+        episode_id = str(episode["id"])
+        row = episodes_repo.get(context.conn, episode_id)
+        if row is not None and row["status"] == "analyzing":
+            episodes_repo.set_status(context.conn, episode_id, str(episode["status"]))
+
+
 def _run_job(
     context: AppContext,
     job_id: str,
@@ -477,8 +497,14 @@ def _run_job(
             job_id=job_id,
         )
     try:
+        # 挖掘阶段逐集播报：任务标签/进度通知可见（此前整批分析前几分钟毫无动静）
+        def mining_report(done: int, count: int) -> None:
+            message = f"全剧字幕热词挖掘 {done}/{count} 集"
+            context.job_store.set_progress(job_id, 0.0, message)
+            context.notifier.progress(job_id, 0.0, message)
+
         bars_by_episode, bands_by_episode, hotwords = _mine_hotwords(
-            context, targets, cancel_event
+            context, targets, cancel_event, on_episode=mining_report
         )
         for index, episode in enumerate(targets):
             if cancel_event.is_set():
@@ -504,6 +530,7 @@ def _run_job(
         context.job_store.mark_failed(job_id, str(exc))
         context.notifier.log("error", f"分析任务失败: {exc}")
     finally:
+        _restore_unprocessed(context, targets)
         context.cancel_events.pop(job_id, None)
         projects_repo.set_status(context.conn, project_id, "ready")
         if failures:
@@ -636,17 +663,20 @@ def _mine_hotwords(
     context: AppContext,
     targets: list[dict[str, Any]],
     cancel_event: threading.Event,
+    on_episode: Callable[[int, int], None] | None = None,
 ) -> tuple[dict[str, list[OcrSegment]], dict[str, tuple[float, float]], str]:
     """阶段 A：全剧 OCR 抽取（落库）→ 挖掘全剧热词表；字幕带按集回传给逐集分析落库。"""
     bars_by_episode: dict[str, list[OcrSegment]] = {}
     bands_by_episode: dict[str, tuple[float, float]] = {}
     if context.settings.get("analysis.ocr_enabled", "1") != "1":
         return bars_by_episode, bands_by_episode, ""
-    for episode in targets:
+    for index, episode in enumerate(targets):
         if cancel_event.is_set():
             break
         episode_id = str(episode["id"])
         bars, band = _extract_bars(context, episode)
+        if on_episode is not None:
+            on_episode(index + 1, len(targets))
         if band is not None:
             # 带是源片属性：即使本集没抽出字幕条（bars 为空）也记下来，逐集分析时落库
             bands_by_episode[episode_id] = band

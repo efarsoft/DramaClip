@@ -198,6 +198,67 @@ def test_cancel_between_episodes(
         instance.close()
 
 
+def test_start_marks_targets_analyzing_immediately(
+    memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    """受理即标 analyzing：前置挖掘阶段集状态不得冻结旧值（用户可见「点了没反应」）。"""
+    instance = Harness(
+        memory_db, tmp_path / "work", FakeTranscriber(delay_s=1.0), data_dir=tmp_path
+    )
+    try:
+        project_id = _make_project(instance, tmp_path, sample_video)
+        result = instance.rpc("analysis.start", {"project_id": project_id})
+        # 不等完成：start 返回时（任务受理瞬间）目标集必须已全部 analyzing
+        episodes = episodes_repo.list_by_project(memory_db, project_id)
+        assert [ep["status"] for ep in episodes] == ["analyzing", "analyzing"]
+        status = instance.wait_done(str(result["job_id"]))
+        assert status["status"] == "completed"
+    finally:
+        instance.close()
+
+
+def test_cancel_restores_unprocessed_episodes(
+    memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    """取消后没轮到的集回滚入队前状态，不滞留 analyzing（否则界面永久「分析中」）。"""
+    instance = Harness(
+        memory_db, tmp_path / "work", FakeTranscriber(delay_s=0.8), data_dir=tmp_path
+    )
+    try:
+        project_id = _make_project(instance, tmp_path, sample_video, copies=3)
+        episodes = episodes_repo.list_by_project(memory_db, project_id)
+        third_id = str(episodes[2]["id"])
+        # 制造失败残留：第 3 集曾是 failed，重新入队后被取消 → 应回滚 failed 而非 pending
+        episodes_repo.set_status(memory_db, third_id, "failed")
+        result = instance.rpc("analysis.start", {"project_id": project_id})
+        time.sleep(0.2)
+        instance.rpc("analysis.cancel", {"job_id": result["job_id"]})
+        status = instance.wait_done(str(result["job_id"]))
+        assert status["status"] == "cancelled"
+        after = episodes_repo.list_by_project(memory_db, project_id)
+        by_id = {str(ep["id"]): ep["status"] for ep in after}
+        assert by_id[third_id] == "failed", "未处理集应回滚为入队前状态"
+        assert "analyzing" not in by_id.values(), "取消后不得有集滞留 analyzing"
+    finally:
+        instance.close()
+
+
+def test_mining_phase_reports_progress(
+    harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    """全剧热词挖掘阶段必须有进度播报——此前该阶段数分钟任务标签纹丝不动。"""
+    project_id = _make_project(harness, tmp_path, sample_video)
+    result = harness.rpc("analysis.start", {"project_id": project_id})
+    status = harness.wait_done(str(result["job_id"]))
+    assert status["status"] == "completed"
+    mining = [
+        m
+        for m in harness.sent
+        if m["method"] == "progress.update" and "热词挖掘" in str(m["params"]["message"])
+    ]
+    assert mining, "挖掘阶段应逐集播报 progress.update"
+
+
 def test_start_rejects_unknown_project(harness: Harness) -> None:
     response = harness.router.dispatch(
         RpcRequest(id=1, method="analysis.start", params={"project_id": "nope"})
