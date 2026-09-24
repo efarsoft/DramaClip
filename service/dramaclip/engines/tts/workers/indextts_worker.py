@@ -14,6 +14,17 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
+
+#: IndexTTS 源码落位（tts_runtime.py 安装时解包），由桥进程经环境变量下发。
+#: 上游 pyproject 的 TOML 扩展写法 pip/uv 都解析不了，不走 pip 安装——与
+#: cosyvoice_worker 的 sys.path 方案同构。
+
+
+def _bootstrap_sys_path() -> None:
+    src = os.environ.get("DRAMACLIP_INDEXTTS_SRC")
+    if src and Path(src).is_dir() and src not in sys.path:
+        sys.path.insert(0, src)
 
 
 def _probe_cuda() -> str:
@@ -43,6 +54,7 @@ def main() -> int:
     sys.stdout = sys.stderr
 
 
+    _bootstrap_sys_path()
     if device == "auto":
         device = _probe_cuda()
 

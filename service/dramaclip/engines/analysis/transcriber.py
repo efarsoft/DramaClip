@@ -1,4 +1,4 @@
-"""ASR 双引擎：faster-whisper（默认，已实测）/ SenseVoice（funasr，懒加载）。
+"""ASR 引擎族：faster-whisper（默认，已实测）/ SenseVoice（funasr）/ Paraformer（funasr）。
 """
 
 from __future__ import annotations
@@ -204,3 +204,108 @@ def _parse_sensevoice(raw: list) -> list[AsrSegment]:  # type: ignore[type-arg]
         )
         return [merged]
     return []
+
+
+class ParaformerEngine:
+    """Paraformer-large（funasr 同栈）：字级时间戳原生，热词有原生槽位。
+
+    与 SenseVoice 的两处关键差异：长音频靠 `batch_size_s` 动态批整集进；
+    时间戳是字级的——按字间静音间隙聚成句级段，供 OCR 融合与台词保护区用。
+    """
+
+    # 字间隙超过这个数（秒）就断句：短剧台词句间停顿普遍 >0.5s，标点模型不挂
+    # （那是另两笔下载），靠间隙本身就是可靠的句边界。
+    _SENTENCE_GAP_S = 0.6
+
+    def __init__(self, model_dir: Path | None = None, *, models_dir: Path | None = None) -> None:
+        resolved = model_dir if model_dir is not None else (
+            models_dir / "asr" / "paraformer" if models_dir is not None else None
+        )
+        self._model_dir = resolved
+        self._model: AutoModel | None = None
+
+    @property
+    def name(self) -> str:
+        return "paraformer"
+
+    def transcribe(
+        self, wav_path: Path, language: str = "zh", *, hotwords: str = ""
+    ) -> list[AsrSegment]:
+        model = self._ensure_model()
+        raw = model.generate(
+            input=str(wav_path),
+            batch_size_s=300,  # 长音频动态批：整集 wav 一次进，按 300s 预算切批
+            hotword=hotwords or None,  # paraformer 原生热词槽（热词反哺直接受益）
+            # 必须显式要时间戳：不传时 funasr 只回 {key,text}，_parse_paraformer
+            # 对无时间戳条目整条丢弃 → 全文静默变空（2026-09-24 真样例实测）。
+            output_timestamp=True,
+        )
+        return _parse_paraformer(raw, self._SENTENCE_GAP_S)
+
+    def _ensure_model(self) -> AutoModel:
+        if self._model is None:
+            from funasr import AutoModel  # ml extras 懒加载
+
+            if self._model_dir is not None and self._model_dir.is_dir():
+                self._model = AutoModel(model=str(self._model_dir))
+            else:
+                self._model = AutoModel(
+                    model="iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
+                )
+        return self._model
+
+
+def _parse_paraformer(raw: list, gap_s: float) -> list[AsrSegment]:  # type: ignore[type-arg]
+    """[{text, timestamp:[[beg_ms,end_ms], ...]}] → 句级段（按字间隙聚句 + 字级 words）。
+
+    text 与 timestamp 逐字配对；长度对不上时按可配对的前缀走、剩余文本并入末字
+    的跨度——文本一个不丢，边界取实测值（量不到的不编）。
+    """
+    segments: list[AsrSegment] = []
+    for item in raw:
+        text = str(item.get("text", "")).strip()
+        timestamps = [span for span in (item.get("timestamp") or []) if len(span) == 2]
+        if not text or not timestamps:
+            continue
+        chars = [ch for ch in text if not ch.isspace()]
+        words = [
+            WordSpan(start=beg_ms / 1000, end=end_ms / 1000, word=char)
+            for char, (beg_ms, end_ms) in _pair(chars, timestamps)
+        ]
+        for run in _group_by_gap(words, gap_s):
+            segments.append(
+                AsrSegment(
+                    start=run[0].start,
+                    end=run[-1].end,
+                    text=simplify("".join(w.word for w in run)),
+                    words=list(run),
+                )
+            )
+    return segments
+
+
+def _pair(
+    chars: list[str], timestamps: list[list[float]]
+) -> list[tuple[str, tuple[float, float]]]:
+    """文本字与时间戳逐位配对；时间戳短时，剩余文本并入末个时间戳的跨度。"""
+    if len(chars) <= len(timestamps):
+        return [(char, (span[0], span[1])) for char, span in zip(chars, timestamps, strict=False)]
+    if not timestamps:
+        return []
+    head = [(char, (span[0], span[1])) for char, span in zip(chars, timestamps, strict=False)]
+    tail = "".join(chars[len(timestamps) - 1 :])
+    last = timestamps[-1]
+    return [*head[: len(timestamps) - 1], (tail, (last[0], last[1]))]
+
+
+def _group_by_gap(
+    words: list[WordSpan], gap_s: float
+) -> list[list[WordSpan]]:
+    """相邻字跨度间隙超阈值的切开；同一句内的字归一段。"""
+    runs: list[list[WordSpan]] = []
+    for word in words:
+        if runs and word.start - runs[-1][-1].end <= gap_s:
+            runs[-1].append(word)
+        else:
+            runs.append([word])
+    return runs

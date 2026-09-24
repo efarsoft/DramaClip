@@ -87,5 +87,11 @@ def test_list_models_exposes_engine_ready(tmp_path: Path) -> None:
     assert flags["kokoro-82m"] is True
     assert flags["faster-whisper-base"] is True
     assert "sherpa-melo-zh" not in flags, "撤下的引擎还在清单里 = 资产库上一行永远装不上的死资产"
-    assert flags["paraformer-large"] is False, "无实现的引擎被报成可用 = 业主点了才知是空的"
+    assert flags["paraformer-large"] is True, "已接入 funasr 同栈（ParaformerEngine）"
+    assert "vibevoice-1.5b" not in flags, (
+        "已移除的引擎（官方运行时被上游删除）不许回潮进清单 = 资产库死资产"
+    )
+    assert "firedred-asr-aed-l" not in flags, (
+        "已移除的引擎（官方无 pip 包/无时间戳）不许回潮进清单 = 资产库死资产"
+    )
     assert all(isinstance(v, bool) for v in flags.values())

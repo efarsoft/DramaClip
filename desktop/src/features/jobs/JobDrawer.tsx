@@ -5,7 +5,7 @@
  */
 import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Alert, Button, Drawer, Empty, Progress, Segmented } from 'antd';
+import { Alert, Button, Drawer, Empty, Popconfirm, Progress, Segmented } from 'antd';
 import type { JobInfo, JobStatus } from '@dramaclip/protocol';
 import { jobsApi, modelsApi, projectApi } from '../../services/client';
 import { mixins } from '../../styles/mixins';
@@ -88,20 +88,37 @@ function JobsBody(): ReactElement {
   }
   const summary = summarizeJobs(jobs);
   const shown = sortJobs(jobs).filter((job) => matches(job, filter));
+  const finishedCount = jobs.length - summary.active;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceMd }}>
-      <Segmented
-        size="small"
-        value={filter}
-        onChange={(value) => {
-          setFilter(value as Filter);
-        }}
-        options={[
-          { label: `全部 ${String(jobs.length)}`, value: 'all' },
-          { label: `失败 ${String(summary.failed)}`, value: 'failed' },
-          { label: `在跑 ${String(summary.active)}`, value: 'active' },
-        ]}
-      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
+        <Segmented
+          size="small"
+          value={filter}
+          onChange={(value) => {
+            setFilter(value as Filter);
+          }}
+          options={[
+            { label: `全部 ${String(jobs.length)}`, value: 'all' },
+            { label: `失败 ${String(summary.failed)}`, value: 'failed' },
+            { label: `在跑 ${String(summary.active)}`, value: 'active' },
+          ]}
+        />
+        <span style={{ flex: 1 }} />
+        {finishedCount > 0 && (
+          <Popconfirm
+            title={`清空 ${String(finishedCount)} 条已结束记录？`}
+            description="完成/失败/取消的都会删掉，失败原因原文一并清除；在跑与排队中的不受影响。"
+            okText="清空"
+            cancelText="取消"
+            onConfirm={() => {
+              void jobsApi.clearFinished();
+            }}
+          >
+            <Button size="small" type="text">清空记录</Button>
+          </Popconfirm>
+        )}
+      </div>
       {shown.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有符合条件的任务" />}
       {shown.map((job) => (
         <JobRow

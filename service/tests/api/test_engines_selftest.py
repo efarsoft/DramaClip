@@ -143,10 +143,16 @@ def test_asr_selftest_refuses_when_model_missing(
         engines_api.run(context, {"model_id": "faster-whisper-small"})
 
 
-def test_reserve_asset_cannot_selftest(memory_db: sqlite3.Connection, tmp_path: Path) -> None:
+def test_reserve_asset_cannot_selftest(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """清单当前已无储备项（全目录接入）；注入 engine_ready=False 钉守卫分支本身。"""
+    import dramaclip.infra.model_manager.registry as registry_mod
+
     context = _context(memory_db, tmp_path)
+    monkeypatch.setattr(registry_mod, "engine_ready", lambda spec: False)
     with pytest.raises(RpcDomainError, match="尚未接入"):
-        engines_api.run(context, {"model_id": "vibevoice-1.5b"})
+        engines_api.run(context, {"model_id": "fun-cosyvoice3-0.5b"})
 
 
 # ---------------------------------------------------------------- TTS

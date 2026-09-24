@@ -22,6 +22,7 @@ def register(router: Router, context: AppContext) -> None:
     router.register("jobs.list", lambda params: list_jobs(context, params))
     router.register("jobs.get", lambda params: get_job(context, params))
     router.register("jobs.cancel", lambda params: cancel(context, params))
+    router.register("jobs.clear_finished", lambda params: clear_finished(context, params))
 
 
 def list_jobs(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -62,6 +63,11 @@ def cancel(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     event.set()
     context.notifier.log("info", f"已请求取消：{job['type']} {job.get('label') or job_id}")
     return {"job_id": job_id, "cancelling": True}
+
+
+def clear_finished(context: AppContext, _params: dict[str, Any]) -> dict[str, Any]:
+    """清空全部已结束（完成/失败/取消）的任务记录；在跑与排队中的原样保留。"""
+    return {"deleted": context.job_store.clear_finished()}
 
 
 def _now_ms() -> int:

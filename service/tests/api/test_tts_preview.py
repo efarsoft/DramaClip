@@ -99,14 +99,14 @@ def test_preview_params_override_settings(tmp_path: Path, fake_engine: FakeEngin
     assert result["engine"] == "edge"
 
 
-def test_preview_rejects_reserve_engine_without_touching_factory(
+def test_preview_rejects_unwired_engine_without_touching_factory(
     tmp_path: Path, fake_engine: FakeEngine
 ) -> None:
     """储备引擎点了试听就出声 = 骗业主说这能力已经能用。"""
     context = _context(tmp_path)
 
     with pytest.raises(Exception, match="未接入"):
-        tts_api.preview(context, {"engine": "vibevoice", "voice": "default"})
+        tts_api.preview(context, {"engine": "nonexistent", "voice": "default"})
 
     assert fake_engine.created == []
 

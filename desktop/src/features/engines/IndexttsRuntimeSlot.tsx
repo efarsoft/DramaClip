@@ -28,7 +28,7 @@ function RuntimeSlotView(state: RuntimeState): ReactElement {
     return (
       <div style={SLOT_BOX}>
         <span style={{ color: tokens.colorWarning }}>
-          IndexTTS 运行环境未安装（torch 等约 2~6GB，含独立 Python，与安装包分离按需下载）
+          TTS 运行环境未安装（IndexTTS 与 CosyVoice 共用；torch 等约 2~6GB，含独立 Python，与安装包分离按需下载）
         </span>
         <Button
           size="small"

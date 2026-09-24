@@ -24,6 +24,10 @@ export interface ServiceManagerOptions {
   readonly dataDir: string;
   readonly appVersion: string;
   readonly isPackaged: boolean;
+  /** 测试注入：spawn 目标（缺省按 isPackaged 解析 venv/sidecar）。 */
+  readonly pythonTarget?: PythonTarget;
+  /** 测试注入：重启策略（缺省 3 次退避 2/4/6s、稳定 60s 清零）。 */
+  readonly policy?: RestartPolicy;
   readonly onStateChange: (state: ServiceState) => void;
   readonly onEvent: (event: ServiceEvent) => void;
 }
@@ -51,7 +55,7 @@ export function resolvePythonTarget(options: ServiceManagerOptions): PythonTarge
 
 export class ServiceManager {
   private readonly options: ServiceManagerOptions;
-  private readonly policy = new RestartPolicy();
+  private readonly policy: RestartPolicy;
   private pipeServer: PipeServer | null = null;
   private child: ChildProcess | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
@@ -60,9 +64,11 @@ export class ServiceManager {
   private token = '';
   private state: ServiceState = 'starting';
   private stopping = false;
+  private manualRespawn = false;
 
   constructor(options: ServiceManagerOptions) {
     this.options = options;
+    this.policy = options.policy ?? new RestartPolicy();
   }
 
   get currentState(): ServiceState {
@@ -100,8 +106,18 @@ export class ServiceManager {
   }
 
   restart(): void {
-    this.killChild();
-    // 退出事件回调将触发 fail → 退避重启
+    // 手动重启是用户动作：不进崩溃账本、不等退避。give-up 后 child 已收走、
+    // 不会再有 exit 事件来接力——这里直接重拉，保证按钮在任何状态下都有效。
+    this.clearTimers();
+    this.stopHeartbeat();
+    this.policy.reset();
+    const child = this.child;
+    if (child !== null && child.exitCode === null) {
+      this.manualRespawn = true; // killChild 的 exit 回调据此立即重拉，不走 fail 退避
+      this.killChild();
+    } else {
+      this.spawnProcess();
+    }
   }
 
   async stop(): Promise<void> {
@@ -148,8 +164,10 @@ export class ServiceManager {
   }
 
   private spawnProcess(): void {
-    if (this.state === 'ready') this.setState('restarting'); // 手动重启时提示中间态
-    const target = resolvePythonTarget(this.options);
+    // restarting 提示中间态：手动/崩溃重启都覆盖（unavailable 是 give-up 终态，
+    // 手动 restart 从它出发时也要让界面看到「正在拉起」）
+    if (this.state === 'ready' || this.state === 'unavailable') this.setState('restarting');
+    const target = this.options.pythonTarget ?? resolvePythonTarget(this.options);
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       DRAMACLIP_SERVICE_ADDRESS: this.pipeServer?.address ?? '',
@@ -166,12 +184,20 @@ export class ServiceManager {
     });
     this.child.on('error', (error: Error) => {
       console.error(`[ServiceManager] 进程启动失败: ${error.message}`);
+      // ENOENT 等启动失败只发 error 不发 exit：不接力 fail 会永远卡在 starting
+      if (!this.stopping) this.fail(`进程启动失败: ${error.message}`);
     });
     this.child.stdout?.on('data', (chunk: Buffer) => { this.logLines('info', chunk); });
     this.child.stderr?.on('data', (chunk: Buffer) => { this.logLines('error', chunk); });
     this.child.once('exit', (code: number | null) => {
       this.child = null;
-      if (!this.stopping) this.fail(`Python 进程退出(code=${String(code ?? '?')})`);
+      if (this.stopping) return;
+      if (this.manualRespawn) {
+        this.manualRespawn = false;
+        this.spawnProcess();
+        return;
+      }
+      this.fail(`Python 进程退出(code=${String(code ?? '?')})`);
     });
   }
 
@@ -193,7 +219,8 @@ export class ServiceManager {
     console.error(`[ServiceManager] ${reason}，${String(decision.delayMs)}ms 后重启`);
     this.setState('restarting');
     this.restartTimer = setTimeout(() => {
-      if (!this.stopping) this.spawnProcess();
+      // child 判空防双拉：断连与进程退出可能先后各触发一次 fail（如手动重启途中）
+      if (!this.stopping && this.child === null) this.spawnProcess();
     }, decision.delayMs);
   }
 

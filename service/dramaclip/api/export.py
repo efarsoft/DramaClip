@@ -377,12 +377,9 @@ def _output_size(settings: config.Settings) -> tuple[int, int]:
     return width - width % 2, height - height % 2
 
 
-# 渲染后时长审计阈值：相对 8% 与绝对 3s 取大。渲染层天然引入数个百分点偏差——
-# dedup 微变速（speed 0.996~1.004，逐段 ±0.4%）、切点安全抖动（jitter ±0.3s、
-# 保护区顺延 ≤1s）、AAC priming/concat 的毫秒级出入——阈值必须容得下这些已知行为，
-# 只抓「段丢了/拼重了/时长翻倍」级别的真偏差（诚实失败哲学：超阈值写明账，不伪造不失败）。
-_AUDIT_DURATION_REL_TOLERANCE = 0.08
-_AUDIT_DURATION_ABS_TOLERANCE_S = 3.0
+# 渲染后时长审计的容差不在这里：判据统一由 encoder.AUDIT_DURATION_* 发号
+# （dedup 微变速 ±0.4%、切点抖动、AAC/concat 毫秒级出入都在它的预算里），
+# 本层只引用——第二处字面量等于第二套判据，改一处就会出现「界面绿、日志 warn」。
 
 
 def _as_float(value: Any) -> float | None:
@@ -544,7 +541,10 @@ def _audit_duration(context: AppContext, plan_data: PlanData, actual_s: float) -
         if declared <= 0:
             return
         diff = actual_s - declared
-        tolerance = max(declared * _AUDIT_DURATION_REL_TOLERANCE, _AUDIT_DURATION_ABS_TOLERANCE_S)
+        tolerance = max(
+            declared * encoder.AUDIT_DURATION_REL_TOLERANCE,
+            encoder.AUDIT_DURATION_ABS_TOLERANCE_S,
+        )
         if abs(diff) <= tolerance:
             return
         context.notifier.log(

@@ -33,6 +33,12 @@ export class RestartPolicy {
     return { action: 'restart', delayMs: this.baseDelayMs * this.attempts };
   }
 
+  /** 手动重启时清账：用户点「重启服务」是新起点，不该继承崩溃计数。 */
+  reset(): void {
+    this.attempts = 0;
+    this.lastStartAt = null;
+  }
+
   /** 当前连续失败次数（调试/展示用）。 */
   get attemptCount(): number {
     return this.attempts;

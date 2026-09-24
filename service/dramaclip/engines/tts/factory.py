@@ -12,10 +12,14 @@ from pathlib import Path
 from dramaclip.engines.tts.base import EngineCaps, TtsEngine
 
 # 引擎 → 模型子目录（相对 models_dir）；None = 云端引擎，不需要本地模型。
+# cosyvoice 的目录名跟随清单 placement（tts/cosyvoice300m）——引擎名与目录名
+# 不同名是有意的：同引擎名将来还要装 CosyVoice3（placement funcosyvoice3），各占各目录。
 _MODEL_DIRS: dict[str, Path | None] = {
     "edge": None,
     "kokoro": Path("tts") / "kokoro" / "Kokoro-82M-v1.1-zh",
     "indextts2": Path("tts") / "indextts2",
+    "cosyvoice": Path("tts") / "cosyvoice300m",
+    "cosyvoice3": Path("tts") / "funcosyvoice3",
 }
 
 
@@ -48,6 +52,10 @@ def create(engine: str, models_dir: Path | None = None) -> TtsEngine:
         from dramaclip.engines.tts.engines.indextts2 import IndexTts2Engine
 
         return IndexTts2Engine(_local_dir(engine, models_dir))
+    if engine in ("cosyvoice", "cosyvoice3"):
+        from dramaclip.engines.tts.engines.cosyvoice import CosyVoiceEngine
+
+        return CosyVoiceEngine(_local_dir(engine, models_dir))
     available = " / ".join(sorted(supported()))
     raise ValueError(f"未知 TTS 引擎: {engine}（可用: {available}）")
 

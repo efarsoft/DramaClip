@@ -545,34 +545,6 @@
       }
     },
     {
-      "name": "models.scan_local",
-      "summary": "重新探测 models/：手动放置的模型即刻被认出来（真正的导入是 models.import_commit）",
-      "params": {},
-      "result": {
-        "type": "object",
-        "required": [
-          "installed",
-          "total",
-          "import_error"
-        ],
-        "properties": {
-          "installed": {
-            "type": "array",
-            "items": {
-              "$ref": "#/x-models/ModelInfo"
-            }
-          },
-          "total": {
-            "type": "integer"
-          },
-          "import_error": {
-            "type": "string",
-            "description": "导入登记本（models/imported.json）读不出来时的说明；空串 = 正常"
-          }
-        }
-      }
-    },
-    {
       "name": "models.verify",
       "summary": "资产体检：目录/必需文件/权重/快照提交号/下载清单/中断残留/唯一路径逐项判据",
       "params": {

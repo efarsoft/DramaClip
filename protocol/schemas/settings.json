@@ -25,20 +25,6 @@
         "required": ["ok"],
         "properties": { "ok": { "type": "boolean" }, "updated": { "type": "integer" } }
       }
-    },
-    {
-      "name": "settings.test_llm",
-      "summary": "按已保存配置探测 LLM 连通性（max_tokens=1 最小往返）",
-      "params": {},
-      "result": {
-        "type": "object",
-        "required": ["ok", "latency_ms", "model"],
-        "properties": {
-          "ok": { "type": "boolean" },
-          "latency_ms": { "type": "integer" },
-          "model": { "type": "string" }
-        }
-      }
     }
   ]
 }

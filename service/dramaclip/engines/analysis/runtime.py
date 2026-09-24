@@ -7,6 +7,7 @@ from pathlib import Path
 from dramaclip.engines.analysis.transcriber import (
     AsrEngine,
     FasterWhisperEngine,
+    ParaformerEngine,
     SenseVoiceEngine,
 )
 from dramaclip.infra import config
@@ -29,9 +30,11 @@ class AnalysisRuntime:
 def supported() -> frozenset[str]:
     """真能构建出来的转写引擎名——``registry.engine_ready`` 读这里，两边不各存一份名单。
 
-    ``paraformer`` / ``firedred`` 在模型清单里有登记项但这里没有实现，不算「已接入」。
+    ``firedred`` 曾在清单里登记、2026-09-24 裁决移除：官方无 pip 包（接入需要隔离桥）、
+    AED 无原生时间戳且单次推理上限 60s（整集 wav 必须先过 VAD 分窗）——清单不再挂
+    「永远装不上」的死资产。
     """
-    return frozenset({"faster_whisper", "sensevoice"})
+    return frozenset({"faster_whisper", "sensevoice", "paraformer"})
 
 
 def _build_transcriber(settings: config.Settings, models_dir: Path) -> AsrEngine:
@@ -41,6 +44,8 @@ def _build_transcriber(settings: config.Settings, models_dir: Path) -> AsrEngine
         raise ValueError(f"未知 ASR 引擎: {engine}（可用: {available}）")
     if engine == "sensevoice":
         return SenseVoiceEngine(models_dir=models_dir)
+    if engine == "paraformer":
+        return ParaformerEngine(models_dir=models_dir)
     model_size = settings.get("asr.model", "base")
     device = settings.get("asr.device", "cpu")
     return FasterWhisperEngine(

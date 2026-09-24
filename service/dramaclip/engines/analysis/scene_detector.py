@@ -16,7 +16,7 @@ def detect_scenes(video_path: Path, *, threshold: float = _DEFAULT_THRESHOLD) ->
 
     scene_list = detect(str(video_path), ContentDetector(threshold=threshold))
     return [
-        SceneInfo(start=start.get_seconds(), end=end.get_seconds())
+        SceneInfo(start=start.seconds, end=end.seconds)
         for start, end in scene_list
     ]
 

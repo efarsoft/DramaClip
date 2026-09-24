@@ -67,16 +67,29 @@ describe('主体文案', () => {
 });
 
 describe('汇总与排序', () => {
-  it('在跑 = pending+running；失败单列', () => {
+  it('在跑 = pending+running；失败单列；进度取最新启动的在跑 job', () => {
     const jobs = [
       job({ status: 'running' }),
       job({ id: 'j2', status: 'pending' }),
       job({ id: 'j3', status: 'failed' }),
       job({ id: 'j4', status: 'completed' }),
     ];
-    expect(summarizeJobs(jobs)).toEqual({ active: 2, failed: 1 });
+    expect(summarizeJobs(jobs)).toEqual({ active: 2, failed: 1, runningPercent: 40 });
     expect(isActiveJob(job({ status: 'pending' }))).toBe(true);
     expect(isActiveJob(job({ status: 'cancelled' }))).toBe(false);
+  });
+
+  it('状态栏进度跟随最新启动的在跑 job（created_at 新者优先）', () => {
+    const jobs = [
+      job({ id: 'old', status: 'running', progress: 90, created_at: 1_000 }),
+      job({ id: 'new', status: 'running', progress: 12, created_at: 5_000 }),
+    ];
+    expect(summarizeJobs(jobs).runningPercent).toBe(12);
+  });
+
+  it('没有在跑 job 时进度为 null（缺席而非编 0）', () => {
+    const jobs = [job({ status: 'failed', progress: 40 }), job({ status: 'completed' })];
+    expect(summarizeJobs(jobs)).toEqual({ active: 0, failed: 1, runningPercent: null });
   });
 
   it('失败优先，其次在跑，终态垫底；同级按最近变更倒序', () => {

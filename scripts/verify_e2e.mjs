@@ -3,6 +3,10 @@
  * 持久化 e2e 冒烟脚本（回归工具）：起独立服务实例，验证
  * 心跳握手 → 模型清单 → 预筛 → 编排 → 导出 全链路。
  * 用法：node scripts/verify_e2e.mjs [--modes a,b,c]
+ *
+ * ⚠️ 读写真实 <repo>/data/（增量回归依赖已分析项目缓存），不是隔离快照——
+ * 需要隔离的验证走 scripts/verify_modes.py 或 seed_scale_data.py。
+ * 退出码即门禁：导出被拒 / 任务非 completed / 服务错误日志 >0 条 → 1。
  */
 import net from 'node:net';
 import { spawn, execSync } from 'node:child_process';
@@ -63,6 +67,10 @@ function handleLine(line) {
 
 function rpc(method, params = {}, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
+    if (send === null) {
+      reject(new Error(`服务尚未连上: ${method}`));
+      return;
+    }
     nextId += 1;
     const id = `e2e-${nextId}`;
     const timer = setTimeout(() => {
@@ -87,6 +95,7 @@ async function waitJob(jobId, timeoutMs) {
 async function main() {
   await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
   console.log(`[e2e] 模式: ${modes.join(', ')}`);
+  console.log(`[e2e] 数据目录（真实库，非隔离快照）: ${dataDir}`);
   const py = spawn(path.join(repoRoot, '.venv', 'Scripts', 'python.exe'), ['-m', 'dramaclip'], {
     cwd: path.join(repoRoot, 'service'),
     env: {
@@ -151,7 +160,10 @@ async function main() {
       throw error;
     }
   }
-  if (analysis !== null) console.log(`[e2e] 分析: ${analysis.status}`);
+  if (analysis !== null) {
+    console.log(`[e2e] 分析: ${analysis.status}`);
+    if (analysis.status !== 'completed') failures += 1;
+  }
 
   const { job_id: genJob } = await rpc('narration.plan_variants', {
     project_id: project.id,
@@ -160,6 +172,7 @@ async function main() {
   });
   const gen = await waitJob(genJob, 1800000);
   console.log(`[e2e] 编排: ${gen.status}`);
+  if (gen.status !== 'completed') failures += 1;
 
   const plans = await rpc('narration.list_plans', { project_id: project.id });
   const byMode = new Map();
@@ -178,13 +191,15 @@ async function main() {
     }
     const result = await waitJob(submitted.exports[0].job_id, 600000);
     console.log(`[e2e] 导出 ${mode}: ${result.status}`);
+    if (result.status !== 'completed') failures += 1;
   }
 
   const exportsList = await rpc('export.list', { project_id: project.id });
   const completed = exportsList.filter((e) => e.status === 'completed').length;
   console.log(`[e2e] 累计完成导出: ${completed}（服务错误日志 ${failures} 条）`);
   await rpc('system.shutdown', {}).catch(() => {});
-  setTimeout(() => process.exit(0), 500);
+  // 退出码即门禁：红灯必须红着出去，不能只打印 failures 后假装成功
+  setTimeout(() => process.exit(failures > 0 ? 1 : 0), 500);
 }
 
 main().catch((error) => {

@@ -163,4 +163,6 @@ def test_factory_capabilities_catches_probe_explosions(tmp_path: Path) -> None:
 
 def test_factory_capabilities_never_touches_supported_set() -> None:
     """registry.engine_ready 的防漂移判据读 factory.supported()：caps 接入不得动它。"""
-    assert factory.supported() == frozenset({"edge", "kokoro", "indextts2"})
+    assert factory.supported() == frozenset(
+        {"edge", "kokoro", "indextts2", "cosyvoice", "cosyvoice3"}
+    )

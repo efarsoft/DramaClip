@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from types import SimpleNamespace
 from typing import Any
 
@@ -102,3 +105,54 @@ def test_unknown_domain_rejected(memory_db: sqlite3.Connection) -> None:
     harness = Harness(memory_db, {})
     assert harness.error_code("engine_configs.create", {"domain": "nope", "name": "x"}) == -32310
     assert harness.error_code("engine_configs.list", {"domain": "nope"}) == -32310
+
+
+class _FakeOpenAI(BaseHTTPRequestHandler):
+    def do_POST(self) -> None:  # noqa: N802 - http.server 命名约定
+        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        body = json.dumps(
+            {"choices": [{"message": {"role": "assistant", "content": "pong"}}]}
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args: Any) -> None:
+        return
+
+
+def test_test_reaches_a_live_llm_endpoint(memory_db: sqlite3.Connection) -> None:
+    """「测试连接」必须真打到 OpenAI 兼容端点并量出往返：ping() 唯一的可达入口就是这条。"""
+    server = HTTPServer(("127.0.0.1", 0), _FakeOpenAI)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        harness = Harness(memory_db, {})
+        result = harness.rpc(
+            "engine_configs.test",
+            {
+                "base_url": f"http://127.0.0.1:{server.server_port}",
+                "api_key": "sk-test",
+                "model": "fake",
+            },
+        )
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["latency_s"] is not None
+    finally:
+        server.shutdown()
+
+
+def test_test_reports_unreachable_endpoint_without_raising(
+    memory_db: sqlite3.Connection,
+) -> None:
+    """连不上是 UI 要显示的结论，不是 RPC 异常——弹窗就地报错，不炸整页。"""
+    harness = Harness(memory_db, {})
+    result = harness.rpc(
+        "engine_configs.test",
+        {"base_url": "http://127.0.0.1:9", "api_key": "", "model": "x"},
+    )
+    assert result["ok"] is False
+    assert result["error"]

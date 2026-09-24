@@ -147,7 +147,11 @@ def test_input_side_errors_do_not_trigger_fallback(
 def test_unknown_kind_still_falls_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """分类不出来的失败（如超时被杀，stderr 空）按可回退处理——best-effort。"""
+    """分类不出来的失败（如超时被杀，stderr 空）按可回退处理——best-effort。
+
+    回退之后还有 A4-2 统一收口：seg0 回退、seg1 硬编成功 → 整片按 libx264 重跑
+    一趟；seg0 凭 sig（actual=libx264）复用零成本，seg1 补编一次 libx264。
+    """
     attempts: list[list[str]] = []
 
     def fake_cut(args: list[str], cancel: Any = None, **_k: Any) -> None:
@@ -155,10 +159,62 @@ def test_unknown_kind_still_falls_back(
             attempts.append(list(args))
             raise runner.FfmpegError("ffmpeg 退出码 1：")
         attempts.append(list(args))
+        Path(args[-1]).write_bytes(b"ok")
 
     _export(monkeypatch, tmp_path, fake_cut)
-    assert len(attempts) == 3, "段0 回退成功后段1 正常跑：1+1+1 次"
-    assert "-c:v libx264" in " ".join(attempts[1])
+    per_seg = _attempts_by_seg(attempts)
+    assert len(attempts) == 4, "seg0 硬编+回退、seg1 硬编成功+统一重跑补编，共 4 次"
+    for seg_attempts in per_seg.values():
+        assert len(seg_attempts) == 2, f"每段恰好硬编+libx264 各一次：{seg_attempts}"
+        assert "-c:v libx264" in " ".join(seg_attempts[-1]), "统一收口：末次尝试必是 libx264"
+
+
+def test_uniform_retry_reuses_fallback_segment_and_reencodes_hw_segment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A4-2 统一收口的复用分工：回退段不重编（sig 复用），硬编成功段补编 libx264。
+
+    seg0 全程 nvenc 成功；seg1 nvenc 失败回退 libx264。统一重跑请求 libx264：
+    seg1 的 sig 记 actual=libx264 → 命中复用（libx264 尝试只有回退那一次）；
+    seg0 的 sig 记 actual=nvenc → 补编一次 libx264。
+    """
+    attempts: list[list[str]] = []
+
+    def fake_cut(args: list[str], cancel: Any = None, **_k: Any) -> None:
+        seg = args[-1]
+        is_hw = args[args.index("-c:v") + 1] in encoder._HW_ENCODERS
+        attempts.append(list(args))
+        if is_hw and seg.endswith("seg_001.mp4"):
+            raise runner.FfmpegError("第二段 nvenc 运行时挂", kind="codec")
+        Path(seg).write_bytes(b"ok")
+
+    _export(monkeypatch, tmp_path, fake_cut)
+    per_seg = _attempts_by_seg(attempts)
+    for seg, seg_attempts in per_seg.items():
+        assert len(seg_attempts) == 2, f"{seg}：硬编 + libx264 各一次，无第三次重编"
+        assert "-c:v libx264" in " ".join(seg_attempts[-1])
+    # 复用生效的铁证：seg1 的 libx264 尝试只有回退那一次（复用失败会再补一次）；
+    # seg0 的 libx264 尝试来自统一重跑（第一趟它 nvenc 是成功的）
+    seg1_fallback = [
+        a for a in per_seg[[k for k in per_seg if k.endswith("seg_001.mp4")][0]]
+        if "-c:v libx264" in " ".join(a)
+    ]
+    assert len(seg1_fallback) == 1
+
+
+def test_no_fallback_runs_single_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """硬编全程成功：单趟完成，不触发统一重跑（行为与改动前逐字节一致）。"""
+    attempts: list[list[str]] = []
+
+    def fake_cut(args: list[str], cancel: Any = None, **_k: Any) -> None:
+        attempts.append(list(args))
+        Path(args[-1]).write_bytes(b"ok")
+
+    _export(monkeypatch, tmp_path, fake_cut)
+    assert len(attempts) == 2, "两段各硬编一次，无回退无重跑"
+    assert all("-c:v h264_nvenc" in " ".join(a) for a in attempts)
 
 
 def test_software_codec_failure_raises_without_retry(

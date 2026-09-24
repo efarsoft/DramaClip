@@ -310,6 +310,8 @@ export const jobsApi = {
   get: (jobId: string): Promise<{ job: JobInfo }> => rpc<{ job: JobInfo }>('jobs.get', { job_id: jobId }),
   cancel: (jobId: string): Promise<{ job_id: string; cancelling: boolean; reason?: string }> =>
     rpc<{ job_id: string; cancelling: boolean; reason?: string }>('jobs.cancel', { job_id: jobId }),
+  /** 清空已结束（完成/失败/取消）的任务记录；在跑与排队中的不动。 */
+  clearFinished: (): Promise<{ deleted: number }> => rpc<{ deleted: number }>('jobs.clear_finished', {}),
 } as const;
 
 export const settingsApi = {

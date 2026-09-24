@@ -16,15 +16,16 @@ import { JobsFeed } from '../JobsFeed';
 const api = vi.hoisted(() => ({
   listJobs: vi.fn(),
   cancel: vi.fn(),
+  clearFinished: vi.fn(),
   projectList: vi.fn(),
   modelsList: vi.fn(),
 }));
 
 vi.mock('../../../services/client', () => ({
-  jobsApi: { list: api.listJobs, get: vi.fn(), cancel: api.cancel },
+  jobsApi: { list: api.listJobs, get: vi.fn(), cancel: api.cancel, clearFinished: api.clearFinished },
   projectApi: { list: api.projectList },
   modelsApi: { list: api.modelsList },
-  appVersion: vi.fn(() => Promise.resolve('1.1.0-RC')),
+  appVersion: vi.fn(() => Promise.resolve('0.2.0')),
   systemApi: { health: vi.fn(() => Promise.resolve({})) },
 }));
 
@@ -197,6 +198,30 @@ describe('JobsFeed（门控轮询）', () => {
   });
 });
 
+describe('任务中心清空记录', () => {
+  it('有已结束记录时给「清空记录」，量化确认后清掉，在跑的不动', async () => {
+    useUiStore.setState({ serviceState: 'ready' });
+    useJobsStore.setState({
+      jobs: [RUNNING_EXPORT, FAILED_JOB],
+      available: true,
+      serverTimeMs: SERVER_NOW,
+    });
+    api.clearFinished.mockResolvedValue({ deleted: 1 });
+    render(
+      <MemoryRouter>
+        <JobDrawer />
+      </MemoryRouter>,
+    );
+    useJobsStore.setState({ drawerOpen: true });
+
+    fireEvent.click(await screen.findByText('清空记录'));
+    fireEvent.click(await screen.findByText('清 空'));
+    await waitFor(() => {
+      expect(api.clearFinished).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
 describe('StatusBar 任务段', () => {
   it('有在跑/失败：计数角标，点击开抽屉', async () => {
     useUiStore.setState({ serviceState: 'ready' });
@@ -204,6 +229,7 @@ describe('StatusBar 任务段', () => {
     render(<StatusBar />);
 
     expect(await screen.findByText(/在跑 1/)).toBeTruthy();
+    expect(screen.getByText('62%')).toBeTruthy();  // 卷二 #18：最高优先级在跑 job 的 %
     expect(screen.getByText(/失败 1/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /在跑 1/ }));
     expect(useJobsStore.getState().drawerOpen).toBe(true);

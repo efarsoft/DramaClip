@@ -1,24 +1,11 @@
 /** Electron 主进程入口（docs/desktop/00 §2 启动时序）。 */
-import { app, BrowserWindow, nativeTheme, protocol, shell } from 'electron';
-import { promises as fsPromises } from 'node:fs';
+import { app, BrowserWindow, nativeTheme, protocol, screen, shell } from 'electron';
 import path from 'node:path';
 import { registerIpc, broadcastEvent, resolveDataPaths, type IpcContext } from './ipc';
+import { createPreviewHandler, createPreviewRoots } from './services/preview-protocol';
 import { ServiceManager, type ServiceManagerOptions } from './services/service-manager';
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
-
-// dramaclip:// 本地文件的响应类型（视频预览 + 图片封面 + 配音试听）
-const CONTENT_TYPES: Record<string, string> = {
-  mp4: 'video/mp4',
-  webm: 'video/webm',
-  mov: 'video/quicktime',
-  mkv: 'video/x-matroska',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-  mp3: 'audio/mpeg',
-  wav: 'audio/wav',
-};
 // dist-electron/main/index.js → 上三级即仓库根
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 
@@ -41,9 +28,12 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 function createMainWindow(): void {
+  // 默认 1680×1050：1920×1080 在主流 1080p 屏扣掉任务栏（可用高约 1040px）放不下，
+  // 1680×1050 在 1080p 与更大屏都完整可见；更小的屏钳到工作区尺寸，不越界
+  const workArea = screen.getPrimaryDisplay().workAreaSize;
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: Math.min(1680, workArea.width),
+    height: Math.min(1050, workArea.height),
     minWidth: 1024,
     minHeight: 680,
     show: false,
@@ -137,44 +127,20 @@ async function bootstrap(): Promise<void> {
 
 void app.whenReady().then(() => {
   // 本地媒体预览协议：dramaclip://local/<encodeURIComponent(绝对路径)>
-  // video 元素要求 Range/206 分段响应，故手动实现字节范围（net.fetch 全量 200 不可播）
-  protocol.handle('dramaclip', async (request) => {
-    try {
-      const raw = decodeURIComponent(new URL(request.url).pathname.replace(/^\/+/, ''));
-      const filePath = raw.replaceAll('\\', '/');
-      const stat = await fsPromises.stat(filePath).catch(() => null);
-      if (!stat?.isFile()) {
-        console.error(`[dramaclip] not found: ${filePath}`);
-        return new Response('not found', { status: 404 });
-      }
-      // 预览文件（≤百 MB）整读切片：Node Buffer 流的块类型不被 Chromium media 接受
-      const buffer = new Uint8Array(await fsPromises.readFile(filePath));
-      const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
-      const contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream';
-      const baseHeaders: Record<string, string> = {
-        'content-type': contentType,
-        'accept-ranges': 'bytes',
-      };
-      const rangeHeader = request.headers.get('range');
-      const match = rangeHeader === null ? null : /bytes=(\d+)-(\d*)/.exec(rangeHeader);
-      if (match === null) {
-        return new Response(buffer, { headers: { ...baseHeaders, 'content-length': String(buffer.length) } });
-      }
-      const start = Number(match[1]);
-      const end = match[2] === '' ? buffer.length - 1 : Math.min(Number(match[2]), buffer.length - 1);
-      return new Response(buffer.subarray(start, end + 1), {
-        status: 206,
-        headers: {
-          ...baseHeaders,
-          'content-length': String(end - start + 1),
-          'content-range': `bytes ${String(start)}-${String(end)}/${String(buffer.length)}`,
-        },
-      });
-    } catch (error) {
-      console.error(`[dramaclip] handler 异常: ${String(error)}`);
-      return new Response('error', { status: 500 });
-    }
-  });
+  // video 元素要求 Range/206 分段响应；路径/类型/内存三重围栏见 preview-protocol.ts
+  const previewDataRoot = app.isPackaged
+    ? path.join(app.getPath('userData'), 'data')
+    : devDataDir();
+  const getPreviewRoots = createPreviewRoots(async () => {
+    if (manager === null) return [];
+    const projects = (await manager.rpc('project.list', {})) as readonly {
+      source_path?: unknown;
+    }[]; // 受信 sidecar 边界：形状由 protocol 契约钳制
+    return projects
+      .map((project) => project.source_path)
+      .filter((value): value is string => typeof value === 'string' && value !== '');
+  }, previewDataRoot);
+  protocol.handle('dramaclip', createPreviewHandler(getPreviewRoots));
   void bootstrap();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();

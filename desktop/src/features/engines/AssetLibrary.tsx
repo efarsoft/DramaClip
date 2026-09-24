@@ -1,24 +1,21 @@
 /**
- * 资产库：一个域的全部模型，按「引擎已接入 / 待接入 / 外部登记」分区，列表与表格两种视图共用同一批列。
+ * 资产库：一个域的全部模型，按「引擎已接入 / 待接入 / 外部登记」分区。
  * 未接入的资产照样列，但不给「选为生效」——判据是后端的 engine_ready 与体检结论，前端不写死。
  * 登记本读坏了要明说（importError），不能把「imported.json 打不开」演成「库里没货」。
  */
 import { useState } from 'react';
 import type { ReactElement } from 'react';
-import { Alert, Button, Empty, Input, Segmented } from 'antd';
+import { Alert, Button, Empty, Input } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import type { ImportRecord, ModelInfo, SelftestResults } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
 import { PageSection } from '../../components/layout/PageKit';
 import { type Reports, partitionAssets, reportFor } from './assetState';
 import type { MachineSpecs } from './machineFit';
-import { COLUMNS, GRID } from './assetGrid';
 import { AssetRow } from './AssetRow';
 import { GroupHead } from './AssetKit';
 import { ExternalAssets } from './ExternalAssets';
 import { useDownloadSettled } from './useDownloadSettled';
-
-type View = 'list' | 'table';
 
 interface LibraryProps {
   models: readonly ModelInfo[];
@@ -42,10 +39,9 @@ interface LibraryProps {
 
 type GroupProps = Omit<LibraryProps, 'models' | 'externals' | 'importError' | 'onForget' | 'onImport'> & {
   models: readonly ModelInfo[];
-  view: View;
 };
 
-/** 资产库分区（含工具栏与视图切换）。 */
+/** 资产库分区（含工具栏）。 */
 export function AssetLibrary({
   models,
   externals,
@@ -63,20 +59,17 @@ export function AssetLibrary({
 }: LibraryProps): ReactElement {
   useDownloadSettled(onChanged);
   const [keyword, setKeyword] = useState('');
-  const [view, setView] = useState<View>('list');
   const filtered = models.filter((model) => hits(model, keyword));
   const shown = externals.filter((record) => externalHits(record, keyword));
   const { usable, reserve } = partitionAssets(filtered);
-  const group = { reports, selftests, view, specs, activeModelId, onActivate, onChanged, onVerify, renderPreview };
+  const group = { reports, selftests, specs, activeModelId, onActivate, onChanged, onVerify, renderPreview };
   return (
     <PageSection
       title="资产库"
       extra={
         <LibraryToolbar
           keyword={keyword}
-          view={view}
           onKeyword={setKeyword}
-          onView={setView}
           onVerifyAll={onChanged}
           onImport={onImport}
         />
@@ -123,16 +116,12 @@ function externalHits(record: ImportRecord, keyword: string): boolean {
 
 function LibraryToolbar({
   keyword,
-  view,
   onKeyword,
-  onView,
   onVerifyAll,
   onImport,
 }: {
   keyword: string;
-  view: View;
   onKeyword: (value: string) => void;
-  onView: (value: View) => void;
   onVerifyAll: () => void;
   onImport: () => void;
 }): ReactElement {
@@ -147,17 +136,6 @@ function LibraryToolbar({
         value={keyword}
         onChange={(event) => {
           onKeyword(event.target.value);
-        }}
-      />
-      <Segmented
-        size="small"
-        value={view}
-        options={[
-          { label: '列表', value: 'list' },
-          { label: '表格', value: 'table' },
-        ]}
-        onChange={(value) => {
-          onView(value as View);
         }}
       />
       <Button size="small" onClick={onVerifyAll}>
@@ -177,7 +155,6 @@ function AssetGroup({
   models,
   reports,
   selftests,
-  view,
   specs,
   activeModelId,
   onActivate,
@@ -200,75 +177,23 @@ function AssetGroup({
         }}
       />
       {open && (
-        <AssetList
-          models={models}
-          view={view}
-          reports={reports}
-          selftests={selftests}
-          specs={specs}
-          activeModelId={activeModelId}
-          onActivate={onActivate}
-          onChanged={onChanged}
-          onVerify={onVerify}
-          renderPreview={renderPreview}
-        />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
+          {models.map((model) => (
+            <AssetRow
+              key={model.model_id}
+              model={model}
+              report={reportFor(reports, model.model_id)}
+              selftest={selftests?.[model.model_id]}
+              specs={specs}
+              active={model.model_id === activeModelId}
+              onActivate={onActivate}
+              onChanged={onChanged}
+              onVerify={onVerify}
+              preview={renderPreview?.(model)}
+            />
+          ))}
+        </div>
       )}
-    </div>
-  );
-}
-
-function AssetList({
-  models,
-  view,
-  reports,
-  selftests,
-  specs,
-  activeModelId,
-  onActivate,
-  onChanged,
-  onVerify,
-  renderPreview,
-}: GroupProps): ReactElement {
-  const row = (model: ModelInfo, table: boolean) => (
-    <AssetRow
-      key={model.model_id}
-      model={model}
-      report={reportFor(reports, model.model_id)}
-      selftest={selftests?.[model.model_id]}
-      specs={specs}
-      active={model.model_id === activeModelId}
-      onActivate={onActivate}
-      onChanged={onChanged}
-      onVerify={onVerify}
-      preview={renderPreview?.(model)}
-      table={table}
-    />
-  );
-  if (view === 'list') {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
-        {models.map((model) => row(model, false))}
-      </div>
-    );
-  }
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: GRID,
-          gap: tokens.spaceMd,
-          padding: `0 ${tokens.spaceMd}`,
-          fontSize: tokens.text.badge.size,
-          lineHeight: tokens.text.badge.leading,
-          color: tokens.textTertiary,
-        }}
-      >
-        {COLUMNS.map((column) => (
-          <span key={column}>{column}</span>
-        ))}
-      </div>
-      {models.map((model) => row(model, true))}
     </div>
   );
 }

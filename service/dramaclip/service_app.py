@@ -12,6 +12,7 @@ from dramaclip import PROTOCOL_VERSION, __version__
 from dramaclip.api import build_router
 from dramaclip.api.context import AppContext
 from dramaclip.engines.analysis.runtime import AnalysisRuntime
+from dramaclip.engines.tts.engines import indextts2
 from dramaclip.infra import config, gpu, jobs, paths
 from dramaclip.infra import logging as logging_setup
 from dramaclip.infra.model_manager import cuda_runtime
@@ -97,6 +98,9 @@ class ServiceApp:
                 self._stop.wait(_STOP_POLL_SECONDS)
         finally:
             executor.shutdown(wait=True)
+            # 先等作业收尾再收 worker：合成中的段先落完，避免最后一问没有应答；
+            # 常驻 worker 不收会在 Windows 上留占着模型内存的孤儿进程
+            indextts2.shutdown_worker()
             if self._connection is not None:
                 self._connection.close()
             conn.close()

@@ -67,17 +67,29 @@ api/project.py      create / list / get / delete / rename / duplicate /
                     reorder_episodes / update_settings                   （11）
 api/analysis.py     prescreen / start / status / cancel / results /
                     resync_semantic / update_asr                          （7）
-api/narration.py    generate_plans / list_plans / produce / list_styles   （4）
+api/narration.py    plan_variants / list_plans / get_plan / list_styles / （6）
+                    generate_titles / update_titles
 api/export.py       submit / retry / list / list_works / get /
                     ensure_covers / delete / selfcheck                  （8）
 api/subtitle.py     list_presets                                          （1）
-api/models.py       list / download / scan_local / delete                 （4）
-api/settings.py     get / update / test_llm                               （3）
+api/models.py       list / download / clean_residue / clean_orphan /      （16）
+                    orphan_list / verify / relayout / import_inspect /
+                    import_commit / import_records / import_forget /
+                    delete / runtime_status / install_runtime /
+                    indextts_status / install_indextts
+api/settings.py     get / update                                          （2）
 api/engine_configs.py  create / list / update / delete / enable / test    （6）
 api/jobs.py         list / get / cancel                                   （3）
+api/prompts.py      list / save / reset                                   （3）
+api/tts.py          preview                                               （1）
+api/engines.py      selftest / selftest_results                           （2）
+                    （analysis.prescreen 单独成文 protocol/schemas/prescreen.json，
+                      与 api/analysis.py 同属 analysis 命名空间）
 ```
 
-**实测合计 46 个方法**（P-1 收口时以 `Router.method_names` 数出，非估算）。
+**合计 69 个方法**（2026-09-24 以 `protocol/schemas/*.json` 的 `x-methods` 数出；
+`tests/transport/test_contract_sync.py` 保证 schema ↔ Router ↔ `protocol/ts` 三面同步，
+所以这三处的数不会各说各话）。
 命名空间分布：`project` 11、`analysis` 7、`engine_configs` 6、`export` 4、`models` 4、
 `narration` 4、`jobs` 3、`settings` 3、`system` 3、`subtitle` 1。
 

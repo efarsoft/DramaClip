@@ -344,21 +344,6 @@ def test_delete_removes_a_landed_copy_and_its_record(
     assert source.is_dir(), "删除库内副本不动业主的源目录"
 
 
-def test_scan_local_reports_a_corrupt_manifest_without_losing_the_library(
-    memory_db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """登记本坏了要说话；但坏了不等于资产库空了——内置探测照旧。"""
-    context = _context(memory_db, tmp_path)
-    models_dir = context.data_dir / "models"
-    models_dir.mkdir(parents=True)
-    importer.manifest_path(models_dir).write_text("{不是 json", encoding="utf-8")
-
-    result = models_api.scan_local(context)
-
-    assert result["import_error"] != ""
-    assert "total" in result
-
-
 def test_import_commit_refuses_a_source_inside_the_library(
     memory_db: sqlite3.Connection, tmp_path: Path
 ) -> None:

@@ -270,6 +270,11 @@ def cut_segment_args(
         _crop_filter(scaled_w, scaled_h, crop_x_ratio),
         f"eq=contrast={dedup.contrast}:brightness={dedup.brightness}",
         f"scale={out_w}:{out_h}",
+        # 像素比必须在这里钉平：`scale` 保留输入 SAR，非方形源的段会带着它编进成片
+        # ——存储尺寸对、显示比例错，播放器横向拉伸，烧进去的 ASS（PlayRes 出画尺寸）
+        # 跟着变形。且它逐段漂移（末级 scale 目标跟着微缩放取整变），Phase B 又是
+        # `-c copy`，一条片子里换几何完全静默。实测与量法见 test_pixel_geometry。
+        "setsar=1",
         f"setpts=PTS/{speed}",
         *_xfade_filters("fade", out_dur, vin, vout),
     ]
@@ -497,12 +502,23 @@ def _run_cut(
 
 
 # ---- A4-2 段级运行时回退：硬编某段失败→清半成品→libx264 重跑一次 ----
+#
+# 段级回退只解决"这一段能编完"，留下一道尾巴：同一部片子里 nvenc 段与 libx264 段
+# 混排，两种编码器的画质特征不同，段间会跳变。所以回退不是终点——本轮只要出现过
+# 一次回退，export_plan 就整片按 libx264 统一重跑一次（_UniformCodecRetry）。重跑
+# 白嫖 B4 断点续跑的签名机制：已回退段的 sig 记的就是实际成功 codec=libx264，与
+# 重跑请求一致 → 命中复用零成本跳过；只有硬编成功的段重编。宁可多付一次整片重编，
+# 不交付段间画质跳变的片子。
 
 _HW_ENCODERS = frozenset({"h264_nvenc", "h264_qsv", "h264_videotoolbox"})
 _FALLBACK_CODEC = "libx264"
 # 输入侧错误（文件缺失/损坏、参数非法）换编码器重跑也没用，直接抛；
 # cancelled 不是编码失败；其余（含分类不出的 unknown，如超时被杀 stderr 空）按可回退。
 _NO_FALLBACK_KINDS = frozenset({"io", "invalid"})
+
+
+class _UniformCodecRetry(Exception):
+    """内部信号：本轮出现过段级硬编回退，export_plan 须整片按 libx264 重跑一次。"""
 
 
 def _args_with_codec(args: list[str], video_codec: str) -> list[str]:
@@ -713,6 +729,66 @@ def export_plan(
 ) -> Path:
     """执行两阶段导出，返回成片路径。
 
+    A4-2 统一收口：请求硬编而中途发生段级回退时，整片换 libx264 再跑一次
+    （见 _UniformCodecRetry 注释）——已回退段凭签名复用，只有硬编成功的段重编。
+    """
+    try:
+        return _export_plan_once(
+            plan, episode_paths, out_path, work_dir,
+            tts_audio_by_segment=tts_audio_by_segment,
+            cancel=cancel,
+            on_progress=on_progress,
+            subtitle_burner=subtitle_burner,
+            original_subtitle_provider=original_subtitle_provider,
+            parallel=parallel,
+            dialogue_zones=dialogue_zones,
+            out_size=out_size,
+            loudness_target=loudness_target,
+            video_codec=video_codec,
+            _allow_uniform_retry=True,
+        )
+    except _UniformCodecRetry:
+        _LOGGER.warning(
+            "本轮出现段级硬编回退：整片按 %s 统一重跑一次，"
+            "消除段间编码器混排的画质跳变（已回退段将凭签名复用）",
+            _FALLBACK_CODEC,
+        )
+        return _export_plan_once(
+            plan, episode_paths, out_path, work_dir,
+            tts_audio_by_segment=tts_audio_by_segment,
+            cancel=cancel,
+            on_progress=on_progress,
+            subtitle_burner=subtitle_burner,
+            original_subtitle_provider=original_subtitle_provider,
+            parallel=parallel,
+            dialogue_zones=dialogue_zones,
+            out_size=out_size,
+            loudness_target=loudness_target,
+            video_codec=_FALLBACK_CODEC,
+            _allow_uniform_retry=False,
+        )
+
+
+def _export_plan_once(
+    plan: PlanData,
+    episode_paths: dict[str, str],
+    out_path: Path,
+    work_dir: Path,
+    *,
+    tts_audio_by_segment: dict[int, str] | None = None,
+    cancel: threading.Event | None = None,
+    on_progress: Callable[[float, str], None] | None = None,
+    subtitle_burner: Callable[[int, str, float], str] | None = None,
+    original_subtitle_provider: Callable[[int, float, float], str | None] | None = None,
+    parallel: int = 2,
+    dialogue_zones: dict[str, list[SpeechZone]] | None = None,
+    out_size: tuple[int, int] = _DEFAULT_OUT_SIZE,
+    loudness_target: loudness.LoudnessTarget | None = None,
+    video_codec: str = "libx264",
+    _allow_uniform_retry: bool = True,
+) -> Path:
+    """单次导出尝试（统一重跑的循环体，见 export_plan）。
+
     B4 断点续跑：Phase A 每段先看 sidecar 签名（seg_NNN.sig）——声明输入一致、
     产物在盘、请求 codec 等于上次实际成功 codec、字幕按上次窗口重生成后内容 hash
     一致，才跳过重编（接受上次的抖动切点与消重参数）。新鲜渲染（空 work_dir）
@@ -893,6 +969,8 @@ def export_plan(
     progress_lock = threading.Lock()
     completed: set[int] = {job.index for job in jobs if job.reuse}
     progress_state = {"peak": 0.0}
+    # 段级回退发生过就整片统一重跑（见 A4-2 注释）；worker 线程写、主线程读
+    fallback_seen = {"v": False}
 
     def _emit(percent: float, label: str) -> None:
         if on_progress is None:
@@ -975,6 +1053,7 @@ def export_plan(
         on_progress: runner.ProgressCallback | None = None,
     ) -> None:
         """A4-2 段级回退：清半成品 → libx264 重跑一次；重跑仍失败才抛。"""
+        fallback_seen["v"] = True
         seg_path = Path(args[-1])
         with contextlib.suppress(OSError):
             seg_path.unlink(missing_ok=True)  # 半成品不删会被 Phase B concat 拼进去
@@ -1008,6 +1087,10 @@ def export_plan(
             _emit(done / total * 90, f"切割 {done}/{total}")
             if cancel is not None and cancel.is_set():
                 raise runner.FfmpegError("已取消", cancelled=True)
+
+    # 统一收口在 concat 之前：一旦本轮有回退，就不让"硬编段+回退段"混排着拼成片
+    if fallback_seen["v"] and _allow_uniform_retry:
+        raise _UniformCodecRetry()
 
     segment_files = sorted(work_dir.glob("seg_*.mp4"))
     _concat(segment_files, out_path)
@@ -1077,8 +1160,12 @@ def _concat(segment_files: list[Path], out_path: Path) -> None:
     _audit_film_duration(out_path, segment_files)
 
 
-def _video_signature(path: Path) -> tuple[str, str, int, str, int, int] | None:
-    """段的视频流签名（concat 流复制的一致性前提）；测不出返回 None（→保守重编码）。"""
+def _video_signature(path: Path) -> tuple[str, str, int, str, int, int, str] | None:
+    """段的视频流签名（concat 流复制的一致性前提）；测不出返回 None（→保守重编码）。
+
+    `sample_aspect_ratio` 必须在内：两套存储尺寸相同、像素比不同的流（setsar 修复前
+    的旧段 vs 新段）在 `-c copy` 下会拼成一条播放器按首段横向拉伸的片子，且毫无痕迹。
+    """
     try:
         result = subprocess.run(  # noqa: S603
             [
@@ -1109,15 +1196,19 @@ def _video_signature(path: Path) -> tuple[str, str, int, str, int, int] | None:
             str(stream.get("pix_fmt") or ""),
             int(stream.get("width") or 0),
             int(stream.get("height") or 0),
+            # ffprobe 对方形像素报 "1:1"，个别容器/编码流不带该字段 → ""（同值即同几何）
+            str(stream.get("sample_aspect_ratio") or ""),
         )
     except Exception:  # noqa: BLE001 - 签名探测失败按不齐处理，绝不挡已成功的段编码
         return None
 
 
-# 时长审计阈值与 api 层 _audit_duration 同思路（encoder 层不依赖 api，独立定义）：
-# 容得下 dedup 微变速（±0.4%）与 AAC/concat 的毫秒级出入，只抓缺段/重复级真偏差。
-_AUDIT_REL_TOLERANCE = 0.08
-_AUDIT_ABS_TOLERANCE_S = 3.0
+# 时长容差的**唯一**落点：三处判据（本层段和 warn、api 层渲染后 warn、
+# selfcheck 成品库红绿）全部引用这两个名字——改一处即三处同改，界面绿/日志 warn
+# 的分叉没有第二种写法。容得下 dedup 微变速（±0.4%）、切点抖动与 AAC/concat
+# 的毫秒级出入，只抓缺段/重复级真偏差。
+AUDIT_DURATION_REL_TOLERANCE = 0.08
+AUDIT_DURATION_ABS_TOLERANCE_S = 3.0
 
 
 def _audit_film_duration(out_path: Path, segment_files: list[Path]) -> None:
@@ -1128,7 +1219,9 @@ def _audit_film_duration(out_path: Path, segment_files: list[Path]) -> None:
             return
         actual = ffprobe_mod.probe(out_path).duration_s
         diff = actual - declared
-        tolerance = max(declared * _AUDIT_REL_TOLERANCE, _AUDIT_ABS_TOLERANCE_S)
+        tolerance = max(
+            declared * AUDIT_DURATION_REL_TOLERANCE, AUDIT_DURATION_ABS_TOLERANCE_S
+        )
         if abs(diff) > tolerance:
             _LOGGER.warning(
                 "成片时长审计：实测 %.1fs vs 段声明和 %.1fs（差 %+.1fs，超阈值 ±%.1fs）",

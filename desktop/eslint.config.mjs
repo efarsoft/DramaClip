@@ -79,7 +79,9 @@ export default tseslint.config(
     },
   },
   {
+    // 纯 JS 工具/测试夹具（非 TS）：关类型规则，并补 node 全局（no-undef 需要）
     files: ['**/*.js', '**/*.mjs'],
     ...tseslint.configs.disableTypeChecked,
+    languageOptions: { globals: { console: 'readonly', process: 'readonly' } },
   },
 );

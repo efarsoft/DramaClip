@@ -11,17 +11,24 @@ export function isActiveJob(job: JobInfo): boolean {
 export interface JobsSummary {
   readonly active: number;
   readonly failed: number;
+  /** 最新启动的在跑 job 的进度（状态栏「最高优先级」取 Newest-started 语义）；
+   *  在跑 job 都不带进度时为 null，状态栏只显条数（缺席而非编 0）。 */
+  readonly runningPercent: number | null;
 }
 
-/** 状态栏角标只吃这两个数；jobs 取不到时调用方显示「—」，不是 0。 */
+/** 状态栏角标只吃这三个数；jobs 取不到时调用方显示「—」，不是 0。 */
 export function summarizeJobs(jobs: readonly JobInfo[]): JobsSummary {
   let active = 0;
   let failed = 0;
+  let newest: JobInfo | null = null;
   for (const job of jobs) {
-    if (isActiveJob(job)) active += 1;
-    else if (job.status === 'failed') failed += 1;
+    if (isActiveJob(job)) {
+      active += 1;
+      if (newest === null || job.created_at > newest.created_at) newest = job;
+    } else if (job.status === 'failed') failed += 1;
   }
-  return { active, failed };
+  const runningPercent = newest !== null ? Math.round(newest.progress) : null;
+  return { active, failed, runningPercent };
 }
 
 interface JobsState {

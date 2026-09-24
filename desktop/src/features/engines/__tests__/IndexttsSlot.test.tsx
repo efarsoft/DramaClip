@@ -87,7 +87,7 @@ describe('IndexTTS 运行环境安装槽 · 接线', () => {
     renderTts('indextts2');
     // antd 图标自带 aria-label="download"，可及名是「download 安装运行环境」——用正则
     expect(await screen.findByRole('button', { name: /安装运行环境/ })).toBeTruthy();
-    expect(screen.getByText(/IndexTTS 运行环境未安装/)).toBeTruthy();
+    expect(screen.getByText(/TTS 运行环境未安装/)).toBeTruthy();
   });
 
   it('运行环境已装 → 槽消失，不做常驻横幅', async () => {
@@ -97,7 +97,7 @@ describe('IndexTTS 运行环境安装槽 · 接线', () => {
       expect(indexttsApi.status).toHaveBeenCalled();
     });
     expect(screen.queryByRole('button', { name: /安装运行环境/ })).toBeNull();
-    expect(screen.queryByText(/IndexTTS 运行环境未安装/)).toBeNull();
+    expect(screen.queryByText(/TTS 运行环境未安装/)).toBeNull();
   });
 
   it('未装 + 选 kokoro → 照样显示（固定显示：入口可见性不押在引擎切换上）', async () => {

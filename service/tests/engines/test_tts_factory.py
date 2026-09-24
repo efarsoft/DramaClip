@@ -19,7 +19,9 @@ from dramaclip.engines.tts import factory
 
 
 def test_factory_supports_exactly_the_wired_engines() -> None:
-    assert factory.supported() == frozenset({"edge", "kokoro", "indextts2"})
+    assert factory.supported() == frozenset(
+        {"edge", "kokoro", "indextts2", "cosyvoice", "cosyvoice3"}
+    )
 
 
 def test_dropped_engine_is_refused_not_silently_swapped(tmp_path: Path) -> None:

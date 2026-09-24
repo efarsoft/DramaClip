@@ -37,6 +37,16 @@ vi.mock('../services/client', () => ({
 }));
 
 const BASE = 1758600000000;
+
+// 每条冒烟只有一个毫秒预算：findByText 的等待线、elapsed 断言、vitest 的 runner
+// 超时全部从它派生。三处各写一个数字等于三套真相——慢机器上 runner 会先于断言
+// 掐死，「超时」被误读成「渲染劣化」，快机器上又看不出余量还剩多少。
+const BUDGET_MS = { matrix: 15_000, works: 45_000, episodes: 15_000 };
+
+// runner 只兜死循环：留一倍余量，保证永远是 elapsed 断言先响。
+function runnerTimeoutMs(budget: number): number {
+  return budget * 2;
+}
 const MODES = [
   'intro_narration',
   'dialogue_narration',
@@ -160,7 +170,7 @@ function smokeMatrix(): void {
   const elapsed = performance.now() - started;
   console.warn(`[scaleSmoke] 剧库矩阵 50 剧 + 500 成品聚合首屏: ${String(Math.round(elapsed))}ms`);
   expect(screen.getAllByRole('listitem')).toHaveLength(50);
-  expect(elapsed).toBeLessThan(15000);
+  expect(elapsed).toBeLessThan(BUDGET_MS.matrix);
 }
 
 async function smokeWorksGrid(): Promise<void> {
@@ -175,11 +185,11 @@ async function smokeWorksGrid(): Promise<void> {
       </AntdApp>
     </MemoryRouter>,
   );
-  await screen.findByText('共 500 个', undefined, { timeout: 45000 });
+  await screen.findByText('共 500 个', undefined, { timeout: BUDGET_MS.works });
   const elapsed = performance.now() - started;
   console.warn(`[scaleSmoke] 成品网格 500 条首屏: ${String(Math.round(elapsed))}ms`);
   // 上限防的是量级恶化（并行跑全量套件时实测 17s）；选型看的是 warn 里的毫秒数与 dev 实跑帧率
-  expect(elapsed).toBeLessThan(45000);
+  expect(elapsed).toBeLessThan(BUDGET_MS.works);
 }
 
 function smokeEpisodeList(): void {
@@ -209,13 +219,13 @@ function smokeEpisodeList(): void {
   console.warn(`[scaleSmoke] 素材列表 100 集首屏: ${String(Math.round(elapsed))}ms`);
   expect(screen.getAllByText(/^ep\d{3}$/)).toHaveLength(100);
   expect(screen.getByText(/1 集缺音频轨，无法转写/)).toBeTruthy();
-  expect(elapsed).toBeLessThan(15000);
+  expect(elapsed).toBeLessThan(BUDGET_MS.episodes);
 }
 
 describe('规模冒烟：三处列表在目标数据量下完整渲染', () => {
-  it('剧库矩阵：50 部剧 + 500 条成品聚合，50 行全在', smokeMatrix);
+  it('剧库矩阵：50 部剧 + 500 条成品聚合，50 行全在', smokeMatrix, runnerTimeoutMs(BUDGET_MS.matrix));
 
-  it('成品分组网格：500 条成品上屏，计数照实', smokeWorksGrid, 60000);
+  it('成品分组网格：500 条成品上屏，计数照实', smokeWorksGrid, runnerTimeoutMs(BUDGET_MS.works));
 
-  it('素材列表：单剧 100 集全渲染，缺音轨告警同时在场', smokeEpisodeList);
+  it('素材列表：单剧 100 集全渲染，缺音轨告警同时在场', smokeEpisodeList, runnerTimeoutMs(BUDGET_MS.episodes));
 });

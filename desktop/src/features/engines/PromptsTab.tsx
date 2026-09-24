@@ -1,4 +1,4 @@
-/** 提示词 tab：八处 LLM 提示词的查看/编辑/重置（覆盖存 settings，默认在代码）。 */
+/** 提示词 tab：九处 LLM 提示词的查看/编辑/重置（覆盖存 settings，默认在代码）。 */
 import type { ReactElement } from 'react';
 import { PromptCard, PromptHint } from './PromptCard';
 import { PromptEditor } from './PromptEditor';

@@ -152,42 +152,12 @@ def builtin_specs() -> list[ModelSpec]:
             ms_repo="FunAudioLLM/Fun-CosyVoice3-0.5B-2512",
             placement="tts/funcosyvoice3",
             name="Fun-CosyVoice3 0.5B（当前开源第一梯队）",
-            notes="约 9.75GB（含 RL/base 双底座）；PyTorch 路线老卡可跑；引擎接入排期 P-2",
+            notes="约 9.75GB（含 RL/base 双底座）；PyTorch 路线老卡可跑；与 300M 共用隔离 venv 桥",
             size_label="~9.75GB",
             tier="accurate",
             speed=2,
             quality=5,
             desc="阿里 FunAudioLLM 最新：零样本克隆、多情感、多语言、流式",
-        ),
-        ModelSpec(
-            model_id="cosyvoice2-0.5b",
-            kind="tts",
-            engine="cosyvoice2",
-            repo_id="iic/CosyVoice2-0.5B",
-            ms_repo="iic/CosyVoice2-0.5B",
-            placement="tts/cosyvoice2",
-            name="CosyVoice2 0.5B（零样本克隆+方言）",
-            notes="约 5GB；建议 N 卡；阿里开源（Apache-2.0）",
-            size_label="~5GB",
-            tier="accurate",
-            speed=2,
-            quality=5,
-            desc="零样本克隆、18 方言、流式合成",
-        ),
-        ModelSpec(
-            model_id="indextts-1.5",
-            kind="tts",
-            engine="indextts",
-            repo_id="IndexTeam/IndexTTS-1.5",
-            ms_repo="IndexTeam/IndexTTS-1.5",
-            placement="tts/indextts15",
-            name="IndexTTS-1.5（轻量克隆）",
-            notes="约 3.4GB；建议 N 卡；B站开源",
-            size_label="~3.4GB",
-            tier="accurate",
-            speed=3,
-            quality=4,
-            desc="IndexTTS 轻量版，零样本音色克隆",
         ),
         ModelSpec(
             model_id="cosyvoice-300m",
@@ -197,7 +167,7 @@ def builtin_specs() -> list[ModelSpec]:
             ms_repo="iic/CosyVoice-300M",
             placement="tts/cosyvoice300m",
             name="CosyVoice 300M（轻量克隆）",
-            notes="约 5.4GB；阿里开源；3 秒零样本克隆",
+            notes="约 2.6GB；阿里开源（Apache-2.0）；隔离 conda env 桥（引擎页「安装运行环境」）",
             size_label="~5.4GB",
             tier="balanced",
             speed=3,
@@ -212,41 +182,12 @@ def builtin_specs() -> list[ModelSpec]:
             ms_repo="iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
             placement="asr/paraformer",
             name="Paraformer-large（FunASR 旗舰）",
-            notes="约 880MB；funasr 同栈（SenseVoice 引擎小改即用）；CPU RTF ~0.3",
+            notes="约 880MB；funasr 同栈；CPU RTF ~0.3",
             size_label="~880MB",
             tier="balanced",
             speed=4,
             quality=4,
             desc="阿里 FunASR 旗舰，中文准确率高、自带标点、CPU 友好",
-        ),
-        ModelSpec(
-            model_id="firedred-asr-aed-l",
-            kind="asr",
-            engine="firedred",
-            repo_id="FireRedTeam/FireRedASR-AED-L",
-            ms_repo="FireRedTeam/FireRedASR-AED-L",
-            placement="asr/firedred",
-            name="FireRedASR AED-L（高精度中文）",
-            notes="约 1.1GB；小红书开源；引擎接入排期 P-2",
-            size_label="~1.1GB",
-            tier="accurate",
-            speed=2,
-            quality=5,
-            desc="中文高精度识别（AED 架构大模型）",
-        ),
-        ModelSpec(
-            model_id="vibevoice-1.5b",
-            kind="tts",
-            engine="vibevoice",
-            repo_id="microsoft/VibeVoice-1.5B",
-            placement="tts/vibevoice",
-            name="VibeVoice 1.5B（多角色）",
-            notes="约 5GB；建议 N 卡；多角色对话合成（微软，MIT）",
-            size_label="~5GB",
-            tier="accurate",
-            speed=2,
-            quality=4,
-            desc="最多 4 角色对话式配音，适合双人对谈",
         ),
     ]
 
@@ -334,6 +275,9 @@ def engine_ready(spec: ModelSpec) -> bool:
 _REQUIREMENTS: dict[str, tuple[str, ...]] = {
     "faster_whisper": ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt"),
     "sensevoice": ("model.pt",),
+    # funasr AutoModel 从本地目录加载的最低判据：权重在场（config.yaml 由 AutoModel
+    # 缺省兜底）。与 sensevoice 同栈同判（engines/analysis/transcriber.ParaformerEngine）。
+    "paraformer": ("model.pt",),
     "kokoro": (
         "Kokoro-82M-v1.1-zh/config.json",
         "Kokoro-82M-v1.1-zh/*.pth",
@@ -342,6 +286,12 @@ _REQUIREMENTS: dict[str, tuple[str, ...]] = {
     # worker 加载三件套（engines/tts/workers/indextts_worker.py：cfg_path=config.yaml，
     # IndexTTS2 按 config 再取 gpt/s2mel 权重）。bpe.model 官方 2.5 仓库不带，不列判据。
     "indextts2": ("config.yaml", "gpt.pth", "s2mel.pth"),
+    # CosyVoice 三件套权重 + zero/cross 两种克隆模式都要用的语音 tokenizer onnx。
+    # 文件清单量自 HF FunAudioLLM/CosyVoice-300M 主分支（2026-09-24）。
+    "cosyvoice": ("cosyvoice.yaml", "llm.pt", "flow.pt", "hift.pt", "speech_tokenizer_v1.onnx"),
+    # v3 与 300M 的差异：cosyvoice3.yaml + speech_tokenizer_v3.onnx + CosyVoice-BlankEN/
+    # 目录（文本前端词表）。清单量自 HF Fun-CosyVoice3-0.5B-2512（本机验证组合的取文件集）。
+    "cosyvoice3": ("cosyvoice3.yaml", "llm.pt", "flow.pt", "hift.pt", "speech_tokenizer_v3.onnx"),
 }
 _WEIGHT_SUFFIXES = (".bin", ".pth", ".pt", ".onnx", ".safetensors")
 _HEX = set("0123456789abcdef")

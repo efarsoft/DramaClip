@@ -61,3 +61,13 @@ def test_merged_output_within_bounds(cut_video: Path) -> None:
     merged = scene_detector.merge_scenes(scene_detector.detect_scenes(cut_video))
     for scene in merged:
         assert 2.0 <= scene.end - scene.start <= 8.0
+
+
+def test_detect_emits_no_deprecation_warning(
+    cut_video: Path, recwarn: pytest.WarningsRecorder
+) -> None:
+    """时间码取值不许走废弃 API：`get_seconds()` 每次检测刷 8 条 DeprecationWarning，
+    真机跑分析时日志全是噪音，且上游一删方法整条镜头检测就断。"""
+    scene_detector.detect_scenes(cut_video)
+    deprecated = [w for w in recwarn if issubclass(w.category, DeprecationWarning)]
+    assert deprecated == [], f"废弃时间码 API：{[str(w.message) for w in deprecated[:3]]}"

@@ -21,14 +21,13 @@ import time
 from pathlib import Path
 from typing import Any
 
+from dramaclip.engines.exporter import encoder
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 
-# 与 verify_modes.py 同源的阈值初值（那边 L75-76；时长容差与 api/export.py 的
-# _AUDIT_DURATION_* 同判据——自检的「时长达标」就是渲染后时长审计的产品化）。
+# 与 verify_modes.py 同源的阈值初值（那边 L83-84）；时长容差不在此定义——
+# 自检的「时长达标」就是渲染后时长审计的产品化，判据由 encoder.AUDIT_DURATION_* 发号。
 MIN_MEAN_VOLUME_DB = -70.0
 MAX_FREEZE_S = 2.0
-DURATION_REL_TOLERANCE = 0.08
-DURATION_ABS_TOLERANCE_S = 3.0
 
 # freezedetect 参数与 verify_modes.max_freeze_s 逐字同判：噪声门 -60dB、
 # 只报 >=1.0s 的静止段；「无长冻结帧」的线在 MAX_FREEZE_S。
@@ -113,7 +112,10 @@ def check_duration(measured_s: float | None, budget_s: float | None) -> dict[str
     """
     if measured_s is None or budget_s is None or budget_s <= 0:
         return {"pass": None}
-    tolerance = max(budget_s * DURATION_REL_TOLERANCE, DURATION_ABS_TOLERANCE_S)
+    tolerance = max(
+        budget_s * encoder.AUDIT_DURATION_REL_TOLERANCE,
+        encoder.AUDIT_DURATION_ABS_TOLERANCE_S,
+    )
     return {
         "pass": abs(measured_s - budget_s) <= tolerance,
         "measured_s": round(measured_s, 2),

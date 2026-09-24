@@ -98,6 +98,9 @@ function JobsSegment(): ReactElement {
       }}
     >
       <span style={{ color: tokens.colorInfo }}>在跑 {String(summary.active)}</span>
+      {summary.runningPercent !== null && (
+        <span style={{ color: tokens.textSecondary }}>{String(summary.runningPercent)}%</span>
+      )}
       {summary.failed > 0 && <span style={{ color: tokens.colorError }}> · 失败 {String(summary.failed)}</span>}
     </button>
   );

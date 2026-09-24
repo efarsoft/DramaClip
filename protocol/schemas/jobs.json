@@ -57,6 +57,20 @@
           "reason": { "type": "string" }
         }
       }
+    },
+    {
+      "name": "jobs.clear_finished",
+      "summary": "清空全部已结束（完成/失败/取消）的任务记录；在跑与排队中的不动",
+      "params": {
+        "type": "object",
+        "required": [],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": ["deleted"],
+        "properties": { "deleted": { "type": "integer" } }
+      }
     }
   ],
   "x-models": {

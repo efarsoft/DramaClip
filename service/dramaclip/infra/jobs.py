@@ -119,6 +119,15 @@ class JobStore:
         ).fetchall()
         return [dict(zip(self._LIST_COLUMNS, row, strict=True)) for row in rows]
 
+    def clear_finished(self) -> int:
+        """删除全部终态任务记录（完成/失败/取消），返回删除条数；在跑与排队中的不动。"""
+        placeholders = ", ".join("?" for _ in _TERMINAL_STATUSES)
+        cursor = self._conn.execute(
+            f"DELETE FROM jobs WHERE status IN ({placeholders})",
+            tuple(sorted(_TERMINAL_STATUSES)),
+        )
+        return cursor.rowcount
+
     def sweep_interrupted(self) -> int:
         """启动清扫：上一会话遗留的 running / pending 任务标记失败（崩溃重入协议）。
         """

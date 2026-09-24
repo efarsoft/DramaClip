@@ -92,7 +92,9 @@ def test_engine_ready_is_true_only_for_engines_the_factory_can_build() -> None:
     assert registry.engine_ready(_spec("indextts2")) is True, (
         "indextts2 已接进工厂（a88da7b），断言不得停留在接入前"
     )
-    assert registry.engine_ready(_spec("vibevoice-1.5b")) is False
+    assert registry.engine_ready(_spec("fun-cosyvoice3-0.5b")) is True, (
+        "cosyvoice3 已接进工厂（与 300M 共用 cosyvoice 桥）"
+    )
     # 防漂移：清单里出现过的 TTS 引擎，「已接入」必须等价于「工厂认得」，两边不得各存一份名单。
     listed = {s.engine for s in builtin_specs() if s.kind == "tts"}
     wired = {s.engine for s in builtin_specs() if s.kind == "tts" and registry.engine_ready(s)}
@@ -104,19 +106,23 @@ def test_engine_ready_asr_follows_the_analysis_runtime_dispatch() -> None:
 
     assert registry.engine_ready(_spec("faster-whisper-base")) is True
     assert registry.engine_ready(_spec("sensevoice-small")) is True
-    assert registry.engine_ready(_spec("paraformer-large")) is False
-    assert registry.engine_ready(_spec("firedred-asr-aed-l")) is False
+    assert registry.engine_ready(_spec("paraformer-large")) is True
     wired = {s.engine for s in builtin_specs() if s.kind == "asr" and registry.engine_ready(s)}
     assert wired == set(asr_supported())
 
 
-def test_dead_paraformer_branch_is_gone_from_the_runtime() -> None:
-    """paraformer 在 registry 里有登记项却没有任何实现，走它只会 ImportError。"""
+def test_dead_firedred_branch_is_gone_from_the_runtime() -> None:
+    """firedred 已整体移出清单（2026-09-24 裁决），工厂与清单两头都不许回潮。
+
+    paraformer 已接入（ParaformerEngine，funasr 同栈）；firedred 官方无 pip 包、
+    AED 无时间戳且 60s 上限——挂清单就是「永远装不上」的死资产。
+    """
     import inspect
 
     from dramaclip.engines.analysis import runtime
 
-    assert "ParaformerEngine" not in inspect.getsource(runtime)
+    assert "ParaformerEngine" in inspect.getsource(runtime)
+    assert "FireRed" not in inspect.getsource(runtime)
 
 
 # ---------------------------------------------------------------- 完整性校验

@@ -7,9 +7,17 @@
 用法：
   .venv/Scripts/python scripts/verify_modes.py --modes full_narration
   .venv/Scripts/python scripts/verify_modes.py --modes all --out D:/tmp/dc-report
+  .venv/Scripts/python scripts/verify_modes.py --modes all --write-baseline   # 全绿跑后建立基线
 
 隔离：用 sqlite 备份 API 把 data/data.db 快照进临时目录再跑（源库只读打开），产物写临时
 目录，绝不写开发者的真实 data/。
+
+基线（同机同素材的渲染管线漂移对比）：门禁断言量的是"这片过没过规格"，基线量的是
+"同一素材同一管线，这次跟上次比变了多少"——规格内的慢漂移（响度还达标但比上次差 1 LU）
+断言看不见，基线看得见。只收渲染管线指标（LUFS/真峰/均量/冻结/压底残差）；段数、时长、
+跨集数随 LLM 编排逐次波动，进基线只会假红。基线文件默认 data/baseline/verify_modes.json
+（素材与模型都不入库，基线是同机同素材的产物：换机器、换素材必须重写）。漂移超容差计
+失败（退出码 1）；--write-baseline 只落无失败模式（红灯跑不许毒化参照系）。
 
 退出码（两档必须分清，否则运维会把环境问题读成产品崩了）：
   0 = 全部断言通过
@@ -632,6 +640,102 @@ def _check_duration_reconciliation(
     }
 
 
+# ---- 基线：同机同素材的渲染管线漂移对比（语义见文件头）----
+#
+# 容差普遍比硬断言紧一档：基线的职责就是抓"还在规格内、但比上次差了"的慢漂移。
+# LUFS 取 1.5 LU：同素材连跑实测 integrated 极差 0.6 LU（最后一块 Summary 的波动，
+# 见 loudness.py 退路注释），1.5 给足抽样噪声余量；真峰 1.0 dB、均量 2.0 dB、
+# 压底残差 1.5 dB 同理留的是测量噪声而非缺陷空间。冻结帧正常恒 0，按增量 0.5s 判。
+_BASELINE_VERSION = 1
+_BASELINE_FLOAT_METRICS: dict[str, float] = {
+    "integrated_lufs": 1.5,
+    "true_peak_dbtp": 1.0,
+    "mean_volume_db": 2.0,
+    "duck_max_residual_db": 1.5,
+}
+_FREEZE_DRIFT_S = 0.5
+
+
+def default_baseline_path() -> Path:
+    return REPO / "data" / "baseline" / "verify_modes.json"
+
+
+def load_baseline(path: Path) -> dict[str, Any] | None:
+    """读基线文件；不存在/损坏/版本不认都按"没有基线"处理（不挡门禁主流程）。"""
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        print(f"基线文件读不出来，跳过漂移对比：{path}", file=sys.stderr)
+        return None
+    if not isinstance(data, dict) or data.get("version") != _BASELINE_VERSION:
+        print(f"基线版本不认（删掉重写即可）：{path}", file=sys.stderr)
+        return None
+    modes = data.get("modes")
+    return modes if isinstance(modes, dict) else {}
+
+
+def diff_baseline(mode: str, rec: dict[str, Any], base: dict[str, Any] | None) -> list[str]:
+    """逐指标对比本次读数与基线；任一侧缺测的指标跳过（缺测不冤枉，宁漏勿假红）。"""
+    if not base:
+        return []
+    drifts: list[str] = []
+    for key, tolerance in _BASELINE_FLOAT_METRICS.items():
+        now, was = rec.get(key), base.get(key)
+        if now is None or was is None:
+            continue
+        if abs(float(now) - float(was)) > tolerance:
+            drifts.append(
+                f"{mode}: 基线漂移 {key}：{was} → {now}（容差 {tolerance}）"
+                "——规格内慢漂移，查上游是否变了（混音参数/素材/编码器）"
+            )
+    now_freeze, was_freeze = rec.get("max_freeze_s"), base.get("max_freeze_s")
+    if (
+        now_freeze is not None
+        and was_freeze is not None
+        and float(now_freeze) - float(was_freeze) > _FREEZE_DRIFT_S
+    ):
+            drifts.append(
+                f"{mode}: 基线漂移 max_freeze_s：{was_freeze} → {now_freeze}"
+                f"（增量容差 {_FREEZE_DRIFT_S}s）——出现了上次没有的静止画面"
+            )
+    return drifts
+
+
+def write_baseline(path: Path, media_name: str, rows: list[dict[str, Any]]) -> int:
+    """把本次（无失败模式的）管线读数并进基线，返回写入的模式数。已有同模式覆盖。"""
+    data: dict[str, Any] = {
+        "version": _BASELINE_VERSION,
+        "written_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "media": media_name,
+        "modes": {},
+    }
+    if path.is_file():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(existing, dict) and isinstance(existing.get("modes"), dict):
+                data["modes"] = existing["modes"]
+        except (OSError, ValueError):
+            pass  # 损坏基线直接重建
+    written = 0
+    for rec in rows:
+        if rec.get("status") != "completed":
+            continue
+        readings = {
+            key: rec[key]
+            for key in (*_BASELINE_FLOAT_METRICS, "max_freeze_s")
+            if rec.get(key) is not None
+        }
+        if not readings:
+            continue
+        data["modes"][str(rec["mode"])] = readings
+        written += 1
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    return written
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--media", default=r"D:\BaiduNetdiskDownload\小小球神不好惹")
@@ -642,6 +746,21 @@ def main() -> int:
         "--require-cross-episode",
         action="store_true",
         help="每部成片必须真的用到 ≥2 集素材（P-2a 定案做真跨集；默认只记录不判）",
+    )
+    ap.add_argument(
+        "--baseline",
+        default=str(default_baseline_path()),
+        help="漂移对比基线文件（默认 data/baseline/verify_modes.json）",
+    )
+    ap.add_argument(
+        "--write-baseline",
+        action="store_true",
+        help="跑完把无失败模式的管线读数写进基线（应取自全绿跑）",
+    )
+    ap.add_argument(
+        "--no-baseline",
+        action="store_true",
+        help="跳过漂移对比（首次跑还没基线时不必加：无基线文件自动跳过）",
     )
     args = ap.parse_args()
 
@@ -950,6 +1069,24 @@ def main() -> int:
 
     executor.shutdown(wait=True, cancel_futures=True)
 
+    # 基线漂移对比（存在基线才比）：漂移进 failures，与硬断言同一张「失败」清单、
+    # 同一个退出码——规格内的慢漂移和规格违规都叫回归，不该分两种待遇。
+    baseline_path = Path(args.baseline)
+    if args.no_baseline:
+        print("\n已按 --no-baseline 跳过漂移对比")
+    else:
+        baseline_modes = load_baseline(baseline_path)
+        if baseline_modes is None:
+            print(f"\n无基线（{baseline_path}），跳过漂移对比；"
+                  "全绿跑后加 --write-baseline 建立")
+        else:
+            for rec in rows:
+                if rec.get("status") == "completed":
+                    failures.extend(
+                        diff_baseline(str(rec["mode"]), rec, baseline_modes.get(str(rec["mode"])))
+                    )
+            print(f"\n漂移对比基线：{baseline_path}（{len(baseline_modes)} 个模式）")
+
     # 列宽只在这一处定义，表头与数据行都从它取值——两边各写一份就迟早对不上。
     columns: list[tuple[str, int, str]] = [
         ("模式", 18, "<"), ("状态", 11, "<"), ("时长s", 8, ">"), ("均量dB", 9, ">"),
@@ -1006,6 +1143,16 @@ def main() -> int:
     (out_dir / "summary.json").write_text(json.dumps(rows, ensure_ascii=False, indent=1),
                                           encoding="utf-8")
     print(f"\n明细：{out_dir / 'summary.json'}")
+    if args.write_baseline:
+        # 基线只落无失败的模式：失败串以 "<mode>: " 开头，据此归属（脚本内约定，
+        # 所有 failures.append 都遵守这个前缀形状）。红灯跑不许毒化参照系。
+        failed_modes = {
+            f.split(":", 1)[0] for f in failures
+        }
+        eligible = [r for r in rows if str(r.get("mode")) not in failed_modes]
+        written = write_baseline(baseline_path, Path(args.media).name, eligible)
+        print(f"基线已写入：{baseline_path}（本次 {written} 个无失败模式；"
+              "已有同模式读数被覆盖）")
     if failures:
         print("\n失败：")
         for f in failures:

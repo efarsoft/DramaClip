@@ -1,7 +1,7 @@
 """ASR 引擎选择的分派面：`supported()` 与工厂分支必须同源，未知引擎显式拒绝。
 
-守卫口径：接进工厂的引擎才许构建；清单里登记而工厂没接的（如 paraformer）必须显式
-拒绝并报出可用引擎——不许 ImportError，更不许静默回退（业主以为在用 A，实际被换了 B）。
+守卫口径：接进工厂的引擎才许构建；没接的（如已移除的 firedred）必须显式拒绝并报出
+可用引擎——不许 ImportError，更不许静默回退（业主以为在用 A，实际被换了 B）。
 """
 
 from __future__ import annotations
@@ -11,13 +11,21 @@ from pathlib import Path
 import pytest
 
 from dramaclip.engines.analysis import runtime
-from dramaclip.engines.analysis.transcriber import FasterWhisperEngine, SenseVoiceEngine
+from dramaclip.engines.analysis.transcriber import (
+    FasterWhisperEngine,
+    ParaformerEngine,
+    SenseVoiceEngine,
+)
 from dramaclip.infra import config
 from dramaclip.infra.model_manager import registry
 from dramaclip.infra.model_manager.registry import builtin_specs
 
 # 名单的第二份抄本，故意抄在测试里：supported() 少一个/多一个都会在这里撞车。
-_BUILDS: dict[str, type] = {"faster_whisper": FasterWhisperEngine, "sensevoice": SenseVoiceEngine}
+_BUILDS: dict[str, type] = {
+    "faster_whisper": FasterWhisperEngine,
+    "sensevoice": SenseVoiceEngine,
+    "paraformer": ParaformerEngine,
+}
 
 
 def _settings(**overrides: str) -> config.Settings:
@@ -34,9 +42,9 @@ def test_every_supported_engine_builds_without_loading_a_model(tmp_path: Path) -
 def test_unknown_engine_is_rejected_instead_of_silently_falling_back(
     tmp_path: Path,
 ) -> None:
-    """paraformer 在清单里躺着、在工厂里没有：必须拒绝，且告诉业主可用的是谁。"""
-    with pytest.raises(ValueError, match="未知 ASR 引擎: paraformer"):
-        runtime._build_transcriber(_settings(**{"asr.engine": "paraformer"}), tmp_path)
+    """firedred 已从清单移除、工厂里也没有：必须拒绝，且告诉业主可用的是谁。"""
+    with pytest.raises(ValueError, match="未知 ASR 引擎: firedred"):
+        runtime._build_transcriber(_settings(**{"asr.engine": "firedred"}), tmp_path)
 
 
 def test_no_registry_entry_builds_unless_engine_ready(tmp_path: Path) -> None:
@@ -50,12 +58,13 @@ def test_no_registry_entry_builds_unless_engine_ready(tmp_path: Path) -> None:
                 runtime._build_transcriber(_settings(**{"asr.engine": spec.engine}), tmp_path)
 
 
-def test_sensevoice_path_matches_the_registry_placement(tmp_path: Path) -> None:
-    """引擎自己拼的路径必须等于清单里的 placement，否则探测与加载会各读一份。"""
-    spec = next(s for s in builtin_specs() if s.engine == "sensevoice")
+def test_engine_path_matches_the_registry_placement(tmp_path: Path) -> None:
+    """funasr 两引擎自己拼的路径必须等于清单里的 placement，否则探测与加载会各读一份。"""
     models_dir = tmp_path / "models"
-    engine = SenseVoiceEngine(models_dir=models_dir)
-    assert engine._model_dir == models_dir / spec.placement
+    for engine, cls in (("sensevoice", SenseVoiceEngine), ("paraformer", ParaformerEngine)):
+        spec = next(s for s in builtin_specs() if s.engine == engine)
+        engine_obj = cls(models_dir=models_dir)  # type: ignore[call-arg]
+        assert engine_obj._model_dir == models_dir / spec.placement  # type: ignore[attr-defined]
 
 
 def test_compute_type_setting_reaches_the_engine(tmp_path: Path) -> None:

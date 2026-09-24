@@ -39,7 +39,6 @@ def register(router: Router, context: AppContext) -> None:
     router.register("models.clean_residue", lambda params: clean_residue(context, params))
     router.register("models.clean_orphan", lambda params: clean_orphan(context, params))
     router.register("models.orphan_list", lambda params: orphan_list(context, params))
-    router.register("models.scan_local", lambda params: scan_local(context))
     router.register("models.verify", lambda params: verify(context, params))
     router.register("models.relayout", lambda params: relayout(context, params))
     router.register("models.import_inspect", lambda params: import_inspect(context, params))
@@ -382,26 +381,6 @@ def install_runtime(context: AppContext, params: dict[str, Any]) -> dict[str, An
 
 
 
-def scan_local(context: AppContext) -> dict[str, Any]:
-    """重新探测 models/：手动放进目录的模型即刻被认出来。
-
-    这里不叫「导入」：真正的导入是 ``models.import_commit``（识别 + 体检 + 落位 + 登记）。
-    本方法只是让引擎中心刷新一次磁盘状态，登记本坏了也在这里说一声。
-    """
-    models_dir = context.data_dir / "models"
-    found = [
-        item
-        for item in registry.list_models(models_dir)
-        if item["status"] == "installed"
-    ]
-    context.notifier.log("info", f"模型目录重新探测完成：{len(found)} 个模型可用")
-    return {
-        "installed": found,
-        "total": len(found),
-        "import_error": importer.records_error(models_dir),
-    }
-
-
 def delete(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     model_id = str(params.get("model_id", ""))
     spec = downloader.spec_by_id(model_id)
@@ -609,16 +588,16 @@ def _matches_installed(recorded: str, installed: Any) -> bool:
 
 def indextts_status(context: AppContext, _params: dict[str, Any]) -> dict[str, Any]:
     """IndexTTS 运行环境安装态（引擎卡内联安装槽的判据）。"""
-    from dramaclip.infra.model_manager import indextts_runtime
+    from dramaclip.infra.model_manager import tts_runtime
 
-    return indextts_runtime.status(context.data_dir)
+    return tts_runtime.status(context.data_dir)
 
 
 def install_indextts(context: AppContext, _params: dict[str, Any]) -> dict[str, Any]:
     """引导 IndexTTS 运行环境（作业模式：uv → venv → torch → 依赖 → 源码 → 自检）。"""
-    from dramaclip.infra.model_manager import indextts_runtime
+    from dramaclip.infra.model_manager import tts_runtime
 
-    if indextts_runtime.status(context.data_dir)["installed"]:
+    if tts_runtime.status(context.data_dir)["installed"]:
         raise RpcDomainError(_ERR_MODEL_STATE, "IndexTTS 运行环境已就绪")
     _active = [
         j for j in context.job_store.list_recent(limit=50, active_only=True)
@@ -634,7 +613,7 @@ def install_indextts(context: AppContext, _params: dict[str, Any]) -> dict[str, 
 
     def _run() -> None:
         try:
-            indextts_runtime.install(
+            tts_runtime.install(
                 context.data_dir,
                 cancel=cancel_event,
                 on_progress=lambda percent, stage: context.job_store.set_progress(

@@ -1,5 +1,5 @@
 /**
- * 资产库的一行：名称 / 引擎接入 / 安装态 / 大小 / 评级 / 说明 / 动作。
+ * 资产库的一行：名称（说明沉第二行）/ 引擎接入 / 安装态 / 大小 / 评级 / 动作。
  *
  * 每格只翻译一个真实字段：安装态出自 status + 体检结论，大小出自落盘字节，
  * 可行性出自 system.health 的容量余量——前端不写死任何一格。
@@ -36,7 +36,6 @@ export interface AssetRowProps {
   onVerify: (modelId: string) => void;
   /** 域自带的行内动作（配音 = 试听）：由调用方造好节点，这一行只管摆哪儿。 */
   preview?: ReactElement;
-  table?: boolean;
 }
 
 export function AssetRow({
@@ -49,7 +48,6 @@ export function AssetRow({
   onChanged,
   onVerify,
   preview,
-  table = false,
 }: AssetRowProps): ReactElement {
   const [detail, setDetail] = useState(false);
   const state = assetState(model, report, selftest);
@@ -57,19 +55,18 @@ export function AssetRow({
     <div style={{ borderTop: `1px solid ${tokens.borderSecondary}` }}>
       <div
         style={{
-          display: table ? 'grid' : 'flex',
-          gridTemplateColumns: table ? GRID : undefined,
+          display: 'grid',
+          gridTemplateColumns: GRID,
           alignItems: 'center',
           gap: tokens.spaceMd,
           padding: `${tokens.spaceSm} ${tokens.spaceMd}`,
         }}
       >
-        <NameCell model={model} state={state} active={active} table={table} />
+        <NameCell model={model} state={state} active={active} specs={specs} />
         <WiredCell ok={model.engine_ready} />
         <StateCell model={model} state={state} report={report} />
         <SizeCell model={model} />
         <RatingCell model={model} />
-        <DescCell model={model} state={state} specs={specs} table={table} />
         <RowActions
           model={model}
           state={state}
@@ -95,14 +92,17 @@ function NameCell({
   model,
   state,
   active,
-  table,
+  specs,
 }: {
   model: ModelInfo;
   state: AssetState;
   active: boolean;
-  table: boolean;
+  specs: MachineSpecs;
 }): ReactElement {
   const imported = model.imported;
+  // 说明位的唯一占用者优先级：「还没装且本机装不下」的可行性警示 > 登记的一句话描述
+  const fit = judgeModelFit(specs, parseSizeGb(model.size_label));
+  const blocked = state === 'missing' && (fit.verdict === 'disk' || fit.verdict === 'ram');
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceMd, minWidth: 0 }}>
       <StateDot state={state} />
@@ -121,11 +121,19 @@ function NameCell({
             本地导入
           </span>
         )}
-        {!table && (
-          <span style={{ marginLeft: tokens.spaceSm, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
-            {model.desc ?? model.repo_id}
-          </span>
-        )}
+        {/* 说明沉到名称下第二行：名称列保持一列宽，行与行的后续列才能对齐 */}
+        <div
+          style={{
+            fontSize: tokens.text.meta.size,
+            lineHeight: tokens.text.meta.leading,
+            color: blocked ? FIT_VERDICT_COLOR[fit.verdict] : tokens.textTertiary,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {blocked ? `⚠ ${fit.reason}` : (model.desc ?? model.repo_id)}
+        </div>
       </div>
     </div>
   );
@@ -165,7 +173,6 @@ function StateCell({
             fontSize: tokens.text.badge.size,
             lineHeight: tokens.text.badge.leading,
             color: tokens.colorError,
-            maxWidth: 220,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -205,37 +212,6 @@ function RatingCell({ model }: { model: ModelInfo }): ReactElement {
     <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       {(model.speed ?? 0) > 0 && <RatingDots label="速度" level={model.speed ?? 0} />}
       {(model.quality ?? 0) > 0 && <RatingDots label="精度" level={model.quality ?? 0} />}
-    </span>
-  );
-}
-
-/** 说明格：只在「还没装且本机装不下」时占用为警示，否则是登记的一句话描述。 */
-function DescCell({
-  model,
-  state,
-  specs,
-  table,
-}: {
-  model: ModelInfo;
-  state: AssetState;
-  specs: MachineSpecs;
-  table: boolean;
-}): ReactElement {
-  const fit = judgeModelFit(specs, parseSizeGb(model.size_label));
-  const blocked = state === 'missing' && (fit.verdict === 'disk' || fit.verdict === 'ram');
-  return (
-    <span
-      style={{
-        fontSize: tokens.text.badge.size,
-        lineHeight: tokens.text.badge.leading,
-        color: blocked ? FIT_VERDICT_COLOR[fit.verdict] : tokens.textTertiary,
-        minWidth: 0,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {blocked ? `⚠ ${fit.reason}` : (table ? (model.desc ?? '') : '')}
     </span>
   );
 }

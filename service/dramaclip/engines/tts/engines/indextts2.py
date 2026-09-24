@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import threading
 import wave
@@ -37,15 +38,35 @@ _SAMPLE_RATE = 22050
 _REQUIRED_FILES = ("config.yaml", "gpt.pth", "s2mel.pth")
 
 _LOCK = threading.Lock()
+# 共享 worker 的 stdin/stdout 一问一答整段持锁：试听（RPC 执行池）与出片任务的
+# 合成并发打同一进程时，无锁的 write/readline 会应答错配拿到别人的音频。
+_IO_LOCK = threading.Lock()
 _PROC: subprocess.Popen[str] | None = None
+# 就绪行整个 worker 生命周期只发一次，读过没有要记在进程身份上、不能记在引擎实例
+# 上——factory 每次都可能 new 新实例，第二个实例再读就绪行会永远挂在 readline 上。
+# 按进程对象记账：respawn 出新对象天然重置，不依赖额外的复位分支。
+_HELLOED_FOR: subprocess.Popen[str] | None = None
+_RUNTIME_OK: bool | None = None
 
 
 def _venv_python() -> Path:
-    return resolve_data_dir() / "runtimes" / "indextts-venv" / "Scripts" / "python.exe"
+    # 与 CosyVoice 共用的 TTS 运行时（infra/model_manager/tts_runtime.py 维护）
+    return resolve_data_dir() / "runtimes" / "tts-venv" / "Scripts" / "python.exe"
+
+
+def _src_dir() -> Path:
+    return resolve_data_dir() / "runtimes" / "indextts-src"
 
 
 def runtime_ready() -> bool:
-    """隔离 venv 可用（存在且能 import indextts）。"""
+    """隔离 venv 可用（存在且能 import indextts）。成功即进程内缓存：
+
+    30s 的 import 探针放在逐段合成热路径上重复跑是纯开销（narration 每段一次）；
+    venv 中途被删的场景由 _ensure_worker 的 spawn 失败如实兜底，不会假装成功。
+    """
+    global _RUNTIME_OK
+    if _RUNTIME_OK is True:
+        return True
     py = _venv_python()
     if not py.is_file():
         return False
@@ -56,9 +77,27 @@ def runtime_ready() -> bool:
             timeout=30,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        return probe.returncode == 0
+        if probe.returncode == 0:
+            _RUNTIME_OK = True
+            return True
+        return False
     except (OSError, subprocess.TimeoutExpired):
         return False
+
+
+def shutdown_worker() -> None:
+    """服务退出时收走常驻 worker：Windows 上不收会留孤儿 python.exe
+
+    一直占着数 GB 的模型内存/显存。挂在优雅退出路径（system.shutdown/SIGTERM
+    → service_app.run 的 finally）上；Electron 强杀（TerminateProcess）到不了
+    这里，那类场景进程树随主进程终止，无法善后。
+    """
+    global _PROC
+    with _IO_LOCK:
+        proc = _PROC
+        _PROC = None
+    if proc is not None and proc.poll() is None:
+        proc.terminate()
 
 
 def _ensure_worker(models_dir: Path | None) -> subprocess.Popen[str]:
@@ -68,11 +107,17 @@ def _ensure_worker(models_dir: Path | None) -> subprocess.Popen[str]:
             return _PROC
         # device 交给 worker 内 torch 自检：探测层不区分 CUDA 代际（M4000 cc5.2 这类
         # 「有 N 卡但新栈不支持」的机器，init 失败进程即退，错误经 stdout 空行带回）。
+        # stderr 走继承：worker 的 CUDA 回退/加载诊断（">> CUDA 探针失败"）经服务
+        # stderr 落进 Electron 主进程日志——DEVNULL 吞掉等于盲飞。
         _PROC = subprocess.Popen( # noqa: S603 - 固定脚本固定参数
             [str(_venv_python()), str(_WORKER_SRC), str(models_dir), "auto"],
+            env={
+                **os.environ,
+                "DRAMACLIP_INDEXTTS_SRC": str(_src_dir()),
+            },
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=None,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -84,7 +129,6 @@ def _ensure_worker(models_dir: Path | None) -> subprocess.Popen[str]:
 class IndexTts2Engine:
     def __init__(self, model_dir: Path | None = None) -> None:
         self._model_dir = model_dir
-        self._device = ""
 
     @property
     def name(self) -> str:
@@ -173,19 +217,24 @@ class IndexTts2Engine:
         return out_path
 
     def _synth_one(self, text: str, ref: str, out_path: Path) -> None:
-        """送一个 job 给 worker 并等应答（协议见文件头注释）。"""
-        proc = _ensure_worker(self._model_dir)
-        if proc.stdin is None or proc.stdout is None:
-            raise RuntimeError("worker 进程管道不可用")
-        if self._device == "":
-            ready = json.loads(proc.stdout.readline())
-            self._device = str(ready.get("device", "?"))
-        job = {"id": "0", "text": text, "voice": ref, "out": str(out_path)}
-        proc.stdin.write(json.dumps(job, ensure_ascii=False) + "\n")
-        proc.stdin.flush()
-        reply = json.loads(proc.stdout.readline())
-        if not reply.get("ok"):
-            raise RuntimeError(f"IndexTTS 合成失败：{reply.get('error', '未知错误')}")
+        """送一个 job 给 worker 并等应答（协议见文件头注释）。
+
+        整段持 _IO_LOCK：一问一答中间不许插队（并发场景见 _IO_LOCK 注释）。
+        """
+        global _HELLOED_FOR
+        with _IO_LOCK:
+            proc = _ensure_worker(self._model_dir)
+            if proc.stdin is None or proc.stdout is None:
+                raise RuntimeError("worker 进程管道不可用")
+            if _HELLOED_FOR is not proc:
+                json.loads(proc.stdout.readline())  # 就绪行只此一条，按进程身份记（见模块头）
+                _HELLOED_FOR = proc
+            job = {"id": "0", "text": text, "voice": ref, "out": str(out_path)}
+            proc.stdin.write(json.dumps(job, ensure_ascii=False) + "\n")
+            proc.stdin.flush()
+            reply = json.loads(proc.stdout.readline())
+            if not reply.get("ok"):
+                raise RuntimeError(f"IndexTTS 合成失败：{reply.get('error', '未知错误')}")
 
 
 def _concat_wav(parts: list[Path], out_path: Path) -> None:
