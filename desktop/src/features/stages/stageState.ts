@@ -3,10 +3,11 @@
  * 纯函数，不发 RPC：工作台矩阵与剧库五要素卡共用同一套词汇与判则——
  * 阶段词、卡点句式两处一致，改一处两处都变（卷三意见 07：共词汇不共组件）。
  *
- * 聚合供数（09-10 §6 核心层已落地）：analyzedCount/planCount 由 project.list/get
- * 的阶段聚合字段（analyzed_count/plan_count）喂入 stageFactsOf；字段缺省（旧服务）
- * 或 staleHint（过期对账仍无字段）传 null 即进「宁灰勿假绿」分支——阶段态取不到
- * 就标 unknown，绝不倒推绿灯（卷三意见 03）。
+ * 聚合供数（09-10 §6 核心层 + §3.1 对账三戳已落地）：analyzedCount/planCount 与
+ * 过期对账（analyzed_at/last_episode_at/latest_plan_at）都由 project.list/get 的
+ * 聚合字段喂入 stageFactsOf；字段缺省（旧服务）或对账戳缺失（没分析过/没方案）
+ * 传 null 即进「宁灰勿假绿」分支——阶段态取不到就标 unknown，过期无从对账金灯
+ * 就不点，绝不倒推（卷三意见 03）。
  * 账本粒度同样诚实：workCount=null（成品账缺）→ ③④ 灰；jobsPresent=false
  * （任务账缺）→ ② 灰、任务类卡点句沉默。缺哪本账灰哪几盏灯，不连坐。
  * export 类任务的 ref_id=export_id 挂不到剧上，因此「正在导出」在剧维度看不见；
@@ -55,8 +56,10 @@ export interface StageFacts {
   readonly analyzedCount: number | null;
   /** 方案数（聚合 RPC 字段）：null = 未落地，③ 拿成品硬证据倒推，否则灰。 */
   readonly planCount: number | null;
-  /** 分析是否重跑于方案快照之后（方案已过期）：null = 无从判断。 */
+  /** 分析是否重跑于方案快照之后（方案已过期）：null = 对账戳缺，无从判断。 */
   readonly staleHint: boolean | null;
+  /** 喂料是否晚于最近一次分析（转写/方案落后于片库）：null = 对账戳缺，无从判断。 */
+  readonly intakeStale: boolean | null;
   /** 任务账里是否有过完成的 analysis/prescreen——卡点兜底句区分「没跑过」与「跑过但账缺」。 */
   readonly analysisEverCompleted: boolean;
   /** 任务账是否在场：false = jobs.list 还没取到或取失败，② 亮灰、卡点句不装知道。 */
@@ -65,11 +68,18 @@ export interface StageFacts {
 
 export function deriveStages(facts: StageFacts): StageMap {
   return {
-    intake: facts.episodeCount > 0 ? 'done' : 'idle',
+    intake: deriveIntake(facts),
     analysis: deriveAnalysis(facts),
     planning: derivePlanning(facts),
     export: deriveExport(facts),
   };
+}
+
+function deriveIntake(facts: StageFacts): StageState {
+  if (facts.episodeCount === 0) return 'idle';
+  // 加了素材没重跑分析：① 过期金灯。对账戳缺（null）不点——宁灰勿假金。
+  if (facts.intakeStale === true) return 'stale';
+  return 'done';
 }
 
 function deriveAnalysis(facts: StageFacts): StageState {
@@ -178,6 +188,16 @@ function failedNote(facts: StageFacts, ctx: BlockContext): BlockNote | null {
 }
 
 function staleNote(facts: StageFacts, ctx: BlockContext): BlockNote | null {
+  // 双过期时先催上游：分析没追上素材就谈不上重新规划，先把 ② 追平。
+  if (facts.intakeStale === true) {
+    return {
+      stage: 'intake',
+      tone: 'warning',
+      text: '素材有新增，分析还没跟上：转写与方案落后于片库',
+      actionLabel: '重跑分析',
+      route: stageRoute(ctx.dramaId, 'analysis'),
+    };
+  }
   if (facts.staleHint !== true) return null;
   return {
     stage: 'planning',
@@ -301,20 +321,30 @@ export function jobFactsFor(dramaId: string, jobs: readonly JobInfo[]): JobFacts
   return { activeTypes, activeLabel, activeProgress, failed, analysisEverCompleted, jobsPresent: true };
 }
 
-/** 事实装配：聚合计数取项目行的阶段聚合字段（analyzed_count/plan_count）。
- * 字段缺省 = 旧服务未供数 → null 走宁灰勿假绿；staleHint 无过期对账字段，恒 null——
- * 金灯（已过期）在对账字段落地前不点。账目字段来自 jobs 扫描。 */
+/** 事实装配：聚合计数与对账三戳取项目行的聚合字段（analyzed_count/plan_count/
+ * analyzed_at/last_episode_at/latest_plan_at）。字段缺省 = 旧服务未供数；戳缺
+ * （null）= 没分析过或没方案——都走宁灰勿假绿，金灯（已过期）不点。
+ * 过期判据在服务只供戳、比先后在这里（判据单一真相源）：
+ * analyzed_at > latest_plan_at = 方案比转写旧（③ 过期）；
+ * last_episode_at > analyzed_at = 加了素材没重跑分析（① 过期）。 */
 export function stageFactsOf(
-  project: Pick<Project, 'episode_count' | 'analyzed_count' | 'plan_count'>,
+  project: Pick<
+    Project,
+    'episode_count' | 'analyzed_count' | 'plan_count' | 'analyzed_at' | 'last_episode_at' | 'latest_plan_at'
+  >,
   workCount: number | null,
   jobFacts: JobFacts,
 ): StageFacts {
+  const analyzedAt = project.analyzed_at ?? null;
+  const latestPlanAt = project.latest_plan_at ?? null;
+  const lastEpisodeAt = project.last_episode_at ?? null;
   return {
     episodeCount: project.episode_count,
     workCount,
     analyzedCount: project.analyzed_count ?? null,
     planCount: project.plan_count ?? null,
-    staleHint: null,
+    staleHint: analyzedAt !== null && latestPlanAt !== null ? analyzedAt > latestPlanAt : null,
+    intakeStale: analyzedAt !== null && lastEpisodeAt !== null ? lastEpisodeAt > analyzedAt : null,
     ...jobFacts,
   };
 }

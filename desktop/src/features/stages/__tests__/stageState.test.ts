@@ -29,6 +29,7 @@ function facts(partial: Partial<StageFacts> = {}): StageFacts {
     analyzedCount: null,
     planCount: null,
     staleHint: null,
+    intakeStale: null,
     analysisEverCompleted: false,
     jobsPresent: true,
     ...partial,
@@ -51,9 +52,12 @@ function job(partial: Partial<JobInfo> = {}): JobInfo {
 }
 
 describe('deriveStages 四阶段灯', () => {
-  it('① 进素材：有集数即完成，零集数未开始', () => {
+  it('① 进素材：有集数即完成，零集数未开始；加了素材没重跑分析=过期金灯', () => {
     expect(deriveStages(facts({ episodeCount: 6 })).intake).toBe('done');
     expect(deriveStages(facts({ episodeCount: 0 })).intake).toBe('idle');
+    expect(deriveStages(facts({ intakeStale: true })).intake).toBe('stale');
+    // 对账戳缺（null）不点金——宁灰勿假金，① 保持完成绿
+    expect(deriveStages(facts({ intakeStale: null })).intake).toBe('done');
   });
 
   it('② 分析：聚合计数缺席时只亮灰，即便有成品也不倒推绿（宁灰勿假绿）', () => {
@@ -205,6 +209,54 @@ describe('continueRoute 继续按钮', () => {
       route: '/projects/p1/analysis',
       label: '继续分析',
     });
+  });
+});
+
+describe('过期对账（09-10 §3.1 三戳）：双过期催办与 stageFactsOf 推导', () => {
+  it('双过期先催上游：素材没跟上催重跑分析，不催重新规划', () => {
+    const f = facts({ intakeStale: true, staleHint: true });
+    const note = deriveBlockNote(f, deriveStages(f), CTX);
+    expect(note).toMatchObject({
+      stage: 'intake',
+      tone: 'warning',
+      text: '素材有新增，分析还没跟上：转写与方案落后于片库',
+      actionLabel: '重跑分析',
+      route: '/projects/p1/analysis',
+    });
+  });
+
+  it('stageFactsOf 对账三戳：戳齐推导过期，戳缺金灯不点', () => {
+    // 分析(5000) 晚于方案(4000)、喂料(3000) 早于分析：③ 过期、① 不过期
+    const fresh = stageFactsOf(
+      { episode_count: 6, analyzed_at: 5000, latest_plan_at: 4000, last_episode_at: 3000 },
+      0,
+      jobFactsFor('p1', []),
+    );
+    expect(fresh.staleHint).toBe(true);
+    expect(fresh.intakeStale).toBe(false);
+    // 喂料(5000) 晚于分析(3000)：① 过期（此时方案比转写旧，③ 也过期——双过期）
+    const added = stageFactsOf(
+      { episode_count: 6, analyzed_at: 3000, latest_plan_at: 2000, last_episode_at: 5000 },
+      0,
+      jobFactsFor('p1', []),
+    );
+    expect(added.intakeStale).toBe(true);
+    expect(added.staleHint).toBe(true);
+    // 只有 analyzed_at 一枚戳：另一头无从对账，两盏金灯不点
+    const partial = stageFactsOf({ episode_count: 6, analyzed_at: 5000 }, 0, jobFactsFor('p1', []));
+    expect(partial.staleHint).toBeNull();
+    expect(partial.intakeStale).toBeNull();
+  });
+
+  it('对账戳在场时灯与句联动：① 金灯 + 重跑分析卡点句', () => {
+    const f = stageFactsOf(
+      { episode_count: 6, analyzed_count: 4, plan_count: 2, analyzed_at: 3000, latest_plan_at: 2000, last_episode_at: 5000 },
+      0,
+      jobFactsFor('p1', []),
+    );
+    const stages = deriveStages(f);
+    expect(stages.intake).toBe('stale');
+    expect(deriveBlockNote(f, stages, CTX)).toMatchObject({ stage: 'intake', tone: 'warning', actionLabel: '重跑分析' });
   });
 });
 
