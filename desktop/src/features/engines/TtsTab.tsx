@@ -22,6 +22,7 @@ import {
 import { DownloadSourceButton } from './ModelDownloadPopover';
 import { type ActiveCardProps, ActiveEngineCard } from './ActiveEngineCard';
 import { AssetLibrary } from './AssetLibrary';
+import { IndexttsRuntimeSlot } from './IndexttsRuntimeSlot';
 import { SettingSelect } from './SettingSelect';
 import { TtsPreviewButton } from './TtsPreviewButton';
 import { previewNotice } from './ttsPreview';
@@ -75,6 +76,10 @@ export function TtsTab({
         onChanged={onChanged}
         onVerify={onVerify}
       />
+      {/* IndexTTS 运行环境安装槽：选中该引擎才现身（装完后槽自己消失）。2~6GB 的
+          独立 Python + torch 不悄悄装——「选为生效」不代装，给显式一键引导，
+          试听/自检/导出的失败文案指的就是这扇门（曾经只有文案没有门）。 */}
+      {engine === 'indextts2' && <IndexttsRuntimeSlot />}
       <AssetLibrary
         models={domainModels}
         externals={externalAssets(imported, 'tts')}
