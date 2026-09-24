@@ -89,6 +89,16 @@ def set_status(conn: sqlite3.Connection, episode_id: str, status: str) -> None:
     conn.commit()
 
 
+def mark_done(conn: sqlite3.Connection, episode_id: str) -> None:
+    """分析落库：status='done' 同时盖 analyzed_at 对账戳（09-10 §3.1 过期金灯判据）。
+    时间取服务毫秒，与 narration_plans.created_at 同量纲可直接比先后。"""
+    conn.execute(
+        "UPDATE episodes SET status = 'done', analyzed_at = ? WHERE id = ?",
+        (_now_ms(), episode_id),
+    )
+    conn.commit()
+
+
 def set_cover(conn: sqlite3.Connection, episode_id: str, cover_path: str) -> None:
     conn.execute("UPDATE episodes SET cover_path = ? WHERE id = ?", (cover_path, episode_id))
     conn.commit()

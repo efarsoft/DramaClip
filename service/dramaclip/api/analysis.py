@@ -581,7 +581,7 @@ def _analyze_one(
     )
     if signature is not None:
         episodes_repo.set_source_signature(context.conn, episode_id, signature)
-    episodes_repo.set_status(context.conn, episode_id, "done")
+    episodes_repo.mark_done(context.conn, episode_id)
     return True
 
 

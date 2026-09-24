@@ -35,11 +35,17 @@ def _row_to_dict(
     episode_count: int = 0,
     analyzed_count: int = 0,
     plan_count: int = 0,
+    analyzed_at: int | None = None,
+    last_episode_at: int | None = None,
+    latest_plan_at: int | None = None,
 ) -> dict[str, Any]:
     return _decoded(dict(zip(_COLUMNS, row, strict=True))) | {
         "episode_count": episode_count,
         "analyzed_count": analyzed_count,
         "plan_count": plan_count,
+        "analyzed_at": analyzed_at,
+        "last_episode_at": last_episode_at,
+        "latest_plan_at": latest_plan_at,
     }
 
 
@@ -61,6 +67,9 @@ def create(conn: sqlite3.Connection, name: str, source_path: str) -> dict[str, A
         "episode_count": 0,
         "analyzed_count": 0,
         "plan_count": 0,
+        "analyzed_at": None,
+        "last_episode_at": None,
+        "latest_plan_at": None,
         "settings": {},
     }
 
@@ -68,15 +77,29 @@ def create(conn: sqlite3.Connection, name: str, source_path: str) -> dict[str, A
 def list_all(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     # 阶段聚合（09-10 §6 核心层）：analyzed_count=status'done' 集数、plan_count=方案行数。
     # 前端 deriveStages 据此把 ②③ 灯从「宁灰勿假绿」的降级两极升级为真值（卷三意见 03）。
+    # 对账三戳（09-10 §3.1 过期金灯）：analyzed_at=最近一次分析落库、last_episode_at=
+    # 最近一次喂料、latest_plan_at=最近一份方案快照；NULL=无从对账，前端金灯不点。
     rows = conn.execute(
         "SELECT p.id, p.name, p.source_path, p.status, p.created_at, p.updated_at,"
         " p.cover_path, p.settings, COUNT(e.id) AS episode_count,"
         " COALESCE(SUM(CASE WHEN e.status = 'done' THEN 1 ELSE 0 END), 0) AS analyzed_count,"
-        " (SELECT COUNT(*) FROM narration_plans np WHERE np.project_id = p.id) AS plan_count"
+        " (SELECT COUNT(*) FROM narration_plans np WHERE np.project_id = p.id) AS plan_count,"
+        " MAX(e.analyzed_at) AS analyzed_at,"
+        " MAX(e.created_at) AS last_episode_at,"
+        " (SELECT MAX(np2.created_at) FROM narration_plans np2"
+        " WHERE np2.project_id = p.id) AS latest_plan_at"
         " FROM projects p LEFT JOIN episodes e ON e.project_id = p.id"
         " GROUP BY p.id ORDER BY p.created_at DESC"
     ).fetchall()
-    keys = (*_COLUMNS, "episode_count", "analyzed_count", "plan_count")
+    keys = (
+        *_COLUMNS,
+        "episode_count",
+        "analyzed_count",
+        "plan_count",
+        "analyzed_at",
+        "last_episode_at",
+        "latest_plan_at",
+    )
     return [_decoded(dict(zip(keys, row, strict=True))) for row in rows]
 
 
@@ -87,14 +110,24 @@ def get(conn: sqlite3.Connection, project_id: str) -> dict[str, Any] | None:
     if row is None:
         return None
     counts = conn.execute(
-        "SELECT COUNT(*), COALESCE(SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END), 0)"
+        "SELECT COUNT(*), COALESCE(SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END), 0),"
+        " MAX(analyzed_at), MAX(created_at)"
         " FROM episodes WHERE project_id = ?",
         (project_id,),
     ).fetchone()
-    plan_count = conn.execute(
-        "SELECT COUNT(*) FROM narration_plans WHERE project_id = ?", (project_id,)
-    ).fetchone()[0]
-    return _row_to_dict(row, int(counts[0]), int(counts[1]), int(plan_count))
+    plan_row = conn.execute(
+        "SELECT COUNT(*), MAX(created_at) FROM narration_plans WHERE project_id = ?",
+        (project_id,),
+    ).fetchone()
+    return _row_to_dict(
+        row,
+        int(counts[0]),
+        int(counts[1]),
+        int(plan_row[0]),
+        analyzed_at=counts[2],
+        last_episode_at=counts[3],
+        latest_plan_at=plan_row[1],
+    )
 
 
 def get_settings(conn: sqlite3.Connection, project_id: str) -> dict[str, Any]:

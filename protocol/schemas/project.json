@@ -39,7 +39,19 @@
         },
         "plan_count": {
           "type": "integer",
-          "description": "阶段聚合：narration_plans 行数；缺省同上降级。过期对账（staleHint）仍无字段，金灯不点"
+          "description": "阶段聚合：narration_plans 行数；缺省同上降级"
+        },
+        "analyzed_at": {
+          "type": ["integer", "null"],
+          "description": "过期对账（09-10 §3.1）：最近一次分析落库的服务毫秒（MAX(episodes.analyzed_at)）。NULL = 没分析过或迁移前旧数据——取不到 ≠ 不存在，前端金灯不点"
+        },
+        "last_episode_at": {
+          "type": ["integer", "null"],
+          "description": "过期对账：最近一次喂料的服务毫秒（MAX(episodes.created_at)）。晚于 analyzed_at = 加了素材还没重跑分析，① 进素材灯过期"
+        },
+        "latest_plan_at": {
+          "type": ["integer", "null"],
+          "description": "过期对账：最近一份方案快照的服务毫秒（MAX(narration_plans.created_at)）。早于 analyzed_at = 方案比转写旧，③ 规划灯过期"
         },
         "cover_path": {
           "type": ["string", "null"],

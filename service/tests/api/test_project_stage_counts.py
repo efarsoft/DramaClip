@@ -4,6 +4,10 @@ analyzed_count = 分析落库（status='done'）的集数；plan_count = narrati
 前端 deriveStages 靠它把 ②分析 / ③规划 灯从降级两极升级为真值——卷三意见 03：
 聚合落地前宁灰勿假绿，落地后绿灯才允许点亮。语义红线：prescreened/analyzing/failed
 都不算「分析完成」，只有 done 算。
+
+对账三戳（09-10 §3.1 过期金灯）：analyzed_at=最近一次分析落库、last_episode_at=
+最近一次喂料、latest_plan_at=最近一份方案快照——服务只供时间戳不下结论，
+比先后是前端 stageFactsOf 的活。无从对账（NULL）金灯保持灰。
 """
 
 from __future__ import annotations
@@ -111,3 +115,63 @@ def test_counts_isolated_per_project(
     assert rows[first]["plan_count"] == 1
     assert rows[second]["analyzed_count"] == 0, "别的剧的账不许串到这部剧头上"
     assert rows[second]["plan_count"] == 0
+
+
+def test_reconciliation_timestamps_aggregated(
+    memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    router = _router(memory_db, tmp_path)
+    source = tmp_path / "ts-src"
+    source.mkdir()
+    project_id = _seed(router, memory_db, ["pending", "pending"], source)
+    episodes = episodes_repo.list_by_project(memory_db, project_id)
+    first_id = str(episodes[0]["id"])
+
+    episodes_repo.mark_done(memory_db, first_id)
+    stamped = memory_db.execute(
+        "SELECT analyzed_at FROM episodes WHERE id = ?", (first_id,)
+    ).fetchone()
+    assert stamped[0] is not None, "mark_done 必须同时盖对账戳"
+
+    plans_repo.create(memory_db, project_id, "full_narration", ["e1"], {"scenes": []})
+    # 钉显式时间戳，免同毫秒竞态：分析(5000) 新于方案(4000)
+    memory_db.execute(
+        "UPDATE episodes SET analyzed_at = 5000 WHERE project_id = ?", (project_id,)
+    )
+    memory_db.execute(
+        "UPDATE narration_plans SET created_at = 4000 WHERE project_id = ?", (project_id,)
+    )
+    memory_db.commit()
+
+    rows = router.dispatch(_request(2, "project.list", {})).result
+    row = next(item for item in rows if str(item["id"]) == project_id)
+    assert row["analyzed_at"] == 5000
+    assert row["latest_plan_at"] == 4000
+    assert isinstance(row["last_episode_at"], int), "喂料时间是硬数据，不许缺"
+
+    detail = router.dispatch(_request(3, "project.get", {"project_id": project_id})).result
+    assert detail["project"]["analyzed_at"] == 5000
+    assert detail["project"]["latest_plan_at"] == 4000
+    assert isinstance(detail["project"]["last_episode_at"], int)
+
+
+def test_reconciliation_null_when_nothing_analyzed(
+    memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    router = _router(memory_db, tmp_path)
+    source = tmp_path / "null-src"
+    source.mkdir()
+    project_id = _seed(router, memory_db, ["pending"], source)
+
+    rows = router.dispatch(_request(2, "project.list", {})).result
+    row = next(item for item in rows if str(item["id"]) == project_id)
+    assert row["analyzed_at"] is None, "没分析过就不给对账戳——金灯宁灰勿假"
+    assert row["latest_plan_at"] is None
+    assert row["last_episode_at"] is not None
+
+    created = router.dispatch(
+        _request(1, "project.create", {"name": "空对账", "source_path": "."})
+    ).result
+    assert created["analyzed_at"] is None
+    assert created["last_episode_at"] is None
+    assert created["latest_plan_at"] is None

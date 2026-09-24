@@ -81,6 +81,12 @@ export interface Project {
   readonly analyzed_count?: number;
   /** 阶段聚合：narration_plans 行数；缺省同上降级。 */
   readonly plan_count?: number;
+  /** 过期对账（09-10 §3.1）：最近一次分析落库的服务毫秒；null/缺省 = 无从对账，金灯不点。 */
+  readonly analyzed_at?: number | null;
+  /** 过期对账：最近一次喂料的服务毫秒；晚于 analyzed_at = 加了素材没重跑分析。 */
+  readonly last_episode_at?: number | null;
+  /** 过期对账：最近一份方案快照的服务毫秒；早于 analyzed_at = 方案比转写旧。 */
+  readonly latest_plan_at?: number | null;
   readonly cover_path?: string | null;
   /** 项目级参数覆盖（方案数 K/转写档位/解说风格/字幕预设等）；空对象=全部使用全局默认。 */
   readonly settings: Record<string, unknown>;
