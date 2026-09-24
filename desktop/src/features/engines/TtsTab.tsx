@@ -76,10 +76,12 @@ export function TtsTab({
         onChanged={onChanged}
         onVerify={onVerify}
       />
-      {/* IndexTTS 运行环境安装槽：选中该引擎才现身（装完后槽自己消失）。2~6GB 的
-          独立 Python + torch 不悄悄装——「选为生效」不代装，给显式一键引导，
+      {/* IndexTTS 运行环境安装槽：配音页固定显示（业主裁决 2026-09-24）——入口可见性
+          不该押在「先切到 indextts2」上，资产库那行的试听/选为生效随时会撞上它。
+          判据仍是 models.indextts_status：装好后槽自己消失，不是常驻横幅。
+          2~6GB 的独立 Python + torch 不悄悄装——「选为生效」不代装，给显式一键引导，
           试听/自检/导出的失败文案指的就是这扇门（曾经只有文案没有门）。 */}
-      {engine === 'indextts2' && <IndexttsRuntimeSlot />}
+      <IndexttsRuntimeSlot />
       <AssetLibrary
         models={domainModels}
         externals={externalAssets(imported, 'tts')}

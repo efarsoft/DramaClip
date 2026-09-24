@@ -2,8 +2,9 @@
  *
  * 槽组件与钩子一直都在（IndexttsRuntimeSlot/useIndexttsRuntime），却从没被任何页面
  * 挂载——自检与合成失败的文案写着「引擎页『安装运行环境』」，指的是扇不存在的门。
- * 判据：选中 indextts2 且运行环境未装 → 卡内现身一键安装入口；已装 → 消失；
- * 选别的引擎 → 不打扰（2~6GB 的引导对 kokoro 用户毫无意义，连状态都不该查）。
+ * 判据（业主裁决：固定显示）：运行环境未装 → 配音页无条件现身一键安装入口，
+ * 不押在「先切到 indextts2」上——资产库那行的试听/选为生效随时会撞上缺环境；
+ * 已装 → 消失，不做常驻横幅。
  */
 import { App as AntdApp } from 'antd';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -82,14 +83,14 @@ describe('IndexTTS 运行环境安装槽 · 接线', () => {
     vi.mocked(indexttsApi.status).mockResolvedValue({ installed: false, dir: '' });
   });
 
-  it('选中 indextts2 且未装 → 卡内现身「安装运行环境」一键入口', async () => {
+  it('未装 + 选 indextts2 → 卡下现身「安装运行环境」一键入口', async () => {
     renderTts('indextts2');
     // antd 图标自带 aria-label="download"，可及名是「download 安装运行环境」——用正则
     expect(await screen.findByRole('button', { name: /安装运行环境/ })).toBeTruthy();
     expect(screen.getByText(/IndexTTS 运行环境未安装/)).toBeTruthy();
   });
 
-  it('运行环境已装 → 槽消失，不占地方', async () => {
+  it('运行环境已装 → 槽消失，不做常驻横幅', async () => {
     vi.mocked(indexttsApi.status).mockResolvedValue({ installed: true, dir: 'C:/rt' });
     renderTts('indextts2');
     await waitFor(() => {
@@ -99,9 +100,9 @@ describe('IndexTTS 运行环境安装槽 · 接线', () => {
     expect(screen.queryByText(/IndexTTS 运行环境未安装/)).toBeNull();
   });
 
-  it('选 kokoro → 不打扰：槽不渲染，连安装状态都不查', () => {
+  it('未装 + 选 kokoro → 照样显示（固定显示：入口可见性不押在引擎切换上）', async () => {
     renderTts('kokoro');
-    expect(screen.queryByRole('button', { name: /安装运行环境/ })).toBeNull();
-    expect(indexttsApi.status).not.toHaveBeenCalled();
+    expect(await screen.findByRole('button', { name: /安装运行环境/ })).toBeTruthy();
+    expect(indexttsApi.status).toHaveBeenCalled();
   });
 });
