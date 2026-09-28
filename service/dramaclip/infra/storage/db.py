@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+import contextlib
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Literal
@@ -86,7 +88,13 @@ class SerializedConnection(sqlite3.Connection):
     def _begin_own(self) -> None:
         owner = threading.get_ident()
         depth = self._tx_depth.get(owner, 0)
-        if depth == 0:
+        if depth == 0 and not self._tx_lock.acquire(timeout=60.0):
+            # 泄漏自愈：持锁线程 60s 未收口（正常单条 execute 毫秒级）视为已消亡，
+            # 强制重置锁与归属记录——永久死锁比短暂互斥破坏更致命。留 error 供追因。
+            with contextlib.suppress(RuntimeError):
+                self._tx_lock.release()
+            self._tx_depth.clear()
+            print("[error] db tx_lock 等待超时，判定事务归属泄漏，已强制重置", file=sys.stderr)
             self._tx_lock.acquire()
         self._tx_depth[owner] = depth + 1
 
