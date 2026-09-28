@@ -15,13 +15,14 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext
-from dramaclip.engines.tts import factory, reference_qc
+from dramaclip.engines.tts import factory, reference_clean, reference_qc, vocal_separation
 from dramaclip.engines.tts.base import DEFAULT_VOICE, audio_container, audio_duration_s
 from dramaclip.engines.tts.factory import create as create_tts
 from dramaclip.transport.rpc import Router, RpcDomainError
 
 _ERR_TTS_PARAM = -32320
 _ERR_TTS_SYNTH = -32321
+_ERR_TTS_CLEAN = -32322
 
 #: 试听短句：一句带停顿、转折和直接引语的台词，标点处理与语气一听便知差别。
 PREVIEW_TEXT = "她推开门就愣住了：三年没见的妹妹，张口还是那句「哥，我回来了」。"
@@ -32,6 +33,43 @@ _PREVIEW_DIR = "tts-preview"
 
 def register(router: Router, context: AppContext) -> None:
     router.register("tts.preview", lambda params: preview(context, params))
+    router.register("tts.clean_reference", lambda params: clean_reference(context, params))
+
+
+def clean_reference(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """参考音频清洗：mode=separate（MDX-Net 人声分离，默认）| fast（ffmpeg 滤镜链）。
+
+    清洗是「改善参考」不是门禁：产物落 <stem>.cleaned.wav 与源同目录，返回产物
+    质检报告由前端展示——用不用清洗产物仍由用户决定（B6 同款：报告不拦路）。
+    """
+    raw = str(params.get("path") or "").strip()
+    if raw == "":
+        raise RpcDomainError(_ERR_TTS_PARAM, "缺少参考音频路径（path）")
+    src = Path(raw)
+    if not src.is_file():
+        raise RpcDomainError(_ERR_TTS_PARAM, f"参考音频不存在：{raw}")
+    mode = str(params.get("mode") or "separate").strip()
+    try:
+        if mode == "fast":
+            out = reference_clean.clean_reference(src)
+        elif mode == "separate":
+            out = vocal_separation.clean_reference(context.data_dir / "models", src)
+        else:
+            raise RpcDomainError(_ERR_TTS_PARAM, f"未知清洗模式「{mode}」（separate | fast）")
+    except RpcDomainError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - 失败原因必须原样带出，不静默换档
+        raise RpcDomainError(_ERR_TTS_CLEAN, f"清洗失败：{type(exc).__name__}: {exc}") from exc
+    quality = reference_qc.inspect_reference(out)
+    return {
+        "path": str(out),
+        "quality": {
+            "grade": quality.grade,
+            "metrics": quality.metrics,
+            "reasons": list(quality.reasons),
+            "suggestions": list(quality.suggestions),
+        },
+    }
 
 
 def preview(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:

@@ -72,6 +72,26 @@ _COSYVOICE_EXTRAS = [
     "wget==3.2",
     "pyarrow==25.0.1",
 ]
+# 人声分离（参考音频清洗「彻底档」，vocal_separation.py）：MDX-Net 走
+# onnxruntime 纯 CPU，不碰 GPU 栈。torch/torchvision 必须在本组显式 pin——
+# audio-separator 的裸 torch 依赖 + onnx2torch 的裸 torchvision 依赖会让解析器
+# 把 torch 拉到 2.14（torchvision 0.29 连带），双栈全炸（2026-09-28 本机实测）。
+# torchvision 取 PyPI CPU 轮即可：onnx2torch 只用它的 CPU 算子做 ONNX 图转换，
+# 分离全程 onnxruntime，不依赖 torchvision 的 CUDA 内核。
+_SEPARATION_EXTRAS = [
+    "audio-separator==0.18.3",
+    "beartype==0.18.5",
+    "diffq==0.2.4",
+    "julius==0.2.7",
+    "ml_collections",
+    "onnx2torch==1.5.15",
+    "torchvision==0.23.0",
+    "pydub==0.25.1",
+    "resampy==0.4.3",
+    "rotary-embedding-torch==0.6.5",
+    "samplerate==0.1.0",
+    "scipy==1.13.1",
+]
 # openai-whisper 20231117 在构建期需要 pkg_resources（已废）：20250625 是
 # Windows 实测可构建版（CosyVoice 只用它的 mel 前端）。
 # main 分支是移动目标：zip 字节数随上游推送变化，精确校验必碎——钉 commit。
@@ -212,7 +232,7 @@ def install(
 
     # ④ 双栈其余依赖（清华镜像；transformers 定 4.52.1 = IndexTTS 硬需要 +
     #    CosyVoice 上游同代版本，见模块头）
-    _pct(50, "安装双栈推理依赖（transformers 4.52 等 37 项）")
+    _pct(50, "安装双栈推理依赖（transformers 4.52 等 49 项）")
     # descript-audiotools（上游搭车依赖）已剔除：index-tts 全源码零 import
     # （grep 实证），其 protobuf<3.20 陈年 pin 还与 onnx>=4.25 死锁。
     _run_uv(uv, venv, "pip", "install",
@@ -220,7 +240,7 @@ def install(
             "json5", "wetext", "cn2an", "jieba", "numba",
             "openai-whisper==20250625", "sentencepiece", "fugashi", "unidic-lite",
             "g2p-en", "modelscope==1.27.0",
-            *_COSYVOICE_EXTRAS, "--index-url", _PYPI_MIRROR)
+            *_COSYVOICE_EXTRAS, *_SEPARATION_EXTRAS, "--index-url", _PYPI_MIRROR)
     _check_cancel()
 
     # ⑤ 源码：IndexTTS zip（--no-deps 可编辑装）+ CosyVoice/Matcha/PyWorld

@@ -42,6 +42,45 @@
           "text": { "type": "string" }
         }
       }
+    },
+    {
+      "name": "tts.clean_reference",
+      "summary": "参考音频清洗：剥底噪/BGM 改善克隆参考，返回产物路径与产物质检报告",
+      "params": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "参考音频本机路径（如引擎页选择的克隆参考）"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["separate", "fast"],
+            "description": "separate=MDX-Net 人声分离（默认，需 TTS 运行环境+首次下载约 50MB 模型）；fast=ffmpeg 滤镜链（零依赖，只压底噪不剥 BGM）"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["path", "quality"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "清洗产物绝对路径（<stem>.cleaned.wav，与源同目录）；前端将其接替为当前参考"
+          },
+          "quality": {
+            "type": "object",
+            "required": ["grade"],
+            "properties": {
+              "grade": { "type": "string", "description": "good | fair | poor（B6 质检口径）" },
+              "metrics": { "type": "object", "description": "duration_s/rms_dbfs/peak_dbfs/clip_ratio/snr_db" },
+              "reasons": { "type": "array", "items": { "type": "string" } },
+              "suggestions": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
     }
   ]
 }

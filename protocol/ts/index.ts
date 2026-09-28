@@ -544,6 +544,17 @@ export interface TtsPreviewResult {
   readonly text: string;
 }
 
+/** tts.clean_reference 返回体：清洗产物 + 产物质检（B6 报告，不是门禁）。 */
+export interface TtsCleanReferenceResult {
+  readonly path: string;
+  readonly quality: {
+    readonly grade: 'good' | 'fair' | 'poor';
+    readonly metrics: Readonly<Record<string, number>>;
+    readonly reasons: ReadonlyArray<string>;
+    readonly suggestions: ReadonlyArray<string>;
+  };
+}
+
 /** 引擎配置（云端/服务端点多实例，单启用）。 */
 export interface EngineConfig {
   readonly id: string;
@@ -703,6 +714,7 @@ export const METHOD_NAMES = [
   'settings.get',
   'settings.update',
   'tts.preview',
+  'tts.clean_reference',
   'prompts.list',
   'prompts.save',
   'prompts.reset',

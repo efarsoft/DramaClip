@@ -35,6 +35,7 @@ import type {
   RelayoutResult,
   SubtitlePresetInfo,
   TtsPreviewResult,
+  TtsCleanReferenceResult,
   VerifyReport,
 } from '@dramaclip/protocol';
 
@@ -288,6 +289,8 @@ export const modelsApi = {
 export const ttsApi = {
   preview: (engine: string, voice: string): Promise<TtsPreviewResult> =>
     rpc<TtsPreviewResult>('tts.preview', { engine, voice }),
+  cleanReference: (path: string, mode: 'separate' | 'fast' = 'separate'): Promise<TtsCleanReferenceResult> =>
+    rpc<TtsCleanReferenceResult>('tts.clean_reference', { path, mode }),
 } as const;
 
 /** 能力层自检（§10.3）：校验=文件层，自检=能力层，两者都过才叫 ready。 */
