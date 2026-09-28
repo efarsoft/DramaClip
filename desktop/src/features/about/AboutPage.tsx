@@ -226,7 +226,7 @@ function WechatBlock(): ReactElement {
             flexShrink: 0,
           }}
         />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs, minWidth: 0 }}>
           <span style={{ fontSize: tokens.text.body.size, fontWeight: 600, color: tokens.textPrimary }}>
             关注公众号
           </span>

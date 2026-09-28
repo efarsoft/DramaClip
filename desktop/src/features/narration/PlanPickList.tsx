@@ -1,13 +1,13 @@
 /** 阶段②（规格 §6 的 ④）：只读方案卡 → 勾选 → 开始出片；卡头覆盖度行常驻（静默清单第 2 条），
  * 底栏成本预估一期口径（意见08）：条数 + 磁盘（估），耗时/LLM 没有实测口径就是「—」。 */
 import { Alert, Button, Card, Empty, Tag, Tooltip } from 'antd';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { PageSection } from '../../components/layout/PageKit';
 import type { NarrationPlan } from '@dramaclip/protocol';
 import { modeLabel } from '../../components/modeMeta';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
-import { planCardView } from './planCards';
+import { planCardView, recommendedIds } from './planCards';
 import { coverageOf, estimateDisk, type Coverage } from './produceView';
 import type { ExportQueue } from './useExportQueue';
 import type { PlanBatch } from './usePlanBatch';
@@ -29,11 +29,14 @@ export function PlanPickList({
   avgBytes: number | null;
 }) {
   const [picked, setPicked] = useState<string[]>([]);
+  const [recommended, setRecommended] = useState<string[]>([]);
   const plans = batch.plans;
 
-  // 换了一批方案，上一批的勾选 id 在这一批里根本不存在——不清空就会把过期 id 提交去渲染
+  // 默认推荐：每模式勾 1 条（有评分取最高分，无分取批次首个可出片）——不用盲选
   useEffect(() => {
-    setPicked([]);
+    const ids = recommendedIds(plans);
+    setRecommended(ids);
+    setPicked(ids);
   }, [plans]);
 
   if (plans.length === 0) {
@@ -53,6 +56,7 @@ export function PlanPickList({
           <PlanCard
             key={plan.id}
             plan={plan}
+            recommended={recommended.includes(plan.id)}
             checked={picked.includes(plan.id)}
             onToggle={() => {
               setPicked((prev) => (prev.includes(plan.id) ? prev.filter((id) => id !== plan.id) : [...prev, plan.id]));
@@ -170,7 +174,17 @@ function planMode(plans: NarrationPlan[], planId: string): string {
 }
 
 /** 只读方案卡（规格 §4.3 四要素 + 重叠率）：用户不挑角度，只判断「K 条是不是 K 个卖点」。 */
-function PlanCard({ plan, checked, onToggle }: { plan: NarrationPlan; checked: boolean; onToggle: () => void }) {
+function PlanCard({
+  plan,
+  checked,
+  recommended,
+  onToggle,
+}: {
+  plan: NarrationPlan;
+  checked: boolean;
+  recommended: boolean;
+  onToggle: () => void;
+}) {
   const card = planCardView(plan);
   return (
     <Card
@@ -195,16 +209,7 @@ function PlanCard({ plan, checked, onToggle }: { plan: NarrationPlan; checked: b
               {card.angle}
             </Tag>
           )}
-          {checked && (
-            <Tag color="blue" style={{ marginLeft: 'auto', marginRight: 0 }}>
-              已选
-            </Tag>
-          )}
-          {!card.pickable && (
-            <Tag color="warning" style={{ marginLeft: 'auto', marginRight: 0 }}>
-              不能出片
-            </Tag>
-          )}
+          <CardBadges recommended={recommended} checked={checked} pickable={card.pickable} />
         </div>
         {card.hook !== '' && <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textPrimary }}>{card.hook}</span>}
         {card.reason !== '' && <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textSecondary }}>{card.reason}</span>}
@@ -221,5 +226,35 @@ function PlanCard({ plan, checked, onToggle }: { plan: NarrationPlan; checked: b
         </span>
       </div>
     </Card>
+  );
+}
+
+function CardBadges({
+  recommended,
+  checked,
+  pickable,
+}: {
+  recommended: boolean;
+  checked: boolean;
+  pickable: boolean;
+}): ReactElement {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: tokens.spaceSm, marginLeft: 'auto' }}>
+      {recommended && (
+        <Tag color="gold" style={{ marginRight: 0 }}>
+          推荐
+        </Tag>
+      )}
+      {checked && (
+        <Tag color="blue" style={{ marginLeft: 'auto', marginRight: 0 }}>
+          已选
+        </Tag>
+      )}
+      {!pickable && (
+        <Tag color="warning" style={{ marginRight: 0 }}>
+          不能出片
+        </Tag>
+      )}
+    </span>
   );
 }

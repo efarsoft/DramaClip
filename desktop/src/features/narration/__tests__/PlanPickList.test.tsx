@@ -53,26 +53,34 @@ function pickList(plans: NarrationPlan[], queue = idleQueue, episodeCount = 2, a
   );
 }
 
-it('勾选后出片，提交的是勾了的方案 id', () => {
+it('默认每模式预选 1 条推荐，直接出片不用盲选', () => {
   const run = vi.fn();
   pickList([plan('a'), plan('b')], { ...idleQueue, run });
-  fireEvent.click(screen.getByText('角度 a'));
   fireEvent.click(screen.getByRole('button', { name: /开始出片/ }));
   expect(run).toHaveBeenCalledWith(['a']);
+  expect(screen.getByText('推荐')).toBeTruthy();
 });
 
-it('换了批次，上一批的勾选自动作废', () => {
+it('推荐可取消：同模式备选不自动顶上，清空后按钮禁用', () => {
+  const run = vi.fn();
+  pickList([plan('a'), plan('b')], { ...idleQueue, run });
+  fireEvent.click(screen.getByText('角度 a')); // 取消默认预选
+  expect(screen.getByText('已选 0 / 2 条方案')).not.toBeNull();
+  expect(screen.getByRole('button', { name: /开始出片/ }).hasAttribute('disabled')).toBe(true);
+  expect(run).not.toHaveBeenCalled();
+});
+
+it('换了批次，勾选按新批次的默认推荐重置', () => {
   const { rerender } = render(
     <PlanPickList batch={{ ...idleBatch, plans: [plan('a')] }} queue={idleQueue} episodeCount={2} avgBytes={null} />,
   );
-  fireEvent.click(screen.getByText('角度 a'));
   expect(screen.getByText('已选 1 / 1 条方案')).not.toBeNull();
 
   rerender(
     <PlanPickList batch={{ ...idleBatch, plans: [plan('c'), plan('d')] }} queue={idleQueue} episodeCount={2} avgBytes={null} />,
   );
-  expect(screen.getByText('已选 0 / 2 条方案')).not.toBeNull();
-  expect(screen.getByRole('button', { name: /开始出片/ }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByText('已选 1 / 2 条方案')).not.toBeNull();
+  expect(screen.getByRole('button', { name: /开始出片/ }).hasAttribute('disabled')).toBe(false);
 });
 
 it('剧本清洗丢了几段就写在卡上：不说出口，方案看起来像天生只有这么长', () => {
@@ -93,8 +101,6 @@ it('过不了转化门禁的方案不能勾选出片', () => {
     block_reason: '收尾没有指向看全集',
   };
   pickList([blocked, plan('b')], { ...idleQueue, run });
-  fireEvent.click(screen.getByText('角度 a'));
-  fireEvent.click(screen.getByText('角度 b'));
   fireEvent.click(screen.getByRole('button', { name: /开始出片/ }));
   expect(run).toHaveBeenCalledWith(['b']);
   expect(screen.getByText('收尾没有指向看全集')).not.toBeNull();
@@ -114,17 +120,16 @@ it('集数拿不到时覆盖度行缺席，不拿 0/0 充数', () => {
 it('成本预估一期口径：条数照实、磁盘带「估」字、耗时与 LLM 就是「—」', () => {
   pickList([plan('a'), plan('b')], idleQueue, 2, 1073741824);
   expect(screen.getByText('成本预估')).toBeTruthy();
-  expect(screen.getByText('0 条')).toBeTruthy(); // 未勾选：条数照实是 0
-  fireEvent.click(screen.getByText('角度 a'));
-  expect(screen.getByText('1 条')).toBeTruthy();
+  expect(screen.getByText('1 条')).toBeTruthy(); // 默认预选每模式 1 条
   expect(screen.getByText('约 1.0 GB（估）')).toBeTruthy();
-  // 耗时与 LLM 成稿没有实测口径：两个「—」芯片常驻
-  expect(screen.getAllByText('—')).toHaveLength(2);
+  fireEvent.click(screen.getByText('角度 a'));
+  expect(screen.getByText('0 条')).toBeTruthy(); // 手动清空：条数照实是 0
+  // 清空后磁盘也失去口径：三个「—」芯片（磁盘/耗时/LLM）
+  expect(screen.getAllByText('—')).toHaveLength(3);
 });
 
 it('没有已完成成片：磁盘项显示「—」而不是编一个系数', () => {
   pickList([plan('a')], idleQueue, 2, null);
-  fireEvent.click(screen.getByText('角度 a'));
   expect(screen.getByText('1 条')).toBeTruthy();
   expect(screen.queryByText(/GB（估）/)).toBeNull();
 });
