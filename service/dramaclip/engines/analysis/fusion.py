@@ -11,6 +11,8 @@ _WINDOW_S = 0.3          # OCR 条时间窗向外扩展（采样与时间轴误�
 _ASR_WIN_PROB = 0.92     # ASR 字概率翻案线
 _OCR_RISK_CONF = 0.75    # OCR 置信风险线（低于才允许 ASR 翻案）
 _PUNCT = set("，。！？、：；“”‘’…—，")  # 标点不进字级对齐，裁决后按原位回插
+_SPLIT_MIN_BARS = 4      # OCR 条达到此数：候选「OCR 主导巨段」
+_SPLIT_MIN_DUR = 8.0     # 巨段时长下限（秒）：短段维持原有逐字对齐融合
 
 
 @dataclass(frozen=True)
@@ -42,8 +44,45 @@ def fuse(
         if not assigned:
             fused.append(seg)
             continue
+        if len(assigned) >= _SPLIT_MIN_BARS and seg.end - seg.start >= _SPLIT_MIN_DUR:
+            # OCR 主导巨段（VAD 连续语音引擎如 paraformer 的整段输出）：
+            # 按字幕条文本变化切回句级粒度，整段吞掉字幕条会毁掉下游句级打分（业主实测）
+            fused.extend(_split_by_runs(seg, assigned))
+            continue
         fused.extend(_fuse_segment(seg, assigned))
     return fused
+
+
+
+def _split_by_runs(seg: AsrSegment, bars: list[OcrSegment]) -> list[AsrSegment]:
+    """OCR 主导巨段拆分：相邻同文本条合并为驻留段，文本变化即切段边界。
+
+    每段文本取该驻留段内最长的条文本（同字幕多帧识别取最稳读法）；
+    ASR 仅用于时间锚定，不做逐字对齐——巨段场景下 ASR 已在投票中全面落败。
+    代价：巨段内 ASR 独有内容（无字幕的旁白）不保留，属「宁缺毋滥」取舍。
+    """
+    pieces: list[AsrSegment] = []
+    runs: list[list[OcrSegment]] = []
+    for bar in sorted(bars, key=lambda o: o.start):
+        if not bar.text.strip():
+            continue
+        if runs and runs[-1][-1].text.replace(" ", "") == bar.text.replace(" ", ""):
+            runs[-1].append(bar)
+        else:
+            runs.append([bar])
+    for run in runs:
+        text = max((o.text for o in run), key=len)
+        pieces.append(
+            AsrSegment(
+                start=round(min(o.start for o in run), 3),
+                end=round(max(o.end for o in run), 3),
+                text=text,
+                speaker=seg.speaker,
+                emotion=seg.emotion,
+                source="ocr_fixed",
+            )
+        )
+    return pieces
 
 
 def _fuse_segment(

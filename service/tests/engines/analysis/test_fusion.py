@@ -95,3 +95,37 @@ def test_multi_char_asr_words_no_duplication() -> None:
     ocr = [OcrSegment(start=9.8, end=11.2, text="你是谁", conf=0.66)]
     result = fuse([seg], ocr)
     assert result[0] is seg, "对齐结果与原文一致 → 段保留，不得叠字"
+
+
+def _long_seg(start: float, end: float, text: str) -> AsrSegment:
+    """构造长巨段（每字均布时间戳，模拟 paraformer 的 VAD 连续输出）。"""
+    span = end - start
+    step = span / max(len(text), 1)
+    words = [
+        WordSpan(start=start + i * step, end=start + (i + 1) * step, word=c, probability=0.6)
+        for i, c in enumerate(text)
+    ]
+    return AsrSegment(start=start, end=end, text=text, words=words)
+
+
+def test_mega_segment_splits_at_text_changes() -> None:
+    """OCR 主导巨段按字幕条文本变化拆回句级粒度（业主实测：92s 巨段吞掉 74 条）。"""
+    seg = _long_seg(10.0, 100.0, "甲" * 90)
+    bars = (
+        [OcrSegment(start=10.5 + i, end=11.5 + i, text="第一句台词", conf=0.9) for i in range(5)]
+        + [OcrSegment(start=16.5 + i, end=17.5 + i, text="第二句台词", conf=0.9) for i in range(5)]
+        + [OcrSegment(start=22.5 + i, end=23.5 + i, text="第三句台词", conf=0.9) for i in range(5)]
+    )
+    result = fuse([seg], bars)
+    assert [r.text for r in result] == ["第一句台词", "第二句台词", "第三句台词"]
+    assert result[0].start == 10.5 and result[0].end == 15.5
+    assert all(r.source == "ocr_fixed" for r in result)
+
+
+def test_short_segment_keeps_legacy_alignment() -> None:
+    """短段（条少时长短）维持逐字对齐融合——拆分只针对巨段。"""
+    seg = _seg("古庭臣，你到底是谁")
+    ocr = [OcrSegment(start=9.8, end=14.2, text="顾霆琛你到底是谁", conf=0.95)]
+    result = fuse([seg], ocr)
+    assert result[0].text == "顾霆琛，你到底是谁"
+    assert result[0].source == "ocr_fixed"
