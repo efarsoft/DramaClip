@@ -498,10 +498,12 @@ def _run_job(
         )
     try:
         # 挖掘阶段逐集播报：任务标签/进度通知可见（此前整批分析前几分钟毫无动静）
+        # 挖掘阶段计入总进度前 30%：OCR 逐集要数分钟，恒 0% 会被当成卡死（业主实测反馈）
         def mining_report(done: int, count: int) -> None:
+            percent = round(done / count * 30, 1) if count else 0.0
             message = f"全剧字幕热词挖掘 {done}/{count} 集"
-            context.job_store.set_progress(job_id, 0.0, message)
-            context.notifier.progress(job_id, 0.0, message)
+            context.job_store.set_progress(job_id, percent, message)
+            context.notifier.progress(job_id, percent, message)
 
         bars_by_episode, bands_by_episode, hotwords = _mine_hotwords(
             context, targets, cancel_event, on_episode=mining_report
@@ -555,7 +557,7 @@ def _analyze_one(
     label = f"第{episode['episode_number']}集"
 
     def report(percent: float, message: str) -> None:
-        overall = (index + percent) / total * 100
+        overall = 30 + (index + percent) / total * 70
         context.job_store.set_progress(job_id, round(overall, 1), f"{label} {message}")
         context.notifier.progress(job_id, round(overall, 1), f"{label} {message}")
 
