@@ -637,6 +637,33 @@ def _fuse_ocr(
     return fusion.fuse(asr, ocr_bars), ocr_bars, ocr_band
 
 
+def _cached_mining(
+    context: AppContext, episode: dict[str, Any], *, ocr_enabled: bool
+) -> tuple[list[OcrSegment], tuple[float, float]] | None:
+    """跨轮复用：源视频在分析后未变 + 已有字幕条产物 → 直接复用，不重挖。
+
+    判据：视频 mtime ≤ analyzed_at（分析晚于素材改动）。ocr_channel 不参与——
+    缓存的是 OCR 输出本身，通道开关只影响新鲜度与下次签名，不影响已有产物。
+    """
+    if not ocr_enabled:
+        return None
+    row = analysis_repo.get(context.conn, str(episode["id"]))
+    if row is None or not row["ocr_segments"] or not row["subtitle_band"]:
+        return None
+    try:
+        stat = Path(str(episode["source_path"])).stat()
+    except OSError:
+        return None
+    if stat.st_mtime_ns > int(row["analyzed_at"]) * 1_000_000:
+        return None
+    try:
+        bars = [OcrSegment.model_validate(b) for b in json.loads(row["ocr_segments"])]
+        band = json.loads(row["subtitle_band"])
+        return bars, (float(band[0]), float(band[1]))
+    except (ValueError, TypeError, KeyError):
+        return None
+
+
 def _extract_bars(
     context: AppContext, episode: dict[str, Any]
 ) -> tuple[list[OcrSegment] | None, tuple[float, float] | None]:
@@ -666,6 +693,8 @@ def _mine_hotwords(
     targets: list[dict[str, Any]],
     cancel_event: threading.Event,
     on_episode: Callable[[int, int], None] | None = None,
+    *,
+    ocr_enabled: bool = True,
 ) -> tuple[dict[str, list[OcrSegment]], dict[str, tuple[float, float]], str]:
     """阶段 A：全剧 OCR 抽取（落库）→ 挖掘全剧热词表；字幕带按集回传给逐集分析落库。"""
     bars_by_episode: dict[str, list[OcrSegment]] = {}
@@ -676,7 +705,8 @@ def _mine_hotwords(
         if cancel_event.is_set():
             break
         episode_id = str(episode["id"])
-        bars, band = _extract_bars(context, episode)
+        cached = _cached_mining(context, episode, ocr_enabled=ocr_enabled)
+        bars, band = cached if cached is not None else _extract_bars(context, episode)
         if on_episode is not None:
             on_episode(index + 1, len(targets))
         if band is not None:

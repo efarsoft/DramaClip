@@ -301,21 +301,27 @@ export const NO_JOB_FACTS: JobFacts = {
 
 /** jobs.list 按 updated_at 倒序（服务端默认排序），所以「第一条命中」即「最近一条」。 */
 export function jobFactsFor(dramaId: string, jobs: readonly JobInfo[]): JobFacts {
+  // 每类任务只认最新一条：同类有在跑的新作业，旧的失败自动过期（被覆盖不算卡）
+  const latestByType = new Map<string, JobInfo>();
+  let analysisEverCompleted = false;
+  for (const job of jobs) {
+    if (job.ref_id !== dramaId || !PROJECT_JOB_TYPES.has(job.type)) continue;
+    const known = latestByType.get(job.type);
+    if (known === undefined || job.created_at > known.created_at) latestByType.set(job.type, job);
+    if (job.status === 'completed' && ANALYSIS_TYPES.has(job.type)) analysisEverCompleted = true;
+  }
+
   const activeTypes = new Set<string>();
   let activeLabel: string | null = null;
   let activeProgress: number | null = null;
   let failed: JobFacts['failed'] = null;
-  let analysisEverCompleted = false;
-  for (const job of jobs) {
-    if (job.ref_id !== dramaId || !PROJECT_JOB_TYPES.has(job.type)) continue;
+  for (const job of latestByType.values()) {
     if (job.status === 'pending' || job.status === 'running') {
       activeTypes.add(job.type);
       activeLabel ??= job.label ?? null;
       activeProgress ??= job.progress;
-    } else if (job.status === 'failed' && failed === null) {
+    } else if (job.status === 'failed') {
       failed = { type: job.type, error: job.error ?? '' };
-    } else if (job.status === 'completed' && ANALYSIS_TYPES.has(job.type)) {
-      analysisEverCompleted = true;
     }
   }
   return { activeTypes, activeLabel, activeProgress, failed, analysisEverCompleted, jobsPresent: true };

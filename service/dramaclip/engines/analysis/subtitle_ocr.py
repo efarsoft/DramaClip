@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 import subprocess
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -22,6 +23,7 @@ _ROI_WIDTH = 800          # 裁剪后缩放宽（识别耗时与像素量成正�
 _BAND_EXPAND = 0.04       # 字幕带上下各扩 4% 画面高，容納描边/阴影
 _HEAD_PAD_S = 0.5         # 字幕条起点向前补（采样间隔一半）
 _TAIL_PAD_S = 1.0         # 字幕条结尾向后补（采样间隔 + 消失延迟）
+_OCR_WORKERS = 4        # 帧识别并行度（onnxruntime session 线程安全）
 _MERGE_RATIO = 0.85       # 相邻帧文本相似度阈值（OCR 抖动容差）
 _MIN_BAR_CHARS = 2        # 字幕条最短字数：单字残条=切镜半帧噪声
 
@@ -84,12 +86,18 @@ def extract_subtitles(
         _LOGGER.info("未定位到字幕带，跳过 OCR 通道：%s", video_path.name)
         return [], None
     frames = _sample_frames(video_path, work_dir, picked_band)
-    results: list[tuple[float, FrameResult]] = []
-    for index, frame in enumerate(frames):
+
+    def _recognize(indexed: tuple[int, Path]) -> tuple[float, FrameResult, Path]:
+        index, frame = indexed
         boxes = [(t, top, bottom, c) for t, top, bottom, c in ocr(str(frame))]
-        t0 = index / _SAMPLE_FPS
-        results.append((t0, boxes))
-        frame.unlink(missing_ok=True)
+        return (index / _SAMPLE_FPS, boxes, frame)
+
+    # 帧级并行：onnxruntime 的 session.run 线程安全，4 路在 CPU 档约 3 倍提速
+    results: list[tuple[float, FrameResult]] = []
+    with ThreadPoolExecutor(max_workers=_OCR_WORKERS) as pool:
+        for t0, boxes, frame in pool.map(_recognize, enumerate(frames)):
+            results.append((t0, boxes))
+            frame.unlink(missing_ok=True)
     return _merge_runs(results), (picked_band.top, picked_band.bottom)
 
 

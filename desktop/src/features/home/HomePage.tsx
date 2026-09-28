@@ -167,8 +167,19 @@ function HomeBody({
 }
 
 function failedJobs(jobs: readonly JobInfo[]): FailedJob[] {
+  // 同项目同类型已有更新（pending/running）的在跑作业 → 旧失败自动过期，不再待办
+  const superseded = new Set(
+    jobs
+      .filter((job) => (job.status === 'pending' || job.status === 'running') && PROJECT_JOB_TYPES.has(job.type))
+      .map((job) => `${job.type}:${job.ref_id ?? ''}`),
+  );
   return jobs
-    .filter((job) => job.status === 'failed' && PROJECT_JOB_TYPES.has(job.type))
+    .filter(
+      (job) =>
+        job.status === 'failed' &&
+        PROJECT_JOB_TYPES.has(job.type) &&
+        !superseded.has(`${job.type}:${job.ref_id ?? ''}`),
+    )
     .map((job) => ({
       id: job.id,
       type: job.type,
