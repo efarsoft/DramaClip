@@ -70,10 +70,11 @@ function droppedText(count: number | undefined): string {
 /** 每模式默认推荐：首个可出片方案（列表已按评分降序——有分即最高分）。
  *  同模式全不可出片则该模式不推荐，不硬点。 */
 export function recommendedIds(plans: NarrationPlan[]): string[] {
-  const best = new Map<string, NarrationPlan>();
+  const best = new Map<string, NarrationPlan[]>();
   for (const plan of plans) {
     if (!planCardView(plan).pickable) continue;
-    if (!best.has(plan.narration_mode)) best.set(plan.narration_mode, plan);
+    const list = best.get(plan.narration_mode) ?? [];
+    if (list.length < 2) best.set(plan.narration_mode, [...list, plan]);
   }
-  return [...best.values()].map((plan) => plan.id);
+  return [...best.values()].flatMap((list) => list.map((plan) => plan.id));
 }

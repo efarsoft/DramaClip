@@ -53,21 +53,21 @@ function pickList(plans: NarrationPlan[], queue = idleQueue, episodeCount = 2, a
   );
 }
 
-it('默认每模式预选 1 条推荐，直接出片不用盲选', () => {
+it('默认每模式预选 2 条推荐，直接出片不用盲选', () => {
   const run = vi.fn();
   pickList([plan('a'), plan('b')], { ...idleQueue, run });
   fireEvent.click(screen.getByRole('button', { name: /开始出片/ }));
-  expect(run).toHaveBeenCalledWith(['a']);
-  expect(screen.getByText('推荐')).toBeTruthy();
+  expect(run).toHaveBeenCalledWith(['a', 'b']);
+  expect(screen.getAllByText('推荐')).toHaveLength(2);
 });
 
-it('推荐可取消：同模式备选不自动顶上，清空后按钮禁用', () => {
+it('取消一条推荐后，另一条保持勾选', () => {
   const run = vi.fn();
   pickList([plan('a'), plan('b')], { ...idleQueue, run });
-  fireEvent.click(screen.getByText('角度 a')); // 取消默认预选
-  expect(screen.getByText('已选 0 / 2 条方案')).not.toBeNull();
-  expect(screen.getByRole('button', { name: /开始出片/ }).hasAttribute('disabled')).toBe(true);
-  expect(run).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText('角度 a')); // 取消 a
+  expect(screen.getByText('已选 1 / 2 条方案')).not.toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /开始出片/ }));
+  expect(run).toHaveBeenCalledWith(['b']);
 });
 
 it('换了批次，勾选按新批次的默认推荐重置', () => {
@@ -79,7 +79,7 @@ it('换了批次，勾选按新批次的默认推荐重置', () => {
   rerender(
     <PlanPickList batch={{ ...idleBatch, plans: [plan('c'), plan('d')] }} queue={idleQueue} episodeCount={2} avgBytes={null} />,
   );
-  expect(screen.getByText('已选 1 / 2 条方案')).not.toBeNull();
+  expect(screen.getByText('已选 2 / 2 条方案')).not.toBeNull();
   expect(screen.getByRole('button', { name: /开始出片/ }).hasAttribute('disabled')).toBe(false);
 });
 
@@ -120,12 +120,12 @@ it('集数拿不到时覆盖度行缺席，不拿 0/0 充数', () => {
 it('成本预估一期口径：条数照实、磁盘带「估」字、耗时与 LLM 就是「—」', () => {
   pickList([plan('a'), plan('b')], idleQueue, 2, 1073741824);
   expect(screen.getByText('成本预估')).toBeTruthy();
-  expect(screen.getByText('1 条')).toBeTruthy(); // 默认预选每模式 1 条
-  expect(screen.getByText('约 1.0 GB（估）')).toBeTruthy();
+  expect(screen.getByText('2 条')).toBeTruthy(); // 默认预选每模式 2 条
+  expect(screen.getByText('约 2.0 GB（估）')).toBeTruthy();
   fireEvent.click(screen.getByText('角度 a'));
-  expect(screen.getByText('0 条')).toBeTruthy(); // 手动清空：条数照实是 0
-  // 清空后磁盘也失去口径：三个「—」芯片（磁盘/耗时/LLM）
-  expect(screen.getAllByText('—')).toHaveLength(3);
+  expect(screen.getByText('1 条')).toBeTruthy(); // 手动清掉一条：条数照实
+  // 清到一条后磁盘仍有口径：耗时与 LLM 成稿保持「—」双芯片
+  expect(screen.getAllByText('—')).toHaveLength(2);
 });
 
 it('没有已完成成片：磁盘项显示「—」而不是编一个系数', () => {

@@ -32,7 +32,7 @@ export function PlanPickList({
   const [recommended, setRecommended] = useState<string[]>([]);
   const plans = batch.plans;
 
-  // 默认推荐：每模式勾 1 条（有评分取最高分，无分取批次首个可出片）——不用盲选
+  // 默认推荐：每模式勾 2 条（有评分取前两名，无分取批次前两个可出片）——不用盲选
   useEffect(() => {
     const ids = recommendedIds(plans);
     setRecommended(ids);
