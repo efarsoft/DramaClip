@@ -10,6 +10,7 @@ import { appPaths, appVersion, revealInFolder, systemApi } from '../../services/
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 import { OPEN_SOURCE } from './openSource';
+import wechatQrcode from '../../assets/images/wechat-qrcode.jpg';
 
 /** 授权与合规声明（素材授权责任归使用者；全本机处理，素材不上传）。 */
 const COMPLIANCE =
@@ -21,7 +22,10 @@ export function AboutPage(): ReactElement {
       <PageHeader title="关于" desc="项目信息 · 版本 · 本地数据 · 许可与声明" />
       <ProjectBlock />
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: tokens.space2xl, alignItems: 'start' }}>
-        <LocalDataBlock />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.space2xl, minWidth: 0 }}>
+          <LocalDataBlock />
+          <WechatBlock />
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.space2xl, minWidth: 0 }}>
           <VersionBlock />
           <PageSection title="开源许可">
@@ -204,5 +208,33 @@ function DataPathRow({
         打开
       </button>
     </div>
+  );
+}
+
+/** 公众号卡：二维码 + 引导文案。扫码后长按识别在微信内完成，故无需附链接。 */
+function WechatBlock(): ReactElement {
+  return (
+    <PageSection title="联系与反馈">
+      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceLg }}>
+        <img
+          src={wechatQrcode}
+          alt="微信公众号二维码"
+          style={{
+            width: 112,
+            height: 112,
+            borderRadius: tokens.radiusControl,
+            flexShrink: 0,
+          }}
+        />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+          <span style={{ fontSize: tokens.text.body.size, fontWeight: 600, color: tokens.textPrimary }}>
+            关注公众号
+          </span>
+          <div style={COPY}>
+            获取更新动态、使用技巧与短剧推广实操内容；问题反馈与交流也在公众号进行。
+          </div>
+        </div>
+      </div>
+    </PageSection>
   );
 }
