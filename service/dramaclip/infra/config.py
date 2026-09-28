@@ -19,7 +19,7 @@ DEFAULTS: dict[str, str] = {
     "analysis.prescreen_threshold": str(PRESCREEN_THRESHOLD),
     "analysis.ocr_enabled": "1",
     "asr.engine": "faster_whisper",
-    "asr.model": "small",
+    "asr.model": "small",  # paraformer 用户曾切；默认档见引擎页推荐卡
     "asr.device": "auto",
     # auto = 把精度决定权交给 ctranslate2 按实际设备挑最快可用档（CPU→int8，
     # CUDA→float16/float32），与 faster-whisper 上游默认一致。存量库已落 int8 的
@@ -38,7 +38,7 @@ DEFAULTS: dict[str, str] = {
     "tts.voice.edge": "zh-CN-XiaoxiaoNeural",
     "narration.style_id": "auto",
     # 每模式的方案数 K（规格 §4.3「方案数 K 」的全局默认；项目级覆盖走 projects.settings）
-    "narration.variants_per_mode": "3",
+    "narration.variants_per_mode": "1",
     "strategy.min_duration_s": "30",
     "strategy.max_duration_s": "300",
     "download.hf_mirror": "https://hf-mirror.com",
