@@ -13,8 +13,6 @@ const KNOWN_KEYS = new Set([
   'analysis.full_threshold',
   'narration.variants_per_mode',
   'narration.style_id',
-  'strategy.min_duration_s',
-  'strategy.max_duration_s',
   'subtitle.default_preset',
   'subtitle.smart_match',
   'export.loudness_target_lufs',
@@ -45,16 +43,8 @@ describe('两分区补入', () => {
     expect(keys).toEqual([
       'narration.variants_per_mode',
       'narration.style_id',
-      'strategy.max_duration_s',
-      'strategy.min_duration_s',
     ]);
     expect(section('production').title).toBe('生产线默认值');
-  });
-
-  it('出片区不再持有长度档键——一个键只在一处有控件', () => {
-    const keys = section('export').fields.map((field) => field.key);
-    expect(keys).not.toContain('strategy.max_duration_s');
-    expect(keys).not.toContain('strategy.min_duration_s');
   });
 
   it('「字幕」分区接回 default_preset（有真消费端：export 渲染烧录）', () => {

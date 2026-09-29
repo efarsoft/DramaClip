@@ -24,8 +24,6 @@ const VALUES: Record<string, string> = {
   'narration.variants_per_mode': '3',
   'narration.style_id': 'auto',
   'subtitle.default_preset': 'conflict-impact',
-  'strategy.min_duration_s': '30',
-  'strategy.max_duration_s': '300',
 };
 
 beforeAll(() => {

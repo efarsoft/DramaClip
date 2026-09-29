@@ -42,7 +42,7 @@ class _StubTts:
 
 
 def _plan_with_copy() -> PlanData:
-    plan = build_full(stamp([(1, "ep1", _SCENES)]), StrategySpec(min_duration_s=10))
+    plan = build_full(stamp([(1, "ep1", _SCENES)]), StrategySpec())
     return plan.model_copy(update={
         "narration_texts": [
             t.model_copy(update={"text": f"第 {i} 段解说文案"})
@@ -62,7 +62,7 @@ def _synth(monkeypatch, plan, engine, work_dir: Path, duration: float = 1.25) ->
 
 
 def test_empty_copy_raises_before_tts(monkeypatch, tmp_path: Path) -> None:
-    plan = build_full(stamp([(1, "ep1", _SCENES)]), StrategySpec(min_duration_s=10))
+    plan = build_full(stamp([(1, "ep1", _SCENES)]), StrategySpec())
     with pytest.raises(RuntimeError, match="文案为空"):
         _synth(monkeypatch, plan, _StubTts(), tmp_path)
 
@@ -114,7 +114,7 @@ def test_plan_without_narration_segments_skips_tts(monkeypatch, tmp_path: Path) 
     silent = PlanData(
         mode="raw_clip",
         timeline=[TimelineSegment(episode_id="ep1", start=0.0, end=2.0, audio="original")],
-        strategy=StrategySpec(min_duration_s=10),
+        strategy=StrategySpec(),
     )
 
     def no_engine(*_args: Any, **_kwargs: Any) -> Any:

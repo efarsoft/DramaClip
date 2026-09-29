@@ -74,11 +74,7 @@ def script_dialogue_plan(
         raise LlmUnavailable(
             "LLM 未配置：剧情解说由编剧模型成稿，请先在「引擎」页配置文本模型"
         )
-    strategy = StrategySpec(
-        platform="douyin",
-        min_duration_s=float(settings.get("strategy.min_duration_s", "30")),
-        max_duration_s=float(settings.get("strategy.max_duration_s", "300")),
-    )
+    strategy = StrategySpec(platform="douyin")
 
     # 基本功层内置于编剧 system prompt；口味层 directives 注入 user prompt
     llm = LlmClient(config, timeout_s=SCRIPT_LLM_TIMEOUT_S)

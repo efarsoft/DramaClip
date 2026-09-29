@@ -158,7 +158,7 @@ def test_full_narration_plan_maps_every_segment_to_own_text(
         for index, score in enumerate([60, 85, 45, 90, 55, 75, 40, 95, 50, 65])
     ]
     plan = build_full(
-        stamp([(1, "ep1", scenes)]), StrategySpec(min_duration_s=10, max_duration_s=120)
+        stamp([(1, "ep1", scenes)]), StrategySpec()
     )
     # 编剧层产出（见 test_narration_no_downgrade 对空文案的守卫）
     plan = plan.model_copy(update={

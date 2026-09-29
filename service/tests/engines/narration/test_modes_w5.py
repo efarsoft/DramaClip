@@ -9,7 +9,7 @@ from dramaclip.engines.narration.modes_w5 import build_cross, build_ultra_short
 from dramaclip.engines.semantic.models import ConflictScore
 from tests.engines.narration.conftest import assert_slots_paired
 
-_STRATEGY = StrategySpec(min_duration_s=10, max_duration_s=120)
+_STRATEGY = StrategySpec()
 
 
 def _scenes() -> list[ConflictScore]:
@@ -35,7 +35,7 @@ def test_cross_alternates_original_and_narration() -> None:
 
 
 def test_cross_keeps_top_scenes_without_duration_chop() -> None:
-    strategy = StrategySpec(min_duration_s=10, max_duration_s=60)
+    strategy = StrategySpec()
     plan = build_cross(stamp([(1, "ep1", _scenes())]), strategy)
     originals = [seg for seg in plan.timeline if seg.audio == "original"]
     assert len(originals) == 6, "交叉解说取冲突 top 6，不再按时长预算提前停"

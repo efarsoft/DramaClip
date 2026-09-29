@@ -9,7 +9,7 @@
 ② 叙事顺序是播出序（集号 → 集内起点），不是钟表序——活库实测十集的场景起点
    全部从 `0.0` 开始，按 start 排会把十集交错；
 ③ `_fit_duration` 的预算不得被末场景豁免顶穿——单集时代够不到预算（活库最大
-   单集 204.2 场景秒 < `strategy.max_duration_s` 300），跨集两集就到 405.8；
+   单集 204.2 场景秒，超旧时长的 300 上限），跨集两集就到 405.8；
 ④ `scene_index` 只在**一集内**唯一，跨集时用它做身份比较会认错场景；
 ⑤ `subtitle_flow` 的金句必须取自该场景**自己那一集**的台词表。
 """
@@ -29,10 +29,10 @@ from dramaclip.engines.semantic.models import ConflictScore
 from tests.engines.narration.conftest import assert_slots_paired
 
 # 预算刻意给小：让"顶穿预算"这条在两三个场景上就能观察到，不必造几十集夹具
-_STRATEGY = StrategySpec(min_duration_s=10, max_duration_s=30)
+_STRATEGY = StrategySpec()
 # intro 要另给一档：`_fit_duration` 在 intro_first 时会从预算里**预留** _INTRO_MAX_S=30s
 # 给引子槽位（段长要等 TTS 回填才知道），30s 的预算会被预留吃光、只剩首场景。
-_STRATEGY_INTRO = StrategySpec(min_duration_s=10, max_duration_s=90)
+_STRATEGY_INTRO = StrategySpec()
 
 
 def _scene(index: int, start: float, score: int) -> ConflictScore:
@@ -140,13 +140,13 @@ def test_fit_duration_keeps_story_past_budget() -> None:
             for number in (1, 2, 3)
         ]
     )
-    strategy = StrategySpec(min_duration_s=10, max_duration_s=30)
+    strategy = StrategySpec()
     for mode, plan in (
         ("raw_clip", build_raw_clip(scenes, [], strategy)),
         ("intro_narration", build_intro(scenes, strategy)),
     ):
         total = sum(segment.end - segment.start for segment in plan.timeline)
-        assert total > strategy.max_duration_s, f"{mode} 仍在按预算砍片：{total}s"
+        assert total > 300, f"{mode} 仍在按预算砍片：{total}s（时长让位于质量）"
 
 
 def test_intro_still_caps_the_hook_slot() -> None:
@@ -157,7 +157,7 @@ def test_intro_still_caps_the_hook_slot() -> None:
             for number in (1, 2, 3)
         ]
     )
-    strategy = StrategySpec(min_duration_s=10, max_duration_s=300)
+    strategy = StrategySpec()
     plan = build_intro(scenes, strategy)
     assert plan.timeline[0].end - plan.timeline[0].start <= 30
     assert len(plan.timeline) == 61
@@ -167,7 +167,7 @@ def test_intro_still_caps_the_hook_slot() -> None:
 def test_intro_keeps_its_slot_when_the_first_scene_alone_exceeds_the_budget() -> None:
     """首场景仍然无条件保留：`intro_narration` 的旁白槽位挂在它上面，丢了就没有解说。"""
     scenes = stamp([(1, "ep1", [ConflictScore(scene_index=0, start=0.0, end=90.0, score=90)])])
-    plan = build_intro(scenes, StrategySpec(min_duration_s=10, max_duration_s=30))
+    plan = build_intro(scenes, StrategySpec())
     assert len(plan.timeline) == 2
     assert plan.timeline[0].narration_id == "intro-1"
     assert plan.timeline[-1].narration_id == "cta-1"

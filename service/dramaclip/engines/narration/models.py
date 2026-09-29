@@ -39,11 +39,13 @@ class NarrationText(BaseModel):
 
 
 class StrategySpec(BaseModel):
-    """推广策略（原案第五章；W4 内置默认，平台预设 W7 接入）。"""
+    """推广策略（原案第五章；W4 内置默认，平台预设 W7 接入）。
+
+    不设成片时长上下限：产品的裁决是「时长让位于质量」（2026-09-29 业主）——
+    段长=实测音频时长（时长服从故事），掐着秒数做片只会牺牲叙事完整度。
+    """
 
     platform: str = "douyin"
-    min_duration_s: float = 30.0
-    max_duration_s: float = 300.0
 
 
 class PlanData(BaseModel):

@@ -11,7 +11,7 @@ from dramaclip.engines.narration.modes import build_intro, build_raw_clip
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from tests.engines.narration.conftest import assert_slots_paired
 
-_STRATEGY = StrategySpec(min_duration_s=10, max_duration_s=30)
+_STRATEGY = StrategySpec()
 
 
 def _scenes() -> list[ConflictScore]:

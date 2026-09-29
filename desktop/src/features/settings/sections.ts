@@ -85,22 +85,6 @@ function productionSection(dynamic: DynamicOptions): SectionSpec {
         help: '与出片中心的风格选择器同键同源；改动对下一次规划生效',
         options: () => [{ label: '自动匹配（推荐）', value: 'auto' }, ...dynamic.styles],
       },
-      {
-        key: 'strategy.max_duration_s',
-        label: '成片目标时长上限 (秒)',
-        type: 'number',
-        min: 30,
-        max: 1200,
-        help: '软参考，不是砍片门禁。片长服从故事：几分钟到十几分钟都可以，冲突讲完再收。超短悬念版仍是单独的短模式。',
-      },
-      {
-        key: 'strategy.min_duration_s',
-        label: '成片最短时长 (秒)',
-        type: 'number',
-        min: 10,
-        max: 120,
-        help: '软参考，不是拉片门禁。片长服从故事，不会为了凑够秒数垫镜头。',
-      },
     ],
   };
 }

@@ -9,7 +9,7 @@ from dramaclip.engines.narration.models import StrategySpec
 from dramaclip.engines.narration.modes_w9 import build_subtitle_flow
 from dramaclip.engines.semantic.models import ConflictScore
 
-_STRATEGY = StrategySpec(min_duration_s=10, max_duration_s=90)
+_STRATEGY = StrategySpec()
 
 def _scenes() -> list[ConflictScore]:
     return [

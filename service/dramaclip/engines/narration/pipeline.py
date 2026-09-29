@@ -59,11 +59,7 @@ def build_plan(
 ) -> PlanData:
     """按模式生成编排方案（纯计算，不触 IO）。
     """
-    strategy = StrategySpec(
-        platform="douyin",
-        min_duration_s=float(settings.get("strategy.min_duration_s", "30")),
-        max_duration_s=float(settings.get("strategy.max_duration_s", "300")),
-    )
+    strategy = StrategySpec(platform="douyin")
     if mode == "raw_clip":
         return apply_transitions(modes.build_raw_clip(scenes, highlights, strategy))
     if mode == "intro_narration":

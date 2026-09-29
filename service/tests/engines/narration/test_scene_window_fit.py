@@ -24,7 +24,7 @@ from dramaclip.engines.narration.modes_w5 import build_cross, build_ultra_short
 from dramaclip.engines.narration.modes_w9 import build_subtitle_flow
 from dramaclip.engines.semantic.models import ConflictScore
 
-_STRATEGY = StrategySpec(min_duration_s=10, max_duration_s=120)
+_STRATEGY = StrategySpec()
 
 
 def _one_scene(length: float = 12.0) -> list[casting.EpisodeScene]:

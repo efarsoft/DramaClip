@@ -65,7 +65,7 @@ def _scenes() -> list[ConflictScore]:
 
 def _full_plan(episode_id: str, tts_dir: Path) -> PlanData:
     """真实 full_narration 编排（build_full 产出的全 ducked 时间轴）+ 旁白回填。"""
-    plan = build_full(stamp([(1, episode_id, _scenes())]), StrategySpec(min_duration_s=10))
+    plan = build_full(stamp([(1, episode_id, _scenes())]), StrategySpec())
     # 编剧层产出（见 test_narration_no_downgrade 对空文案的守卫）
     plan = plan.model_copy(update={
         "narration_texts": [

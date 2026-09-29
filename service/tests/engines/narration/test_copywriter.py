@@ -63,7 +63,7 @@ class FakeLlm:
 
 
 def _plan():
-    return build_full(casting.stamp([(1, "ep1", _SCENES)]), StrategySpec(min_duration_s=10))
+    return build_full(casting.stamp([(1, "ep1", _SCENES)]), StrategySpec())
 
 
 def _lines() -> dict[str, Any]:
@@ -275,7 +275,7 @@ def _two_episode_plan() -> tuple[Any, casting.MaterialByEpisode]:
             (2, "ep2", [ConflictScore(scene_index=0, start=12.0, end=22.0, score=88)]),
         ]
     )
-    plan = build_full(scenes, StrategySpec(min_duration_s=10))
+    plan = build_full(scenes, StrategySpec())
     material: casting.MaterialByEpisode = {
         "ep1": casting.EpisodeMaterial(
             number=1, asr=[AsrSegment(start=13.0, end=16.0, text="第一集的原话")]

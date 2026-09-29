@@ -22,8 +22,6 @@ _SETTINGS: dict[str, str] = {
     "narration.style_id": "auto",
     "_project_name": "测试剧",
     "_genre": "逆袭",
-    "strategy.min_duration_s": "30",
-    "strategy.max_duration_s": "300",
 }
 
 _VALID_PAYLOAD: dict[str, Any] = {
