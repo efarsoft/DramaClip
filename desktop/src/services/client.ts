@@ -36,6 +36,7 @@ import type {
   SubtitlePresetInfo,
   TtsPreviewResult,
   TtsCleanReferenceResult,
+  ModeRecommendation,
   VerifyReport,
 } from '@dramaclip/protocol';
 
@@ -162,6 +163,9 @@ export function listWorks(limit = 60, state?: WorksFilter): Promise<WorksItem[]>
 }
 
 export const narrationApi = {
+  /** 阶段①：AI 模式推荐（随项目缓存；refresh=true 忽略缓存重算）。 */
+  recommendModes: (projectId: string, refresh = false): Promise<ModeRecommendation> =>
+    rpc<ModeRecommendation>('narration.recommend_modes', { project_id: projectId, refresh }),
   /** 阶段③：为选中模式各产出 K 条角度互异的方案，只规划不渲染。 */
   planVariants: (
     projectId: string,

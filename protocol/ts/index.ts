@@ -544,6 +544,11 @@ export interface TtsPreviewResult {
   readonly text: string;
 }
 
+/** narration.recommend_modes 返回体：推荐的模式与理由（随项目缓存）。 */
+export interface ModeRecommendation {
+  readonly modes: ReadonlyArray<{ readonly mode: string; readonly reason: string }>;
+}
+
 /** tts.clean_reference 返回体：清洗产物 + 产物质检（B6 报告，不是门禁）。 */
 export interface TtsCleanReferenceResult {
   readonly path: string;
@@ -669,6 +674,7 @@ export const METHOD_NAMES = [
   'analysis.cancel',
   'analysis.results',
   'narration.plan_variants',
+  'narration.recommend_modes',
   'narration.get_plan',
   'narration.list_plans',
   'narration.list_styles',

@@ -1,8 +1,8 @@
 /** 阶段①（规格 §6 的 ③）：选模式、定每个模式出几条，发起规划并显示进度。 */
 import { Alert, Button, Card, Select, Tag } from 'antd';
 import { PageSection } from '../../components/layout/PageKit';
-import type { NarrationMode } from '@dramaclip/protocol';
-import { MODE_INFO } from '../../components/modeMeta';
+import type { ModeRecommendation, NarrationMode } from '@dramaclip/protocol';
+import { MODE_INFO, modeLabel } from '../../components/modeMeta';
 import { layout, tokens } from '../../styles/theme';
 import type { PlanBatch } from './usePlanBatch';
 import { StageProgress } from './StageProgress';
@@ -14,6 +14,9 @@ export function ModePicker({
   batch,
   modes,
   k,
+  recommendation = null,
+  recLoading = false,
+  onReroll,
   onToggleMode,
   onSelectAll,
   onKChange,
@@ -21,16 +24,51 @@ export function ModePicker({
   batch: PlanBatch;
   modes: NarrationMode[];
   k: number;
+  recommendation?: ModeRecommendation | null;
+  recLoading?: boolean;
+  onReroll?: () => void;
   onToggleMode: (mode: NarrationMode) => void;
   onSelectAll: () => void;
   onKChange: (k: number) => void;
 }) {
   return (
     <PageSection title="① 选模式，出方案">
+      {recommendation !== null && recommendation.modes.length > 0 && (
+        <RecommendationLine recommendation={recommendation} recLoading={recLoading} onReroll={onReroll} />
+      )}
       <ModeGrid modes={modes} onToggleMode={onToggleMode} />
       <PlanToolbar batch={batch} modes={modes} k={k} onSelectAll={onSelectAll} onKChange={onKChange} />
       {batch.error !== '' && <Alert style={{ marginTop: tokens.spaceMd }} type="error" showIcon title={batch.error} />}
     </PageSection>
+  );
+}
+
+/** 推荐理由行：AI 按题材/高光给出的三个模式与各自依据；重掷显式重算并覆盖勾选。 */
+function RecommendationLine({
+  recommendation,
+  recLoading,
+  onReroll,
+}: {
+  recommendation: ModeRecommendation;
+  recLoading: boolean;
+  onReroll?: () => void;
+}): React.ReactElement {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, marginBottom: tokens.spaceMd, flexWrap: 'wrap' }}>
+      <Tag color="gold" style={{ marginRight: 0 }}>
+        AI 推荐
+      </Tag>
+      <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary, minWidth: 0 }}>
+        {recommendation.modes
+          .map((item) => `${modeLabel(item.mode)}（${item.reason}）`)
+          .join(' · ')}
+      </span>
+      {onReroll !== undefined && (
+        <Button size="small" type="text" loading={recLoading} onClick={onReroll}>
+          重新推荐
+        </Button>
+      )}
+    </div>
   );
 }
 

@@ -319,6 +319,38 @@
           }
         }
       }
+    },
+    {
+      "name": "narration.recommend_modes",
+      "summary": "AI 模式推荐：按题材与高光推 3 个模式（随项目缓存，refresh 强制重算），供阶段①默认勾选",
+      "params": {
+        "type": "object",
+        "required": ["project_id"],
+        "properties": {
+          "project_id": { "type": "string" },
+          "refresh": {
+            "type": "boolean",
+            "description": "true=忽略缓存重算（「重新推荐」按钮）；缺省 false 命中缓存直接返回"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["modes"],
+        "properties": {
+          "modes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["mode", "reason"],
+              "properties": {
+                "mode": { "type": "string", "description": "模式 id（与 plan_variants 的 modes 同一集合）" },
+                "reason": { "type": "string", "description": "一句话理由，引用题材/高光内容依据；补位项如实标注" }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

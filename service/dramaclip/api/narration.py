@@ -15,6 +15,7 @@ from dramaclip.engines.narration import (
     angles,
     casting,
     copywriter,
+    mode_recommend,
     overlap,
     script_driver,
     scriptwriter,
@@ -80,6 +81,7 @@ def register(router: Router, context: AppContext) -> None:
     router.register("narration.list_plans", lambda params: list_plans(context, params))
     router.register("narration.get_plan", lambda params: get_plan(context, params))
     router.register("narration.list_styles", lambda _params: list_styles(context))
+    router.register("narration.recommend_modes", lambda params: recommend_modes(context, params))
     router.register("narration.generate_titles", lambda params: generate_titles(context, params))
     router.register("narration.update_titles", lambda params: update_titles(context, params))
 
@@ -705,3 +707,13 @@ def _scene_cuts_of(raw: Any) -> list[float]:
 
 def _parse_highlights(raw: str | None) -> list[HighlightSegment]:
     return [HighlightSegment.model_validate(item) for item in json.loads(raw or "[]")]
+
+
+def recommend_modes(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """AI 模式推荐（阶段①）：按题材与高光推 3 个模式，随项目缓存可重算。"""
+    project_id = str(params.get("project_id", ""))
+    if projects_repo.get(context.conn, project_id) is None:
+        raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
+    refresh = bool(params.get("refresh"))
+    result = mode_recommend.recommend(context.conn, project_id, context.settings, refresh=refresh)
+    return {"modes": result["modes"]}

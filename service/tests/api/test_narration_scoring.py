@@ -421,7 +421,7 @@ def test_scoring_leaves_a_trace_file(
 
 
 def test_no_new_rpc_method_is_registered(memory_db: sqlite3.Connection) -> None:
-    """契约同步钉死 Router==schema x-methods：B10 不新增 RPC（评分只走生成链）。"""
+    """契约同步钉死 Router==schema x-methods：新增方法必须先过 protocol 两侧。"""
     from types import SimpleNamespace
 
     from dramaclip.api import narration as narration_api
@@ -430,6 +430,7 @@ def test_no_new_rpc_method_is_registered(memory_db: sqlite3.Connection) -> None:
     router = Router()
     narration_api.register(router, SimpleNamespace(conn=memory_db, settings={}))  # type: ignore[arg-type]
     assert set(router.method_names) == {
+        "narration.recommend_modes",
         "narration.plan_variants",
         "narration.list_plans",
         "narration.get_plan",

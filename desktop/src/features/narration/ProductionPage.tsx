@@ -1,10 +1,10 @@
 /** 出片中心：③ 选模式出 K 条方案 → 勾选方案 → ④ 出片所选，成品入作品库。 */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import type { ExportJob, NarrationMode, Project } from '@dramaclip/protocol';
+import type { ExportJob, ModeRecommendation, NarrationMode, Project } from '@dramaclip/protocol';
 import { PageHeader as PageKitHeader, PageShell } from '../../components/layout/PageKit';
 import { MODE_INFO } from '../../components/modeMeta';
-import { exportApi, projectApi, settingsApi } from '../../services/client';
+import { exportApi, narrationApi, projectApi, settingsApi } from '../../services/client';
 import { rememberDrama } from '../../stores/lastDrama';
 import { useUiStore } from '../../stores/ui';
 import { layout, tokens } from '../../styles/theme';
@@ -56,6 +56,8 @@ export function ProductionPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [episodeCount, setEpisodeCount] = useState(0);
   const [modes, setModes] = useState<NarrationMode[]>([]);
+  const [recommendation, setRecommendation] = useState<ModeRecommendation | null>(null);
+  const [recLoading, setRecLoading] = useState(false);
   const [k, setK] = useState<number>(DEFAULT_K);
   const [exports, setExports] = useState<ExportJob[] | null>(null);
   const { planningRef, exportRef } = useFocusScroll();
@@ -84,6 +86,49 @@ export function ProductionPage() {
   // K 默认（09-10 §4.6「生产线默认值」）：初值读设置页同键，不写死 3
   useKDefault(serviceState, setK);
 
+  // AI 模式推荐：服务端随项目缓存（命中秒回，未命中现算并落缓存）
+  useEffect(() => {
+    if (serviceState !== 'ready' || projectId === '') return;
+    let cancelled = false;
+    setRecLoading(true);
+    narrationApi
+      .recommendModes(projectId)
+      .then((rec) => {
+        if (!cancelled) setRecommendation(rec);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setRecLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, serviceState]);
+
+  // 推荐到位且用户尚未手选 → 默认勾上推荐模式；手动改过就绝不覆盖
+  useEffect(() => {
+    if (recommendation === null) return;
+    setModes((prev) => {
+      if (prev.length > 0) return prev;
+      const ids = recommendation.modes.map((item) => item.mode) as NarrationMode[];
+      return ids;
+    });
+  }, [recommendation]);
+
+  const onRerollRecommendation = useCallback(() => {
+    setRecLoading(true);
+    narrationApi
+      .recommendModes(projectId, true)
+      .then((rec) => {
+        setRecommendation(rec);
+        setModes(rec.modes.map((m) => m.mode) as NarrationMode[]); // 显式重算=用户授权覆盖
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        setRecLoading(false);
+      });
+  }, [projectId]);
+
   const batch = usePlanBatch(projectId);
   const queue = useExportQueue(reloadExports);
   // 磁盘预估系数：本剧已完成成片的实测均值（意见08「估」字要带得出出处）
@@ -97,6 +142,9 @@ export function ProductionPage() {
         <ModePicker
           batch={batch}
           modes={modes}
+          recommendation={recommendation}
+          recLoading={recLoading}
+          onReroll={onRerollRecommendation}
           k={k}
           onToggleMode={(mode) => {
             toggleMode(setModes, mode);
