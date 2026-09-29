@@ -26,6 +26,16 @@ def sample_wav() -> Path:
     return resolve_resources_dir() / "selftest" / "sample_zh.wav"
 
 
+def sample_ref_voice() -> Path:
+    """随包 TTS 克隆参考音（Kokoro zf_001 合成，来历见 resources/selftest/README.md）。
+
+    克隆引擎（IndexTTS/CosyVoice 系）零样本合成本来就要一段参考音频；业主还没在
+    配音页选参考时，自检用这段随包样例顶上——能力自检验的是「引擎能不能出声」，
+    不是「业主配没配过音色」，两件事混在一起，新机器点自检就永远红。
+    """
+    return resolve_resources_dir() / "selftest" / "sample_ref_voice.wav"
+
+
 def run_asr(
     models_dir: Path, spec: ModelSpec, *, device: str = "cpu", compute_type: str = "auto"
 ) -> dict[str, Any]:
@@ -71,10 +81,15 @@ def run_tts(models_dir: Path, work_dir: Path, spec: ModelSpec, voice: str) -> di
         engine_dir = None  # 云端引擎（edge）：没有本地模型这一说
     if engine_dir is not None and not engine_dir.is_dir():
         return _fail(f"模型未下载：{engine_dir}——先下载或导入再自检")
+    engine = factory.create(spec.engine, models_dir)
+    if voice == "" and engine.capabilities().supports_cloning:
+        # 克隆引擎没有「默认嗓音」可回退：业主未选参考时用随包样例顶上，
+        # 让「引擎能不能出声」与「业主配没配过音色」两件事分开。
+        voice = str(sample_ref_voice())
     out = work_dir / f"selftest-{spec.engine}.wav"
     started = time.monotonic()
     try:
-        factory.create(spec.engine, models_dir).synthesize(SELFTEST_TEXT, voice, out)
+        engine.synthesize(SELFTEST_TEXT, voice, out)
     except Exception as exc:  # noqa: BLE001 - 同上：失败原文就是自检结论
         return _fail(f"合成失败：{type(exc).__name__}: {exc}")
     elapsed = time.monotonic() - started

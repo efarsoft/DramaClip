@@ -166,6 +166,11 @@ def test_tts_selftest_synthesizes_and_measures(
     (tmp_path / "models" / "tts/kokoro/Kokoro-82M-v1.1-zh").mkdir(parents=True)
 
     class _FakeTts:
+        def capabilities(self):
+            from dramaclip.engines.tts.base import EngineCaps
+
+            return EngineCaps(sample_rate=24000, supports_cloning=False)
+
         def synthesize(self, text: str, voice: str, out_path: Path) -> Path:
             assert text == selftest_mod.SELFTEST_TEXT
             out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -244,3 +249,79 @@ def test_ledger_survives_reload_and_ignores_corruption(tmp_path: Path) -> None:
     # 账本读坏 = 空表（未自检），不是异常：UI 会要求重跑，不会发绿灯
     (models / "selftest.json").write_text("{broken", encoding="utf-8")
     assert selftest_mod.load_results(models) == {}
+
+
+# ---------------------------------------------------------------- 克隆引擎的参考音回落
+
+
+class _FakeCloneEngine:
+    """替身克隆引擎：capabilities 声明 supports_cloning，synth 写有效 wav。"""
+
+    name = "indextts2"
+
+    def capabilities(self) -> SimpleNamespace:
+        from dramaclip.engines.tts.base import EngineCaps
+
+        return EngineCaps(sample_rate=24000, supports_cloning=True)
+
+    def synthesize(self, text: str, voice: str, out_path: Path) -> Path:
+        self.voice_used = voice
+        with wave.open(str(out_path), "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(16000)
+            handle.writeframes(b"\x00\x10" * 16000)
+        return out_path
+
+
+class _FakeFixedEngine(_FakeCloneEngine):
+    name = "edge"
+
+    def capabilities(self) -> SimpleNamespace:
+        from dramaclip.engines.tts.base import EngineCaps
+
+        return EngineCaps(sample_rate=24000, supports_cloning=False)
+
+
+def _run_tts_with(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, engine: object, voice: str
+) -> dict:
+    from dramaclip.engines.tts import factory
+
+    (tmp_path / "models" / "tts" / "indextts2").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(factory, "create", lambda name, models_dir=None: engine)
+    return selftest_mod.run_tts(tmp_path / "models", tmp_path, _indextts_spec(), voice)
+
+
+def _indextts_spec():
+    from dramaclip.infra.model_manager import registry
+
+    for spec in registry.builtin_specs():
+        if spec.engine == "indextts2":
+            return spec
+    raise AssertionError("indextts2 spec missing")
+
+
+def test_clone_engine_without_voice_falls_back_to_bundled_sample(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """业主没选参考音色时，克隆引擎自检用随包样例顶上——能力自检≠音色配置检查。"""
+    engine = _FakeCloneEngine()
+    result = _run_tts_with(monkeypatch, tmp_path, engine, voice="")
+
+    assert result["ok"] is True
+    assert Path(engine.voice_used) == selftest_mod.sample_ref_voice()
+    assert selftest_mod.sample_ref_voice().is_file(), "随包样例参考音必须真在包里"
+
+
+def test_clone_engine_keeps_user_voice(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    engine = _FakeCloneEngine()
+    _run_tts_with(monkeypatch, tmp_path, engine, voice="D:/ref/mine.wav")
+    assert engine.voice_used == "D:/ref/mine.wav", "业主选过的参考不许被样例顶掉"
+
+
+def test_fixed_engine_gets_empty_voice(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """固定音色表引擎（edge/kokoro）不吃参考音：voice 原样为空，引擎自己回默认。"""
+    engine = _FakeFixedEngine()
+    _run_tts_with(monkeypatch, tmp_path, engine, voice="")
+    assert engine.voice_used == ""
