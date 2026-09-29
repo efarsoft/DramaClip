@@ -177,7 +177,6 @@ def _load_model(model_dir: str, device: str) -> Any:
 
 def _main(model_dir: str, device: str, proto_fd: int) -> int:
     import torchaudio  # noqa: PLC0415
-    from cosyvoice.utils.file_utils import load_wav  # noqa: PLC0415
 
     model = _load_model(model_dir, device)
     proto = os.fdopen(proto_fd, "w", encoding="utf-8")
@@ -194,12 +193,14 @@ def _main(model_dir: str, device: str, proto_fd: int) -> int:
             continue
         try:
             job = json.loads(line)
-            prompt = load_wav(job["voice"], 16000)
             lang = str(job.get("lang") or "zh").lower()
             is_v3 = type(model).__name__ == "CosyVoice3"
+            # 参考音频传路径不传张量：上游 inference_cross_lingual 内部按
+            # 16k/24k 各自 load_wav 三次（speech_token/spk_embedding/speech_feat），
+            # 这里预加载会被二次 load 炸掉（Invalid file: tensor，真机实测）。
             chunks = list(
                 model.inference_cross_lingual(
-                    _tts_text(job["text"], lang, is_v3), prompt, stream=False
+                    _tts_text(job["text"], lang, is_v3), job["voice"], stream=False
                 )
             )
             if not chunks:
