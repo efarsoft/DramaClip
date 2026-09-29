@@ -671,6 +671,10 @@ def _collect_episode_inputs(
                     }
                     for seg in segments
                 ],
+                # 镜头切点（PySceneDetect 边界，秒）：编排层把解说窗吸附到切点上，
+                # 剪口落在换镜头处=画面不撕裂。切点缺失（旧库/解析失败）时空表，
+                # 编排层原值返回。
+                "scene_cuts": _scene_cuts_of(record.get("scene_data")),
             }
         )
     return inputs
@@ -678,6 +682,25 @@ def _collect_episode_inputs(
 
 def _parse_conflicts(raw: str | None) -> list[ConflictScore]:
     return [ConflictScore.model_validate(item) for item in json.loads(raw or "[]")]
+
+
+def _scene_cuts_of(raw: Any) -> list[float]:
+    """scene_data 落库是 JSON 字符串：解析出镜头切点表，坏形返回空表不 raise。"""
+    try:
+        scenes = json.loads(raw) if raw else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(scenes, list):
+        return []
+    cuts: list[float] = []
+    for scene in scenes:
+        try:
+            cut = round(float(scene["start"]), 2)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if cut > 0:
+            cuts.append(cut)
+    return cuts
 
 
 def _parse_highlights(raw: str | None) -> list[HighlightSegment]:

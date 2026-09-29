@@ -104,7 +104,13 @@ def script_dialogue_plan(
         for ep in episode_inputs
     }
     durations = {int(ep["number"]): float(ep.get("duration") or 0.0) for ep in episode_inputs}
-    plan = narration_pipeline.build_from_script_episodes(episode_map, durations, script, strategy)
+    scene_cuts = {
+        int(ep["number"]): [float(c) for c in ep.get("scene_cuts") or []]
+        for ep in episode_inputs
+    }
+    plan = narration_pipeline.build_from_script_episodes(
+        episode_map, durations, script, strategy, scene_cuts=scene_cuts
+    )
     # 清洗吃掉了几段随方案落库：方案卡据此说"剧本丢弃 N 段"（规格 §4.3 卡片可见性）
     plan = plan.model_copy(update={"dropped_segments": script.dropped_segments})
     used_ids = sorted({seg.episode_id for seg in plan.timeline})

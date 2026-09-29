@@ -88,6 +88,11 @@ def build_plan(
 
 
 _NEAR_GAP_S = 1.0  # 近邻衔接阈值：段间隔小于此值视为同镜头连续推进
+# 镜头切点外扩吸附容差：0.7s 内有切点就扩过去（start 前扩/end 后扩，只加余地不吞内容）；
+# 更宽会把解说与画面的对应关系拉远，更窄则大部分切点够不着。
+_SHOT_TOL_S = 0.7
+# 接缝判定：段开口与切点距离小于此值视为「落在换镜头上」（转 fade→cut 的依据）。
+_SHOT_JOINT_EPS_S = 0.2
 
 # 越界判定放的余量。两端数字都不精确：`end` 与源长都按 3 位小数入库（源长由扫描时
 # ffprobe 量得，见 api/project.py），而素材自己的帧栅格更粗——实测 6.00s 的窗口落出
@@ -101,18 +106,40 @@ def build_from_script_episodes(
     durations: dict[int, float],
     script: Script,
     strategy: StrategySpec,
+    *,
+    scene_cuts: dict[int, list[float]] | None = None,
 ) -> PlanData:
     """跨集剧本驱动编排：每个剧本片段按集号取对应集的素材画面。
+
+    剪口精度两级吸附：先吸台词边界（对齐叙事），再外扩到镜头切点（对齐画面）——
+    外扩只加画面余地不吞内容，剪口落在换镜头处，接缝读作一次正常转场而不是撕裂。
+    切点缺失（旧库没跑场景检测）时第二级原值返回，退回纯台词吸附。
     """
     bounds_by_ep = {
         number: sorted({round(b, 2) for seg in asr for b in (seg.start, seg.end)})
         for number, (_episode_id, asr) in episode_map.items()
+    }
+    cuts_by_ep = {
+        number: sorted({round(float(c), 2) for c in cuts})
+        for number, cuts in (scene_cuts or {}).items()
     }
 
     def snap(number: int, value: float) -> float:
         candidates = bounds_by_ep.get(number, [])
         near = [b for b in candidates if abs(b - value) <= 1.5]
         return min(near, key=lambda b: abs(b - value)) if near else value
+
+    def snap_to_shot(number: int, value: float, *, forward: bool) -> float:
+        """外扩吸附镜头切点：start 向前（earlier）、end 向后（later）。"""
+        cuts = cuts_by_ep.get(number, [])
+        if forward:
+            near = [c for c in cuts if value <= c <= value + _SHOT_TOL_S]
+        else:
+            near = [c for c in cuts if value - _SHOT_TOL_S <= c <= value]
+        return min(near, key=lambda c: abs(c - value)) if near else value
+
+    def on_shot_cut(number: int, value: float) -> bool:
+        return any(abs(c - value) <= _SHOT_JOINT_EPS_S for c in cuts_by_ep.get(number, []))
 
     def narration_span(
         number: int, text: str, start: float, *, narration_id: str
@@ -130,9 +157,10 @@ def build_from_script_episodes(
     timeline: list[TimelineSegment] = []
     texts: list[NarrationText] = []
     cursors: dict[int, float] = {}
+    shot_aligned: set[int] = set()
 
     first = script.segments[0]
-    hook_start = snap(first.episode, first.start)
+    hook_start = snap_to_shot(first.episode, snap(first.episode, first.start), forward=False)
     hook_id = "n0"
     timeline.append(
         narration_span(first.episode, script.hook, hook_start, narration_id=hook_id)
@@ -146,13 +174,16 @@ def build_from_script_episodes(
         ep = segment.episode
         limit = durations.get(ep, 0.0) + 5
         cursor = cursors.get(ep, 0.0)
-        start_candidate = snap(ep, segment.start)
+        start_candidate = snap_to_shot(ep, snap(ep, segment.start), forward=False)
         # 近邻衔接：与上一段结尾间隔 <1s 时贴合，消除微跳跃观感（≥1s 的
         # 场景跳转是叙事需要，保留）
         if 0.0 < start_candidate - cursor < _NEAR_GAP_S:
             start_candidate = cursor
         start = max(start_candidate, cursor)
-        end = min(max(snap(ep, segment.end), start + 0.5), limit)
+        end = min(
+            max(snap_to_shot(ep, snap(ep, segment.end), forward=True), start + 0.5),
+            limit,
+        )
         if end <= start:
             continue
         body_id = f"n{order}"
@@ -166,6 +197,14 @@ def build_from_script_episodes(
                 narration_id=body_id,
             )
         )
+        # 本段开口正落在镜头切点上：接缝是画面自身的换镜头，硬切比叠淡更干净
+        # （fade 盖在真实 shot change 上反而发糊）；不足 1s 的贴缝本来就是 cut。
+        if (
+            len(timeline) > 1
+            and timeline[-1].episode_id == timeline[-2].episode_id
+            and on_shot_cut(ep, start)
+        ):
+            shot_aligned.add(len(timeline) - 1)
         texts.append(NarrationText(id=body_id, text=segment.text))
         cursors[ep] = end
 
@@ -186,7 +225,8 @@ def build_from_script_episodes(
             narration_texts=texts,
             strategy=strategy,
             planner="llm_script",
-        )
+        ),
+        prefer_cuts=frozenset(shot_aligned),
     )
 
 

@@ -190,3 +190,77 @@ def test_near_adjacent_segments_bridge_without_stutter() -> None:
         assert gap == 0.0, f"近邻段出现 {gap}s 微跳跃（应为连续衔接）"
     # 6.03 没有被吸附、也没被留在原地：它被拉回上一段的结尾 5.58
     assert same_ep[2] == (5.58, 13.15), f"贴合落点不对：{same_ep[2]}"
+
+
+# ---- 镜头切点外扩吸附：剪口落在换镜头处，画面不撕裂 ----
+# 布局：钩子+首段垫在时间轴头部，断言集中在第二段（timeline[2]）。
+
+
+def _two_on_ep1(
+    first: scriptwriter.ScriptSegment, second: scriptwriter.ScriptSegment
+) -> scriptwriter.Script:
+    return scriptwriter.Script(hook="钩子", segments=[first, second], cta="")
+
+
+def test_scene_cut_snapping_expands_edges_outward() -> None:
+    """start 前扩、end 后扩到镜头切点：只加画面余地不吞内容。"""
+    plan = build_from_script_episodes(
+        {1: ("ep-a", _asr([(0.0, 20.0)]))},
+        {1: 100.0},
+        _two_on_ep1(
+            scriptwriter.ScriptSegment(episode=1, start=0.5, end=2.0, text="甲"),
+            scriptwriter.ScriptSegment(episode=1, start=4.5, end=14.5, text="乙"),
+        ),
+        StrategySpec(),
+        scene_cuts={1: [3.9, 8.0, 15.1]},
+    )
+
+    assert (plan.timeline[2].start, plan.timeline[2].end) == (3.9, 15.1)
+
+
+def test_without_scene_cuts_behavior_unchanged() -> None:
+    """切点缺失（旧库）：退回纯台词吸附，原值返回不编造。"""
+    plan = build_from_script_episodes(
+        {1: ("ep-a", _asr([(0.0, 20.0)]))},
+        {1: 100.0},
+        _two_on_ep1(
+            scriptwriter.ScriptSegment(episode=1, start=0.5, end=2.0, text="甲"),
+            scriptwriter.ScriptSegment(episode=1, start=4.5, end=14.5, text="乙"),
+        ),
+        StrategySpec(),
+    )
+
+    assert (plan.timeline[2].start, plan.timeline[2].end) == (4.5, 14.5)
+
+
+def test_scene_snap_never_crosses_previous_end() -> None:
+    """前扩不许越过同集上一段的结尾：那会造出画面重播（立案③的形状）。"""
+    plan = build_from_script_episodes(
+        {1: ("ep-a", _asr([(0.0, 20.0)]))},
+        {1: 100.0},
+        _two_on_ep1(
+            scriptwriter.ScriptSegment(episode=1, start=0.5, end=5.0, text="第一段"),
+            scriptwriter.ScriptSegment(episode=1, start=6.1, end=14.0, text="第二段"),
+        ),
+        StrategySpec(),
+        scene_cuts={1: [5.5, 14.0]},  # 5.5 在第二段开口 6.1 的前扩窗内，但在上一段结尾之前
+    )
+
+    body2 = plan.timeline[2]
+    assert body2.start >= plan.timeline[1].end, "前扩越过上一段结尾=画面重播"
+
+
+def test_joint_on_shot_cut_prefers_cut_over_fade() -> None:
+    """接缝正落在镜头切点上：画面自身在换镜头，硬切比叠 fade 干净。"""
+    plan = build_from_script_episodes(
+        {1: ("ep-a", _asr([(0.0, 20.0)]))},
+        {1: 100.0},
+        _two_on_ep1(
+            scriptwriter.ScriptSegment(episode=1, start=0.5, end=2.0, text="甲"),
+            scriptwriter.ScriptSegment(episode=1, start=8.0, end=14.0, text="乙"),
+        ),
+        StrategySpec(),
+        scene_cuts={1: [8.0, 14.0]},  # 8.0 正是第二段的开口
+    )
+
+    assert plan.timeline[2].transition == "cut", "接缝在换镜头处应硬切而不是 fade"
