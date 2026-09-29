@@ -552,7 +552,12 @@ def _analyze_one(
     ocr_band: tuple[float, float] | None = None,
     hotwords: str = "",
 ) -> bool:
-    """分析单集；返回是否成功（失败标记后继续其余集）。"""
+    """分析单集；返回是否成功（失败标记后继续其余集）。
+
+    两段写入：第一层（转写/场景/音频/OCR）跑完立即落库、语义列显式清空，语义层
+    完成**才**标 done——链路里最贵的是转写、最易挂的是 LLM，语义抖动不再连坐
+    转写白跑。重入判据：签名相同 + 语义列为空 = 上轮死在语义层，跳过转写直补。
+    """
     episode_id = str(episode["id"])
     label = f"第{episode['episode_number']}集"
 
@@ -573,45 +578,88 @@ def _analyze_one(
         context.notifier.log("warn", f"{label} 源已变更，重新分析", job_id=job_id)
     episodes_repo.set_status(context.conn, episode_id, "analyzing")
     try:
-        raw = pipeline.analyze_episode(
-            video_path=Path(str(episode["source_path"])),
-            work_dir=context.work_dir / episode_id,
-            transcriber=context.analysis_runtime.transcriber(),
-            language=language,
-            cancel=cancel_event,
-            report=report,
-            hotwords=hotwords,
-        )
+        stored = _resumable_raw(context, episode, signature)
+        if stored is not None:
+            context.notifier.log(
+                "info", f"{label} 上轮语义层未完成：沿用转写结果，直接补语义", job_id=job_id
+            )
+            raw = stored
+        else:
+            raw = pipeline.analyze_episode(
+                video_path=Path(str(episode["source_path"])),
+                work_dir=context.work_dir / episode_id,
+                transcriber=context.analysis_runtime.transcriber(),
+                language=language,
+                cancel=cancel_event,
+                report=report,
+                hotwords=hotwords,
+            )
+            asr_segments, ocr_segments, band = _fuse_ocr(
+                context, episode, raw.asr_segments, ocr_bars, ocr_band
+            )
+            ocr_json = (
+                json.dumps([o.model_dump() for o in ocr_segments]) if ocr_segments else None
+            )
+            analysis_repo.upsert(
+                context.conn,
+                episode_id,
+                asr_segments=json.dumps([seg.model_dump() for seg in asr_segments]),
+                scene_data=json.dumps([scene.model_dump() for scene in raw.scenes]),
+                audio_features=raw.audio.model_dump_json(),
+                ocr_segments=ocr_json,
+                # A2 避让数据链落库：NULL=无硬字幕带/未探测/OCR 未装，烧录端对 NULL 回退现状边距
+                subtitle_band=(json.dumps([band[0], band[1]]) if band is not None else None),
+                # 语义列显式清空（upsert 传 None 即置 NULL）：此后任何时刻挂掉，
+                # 重入判据都能识别「这份源的第一层已就绪，只欠语义」。
+            )
+            if signature is not None:
+                episodes_repo.set_source_signature(context.conn, episode_id, signature)
         semantic_result = semantic_pipeline.enhance(
             raw,
             context.settings,
             trace_dir=llm_trace_dir(context),
             trace_tag=episode_id,
         )
+        analysis_repo.update_semantic(
+            context.conn,
+            episode_id,
+            conflict_scores=json.dumps([s.model_dump() for s in semantic_result.conflict_scores]),
+            highlights=json.dumps([h.model_dump() for h in semantic_result.highlights]),
+            genre=semantic_result.genre or None,
+        )
+        episodes_repo.mark_done(context.conn, episode_id)
+        return True
     except Exception as exc:
         episodes_repo.set_status(context.conn, episode_id, "failed")
         context.notifier.log("error", f"{label} 分析失败: {exc}")
         return False
-    asr_segments, ocr_segments, band = _fuse_ocr(
-        context, episode, raw.asr_segments, ocr_bars, ocr_band
-    )
-    analysis_repo.upsert(
-        context.conn,
-        episode_id,
-        asr_segments=json.dumps([seg.model_dump() for seg in asr_segments]),
-        scene_data=json.dumps([scene.model_dump() for scene in raw.scenes]),
-        audio_features=raw.audio.model_dump_json(),
-        conflict_scores=json.dumps([s.model_dump() for s in semantic_result.conflict_scores]),
-        highlights=json.dumps([h.model_dump() for h in semantic_result.highlights]),
-        genre=semantic_result.genre or None,
-        ocr_segments=(json.dumps([o.model_dump() for o in ocr_segments]) if ocr_segments else None),
-        # A2 避让数据链落库：NULL=无硬字幕带/未探测/OCR 未装，烧录端对 NULL 回退现状边距
-        subtitle_band=(json.dumps([band[0], band[1]]) if band is not None else None),
-    )
-    if signature is not None:
-        episodes_repo.set_source_signature(context.conn, episode_id, signature)
-    episodes_repo.mark_done(context.conn, episode_id)
-    return True
+
+
+def _resumable_raw(
+    context: AppContext, episode: dict[str, Any], signature: str | None
+) -> EpisodeRawAnalysis | None:
+    """上轮死在语义层的残留可续跑时，从库里重建第一层产物；不可续返回 None。
+
+    判据三条同时成立：源签名相同（转写产物属于这份源）、语义列为空（语义层没
+    完成）、第一层产物能完整解析（半截/损坏的记录按不可续走全量重算）。
+    """
+    if signature is None or episode.get("source_signature") != signature:
+        return None
+    record = analysis_repo.get(context.conn, str(episode["id"]))
+    if record is None or not record["asr_segments"] or record["conflict_scores"]:
+        return None
+    try:
+        return EpisodeRawAnalysis(
+            asr_segments=[
+                AsrSegment.model_validate(item) for item in json.loads(record["asr_segments"])
+            ],
+            scenes=[
+                SceneInfo.model_validate(item) for item in json.loads(record["scene_data"] or "[]")
+            ],
+            audio=AudioFeatures.model_validate(json.loads(record["audio_features"] or "{}")),
+        )
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
 
 
 def _fuse_ocr(
