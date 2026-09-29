@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import threading
 import urllib.parse
 import urllib.request
@@ -48,9 +49,14 @@ def status(data_dir: Path) -> dict[str, Any]:
 def inject_dll_dirs(data_dir: Path) -> int:
     """服务启动调用：把 CUDA DLL 目录注入进程搜索路径。返回注入数。
 
-    必须同时做两件事：ctranslate2 用普通 LoadLibrary 加载 cublas/cudnn——
+    必须同时做两件事：ctranslate2 用普通 LoadLibrary 加载 cublas/cubnn——
     只搜 PATH（add_dll_directory 对它不生效）；其余依赖用 add_dll_directory
-    兜底。PATH 前置保证优先于系统目录。"""
+    兜底。PATH 前置保证优先于系统目录。
+
+    add_dll_directory 是 Windows 专属 os API：非 Windows 平台早退返回 0（CUDA
+    运行库注入只在该平台有意义）——护栏同时是给 mypy 的平台契约。"""
+    if sys.platform != "win32":
+        return 0
     root = runtime_dir(data_dir)
     injected = 0
     dirs: list[str] = []

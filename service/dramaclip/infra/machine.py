@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ctypes
 import shutil
+import sys
 import threading
 from pathlib import Path
 
@@ -30,6 +31,11 @@ class _MemoryStatusEx(ctypes.Structure):
 
 
 def _query_once() -> dict[str, float]:
+    # GlobalMemoryStatusEx 是 Windows API，本探测只在该平台有实现；早退护栏同时是
+    # 给 mypy 的平台契约（linux 口径下后续分支不可达，windll 不再报 attr-defined，
+    # 也免掉平台相关的 ignore 在另一口径下变 unused-ignore）。
+    if sys.platform != "win32":
+        return {}
     stat = _MemoryStatusEx()
     stat.dwLength = ctypes.sizeof(_MemoryStatusEx)
     ok = ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
