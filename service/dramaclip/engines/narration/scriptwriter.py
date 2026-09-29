@@ -65,6 +65,8 @@ _STRUCTURE_PROMPT = (
     "同一集内按时间递增且互不重叠：下一段的 start 不得早于前一段的 end；"
     "相邻片段优先同集连续时段，换集必须有因果（前集埋线→后集爆发），禁止无因果跳切；"
     "1.5) hook 必须含一个具体反差事实（身份/生死/数字），禁止「他竟然…」式空泛悬念；"
+    "台词前的[角色X]是声纹聚类标签，同一标签就是同一个人：写文案时把它换成你从"
+    "称呼与剧情推断出的真名（如 小明/姐姐/总栽），推断不出再保留原标签；"
     "关键台词可原样引用（加引号）增强真实感；善用具体数字（年份/金额/集数）制造冲击；"
     "cta 必须是转化引导：留剧情缺口并明确引导去看全集（可带剧名），"
     "不得空喊关注/点赞/收藏，不得剧透最大反转。"
@@ -253,7 +255,11 @@ def format_transcript_episodes(
             if text == "":
                 continue
             span = f"{clock(float(seg.get('start', 0)))}-{clock(float(seg.get('end', 0)))}"
-            rendered.append(f"{span} {text}")
+            # 声纹聚类标签（说话人分离开启时才有）：编剧看到的是「谁在说」，
+            # 真名化是它的活——业主不看素材，角色名只能由读台词的人（LLM）推断。
+            speaker = str(seg.get("speaker") or "").strip()
+            prefix = f"[{speaker}] " if speaker else ""
+            rendered.append(f"{span} {prefix}{text}")
         if not rendered:  # 一行没进就不留孤立集标题
             continue
         lines.append(f"【第{int(episode['number'])}集】")

@@ -71,3 +71,22 @@ def test_unknown_duration_does_not_fabricate_a_length() -> None:
     assert "本集台词截至 00:05" in prompt
     assert "全长" not in prompt
 
+
+def test_speaker_label_rendered_when_present() -> None:
+    """说话人分离开启时，台词行带聚类标签前缀——真名化是编剧 LLM 的活。"""
+    ep = _ep(1, 2)
+    ep["segments"][0]["speaker"] = "角色A"
+    prompt = scriptwriter.format_transcript_episodes([ep])
+    assert "[角色A] 集1台词0" in prompt
+    assert "集1台词1" in prompt
+    assert "[角色A] 集1台词1" not in prompt, "没标签的行不编造归属"
+
+
+def test_speaker_absent_keeps_bare_lines() -> None:
+    """分离未开启（或字段为空）：转写行保持原样，不出空括号。"""
+    ep = _ep(1, 2)
+    ep["segments"][0]["speaker"] = None
+    prompt = scriptwriter.format_transcript_episodes([ep])
+    assert "00:00-00:01 集1台词0" in prompt
+    assert "[]" not in prompt and "[None]" not in prompt
+

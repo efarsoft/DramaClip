@@ -663,7 +663,12 @@ def _collect_episode_inputs(
                 "episode_id": str(episode["id"]),
                 "duration": float(episode.get("duration") or 0.0),
                 "segments": [
-                    {"start": seg.start, "end": seg.end, "text": seg.text}
+                    {
+                        "start": seg.start,
+                        "end": seg.end,
+                        "text": seg.text,
+                        "speaker": seg.speaker,
+                    }
                     for seg in segments
                 ],
             }
