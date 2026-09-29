@@ -2,43 +2,22 @@
  * 任务中心抽屉：全局唯一任务入口（队列页的前身，卷二 §4.3）。
  * 三条诚实纪律：不编速度/ETA（jobs 里没有，只有 % + 阶段词 + 服务端时钟差）；
  * 失败行 error 原文不截断且给「去处理」；取消被拒时把服务端 reason 原样说出来。
+ * 行内三段与过滤工具条在 ./JobRow（300 行红线拆出）。
  */
-import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Alert, Button, Drawer, Empty, Popconfirm, Progress, Segmented } from 'antd';
-import type { JobInfo, JobStatus } from '@dramaclip/protocol';
+import { useEffect, useState, type ReactElement } from 'react';
+import { Alert, Drawer, Empty } from 'antd';
+import type { JobInfo } from '@dramaclip/protocol';
 import { jobsApi, modelsApi, projectApi } from '../../services/client';
-import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 import { useJobsStore } from '../../stores/jobs';
 import {
-  durationLabel,
   EMPTY_NAMES,
   isActiveJob,
-  jobElapsedMs,
-  jobRoute,
-  jobSubject,
-  jobTypeLabel,
   sortJobs,
   summarizeJobs,
   type JobSubjectNames,
 } from './jobMeta';
-
-const STATUS_TEXT: Readonly<Record<JobStatus, string>> = {
-  pending: '排队中',
-  running: '运行中',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已取消',
-};
-
-const STATUS_COLOR: Readonly<Record<JobStatus, string>> = {
-  pending: tokens.colorWarning,
-  running: tokens.colorInfo,
-  completed: tokens.colorSuccess,
-  failed: tokens.colorError,
-  cancelled: tokens.textTertiary,
-};
+import { JobRow, JobsToolbar, type CancelNote } from './JobRow';
 
 type Filter = 'all' | 'failed' | 'active';
 
@@ -88,37 +67,15 @@ function JobsBody(): ReactElement {
   }
   const summary = summarizeJobs(jobs);
   const shown = sortJobs(jobs).filter((job) => matches(job, filter));
-  const finishedCount = jobs.length - summary.active;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceMd }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
-        <Segmented
-          size="small"
-          value={filter}
-          onChange={(value) => {
-            setFilter(value as Filter);
-          }}
-          options={[
-            { label: `全部 ${String(jobs.length)}`, value: 'all' },
-            { label: `失败 ${String(summary.failed)}`, value: 'failed' },
-            { label: `在跑 ${String(summary.active)}`, value: 'active' },
-          ]}
-        />
-        <span style={{ flex: 1 }} />
-        {finishedCount > 0 && (
-          <Popconfirm
-            title={`清空 ${String(finishedCount)} 条已结束记录？`}
-            description="完成/失败/取消的都会删掉，失败原因原文一并清除；在跑与排队中的不受影响。"
-            okText="清空"
-            cancelText="取消"
-            onConfirm={() => {
-              void jobsApi.clearFinished();
-            }}
-          >
-            <Button size="small" type="text">清空记录</Button>
-          </Popconfirm>
-        )}
-      </div>
+      <JobsToolbar
+        total={jobs.length}
+        failed={summary.failed}
+        active={summary.active}
+        filter={filter}
+        onFilter={setFilter}
+      />
       {shown.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有符合条件的任务" />}
       {shown.map((job) => (
         <JobRow
@@ -161,10 +118,6 @@ function useJobSubjects(open: boolean): JobSubjectNames {
   return names;
 }
 
-type CancelNote =
-  | { readonly kind: 'sending' | 'cancelling' }
-  | { readonly kind: 'rejected'; readonly reason: string };
-
 function useCancelJob(): [Readonly<Record<string, CancelNote>>, (jobId: string) => void] {
   const [notes, setNotes] = useState<Readonly<Record<string, CancelNote>>>({});
   const cancel = (jobId: string): void => {
@@ -185,149 +138,4 @@ function useCancelJob(): [Readonly<Record<string, CancelNote>>, (jobId: string) 
       });
   };
   return [notes, cancel];
-}
-
-const ROW_STYLE: CSSProperties = {
-  background: tokens.bgContainer,
-  border: `1px solid ${tokens.borderSecondary}`,
-  borderRadius: tokens.radiusControl,
-  padding: `${tokens.spaceSm} ${tokens.spaceMd}`,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: tokens.spaceSm,
-};
-
-function JobRow({
-  job,
-  names,
-  serverTimeMs,
-  note,
-  onCancel,
-}: {
-  job: JobInfo;
-  names: JobSubjectNames;
-  serverTimeMs: number | null;
-  note: CancelNote | undefined;
-  onCancel: () => void;
-}): ReactElement {
-  const elapsed = jobElapsedMs(job, serverTimeMs);
-  return (
-    <div style={ROW_STYLE}>
-      <JobTitleLine job={job} names={names} />
-      {job.status === 'running' && <Progress percent={Math.round(job.progress)} size="small" status="active" />}
-      <JobMetaLine job={job} elapsed={elapsed} note={note} onCancel={onCancel} />
-      {job.status === 'failed' && job.error !== null && job.error !== undefined && job.error !== '' && (
-        <span
-          style={{
-            fontSize: tokens.text.meta.size,
-            lineHeight: tokens.text.meta.leading,
-            color: tokens.colorError,
-            background: tokens.errorSoft,
-            borderRadius: tokens.radiusControl,
-            padding: `${tokens.spaceXs} ${tokens.spaceSm}`,
-          }}
-        >
-          {job.error}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function JobTitleLine({ job, names }: { job: JobInfo; names: JobSubjectNames }): ReactElement {
-  const navigate = useNavigate();
-  const setOpen = useJobsStore((state) => state.setDrawerOpen);
-  const route = jobRoute(job);
-  const go = (): void => {
-    if (route === null) return;
-    setOpen(false);
-    void navigate(route);
-  };
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
-      <span style={mixins.statusDot(STATUS_COLOR[job.status])} />
-      <span
-        style={{
-          fontSize: tokens.text.body.size,
-          lineHeight: tokens.text.body.leading,
-          fontWeight: 600,
-          color: tokens.textPrimary,
-          minWidth: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-        title={`${jobTypeLabel(job.type)} · ${jobSubject(job, names)}`}
-      >
-        {jobTypeLabel(job.type)} · {jobSubject(job, names)}
-      </span>
-      <span
-        style={{
-          marginLeft: 'auto',
-          flexShrink: 0,
-          fontSize: tokens.text.badge.size,
-          lineHeight: tokens.text.badge.leading,
-          color: STATUS_COLOR[job.status],
-        }}
-      >
-        {STATUS_TEXT[job.status]}
-      </span>
-      {route !== null && (
-        <Button size="small" type="link" style={{ flexShrink: 0 }} onClick={go}>
-          {job.status === 'failed' ? '去处理' : '查看'}
-        </Button>
-      )}
-    </div>
-  );
-}
-
-function JobMetaLine({
-  job,
-  elapsed,
-  note,
-  onCancel,
-}: {
-  job: JobInfo;
-  elapsed: number | null;
-  note: CancelNote | undefined;
-  onCancel: () => void;
-}): ReactElement | null {
-  const parts: string[] = [];
-  if (job.status === 'running' && job.label !== null && job.label !== undefined && job.label !== '') {
-    parts.push(job.label);
-  }
-  if (job.status === 'pending') parts.push('等待并发额度');
-  if (elapsed !== null) parts.push(`${isActiveJob(job) ? '已进行' : '耗时'} ${durationLabel(elapsed)}`);
-  const showCancel = isActiveJob(job);
-  if (parts.length === 0 && !showCancel) return null;
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: tokens.spaceSm,
-        fontSize: tokens.text.badge.size,
-        lineHeight: tokens.text.badge.leading,
-        color: tokens.textTertiary,
-      }}
-    >
-      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {parts.join(' · ')}
-      </span>
-      {note?.kind === 'rejected' && (
-        <span style={{ color: tokens.colorWarning, flexShrink: 0 }}>无法取消：{note.reason}</span>
-      )}
-      {showCancel && (
-        <span style={{ marginLeft: 'auto', flexShrink: 0 }}>
-          {note?.kind === 'cancelling' ? (
-            <span>已请求取消，等任务在检查点退出</span>
-          ) : (
-            <Button size="small" loading={note?.kind === 'sending'} onClick={onCancel}>
-              取消
-            </Button>
-          )}
-        </span>
-      )}
-    </div>
-  );
 }
