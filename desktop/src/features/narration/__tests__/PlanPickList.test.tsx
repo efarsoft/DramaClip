@@ -43,6 +43,8 @@ const idleBatch = {
   percent: 0,
   stageText: '',
   error: '',
+  failDetail: '',
+  batchId: null,
   run: vi.fn(),
   cancel: vi.fn(),
 };

@@ -11,6 +11,7 @@ import { layout, tokens } from '../../styles/theme';
 import { ExportsCard } from './ExportsCard';
 import { ModePicker } from './ModePicker';
 import { PlanPickList } from './PlanPickList';
+import { PlanQueue } from './PlanQueue';
 import { avgCompletedBytes } from './produceView';
 import { StyleSelectCard } from './StyleSelectCard';
 import { useExportQueue } from './useExportQueue';
@@ -154,7 +155,11 @@ export function ProductionPage() {
           }}
           onKChange={setK}
         />
-        <PlanPickList batch={batch} queue={queue} episodeCount={episodeCount} avgBytes={avgBytes} />
+        {batch.planning ? (
+          <PlanQueue batch={batch} modes={modes} k={k} />
+        ) : (
+          <PlanPickList batch={batch} queue={queue} episodeCount={episodeCount} avgBytes={avgBytes} />
+        )}
       </div>
       <div ref={exportRef}>
         <ExportsCard exports={exports} />

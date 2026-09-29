@@ -7,6 +7,7 @@ import json
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext, llm_trace_dir
@@ -82,6 +83,8 @@ def register(router: Router, context: AppContext) -> None:
     router.register("narration.get_plan", lambda params: get_plan(context, params))
     router.register("narration.list_styles", lambda _params: list_styles(context))
     router.register("narration.recommend_modes", lambda params: recommend_modes(context, params))
+    router.register("narration.llm_traces", lambda params: llm_traces(context, params))
+    router.register("narration.plan_trace", lambda params: plan_trace(context, params))
     router.register("narration.generate_titles", lambda params: generate_titles(context, params))
     router.register("narration.update_titles", lambda params: update_titles(context, params))
 
@@ -348,7 +351,10 @@ def _run_plan_variants(
                 )
             except Exception as exc:  # noqa: BLE001 - 取意图失败 = 这个模式的 K 条全没了
                 # 按 K 条记账：界面才不会把「这个模式一条都没出」显示成「这个模式本来就没有方案」
-                failures.extend(f"{label}·第{i}条: {exc}" for i in range(1, k + 1))
+                for i in range(1, k + 1):
+                    line = f"{label}·第{i}条: {exc}"
+                    failures.append(line)
+                    context.job_store.append_detail(job_id, line)
                 context.notifier.log("error", f"{label} 取方案意图失败: {exc}")
                 done_count += k
                 context.job_store.set_progress(
@@ -388,6 +394,7 @@ def _run_plan_variants(
                     accepted.append((variant, plan))
                 except Exception as exc:  # noqa: BLE001 - 单条方案失败不中断兄弟与其他模式
                     failures.append(f"{tag}: {exc}")
+                    context.job_store.append_detail(job_id, failures[-1])
                     context.notifier.log("error", f"{tag} 方案失败: {exc}")
                 done_count += 1
                 context.job_store.set_progress(
@@ -717,3 +724,28 @@ def recommend_modes(context: AppContext, params: dict[str, Any]) -> dict[str, An
     refresh = bool(params.get("refresh"))
     result = mode_recommend.recommend(context.conn, project_id, context.settings, refresh=refresh)
     return {"modes": result["modes"]}
+
+
+def llm_traces(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """最近的 LLM 往返留痕清单（规划队列的「LLM 往返」入口数据源）。"""
+    trace_dir = llm_trace_dir(context)
+    if trace_dir is None or not trace_dir.is_dir():
+        return {"traces": []}
+    limit = min(int(params.get("limit") or 30), 100)
+    files = sorted(trace_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:limit]
+    return {
+        "traces": [
+            {"name": f.name, "size": f.stat().st_size, "mtime": int(f.stat().st_mtime * 1000)}
+            for f in files
+        ]
+    }
+
+
+def plan_trace(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """读一份 LLM 往返留痕原文（system/user/attempts 全量）。"""
+    name = Path(str(params.get("name", ""))).name  # basename 化：路径穿越在此终结
+    trace_dir = llm_trace_dir(context)
+    path = trace_dir / name if trace_dir is not None else None
+    if path is None or path.suffix != ".json" or not path.is_file():
+        raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"往返记录不存在：{name}")
+    return {"name": name, "content": path.read_text(encoding="utf-8", errors="replace")}

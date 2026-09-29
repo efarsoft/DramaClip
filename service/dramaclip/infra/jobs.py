@@ -61,6 +61,18 @@ class JobStore:
     def mark_failed(self, job_id: str, error: str) -> None:
         self._transition(job_id, "failed", error=error)
 
+    def append_detail(self, job_id: str, line: str) -> None:
+        """运行中把失败明细追加进 error 列（轮询方即时可见，不必等终态）。
+
+        终态 mark_failed 仍会写权威全文（同样的行再拼一遍），运行态这里只是
+        让「规划队列」能逐条点亮失败行，而不是全军沉默到批次结束。"""
+        self._conn.execute(
+            "UPDATE jobs SET error = CASE WHEN error IS NULL OR error = ''"
+            " THEN ? ELSE error || '；' || ? END, updated_at = ? WHERE id = ?",
+            (line, line, _now_ms(), job_id),
+        )
+        self._conn.commit()
+
     def mark_cancelled(self, job_id: str) -> None:
         self._transition(job_id, "cancelled")
 

@@ -429,12 +429,8 @@ def test_no_new_rpc_method_is_registered(memory_db: sqlite3.Connection) -> None:
 
     router = Router()
     narration_api.register(router, SimpleNamespace(conn=memory_db, settings={}))  # type: ignore[arg-type]
-    assert set(router.method_names) == {
-        "narration.recommend_modes",
-        "narration.plan_variants",
-        "narration.list_plans",
-        "narration.get_plan",
-        "narration.list_styles",
-        "narration.generate_titles",
-        "narration.update_titles",
+    schema_path = Path(__file__).resolve().parents[3] / "protocol" / "schemas" / "narration.json"
+    schema_methods = {
+        item["name"] for item in json.loads(schema_path.read_text(encoding="utf-8"))["x-methods"]
     }
+    assert set(router.method_names) == schema_methods

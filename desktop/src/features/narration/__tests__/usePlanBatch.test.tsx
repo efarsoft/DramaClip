@@ -65,7 +65,7 @@ it('规划走 narration.plan_variants，并按本次批次取回方案', async (
   expect(result.current.planning).toBe(false);
 });
 
-it('作业失败时说出原因，不演成「没有方案」', async () => {
+it('作业失败时说出原因，同时取回已落库的部分方案（规划队列逐条点亮）', async () => {
   planVariants.mockResolvedValue({ job_id: 'job-1', k: 3, batch_id: 'job-1' });
   status.mockResolvedValue({
     status: 'failed',
@@ -80,11 +80,11 @@ it('作业失败时说出原因，不演成「没有方案」', async () => {
   });
 
   expect(result.current.error).toBe('编剧模型未配置');
-  expect(listPlans).not.toHaveBeenCalled();
-  expect(result.current.plans).toEqual([]);
+  expect(listPlans).toHaveBeenCalledWith('p1', 'job-1'), '失败也要取回已落库的部分';
+  expect(result.current.failDetail).toBe('编剧模型未配置');
 });
 
-it('作业被取消时不把取消演成失败', async () => {
+it('作业被取消时不把取消演成失败，已落库部分照常取回', async () => {
   planVariants.mockResolvedValue({ job_id: 'job-1', k: 3, batch_id: 'job-1' });
   status.mockResolvedValue({ status: 'cancelled', progress: 40, message: '' });
 
@@ -94,6 +94,5 @@ it('作业被取消时不把取消演成失败', async () => {
   });
 
   expect(result.current.error).toBe('');
-  expect(listPlans).not.toHaveBeenCalled();
-  expect(result.current.plans).toEqual([]);
+  expect(listPlans).toHaveBeenCalledWith('p1', 'job-1');
 });

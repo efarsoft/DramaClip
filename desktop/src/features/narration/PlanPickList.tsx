@@ -205,9 +205,12 @@ function PlanCard({
           {card.angle === '' ? (
             <strong style={{ color: tokens.textPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading }}>{modeLabel(card.mode)}</strong>
           ) : (
-            <Tag color="gold" style={{ marginRight: 0 }}>
-              {card.angle}
-            </Tag>
+            <>
+              <Tag color="gold" style={{ marginRight: 0 }}>
+                {card.angle}
+              </Tag>
+              <strong style={{ color: tokens.textPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading }}>{modeLabel(card.mode)}</strong>
+            </>
           )}
           <CardBadges recommended={recommended} checked={checked} pickable={card.pickable} />
         </div>

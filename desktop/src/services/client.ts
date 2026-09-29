@@ -37,6 +37,8 @@ import type {
   TtsPreviewResult,
   TtsCleanReferenceResult,
   ModeRecommendation,
+  LlmTraceListResult,
+  PlanTraceResult,
   VerifyReport,
 } from '@dramaclip/protocol';
 
@@ -166,6 +168,12 @@ export const narrationApi = {
   /** 阶段①：AI 模式推荐（随项目缓存；refresh=true 忽略缓存重算）。 */
   recommendModes: (projectId: string, refresh = false): Promise<ModeRecommendation> =>
     rpc<ModeRecommendation>('narration.recommend_modes', { project_id: projectId, refresh }),
+  /** 规划队列：最近的 LLM 往返留痕（新→旧）。 */
+  llmTraces: (limit = 30): Promise<LlmTraceListResult> =>
+    rpc<LlmTraceListResult>('narration.llm_traces', { limit }),
+  /** 读一份往返留痕原文（system/user/attempts）。 */
+  planTrace: (name: string): Promise<PlanTraceResult> =>
+    rpc<PlanTraceResult>('narration.plan_trace', { name }),
   /** 阶段③：为选中模式各产出 K 条角度互异的方案，只规划不渲染。 */
   planVariants: (
     projectId: string,

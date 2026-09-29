@@ -544,6 +544,22 @@ export interface TtsPreviewResult {
   readonly text: string;
 }
 
+export interface LlmTraceInfo {
+  readonly name: string;
+  readonly size: number;
+  readonly mtime: number;
+}
+
+/** narration.llm_traces / narration.plan_trace 返回体。 */
+export interface LlmTraceListResult {
+  readonly traces: ReadonlyArray<LlmTraceInfo>;
+}
+
+export interface PlanTraceResult {
+  readonly name: string;
+  readonly content: string;
+}
+
 /** narration.recommend_modes 返回体：推荐的模式与理由（随项目缓存）。 */
 export interface ModeRecommendation {
   readonly modes: ReadonlyArray<{ readonly mode: string; readonly reason: string }>;
@@ -675,6 +691,8 @@ export const METHOD_NAMES = [
   'analysis.results',
   'narration.plan_variants',
   'narration.recommend_modes',
+  'narration.llm_traces',
+  'narration.plan_trace',
   'narration.get_plan',
   'narration.list_plans',
   'narration.list_styles',

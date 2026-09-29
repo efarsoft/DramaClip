@@ -351,6 +351,49 @@
           }
         }
       }
+    },
+    {
+      "name": "narration.llm_traces",
+      "summary": "最近的 LLM 往返留痕清单（新→旧，供规划队列查看问答内容）",
+      "params": {
+        "type": "object",
+        "properties": { "limit": { "type": "integer", "maximum": 100 } }
+      },
+      "result": {
+        "type": "object",
+        "required": ["traces"],
+        "properties": {
+          "traces": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "size", "mtime"],
+              "properties": {
+                "name": { "type": "string" },
+                "size": { "type": "integer" },
+                "mtime": { "type": "integer" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "narration.plan_trace",
+      "summary": "读一份 LLM 往返留痕原文（system/user/attempts）",
+      "params": {
+        "type": "object",
+        "required": ["name"],
+        "properties": { "name": { "type": "string", "description": "留痕文件名（basename，防路径穿越）" } }
+      },
+      "result": {
+        "type": "object",
+        "required": ["name", "content"],
+        "properties": {
+          "name": { "type": "string" },
+          "content": { "type": "string" }
+        }
+      }
     }
   ]
 }
