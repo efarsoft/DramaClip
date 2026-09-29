@@ -15,8 +15,10 @@ from dramaclip.engines.narration import scriptwriter, styles
 from dramaclip.engines.narration.models import PlanData, StrategySpec
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
 
-# 剧本生成实测可达 100s+（qwen3.7-plus），远超 LLM 客户端默认 60s 超时
-SCRIPT_LLM_TIMEOUT_S = 240.0
+# 剧本生成实测可达 100s+（qwen3.7-plus），远超 LLM 客户端默认 60s 超时；
+# 2026-09-29 十集跨集剧本 3×240s 全读超时（prompt 7.7k 字符不大，是**产出**
+# 的完整剧本 JSON 太长）——提到 600s。端点 600s 都吐不完就该换端点了。
+SCRIPT_LLM_TIMEOUT_S = 600.0
 _SELECT_TIMEOUT_S = 60.0
 
 LogFn = Callable[[str, str], None]
