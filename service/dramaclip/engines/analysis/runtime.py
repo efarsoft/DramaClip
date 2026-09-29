@@ -45,7 +45,13 @@ def _build_transcriber(settings: config.Settings, models_dir: Path) -> AsrEngine
     if engine == "sensevoice":
         return SenseVoiceEngine(models_dir=models_dir)
     if engine == "paraformer":
-        return ParaformerEngine(models_dir=models_dir)
+        diarize = config.get_bool(settings, "asr.diarization")
+        return ParaformerEngine(
+            models_dir=models_dir,
+            vad_model_dir=models_dir / "asr" / "fsmn-vad" if diarize else None,
+            spk_model_dir=models_dir / "asr" / "campplus" if diarize else None,
+            num_speakers=config.get_int(settings, "asr.num_speakers"),
+        )
     model_size = settings.get("asr.model", "base")
     device = settings.get("asr.device", "cpu")
     return FasterWhisperEngine(

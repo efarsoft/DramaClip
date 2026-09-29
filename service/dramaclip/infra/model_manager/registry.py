@@ -27,6 +27,9 @@ class ModelSpec:
     speed: int = 0         # 速度评级 1-5（5 最快）
     quality: int = 0       # 精度评级 1-5（5 最准）
     desc: str = ""         # 一句话定位
+    # 必需文件集覆盖：同一引擎挂多份资产时（如 paraformer 的主模型与 vad/分离
+    # 辅助模型），引擎级 _REQUIREMENTS 表只有一份——覆盖字段让每份资产各判各的。
+    required_files: tuple[str, ...] = ()
 
     def sources(self) -> list[tuple[str, str]]:
         """可用下载源（国内优先排序）：[(kind, repo)]，kind ∈ modelscope/hf_mirror/huggingface。
@@ -188,6 +191,38 @@ def builtin_specs() -> list[ModelSpec]:
             speed=4,
             quality=4,
             desc="阿里 FunASR 旗舰，中文准确率高、自带标点、CPU 友好",
+        ),
+        ModelSpec(
+            model_id="fsmn-vad",
+            kind="asr",
+            engine="paraformer",
+            repo_id="iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+            ms_repo="iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+            placement="asr/fsmn-vad",
+            name="FSMN-VAD（语音活动检测）",
+            notes="约 1MB；说话人分离的前置（嵌入按语音区间提取，无 VAD 没有输入窗）",
+            size_label="~1MB",
+            tier="fast",
+            speed=5,
+            quality=4,
+            desc="切出有语音的区间；paraformer 说话人分离必需",
+            required_files=("config.yaml", "model.pt"),
+        ),
+        ModelSpec(
+            model_id="campplus-sv",
+            kind="asr",
+            engine="paraformer",
+            repo_id="iic/speech_campplus_sv_zh-cn_16k-common",
+            ms_repo="iic/speech_campplus_sv_zh-cn_16k-common",
+            placement="asr/campplus",
+            name="CAM++（说话人分离/角色聚类）",
+            notes="约 28MB；funasr 内置聚类自动判人数（1~15），asr.num_speakers 可指定",
+            size_label="~28MB",
+            tier="fast",
+            speed=5,
+            quality=4,
+            desc="声纹嵌入+聚类，把台词按角色聚类并标注说话人（角色A/B…）",
+            required_files=("campplus_cn_common.bin",),
         ),
     ]
 
@@ -389,7 +424,7 @@ def verify(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
         add("必需文件", "fail", f"{base} 下没有 {spec.repo_id.replace('/', '--')} 缓存目录")
     else:
         add("目录存在", "pass", str(base))
-        required = _REQUIREMENTS.get(spec.engine, ())
+        required = spec.required_files or _REQUIREMENTS.get(spec.engine, ())
         root = snapshot if snapshot is not None else base
         if cache is not None and snapshot is None:
             add("必需文件", "fail", f"{cache} 下没有已解析的快照目录（snapshots/<提交号>）")

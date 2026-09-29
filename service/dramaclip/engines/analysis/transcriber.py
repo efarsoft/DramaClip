@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
+from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from dramaclip.engines.analysis.models import AsrSegment, WordSpan
 
@@ -211,46 +213,104 @@ class ParaformerEngine:
 
     与 SenseVoice 的两处关键差异：长音频靠 `batch_size_s` 动态批整集进；
     时间戳是字级的——按字间静音间隙聚成句级段，供 OCR 融合与台词保护区用。
+
+    说话人分离（`spk_model_dir` 在场时启用）：funasr 的 diarization 路径
+    **必须**挂 vad_model（嵌入按语音区间提取，无 vad 直接没有输入窗），
+    且 spk_mode 显式走 "vad_segment"——"punc_segment"（默认值）需要标点模型，
+    不装标点时会先打一条 error 日志再被库自己改回，明着写对省那条假警报。
+    说话人数：`num_speakers>0` 经 `preset_spk_num` 指定，0 交给聚类自动估
+    （1~15 人范围，短剧每集 2~6 人绰绰有余）。
     """
 
     # 字间隙超过这个数（秒）就断句：短剧台词句间停顿普遍 >0.5s，标点模型不挂
     # （那是另两笔下载），靠间隙本身就是可靠的句边界。
     _SENTENCE_GAP_S = 0.6
 
-    def __init__(self, model_dir: Path | None = None, *, models_dir: Path | None = None) -> None:
+    # CAM++ 权重的仓库实名（registry 同名判据；funasr 本地加载默认找 model.pt）
+    _CAMPP_WEIGHT = "campplus_cn_common.bin"
+
+    def __init__(
+        self,
+        model_dir: Path | None = None,
+        *,
+        models_dir: Path | None = None,
+        vad_model_dir: Path | None = None,
+        spk_model_dir: Path | None = None,
+        num_speakers: int = 0,
+    ) -> None:
         resolved = model_dir if model_dir is not None else (
             models_dir / "asr" / "paraformer" if models_dir is not None else None
         )
         self._model_dir = resolved
+        self._vad_model_dir = vad_model_dir
+        self._spk_model_dir = spk_model_dir
+        self._num_speakers = num_speakers
         self._model: AutoModel | None = None
 
     @property
     def name(self) -> str:
         return "paraformer"
 
+    @property
+    def diarization(self) -> bool:
+        """说话人分离是否启用（由调用方决定传入 spk 模型目录与否）。"""
+        return self._spk_model_dir is not None
+
     def transcribe(
         self, wav_path: Path, language: str = "zh", *, hotwords: str = ""
     ) -> list[AsrSegment]:
         model = self._ensure_model()
-        raw = model.generate(
-            input=str(wav_path),
-            batch_size_s=300,  # 长音频动态批：整集 wav 一次进，按 300s 预算切批
-            hotword=hotwords or None,  # paraformer 原生热词槽（热词反哺直接受益）
-            # 必须显式要时间戳：不传时 funasr 只回 {key,text}，_parse_paraformer
-            # 对无时间戳条目整条丢弃 → 全文静默变空（2026-09-24 真样例实测）。
-            output_timestamp=True,
-        )
-        return _parse_paraformer(raw, self._SENTENCE_GAP_S)
+        with _punc_false_alarm_silenced():
+            raw = model.generate(
+                input=str(wav_path),
+                batch_size_s=300,  # 长音频动态批：整集 wav 一次进，按 300s 预算切批
+                hotword=hotwords or None,  # paraformer 原生热词槽（热词反哺直接受益）
+                # 必须显式要时间戳：不传时 funasr 只回 {key,text}，_parse_paraformer
+                # 对无时间戳条目整条丢弃 → 全文静默变空（2026-09-24 真样例实测）。
+                output_timestamp=True,
+                **(
+                    {"preset_spk_num": self._num_speakers}
+                    if self.diarization and self._num_speakers > 0
+                    else {}
+                ),
+            )
+        segments = _parse_paraformer(raw, self._SENTENCE_GAP_S)
+        spans = _spk_spans(raw)
+        return _assign_speakers(segments, spans) if spans else segments
 
     def _ensure_model(self) -> AutoModel:
         if self._model is None:
             from funasr import AutoModel  # ml extras 懒加载
 
+            spk_kwargs: dict[str, Any] = {}
+            if self.diarization:
+                spk_dir = self._spk_model_dir
+                vad_dir = self._vad_model_dir
+                assert spk_dir is not None  # diarization=True 的定义就是这个字段在场
+                spk_kwargs["vad_model"] = (
+                    str(vad_dir) if vad_dir is not None and vad_dir.is_dir() else "fsmn-vad"
+                )
+                if spk_dir.is_dir():
+                    spk_kwargs["spk_model"] = str(spk_dir)
+                    # funasr 本地目录加载把权重名硬编码成 model.pt（download_from_hub
+                    # 的断言），CAM++ 的权重实名是 campplus_cn_common.bin——经
+                    # spk_kwargs 组件通道用 init_param 指路（绝对路径绕开 CWD 相对
+                    # 解析）。不能放顶层 kwargs：那里会把 cam++ 权重喂给主模型。
+                    weight = spk_dir / self._CAMPP_WEIGHT
+                    if weight.is_file():
+                        spk_kwargs["spk_kwargs"] = {"init_param": str(weight)}
+                else:
+                    spk_kwargs["spk_model"] = "cam++"
+                spk_kwargs["spk_mode"] = "vad_segment"
             if self._model_dir is not None and self._model_dir.is_dir():
-                self._model = AutoModel(model=str(self._model_dir))
+                self._model = AutoModel(
+                    model=str(self._model_dir), disable_update=True, **spk_kwargs
+                )
             else:
                 self._model = AutoModel(
-                    model="iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
+                    model="iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+                    disable_update=True,  # 启动期联网检查版本：桌面应用不联网也能转写
+                    **spk_kwargs,
                 )
         return self._model
 
@@ -282,6 +342,97 @@ def _parse_paraformer(raw: list, gap_s: float) -> list[AsrSegment]:  # type: ign
                 )
             )
     return segments
+
+
+_PUNC_FALSE_ALARM = "Missing punc_model, which is required by spk_model."
+
+
+class _ExactMessageFilter(logging.Filter):
+    """只放行不含指定原文的日志记录——精确到整句，不误伤同通道其他消息。"""
+
+    def __init__(self, message: str) -> None:
+        super().__init__()
+        self._message = message
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return self._message not in record.getMessage()
+
+
+@contextlib.contextmanager
+def _punc_false_alarm_silenced() -> Iterator[None]:
+    """vad_segment 模式下静音 funasr 的「缺标点模型」ERROR。
+
+    库在 spk 路径上无差别检查 punc（`auto_model.py`：`elif raw_text is None` 分支
+    对 vad_segment 模式也报 ERROR），但 vad_segment 只靠 VAD 区间拼句，本就不需要
+    标点模型——这是我们主动选的配置，不是缺件。过滤器挂在 root（funasr 用模块级
+    logging.error 直打 root），只在 generate 期间在场、消息精确匹配，别的 ERROR
+    一条不放行。
+    """
+    filt = _ExactMessageFilter(_PUNC_FALSE_ALARM)
+    root = logging.getLogger()
+    root.addFilter(filt)
+    try:
+        yield
+    finally:
+        root.removeFilter(filt)
+
+
+def _spk_spans(raw: list) -> list[tuple[float, float, int]]:  # type: ignore[type-arg]
+    """从 funasr 输出收集说话人区间 [(start_s, end_s, 簇id)]（sentence_info，ms 单位）。
+
+    没启用分离时 raw 里没有 sentence_info，返回空表——调用方据此跳过归属。
+    """
+    spans: list[tuple[float, float, int]] = []
+    for item in raw:
+        for sentence in item.get("sentence_info") or []:
+            try:
+                start = float(sentence["start"]) / 1000
+                end = float(sentence["end"]) / 1000
+                label = int(sentence["spk"])
+            except (KeyError, TypeError, ValueError):
+                continue  # 缺字段的条目跳过，不编造归属
+            if end > start:
+                spans.append((start, end, label))
+    return spans
+
+
+def _assign_speakers(
+    segments: list[AsrSegment], spans: list[tuple[float, float, int]]
+) -> list[AsrSegment]:
+    """句级段按重叠时长多数归属说话人：一段话里的字属谁，看谁的声音盖的时间长。
+
+    与任何区间都不重叠的段（纯静音误检等）speaker 保持 None——量不到的不编。
+    """
+    out: list[AsrSegment] = []
+    for seg in segments:
+        totals: dict[int, float] = {}
+        for start, end, label in spans:
+            overlap = min(seg.end, end) - max(seg.start, start)
+            if overlap > 0:
+                totals[label] = totals.get(label, 0.0) + overlap
+        if not totals:
+            out.append(seg)
+            continue
+        winner = max(totals, key=lambda label: totals[label])
+        out.append(
+            AsrSegment(
+                start=seg.start,
+                end=seg.end,
+                text=seg.text,
+                speaker=_speaker_label(winner),
+                emotion=seg.emotion,
+                words=seg.words,
+                source=seg.source,
+            )
+        )
+    return out
+
+
+def _speaker_label(label: int) -> str:
+    """簇 id → 界面可读标签：角色A/角色B…（id 是聚类产物，不代表真实姓名）。"""
+    if 0 <= label < 26:
+        return f"角色{chr(ord('A') + label)}"
+    return f"角色{label + 1}"
 
 
 def _pair(

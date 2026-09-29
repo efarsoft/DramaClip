@@ -27,6 +27,11 @@ DEFAULTS: dict[str, str] = {
     # 行为与 auto 等价，原因见该处 docstring。
     "asr.compute_type": "auto",
     "asr.language": "zh",
+    # 说话人分离（仅 paraformer 生效）：聚类自动判人数（1~15），num_speakers>0
+    # 则经 preset_spk_num 指定。分离模型未下载时 funasr 按别名自行拉取（cam++/
+    # fsmn-vad 共约 30MB），资产库登记项可管理下载。
+    "asr.diarization": "true",
+    "asr.num_speakers": "0",
     "subtitle.default_preset": "conflict-impact",
     "subtitle.smart_match": "true",
     "llm.base_url": "",
@@ -80,3 +85,8 @@ def get_float(settings: Settings, key: str) -> float:
         return float(settings[key])
     except (KeyError, ValueError, TypeError):
         return float(DEFAULTS[key])
+
+
+def get_bool(settings: Settings, key: str) -> bool:
+    """按 bool 读取；真值集 {"1","true","on","yes"}（大小写不敏感），其余皆假。"""
+    return str(settings.get(key, "")).strip().lower() in {"1", "true", "on", "yes"}
