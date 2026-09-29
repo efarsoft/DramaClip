@@ -56,8 +56,10 @@ def test_write_script_episodes_multi() -> None:
     script = scriptwriter.write_script_episodes(
         fake, _EPISODE_INPUTS,
         angle_block="",
-        project_name="剧"
+        project_name="剧",
+    min_segments=2,
     )
+
     episodes = [segment.episode for segment in script.segments]
     assert episodes == [1, 2]  # 未知集号（9）被丢弃
     assert "【第1集】" in fake.prompts[0] and "【第2集】" in fake.prompts[0]
@@ -71,8 +73,10 @@ def test_write_script_episodes_empty_transcript_raises() -> None:
         scriptwriter.write_script_episodes(
             fake, empty,
             angle_block="",
-            project_name="剧"
+            project_name="剧",
+        min_segments=2,
         )
+
 
 
 def _asr(spans: list[tuple[float, float]]) -> list[AsrSegment]:
@@ -148,8 +152,10 @@ def test_prompt_keeps_raw_segments_by_episode() -> None:
     scriptwriter.write_script_episodes(
         fake, inputs,
             angle_block="",
-            project_name="剧"
+            project_name="剧",
+    min_segments=2,
     )
+
     user = fake.prompts[0]
     assert "【第1集】" in user
     assert "00:00-00:01 據最新消息" in user

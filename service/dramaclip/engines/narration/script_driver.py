@@ -68,6 +68,7 @@ def script_dialogue_plan(
     *,
     angle_block: str,
     trace_dir: Any = None,
+    min_segments: int = scriptwriter._MIN_BODY_SEGMENTS,
 ) -> tuple[PlanData, list[str]]:
     """跨集剧本驱动的对话解说。LLM 未配置或剧本不合格一律抛（降级已禁止）。
     """
@@ -92,6 +93,7 @@ def script_dialogue_plan(
         style_directives=str(settings.get("_style_directives") or ""),
         trace_path=trace_path,
         prompts=llm_prompts.overrides_from(settings),
+        min_segments=min_segments,
     )
 
     episode_map = {

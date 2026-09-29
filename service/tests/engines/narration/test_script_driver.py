@@ -91,14 +91,20 @@ def test_unconfigured_llm_raises_not_none() -> None:
     settings = dict(_SETTINGS)
     settings["llm.base_url"] = ""
     with pytest.raises(LlmUnavailable, match="引擎"):
-        script_driver.script_dialogue_plan(_EPISODES, settings, angle_block="")
+        script_driver.script_dialogue_plan(_EPISODES, settings, angle_block="",
+        min_segments=2,
+        )
+
 
 
 def test_no_script_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(script_driver, "LlmClient", FakeLlmClient)
     FakeLlmClient.queue = [{"hook": "", "segments": []}]
     with pytest.raises(ValueError, match="剧本"):
-        script_driver.script_dialogue_plan(_EPISODES, dict(_SETTINGS), angle_block="")
+        script_driver.script_dialogue_plan(_EPISODES, dict(_SETTINGS), angle_block="",
+        min_segments=2,
+        )
+
 
 
 def test_resolve_run_style_uses_llm_choice(driver: Any) -> None:
@@ -143,7 +149,10 @@ def test_script_plan_injects_directives_without_selection(driver: Any) -> None:
     settings = dict(_SETTINGS)
     settings["_style_directives"] = planted
     FakeLlmClient.queue = [dict(_SCRIPT_PAYLOAD)]
-    plan, used = script_driver.script_dialogue_plan(_EPISODES, settings, angle_block="")
+    plan, used = script_driver.script_dialogue_plan(_EPISODES, settings, angle_block="",
+    min_segments=2,
+    )
+
     assert plan.planner == "llm_script"
     assert used == ["ep-1", "ep-2"]
     assert len(FakeLlmClient.calls) == 1, f"剧本装配不该再发选题请求：{FakeLlmClient.calls}"
@@ -158,8 +167,10 @@ def test_angle_block_is_forwarded_to_the_script_prompt(
     monkeypatch.setattr(script_driver, "LlmClient", FakeLlmClient)
     FakeLlmClient.queue = [dict(_VALID_PAYLOAD)]
     script_driver.script_dialogue_plan(
-        _EPISODES, dict(_SETTINGS), angle_block="\n本条片的取材角度：复仇线"
+        _EPISODES, dict(_SETTINGS), angle_block="\n本条片的取材角度：复仇线",
+    min_segments=2,
     )
+
     assert any("复仇线" in call[1] for call in FakeLlmClient.calls), (
         "角度块没转交到编剧 prompt"
     )
@@ -223,6 +234,8 @@ def test_script_plan_carries_what_the_sanitizer_ate(driver: Any) -> None:
     }
     FakeLlmClient.queue = [payload]
     plan, _used = script_driver.script_dialogue_plan(
-        _EPISODES, dict(_SETTINGS), angle_block=""
+        _EPISODES, dict(_SETTINGS), angle_block="",
+    min_segments=2,
     )
+
     assert plan.dropped_segments == 1

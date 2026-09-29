@@ -63,7 +63,9 @@ def _run(llm: FakeLLM) -> Script:
         _EPISODES,
         project_name="测试剧",
         angle_block="",
+    min_segments=2,
     )
+
 
 
 def test_valid_payload_returns_sanitized_script() -> None:
@@ -154,22 +156,28 @@ def test_no_transcript_raises() -> None:
             FakeLLM([dict(_VALID_PAYLOAD)]), empty,
             project_name="测试剧",
         angle_block="",
+        min_segments=2,
         )
+
 
 
 def _system_sent(**prompts: str) -> str:
     llm = FakeLLM([dict(_VALID_PAYLOAD)])
     write_script_episodes(
-        llm, _EPISODES, project_name="测试剧", angle_block="", prompts=prompts
+        llm, _EPISODES, project_name="测试剧", angle_block="", prompts=prompts,
+    min_segments=2,
     )
+
     return llm.systems[0]
 
 
 def _user_sent(**prompts: str) -> str:
     llm = FakeLLM([dict(_VALID_PAYLOAD)])
     write_script_episodes(
-        llm, _EPISODES, project_name="测试剧", angle_block="", prompts=prompts
+        llm, _EPISODES, project_name="测试剧", angle_block="", prompts=prompts,
+    min_segments=2,
     )
+
     return llm.users[0]
 
 
@@ -260,7 +268,9 @@ def test_single_episode_may_omit_the_episode_field() -> None:
         [_EPISODES[0]],
         project_name="测试剧",
         angle_block="",
+    min_segments=2,
     )
+
     assert [segment.episode for segment in script.segments] == [1, 1]
 
 
@@ -274,7 +284,9 @@ def test_trace_dumps_the_system_actually_sent(tmp_path) -> None:
         angle_block="",
         prompts={"prompt.scriptwriter_system": "只回 JSON。"},
         trace_path=trace,
+    min_segments=2,
     )
+
     payload = json.loads(trace.read_text(encoding="utf-8"))
     assert payload["system"] == llm.systems[0]
     assert payload["system"].startswith("只回 JSON。")
@@ -319,7 +331,9 @@ def test_drop_count_is_in_the_trace_too(tmp_path) -> None:
         project_name="测试剧",
         angle_block="",
         trace_path=trace,
+    min_segments=2,
     )
+
     attempt = json.loads(trace.read_text(encoding="utf-8"))["attempts"][-1]
     assert attempt["segments_kept"] == 3
     assert attempt["segments_dropped"] == 2
@@ -365,8 +379,10 @@ def test_unknown_episode_duration_does_not_drop_everything() -> None:
         "cta": "",
     }
     script = write_script_episodes(
-        FakeLLM([payload]), episodes, project_name="测试剧", angle_block=""
+        FakeLLM([payload]), episodes, project_name="测试剧", angle_block="",
+    min_segments=2,
     )
+
     assert [(segment.start, segment.end) for segment in script.segments] == [
         (1.0, 10.0),
         (10.0, 20.0),
@@ -402,7 +418,9 @@ def test_bad_raw_response_is_kept_in_trace(tmp_path) -> None:
             project_name="测试剧",
             angle_block="",
             trace_path=trace,
+        min_segments=2,
         )
+
     attempts = json.loads(trace.read_text(encoding="utf-8"))["attempts"]
     assert attempts[0]["raw"] == payload, "坏响应原文没进留痕"
     assert attempts[0]["error"].startswith("ValidationError")
@@ -425,6 +443,8 @@ def test_clamped_segments_are_counted_in_trace(tmp_path) -> None:
         project_name="测试剧",
         angle_block="",
         trace_path=trace,
+    min_segments=2,
     )
+
     attempt = json.loads(trace.read_text(encoding="utf-8"))["attempts"][-1]
     assert attempt["segments_clamped"] == 1

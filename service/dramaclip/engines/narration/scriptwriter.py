@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 _CHARS_PER_SECOND = 4.2  # 中文 TTS 语速估算（约 250 字/分钟）
 _MIN_SEGMENTS = 2
+# 清洗后正文段数硬门：system 写了 12-28 是软要求，模型偷懒给 8 段照样过——
+# 低于此门触发强化重掷，三次仍不达标整条方案失败（宁掷勿滥，时长让位质量的姊妹裁决）。
+_MIN_BODY_SEGMENTS = 12
 _EPISODE_LINE_CAP = 80
 _TOTAL_LINE_CAP = 500
 _MIN_LINES_PER_EPISODE = 3  # 集数再多，每集也至少露面的保底线
@@ -73,6 +76,10 @@ _STRUCTURE_PROMPT = (
     "2) 正文 12-28 段：把冲突链条完整铺开（起因→多轮升级→连环反转→高潮），"
     "段数不够就是没讲透；冲突没讲完写到上限，禁止为赶时长砍高潮；"
     "每段文案不超过 60 字；"
+    "文案要像真人解说员开口说话：相邻两段禁止同一提示语起手"
+    "（「更狠的是/万万没想到/谁能想到」这类起手式全稿至多出现一次），"
+    "每段至少一处情绪词（怒/恨/慌/疼/疯）或一句人物原话引用，"
+    "多用短句和具体动作，拒绝概括性陈述与排比复读；"
     "3) 覆盖剧情完整钩子-冲突-反转弧线，看完必须还想点进去看原片；"
     "4) 只输出 JSON，不要多余文字。"
 )
@@ -287,6 +294,7 @@ def write_script_episodes(
     style_directives: str = "",
     trace_path: Path | None = None,
     prompts: dict[str, str] | None = None,
+    min_segments: int | None = None,
 ) -> Script:
     """跨集剧本：读多集转写（每集一个「【第N集】」分组），产出带集号的跨集故事剧本。
     """
@@ -319,11 +327,20 @@ def write_script_episodes(
         + f"{style_block}"
     )
     system = system_prompt(prompts)
+    # 薄稿硬门按集数推导：2 段/集（10 集→20 段，单集→2 段），LLM 偷懒给薄稿
+    # 会触发强化重掷；下限跟着输入规模走，单集项目不被跨集的尺子误杀。
+    floor = max(2, 2 * len(episode_inputs)) if min_segments is None else min_segments
     attempts: list[dict[str, Any]] = []
     script: Script | None = None
     for attempt in range(_MAX_ATTEMPTS):
         # 重试注入格式强化：原样重问等于期待模型原样再犯
         ask = user_prompt + _FORMAT_REINFORCEMENT if attempt > 0 else user_prompt
+        if attempts and attempts[-1].get("rejected"):
+            tail_note = (
+                f"上一次你只写了 {attempts[-1]['rejected']}。"
+                "每集的冲突都要铺开成段，段数不够能力就是不及格——这次必须给满段数。"
+            )
+            ask += "\n\n" + tail_note
         raw: Any = None
         try:
             raw = llm.chat_json(system, ask)
@@ -346,6 +363,10 @@ def write_script_episodes(
                 "segments_clamped": clamped,
             }
         )
+        if script is not None and len(script.segments) < floor:
+            kept = len(script.segments)
+            attempts[-1]["rejected"] = f"正文仅 {kept} 段（要求至少 {floor} 段）"
+            script = None
         if script is not None:
             break
     dump_trace(
