@@ -162,6 +162,8 @@ export const layout = {
   stepNav: { dotGap: 7, connectorGap: 10 },
   /** 行内编辑输入框 '3px 8px' 内边距：3 脱阶照实登记。 */
   inlineInput: { paddingBlock: 3, paddingInline: tokens.spaceSm },
+  /** 图标/角标对齐的 2px 微推（首启三步）：脱阶照实登记，不新造一档。 */
+  iconNudge: 2,
   /** 来源徽标/无音轨一类迷你芯片 '0 6px' 内边距：6 脱阶照实登记。 */
   badgeChip: { paddingBlock: 0, paddingInline: 6 },
   /** EnvPanel/TipsPanel 度量债偿还（全局改造批）：六处脱阶值照实登记，不新造一档。 */

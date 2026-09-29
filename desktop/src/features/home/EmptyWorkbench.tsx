@@ -1,12 +1,10 @@
-/** 无剧时的主区引导（规格 §4.1 空态：「无剧时主区整块替换为「新增项目」引导」）。
+/** 无剧时的主区引导（规格 §4.1 空态 + §4.2 首启三步）。
  *
- * 两处刻意的取舍：
- * 1. 带完成度的首启三步（装 ASR 模型 / 配 LLM / 新增项目）是 §4.2 **剧库页**的空态，
- *    依赖 project.list 的阶段聚合，归 P-3.2。本组件只做 §4.1 要求的那一件事。
- *    首启信息没有丢：新装机同时缺模型与凭据时，**今日待办**恰恰就是首启引导
- *    （缺模型→去下载、未配编剧模型→去配置），所以 HomePage 在空态下保留待办。
- * 2. 本页唯一的 primary 在这里，不在 PageHeader 上——两处都放会违反 DSS §3.1
- *    「每屏 primary 至多 1 个」。HomePage 据此在有剧/无剧之间切换 primary 的落点。
+ * 带完成度的首启三步（装 ASR 模型 / 配 LLM / 新增项目）在 OnboardingSteps，
+ * 就绪判定与右栏「环境就绪度」同源（models.list + llmBaseUrl）。
+ *
+ * 本页唯一的 primary 在这里，不在 PageHeader 上——两处都放会违反 DSS §3.1
+ * 「每屏 primary 至多 1 个」。HomePage 据此在有剧/无剧之间切换 primary 的落点。
  *
  * 文案纪律：不承诺拖放（全库无 dataTransfer）、不承诺下载与网盘（规格 §1 产品边界：
  * 软件从素材已在本地开始）、不承诺授权留痕（§7 已整体移除）。
@@ -14,14 +12,20 @@
 import { FolderAddOutlined } from '@ant-design/icons';
 import { Button } from 'antd';
 import type { ReactElement } from 'react';
+import type { ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
+import { OnboardingSteps } from './OnboardingSteps';
 
 export function EmptyWorkbench({
   creating,
   onCreate,
+  models,
+  llmBaseUrl,
 }: {
   creating: boolean;
   onCreate: () => void;
+  models: ModelInfo[] | null;
+  llmBaseUrl: string;
 }): ReactElement {
   return (
     <section
@@ -48,10 +52,10 @@ export function EmptyWorkbench({
             maxWidth: 420,
           }}
         >
-          选择素材所在文件夹即可开始——一部剧对应一个文件夹，文件夹名就是剧名。
-          素材已在本地，无需任何额外录入。
+          三步开始：装一个识别模型、配文案引擎、选素材文件夹建剧。
         </div>
       </div>
+      <OnboardingSteps models={models} llmBaseUrl={llmBaseUrl} />
       <Button type="primary" icon={<FolderAddOutlined />} loading={creating} disabled={creating} onClick={onCreate}>
         新增项目
       </Button>

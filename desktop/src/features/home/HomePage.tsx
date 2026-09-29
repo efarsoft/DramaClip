@@ -155,7 +155,7 @@ function HomeBody({
             }}
           />
         ) : (
-          <EmptyWorkbench creating={creating} onCreate={onCreate} />
+          <EmptyWorkbench creating={creating} onCreate={onCreate} models={data.models} llmBaseUrl={data.llmBaseUrl} />
         )}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
