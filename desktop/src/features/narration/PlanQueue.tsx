@@ -5,9 +5,9 @@
 import { useState } from 'react';
 import { Alert, Button, Tag } from 'antd';
 import type { NarrationMode, NarrationPlan } from '@dramaclip/protocol';
+import { PlanCard } from './PlanCard';
 import { PageSection } from '../../components/layout/PageKit';
 import { modeLabel } from '../../components/modeMeta';
-import { hookLine } from './planCards';
 import { tokens } from '../../styles/theme';
 import type { PlanBatch } from './usePlanBatch';
 import { LlmTraceModal } from './LlmTraceModal';
@@ -17,9 +17,9 @@ export interface QueueRow {
   label: string;
   index: number;
   status: 'pending' | 'running' | 'done' | 'failed';
-  /** 完成行带方案角度名与卖点一句话；失败行带原因原文。 */
+  /** 完成行带整份方案（渲染成方案卡）；失败行带原因原文。 */
+  plan?: NarrationPlan;
   angle?: string;
-  hook?: string;
   reason?: string;
 }
 
@@ -73,8 +73,8 @@ export function buildQueueRows(
               label,
               index,
               status: 'done',
+              plan,
               angle: plan.angle || `第${String(index)}条`,
-              hook: hookLine(plan),
             }
           : { mode, label, index, status: 'pending' },
       );
@@ -121,9 +121,16 @@ export function PlanQueue({
   const doneCount = rows.filter((row) => row.status === 'done').length;
   return (
     <PageSection title="② 规划队列" dense>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
         {rows.map((row) => {
           const meta = STATUS_META[row.status];
+          if (row.status === 'done' && row.plan !== undefined) {
+            return (
+              <div key={`${row.mode}#${String(row.index)}`} style={{ maxWidth: 460 }}>
+                <PlanCard plan={row.plan} checked={false} recommended={false} onToggle={() => undefined} />
+              </div>
+            );
+          }
           return (
             <div
               key={`${row.mode}#${String(row.index)}`}
@@ -148,24 +155,10 @@ export function PlanQueue({
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
                 }}
-                title={row.reason ?? row.angle}
+                title={row.reason}
               >
-                {row.label} · {row.angle ?? `第${String(row.index)}条`}
+                {row.label} · 第{String(row.index)}条
               </span>
-              {row.status === 'done' && row.hook !== undefined && row.hook !== '' && (
-                <span
-                  style={{
-                    fontSize: tokens.text.meta.size,
-                    color: tokens.textTertiary,
-                    minWidth: 0,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {row.hook}
-                </span>
-              )}
               {row.status === 'failed' && (
                 <>
                   <span
@@ -192,15 +185,9 @@ export function PlanQueue({
                 </>
               )}
               <span style={{ marginLeft: 'auto', flexShrink: 0 }}>
-                {row.status === 'done' ? (
-                  <Tag color="success" style={{ marginRight: 0 }}>
-                    完成
-                  </Tag>
-                ) : (
-                  <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: meta.color }}>
-                    {meta.text}
-                  </span>
-                )}
+                <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: meta.color }}>
+                  {meta.text}
+                </span>
               </span>
             </div>
           );

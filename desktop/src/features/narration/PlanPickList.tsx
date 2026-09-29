@@ -8,6 +8,7 @@ import { modeLabel } from '../../components/modeMeta';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 import { planCardView, recommendedIds } from './planCards';
+import { PlanCard } from './PlanCard';
 import { coverageOf, estimateDisk, type Coverage } from './produceView';
 import type { ExportQueue } from './useExportQueue';
 import type { PlanBatch } from './usePlanBatch';
@@ -171,93 +172,4 @@ function CostChip({ label, value, dim, tooltip }: { label: string; value: string
 /** 被拒的是哪条方案，界面上只有模式名可读——id 对用户没有意义。 */
 function planMode(plans: NarrationPlan[], planId: string): string {
   return plans.find((plan) => plan.id === planId)?.narration_mode ?? '';
-}
-
-/** 只读方案卡（规格 §4.3 四要素 + 重叠率）：用户不挑角度，只判断「K 条是不是 K 个卖点」。 */
-function PlanCard({
-  plan,
-  checked,
-  recommended,
-  onToggle,
-}: {
-  plan: NarrationPlan;
-  checked: boolean;
-  recommended: boolean;
-  onToggle: () => void;
-}) {
-  const card = planCardView(plan);
-  return (
-    <Card
-      size="small"
-      hoverable={card.pickable}
-      onClick={() => {
-        if (card.pickable) onToggle();
-      }}
-      style={{
-        borderColor: checked ? tokens.colorPrimary : tokens.border,
-        background: checked ? tokens.accentSoft : undefined,
-        opacity: card.pickable ? 1 : 0.55,
-        cursor: card.pickable ? 'pointer' : 'not-allowed',
-      }}
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm, minHeight: 130 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, flexWrap: 'wrap' }}>
-          {card.angle === '' ? (
-            <strong style={{ color: tokens.textPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading }}>{modeLabel(card.mode)}</strong>
-          ) : (
-            <>
-              <Tag color="gold" style={{ marginRight: 0 }}>
-                {card.angle}
-              </Tag>
-              <strong style={{ color: tokens.textPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading }}>{modeLabel(card.mode)}</strong>
-            </>
-          )}
-          <CardBadges recommended={recommended} checked={checked} pickable={card.pickable} />
-        </div>
-        {card.hook !== '' && <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textPrimary }}>{card.hook}</span>}
-        {card.reason !== '' && <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textSecondary }}>{card.reason}</span>}
-        {card.gate !== '' && (
-          <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.colorWarning }}>{card.gate}</span>
-        )}
-        <span style={{ display: 'flex', gap: tokens.spaceMd, marginTop: 'auto', fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
-          <span>{modeLabel(card.mode)}</span>
-          <span>{card.episodes}</span>
-          <span>{card.overlap}</span>
-          {card.dropped !== '' && (
-            <span style={{ color: tokens.colorWarning }}>{card.dropped}</span>
-          )}
-        </span>
-      </div>
-    </Card>
-  );
-}
-
-function CardBadges({
-  recommended,
-  checked,
-  pickable,
-}: {
-  recommended: boolean;
-  checked: boolean;
-  pickable: boolean;
-}): ReactElement {
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: tokens.spaceSm, marginLeft: 'auto' }}>
-      {recommended && (
-        <Tag color="gold" style={{ marginRight: 0 }}>
-          推荐
-        </Tag>
-      )}
-      {checked && (
-        <Tag color="blue" style={{ marginLeft: 'auto', marginRight: 0 }}>
-          已选
-        </Tag>
-      )}
-      {!pickable && (
-        <Tag color="warning" style={{ marginRight: 0 }}>
-          不能出片
-        </Tag>
-      )}
-    </span>
-  );
 }
