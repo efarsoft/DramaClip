@@ -7,6 +7,7 @@ import { Alert, Button, Tag } from 'antd';
 import type { NarrationMode, NarrationPlan } from '@dramaclip/protocol';
 import { PageSection } from '../../components/layout/PageKit';
 import { modeLabel } from '../../components/modeMeta';
+import { hookLine } from './planCards';
 import { tokens } from '../../styles/theme';
 import type { PlanBatch } from './usePlanBatch';
 import { LlmTraceModal } from './LlmTraceModal';
@@ -16,8 +17,9 @@ export interface QueueRow {
   label: string;
   index: number;
   status: 'pending' | 'running' | 'done' | 'failed';
-  /** 完成行带方案角度名；失败行带原因原文。 */
+  /** 完成行带方案角度名与卖点一句话；失败行带原因原文。 */
   angle?: string;
+  hook?: string;
   reason?: string;
 }
 
@@ -66,7 +68,14 @@ export function buildQueueRows(
       const plan = byKey.get(`${mode}#${index}`);
       rows.push(
         plan !== undefined
-          ? { mode, label, index, status: 'done', angle: plan.angle || `第${String(index)}条` }
+          ? {
+              mode,
+              label,
+              index,
+              status: 'done',
+              angle: plan.angle || `第${String(index)}条`,
+              hook: hookLine(plan),
+            }
           : { mode, label, index, status: 'pending' },
       );
     }
@@ -111,15 +120,7 @@ export function PlanQueue({
   const rows = buildQueueRows(modes, k, batch.plans, batch.batchId, batch.failDetail, batch.stageText);
   const doneCount = rows.filter((row) => row.status === 'done').length;
   return (
-    <PageSection
-      title="② 规划队列"
-      dense
-      extra={
-        <Button size="small" type="text" onClick={() => setTracesOpen(true)}>
-          LLM 往返记录
-        </Button>
-      }
-    >
+    <PageSection title="② 规划队列" dense>
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}>
         {rows.map((row) => {
           const meta = STATUS_META[row.status];
@@ -151,19 +152,44 @@ export function PlanQueue({
               >
                 {row.label} · {row.angle ?? `第${String(row.index)}条`}
               </span>
-              {row.status === 'failed' && (
+              {row.status === 'done' && row.hook !== undefined && row.hook !== '' && (
                 <span
                   style={{
-                    fontSize: tokens.text.badge.size,
-                    color: tokens.colorError,
+                    fontSize: tokens.text.meta.size,
+                    color: tokens.textTertiary,
                     minWidth: 0,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {row.reason}
+                  {row.hook}
                 </span>
+              )}
+              {row.status === 'failed' && (
+                <>
+                  <span
+                    style={{
+                      fontSize: tokens.text.badge.size,
+                      color: tokens.colorError,
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {row.reason}
+                  </span>
+                  <Button
+                    size="small"
+                    type="text"
+                    onClick={() => {
+                      setTracesOpen(true);
+                    }}
+                  >
+                    往返
+                  </Button>
+                </>
               )}
               <span style={{ marginLeft: 'auto', flexShrink: 0 }}>
                 {row.status === 'done' ? (
@@ -188,6 +214,7 @@ export function PlanQueue({
           title={`已完成 ${String(doneCount)} 条——批次结束后进入「挑方案」勾选出片`}
         />
       )}
+      {/* 往返留痕是失败诊断工具：只从失败行进，不占头部位置 */}
       <LlmTraceModal open={tracesOpen} onClose={() => setTracesOpen(false)} />
     </PageSection>
   );

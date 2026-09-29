@@ -47,7 +47,8 @@ export function planCardView(plan: NarrationPlan): PlanCardView {
   };
 }
 
-function hookLine(plan: NarrationPlan): string {
+/** 首段文案的首句（卖点预览）；PlanQueue 完成行复用，不各抄一份截断规则。 */
+export function hookLine(plan: NarrationPlan): string {
   const first = plan.plan_data.narration_texts[0]?.text.trim() ?? '';
   if (first === '') return '';
   const end = first.search(SENTENCE_ENDS);
