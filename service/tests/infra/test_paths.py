@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from dramaclip.infra import paths
@@ -16,9 +17,13 @@ def test_env_override_creates_subdirs(tmp_path: Path) -> None:
 
 
 def test_blank_env_falls_back_to_appdata(tmp_path: Path) -> None:
+    """空 env 按平台回退：win32 走 %APPDATA%/DramaClip，其余走 ~/.local/share/dramaclip。"""
     appdata = tmp_path / "appdata"
     result = paths.resolve_data_dir(env={"DRAMACLIP_DATA_DIR": "  ", "APPDATA": str(appdata)})
-    assert result == appdata / "DramaClip"
+    if sys.platform == "win32":
+        assert result == appdata / "DramaClip"
+    else:
+        assert result == Path.home() / ".local" / "share" / "dramaclip"
 
 
 def test_db_path(tmp_path: Path) -> None:

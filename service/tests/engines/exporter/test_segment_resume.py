@@ -489,9 +489,9 @@ def test_stale_tail_segments_are_pruned(
 def test_real_ffmpeg_second_run_skips_and_reuses_bytes(
     repo_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ffmpeg = repo_root / "resources" / "ffmpeg" / (
-        "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
-    )
+    from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
+
+    ffmpeg = Path(resolve_ffmpeg())
     if not ffmpeg.is_file():
         pytest.skip("随包 ffmpeg 不存在")
     source = tmp_path / "ep1.mp4"

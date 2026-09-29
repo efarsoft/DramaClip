@@ -11,13 +11,16 @@ from pathlib import Path
 
 import pytest
 
+from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 from dramaclip.infra.storage import db
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _ffmpeg() -> str:
-    return str(REPO_ROOT / "resources" / "ffmpeg" / "ffmpeg.exe")
+    # 经产品解析器取二进制：resources 优先、PATH 兜底（Linux CI 用系统 ffmpeg），
+    # 测试与生产永远同一套选路逻辑。
+    return resolve_ffmpeg()
 
 
 @pytest.fixture(scope="session")

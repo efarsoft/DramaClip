@@ -190,7 +190,9 @@ _SEGMENT_AAC_TP_BUDGET_DB = 1.5
 
 
 def _ffmpeg(repo_root: Path) -> str:
-    return str(repo_root / "resources" / "ffmpeg" / "ffmpeg.exe")
+    from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
+
+    return resolve_ffmpeg()
 
 
 # 确定性原声床：四条正弦相加（不用 anoisesrc，理由见 `worst_case` 的 docstring）。
@@ -525,7 +527,9 @@ def test_original_ceiling_meets_the_documented_aac_budget(
 
 def _probe(repo_root: Path, args: list[str]) -> str:
     """跑 ffprobe 并返回 **stdout**（`_sh` 返回的是 stderr，那是 ffmpeg 日志那一侧）。"""
-    ffprobe = str(repo_root / "resources" / "ffmpeg" / "ffprobe.exe")
+    from dramaclip.infra.ffmpeg.binaries import resolve_ffprobe
+
+    ffprobe = resolve_ffprobe()
     proc = subprocess.run(  # noqa: S603
         [ffprobe, *args], capture_output=True, text=True, encoding="utf-8",
         errors="replace", check=False, timeout=180,

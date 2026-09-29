@@ -17,6 +17,7 @@ import pytest
 
 from dramaclip.engines.exporter import encoder, loudness
 from dramaclip.engines.narration.models import PlanData, StrategySpec, TimelineSegment
+from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 from dramaclip.infra.ffmpeg.probe import MediaInfo
 
 _TARGET = loudness.LoudnessTarget(integrated_lufs=-14.0, true_peak_dbtp=-1.5)
@@ -618,7 +619,7 @@ def test_film_without_audio_track_raises_operator_message(
     film = tmp_path / "video_only.mp4"
     subprocess.run(  # noqa: S603
         [
-            str(repo_root / "resources" / "ffmpeg" / "ffmpeg.exe"),
+            loudness.resolve_ffmpeg(),
             "-hide_banner", "-loglevel", "error", "-y",
             "-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=10",
             "-c:v", "libx264", "-preset", "ultrafast", "-an",
@@ -1044,7 +1045,7 @@ def test_gain_branch_hits_the_target_on_real_audio(
     **最终产物照样是 -14.00**。所以只量最终响度的断言看不见它（复核 + 退路把它掩盖了，
     代价是每部片子白编一遍、而且增益路等于废掉）——必须同时断言"**没走退路**"才会红。
     """
-    ffmpeg = str(repo_root / "resources" / "ffmpeg" / "ffmpeg.exe")
+    ffmpeg = resolve_ffmpeg()
     film = tmp_path / "quiet_film.mp4"
     _build_film(ffmpeg, film, "15.2", "aformat=sample_fmts=fltp,volume=-12.0dB")
 
@@ -1097,7 +1098,7 @@ def test_loudnorm_branch_on_real_hot_audio(
     归一后实测 `I=-14.80 / Peak=-2.40`：偏离 0.80 LU，在生产容差 2.0 与门禁窗口 2.5 之内，
     真峰在门限 -1.0 之内——loudnorm 路照样要过复核，不是"走了压缩就算交差"。
     """
-    ffmpeg = str(repo_root / "resources" / "ffmpeg" / "ffmpeg.exe")
+    ffmpeg = resolve_ffmpeg()
     film = tmp_path / "hot_film.mp4"
     # `pow(a,b)` 里的逗号在滤镜图语法中是滤镜分隔符，必须转义。
     _build_film(

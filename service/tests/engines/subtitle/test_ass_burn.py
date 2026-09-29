@@ -25,7 +25,14 @@ from PIL import Image
 from dramaclip.engines.subtitle import ass_generator, caption_font, presets
 from dramaclip.engines.subtitle.ass_generator import build_ass, line_char_cap, split_subtitle_text
 
-_FFMPEG = Path(__file__).resolve().parents[4] / "resources" / "ffmpeg" / "ffmpeg.exe"
+
+def _ffmpeg() -> str:
+    from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
+
+    return resolve_ffmpeg()
+
+
+_FFMPEG = Path(_ffmpeg())
 _BG = np.array([16, 16, 16], dtype=np.int16)  # color=0x101010
 _RUN = "她怎么也想不到那个温声细语的男人会在新婚夜锁上房门转身就走"
 # 演示区（ASS 头部的 MarginL/R 那对边距围出来的可用宽度），不是画框边缘
@@ -41,7 +48,7 @@ def _paint(tmp_path: Path, ass_text: str, name: str) -> np.ndarray:
     滤镜串里会被当成选项分隔符。`fontsdir` 用 encoder 生产那份同一构造的选项——量的
     必须是被烧出来的那个字面，否则这条门禁测的是系统里恰好装着的字体。
     """
-    assert _FFMPEG.is_file(), f"缺 bundled ffmpeg：{_FFMPEG}"
+    assert _FFMPEG.is_file(), f"缺 ffmpeg（resources 与 PATH 均无）：{_FFMPEG}"
     (tmp_path / f"{name}.ass").write_text(ass_text, encoding="utf-8")
     fontsdir = caption_font.fontsdir_option(caption_font.caption_font())
     subprocess.run(  # noqa: S603 - 受控参数

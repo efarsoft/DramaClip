@@ -82,16 +82,15 @@ def test_face_x_ratio_detects_real_face() -> None:
     回归对象：旧 Haar 实现在 opencv 5.0 上**永远**返回 None——检测器不存在、
     级联 XML 也没有，跟脸裁切形同虚设却无任何报错。
     """
-    import shutil
     import subprocess
     import tempfile
     from urllib.request import urlretrieve
 
     if not face_crop_model_exists():
         pytest.skip("YuNet 模型未随包")
-    ffmpeg = shutil.which("ffmpeg") or str(
-        Path(__file__).resolve().parents[4] / "resources" / "ffmpeg" / "ffmpeg.exe"
-    )
+    from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
+
+    ffmpeg = resolve_ffmpeg()
     with tempfile.TemporaryDirectory() as tmp:
         face_jpg = Path(tmp) / "face.jpg"
         try:

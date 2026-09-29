@@ -31,7 +31,9 @@ _OUT_W, _OUT_H = encoder._DEFAULT_OUT_SIZE
 
 
 def _ffmpeg(repo_root: Path) -> str:
-    return str(repo_root / "resources" / "ffmpeg" / "ffmpeg.exe")
+    from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
+
+    return resolve_ffmpeg()
 
 
 def _sh(ffmpeg: str, args: list[str]) -> None:
@@ -44,7 +46,9 @@ def _sh(ffmpeg: str, args: list[str]) -> None:
 
 def _probe_stream(repo_root: Path, path: Path) -> dict[str, str]:
     """第一路视频流的宽高与像素比（ffprobe 原样字符串）。"""
-    ffprobe = str(repo_root / "resources" / "ffmpeg" / "ffprobe.exe")
+    from dramaclip.infra.ffmpeg.binaries import resolve_ffprobe
+
+    ffprobe = resolve_ffprobe()
     proc = subprocess.run(  # noqa: S603
         [ffprobe, "-v", "error", "-select_streams", "v:0", "-print_format", "json",
          "-show_entries", "stream=width,height,sample_aspect_ratio,display_aspect_ratio",

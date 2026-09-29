@@ -17,7 +17,9 @@ pytest.importorskip("scenedetect")
 def cut_video(tmp_path_factory: pytest.TempPathFactory, repo_root: Path) -> Path:
     """两段视觉差异明显的视频拼接（testsrc → smpte 色条），中点有一次硬切。"""
     video = tmp_path_factory.mktemp("cuts") / "cut.mp4"
-    ffmpeg = str(repo_root / "resources" / "ffmpeg" / "ffmpeg.exe")
+    from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
+
+    ffmpeg = resolve_ffmpeg()
     subprocess.run(  # noqa: S603
         [
             ffmpeg,

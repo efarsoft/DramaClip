@@ -37,6 +37,9 @@ jobs:
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -e '.[ml,dev]'
+      # 测试夹具用真 ffmpeg 生成样片：解析器 resources→PATH，Linux 上落 PATH
+      - name: 安装 ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - run: ruff check .
       - run: mypy dramaclip
       - run: python -m pytest -x -q
