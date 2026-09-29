@@ -59,10 +59,14 @@ def _src_dir() -> Path:
 
 
 def runtime_ready() -> bool:
-    """隔离 venv 可用（存在且能 import indextts）。成功即进程内缓存：
+    """隔离 venv 可用（存在且能按 worker 同款引导 import indextts）。成功即进程内缓存：
 
     30s 的 import 探针放在逐段合成热路径上重复跑是纯开销（narration 每段一次）；
     venv 中途被删的场景由 _ensure_worker 的 spawn 失败如实兜底，不会假装成功。
+
+    探针必须与 indextts_worker 同一导入契约：indextts 不是 pip 包，源码落位在
+    runtimes/indextts-src，靠 sys.path 引入——裸 `import indextts` 永远
+    ModuleNotFoundError，引擎会被自己的探针冤判成「未装运行环境」。
     """
     global _RUNTIME_OK
     if _RUNTIME_OK is True:
@@ -70,9 +74,12 @@ def runtime_ready() -> bool:
     py = _venv_python()
     if not py.is_file():
         return False
+    probe_code = (
+        f"import sys; sys.path.insert(0, r'{_src_dir()}'); import indextts, torch"
+    )
     try:
-        probe = subprocess.run( # noqa: S603 - 固定路径受控参数
-            [str(py), "-c", "import indextts, torch"],
+        probe = subprocess.run(  # noqa: S603 - 固定路径受控参数
+            [str(py), "-c", probe_code],
             capture_output=True,
             timeout=30,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),

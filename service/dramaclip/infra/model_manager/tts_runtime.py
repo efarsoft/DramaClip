@@ -232,15 +232,23 @@ def install(
 
     # ④ 双栈其余依赖（清华镜像；transformers 定 4.52.1 = IndexTTS 硬需要 +
     #    CosyVoice 上游同代版本，见模块头）
-    _pct(50, "安装双栈推理依赖（transformers 4.52 等 49 项）")
-    # descript-audiotools（上游搭车依赖）已剔除：index-tts 全源码零 import
-    # （grep 实证），其 protobuf<3.20 陈年 pin 还与 onnx>=4.25 死锁。
+    _pct(50, "安装双栈推理依赖（transformers 4.52 等 58 项）")
+    # descript-audiotools 的教训（2026-09-29 真机实证）：它不是「上游搭车依赖」——
+    # indextts/s2mel/dac 有 4 处真实 import，剔除后 IndexTTS worker 必死在
+    # ModuleNotFoundError。但它的 protobuf<3.20 陈年 pin 与 onnx>=4.25 死锁是真，
+    # 所以必须 --no-deps 单独装（只取包本体），import 链上真正缺的 9 个子依赖
+    # 走常规批次（都是无恩怨的纯工具包）。
     _run_uv(uv, venv, "pip", "install",
             "transformers==4.52.1", "omegaconf", "accelerate", "munch", "einops",
             "json5", "wetext", "cn2an", "jieba", "numba",
             "openai-whisper==20250625", "sentencepiece", "fugashi", "unidic-lite",
             "g2p-en", "modelscope==1.27.0",
+            "flatten-dict", "pysbd", "decorator", "ffmpy", "importlib-resources",
+            "tensorboard", "randomname", "argbind", "docstring-parser",
             *_COSYVOICE_EXTRAS, *_SEPARATION_EXTRAS, "--index-url", _PYPI_MIRROR)
+    _check_cancel()
+    _run_uv(uv, venv, "pip", "install", "--no-deps", "descript-audiotools==0.7.2",
+            "--index-url", _PYPI_MIRROR)
     _check_cancel()
 
     # ⑤ 源码：IndexTTS zip（--no-deps 可编辑装）+ CosyVoice/Matcha/PyWorld
