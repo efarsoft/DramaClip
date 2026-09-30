@@ -126,8 +126,8 @@ export function usePlanBatch(projectId: string): PlanBatch {
     [planning, pollUntilTerminal, projectId, saveSpec],
 );
 
-  // 页面重进：按项目找回在跑的规划作业（type=narration + 同 ref_id + 未终态），
-  // 重新挂上轮询——队列原样还原，不因导航失联。
+  // 页面重进：先找回在跑的规划作业（type=narration + 同 ref_id + 未终态）重新挂轮询；
+  // 没有在跑作业时也要把库里已有方案捞回来——方案是持久资产，不该随导航消失。
   useEffect(() => {
     if (projectId === '' || jobIdRef.current !== null) return;
     let cancelled = false;
@@ -141,7 +141,10 @@ export function usePlanBatch(projectId: string): PlanBatch {
             job.ref_id === projectId &&
             (job.status === 'running' || job.status === 'pending'),
         );
-        if (active === undefined) return;
+        if (active === undefined) {
+          setPlans(await narrationApi.listPlans(projectId));
+          return;
+        }
         jobIdRef.current = active.id;
         setBatchId(active.id);
         setPlanning(true);

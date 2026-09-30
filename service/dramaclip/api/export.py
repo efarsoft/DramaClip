@@ -159,15 +159,17 @@ def _tts_preflight_error(plan_data: PlanData, settings: dict[str, Any]) -> str |
     不拦的话整片渲染到 TTS 逐段才炸，白跑（2026-09-30 实测：4 条出片全失败
     于「voice 为空」）。克隆引擎的运行环境未装同类晚炸，一并拦。返回 None
     = 配置可用。引擎集合与 tts engines capabilities.supports_cloning 对齐。
+
+    克隆引擎**只认专属键 tts.voice.<engine>**，不回退旧全局 tts.voice——
+    那是 Kokoro 时代的音色号（如 zf_003），对克隆引擎是无效路径，非空也
+    必炸；放行一个无效值比拦下它更误事。
     """
     if not plan_data.narration_texts:
         return None
     engine = str(settings.get("tts.engine") or "edge").strip()
     if engine not in _VOICE_NEEDED_ENGINES:
         return None
-    voice = str(
-        settings.get(f"tts.voice.{engine}") or settings.get("tts.voice") or ""
-    ).strip()
+    voice = str(settings.get(f"tts.voice.{engine}") or "").strip()
     if not voice:
         return (
             f"配音引擎 {engine} 需要参考音色（任意 3~10 秒人声 wav）："
