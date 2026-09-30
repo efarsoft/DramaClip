@@ -20,6 +20,8 @@ export interface PlanBatch {
   failDetail: string;
   /** 本批作业 id（规划队列按它过滤方案与读失败明细）。 */
   batchId: string | null;
+  /** 提交时的 模式×条数 规格（localStorage 持久化，队列骨架据此还原）。 */
+  spec: { modes: NarrationMode[]; k: number } | null;
   error: string;
   run: (modes: NarrationMode[], k: number) => Promise<void>;
   cancel: () => Promise<void>;
@@ -32,8 +34,33 @@ export function usePlanBatch(projectId: string): PlanBatch {
   const [plans, setPlans] = useState<NarrationPlan[]>([]);
   const [failDetail, setFailDetail] = useState('');
   const [batchId, setBatchId] = useState<string | null>(null);
+  const [spec, setSpec] = useState<{ modes: NarrationMode[]; k: number } | null>(null);
   const [error, setError] = useState('');
   const jobIdRef = useRef<string | null>(null);
+
+  const specKey = `dramaclip:plan-batch:${projectId}`;
+  const saveSpec = useCallback(
+    (value: { modes: NarrationMode[]; k: number; batch_id: string } | null): void => {
+      try {
+        if (value === null) localStorage.removeItem(specKey);
+        else localStorage.setItem(specKey, JSON.stringify(value));
+      } catch {
+        // 存储不可用（隐私模式等）只影响重进还原，不影响本轮队列
+      }
+    },
+    [specKey],
+  );
+  const loadSpec = useCallback(
+    (): { modes: NarrationMode[]; k: number; batch_id: string } | null => {
+      try {
+        const raw = localStorage.getItem(specKey);
+        return raw === null ? null : (JSON.parse(raw) as { modes: NarrationMode[]; k: number; batch_id: string });
+      } catch {
+        return null;
+      }
+    },
+    [specKey],
+  );
 
   const cancel = useCallback(async (): Promise<void> => {
     const jobId = jobIdRef.current;
@@ -84,6 +111,9 @@ export function usePlanBatch(projectId: string): PlanBatch {
         );
         jobIdRef.current = jobId;
         setBatchId(batch);
+        const submitted = { modes, k, batch_id: batch };
+        setSpec(submitted);
+        saveSpec(submitted);
         await pollUntilTerminal(jobId, batch);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
@@ -93,8 +123,8 @@ export function usePlanBatch(projectId: string): PlanBatch {
         setStageText('');
       }
     },
-    [planning, pollUntilTerminal, projectId],
-  );
+    [planning, pollUntilTerminal, projectId, saveSpec],
+);
 
   // 页面重进：按项目找回在跑的规划作业（type=narration + 同 ref_id + 未终态），
   // 重新挂上轮询——队列原样还原，不因导航失联。
@@ -118,6 +148,8 @@ export function usePlanBatch(projectId: string): PlanBatch {
         setPercent(active.progress);
         setStageText(active.label ?? '');
         setFailDetail(active.error ?? '');
+        const stored = loadSpec();
+        if (stored !== null && stored.batch_id === active.id) setSpec(stored);
         setPlans(await narrationApi.listPlans(projectId, active.id));
         if (cancelled) return;
         await pollUntilTerminal(active.id, active.id);
@@ -135,5 +167,5 @@ export function usePlanBatch(projectId: string): PlanBatch {
     };
   }, [pollUntilTerminal, projectId]);
 
-  return { planning, percent, stageText, plans, failDetail, batchId, error, run, cancel };
+  return { planning, percent, stageText, plans, failDetail, batchId, spec, error, run, cancel };
 }

@@ -45,6 +45,7 @@ const idleBatch = {
   error: '',
   failDetail: '',
   batchId: null,
+  spec: null,
   run: vi.fn(),
   cancel: vi.fn(),
 };

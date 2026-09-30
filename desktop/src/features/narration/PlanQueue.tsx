@@ -1,15 +1,20 @@
-/** 阶段②规划期视图：每条「模式×槽位」一行/一卡，三路服务端数据点亮状态——
- * 已落库方案（完成，升格方案卡）、jobs.error 增量（失败+原因原文）、当前 stage
- * （生成中）。行推导只依赖批次数据本身：离开页面再进来，队列原样还原。
- * 批次结束本组件让位给「挑方案」列表，那里决定出哪几条。 */
+/** 阶段②规划期视图：每条「模式×槽位」一行/一卡，状态来自三路服务端数据——
+ * 已落库方案（完成，含 hook 预览）、jobs.error 增量（失败+原因原文，可查往返）、
+ * 当前 stage（生成中）。提交规格（模式×条数）持久化在 localStorage：0% 时就能画出
+ * 完整骨架，页面重进/重启后照样还原。批次结束本组件让位给「挑方案」列表。 */
 import { useState } from 'react';
 import { Alert, Button, Tag } from 'antd';
-import type { NarrationPlan } from '@dramaclip/protocol';
+import type { NarrationMode, NarrationPlan } from '@dramaclip/protocol';
 import { PageSection } from '../../components/layout/PageKit';
-import { modeLabel } from '../../components/modeMeta';
+import { MODE_INFO, modeLabel } from '../../components/modeMeta';
 import { tokens } from '../../styles/theme';
 import type { PlanBatch } from './usePlanBatch';
 import { LlmTraceModal } from './LlmTraceModal';
+
+export interface BatchSpec {
+  modes: NarrationMode[];
+  k: number;
+}
 
 interface FailureLine {
   label: string;
@@ -33,104 +38,144 @@ export function parseFailures(detail: string): FailureLine[] {
   return out;
 }
 
-export interface QueueSummary {
-  /** 已完成的方案（按落库顺序）。 */
-  done: NarrationPlan[];
-  /** 失败行。 */
-  failures: FailureLine[];
-  /** 当前生成中的 stage 原文（空 = 恰在两条之间）。 */
-  stageText: string;
-  /** 仍在排队的条数（按进度百分比反推）。 */
-  pendingCount: number;
+type RowStatus = 'pending' | 'running' | 'done' | 'failed';
+
+interface QueueRow {
+  mode: NarrationMode;
+  label: string;
+  index: number;
+  status: RowStatus;
+  plan?: NarrationPlan;
+  reason?: string;
 }
 
-export function buildQueueSummary(
+/** 队列骨架合成：规格（模式×条数）定行集，三路数据逐行盖章。
+ *  spec 缺失（如换了浏览器重进）退化为汇总形态：完成卡 + 失败行 + 当前 stage。 */
+export function buildQueueRows(
+  spec: BatchSpec,
   plans: NarrationPlan[],
   batchId: string | null,
   failDetail: string,
   stageText: string,
-  percent: number,
-): QueueSummary {
-  const done = batchId === null ? [] : plans.filter((p) => p.batch_id === batchId);
+): QueueRow[] {
+  const byKey = new Map<string, NarrationPlan>();
+  for (const plan of plans) {
+    if (batchId !== null && plan.batch_id !== null && plan.batch_id !== undefined && plan.batch_id !== batchId) {
+      continue;
+    }
+    byKey.set(`${plan.narration_mode}#${plan.variant_index ?? 1}`, plan);
+  }
   const failures = parseFailures(failDetail);
-  const finished = done.length + failures.length;
-  const total = percent > 0 && percent < 100 ? Math.ceil(finished / (percent / 100)) : finished;
-  return {
-    done,
-    failures,
-    stageText,
-    pendingCount: Math.max(0, total - finished),
-  };
+  const rows: QueueRow[] = [];
+  for (const mode of spec.modes) {
+    const label = modeLabel(mode);
+    for (let index = 1; index <= spec.k; index += 1) {
+      const plan = byKey.get(`${mode}#${index}`);
+      rows.push(
+        plan !== undefined
+          ? { mode, label, index, status: 'done', plan }
+          : { mode, label, index, status: 'pending' },
+      );
+    }
+  }
+  for (const failure of failures) {
+    const numbered = /^第(\d+)条$/.exec(failure.slot);
+    const modeByLabel = MODE_INFO.find((item) => modeLabel(item.mode as NarrationMode) === failure.label);
+    const target =
+      numbered !== null && modeByLabel !== undefined
+        ? rows.find(
+            (row) =>
+              row.mode === modeByLabel.mode &&
+              row.index === Number(numbered[1]) &&
+              row.status === 'pending',
+          )
+        : rows.find((row) => modeLabel(row.mode) === failure.label && row.status === 'pending');
+    if (target !== undefined) {
+      target.status = 'failed';
+      target.reason = failure.reason;
+    }
+  }
+  const running = rows.find((row) => row.status === 'pending');
+  if (
+    running !== undefined &&
+    stageText !== '' &&
+    stageText.startsWith(`${running.label}·`)
+  ) {
+    running.status = 'running';
+  }
+  return rows;
 }
 
 const FAIL_COLOR = tokens.colorError;
 
-export function PlanQueue({ batch }: { batch: PlanBatch }): React.ReactElement {
+export function PlanQueue({
+  batch,
+  spec = null,
+}: {
+  batch: PlanBatch;
+  spec?: BatchSpec | null;
+}): React.ReactElement {
   const [tracesOpen, setTracesOpen] = useState(false);
-  const summary = buildQueueSummary(
-    batch.plans,
-    batch.batchId,
-    batch.failDetail,
-    batch.stageText,
-    batch.percent,
-  );
+  const batchPlans =
+    batch.batchId === null
+      ? []
+      : batch.plans.filter(
+          (p) => p.batch_id !== null && p.batch_id !== undefined && p.batch_id === batch.batchId,
+        );
+  const failures = parseFailures(batch.failDetail);
+  const rows = spec !== null ? buildQueueRows(spec, batch.plans, batch.batchId, batch.failDetail, batch.stageText) : [];
+  const doneCount = batchPlans.length;
   return (
     <PageSection title="② 规划队列" dense>
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
-        {summary.done.map((plan) => (
-          <DoneRow key={plan.id} plan={plan} />
-        ))}
-        {summary.failures.map((failure, index) => (
-          <FailureRow key={`f${String(index)}`} failure={failure} onTrace={() => setTracesOpen(true)} />
-        ))}
-        {summary.stageText !== '' && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: tokens.spaceSm,
-              padding: `${tokens.spaceXs} ${tokens.spaceSm}`,
-              borderBottom: `1px solid ${tokens.borderSecondary}`,
-            }}
-          >
-            <span
-              style={{ width: 6, height: 6, borderRadius: tokens.radiusDot, background: tokens.colorInfo, flexShrink: 0 }}
-            />
-            <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textPrimary }}>
-              {summary.stageText}
-            </span>
-            <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: tokens.text.badge.size, color: tokens.colorInfo }}>
-              生成中
-            </span>
-          </div>
-        )}
-        {summary.pendingCount > 0 && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: tokens.spaceSm,
-              padding: `${tokens.spaceXs} ${tokens.spaceSm}`,
-              borderBottom: `1px solid ${tokens.borderSecondary}`,
-            }}
-          >
-            <span
-              style={{ width: 6, height: 6, borderRadius: tokens.radiusDot, background: tokens.textTertiary, flexShrink: 0 }}
-            />
-            <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textTertiary }}>
-              其余 {String(summary.pendingCount)} 条排队中
-            </span>
-          </div>
+        {spec !== null
+          ? rows.map((row) =>
+              row.status === 'done' && row.plan !== undefined ? (
+                <DoneRow key={`${row.mode}#${String(row.index)}`} plan={row.plan} />
+              ) : (
+                <ThinRow
+                  key={`${row.mode}#${String(row.index)}`}
+                  label={`${modeLabel(row.mode)} · 第${String(row.index)}条`}
+                  status={row.status}
+                  reason={row.reason}
+                  onTrace={
+                    row.status === 'failed'
+                      ? () => {
+                          setTracesOpen(true);
+                        }
+                      : undefined
+                  }
+                />
+              ),
+            )
+          : [
+              ...batchPlans.map((plan) => <DoneRow key={plan.id} plan={plan} />),
+              ...failures.map((failure, index) => (
+                <ThinRow
+                  key={`f${String(index)}`}
+                  label={`${failure.label} · ${failure.slot}`}
+                  status="failed"
+                  reason={failure.reason}
+                  onTrace={() => {
+                    setTracesOpen(true);
+                  }}
+                />
+              )),
+              batch.stageText !== '' && (
+                <ThinRow key="stage" label={batch.stageText} status="running" />
+              ),
+            ]}
+        {spec !== null && spec.modes.length > 0 && (
+          <Alert
+            style={{ marginTop: tokens.spaceMd }}
+            type="info"
+            showIcon
+            title={`本批共 ${String(spec.modes.length * spec.k)} 条：完成 ${String(doneCount)} 条，剩余 ${String(
+              Math.max(0, spec.modes.length * spec.k - doneCount),
+            )} 条`}
+          />
         )}
       </div>
-      {summary.done.length > 0 && (
-        <Alert
-          style={{ marginTop: tokens.spaceMd }}
-          type="info"
-          showIcon
-          title={`已完成 ${String(summary.done.length)} 条——批次结束后进入「挑方案」勾选出片`}
-        />
-      )}
       <LlmTraceModal open={tracesOpen} onClose={() => setTracesOpen(false)} />
     </PageSection>
   );
@@ -175,7 +220,23 @@ function DoneRow({ plan }: { plan: NarrationPlan }): React.ReactElement {
   );
 }
 
-function FailureRow({ failure, onTrace }: { failure: FailureLine; onTrace: () => void }): React.ReactElement {
+function ThinRow({
+  label,
+  status,
+  reason,
+  onTrace,
+}: {
+  label: string;
+  status: RowStatus;
+  reason?: string;
+  onTrace?: () => void;
+}): React.ReactElement {
+  const meta: Record<RowStatus, { text: string; color: string }> = {
+    pending: { text: '排队', color: tokens.textTertiary },
+    running: { text: '生成中', color: tokens.colorInfo },
+    done: { text: '完成', color: tokens.colorSuccess },
+    failed: { text: '失败', color: tokens.colorError },
+  };
   return (
     <div
       style={{
@@ -186,27 +247,41 @@ function FailureRow({ failure, onTrace }: { failure: FailureLine; onTrace: () =>
         borderBottom: `1px solid ${tokens.borderSecondary}`,
       }}
     >
-      <span style={{ width: 6, height: 6, borderRadius: tokens.radiusDot, background: FAIL_COLOR, flexShrink: 0 }} />
-      <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textPrimary, flexShrink: 0 }}>
-        {failure.label} · {failure.slot}
+      <span style={{ width: 6, height: 6, borderRadius: tokens.radiusDot, background: meta[status].color, flexShrink: 0 }} />
+      <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textPrimary }}>
+        {label}
       </span>
+      {status === 'failed' && reason !== undefined && (
+        <span
+          style={{
+            fontSize: tokens.text.badge.size,
+            color: meta[status].color,
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={reason}
+        >
+          {reason}
+        </span>
+      )}
+      {onTrace !== undefined && (
+        <Button size="small" type="text" style={{ marginLeft: 'auto', flexShrink: 0 }} onClick={onTrace}>
+          往返
+        </Button>
+      )}
       <span
         style={{
+          marginLeft: 'auto',
+          flexShrink: 0,
           fontSize: tokens.text.badge.size,
-          color: FAIL_COLOR,
-          minWidth: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
+          lineHeight: tokens.text.badge.leading,
+          color: meta[status].color,
         }}
-        title={failure.reason}
       >
-        {failure.reason}
+        {meta[status].text}
       </span>
-      <Button size="small" type="text" style={{ marginLeft: 'auto', flexShrink: 0 }} onClick={onTrace}>
-        往返
-      </Button>
-      <span style={{ fontSize: tokens.text.badge.size, color: FAIL_COLOR, flexShrink: 0 }}>失败</span>
     </div>
   );
 }

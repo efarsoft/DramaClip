@@ -156,7 +156,7 @@ export function ProductionPage() {
           onKChange={setK}
         />
         {batch.planning ? (
-          <PlanQueue batch={batch} />
+          <PlanQueue batch={batch} spec={batch.spec} />
         ) : (
           <PlanPickList batch={batch} queue={queue} episodeCount={episodeCount} avgBytes={avgBytes} />
         )}
