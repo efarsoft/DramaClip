@@ -125,6 +125,14 @@ def submit(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
             rejected.append({"plan_id": plan_id, "reason": exc.message})
             continue
         project_id = str(plan_row["project_id"])
+        from dramaclip.api import narration as narration_api
+
+        voice_issue = _tts_preflight_error(
+            plan_data, narration_api._effective_settings(context, project_id)
+        )
+        if voice_issue is not None:
+            rejected.append({"plan_id": plan_id, "reason": voice_issue})
+            continue
         export_id = exports_repo.create(
             conn=context.conn,
             project_id=project_id,
@@ -140,6 +148,38 @@ def submit(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         )
         accepted.append({"plan_id": plan_id, "export_id": export_id, "job_id": job_id})
     return {"exports": accepted, "rejected": rejected}
+
+
+_VOICE_NEEDED_ENGINES = frozenset({"indextts2", "cosyvoice", "cosyvoice3"})
+
+
+def _tts_preflight_error(plan_data: PlanData, settings: dict[str, Any]) -> str | None:
+    """出片受理前的配音配置预检：有旁白 + 克隆引擎 + 未配参考音色 → 指导文案。
+
+    不拦的话整片渲染到 TTS 逐段才炸，白跑（2026-09-30 实测：4 条出片全失败
+    于「voice 为空」）。克隆引擎的运行环境未装同类晚炸，一并拦。返回 None
+    = 配置可用。引擎集合与 tts engines capabilities.supports_cloning 对齐。
+    """
+    if not plan_data.narration_texts:
+        return None
+    engine = str(settings.get("tts.engine") or "edge").strip()
+    if engine not in _VOICE_NEEDED_ENGINES:
+        return None
+    voice = str(
+        settings.get(f"tts.voice.{engine}") or settings.get("tts.voice") or ""
+    ).strip()
+    if not voice:
+        return (
+            f"配音引擎 {engine} 需要参考音色（任意 3~10 秒人声 wav）："
+            "去「引擎中心 → 配音」选择参考音频；或把配音引擎切到 Edge（云端免费）/"
+            "Kokoro（本地）后再出片"
+        )
+    if engine == "indextts2":
+        from dramaclip.engines.tts.engines.indextts2 import runtime_ready
+
+        if not runtime_ready():
+            return "IndexTTS 运行环境未就绪：在引擎页「安装运行环境」后重试"
+    return None
 
 
 def _assert_renderable(plan_row: dict[str, Any], plan_data: PlanData) -> None:
@@ -182,6 +222,14 @@ def retry(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     # 守卫排在 CAS 复位之前：注定失败的重试不该把 failed 洗成 pending
     plan_data = PlanData.model_validate(plan_row["plan_data"])
     _assert_renderable(plan_row, plan_data)
+    from dramaclip.api import narration as narration_api
+
+    voice_issue = _tts_preflight_error(
+        plan_data,
+        narration_api._effective_settings(context, str(record["project_id"])),
+    )
+    if voice_issue is not None:
+        raise RpcDomainError(_ERR_PLAN_NOT_RENDERABLE, voice_issue)
     # 复位是 CAS（仅当仍为 failed 才生效）：并发点两次重试时只有一个能复位成功，
     # 另一个在此被判不可重试，避免双双渲染进同一产物路径。
     if not exports_repo.reset_for_retry(context.conn, export_id):
