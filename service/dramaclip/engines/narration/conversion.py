@@ -65,6 +65,13 @@ def _timeline_defects(plan: PlanData) -> list[str]:
                 f"第 {index + 1} 段结束不晚于开始（{segment.start:g}s → {segment.end:g}s）"
             )
         by_episode.setdefault(segment.episode_id, []).append((segment.start, segment.end))
+    if plan.mode == "ultra_short_hook":
+        # 超短的命就是密度：全稿 60 字 ≈ 14 秒以下，钩子没展开就收尾
+        # （首版实测 24 字/6 秒——brief 要求薄 + 模型照办，双重薄）。宁可 draft
+        # 重掷，不交付 6 秒残件。
+        chars = sum(len(text.text) for text in plan.narration_texts)
+        if 0 < chars < 60:
+            issues.append(f"超短文案仅 {chars} 字（≈{chars // 4} 秒），钩子没展开就收尾")
     if plan.mode != "dialogue_narration":
         return issues  # 规则编排的重叠是设计（CTA 卡复用画面/旁白桥），见 docstring
     for episode_id, spans in by_episode.items():

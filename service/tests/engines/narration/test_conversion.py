@@ -199,3 +199,48 @@ def test_raw_clip_still_checks_timeline_legality() -> None:
         ],
     )
     assert any("结束不晚于开始" in issue for issue in defects(plan))
+
+
+def test_ultra_short_thin_copy_is_a_defect() -> None:
+    """超短全稿 <60 字 = 钩子没展开就收尾（首版实测 24 字/6 秒残件）→ draft 重掷。"""
+    plan = PlanData(
+        mode="ultra_short_hook",
+        timeline=[
+            TimelineSegment(episode_id="ep-1", start=0.0, end=3.0, audio="narration"),
+            TimelineSegment(episode_id="ep-1", start=3.0, end=9.0, audio="original"),
+            TimelineSegment(episode_id="ep-1", start=9.0, end=12.0, audio="narration"),
+        ],
+        narration_texts=[
+            NarrationText(id="hook-1", text="他杀妻夺产，殊不知她是龙王"),
+            NarrationText(id="cta-1", text="点击左下角看全集"),
+        ],
+    )
+    issues = defects(plan)
+    assert any("钩子没展开" in item for item in issues), issues
+
+
+def test_ultra_short_dense_copy_passes() -> None:
+    plan = PlanData(
+        mode="ultra_short_hook",
+        timeline=[
+            TimelineSegment(
+                episode_id="ep-1", start=0.0, end=12.0, audio="narration", narration_id="hook-1"
+            ),
+            TimelineSegment(episode_id="ep-1", start=12.0, end=20.0, audio="original"),
+            TimelineSegment(
+                episode_id="ep-1", start=20.0, end=26.0, audio="narration", narration_id="cta-1"
+            ),
+        ],
+        narration_texts=[
+            NarrationText(
+                id="hook-1",
+                text="花几百万两买凶杀妻，八年后她以龙王之尊踏浪归来——当年沉海的弃妇，如今执掌四海生杀。",
+            ),
+            NarrationText(
+                id="cta-1",
+                text="寿宴上他还在等她跪下，却不知龙魂已醒。点击左下角，免费观看全集。",
+            ),
+        ],
+    )
+    # _cta_text 认最后一段旁白：时间轴尾段的 narration_id 必须接上 cta-1（与真实编排同形）
+    assert defects(plan) == []

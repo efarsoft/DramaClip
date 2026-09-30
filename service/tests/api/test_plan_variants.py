@@ -502,10 +502,19 @@ def _stub_language_and_tts(
                 }
             if "风格库" in system:  # styles._SELECT_SYSTEM_PROMPT
                 return {"style_id": "shuanggan", "reason": "全剧靠反问推进"}
-            slots = re.findall(r"^\[([^\]]+)\] 要做的事：", user, flags=re.MULTILINE)
-            return {"lines": [
-                {"id": slot, "text": f"{slot} 的解说，后面更狠——点进去看全集"} for slot in slots
-            ]}
+            slot_blocks = re.findall(
+                r"^\[([^\]]+)\] 要做的事：(.*?)(?=^\[|\Z)", user, flags=re.MULTILINE | re.DOTALL
+            )
+            # 样稿对齐各槽位 brief 的字数区间（超短全稿 ≥60 字、各槽不超各自上限）：
+            # 桩模型也必须交出「够密度且合规」的文案，薄稿/超限两道门都拦不足额交付。
+            def _line(slot: str) -> dict[str, str]:
+                body = (
+                    f"{slot} 的解说：沈修远买凶杀妻，八年后她以龙王之尊归来"
+                    "揭穿杀局——点击左下角，免费观看全集。"
+                )[:60]  # prompt 硬性要求每条不超过 60 字；「看全集」必须留在截断后
+                return {"id": slot, "text": body if body.endswith("。") else body + "。"}
+
+            return {"lines": [_line(slot) for slot, _block in slot_blocks]}
 
     monkeypatch.setattr(angles, "LlmClient", _Llm)
     monkeypatch.setattr(copywriter, "LlmClient", _Llm)
