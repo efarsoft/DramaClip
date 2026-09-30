@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import sqlite3
 import sys
 import threading
@@ -82,18 +81,19 @@ class SerializedConnection(sqlite3.Connection):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._call_lock = threading.Lock()
-        self._tx_lock = threading.RLock()
+        self._tx_lock = threading.Lock()
+        self._LEAK_TIMEOUT_S = 60.0
         self._tx_depth: dict[int, int] = {}
 
     def _begin_own(self) -> None:
         owner = threading.get_ident()
         depth = self._tx_depth.get(owner, 0)
-        if depth == 0 and not self._tx_lock.acquire(timeout=60.0):
+        if depth == 0 and not self._tx_lock.acquire(timeout=self._LEAK_TIMEOUT_S):
             # 泄漏自愈：持锁线程 60s 未收口（正常单条 execute 毫秒级）视为已消亡，
             # 强制重置锁与归属记录——永久死锁比短暂互斥破坏更致命。留 error 供追因。
-            with contextlib.suppress(RuntimeError):
-                self._tx_lock.release()
             self._tx_depth.clear()
+            # Lock（非 RLock）才允许他线程代释放——这是自愈能成立的前提
+            self._tx_lock.release()
             print("[error] db tx_lock 等待超时，判定事务归属泄漏，已强制重置", file=sys.stderr)
             self._tx_lock.acquire()
         self._tx_depth[owner] = depth + 1

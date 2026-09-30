@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+from pathlib import Path
 
 import pytest
 
@@ -260,3 +262,44 @@ def test_context_manager_commits_and_rolls_back() -> None:
         conn.execute("INSERT INTO t VALUES (4)")
     assert conn.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 3
     conn.close()
+
+
+def test_leaked_ownership_is_healed_by_another_thread(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """持有归属的线程「死亡」（不再有任何动作）→ 另一线程超时后强制收复并继续写。
+
+    RLock 时代这里的自愈是空操作：release() 由非持有线程调用必 RuntimeError，
+    被吞掉之后的无超时 acquire 就永久等一个已消失的线程（2026-09-30 全量分析
+    卡死 30 分钟的根因）。换 Lock 后代释放真正生效。
+    """
+    memory_db._LEAK_TIMEOUT_S = 0.2  # type: ignore[attr-defined]
+    done = threading.Event()
+    healed = threading.Event()
+
+    def _dead_owner() -> None:
+        memory_db.execute(
+            "INSERT INTO projects (id, name, source_path, status, settings, created_at, updated_at)"
+            " VALUES ('dead', 'd', ?, 'pending', '{}', 1, 1)",
+            (str(tmp_path / "dead-src"),),
+        )
+        memory_db.commit()
+        done.set()  # 这条线程到此「死亡」：不再有任何动作（故意不收尾什么）
+
+    threading.Thread(target=_dead_owner, daemon=True).start()
+    done.wait(5)
+
+    def _healer() -> None:
+        memory_db.execute(
+            "INSERT INTO projects (id, name, source_path, status, settings, created_at, updated_at)"
+            " VALUES ('heal', 'h', ?, 'pending', '{}', 2, 2)",
+            (str(tmp_path / "heal-src"),),
+        )
+        memory_db.commit()
+        healed.set()
+
+    threading.Thread(target=_healer, daemon=True).start()
+    assert healed.wait(5), "泄漏归属未在超时后被另一线程收复"
+
+    row = memory_db.execute("SELECT name FROM projects WHERE id = 'heal'").fetchone()
+    assert row is not None and row[0] == "h"
