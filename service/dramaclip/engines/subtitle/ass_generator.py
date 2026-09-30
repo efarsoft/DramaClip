@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from dramaclip.engines.subtitle import caption_font
@@ -33,6 +34,29 @@ _GLYPH_ADVANCE_PERCENT = 69
 _CAPTION_PACE_CHARS = 16
 
 
+@dataclass(frozen=True)
+class Canvas:
+    """ASS 播放画布 = 实际出图尺寸：PlayRes、字号、边距、拆行上限都按它推导。
+
+    基准是竖屏 (1080,1920)——预设字号/边距按它标定；画布变化时等比缩放，
+    视觉占比不变，拆行上限的几何档随宽线性走（usable/advance 两头乘同一尺）。
+    """
+
+    x: int = _PLAY_RES_X
+    y: int = _PLAY_RES_Y
+
+    @property
+    def scale(self) -> float:
+        return self.x / _PLAY_RES_X
+
+    def font_px(self, preset: dict[str, Any]) -> int:
+        return max(1, round(_font_size(preset) * self.scale))
+
+    @property
+    def side_margin(self) -> int:
+        return max(1, round(_SIDE_MARGIN_PX * self.scale))
+
+
 def _layout_of(preset: dict[str, Any], key: str = "default") -> str:
     """取预设的布局名（default / climax 两档）；缺档回退贴底。"""
     layout_map = preset.get("dimensions", {}).get("layout", {})
@@ -40,7 +64,10 @@ def _layout_of(preset: dict[str, Any], key: str = "default") -> str:
 
 
 def _placement(
-    layout: str, preset_margin_v: int, source_band: tuple[float, float] | None = None
+    layout: str,
+    preset_margin_v: int,
+    source_band: tuple[float, float] | None = None,
+    canvas: Canvas | None = None,
 ) -> tuple[int, int]:
     """布局名 → (ASS 九宫格对齐, MarginV)。
 
@@ -54,12 +81,15 @@ def _placement(
     if alignment == 5:
         return (alignment, 0)
     if alignment == 2:
-        return (alignment, avoid_source_band_margin_v(source_band, preset_margin_v))
+        return (alignment, avoid_source_band_margin_v(source_band, preset_margin_v, canvas))
     return (alignment, preset_margin_v)
 
 
-def _margin_v(preset: dict[str, Any]) -> int:
-    return int(preset.get("font", {}).get("margin_v", 80))
+def _margin_v(preset: dict[str, Any], canvas: Canvas | None = None) -> int:
+    """预设 MarginV（基准 1080×1920 坐标）→ 实际画布坐标，纵向线性缩放。"""
+    preset_value = int(preset.get("font", {}).get("margin_v", 80))
+    # 只做坐标缩放；源带避让归 _placement 的贴底分支（它知道布局适不适用）
+    return round(preset_value * (canvas.y / _PLAY_RES_Y)) if canvas is not None else preset_value
 
 
 # ── A2 源硬字幕带避让（不是擦除：源片像素不动，只把我们烧的字幕抬到源带顶之上）──
@@ -80,20 +110,24 @@ _AVOID_MARGIN_CAP_RATIO = 2 / 3
 
 
 def avoid_source_band_margin_v(
-    band: tuple[float, float] | None, preset_margin_v: int
+    band: tuple[float, float] | None,
+    preset_margin_v: int,
+    canvas: Canvas | None = None,
 ) -> int:
     """归一化源字幕带 → bottom_bar 布局的 MarginV（避让源硬字幕，只抬不降）。
 
     band 为 None（未探测/无硬字幕带/OCR 未装）或与预设边距不重叠时原样返回
     preset_margin_v——降级不可见，生成的 ASS 与现状逐字节一致。
+    避让几何在**实际画布**坐标系里算（canvas.y，缺省基准 1920）。
     """
     if band is None:
         return preset_margin_v
+    res_y = canvas.y if canvas is not None else _PLAY_RES_Y
     top = min(max(float(band[0]), 0.0), 1.0)
     # ceil 不是 int：(1-0.85)×1920 在浮点里是 287.999…，截断成 287 就压回源带顶 1px，
     # 「不重叠」的验收（margin ≥ 源带顶距底像素）直接失守。
-    required = math.ceil((1.0 - top) * _PLAY_RES_Y)
-    cap = int(_PLAY_RES_Y * _AVOID_MARGIN_CAP_RATIO)
+    required = math.ceil((1.0 - top) * res_y)
+    cap = int(res_y * _AVOID_MARGIN_CAP_RATIO)
     return max(preset_margin_v, min(required, cap))
 
 
@@ -101,7 +135,7 @@ def _font_size(preset: dict[str, Any]) -> int:
     return int(preset.get("font", {}).get("size", _DEFAULT_FONT_SIZE))
 
 
-def line_char_cap(preset: dict[str, Any]) -> int:
+def line_char_cap(preset: dict[str, Any], canvas: Canvas | None = None) -> int:
     """单行字幕最多放几个字：「读得完」与「放得下」取更紧的那个。
 
     放得下 = 演示区宽度 ÷ 每字步进，步进按随包字面量出来（见 `_GLYPH_ADVANCE_PERCENT`
@@ -109,9 +143,13 @@ def line_char_cap(preset: dict[str, Any]) -> int:
     17 字时墨迹占到 x=[25,1053]，越出 40/1040 演示区。三套内置预设的字号（64/72/80）
     几何档各是 22/20/17 字，都不比「读得完」更紧；字号 96 起才轮到几何档接管（实测
     上限收到 15 字，16 字就越界）。`max(1, ...)` 只是硬切循环的终止保证，不是承诺。
+    画布非基准时宽/字号/边距同尺缩放，可容纳字数不变——视觉占比恒定。
     """
-    usable = _PLAY_RES_X - 2 * _SIDE_MARGIN_PX
-    advance = _font_size(preset) * _GLYPH_ADVANCE_PERCENT // 100
+    res_x = canvas.x if canvas is not None else _PLAY_RES_X
+    margin = canvas.side_margin if canvas is not None else _SIDE_MARGIN_PX
+    font_px = canvas.font_px(preset) if canvas is not None else _font_size(preset)
+    usable = res_x - 2 * margin
+    advance = font_px * _GLYPH_ADVANCE_PERCENT // 100
     return min(_CAPTION_PACE_CHARS, max(1, usable // advance))
 
 
@@ -123,23 +161,33 @@ _STYLE_FORMAT = (
 _EVENT_FORMAT = "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
 
 
-def _header(preset: dict[str, Any], source_band: tuple[float, float] | None = None) -> str:
+def _header(
+    preset: dict[str, Any],
+    source_band: tuple[float, float] | None = None,
+    canvas: Canvas | None = None,
+) -> str:
     font = preset.get("font", {})
-    alignment, margin_v = _placement(_layout_of(preset), _margin_v(preset), source_band)
+    alignment, margin_v = _placement(
+        _layout_of(preset), _margin_v(preset, canvas), source_band, canvas
+    )
+    res_x = canvas.x if canvas is not None else _PLAY_RES_X
+    res_y = canvas.y if canvas is not None else _PLAY_RES_Y
+    font_px = canvas.font_px(preset) if canvas is not None else _font_size(preset)
+    side = canvas.side_margin if canvas is not None else _SIDE_MARGIN_PX
     # 族名不接受预设指定：预设能换字号/边距，但字面是随包资产，拆行上限按它标定
     style = (
-        f"Style: DC,{caption_font.caption_font().family},{_font_size(preset)},"
+        f"Style: DC,{caption_font.caption_font().family},{font_px},"
         f"&H00FFFFFF,&H00FFFFFF,&H00000000,&H7F000000,"
         f"{-1 if font.get('bold', False) else 0},0,0,0,100,100,0,0,1,"
         f"{int(font.get('outline_width', 3))},{int(font.get('shadow', 1))},{alignment},"
-        f"{_SIDE_MARGIN_PX},{_SIDE_MARGIN_PX},{margin_v},1"
+        f"{side},{side},{margin_v},1"
     )
     return "\n".join(
         [
             "[Script Info]",
             "ScriptType: v4.00+",
-            f"PlayResX: {_PLAY_RES_X}",
-            f"PlayResY: {_PLAY_RES_Y}",
+            f"PlayResX: {res_x}",
+            f"PlayResY: {res_y}",
             "WrapStyle: 0",
             "",
             "[V4+ Styles]",
@@ -230,12 +278,15 @@ def _span_body(
 
 
 def _event_line(
-    line: dict[str, Any], preset: dict[str, Any], source_band: tuple[float, float] | None = None
+    line: dict[str, Any],
+    preset: dict[str, Any],
+    source_band: tuple[float, float] | None = None,
+    canvas: Canvas | None = None,
 ) -> str | None:
     text = str(line.get("text", "")).strip()
     if not text:
         return None
-    cap = line_char_cap(preset)
+    cap = line_char_cap(preset, canvas)
     if len(text) > cap:
         # 超上限的行不会换行，只会居中后向两侧溢出、首尾被画框切掉（实测）——那是观众
         # 看得见的残缺，按「改所见所闻的一律失败不出片」的规矩不能默默烧出去。
@@ -258,7 +309,7 @@ def _event_line(
         "climax" if emotion in ("anger", "triumph") and "climax" in layout_map else "default"
     )
     alignment, margin_v = _placement(
-        _layout_of(preset, layout_key), _margin_v(preset), source_band
+        _layout_of(preset, layout_key), _margin_v(preset, canvas), source_band, canvas
     )
 
     rhythm = str(dimensions.get("rhythm", {}).get("type", "whole_line"))
@@ -360,6 +411,7 @@ def build_ass(
     preset: dict[str, Any],
     *,
     source_band: tuple[float, float] | None = None,
+    play_res: tuple[int, int] | None = None,
 ) -> str:
     """生成 ASS 字幕全文。
 
@@ -369,10 +421,13 @@ def build_ass(
     只影响 bottom_bar：center_single/center_multi/top_title 零改动。
     接线（api/export.py，另一子任务名下）：从 analysis_repo.get(...)["subtitle_band"]
     读 JSON 两元数组转 tuple，作关键字参传进来即可。
+    `play_res`：实际出图画布（encoder.resolve_canvas 的结果）——PlayRes/字号/边距/
+    拆行上限全部按它推导；缺省回基准竖屏（逐字节兼容旧输出）。
     """
+    canvas = Canvas(*play_res) if play_res is not None else None
     events = [
         event
         for line in lines
-        if (event := _event_line(line, preset, source_band)) is not None
+        if (event := _event_line(line, preset, source_band, canvas)) is not None
     ]
-    return "\n".join([_header(preset, source_band), *events]) + "\n"
+    return "\n".join([_header(preset, source_band, canvas), *events]) + "\n"

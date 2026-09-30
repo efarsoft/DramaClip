@@ -23,13 +23,13 @@ from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.dedup import jitter
 from dramaclip.engines.dedup import params as dedup_params
 from dramaclip.engines.exporter import loudness
-from dramaclip.engines.exporter.face_crop import face_x_ratio
 from dramaclip.engines.narration.models import PlanData, TimelineSegment
 from dramaclip.engines.subtitle import caption_font
 from dramaclip.infra import config
 from dramaclip.infra.ffmpeg import probe as ffprobe_mod
 from dramaclip.infra.ffmpeg import runner
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg, resolve_ffprobe
+from dramaclip.infra.ffmpeg.probe import probe
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -219,16 +219,25 @@ class EpisodeSourceMissing(Exception):
     """时间轴引用的源集文件缺失。"""
 
 
-def _crop_filter(scaled_w: int, scaled_h: int, crop_x_ratio: float | None) -> str:
-    """9:16 裁窗：无比例时中心裁；有人脸 x 比例时尽量把脸放进水平中心。"""
-    if crop_x_ratio is None:
-        return f"crop={scaled_w}:{scaled_h}"
-    fx = min(1.0, max(0.0, float(crop_x_ratio)))
-    return (
-        f"crop={scaled_w}:{scaled_h}"
-        f":max(0\\,min(iw-{scaled_w}\\,iw*{fx:.4f}-({scaled_w}/2)))"
-        f":(ih-{scaled_h})/2"
-    )
+def resolve_canvas(episode_paths: dict[str, str], cap: tuple[int, int]) -> tuple[int, int]:
+    """成片画布跟随首个源集的画幅（业主裁决：16:9 进 → 16:9 出，不裁不拉）。
+
+    等比缩放使长边贴 cap 长边（cap=1080×1920 时：16:9 源 → 1920×1080，
+    竖源 → 1080×1920 与现状一致），宽高取偶。混画幅批次以首集为准，异画幅
+    源等比缩进画布、两侧补黑——内容完整优先于满屏。probe 不可得时回退 cap。
+    """
+    try:
+        first = probe(Path(next(iter(episode_paths.values()))))
+        src_w, src_h = first.width, first.height
+    except Exception:  # noqa: BLE001 - 探测失败回默认画布，不让导出开天窗
+        return cap
+    if src_w <= 0 or src_h <= 0:
+        return cap
+    long_side = min(max(cap[0], cap[1]), 1920)
+    factor = long_side / max(src_w, src_h)
+    width = max(2, round(src_w * factor / 2) * 2)
+    height = max(2, round(src_h * factor / 2) * 2)
+    return (width, height)
 
 
 def cut_segment_args(
@@ -248,9 +257,12 @@ def cut_segment_args(
     fade_out_s: float | None = None,
     afade_in_s: float | None = None,
     afade_out_s: float | None = None,
-    crop_x_ratio: float | None = None,
 ) -> list[str]:
     """构建单段切割命令（Phase A）。
+
+    画布语义（业主裁决「16:9 就是 16:9，不要拉伸到 9:16」）：等比缩放进画布
+    （force_original_aspect_ratio=decrease），不足处补黑——内容完整、比例忠实，
+    不再覆盖裁切也不再要人脸裁窗（那是把横屏源塞竖屏画布的旧形状）。
     """
     out_w, out_h = out_size
     dedup = dedup_params.generate(rng)
@@ -266,10 +278,9 @@ def cut_segment_args(
     audio_tail = ",".join([*_xfade_filters("afade", out_dur, ain, aout), _peak_ceiling_filter()])
 
     filters = [
-        f"scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=increase",
-        _crop_filter(scaled_w, scaled_h, crop_x_ratio),
+        f"scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease",
+        f"pad={out_w}:{out_h}:(ow-iw)/2:(oh-ih)/2:color=black",
         f"eq=contrast={dedup.contrast}:brightness={dedup.brightness}",
-        f"scale={out_w}:{out_h}",
         # 像素比必须在这里钉平：`scale` 保留输入 SAR，非方形源的段会带着它编进成片
         # ——存储尺寸对、显示比例错，播放器横向拉伸，烧进去的 ASS（PlayRes 出画尺寸）
         # 跟着变形。且它逐段漂移（末级 scale 目标跟着微缩放取整变），Phase B 又是
@@ -568,9 +579,6 @@ class _SegmentJob:
     """一段的编码任务 + 写 sidecar 签名所需的全部上下文。
 
     reuse=True 的段不进线程池：产物与 sig 都已在盘上且输入签名一致。
-    人脸裁窗比例（crop_x_ratio）刻意不进签名输入：它由源帧内容决定，源身份
-    （path+size+mtime_ns）一致即帧内容一致，复用即接受上次检测值——与「复用即
-    接受上次抖动切点」同一哲学（mid 随 jitter 微动，重测也不可复现）。
     """
 
     index: int
@@ -802,13 +810,15 @@ def _export_plan_once(
     rng = random.Random()
 
     total = len(segments)
+    # 画布跟随首个源集画幅（16:9 进→16:9 出，不裁不拉；异画幅补黑），全片统一——
+    # Phase B -c copy 拼接要求段段几何一致，逐集各画各的会拼出变换静默。
+    out_size = resolve_canvas(episode_paths, out_size)
     _prune_stale_segments(work_dir, total)
 
     # Phase A：构建每段命令参数（含台词保护区安全切点、字幕、混音）；
     # 命中复用判据的段不建令、不动 rng、不抽帧——直接进 jobs 标记 reuse。
     jobs: list[_SegmentJob] = []
     zones_cache: dict[str, list[SpeechZone]] = {}
-    face_cache: dict[tuple[str, float], float | None] = {}
     reused_count = 0
     for index, segment in enumerate(segments):
         source = episode_paths.get(segment.episode_id)
@@ -912,13 +922,6 @@ def _export_plan_once(
             # 在调用方按 segment.start/end 预生成字幕的话，抖动挪过的段会整体错位。
             ass_path = original_subtitle_provider(index, safe_start, safe_end)
         ass_sha256 = None if ass_path is None else _sha256_file(ass_path)
-        mid = (safe_start + safe_end) / 2.0
-        face_key = (segment.episode_id, round(mid, 1))
-        if face_key not in face_cache:
-            try:
-                face_cache[face_key] = face_x_ratio(Path(source), mid)
-            except Exception:  # noqa: BLE001 - 检测失败保持中心裁
-                face_cache[face_key] = None
         jobs.append(
             _SegmentJob(
                 index=index,
@@ -938,7 +941,6 @@ def _export_plan_once(
                     fade_out_s=vout,
                     afade_in_s=ain,
                     afade_out_s=aout,
-                    crop_x_ratio=face_cache[face_key],
                 ),
                 seg_path=seg_path,
                 inputs=inputs,

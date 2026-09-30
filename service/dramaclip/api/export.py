@@ -15,12 +15,12 @@ from typing import Any
 from dramaclip.api.context import AppContext
 from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.exporter import encoder, loudness, selfcheck
-from dramaclip.engines.exporter.face_crop import face_x_ratio
 from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle import presets as subtitle_presets
 from dramaclip.engines.subtitle.ass_generator import (
     TRAILING_MARKS,
+    Canvas,
     build_ass,
     line_char_cap,
     split_subtitle_text,
@@ -225,11 +225,9 @@ def _cover_source_frame(
     """A1：封面源截帧的输入——(源文件, 源时间戳, 构图滤镜链)；拿不到就 None（退回成片截）。
 
     映射公式：源时间戳 = 时间轴**首段** start + 1.5（与成片钩帧「1.5s 处」同一画面
-    内容，但取自源素材、无烧录字幕）。构图链复现 encoder.cut_segment_args 的三级：
-    `scale=force_original_aspect_ratio=increase` 填充 → `_crop_filter(crop_x_ratio)`
-    跟脸裁窗 → `scale=out_w:out_h`；crop_x_ratio 用同一个 face_x_ratio、同一时间点
-    算（跟脸不同步 = 封面构图≠成片构图 = 骗点击），拿不到脸/异常返回 None 即中心裁，
-    与 encoder 降级口径一致。eq/fade/setpts/ass 不接（理由见 infra/ffmpeg/cover.py）。
+    内容，但取自源素材、无烧录字幕）。构图链与 encoder 同语义：等比缩放进画布
+    （decrease）+ 不足处补黑——封面构图=成片构图。eq/fade/setpts/ass 不接
+    （理由见 infra/ffmpeg/cover.py）。
 
     None 的判据（每条都走 _extract_cover 的成片回退）：时间轴为空 / episode_paths
     无首段那集 / 源文件不存在。
@@ -244,15 +242,9 @@ def _cover_source_frame(
     if not source.is_file():
         return None
     seek_s = first.start + 1.5
-    out_w, out_h = out_size
-    try:
-        crop_x_ratio = face_x_ratio(source, seek_s)
-    except Exception:  # noqa: BLE001 - 封面属增强项：检测炸了一律中心裁
-        crop_x_ratio = None
     composition = (
-        f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
-        f"{encoder._crop_filter(out_w, out_h, crop_x_ratio)},"
-        f"scale={out_w}:{out_h}"
+        f"scale={out_size[0]}:{out_size[1]}:force_original_aspect_ratio=decrease,"
+        f"pad={out_size[0]}:{out_size[1]}:(ow-iw)/2:(oh-ih)/2:color=black"
     )
     return source, seek_s, composition
 
@@ -788,7 +780,11 @@ def render_export(
 
     tts_segments = tts_audio_by_segment(plan_data)
     preset = subtitle_presets.get_preset(context.settings.get("subtitle.default_preset"))
-    out_size = _output_size(context.settings)
+    # 画布跟随首个源集画幅（16:9 进→16:9 出，不裁不拉；settings 尺寸只当上限盒）。
+    # ASS 的 PlayRes/字号/拆行上限与编码器 out_size 必须同一画布——两边各算一份
+    # 就是「字幕超出屏幕」的新产房。
+    out_size = encoder.resolve_canvas(episode_paths, _output_size(context.settings))
+    ass_canvas = Canvas(*out_size)
 
     def burn_subtitle(segment_index: int, text: str, duration_s: float) -> str:
         """生成段级 ass 文件并返回路径（相对时间轴 0→duration）。
@@ -801,7 +797,7 @@ def render_export(
         ass_dir = context.work_dir / "export" / export_id
         ass_dir.mkdir(parents=True, exist_ok=True)
         ass_path = ass_dir / f"seg_{segment_index:03d}.ass"
-        chunks = split_subtitle_text(text, line_char_cap(preset))
+        chunks = split_subtitle_text(text, line_char_cap(preset, ass_canvas))
         total_chars = sum(len(c) for c in chunks)
         emotion = None
         if 0 <= segment_index < len(plan_data.timeline):
@@ -828,6 +824,7 @@ def render_export(
                     if 0 <= segment_index < len(plan_data.timeline)
                     else ""
                 ),
+                play_res=out_size,
             ),
             encoding="utf-8",
         )
@@ -847,7 +844,7 @@ def render_export(
         cropped = crop_dialogue_lines(items, win_start, win_end)
         if not cropped:
             return None
-        cap = line_char_cap(preset)
+        cap = line_char_cap(preset, ass_canvas)
         lines: list[dict[str, Any]] = []
         for item in cropped:
             lines.extend(_dialogue_ass_lines(item, cap))
@@ -857,7 +854,7 @@ def render_export(
         ass_dir.mkdir(parents=True, exist_ok=True)
         ass_path = ass_dir / f"seg_{segment_index:03d}.ass"
         ass_path.write_text(
-            build_ass(lines, preset, source_band=subtitle_bands.get(episode_id)),
+            build_ass(lines, preset, source_band=subtitle_bands.get(episode_id), play_res=out_size),
             encoding="utf-8",
         )
         return str(ass_path)

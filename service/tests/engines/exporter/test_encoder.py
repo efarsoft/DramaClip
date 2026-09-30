@@ -21,7 +21,9 @@ def test_cut_segment_args_original_audio() -> None:
     )
     joined = " ".join(args)
     assert "-ss 1.500" in joined and "-to 8.250" in joined
-    assert "scale=1080:1920" in joined, "竖屏输出"
+    assert "scale=1060:1886:force_original_aspect_ratio=decrease" in joined, "微缩放后等比适配"
+    assert "pad=1080:1920:" in joined, "不足处补黑（保持源比例，不裁不拉）"
+    assert "crop=" not in joined, "不再有 9:16 裁窗（16:9 就是 16:9）"
     assert "eq=contrast=" in joined, "消重色彩抖动"
     assert "atempo=" in joined, "微变速"
     assert "-map_metadata -1" in joined, "元数据擦除"

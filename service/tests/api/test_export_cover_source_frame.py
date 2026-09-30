@@ -1,9 +1,8 @@
-"""A1：封面从源素材截帧（去烧录字幕）+ 复现成片构图 + 跟脸避让——API 层接线。
+"""A1：封面从源素材截帧（去烧录字幕）+ 复现成片构图——API 层接线。
 
 字层/构图滤镜串形状在 tests/infra/ffmpeg/ 钉死；这里钉 api/export.py 的四件事：
 - render_export 尾部的封面改用 **源素材** 截帧：首段 start+1.5 映射回源文件，
-  composition_vf 复现成片三级构图链，crop_x_ratio 来自 face_x_ratio(源, 首段 start+1.5)；
-- face_x_ratio 返回 None → 中心裁（与 encoder 同降级口径），仍能截；
+  composition_vf 与 encoder 同语义（等比缩放进画布 + 不足处补黑，不裁不拉）；
 - 降级链：源文件不存在/源截帧失败 → 退回成片截帧（现状行为），全程不 raise；
 - ensure_covers 补拍历史成片仍从成片截（拿不到源素材与 plan，不新增查询面）；
   封面已存在直接 return（幂等不破）。
@@ -88,10 +87,8 @@ def _stub_pipeline(
     cover_calls: list[dict[str, Any]],
     *,
     cover_result: Any = True,
-    face_result: float | None = 0.25,
-    face_calls: list[tuple[Path, float]] | None = None,
 ) -> None:
-    """桩掉 ffmpeg 执行链 + probe + face_x_ratio + extract_cover。
+    """桩掉 ffmpeg 执行链 + probe + extract_cover。
 
     cover_result: True/False 恒定，或 callable(video)->bool 按输入文件分流。
     """
@@ -102,13 +99,6 @@ def _stub_pipeline(
 
     monkeypatch.setattr(encoder, "_concat", _fake_concat)
     monkeypatch.setattr(encoder.loudness, "normalize_in_place", lambda *_a, **_k: None)
-
-    def _fake_face(video: Path, time_s: float) -> float | None:
-        if face_calls is not None:
-            face_calls.append((Path(video), time_s))
-        return face_result
-
-    monkeypatch.setattr(export_api, "face_x_ratio", _fake_face)
 
     def _fake_cover(video: Path, out: Path, **kwargs: Any) -> bool:
         cover_calls.append({"video": Path(video), "out": Path(out), **kwargs})
@@ -143,12 +133,10 @@ def _render(
     )
 
 
-def _expected_composition(crop_x_ratio: float | None) -> str:
-    crop = encoder._crop_filter(1080, 1920, crop_x_ratio)
+def _expected_composition() -> str:
     return (
-        "scale=1080:1920:force_original_aspect_ratio=increase,"
-        f"{crop},"
-        "scale=1080:1920"
+        "scale=1080:1920:force_original_aspect_ratio=decrease,"
+        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black"
     )
 
 
@@ -158,13 +146,12 @@ def _expected_composition(crop_x_ratio: float | None) -> str:
 def test_render_cover_grabs_from_source_with_composition(
     monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    """封面从源素材截：seek=首段 start+1.5，构图链三级复现，crop 用 face_x_ratio 结果。"""
+    """封面从源素材截：seek=首段 start+1.5，构图链与 encoder 同语义（适配+补黑）。"""
     context, export_id, plan_row, plan_data, source = _seed(
         memory_db, tmp_path, titles=["源帧标题"]
     )
     calls: list[dict[str, Any]] = []
-    faces: list[tuple[Path, float]] = []
-    _stub_pipeline(monkeypatch, calls, face_result=0.25, face_calls=faces)
+    _stub_pipeline(monkeypatch, calls)
     out_path = _render(context, export_id, plan_row, plan_data)
 
     assert len(calls) == 1
@@ -173,26 +160,12 @@ def test_render_cover_grabs_from_source_with_composition(
     assert call["video"] != out_path
     assert call["seek_s"] == pytest.approx(_SOURCE_SEEK)
     assert call["title"] == "源帧标题"  # 字层行为零改动
-    assert call["composition_vf"] == _expected_composition(0.25)
+    assert call["composition_vf"] == _expected_composition()
+    assert "crop=" not in call["composition_vf"], "不裁不拉（16:9 就是 16:9）"
     assert "ass" not in call["composition_vf"]
-    # face_x_ratio 与截帧同一时间点（首段 start+1.5）、同一源文件
-    assert faces == [(source, pytest.approx(_SOURCE_SEEK))]
     # set_cover 落库
     row = exports_repo.get(memory_db, export_id)
     assert row is not None and row["cover_path"]
-
-
-def test_render_cover_face_none_uses_center_crop(
-    monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """face_x_ratio 拿不到脸（None）→ 中心裁，与 encoder._crop_filter(None) 同口径。"""
-    context, export_id, plan_row, plan_data, _source = _seed(memory_db, tmp_path)
-    calls: list[dict[str, Any]] = []
-    _stub_pipeline(monkeypatch, calls, face_result=None)
-    _render(context, export_id, plan_row, plan_data)
-    assert len(calls) == 1
-    assert calls[0]["composition_vf"] == _expected_composition(None)
-    assert "crop=1080:1920," in calls[0]["composition_vf"]
 
 
 def test_render_cover_source_missing_falls_back_to_film(
@@ -210,8 +183,7 @@ def test_render_cover_source_missing_falls_back_to_film(
     film.write_bytes(b"film")
     episode_paths = {seg.episode_id: str(tmp_path / "ep1.mp4") for seg in plan_data.timeline}
     calls: list[dict[str, Any]] = []
-    faces: list[tuple[Path, float]] = []
-    _stub_pipeline(monkeypatch, calls, face_calls=faces)
+    _stub_pipeline(monkeypatch, calls)
     export_api._extract_cover(
         context,  # type: ignore[arg-type]
         export_id,
@@ -224,7 +196,6 @@ def test_render_cover_source_missing_falls_back_to_film(
     assert len(calls) == 1
     assert calls[0]["video"] == film  # 成片
     assert "seek_s" not in calls[0] and "composition_vf" not in calls[0]
-    assert faces == []  # 源不存在就不浪费一次 YuNet 检测
     row = exports_repo.get(memory_db, export_id)
     assert row is not None and row["cover_path"]
 
@@ -298,19 +269,10 @@ def test_source_frame_none_when_source_file_gone(tmp_path: Path) -> None:
     )
 
 
-def test_source_frame_maps_first_segment(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """首段 start=3.0 → 源时间戳 4.5；构图链含 face_x_ratio(源, 4.5) 的裁窗表达式。"""
+def test_source_frame_maps_first_segment(tmp_path: Path) -> None:
+    """首段 start=3.0 → 源时间戳 4.5；构图链与 encoder 同语义（适配+补黑）。"""
     source = tmp_path / "ep1.mp4"
     source.write_bytes(b"x")
-    seen: list[tuple[Path, float]] = []
-
-    def _fake_face(video: Path, time_s: float) -> float | None:
-        seen.append((Path(video), time_s))
-        return 0.75
-
-    monkeypatch.setattr(export_api, "face_x_ratio", _fake_face)
     plan = PlanData(
         mode="raw_clip",
         timeline=[
@@ -323,28 +285,7 @@ def test_source_frame_maps_first_segment(
     frame_path, seek_s, composition = frame
     assert frame_path == source
     assert seek_s == pytest.approx(4.5)
-    assert composition == _expected_composition(0.75)
-    assert seen == [(source, pytest.approx(4.5))]
-
-
-def test_source_frame_face_raises_degrades_to_center(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """face_x_ratio 意外抛异常 → 中心裁（封面属增强项，绝不向外抛）。"""
-    source = tmp_path / "ep1.mp4"
-    source.write_bytes(b"x")
-
-    def _boom(video: Path, time_s: float) -> float | None:
-        raise RuntimeError("YuNet 炸了")
-
-    monkeypatch.setattr(export_api, "face_x_ratio", _boom)
-    plan = PlanData(
-        mode="raw_clip",
-        timeline=[TimelineSegment(episode_id="ep-1", start=0.0, end=9.0, audio="original")],
-    )
-    frame = export_api._cover_source_frame(plan, {"ep-1": str(source)}, (1080, 1920))
-    assert frame is not None
-    assert frame[2] == _expected_composition(None)
+    assert composition == _expected_composition()
 
 
 # --- ensure_covers：补拍历史成片保持现状（从成片截） ---------------------------
