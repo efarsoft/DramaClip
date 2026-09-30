@@ -3,7 +3,7 @@
  *  角度名槽位按序贪心归位；别的批次的方案绝不点亮本批的行。 */
 import { describe, expect, it } from 'vitest';
 import type { NarrationPlan } from '@dramaclip/protocol';
-import { buildQueueRows, parseFailures } from '../PlanQueue';
+import { buildQueueSummary, parseFailures } from '../PlanQueue';
 
 const MODES = ['dialogue_narration', 'cross_narration'] as const;
 
@@ -22,67 +22,46 @@ function plan(mode: string, index: number, batchId = 'job-1', angle = `角度${S
   } as NarrationPlan;
 }
 
-describe('buildQueueRows', () => {
-  it('无数据时全部排队，第一个待定行是生成中', () => {
-    const rows = buildQueueRows([...MODES], 2, [], 'job-1', '', '剧情解说·第1条 选题中');
-    expect(rows).toHaveLength(4);
-    expect(rows[0]?.status).toBe('running');
-    expect(rows[1]?.status).toBe('pending');
-    expect(rows[2]?.status).toBe('pending');
-  });
-
-  it('落库方案按 批次+模式+槽位 点亮完成，别批的方案不算数', () => {
-    const rows = buildQueueRows(
-      [...MODES],
-      1,
+describe('buildQueueSummary', () => {
+  it('只认本批方案，别批的不计入完成', () => {
+    const summary = buildQueueSummary(
       [plan('dialogue_narration', 1, 'job-1'), plan('cross_narration', 1, 'other-batch')],
       'job-1',
       '',
       '',
+      50,
     );
-    expect(rows[0]?.status).toBe('done');
-    expect(rows[0]?.angle).toBe('角度1');
-    expect(rows[1]?.status).toBe('pending');
+    expect(summary.done).toHaveLength(1);
   });
 
-  it('失败行按「第N条」精确归位并带原因原文', () => {
-    const rows = buildQueueRows(
-      [...MODES],
-      2,
-      [],
+  it('失败行解析自 jobs.error 增量，计入已完成进度', () => {
+    const summary = buildQueueSummary([], 'job-1', '剧情解说·第1条: LLM 请求失败: read timeout', '', 50);
+    expect(summary.failures).toHaveLength(1);
+    expect(summary.failures[0]?.reason).toContain('read timeout');
+    expect(summary.pendingCount).toBe(1);
+  });
+
+  it('百分比反推排队条数：完成 2 条时 40% → 总数 5、排队 3', () => {
+    const summary = buildQueueSummary(
+      [plan('dialogue_narration', 1), plan('cross_narration', 1)],
       'job-1',
-      '剧情解说·第2条: LLM 请求失败: read timeout',
+      '',
       '剧情解说·第1条',
+      40,
     );
-    expect(rows[0]?.status).toBe('running');
-    expect(rows[1]?.status).toBe('failed');
-    expect(rows[1]?.reason).toContain('read timeout');
+    expect(summary.pendingCount).toBe(3);
+    expect(summary.stageText).toBe('剧情解说·第1条');
   });
 
-  it('角度名槽位（无编号）按序贪心贴到该模式最早的待定行', () => {
-    const rows = buildQueueRows(
-      [...MODES],
-      2,
-      [],
-      'job-1',
-      '交叉解说·复仇洗白视角: 取材重叠超限',
-      '交叉解说·第1条',
-    );
-    const failed = rows.filter((row) => row.status === 'failed');
-    expect(failed).toHaveLength(1);
-    expect(failed[0]?.label).toBe('交叉解说');
-  });
-
-  it('完成行优先于失败解析：同槽位先成功就不许再判失败', () => {
-    const rows = buildQueueRows(
-      ['dialogue_narration'],
-      1,
+  it('终态（100%）不再反推总数，排队归零', () => {
+    const summary = buildQueueSummary(
       [plan('dialogue_narration', 1)],
       'job-1',
-      '剧情解说·第1条: 旧失败',
       '',
+      '',
+      100,
     );
-    expect(rows[0]?.status).toBe('done');
+    expect(summary.pendingCount).toBe(0);
   });
 });
 
