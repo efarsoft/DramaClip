@@ -15,9 +15,19 @@ from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnava
 
 COPY_LLM_TIMEOUT_S = 240.0  # 与编剧同量级：多槽位成稿实测可达 100s+
 _MAX_LINE_CHARS = 60
+# 超短的全部文案就一两条：60 字/段的分段阅读规则套在它身上会逼出 6 秒残件
+# （首版实测）——时长让位（业主裁决 2026-09-29），字数由内容讲完为止决定。
+_ULTRA_SHORT_LINE_CHARS = 240
 _OVERSIZE_TOLERANCE = 1.2  # 容忍 20% 溢出，再长即判不合格重问
 _ATTEMPTS = 2
 
+
+def _line_cap_of(mode: str) -> int:
+    return _ULTRA_SHORT_LINE_CHARS if mode == "ultra_short_hook" else _MAX_LINE_CHARS
+
+
+# 注册表/可编辑 UI 的缺省文本（通用 60 字档）。运行时按模式组装见 _structure_prompt——
+# 超短不设 60 字帽（时长让位），但可编辑覆盖仍按单键单默认文本管理。
 _STRUCTURE_PROMPT = (
     "你是短剧推广解说编剧。下面给出若干旁白槽位，每个槽位标注了它承担的职责、"
     "覆盖的画面区间，以及该区间内的原片台词。为每个槽位各写一条解说文案。\n"
@@ -31,13 +41,30 @@ _STRUCTURE_PROMPT = (
 )
 
 
-def system_prompt(settings: dict[str, str]) -> str:
+def _structure_prompt(mode: str) -> str:
+    """结构指令按模式组装：行长上限随模式（超短的字数由内容决定，不设 60 字帽）。"""
+    return (
+        "你是短剧推广解说编剧。下面给出若干旁白槽位，每个槽位标注了它承担的职责、"
+        "覆盖的画面区间，以及该区间内的原片台词。为每个槽位各写一条解说文案。\n"
+        '只输出 JSON：{"lines": [{"id": "槽位id", "text": "解说文案"}]}，不要其他文字。\n'
+        f"硬性要求：lines 必须覆盖全部槽位 id（数量与 id 一字不差）；"
+        f"每条不超过 {_line_cap_of(mode)} 字；"
+        "槽位的职责标注是契约：文案必须完成该槽位要做的事，不得答非所问；"
+        "开场槽必须 3 秒内抛出具体反差事实，禁止「他竟然…」；"
+        "收尾/CTA 槽必须留缺口并引导去看全集（可带剧名），禁止关注/点赞/二维码，禁止剧透最大反转；"
+        "按给定顺序书写，相邻两条要能连读成一条故事线；鼓励在条尾留半句钩勾住下一条；"
+        "情节、细节、称谓只能来自给定台词，禁止编造台词之外的事件。"
+    )
+
+
+def system_prompt(settings: dict[str, str], mode: str = "") -> str:
     """真正发出去的 system：结构指令 + 与编剧共用的那一层基本功。
 
     基本功层必须在调用时拼：导入期拼死等于让「基本功」那张卡对填词不起作用。
+    结构指令按模式组装（行长上限随模式走），缺省走通用 60 字档。
     """
     overrides = llm_prompts.overrides_from(settings)
-    structure = overrides.get("prompt.copywriter_system") or _STRUCTURE_PROMPT
+    structure = overrides.get("prompt.copywriter_system") or _structure_prompt(mode)
     return structure + scriptwriter.fundamentals_layer(overrides)
 
 
@@ -78,13 +105,14 @@ def _slot_block(
     return "\n".join(lines)
 
 
-def _sanitize(raw: Any, texts: list[NarrationText]) -> dict[str, str]:
+def _sanitize(
+    raw: Any, texts: list[NarrationText], limit: int
+) -> dict[str, str]:
     """按 id 取用，绝不按位置推断；漏答、空答、超长都算没答，交由调用方重试或抛。"""
     lines = raw.get("lines") if isinstance(raw, dict) else None
     if not isinstance(lines, list):
         raise ValueError("编剧未返回 lines 数组")
     wanted = {text.id for text in texts}
-    limit = int(_MAX_LINE_CHARS * _OVERSIZE_TOLERANCE)
     got: dict[str, str] = {}
     for item in lines:
         if not isinstance(item, dict):
@@ -123,6 +151,10 @@ def write_plan_copy(
     project_name = str(settings.get("_project_name") or "").strip()
     if not project_name:
         raise ValueError("缺少项目名：编剧需要剧名作为称谓")
+    line_cap = _line_cap_of(plan.mode)
+    # 行长上限按模式：超短的全部文案就这一两条，60 字/段的分段阅读规则套在它身上
+    # 会逼出 6 秒残件（首版实测）——给它 4 倍空间，密度由 brief 的效果要求保证。
+    line_cap = _ULTRA_SHORT_LINE_CHARS if plan.mode == "ultra_short_hook" else _MAX_LINE_CHARS
     genre = str(settings.get("_genre") or "").strip()
     directives = str(settings.get("_style_directives") or "").strip()
     user_prompt = (
@@ -135,13 +167,15 @@ def write_plan_copy(
         + (f"\n\n解说风格要求：{directives}" if directives else "")
     )
     llm = LlmClient(config, timeout_s=COPY_LLM_TIMEOUT_S)
-    system = system_prompt(settings)
+    system = system_prompt(settings, mode=plan.mode)
     attempts: list[dict[str, Any]] = []
     filled: dict[str, str] | None = None
     for _ in range(_ATTEMPTS):
         try:
             raw = llm.chat_json(system, user_prompt)
-            filled = _sanitize(raw, plan.narration_texts)
+            filled = _sanitize(
+                raw, plan.narration_texts, int(line_cap * _OVERSIZE_TOLERANCE)
+            )
         except (LlmUnavailable, ValueError, TypeError, KeyError) as exc:
             attempts.append({"error": f"{type(exc).__name__}: {exc}"})
             continue
