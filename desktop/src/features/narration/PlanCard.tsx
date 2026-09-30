@@ -8,10 +8,17 @@ import { modeLabel } from '../../components/modeMeta';
 import { tokens } from '../../styles/theme';
 import { planCardView } from './planCards';
 
-/** 排期预估（秒）：时间轴画面窗之和。规划期还没有实测音频，这是画面窗口径；
- *  回填后段长=实测音频时长，出片页的时长才是实测口径——两层不说谎。 */
+/** 成片时长预估（秒）：有旁白按 字数/4.2（与服务端 estimate_duration 同一口径，
+ *  回填后段长=实测音频≈此数）；纯原片没有旁白，画面窗即成片。
+ *  之前用画面窗合计，跨集剧本的画面窗是转写跨度，会高估两倍以上。 */
+const CHARS_PER_SECOND = 4.2;
+
 export function estimatedDurationS(plan: NarrationPlan): number {
-  return plan.plan_data.timeline.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
+  const texts = plan.plan_data.narration_texts ?? [];
+  if (texts.length === 0) {
+    return plan.plan_data.timeline.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
+  }
+  return texts.reduce((sum, item) => sum + (item.text?.length ?? 0), 0) / CHARS_PER_SECOND;
 }
 
 export function formatDuration(seconds: number): string {
