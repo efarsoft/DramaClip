@@ -3,12 +3,18 @@
  * 轮询期间方案**增量可见**（服务端逐条落库）且失败明细即时透出（jobs.error 由
  * 服务端 append_detail 运行中追加）——「规划队列」靠这两路数据逐行点亮状态。
  * 页面重进时按项目找回在跑的规划作业并重新挂上轮询：服务端任务在后台继续，
- * 队列不因导航丢失。
+ * 队列不因导航丢失。提交规格（模式×条数）随项目设置持久化（服务端创建批次时
+ * 写入 last_plan_batch，重进时从项目详情读回）。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NarrationMode, NarrationPlan } from '@dramaclip/protocol';
-import { analysisApi, jobsApi, narrationApi } from '../../services/client';
+import { analysisApi, jobsApi, narrationApi, projectApi } from '../../services/client';
 import { POLL_INTERVAL_MS, isTerminal, reasonOr, sleep } from './poll';
+
+export interface PlanBatchSpec {
+  modes: NarrationMode[];
+  k: number;
+}
 
 export interface PlanBatch {
   planning: boolean;
@@ -20,8 +26,8 @@ export interface PlanBatch {
   failDetail: string;
   /** 本批作业 id（规划队列按它过滤方案与读失败明细）。 */
   batchId: string | null;
-  /** 提交时的 模式×条数 规格（localStorage 持久化，队列骨架据此还原）。 */
-  spec: { modes: NarrationMode[]; k: number } | null;
+  /** 提交规格（模式×条数）：在跑时从项目设置恢复，供规划队列画骨架。 */
+  spec: PlanBatchSpec | null;
   error: string;
   run: (modes: NarrationMode[], k: number) => Promise<void>;
   cancel: () => Promise<void>;
@@ -34,33 +40,9 @@ export function usePlanBatch(projectId: string): PlanBatch {
   const [plans, setPlans] = useState<NarrationPlan[]>([]);
   const [failDetail, setFailDetail] = useState('');
   const [batchId, setBatchId] = useState<string | null>(null);
-  const [spec, setSpec] = useState<{ modes: NarrationMode[]; k: number } | null>(null);
+  const [spec, setSpec] = useState<PlanBatchSpec | null>(null);
   const [error, setError] = useState('');
   const jobIdRef = useRef<string | null>(null);
-
-  const specKey = `dramaclip:plan-batch:${projectId}`;
-  const saveSpec = useCallback(
-    (value: { modes: NarrationMode[]; k: number; batch_id: string } | null): void => {
-      try {
-        if (value === null) localStorage.removeItem(specKey);
-        else localStorage.setItem(specKey, JSON.stringify(value));
-      } catch {
-        // 存储不可用（隐私模式等）只影响重进还原，不影响本轮队列
-      }
-    },
-    [specKey],
-  );
-  const loadSpec = useCallback(
-    (): { modes: NarrationMode[]; k: number; batch_id: string } | null => {
-      try {
-        const raw = localStorage.getItem(specKey);
-        return raw === null ? null : (JSON.parse(raw) as { modes: NarrationMode[]; k: number; batch_id: string });
-      } catch {
-        return null;
-      }
-    },
-    [specKey],
-  );
 
   const cancel = useCallback(async (): Promise<void> => {
     const jobId = jobIdRef.current;
@@ -111,9 +93,7 @@ export function usePlanBatch(projectId: string): PlanBatch {
         );
         jobIdRef.current = jobId;
         setBatchId(batch);
-        const submitted = { modes, k, batch_id: batch };
-        setSpec(submitted);
-        saveSpec(submitted);
+        setSpec({ modes: [...modes], k });
         await pollUntilTerminal(jobId, batch);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
@@ -123,11 +103,13 @@ export function usePlanBatch(projectId: string): PlanBatch {
         setStageText('');
       }
     },
-    [planning, pollUntilTerminal, projectId, saveSpec],
-);
+    [planning, pollUntilTerminal, projectId],
+  );
 
   // 页面重进：先找回在跑的规划作业（type=narration + 同 ref_id + 未终态）重新挂轮询；
   // 没有在跑作业时也要把库里已有方案捞回来——方案是持久资产，不该随导航消失。
+  // 多次「生成方案」的产物按批次累积落库（不丢数据），页面只呈现**最近一批**。
+  // 在跑批次的规格从项目设置恢复（服务端创建批次时写入 last_plan_batch）。
   useEffect(() => {
     if (projectId === '' || jobIdRef.current !== null) return;
     let cancelled = false;
@@ -141,8 +123,18 @@ export function usePlanBatch(projectId: string): PlanBatch {
             job.ref_id === projectId &&
             (job.status === 'running' || job.status === 'pending'),
         );
+        const all = await narrationApi.listPlans(projectId);
+        if (cancelled) return;
         if (active === undefined) {
-          setPlans(await narrationApi.listPlans(projectId));
+          // 没有在跑作业：展示**最近一批**方案——跨批全量刷屏没人看得过来，
+          // 旧批次仍在库里，按 created_at 找最新一批的 batch_id 圈定展示范围。
+          const latest = all.reduce<NarrationPlan | null>(
+            (acc, p) => (acc === null || (p.created_at ?? 0) > (acc.created_at ?? 0) ? p : acc),
+            null,
+          );
+          const batch = latest?.batch_id ?? null;
+          setBatchId(batch);
+          setPlans(batch === null ? all : all.filter((p) => p.batch_id === batch));
           return;
         }
         jobIdRef.current = active.id;
@@ -151,9 +143,27 @@ export function usePlanBatch(projectId: string): PlanBatch {
         setPercent(active.progress);
         setStageText(active.label ?? '');
         setFailDetail(active.error ?? '');
-        const stored = loadSpec();
-        if (stored !== null && stored.batch_id === active.id) setSpec(stored);
-        setPlans(await narrationApi.listPlans(projectId, active.id));
+        setPlans(all.filter((p) => p.batch_id === active.id));
+        if (cancelled) return;
+        try {
+          const detail = await projectApi.get(projectId);
+          const stored = (
+            (detail.project.settings ?? {}) as Record<string, unknown>
+          )['last_plan_batch'];
+          if (
+            !cancelled &&
+            stored &&
+            typeof stored === 'object' &&
+            Array.isArray((stored as { modes?: unknown }).modes)
+          ) {
+            setSpec({
+              modes: (stored as { modes: string[] }).modes as NarrationMode[],
+              k: typeof (stored as { k?: unknown }).k === 'number' ? (stored as { k: number }).k : 1,
+            });
+          }
+        } catch {
+          // 规格恢复失败只影响骨架显示，不影响轮询
+        }
         if (cancelled) return;
         await pollUntilTerminal(active.id, active.id);
       } catch {

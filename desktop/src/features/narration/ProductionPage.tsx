@@ -10,6 +10,7 @@ import { useUiStore } from '../../stores/ui';
 import { layout, tokens } from '../../styles/theme';
 import { ExportsCard } from './ExportsCard';
 import { ModePicker } from './ModePicker';
+import type { BatchSpec } from './PlanQueue';
 import { PlanPickList } from './PlanPickList';
 import { PlanQueue } from './PlanQueue';
 import { avgCompletedBytes } from './produceView';
@@ -131,6 +132,13 @@ export function ProductionPage() {
   }, [projectId]);
 
   const batch = usePlanBatch(projectId);
+
+  const onGenerate = useCallback(
+    (modes: NarrationMode[], k: number) => {
+      void batch.run(modes, k); // 规格由 hook 记录（batch.spec），规划队列据此画骨架
+    },
+    [batch],
+  );
   const queue = useExportQueue(reloadExports);
   // 磁盘预估系数：本剧已完成成片的实测均值（意见08「估」字要带得出出处）
   const avgBytes = useMemo(() => avgCompletedBytes(exports), [exports]);
@@ -143,6 +151,7 @@ export function ProductionPage() {
         <ModePicker
           batch={batch}
           modes={modes}
+          onGenerate={onGenerate}
           recommendation={recommendation}
           recLoading={recLoading}
           onReroll={onRerollRecommendation}

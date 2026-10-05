@@ -17,6 +17,7 @@ export function ModePicker({
   recommendation = null,
   recLoading = false,
   onReroll,
+  onGenerate,
   onToggleMode,
   onSelectAll,
   onKChange,
@@ -26,6 +27,8 @@ export function ModePicker({
   k: number;
   recommendation?: ModeRecommendation | null;
   recLoading?: boolean;
+  /** 生成方案入口：页面先定格规格（模式×条数）再启动（规格供规划队列画骨架）。 */
+  onGenerate: (modes: NarrationMode[], k: number) => void;
   onReroll?: () => void;
   onToggleMode: (mode: NarrationMode) => void;
   onSelectAll: () => void;
@@ -37,7 +40,14 @@ export function ModePicker({
         <RecommendationLine recommendation={recommendation} recLoading={recLoading} onReroll={onReroll} />
       )}
       <ModeGrid modes={modes} onToggleMode={onToggleMode} />
-      <PlanToolbar batch={batch} modes={modes} k={k} onSelectAll={onSelectAll} onKChange={onKChange} />
+      <PlanToolbar
+        batch={batch}
+        modes={modes}
+        k={k}
+        onSelectAll={onSelectAll}
+        onKChange={onKChange}
+        onGenerate={onGenerate}
+      />
       {batch.error !== '' && <Alert style={{ marginTop: tokens.spaceMd }} type="error" showIcon title={batch.error} />}
     </PageSection>
   );
@@ -78,12 +88,14 @@ function PlanToolbar({
   k,
   onSelectAll,
   onKChange,
+  onGenerate,
 }: {
   batch: PlanBatch;
   modes: NarrationMode[];
   k: number;
   onSelectAll: () => void;
   onKChange: (k: number) => void;
+  onGenerate: (modes: NarrationMode[], k: number) => void;
 }) {
   return (
     <>
@@ -110,7 +122,7 @@ function PlanToolbar({
           disabled={modes.length === 0}
           loading={batch.planning}
           onClick={() => {
-            void batch.run(modes, k);
+            onGenerate(modes, k);
           }}
         >
           {batch.planning ? '规划中…' : '生成方案'}

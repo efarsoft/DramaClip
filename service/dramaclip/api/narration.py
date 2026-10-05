@@ -283,6 +283,12 @@ def plan_variants(context: AppContext, params: dict[str, Any]) -> dict[str, Any]
     excluded_angles = _excluded_angle_names(context, exclude_plan_ids)
 
     job_id = context.job_store.create("narration", ref_id=project_id)
+    # 提交规格随项目设置持久化：页面重进/重启后，规划队列据此还原「模式×条数」骨架
+    projects_repo.update_settings(
+        context.conn,
+        project_id,
+        {"last_plan_batch": {"batch_id": job_id, "modes": list(modes), "k": int(k)}},
+    )
     cancel_event = threading.Event()
     context.cancel_events[job_id] = cancel_event
     context.executor.submit(
