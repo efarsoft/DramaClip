@@ -23,6 +23,7 @@ from dramaclip.engines.tts import reference_clean, vocal_separation
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
+from dramaclip.infra.storage.repos import projects as projects_repo
 
 _MIN_S, _MAX_S, _TARGET_S = 4.0, 10.0, 8.0
 _EXTRACT_AR = 24000
@@ -74,7 +75,15 @@ def pick_best_span(
     conn: Any, episodes: list[dict[str, Any]] | None = None
 ) -> tuple[dict[str, Any], float, float, str] | None:
     """跨集选最优：(集行, start, end, 主角)。优先集号新（分析新）、时长接近 7s。"""
-    rows = episodes if episodes is not None else episodes_repo.list_all(conn)
+    if episodes is not None:
+        rows = episodes
+    else:
+        # 未显式给集行时跨项目扫描：参考音色与项目无关，哪个剧的主角清晰用哪个
+        rows = [
+            episode
+            for project in projects_repo.list_all(conn)
+            for episode in episodes_repo.list_by_project(conn, str(project["id"]))
+        ]
     best: tuple[float, dict[str, Any], float, float, str] | None = None
     for row in rows:
         record = analysis_repo.get(conn, str(row["id"]))
