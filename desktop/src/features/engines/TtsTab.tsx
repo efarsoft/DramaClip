@@ -22,6 +22,7 @@ import { DownloadSourceButton } from './ModelDownloadPopover';
 import { type ActiveCardProps, ActiveEngineCard } from './ActiveEngineCard';
 import { AssetLibrary } from './AssetLibrary';
 import { IndexttsRuntimeSlot } from './IndexttsRuntimeSlot';
+import { AutoVoiceButton } from './AutoVoiceButton';
 import { RefCleanButton } from './RefCleanButton';
 import { RefVoiceSelect } from './RefVoiceSelect';
 import { SettingSelect } from './SettingSelect';
@@ -202,6 +203,11 @@ function VoiceRow({
   if (engine === 'indextts2') {
     return (
       <span style={{ display: 'inline-flex', alignItems: 'flex-start', gap: tokens.spaceSm }}>
+        <AutoVoiceButton
+          onSave={(voicePath) => {
+            onSave({ [voiceSettingKey(engine)]: voicePath });
+          }}
+        />
         <RefVoiceSelect settings={settings} onSave={onSave} />
         {voice !== '' && (
           <RefCleanButton

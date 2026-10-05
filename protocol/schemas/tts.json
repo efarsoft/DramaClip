@@ -81,6 +81,23 @@
           }
         }
       }
+    },
+    {
+      "name": "tts.auto_voice",
+      "summary": "从剧集自动提取主角参考音色：选段→抽音频→人声分离→写入 tts.voice.indextts2",
+      "params": { "type": "object", "properties": {} },
+      "result": {
+        "type": "object",
+        "required": ["path", "speaker", "seconds", "voice_set"],
+        "properties": {
+          "path": { "type": "string" },
+          "speaker": { "type": "string", "description": "声纹聚类标签（角色A…），主角=台词字数最多者" },
+          "start": { "type": "number" },
+          "end": { "type": "number" },
+          "seconds": { "type": "number" },
+          "voice_set": { "type": "string" }
+        }
+      }
     }
   ]
 }

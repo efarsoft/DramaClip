@@ -37,6 +37,7 @@ import type {
   TtsPreviewResult,
   TtsCleanReferenceResult,
   ModeRecommendation,
+  TtsAutoVoiceResult,
   LlmTraceListResult,
   PlanTraceResult,
   VerifyReport,
@@ -303,6 +304,8 @@ export const ttsApi = {
     rpc<TtsPreviewResult>('tts.preview', { engine, voice }),
   cleanReference: (path: string, mode: 'separate' | 'fast' = 'separate'): Promise<TtsCleanReferenceResult> =>
     rpc<TtsCleanReferenceResult>('tts.clean_reference', { path, mode }),
+  /** 从剧集自动提取主角参考音色并设为 IndexTTS 参考（无需手动找 wav）。 */
+  autoVoice: (): Promise<TtsAutoVoiceResult> => rpc<TtsAutoVoiceResult>('tts.auto_voice', {}),
 } as const;
 
 /** 能力层自检（§10.3）：校验=文件层，自检=能力层，两者都过才叫 ready。 */

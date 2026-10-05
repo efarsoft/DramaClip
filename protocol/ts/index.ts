@@ -560,6 +560,17 @@ export interface PlanTraceResult {
   readonly content: string;
 }
 
+export interface TtsAutoVoiceResult {
+  readonly path: string;
+  readonly speaker: string;
+  readonly start: number;
+  readonly end: number;
+  readonly seconds: number;
+  /** 提取产物质检（B6 口径）。 */
+  readonly quality: 'good' | 'fair' | 'poor';
+  readonly voice_set: 'tts.voice.indextts2';
+}
+
 /** narration.recommend_modes 返回体：推荐的模式与理由（随项目缓存）。 */
 export interface ModeRecommendation {
   readonly modes: ReadonlyArray<{ readonly mode: string; readonly reason: string }>;
@@ -739,6 +750,7 @@ export const METHOD_NAMES = [
   'settings.update',
   'tts.preview',
   'tts.clean_reference',
+  'tts.auto_voice',
   'prompts.list',
   'prompts.save',
   'prompts.reset',

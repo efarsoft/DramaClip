@@ -33,8 +33,33 @@ _PREVIEW_DIR = "tts-preview"
 
 def register(router: Router, context: AppContext) -> None:
     router.register("tts.preview", lambda params: preview(context, params))
+    router.register("tts.auto_voice", lambda params: auto_voice(context, params))
     router.register("tts.clean_reference", lambda params: clean_reference(context, params))
 
+
+
+def auto_voice(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """从剧集自动提取主角参考音色：选段 → 抽音频 → 人声分离 → 设为 IndexTTS 参考。
+
+    剧集本身就是最好的音色库：分析数据里「谁在什么时候说了什么」都有——选台词量
+    最大的主角最清晰的 4~10 秒连续段。提取后直接写入 tts.voice.indextts2，
+    用户不再需要手动找一段 wav（2026-09-30 出片预检拦截「voice 为空」的根治）。
+    """
+    from dramaclip.engines.tts import auto_voice as auto_voice_mod
+    from dramaclip.infra.storage.repos import settings as settings_repo
+
+    picked = auto_voice_mod.extract_auto_voice(context.conn, context.data_dir)
+    settings_repo.set_value(context.conn, "tts.voice.indextts2", picked["path"])
+    quality = reference_qc.inspect_reference(Path(picked["path"]))
+    return {
+        "path": picked["path"],
+        "speaker": picked["speaker"],
+        "start": picked["start"],
+        "end": picked["end"],
+        "seconds": picked["seconds"],
+        "quality": quality.grade,
+        "voice_set": "tts.voice.indextts2",
+    }
 
 def clean_reference(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     """参考音频清洗：mode=separate（MDX-Net 人声分离，默认）| fast（ffmpeg 滤镜链）。
