@@ -16,6 +16,7 @@ from dramaclip.engines.narration.casting import (
 from dramaclip.engines.narration.models import (
     NarrationText,
     PlanData,
+    SceneCandidate,
     StrategySpec,
     TimelineSegment,
 )
@@ -27,6 +28,8 @@ _HOOK_TTS_FALLBACK_S = 4.0  # TTS 时长回填前的保守估算
 # 「起点前伸」吸收，短则硬切进下一拍——已选素材一秒不裁、一秒不重播。
 _HOOK_BUDGET_S = 30.0  # ≈90 字 @ IndexTTS 实测 ~3 字/秒（真机 61 字 ≈ 20s）
 _CTA_BUDGET_S = 15.0  # CTA 是公式句（真机 25 字 ≈ 8s），留 ~1.9× 余量
+# 候选池深度：出片时按实测旁白时长从池里做最终选景（业主裁决「先出语音、再选画面」）
+_ULTRA_POOL_SIZE = 6
 # 节拍吸附后的段长下限（B9）；与 A3 收缩下限同口径（casting.SCENE_WINDOW_MIN_S）。
 _SNAP_MIN_LEN_S = 2.0
 
@@ -130,33 +133,35 @@ def build_ultra_short(
     # `min(score_order)` 而不是 `max(key=score)`：后者在同分时取**输入顺序**的第一个，
     # 而输入顺序来自 episodes_repo.list_by_project，没有契约（活库实测 333 个场景只有
     # 19 个不同分值）。score_order 已带 (集号, 起点, scene_index) 三个次键。
-    candidates = sorted(scenes, key=score_order)
+    ranked = sorted(scenes, key=score_order)
+
+    def _conflict_window(scene: EpisodeScene) -> tuple[float, float]:
+        """场景 → 冲突窗（最强台词 span 收缩 + 节拍吸附）。布局与候选池共用一处真相。"""
+        span = fit_scene_window(scene.end - scene.start, strongest_span_of(material, scene))
+        start = round(scene.start, 3)
+        end = round(
+            snap_window_end(
+                start,
+                round(scene.start + span, 3),
+                beats_of(material, scene.episode_id),
+                min_len=_SNAP_MIN_LEN_S,
+            ),
+            3,
+        )
+        return start, end
+
     best = next(
         (
             scene
-            for scene in candidates
+            for scene in ranked
             if source_durations is not None
             and scene.start >= _HOOK_BUDGET_S
             and source_durations.get(scene.episode_id, 0.0)
             >= scene.end + _CTA_BUDGET_S
         ),
-        candidates[0],
+        ranked[0],
     )
-    # A3：冲突窗长跟随该场景最强金句的台词 span；口径与 cross/金句流同一处真相
-    # （casting.fit_scene_window）。**吸附排在收缩之后**。
-    scene_span = fit_scene_window(
-        best.end - best.start, strongest_span_of(material, best)
-    )
-    conflict_start = round(best.start, 3)
-    conflict_end = round(
-        snap_window_end(
-            conflict_start,
-            round(best.start + scene_span, 3),
-            beats_of(material, best.episode_id),
-            min_len=_SNAP_MIN_LEN_S,
-        ),
-        3,
-    )
+    conflict_start, conflict_end = _conflict_window(best)
     # 吸引力是唯一标准（业主裁决：时长让位，不为短而短）——brief 只描述要达成
     # 的效果，不设字数锚。爆款节奏锚（抖音/快手公开复盘）：0-3s 生死线上第一句
     # 必须是身份反差/生死/数字冲击；4-8s 冲突递进；结尾撕新缺口不剧透最大反转。
@@ -213,6 +218,18 @@ def build_ultra_short(
             narration_id=texts[1].id,
         ),
     ]
+    # 候选池 = 分值序前 N 个场景的冲突窗（含已选那个）：出片时 TTS 实测旁白时长
+    # 到手，布局阶段从这里挑第一个放得下的——「先出语音、再选画面」（业主裁决）。
+    pool_scenes = ranked[:_ULTRA_POOL_SIZE]
     return PlanData(
-        mode="ultra_short_hook", timeline=timeline, narration_texts=texts, strategy=strategy
+        mode="ultra_short_hook",
+        timeline=timeline,
+        narration_texts=texts,
+        strategy=strategy,
+        scene_pool=[
+            SceneCandidate(episode_id=scene.episode_id, start=start, end=end)
+            for scene, (start, end) in (
+                (scene, _conflict_window(scene)) for scene in pool_scenes
+            )
+        ],
     )

@@ -111,6 +111,14 @@ def test_ultra_short_picks_a_scene_that_fits_hook_and_cta_budgets() -> None:
     assert (cta.start, cta.end) == (38.0, 53.0)
 
 
+def test_ultra_short_stores_score_ordered_scene_pool() -> None:
+    """候选池 = 分值序前 6 个场景的冲突窗（含已选那个）：出片时布局按实测时长挑。"""
+    plan = build_ultra_short(stamp([(1, "ep1", _scenes())]), _STRATEGY)
+    assert len(plan.scene_pool) == 6, "池深度 = _ULTRA_POOL_SIZE，不足时取全部"
+    assert (plan.scene_pool[0].start, plan.scene_pool[0].end) == (140.0, 148.0)
+    assert plan.scene_pool[0].episode_id == "ep1"
+
+
 def test_ultra_short_without_durations_keeps_highest_score_scene() -> None:
     """没传集时长（旧调用形状）不做可行性筛选：仍然取最高分场景，只换布局。"""
     scenes = [

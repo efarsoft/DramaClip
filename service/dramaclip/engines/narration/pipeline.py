@@ -656,6 +656,185 @@ def synthesize_narration_texts(
         voiced[item.id] = (str(audio_path), item.text, float(duration))
     _evict_cache(cache_dir, _CACHE_MAX_BYTES)
 
+    # 布局分发（2026-10-06 业主裁决「先出语音、再选画面」）：超短（带候选池）与
+    # 交叉的时间轴在编排期只是占位（超短三拍互相重叠、交叉桥段叠在下个场景开头），
+    # 实测时长到手后按模式规则**整体重铺**；其余模式（intro/full/ducker/对谈/
+    # 独白/剧本驱动）时间轴承载语义（闪前预告、ASR 吸附、台词对位），走下方的
+    # 游标修补——修补的头部扩展/尾部收口对所有模式仍是兜底。
+    if plan.mode == "ultra_short_hook" and plan.scene_pool:
+        timeline = _layout_ultra_short(plan, voiced, source_durations, log)
+    elif plan.mode == "cross_narration":
+        timeline = _layout_cross(plan, voiced, source_durations, log)
+    else:
+        timeline = _patch_timeline(plan, voiced, source_durations)
+    _assert_within_source(timeline, source_durations)
+    updated = [
+        item.model_copy(
+            update={"audio_path": voiced[item.id][0], "duration": voiced[item.id][2]}
+        )
+        for item in plan.narration_texts
+    ]
+    # timeline 是裸 dict，必须过 model_validate 才是模型实例，导出层按属性读段
+    laid = PlanData.model_validate(
+        {**plan.model_dump(), "narration_texts": updated, "timeline": timeline}
+    )
+    if plan.mode in ("ultra_short_hook", "cross_narration"):
+        # 重铺改变了相邻关系，规划期的转场判定过期：按新窗口重算 fade/cut
+        laid = apply_transitions(laid)
+    return laid
+
+
+def _layout_ultra_short(
+    plan: PlanData,
+    voiced: dict[str, tuple[str, str, float]],
+    source_durations: dict[str, float],
+    log: LogFn | None,
+) -> list[dict[str, Any]]:
+    """超短三拍整体重铺：候选池按实测时长选景，三拍精确落位、互不重叠。
+
+    候选窗按分值序找第一个「场景前放得下钩子实测、集尾放得下 CTA 实测」的；
+    全都放不下 → 如实报错并给出各候选差多少秒，不静默、不裁剪（业主裁决）。
+    钩子尾锚冲突窗开头（讲完正好进正片）、原声拍原样、CTA 接在窗后。
+    """
+    missing = [slot for slot in ("hook-1", "cta-1") if slot not in voiced]
+    if missing:
+        raise RuntimeError(f"超短方案缺 {'、'.join(missing)} 槽位的实测音频，无法布局")
+    conflict = next(
+        (segment for segment in plan.timeline if segment.audio == "original"), None
+    )
+    if conflict is None:
+        raise RuntimeError("超短方案时间轴里没有冲突原声拍，无法布局")
+    hook_dur = voiced["hook-1"][2]
+    cta_dur = voiced["cta-1"][2]
+
+    def _placed(episode_id: str, win_start: float, win_end: float) -> list[dict[str, Any]]:
+        return [
+            {
+                "episode_id": episode_id,
+                "start": round(win_start - hook_dur, 3),
+                "end": round(win_start, 3),
+                "audio": "narration",
+                "narration_id": "hook-1",
+                "subtitle_text": voiced["hook-1"][1],
+            },
+            {
+                "episode_id": episode_id,
+                "start": round(win_start, 3),
+                "end": round(win_end, 3),
+                "audio": "original",
+            },
+            {
+                "episode_id": episode_id,
+                "start": round(win_end, 3),
+                "end": round(win_end + cta_dur, 3),
+                "audio": "narration",
+                "narration_id": "cta-1",
+                "subtitle_text": voiced["cta-1"][1],
+            },
+        ]
+
+    shortfalls: list[str] = []
+    for candidate in plan.scene_pool:
+        limit = source_durations.get(candidate.episode_id, 0.0)
+        if limit <= 0:
+            shortfalls.append(
+                f"{candidate.episode_id}@{candidate.start:.0f}s 查不到集时长"
+            )
+            continue  # 与守卫同口径：查不了 = 放不下，换下一个
+        if candidate.start < hook_dur:
+            shortfalls.append(
+                f"{candidate.episode_id}@{candidate.start:.0f}s "
+                f"场景前素材 {candidate.start:.1f}s < 钩子 {hook_dur:.1f}s"
+            )
+            continue
+        if candidate.end + cta_dur > limit + _SOURCE_FIT_TOL_S:
+            shortfalls.append(
+                f"{candidate.episode_id}@{candidate.start:.0f}s "
+                f"集尾差 {candidate.end + cta_dur - limit:.1f}s"
+            )
+            continue
+        _emit(
+            log,
+            f"超短布局按实测时长选中冲突窗 {candidate.episode_id} "
+            f"{candidate.start:.2f}-{candidate.end:.2f}s"
+            f"（钩子 {hook_dur:.1f}s + CTA {cta_dur:.1f}s）",
+        )
+        return _placed(candidate.episode_id, candidate.start, candidate.end)
+    raise RuntimeError(
+        "候选池里没有放得下实测时长的冲突窗（"
+        + "；".join(shortfalls)
+        + "）——重新生成方案即可换一批候选，文案与音频一秒不裁"
+    )
+
+
+def _layout_cross(
+    plan: PlanData,
+    voiced: dict[str, tuple[str, str, float]],
+    source_durations: dict[str, float],
+    log: LogFn | None,
+) -> list[dict[str, Any]]:
+    """交叉解说桥段落位：场景原声窗原封不动，桥段旁白放进场景间空隙。
+
+    旧布局把桥段叠在下个场景开头（与场景窗设计性重叠），IndexTTS 实测一超长
+    就把场景顶出集尾（真机 2026-10-06：cross-3 差 0.16s 整条判死）。场景窗吸附
+    过最强台词 span，挪了就不是那句台词——所以桥段改为收尾锚在下个场景开头、
+    向前伸进空隙；末段桥（没有下一场景）接在自己场景窗之后。空隙放不下如实报错。
+    """
+    segments = plan.timeline
+    timeline: list[dict[str, Any]] = []
+    cursor: dict[str, float] = {}
+    for index, segment in enumerate(segments):
+        if segment.audio != "narration":
+            entry = segment.model_dump()
+            timeline.append(entry)
+            cursor[segment.episode_id] = float(entry["end"])
+            continue
+        slot = str(segment.narration_id or "")
+        voiced_entry = voiced.get(slot)
+        if voiced_entry is None:
+            raise RuntimeError(f"交叉桥段 {slot} 没有实测音频，无法布局")
+        _audio_path, text, duration = voiced_entry
+        next_original = next(
+            (s for s in segments[index + 1 :] if s.audio != "narration"), None
+        )
+        if next_original is None:
+            start = cursor.get(segment.episode_id, float(segment.start))
+        else:
+            start = float(next_original.start) - duration
+            floor = cursor.get(next_original.episode_id, 0.0)
+            if start < floor:
+                raise RuntimeError(
+                    f"交叉桥段 {slot} 实测 {duration:.2f}s，但 "
+                    f"{next_original.episode_id} 场景 {next_original.start:.2f}s 前的"
+                    f"空隙只有 {float(next_original.start) - floor:.2f}s——"
+                    "空隙放不下，这条方案判失败（不裁音、不重播）"
+                )
+        end = start + duration
+        timeline.append(
+            {
+                "episode_id": segment.episode_id,
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "audio": "narration",
+                "narration_id": slot,
+                "subtitle_text": text,
+            }
+        )
+        cursor[segment.episode_id] = end
+    _emit(
+        log,
+        f"交叉布局按实测时长把 {sum(1 for s in timeline if s['audio'] == 'narration')}"
+        "段桥旁白放进场景间空隙，场景原声窗原样保留",
+    )
+    return timeline
+
+
+def _patch_timeline(
+    plan: PlanData,
+    voiced: dict[str, tuple[str, str, float]],
+    source_durations: dict[str, float],
+) -> list[dict[str, Any]]:
+    """游标修补（既有回填语义）：旁白段长=实测音频，头部扩展→尾部收口→守卫。"""
     timeline = [segment.model_dump() for segment in plan.timeline]
     # 实测音频时长 ≠ 编排期的估计时长：把 end 直接改成 start + 实测，前一段就会
     # 盖住后一段的源素材区间，成片演到第 6 秒又倒回第 1 秒重播同一段画面（业主
@@ -725,16 +904,6 @@ def synthesize_narration_texts(
         if index == 0 and _intro_teaser:
             continue  # 闪前预告不推进游标：正文从自己的计划起点起算（见上方判据注释）
         cursor[episode_id] = end
-    _assert_within_source(timeline, source_durations)
-    updated = [
-        item.model_copy(
-            update={"audio_path": voiced[item.id][0], "duration": voiced[item.id][2]}
-        )
-        for item in plan.narration_texts
-    ]
-    # timeline 是裸 dict，必须过 model_validate 才是模型实例，导出层按属性读段
-    return PlanData.model_validate(
-        {**plan.model_dump(), "narration_texts": updated, "timeline": timeline}
-    )
+    return timeline
 
 

@@ -48,6 +48,18 @@ class StrategySpec(BaseModel):
     platform: str = "douyin"
 
 
+class SceneCandidate(BaseModel):
+    """候选冲突窗（已经过收缩+节拍吸附的可用画面区间），供出片时二次选景。
+
+    TTS 时长只有合成后才知道（业主裁决：先出语音、再选画面），编排期把按
+    分值序的候选窗存进方案，布局阶段拿实测旁白时长挑第一个放得下的。
+    """
+
+    episode_id: str
+    start: float
+    end: float
+
+
 class PlanData(BaseModel):
     """narration_plans.plan_data 的结构化定义。"""
 
@@ -60,3 +72,6 @@ class PlanData(BaseModel):
     # 剧本清洗层丢掉的段数（未知集号/越界/重叠/空文案）：仅 llm_script 链会写，
     # 其余模式恒为 0。方案卡据此显示「剧本丢弃 N 段」，把悄悄变短讲成明账。
     dropped_segments: int = 0
+    # 候选冲突窗（分值序）：超短钩子出片时按实测旁白时长二次选景用。
+    # 旧库行缺该键 → 空表，布局退回时间轴里的冲突窗原位放置。
+    scene_pool: list[SceneCandidate] = Field(default_factory=list)
