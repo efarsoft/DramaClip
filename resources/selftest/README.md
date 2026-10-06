@@ -23,3 +23,16 @@ PCM，约 14 秒 / 450 KB。
 `zf_001`（Apache-2.0 模型）合成，24 kHz 单声道，约 5.9 秒 / 278 KB。文案：
 「短剧的高光，值得被更多人看见。这是一段用于能力自检的样例人声。」
 业主未在配音页选择参考音色时，`run_tts` 以它顶上（`selftest.sample_ref_voice`）。
+
+## `selftest-ref-*.wav`（2026-10-06 增，EdgeTTS 生成 4 条）
+
+克隆引擎（IndexTTS-2.5）自检/出片的**备用参考音色**（当业主未选参考时，
+`run_tts` 用这些顶上，让「引擎能不能出声」与「业主配没配过音色」分开）：
+
+- `selftest-ref-female.wav` — XiaoxiaoNeural（女声），39KB
+- `selftest-ref-male.wav` — YunjianNeural（男声），31KB
+- `selftest-ref-2.wav` — XiaoyiNeural（女声），37KB
+- `selftest-ref-3.wav` — YunyangNeural（男声），33KB
+
+全部由 edge-tts 按需生成（免费无需 API Key），24kHz 单声道，3~5 秒。
+另有 `sample_ref_voice.wav`（Kokoro zf_001 生成，284KB）同一用途。
