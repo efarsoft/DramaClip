@@ -56,8 +56,12 @@ def build_plan(
     highlights: list[HighlightSegment],
     material: MaterialByEpisode,
     settings: dict[str, str],
+    source_durations: dict[str, float] | None = None,
 ) -> PlanData:
     """按模式生成编排方案（纯计算，不触 IO）。
+
+    `source_durations`（{集 id: 源片秒数}）可选，供超短钩子做可行性选景——
+    钩子/CTA 的画面预算要在规划期就知道放不放得下，不能等 TTS 实测才爆。
     """
     strategy = StrategySpec(platform="douyin")
     if mode == "raw_clip":
@@ -67,7 +71,9 @@ def build_plan(
     if mode == "cross_narration":
         return apply_transitions(modes_w5.build_cross(scenes, strategy, material))
     if mode == "ultra_short_hook":
-        return apply_transitions(modes_w5.build_ultra_short(scenes, strategy, material))
+        return apply_transitions(
+            modes_w5.build_ultra_short(scenes, strategy, material, source_durations)
+        )
     if mode == "dialogue_narration":
         raise ValueError(
             "剧情解说为剧本驱动，不经规则编排（走 script_driver.script_dialogue_plan）"
@@ -679,14 +685,30 @@ def synthesize_narration_texts(
     for index, segment in enumerate(timeline):
         episode_id = str(segment["episode_id"])
         floor = cursor.get(episode_id, 0.0)
-        start = max(float(segment["start"]), floor)
+        planned_start = float(segment["start"])
+        planned_end = float(segment["end"])
+        start = max(planned_start, floor)
         if segment["audio"] in ("narration", "ducked"):
             # ducked（全片解说全程压底旁白）与 narration 同权：两者都要回填时长与解说字幕
             _audio_path, text, duration = voiced[str(segment["narration_id"])]
             segment["subtitle_text"] = text
             length = duration
         else:
-            length = float(segment["end"]) - float(segment["start"])
+            length = planned_end - planned_start
+        limit = source_durations.get(episode_id, 0.0)
+        # 头部扩展（2026-10-06 业主裁决「保障素材时长，不裁」）：实测旁白比计划窗口
+        # 长时，先保住计划尾——配哪几秒画面是编排选好的——把起点往前伸。吃的是
+        # 上一段与本段之间的空闲素材：不偷后段的画面（立案③），不把已计划素材
+        # 推出集尾。伸不动（计划尾本身出界、或前面被上一段占满）再退回收口，
+        # 还不行由 `_assert_within_source` 如实判死。
+        if (
+            segment["audio"] in ("narration", "ducked")
+            and length > planned_end - planned_start
+            and limit > 0
+            and planned_end <= limit + _SOURCE_FIT_TOL_S
+            and planned_end - length >= floor
+        ):
+            start = planned_end - length
         # 尾部收口：实测比剩余素材长时，整段往前挪到贴着集尾——这段的文案与长度都不动，
         # 换的只是压在它下面的画面。挪不动（再往前就和上一段重叠=画面重播）就照原样
         # 交给 `_assert_within_source` 判死，不截音也不截画面。
@@ -695,8 +717,7 @@ def synthesize_narration_texts(
         # 窗口 185.85→192.20 出片视频 6.367s / 音频 6.371s，与同一干音在素材中段
         # 20.00→26.35 的产物逐毫秒一致；而起点即 EOF 的越界窗口退码仍 0、262 字节无流。
         # 收口损失的只有"这一段配哪几秒画面"，没有一帧声音被丢掉。
-        limit = source_durations.get(episode_id, 0.0)
-        if 0 < limit < start + length and limit - length >= floor:
+        elif 0 < limit < start + length and limit - length >= floor:
             start = limit - length
         end = start + length
         segment["start"] = round(start, 3)

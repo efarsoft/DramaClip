@@ -179,7 +179,7 @@ def test_ultra_short_conflict_window_follows_the_line() -> None:
     hook, conflict, cta = plan.timeline
     assert (conflict.start, conflict.end) == (0.0, 3.5)
     assert (hook.start, hook.end) == (0.0, 4.0), "hook 旁白占位段不收缩"
-    assert (cta.start, cta.end) == (8.0, 12.0), "CTA 段复用场景尾部，不受收缩影响"
+    assert (cta.start, cta.end) == (3.5, 18.5), "CTA 接在冲突窗后按预算留画面，不受收缩影响"
 
 
 def test_ultra_short_no_dialogue_is_byte_identical() -> None:
@@ -195,7 +195,7 @@ def test_ultra_short_snap_happens_after_shrink() -> None:
     hook, conflict, cta = plan.timeline
     assert conflict.end == 3.4
     assert (hook.start, hook.end) == (0.0, 4.0)
-    assert (cta.start, cta.end) == (8.0, 12.0)
+    assert (cta.start, cta.end) == (3.4, 18.4)
 
 
 # ---- 三模式口径一致 ----------------------------------------------------------

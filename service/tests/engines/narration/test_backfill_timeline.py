@@ -192,7 +192,7 @@ def test_script_plan_stays_renderable_after_voicing(
 def test_backfill_past_the_source_end_is_rejected_not_truncated(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """回填把段尾推出源片末尾、且往前挪就会和上一段重叠：这条方案必须失败。
+    """回填把段尾推出源片末尾、且前伸和收口都救不动：这条方案必须失败。
 
     真机实测（bundled ffmpeg 8.1.1，源 6.mp4=76.86s、9s 干音）：窗口 70.86→79.86
     退码 **0**，产物视频 6.07s / 音频 6.03s——9 秒旁白被从中间掐掉；窗口
@@ -202,7 +202,7 @@ def test_backfill_past_the_source_end_is_rejected_not_truncated(
     plan = _plan(("ep1", 186.0, 192.0, "ducked"), ("ep1", 192.0, 197.0, "ducked"))
     with pytest.raises(
         RuntimeError,
-        match=r"越过源集末尾.*197\.20.*192\.20.*超出 5\.00.*止于 192\.20s.*重播画面",
+        match=r"越过源集末尾.*197\.00.*192\.20.*超出 4\.80.*止于 192\.00s.*重播画面",
     ):
         _voice(
             monkeypatch,
@@ -211,6 +211,38 @@ def test_backfill_past_the_source_end_is_rejected_not_truncated(
             {"n0": 6.2, "n1": 5.0},
             {"ep1": 192.2},
         )
+
+
+def test_narration_overrun_extends_backwards_and_keeps_the_payoff_in_place(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """实测比计划窗口长：起点前伸保住计划尾，后段原声拍原地不动（音画同源）。
+
+    2026-10-06 真机 ultra_short：61 字钩子实测 ~20s，旧逻辑收口把窗口推到集尾、
+    把 CTA 顶出源末尾整条判死。新逻辑钩子窗口起点前伸——素材不裁、不重播、
+    原声拍对口型的画面一帧不挪（业主裁决「保障素材时长，不裁」）。"""
+    plan = _plan(
+        ("ep1", 38.13, 68.13, "narration"),
+        ("ep1", 68.13, 72.66, "original"),
+        ("ep1", 72.66, 87.66, "narration"),
+    )
+    result = _voice(monkeypatch, tmp_path, plan, {"n0": 40.0, "n1": 8.0}, {"ep1": 90.0})
+    _assert_source_never_runs_backwards(result)
+    assert [(s.start, s.end) for s in result.timeline] == [
+        (28.13, 68.13),  # 钩子实测 40s > 预算窗 30s：起点前伸，尾锚 68.13 不动
+        (68.13, 72.66),  # 原声拍原地（音画同源，动不得）
+        (72.66, 80.66),  # CTA 实测 8s < 预算 15s：从计划起点起
+    ]
+
+
+def test_backwards_extension_stops_at_the_previous_segment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """前伸撞上同集上一段就停：保持计划起点、向后超出计划尾，不叠上一段画面。"""
+    plan = _plan(("ep1", 0.0, 10.0, "ducked"), ("ep1", 10.0, 14.0, "ducked"))
+    result = _voice(monkeypatch, tmp_path, plan, {"n0": 8.0, "n1": 8.0})
+    _assert_source_never_runs_backwards(result)
+    assert [(s.start, s.end) for s in result.timeline] == [(0.0, 8.0), (10.0, 18.0)]
 
 
 def test_a_narration_longer_than_the_whole_episode_says_so(
@@ -285,7 +317,7 @@ def test_a_pulled_back_tail_leaves_later_episodes_alone(
         {"ep-a": 192.2, "ep-b": 30.0},
     )
     _assert_source_never_runs_backwards(result)
-    assert _windows(result) == [("ep-a", 186.2, 192.2), ("ep-b", 5.0, 9.0)]
+    assert _windows(result) == [("ep-a", 186.0, 192.0), ("ep-b", 5.0, 9.0)]  # 前伸保计划尾
 
 
 # ---- B 项·片头闪前预告：回填游标豁免 -----------------------------------------

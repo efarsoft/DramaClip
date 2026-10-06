@@ -21,6 +21,12 @@ from dramaclip.engines.narration.models import (
 )
 
 _HOOK_TTS_FALLBACK_S = 4.0  # TTS 时长回填前的保守估算
+
+# 超短钩子的画面预算（2026-10-06 业主裁决「保障素材时长，不裁」）：钩子/CTA 的
+# 文案在规划期还没生成，窗口按预算预留整段画面；文案实测比预算长时由回填的
+# 「起点前伸」吸收，短则硬切进下一拍——已选素材一秒不裁、一秒不重播。
+_HOOK_BUDGET_S = 30.0  # ≈90 字 @ IndexTTS 实测 ~3 字/秒（真机 61 字 ≈ 20s）
+_CTA_BUDGET_S = 15.0  # CTA 是公式句（真机 25 字 ≈ 8s），留 ~1.9× 余量
 # 节拍吸附后的段长下限（B9）；与 A3 收缩下限同口径（casting.SCENE_WINDOW_MIN_S）。
 _SNAP_MIN_LEN_S = 2.0
 
@@ -102,19 +108,40 @@ def build_ultra_short(
     scenes: list[EpisodeScene],
     strategy: StrategySpec,
     material: MaterialByEpisode | None = None,
+    source_durations: dict[str, float] | None = None,
 ) -> PlanData:
     """超短悬念版：钩子旁白 → 最高冲突原声画面 → 收尾引导（时长由内容讲完为止，不设上限）。
 
     `material`（B9）只为节拍吸附而来，可选，降级同 `build_cross`。冲突窗口
-    end=起点+8s 是任意点，有拍点就吸附；**hook 段与 CTA 段不吸附**——两段都是
-    旁白，段长由 TTS 实测回填，规划期的 end 只是占位。
+    end=起点+8s 是任意点，有拍点就吸附；钩子/CTA 是旁白段，段长由 TTS 实测回填。
+
+    三拍互不重叠、已选素材全保留（2026-10-06 业主裁决「保障素材时长，不裁」）：
+    - 钩子压在冲突场景**之前**的素材上，尾锚在场景开头——讲完正好进正片；
+    - 冲突原声拍原地不动：音画同源，挪了就对不上口型；
+    - CTA 排在原声拍之后，按公式句长度预算预留画面。
+    文案实测比预算长时由回填的「起点前伸」吸收，短则留硬切空隙，素材一秒不裁。
+
+    `source_durations` 提供时做**可行性选景**：按分值序取第一个「场景前放得下
+    钩子预算、集尾放得下 CTA 预算」的场景；全都放不下时退回最高分场景——
+    回填守卫会给出如实的失败原因，不静默出坏片。
     """
     if not scenes:
         return PlanData(mode="ultra_short_hook", strategy=strategy)
     # `min(score_order)` 而不是 `max(key=score)`：后者在同分时取**输入顺序**的第一个，
     # 而输入顺序来自 episodes_repo.list_by_project，没有契约（活库实测 333 个场景只有
     # 19 个不同分值）。score_order 已带 (集号, 起点, scene_index) 三个次键。
-    best = min(scenes, key=score_order)
+    candidates = sorted(scenes, key=score_order)
+    best = next(
+        (
+            scene
+            for scene in candidates
+            if source_durations is not None
+            and scene.start >= _HOOK_BUDGET_S
+            and source_durations.get(scene.episode_id, 0.0)
+            >= scene.end + _CTA_BUDGET_S
+        ),
+        candidates[0],
+    )
     # A3：冲突窗长跟随该场景最强金句的台词 span；口径与 cross/金句流同一处真相
     # （casting.fit_scene_window）。**吸附排在收缩之后**。
     scene_span = fit_scene_window(
@@ -156,8 +183,19 @@ def build_ultra_short(
     timeline = [
         TimelineSegment(
             episode_id=best.episode_id,
-            start=conflict_start,
-            end=round(best.start + _HOOK_TTS_FALLBACK_S, 3),
+            # 钩子尾锚在冲突场景开头：文案实测比预算长→回填起点前伸，短→硬切进正片。
+            # 场景贴着集头、前面凑不出最小铺垫时退回旧占位形状（可行性选景会在
+            # 有集时长时避开这种场景，这里是无时长兜底）。
+            start=(
+                round(conflict_start - _HOOK_BUDGET_S, 3)
+                if conflict_start >= _HOOK_TTS_FALLBACK_S
+                else conflict_start
+            ),
+            end=(
+                conflict_start
+                if conflict_start >= _HOOK_TTS_FALLBACK_S
+                else round(conflict_start + _HOOK_TTS_FALLBACK_S, 3)
+            ),
             audio="narration",
             narration_id=texts[0].id,
         ),
@@ -169,8 +207,8 @@ def build_ultra_short(
         ),
         TimelineSegment(
             episode_id=best.episode_id,
-            start=round(best.end - _HOOK_TTS_FALLBACK_S, 3),
-            end=round(best.end, 3),
+            start=conflict_end,
+            end=round(conflict_end + _CTA_BUDGET_S, 3),
             audio="narration",
             narration_id=texts[1].id,
         ),

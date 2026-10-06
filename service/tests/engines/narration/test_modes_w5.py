@@ -47,10 +47,13 @@ def test_ultra_short_structure() -> None:
     assert [segment.audio for segment in plan.timeline] == ["narration", "original", "narration"]
     assert [t.id for t in plan.narration_texts] == ["hook-1", "cta-1"]
     assert_slots_paired(plan, "ultra_short_hook")
-    # 三段全部来自冲突分最高的场景（score=95, index=7, start=140）
-    best_start = 140.0
-    for segment in plan.timeline:
-        assert segment.start >= best_start - 0.01
+    # 三拍互不重叠、素材全保留（2026-10-06 裁决「保障素材时长，不裁」）：
+    # 冲突分最高的场景（score=95, [140,155]）原声拍原地不动；钩子压在它之前的
+    # 素材上、尾锚在场景开头；CTA 排在原声拍之后按公式句预算留画面。
+    hook, conflict, cta = plan.timeline
+    assert (hook.start, hook.end) == (110.0, 140.0)
+    assert (conflict.start, conflict.end) == (140.0, 148.0)  # 无台词 span → 8s 冲突窗
+    assert (cta.start, cta.end) == (148.0, 163.0)
 
 
 def test_ultra_short_empty_scenes() -> None:
@@ -83,14 +86,40 @@ def test_cross_original_ends_snap_but_narration_ends_do_not() -> None:
 
 
 def test_ultra_short_conflict_window_snaps_hook_and_cta_do_not() -> None:
-    """冲突窗口 end 148 → 147.9；143.9/154.9 两个拍点紧贴 hook 段 end（144）与
-    CTA 段 end（155），两段都不动——旁白段的长度归 TTS 实测，不归节拍。"""
+    """冲突窗口 end 155 → 147.9（吸附 147.9 拍点）；钩子 end（140.0）与 CTA 两端
+    都不吸附——旁白段的长度归 TTS 实测回填，不归节拍。"""
     beats = (143.9, 147.9, 154.9)
     plan = build_ultra_short(stamp([(1, "ep1", _scenes())]), _STRATEGY, _material_with_beats(beats))
     hook, conflict, cta = plan.timeline
-    assert (hook.start, hook.end) == (140.0, 144.0)
+    assert (hook.start, hook.end) == (110.0, 140.0)
     assert (conflict.start, conflict.end) == (140.0, 147.9)
-    assert (cta.start, cta.end) == (151.0, 155.0)
+    assert (cta.start, cta.end) == (147.9, 162.9)
+
+
+def test_ultra_short_picks_a_scene_that_fits_hook_and_cta_budgets() -> None:
+    """可行性选景（2026-10-06 裁决「保障素材时长」）：最高分场景贴着集尾、CTA
+    预算放不下时，按分值序取第一个「前面放得下钩子、集尾放得下 CTA」的场景；
+    修法之前这种形状会在回填时整条判死（真机：61 字钩子把 CTA 顶出集尾）。"""
+    scenes = [
+        ConflictScore(scene_index=0, start=60.0, end=74.0, score=95),  # 集尾只剩 3s，CTA 放不下
+        ConflictScore(scene_index=1, start=30.0, end=44.0, score=60),  # 前 30 ✓ 集尾 33 ✓
+    ]
+    plan = build_ultra_short(stamp([(1, "ep1", scenes)]), _STRATEGY, None, {"ep1": 77.0})
+    hook, conflict, cta = plan.timeline
+    assert (conflict.start, conflict.end) == (30.0, 38.0)  # 无台词 span → 8s 冲突窗
+    assert (hook.start, hook.end) == (0.0, 30.0)
+    assert (cta.start, cta.end) == (38.0, 53.0)
+
+
+def test_ultra_short_without_durations_keeps_highest_score_scene() -> None:
+    """没传集时长（旧调用形状）不做可行性筛选：仍然取最高分场景，只换布局。"""
+    scenes = [
+        ConflictScore(scene_index=0, start=60.0, end=74.0, score=95),
+        ConflictScore(scene_index=1, start=30.0, end=44.0, score=60),
+    ]
+    plan = build_ultra_short(stamp([(1, "ep1", scenes)]), _STRATEGY)
+    conflict = plan.timeline[1]
+    assert (conflict.start, conflict.end) == (60.0, 68.0)
 
 
 def test_cross_without_material_is_byte_identical() -> None:
@@ -158,6 +187,6 @@ def test_build_plan_threads_material_into_ultra_short() -> None:
         {},
     )
     hook, conflict, cta = snapped.timeline
-    assert (hook.start, hook.end) == (140.0, 144.0), "hook 旁白段不吸附"
+    assert (hook.start, hook.end) == (110.0, 140.0), "hook 尾锚在冲突场景开头，不吸附"
     assert (conflict.start, conflict.end) == (140.0, 147.9), "冲突窗口 end 吸附到拍点"
-    assert (cta.start, cta.end) == (151.0, 155.0), "CTA 段不吸附"
+    assert (cta.start, cta.end) == (147.9, 162.9), "CTA 段不吸附"

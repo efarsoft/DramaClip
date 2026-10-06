@@ -519,7 +519,18 @@ def _plan_one(
         )
 
     scenes, highlights, material = _casting_for(context, episodes, variant)
-    plan = narration_pipeline.build_plan(mode, scenes, highlights, material, settings)
+    plan = narration_pipeline.build_plan(
+        mode,
+        scenes,
+        highlights,
+        material,
+        settings,
+        # 超短钩子的可行性选景要在规划期知道每集有多长（钩子/CTA 预算放不放得下），
+        # 不能等 TTS 实测回填才爆——2026-10-06 真机：61 字钩子把 CTA 顶出集尾。
+        source_durations={
+            str(episode["id"]): float(episode["duration"] or 0.0) for episode in episodes
+        },
+    )
     if not plan.timeline:
         # 空时间轴的方案渲染出来是一部 0 秒的片；规划期就该说清楚，不留到导出
         raise ValueError(

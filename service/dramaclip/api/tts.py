@@ -46,9 +46,14 @@ def auto_voice(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     用户不再需要手动找一段 wav（2026-09-30 出片预检拦截「voice 为空」的根治）。
     """
     from dramaclip.engines.tts import auto_voice as auto_voice_mod
+    from dramaclip.infra.storage.repos import episodes as episodes_repo
     from dramaclip.infra.storage.repos import settings as settings_repo
 
-    picked = auto_voice_mod.extract_auto_voice(context.conn, context.data_dir)
+    episode_rows = [
+        {"id": row["id"], "source_path": row["source_path"]}
+        for row in episodes_repo.list_by_project(context.conn, str(params.get("project_id", "")))
+    ]
+    picked = auto_voice_mod.extract_auto_voice(context.conn, context.data_dir, episode_rows)
     settings_repo.set_value(context.conn, "tts.voice.indextts2", picked["path"])
     quality = reference_qc.inspect_reference(Path(picked["path"]))
     return {
