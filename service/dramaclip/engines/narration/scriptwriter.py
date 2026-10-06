@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,9 @@ _EPISODE_LINE_CAP = 80
 _TOTAL_LINE_CAP = 500
 _MIN_LINES_PER_EPISODE = 3  # 集数再多，每集也至少露面的保底线
 _MAX_ATTEMPTS = 3  # 首次 + 最多 2 次重试：网关抖动与模型手滑都不该一次判死
+# 网络类失败（LlmUnavailable）的退避：端点停顿窗口常在分钟级，背靠背重试只会
+# 再撞一次（2026-10-06 真机：内心独白变体连续两次读超时整条报废）。格式类失败不退避。
+_RETRY_BACKOFF_S = (15.0, 30.0)
 
 # 重试注入的格式强化：原样重问等于期待模型原样再犯一遍。
 _FORMAT_REINFORCEMENT = (
@@ -396,6 +400,13 @@ def write_script_episodes(
             if raw is not None:
                 attempt_trace["raw"] = raw
             attempts.append(attempt_trace)
+            if isinstance(exc, LlmUnavailable) and attempt < _MAX_ATTEMPTS - 1:
+                # 端点停顿窗口常在分钟级：退避等窗口过去，背靠背重试只会再撞一次
+                delay = _RETRY_BACKOFF_S[min(attempt, len(_RETRY_BACKOFF_S) - 1)]
+                logger.warning(
+                    "LLM 网络类失败，%.0fs 后重试 (%d/%d)", delay, attempt + 1, _MAX_ATTEMPTS
+                )
+                time.sleep(delay)
             continue
         attempts.append(
             {

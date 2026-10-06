@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,8 @@ from dramaclip.engines.narration import casting, scriptwriter
 from dramaclip.engines.narration.models import NarrationText, PlanData, TimelineSegment
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
 
+logger = logging.getLogger(__name__)
+
 COPY_LLM_TIMEOUT_S = 240.0  # 与编剧同量级：多槽位成稿实测可达 100s+
 _MAX_LINE_CHARS = 60
 # 超短的全部文案就一两条：60 字/段的分段阅读规则套在它身上会逼出 6 秒残件
@@ -20,6 +23,9 @@ _MAX_LINE_CHARS = 60
 _ULTRA_SHORT_LINE_CHARS = 240
 _OVERSIZE_TOLERANCE = 1.2  # 容忍 20% 溢出，再长即判不合格重问
 _ATTEMPTS = 2
+# 端点停顿窗口常在分钟级（2026-10-06 真机：连续两波 >240s 的字节间停顿整条报废）：
+# 网络类失败退避后再试，别背靠背撞同一堵墙。格式类失败（模型手滑）不退避。
+_COPY_RETRY_BACKOFF_S = (15.0, 30.0)
 
 
 def _line_cap_of(mode: str) -> int:
@@ -173,11 +179,13 @@ def write_plan_copy(
         + _slot_block(plan.narration_texts, plan.timeline, material)
         + (f"\n\n解说风格要求：{directives}" if directives else "")
     )
-    llm = LlmClient(config, timeout_s=COPY_LLM_TIMEOUT_S)
+    llm = LlmClient(
+        config, timeout_s=float(settings.get("llm.timeout_s") or COPY_LLM_TIMEOUT_S)
+    )
     system = system_prompt(settings, mode=plan.mode)
     attempts: list[dict[str, Any]] = []
     filled: dict[str, str] | None = None
-    for _ in range(_ATTEMPTS):
+    for round_index in range(_ATTEMPTS):
         try:
             raw = llm.chat_json(system, user_prompt)
             filled = _sanitize(
@@ -185,6 +193,14 @@ def write_plan_copy(
             )
         except (LlmUnavailable, ValueError, TypeError, KeyError) as exc:
             attempts.append({"error": f"{type(exc).__name__}: {exc}"})
+            if isinstance(exc, LlmUnavailable) and round_index < _ATTEMPTS - 1:
+                delay = _COPY_RETRY_BACKOFF_S[
+                    min(round_index, len(_COPY_RETRY_BACKOFF_S) - 1)
+                ]
+                logger.warning(
+                    "LLM 网络类失败，%.0fs 后重试 (%d/%d)", delay, round_index + 1, _ATTEMPTS
+                )
+                time.sleep(delay)
             continue
         attempts.append({"raw": raw, "accepted": True})
         break

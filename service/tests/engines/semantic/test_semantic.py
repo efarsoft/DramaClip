@@ -179,3 +179,15 @@ def test_genre_trace_exposes_the_silent_fallback(tmp_path: Path) -> None:
     blob = _read(trace)
     assert blob["raw"] == {"genre": "武侠"}
     assert blob["matched"] is False and blob["degraded"] is True
+
+
+def test_from_settings_honors_llm_timeout_override() -> None:
+    """llm.timeout_s 覆盖默认 60s：慢端点的字节间停顿容忍按端点调。"""
+    from dramaclip.engines.semantic import llm_client
+
+    settings = {"llm.base_url": "https://x/v1", "llm.model": "m", "llm.timeout_s": "240"}
+    client = llm_client.from_settings(settings)
+    assert client._timeout_s == 240.0
+
+    default_client = llm_client.from_settings({"llm.base_url": "https://x/v1", "llm.model": "m"})
+    assert default_client._timeout_s == llm_client._REQUEST_TIMEOUT_S

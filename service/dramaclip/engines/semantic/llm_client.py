@@ -40,7 +40,12 @@ class LlmConfig:
 
 
 def from_settings(settings: dict[str, str]) -> LlmClient:
-    return LlmClient(LlmConfig.from_settings(settings))
+    config = LlmConfig.from_settings(settings)
+    # llm.timeout_s：字节间停顿容忍（socket 超时=不活动上限，不是总时长上限）。
+    # 官方端点 60s 足够；中转端点偶发分钟级停顿，调大免得整条方案被读超时判死
+    # （2026-10-06 真机：内心独白变体连续两次读超时整条报废）。
+    timeout = float(settings.get("llm.timeout_s") or _REQUEST_TIMEOUT_S)
+    return LlmClient(config, timeout_s=timeout)
 
 
 class LlmClient:

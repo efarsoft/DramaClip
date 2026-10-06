@@ -81,6 +81,7 @@ def llm(monkeypatch: pytest.MonkeyPatch) -> Any:
     FakeLlm.systems = []
     FakeLlm.queue = []
     monkeypatch.setattr(copywriter, "LlmClient", FakeLlm)
+    monkeypatch.setattr(copywriter, "_COPY_RETRY_BACKOFF_S", (0.0, 0.0))
     return FakeLlm
 
 
@@ -374,3 +375,33 @@ def test_copy_structure_override_replaces_only_the_structure(llm: Any) -> None:
     assert system.startswith("只回 JSON。")
     assert "lines 必须覆盖全部槽位" not in system
     assert "【解说基本功——逐条强制遵守】" in system
+
+
+def test_network_failure_backs_off_before_retry(
+    llm: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """网络类失败（LlmUnavailable）重试前退避——端点停顿是分钟级的，背靠背重试
+    只会再撞一次（2026-10-06 真机：连续两波停顿把内心独白整条报废）。"""
+    slept: list[float] = []
+    monkeypatch.setattr(copywriter.time, "sleep", slept.append)
+    monkeypatch.setattr(copywriter, "_COPY_RETRY_BACKOFF_S", (15.0, 30.0))
+    llm.queue = [LlmUnavailable("网关停顿"), {"lines": []}]
+    with pytest.raises(ValueError, match="未产出合格文案"):
+        copywriter.write_plan_copy(
+            _plan(), _MATERIAL, _SETTINGS, mode_label=_MODE_LABEL, angle_block=""
+        )
+    assert slept == [15.0], "网络类失败重试前应退避 _COPY_RETRY_BACKOFF_S[0]"
+
+
+def test_format_failure_does_not_back_off(
+    llm: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """格式类失败（模型手滑）是模型行为不是端点行为：立即重问，不退避。"""
+    slept: list[float] = []
+    monkeypatch.setattr(copywriter.time, "sleep", slept.append)
+    llm.queue = [{"lines": []}]
+    with pytest.raises(ValueError, match="未产出合格文案"):
+        copywriter.write_plan_copy(
+            _plan(), _MATERIAL, _SETTINGS, mode_label=_MODE_LABEL, angle_block=""
+        )
+    assert slept == [], "格式类失败不该退避"
