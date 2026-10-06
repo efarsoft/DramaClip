@@ -15,18 +15,28 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 from dramaclip.engines.tts import reference_clean, vocal_separation
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 from dramaclip.infra.storage.repos import analysis as analysis_repo
-from dramaclip.infra.storage.repos import episodes as episodes_repo
-from dramaclip.infra.storage.repos import projects as projects_repo
 
 _MIN_S, _MAX_S, _TARGET_S = 4.0, 10.0, 8.0
 _EXTRACT_AR = 24000
+
+# 一次提取 = ffmpeg 抽段 + MDX 分离，全程秒级文件名落盘。并发出片批里多条
+# 任务同时走到这里会互踩（同秒同名 raw、先洗完先删、MDX 模型并发加载），
+# 所以整条提取管线串行；可重入——调用方可在锁内先查再调 extract_auto_voice。
+_EXTRACT_LOCK = threading.RLock()
+
+
+def extract_lock() -> threading.RLock:
+    """提取串行锁：调用方要「锁内查最新音色、没有才提取」时用它包住整段。"""
+    return _EXTRACT_LOCK
 
 
 def _segments_of(analysis_row: dict[str, Any]) -> list[dict[str, Any]]:
@@ -72,18 +82,10 @@ def _pick_span(segments: list[dict[str, Any]], speaker: str) -> tuple[float, flo
 
 
 def pick_best_span(
-    conn: Any, episodes: list[dict[str, Any]] | None = None
+    conn: Any, episodes: list[dict[str, Any]]
 ) -> tuple[dict[str, Any], float, float, str] | None:
-    """跨集选最优：(集行, start, end, 主角)。优先集号新（分析新）、时长接近 7s。"""
-    if episodes is not None:
-        rows = episodes
-    else:
-        # 未显式给集行时跨项目扫描：参考音色与项目无关，哪个剧的主角清晰用哪个
-        rows = [
-            episode
-            for project in projects_repo.list_all(conn)
-            for episode in episodes_repo.list_by_project(conn, str(project["id"]))
-        ]
+    """在给定集行里选最优：(集行, start, end, 主角)。时长越接近 7s 越优。"""
+    rows = episodes
     best: tuple[float, dict[str, Any], float, float, str] | None = None
     for row in rows:
         record = analysis_repo.get(conn, str(row["id"]))
@@ -105,9 +107,14 @@ def pick_best_span(
     return (row, start, end, speaker)
 
 
-def extract_auto_voice(conn: Any, data_dir: Path) -> dict[str, Any]:
+def extract_auto_voice(conn: Any, data_dir: Path, episodes: list[dict[str, Any]]) -> dict[str, Any]:
     """主入口：选段 → ffmpeg 抽音频 → 人声分离 → 落盘。返回给前端展示/直接采用。"""
-    picked = pick_best_span(conn)
+    with _EXTRACT_LOCK:
+        return _extract_locked(conn, data_dir, episodes)
+
+
+def _extract_locked(conn: Any, data_dir: Path, episodes: list[dict[str, Any]]) -> dict[str, Any]:
+    picked = pick_best_span(conn, episodes)
     if picked is None:
         raise ValueError(
             "剧集中没有可用的参考段：需要先完成剧集分析（带说话人），"
@@ -120,7 +127,7 @@ def extract_auto_voice(conn: Any, data_dir: Path) -> dict[str, Any]:
 
     voices_dir = data_dir / "voices"
     voices_dir.mkdir(parents=True, exist_ok=True)
-    stamp = time.strftime("%m%d-%H%M%S")
+    stamp = f"{time.strftime('%m%d-%H%M%S')}-{uuid.uuid4().hex[:4]}"
     raw_path = voices_dir / f"auto-raw-{stamp}.wav"
     subprocess.run(
         [

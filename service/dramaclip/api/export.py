@@ -125,11 +125,7 @@ def submit(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
             rejected.append({"plan_id": plan_id, "reason": exc.message})
             continue
         project_id = str(plan_row["project_id"])
-        from dramaclip.api import narration as narration_api
-
-        voice_issue = _tts_preflight_error(
-            plan_data, narration_api._effective_settings(context, project_id)
-        )
+        voice_issue = _voice_issue_or_none(context, plan_data, project_id)
         if voice_issue is not None:
             rejected.append({"plan_id": plan_id, "reason": voice_issue})
             continue
@@ -153,35 +149,44 @@ def submit(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
 _VOICE_NEEDED_ENGINES = frozenset({"indextts2", "cosyvoice", "cosyvoice3"})
 
 
-def _tts_preflight_error(plan_data: PlanData, settings: dict[str, Any]) -> str | None:
-    """出片受理前的配音配置预检：有旁白 + 克隆引擎 + 未配参考音色 → 指导文案。
+def _auto_voice_available(conn: Any, episode_paths: dict[str, str]) -> bool:
+    """可行性判定：本剧剧集里是否存在可自动提取的参考段（带说话人的 4~10s 台词）。"""
+    from dramaclip.engines.tts import auto_voice
 
-    不拦的话整片渲染到 TTS 逐段才炸，白跑（2026-09-30 实测：4 条出片全失败
-    于「voice 为空」）。克隆引擎的运行环境未装同类晚炸，一并拦。返回 None
-    = 配置可用。引擎集合与 tts engines capabilities.supports_cloning 对齐。
+    rows = [{"id": eid, "source_path": src} for eid, src in episode_paths.items()]
+    return auto_voice.pick_best_span(conn, rows) is not None
 
-    克隆引擎**只认专属键 tts.voice.<engine>**，不回退旧全局 tts.voice——
-    那是 Kokoro 时代的音色号（如 zf_003），对克隆引擎是无效路径，非空也
-    必炸；放行一个无效值比拦下它更误事。
+
+def _voice_issue_or_none(
+    context: AppContext, plan_data: PlanData, project_id: str
+) -> str | None:
+    """出片受理的配音可行性判定：能自动提取就放行，真不行才拒并说清原因。
+
+    克隆引擎 + 未配参考音色时，**自动从剧集提取**（渲染启动时执行，见
+    _ensure_clone_voice）——自动化纪律：用户不看素材，音色从哪来不该问用户。
+    只有自动提取也不可行（无带说话人的分析）才拒。
     """
     if not plan_data.narration_texts:
-        return None
+        return None  # 纯原片不需要配音
+    from dramaclip.api import narration as narration_api
+    from dramaclip.engines.tts import auto_voice
+
+    settings = narration_api._effective_settings(context, project_id)
     engine = str(settings.get("tts.engine") or "edge").strip()
     if engine not in _VOICE_NEEDED_ENGINES:
-        return None
-    voice = str(settings.get(f"tts.voice.{engine}") or "").strip()
-    if not voice:
-        return (
-            f"配音引擎 {engine} 需要参考音色（任意 3~10 秒人声 wav）："
-            "去「引擎中心 → 配音」选择参考音频；或把配音引擎切到 Edge（云端免费）/"
-            "Kokoro（本地）后再出片"
-        )
-    if engine == "indextts2":
-        from dramaclip.engines.tts.engines.indextts2 import runtime_ready
-
-        if not runtime_ready():
-            return "IndexTTS 运行环境未就绪：在引擎页「安装运行环境」后重试"
-    return None
+        return None  # edge/kokoro/auto 链首不需要参考音色
+    if str(settings.get(f"tts.voice.{engine}") or "").strip():
+        return None  # 已有参考音色
+    episode_rows = [
+        {"id": row["id"], "source_path": row["source_path"]}
+        for row in episodes_repo.list_by_project(context.conn, project_id)
+    ]
+    if auto_voice.pick_best_span(context.conn, episode_rows) is not None:
+        return None  # 可自动提取：渲染启动时补齐
+    return (
+        "无法自动提取参考音色：本剧已完成分析的剧集中没有主角 4 秒以上的连续台词段。"
+        "请先完成剧集分析（含说话人），或把配音引擎切到 Edge（云端免费）/ Kokoro（本地）"
+    )
 
 
 def _assert_renderable(plan_row: dict[str, Any], plan_data: PlanData) -> None:
@@ -224,12 +229,7 @@ def retry(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     # 守卫排在 CAS 复位之前：注定失败的重试不该把 failed 洗成 pending
     plan_data = PlanData.model_validate(plan_row["plan_data"])
     _assert_renderable(plan_row, plan_data)
-    from dramaclip.api import narration as narration_api
-
-    voice_issue = _tts_preflight_error(
-        plan_data,
-        narration_api._effective_settings(context, str(record["project_id"])),
-    )
+    voice_issue = _voice_issue_or_none(context, plan_data, str(record["project_id"]))
     if voice_issue is not None:
         raise RpcDomainError(_ERR_PLAN_NOT_RENDERABLE, voice_issue)
     # 复位是 CAS（仅当仍为 failed 才生效）：并发点两次重试时只有一个能复位成功，
@@ -973,7 +973,9 @@ def _needs_voice(plan: PlanData) -> bool:
 
 
 def _ensure_voiced(context: AppContext, plan_row: dict[str, Any], plan_data: PlanData) -> PlanData:
-    """勾选导出时才配音：规划阶段故意不合成。"""
+    """勾选导出时才配音：规划阶段故意不合成。克隆引擎没有参考音色时，
+    先**自动从剧集提取**（主角最清晰的 4~10s 台词段，人声分离去 BGM）——
+    自动化纪律：音色从哪来不该问用户，剧集本身就是最好的音色库。"""
     if not _needs_voice(plan_data):
         return plan_data
     from dramaclip.api import narration as narration_api
@@ -984,11 +986,68 @@ def _ensure_voiced(context: AppContext, plan_row: dict[str, Any], plan_data: Pla
         for episode in episodes_repo.list_by_project(context.conn, project_id)
     }
     settings = narration_api._effective_settings(context, project_id)
+    _ensure_clone_voice(context, plan_row, project_id, episodes_repo, settings)
     voiced = narration_api._voice(context, plan_data, settings, durations)
     plans_repo.update_plan_data(context.conn, str(plan_row["id"]), voiced.model_dump())
     if _needs_voice(voiced):
         raise ValueError("旁白音频合成失败，不能用原声顶替")
     return voiced
+
+
+def _ensure_clone_voice(
+    context: AppContext,
+    plan_row: dict[str, Any],
+    project_id: str,
+    episodes_repo: Any,
+    settings: dict[str, str],
+) -> None:
+    """克隆引擎 + 未配参考音色 → 自动从本剧剧集提取主角音色并设为参考。
+
+    用带说话人标签的分析数据：选台词字数最多的主角最清晰的 4~10s 连续段。
+    写 DB + 就地改 settings 快照（后续 voice_for 读同一 dict）。提取失败
+    （无分析/源缺失）原样抛——导出按失败处理，理由如实。
+
+    一批出片会多条任务并发走到这里：提取全程持锁，且锁内重读 DB——
+    手动提取按钮或兄弟任务刚写好的音色直接复用，不重复跑 MDX 分离。
+    """
+    from dramaclip.engines.tts import auto_voice
+    from dramaclip.infra.storage.repos import settings as settings_repo
+
+    engine = str(settings.get("tts.engine") or "edge").strip()
+    if engine not in _VOICE_NEEDED_ENGINES:
+        return
+    voice_key = f"tts.voice.{engine}"
+    if str(settings.get(voice_key) or "").strip():
+        return  # 已有参考音色
+    with auto_voice.extract_lock():
+        fresh = str(settings_repo.get_all(context.conn).get(voice_key) or "").strip()
+        if fresh:
+            settings[voice_key] = fresh
+            return
+        episode_rows = [
+            {"id": row["id"], "source_path": row["source_path"]}
+            for row in episodes_repo.list_by_project(context.conn, project_id)
+            if row["status"] == "done"
+        ]
+        picked = auto_voice.pick_best_span(context.conn, episode_rows)
+        if picked is None:
+            raise ValueError(
+                "无法自动提取参考音色：本剧剧集分析里没有主角 4 秒以上的连续台词段。"
+                "请先完成剧集分析，或在引擎中心把配音引擎切到 Edge（云端免费）"
+            )
+        row, start, end, speaker = picked
+        result = auto_voice.extract_auto_voice(
+            context.conn,
+            context.data_dir,
+            [{"id": row["id"], "source_path": row["source_path"]}],
+        )
+        settings[voice_key] = result["path"]
+        settings_repo.set_value(context.conn, voice_key, result["path"])
+        context.notifier.log(
+            "info",
+            f"已自动从剧集提取参考音色（{speaker}，{result['seconds']}s，人声分离完成）"
+            f"并设为 {engine} 参考",
+        )
 
 
 def _ensure_titles(context: AppContext, plan_row: dict[str, Any]) -> None:
