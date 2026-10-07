@@ -89,12 +89,13 @@ def test_extract_subtitles_returns_detected_band(
         subtitle_ocr, "_probe_frames", lambda *_a, **_k: [(0.5, p) for p in probes]
     )
     monkeypatch.setattr(subtitle_ocr, "_sample_frames", lambda *_a, **_k: [])
-    segments, band = subtitle_ocr.extract_subtitles(
+    segments, band, lines = subtitle_ocr.extract_subtitles(
         Path("fake.mp4"), tmp_path, duration_s=3.0, ocr=lambda _p: []
     )
     assert segments == []
     assert band is not None, "探测到的字幕带必须回传，不能用完即弃"
     assert band[0] <= 0.65 and band[1] >= 0.68, "回传的 band 覆盖探针实测位置"
+    assert lines is not None and lines[0][0] <= 0.65, "行框同样回传（逐行擦除用）"
 
 
 def test_extract_subtitles_band_none_when_not_detected(
@@ -102,10 +103,12 @@ def test_extract_subtitles_band_none_when_not_detected(
 ) -> None:
     monkeypatch.setattr(subtitle_ocr, "_probe_frames", lambda *_a, **_k: [])
     monkeypatch.setattr(subtitle_ocr, "_sample_frames", lambda *_a, **_k: [])
-    segments, band = subtitle_ocr.extract_subtitles(
+    segments, band, lines = subtitle_ocr.extract_subtitles(
         Path("fake.mp4"), tmp_path, duration_s=3.0, ocr=lambda _p: []
     )
-    assert segments == [] and band is None, "未探到带 → band 为 None（NULL 语义）"
+    assert segments == [] and band is None and lines is None, (
+        "未探到带 → band/行框均为 None（NULL 语义）"
+    )
 
 
 def test_extract_subtitles_passes_through_given_band(
@@ -116,8 +119,9 @@ def test_extract_subtitles_passes_through_given_band(
 
     monkeypatch.setattr(subtitle_ocr, "_probe_frames", forbidden_probe)
     monkeypatch.setattr(subtitle_ocr, "_sample_frames", lambda *_a, **_k: [])
-    segments, band = subtitle_ocr.extract_subtitles(
+    segments, band, lines = subtitle_ocr.extract_subtitles(
         Path("fake.mp4"), tmp_path, duration_s=3.0, ocr=lambda _p: [], band=(0.5, 0.6)
     )
     assert segments == []
     assert band == (0.5, 0.6), "外部传入的 band 原样回传（调用方拿它落库）"
+    assert lines is None, "外部传入 band 时行框未知，回 None（调用方按整带回退）"

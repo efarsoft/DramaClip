@@ -505,7 +505,7 @@ def _run_job(
             context.job_store.set_progress(job_id, percent, message)
             context.notifier.progress(job_id, percent, message)
 
-        bars_by_episode, bands_by_episode, hotwords = _mine_hotwords(
+        bars_by_episode, bands_by_episode, lines_by_episode, hotwords = _mine_hotwords(
             context, targets, cancel_event, on_episode=mining_report
         )
         for index, episode in enumerate(targets):
@@ -523,6 +523,7 @@ def _run_job(
                 language,
                 cancel_event,
                 ocr_bars=bars,
+                ocr_lines=lines_by_episode.get(episode_id),
                 ocr_band=bands_by_episode.get(episode_id),
                 hotwords=hotwords,
             ):
@@ -550,6 +551,7 @@ def _analyze_one(
     *,
     ocr_bars: list[OcrSegment] | None = None,
     ocr_band: tuple[float, float] | None = None,
+    ocr_lines: list[tuple[float, float]] | None = None,
     hotwords: str = "",
 ) -> bool:
     """分析单集；返回是否成功（失败标记后继续其余集）。
@@ -594,9 +596,9 @@ def _analyze_one(
                 report=report,
                 hotwords=hotwords,
             )
-            asr_segments, ocr_segments, band = _fuse_ocr(
-                context, episode, raw.asr_segments, ocr_bars, ocr_band
-            )
+            asr_segments, ocr_segments, band, band_lines = _fuse_ocr(
+                context, episode, raw.asr_segments, ocr_bars, ocr_band, ocr_lines
+            )  # noqa: F841 - band_lines 落库见下方 subtitle_band
             ocr_json = (
                 json.dumps([o.model_dump() for o in ocr_segments]) if ocr_segments else None
             )
@@ -607,8 +609,17 @@ def _analyze_one(
                 scene_data=json.dumps([scene.model_dump() for scene in raw.scenes]),
                 audio_features=raw.audio.model_dump_json(),
                 ocr_segments=ocr_json,
-                # A2 避让数据链落库：NULL=无硬字幕带/未探测/OCR 未装，烧录端对 NULL 回退现状边距
-                subtitle_band=(json.dumps([band[0], band[1]]) if band is not None else None),
+                # 覆盖数据链落库：{"band": [t,b], "lines": [[t,b],...]}（旧库为纯 list，
+                # 读取端两种都认）。NULL=无硬字幕带/未探测/OCR 未装，消费端回退现状
+                subtitle_band=(
+                    json.dumps(
+                        {"band": [band[0], band[1]], "lines": band_lines or []}
+                        if band is not None
+                        else None
+                    )
+                    if band is not None
+                    else None
+                ),
                 # 语义列显式清空（upsert 传 None 即置 NULL）：此后任何时刻挂掉，
                 # 重入判据都能识别「这份源的第一层已就绪，只欠语义」。
             )
@@ -668,26 +679,33 @@ def _fuse_ocr(
     asr: list[AsrSegment],
     ocr_bars: list[OcrSegment] | None = None,
     ocr_band: tuple[float, float] | None = None,
-) -> tuple[list[AsrSegment], list[OcrSegment] | None, tuple[float, float] | None]:
+    ocr_lines: list[tuple[float, float]] | None = None,
+) -> tuple[
+    list[AsrSegment],
+    list[OcrSegment] | None,
+    tuple[float, float] | None,
+    list[tuple[float, float]] | None,
+]:
     """硬字幕 OCR 通道 + 融合（analysis.ocr_enabled 默认开）。
 
-    第三元是探测到的源字幕带（A2 避让）：即便没融合出字幕条也要回传落库——
-    带的位置是源片属性，与本轮台词抽取成败无关。
+    第三元是探测到的源字幕带、第四元是逐行框（覆盖数据链）：即便没融合出字幕条
+    也要回传落库——带的位置是源片属性，与本轮台词抽取成败无关。
     """
     if context.settings.get("analysis.ocr_enabled", "1") != "1":
-        return asr, None, ocr_band
+        return asr, None, ocr_band, ocr_lines
     if ocr_bars is None:
-        ocr_bars, ocr_band = _extract_bars(context, episode)
-        if ocr_bars is None:
-            return asr, None, ocr_band
+        extracted = _extract_bars(context, episode)
+        if extracted is None:
+            return asr, None, ocr_band, ocr_lines
+        ocr_bars, ocr_band, ocr_lines = extracted
     if not ocr_bars:
-        return asr, None, ocr_band
-    return fusion.fuse(asr, ocr_bars), ocr_bars, ocr_band
+        return asr, None, ocr_band, ocr_lines
+    return fusion.fuse(asr, ocr_bars), ocr_bars, ocr_band, ocr_lines
 
 
 def _cached_mining(
     context: AppContext, episode: dict[str, Any], *, ocr_enabled: bool
-) -> tuple[list[OcrSegment], tuple[float, float]] | None:
+) -> tuple[list[OcrSegment], tuple[float, float], list[tuple[float, float]] | None] | None:
     """跨轮复用：源视频在分析后未变 + 已有字幕条产物 → 直接复用，不重挖。
 
     判据：视频 mtime ≤ analyzed_at（分析晚于素材改动）。ocr_channel 不参与——
@@ -706,23 +724,34 @@ def _cached_mining(
         return None
     try:
         bars = [OcrSegment.model_validate(b) for b in json.loads(row["ocr_segments"])]
-        band = json.loads(row["subtitle_band"])
-        return bars, (float(band[0]), float(band[1]))
+        parsed = json.loads(row["subtitle_band"])
+        # 两种落库格式都认：新 = {"band": [...], "lines": [[t,b],...]}；旧 = [t, b]
+        if isinstance(parsed, dict):
+            band = (float(parsed["band"][0]), float(parsed["band"][1]))
+            lines = [(float(t), float(b)) for t, b in parsed.get("lines") or []]
+        else:
+            band = (float(parsed[0]), float(parsed[1]))
+            lines = None
+        return bars, band, lines or None
     except (ValueError, TypeError, KeyError):
         return None
 
 
 def _extract_bars(
     context: AppContext, episode: dict[str, Any]
-) -> tuple[list[OcrSegment] | None, tuple[float, float] | None]:
-    """单集 OCR 抽取，返回 (字幕条, 源字幕带)；失败返回 (None, None) 并留痕（不阻塞分析主链路）。
+) -> tuple[
+    list[OcrSegment] | None,
+    tuple[float, float] | None,
+    list[tuple[float, float]] | None,
+]:
+    """单集 OCR 抽取，返回 (字幕条, 源带, 行框)；失败返回 None 并留痕（不阻塞分析主链路）。
 
-    字幕带随字幕条一起回传（A2 避让数据链）：调用方落库 episode_analysis.subtitle_band，
-    烧录字幕据此抬 MarginV 避开源片硬字幕——是避让不是擦除，源片像素不动。
+    字幕带与逐行框随字幕条一起回传（覆盖数据链）：调用方落库
+    episode_analysis.subtitle_band，编码端 delogo 逐行擦除、烧录字幕带内压位。
     """
     duration = float(episode["duration"] or 0)
     if duration <= 0:
-        return None, None
+        return None, None, None
     try:
         return subtitle_ocr.extract_subtitles(
             Path(str(episode["source_path"])),
@@ -730,10 +759,10 @@ def _extract_bars(
             duration_s=duration,
         )
     except ImportError:
-        return None, None  # rapidocr 未安装：ml extras 约定的纯 ASR 路径
+        return None, None, None  # rapidocr 未安装：ml extras 约定的纯 ASR 路径
     except Exception as exc:  # noqa: BLE001 - OCR 失败不影响分析主链路
         context.notifier.log("warn", f"OCR 字幕通道失败（不影响分析）: {exc}")
-        return None, None
+        return None, None, None
 
 
 def _mine_hotwords(
@@ -743,23 +772,31 @@ def _mine_hotwords(
     on_episode: Callable[[int, int], None] | None = None,
     *,
     ocr_enabled: bool = True,
-) -> tuple[dict[str, list[OcrSegment]], dict[str, tuple[float, float]], str]:
-    """阶段 A：全剧 OCR 抽取（落库）→ 挖掘全剧热词表；字幕带按集回传给逐集分析落库。"""
+) -> tuple[
+    dict[str, list[OcrSegment]],
+    dict[str, tuple[float, float]],
+    dict[str, list[tuple[float, float]]],
+    str,
+]:
+    """阶段 A：全剧 OCR 抽取（落库）→ 挖掘全剧热词表；字幕带与逐行框按集回传。"""
     bars_by_episode: dict[str, list[OcrSegment]] = {}
     bands_by_episode: dict[str, tuple[float, float]] = {}
+    lines_by_episode: dict[str, list[tuple[float, float]]] = {}
     if context.settings.get("analysis.ocr_enabled", "1") != "1":
-        return bars_by_episode, bands_by_episode, ""
+        return bars_by_episode, bands_by_episode, lines_by_episode, ""
     for index, episode in enumerate(targets):
         if cancel_event.is_set():
             break
         episode_id = str(episode["id"])
         cached = _cached_mining(context, episode, ocr_enabled=ocr_enabled)
-        bars, band = cached if cached is not None else _extract_bars(context, episode)
+        bars, band, lines = cached if cached is not None else _extract_bars(context, episode)
         if on_episode is not None:
             on_episode(index + 1, len(targets))
         if band is not None:
             # 带是源片属性：即使本集没抽出字幕条（bars 为空）也记下来，逐集分析时落库
             bands_by_episode[episode_id] = band
+            if lines:
+                lines_by_episode[episode_id] = lines
         if not bars:
             continue
         bars_by_episode[episode_id] = bars
@@ -769,4 +806,4 @@ def _mine_hotwords(
     hotwords = hotwords_engine.mine([b for bars in bars_by_episode.values() for b in bars])
     if hotwords:
         context.notifier.log("info", f"全剧热词表：{hotwords}")
-    return bars_by_episode, bands_by_episode, hotwords
+    return bars_by_episode, bands_by_episode, lines_by_episode, hotwords

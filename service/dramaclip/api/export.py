@@ -784,6 +784,8 @@ def render_export(
     # 形状不对（非两元素数值对）一律不进缓存 → build_ass 收 None → 现状 margin_v，
     # 逐字节不变。
     subtitle_bands: dict[str, tuple[float, float]] = {}
+    # 行级擦除矩形（2026-10-07 业主追加：只擦检测到的文字行，不擦整带）
+    subtitle_line_rects: dict[str, list[tuple[float, float]]] = {}
     for segment in plan_data.timeline:
         episode_id = segment.episode_id
         if episode_id in dialogue_zones:
@@ -797,7 +799,33 @@ def render_export(
                 parsed = json.loads(str(band_raw))
             except (TypeError, json.JSONDecodeError):
                 parsed = None
-            if (
+            # 两种落库格式都认：新 = dict（band+lines）；旧 = 纯 list（band）
+            if isinstance(parsed, dict):
+                band_list = parsed.get("band")
+                if (
+                    isinstance(band_list, list)
+                    and len(band_list) == 2
+                    and all(
+                        isinstance(v, (int, float)) and not isinstance(v, bool)
+                        for v in band_list
+                    )
+                ):
+                    subtitle_bands[episode_id] = (float(band_list[0]), float(band_list[1]))
+                raw_lines = parsed.get("lines")
+                if isinstance(raw_lines, list):
+                    rects = [
+                        (float(item[0]), float(item[1]))
+                        for item in raw_lines
+                        if isinstance(item, list)
+                        and len(item) == 2
+                        and all(
+                            isinstance(v, (int, float)) and not isinstance(v, bool)
+                            for v in item
+                        )
+                    ]
+                    if rects:
+                        subtitle_line_rects[episode_id] = rects
+            elif (
                 isinstance(parsed, list)
                 and len(parsed) == 2
                 and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in parsed)
@@ -933,6 +961,7 @@ def render_export(
         ),
         dialogue_zones=dialogue_zones,
         subtitle_bands=subtitle_bands,
+        subtitle_erase_rects=subtitle_line_rects,
         out_size=out_size,
         loudness_target=loudness.LoudnessTarget.from_settings(context.settings),
     )

@@ -233,7 +233,7 @@ def test_cut_segment_args_band_erasure_delogo() -> None:
         audio="narration",
         tts_audio=None,
         rng=random.Random(42),
-        band=band,
+        erase_rects=[band],
     )
     joined = " ".join(args)
     assert "delogo=" in joined, "有 band 必须有 delogo 擦除"

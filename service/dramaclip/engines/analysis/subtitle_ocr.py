@@ -65,26 +65,29 @@ def extract_subtitles(
     duration_s: float,
     ocr: OcrCallable | None = None,
     band: tuple[float, float] | None = None,
-) -> tuple[list[OcrSegment], tuple[float, float] | None]:
-    """抽取全集硬字幕条，并回传字幕带 (segments, band)。
+) -> tuple[list[OcrSegment], tuple[float, float] | None, list[tuple[float, float]] | None]:
+    """抽取全集硬字幕条，并回传 (segments, band, 行框列表)。
 
-    ocr 可注入（测试）；band 可传入已探测的字幕带（原样回传）。回传 band 是 A2
-    避让数据链的起点：调用方落库 episode_analysis.subtitle_band，烧录字幕据此抬
-    MarginV，不把我们的字幕叠到源片硬字幕上。未探到带时 band 为 None（NULL 语义：
-    无硬字幕带/未探测，消费端一律回退现状边距）。
+    ocr 可注入（测试）；band 可传入已探测的字幕带（原样回传，行框未知为 None）。
+    band/行框是覆盖数据链的起点：调用方落库 episode_analysis.subtitle_band，编码端
+    delogo 逐行擦除、烧录字幕带内压位。未探到带时 band/行框均为 None（NULL 语义：
+    无硬字幕带/未探测，消费端一律回退现状）。
     """
     work_dir.mkdir(parents=True, exist_ok=True)
     if ocr is None:
         ocr = _rapidocr()
     picked_band: _Band | None = None
+    lines: list[_Band] | None = None
     if band is not None:
         picked_band = _Band(top=band[0], bottom=band[1])
     if picked_band is None:
         probes = _probe_frames(video_path, work_dir, duration_s, ocr)
-        picked_band = _pick_band([boxes for _t, boxes in probes])
+        candidates = _dialogue_candidates([boxes for _t, boxes in probes])
+        picked_band = _band_from(candidates)
+        lines = _cluster_lines(candidates)
     if picked_band is None:
         _LOGGER.info("未定位到字幕带，跳过 OCR 通道：%s", video_path.name)
-        return [], None
+        return [], None, None
     frames = _sample_frames(video_path, work_dir, picked_band)
 
     def _recognize(indexed: tuple[int, Path]) -> tuple[float, FrameResult, Path]:
@@ -98,7 +101,14 @@ def extract_subtitles(
         for t0, boxes, frame in pool.map(_recognize, enumerate(frames)):
             results.append((t0, boxes))
             frame.unlink(missing_ok=True)
-    return _merge_runs(results), (picked_band.top, picked_band.bottom)
+    line_rects = (
+        [(b.top, b.bottom) for b in lines] if lines is not None else None
+    )
+    return (
+        _merge_runs(results),
+        (picked_band.top, picked_band.bottom),
+        line_rects,
+    )
 
 
 def _probe_frames(
@@ -120,11 +130,8 @@ def _probe_frames(
     return out
 
 
-def _pick_band(probes: list[FrameResult]) -> _Band | None:
-    """定位台词字幕带：探针帧中出现最多的纵向位置簇，排除常驻横幅。
-    """
-    if not probes:
-        return None
+def _dialogue_candidates(probes: list[FrameResult]) -> list[tuple[float, float]]:
+    """探针帧里的台词字幕行位置（排除常驻横幅：几乎每帧都在同一位置的框）。"""
     by_text: dict[str, list[tuple[float, float]]] = {}
     for boxes in probes:
         for text, top, bottom, _c in boxes:
@@ -133,12 +140,16 @@ def _pick_band(probes: list[FrameResult]) -> _Band | None:
     for _text, spots in by_text.items():
         if len(spots) >= max(2, len(probes) - 1):
             persistent.extend(spots)
-    candidates = [
+    return [
         (top, bottom)
         for boxes in probes
         for text, top, bottom, _c in boxes
         if (round(top, 2), round(bottom, 2)) not in persistent
     ]
+
+
+def _band_from(candidates: list[tuple[float, float]]) -> _Band | None:
+    """台词行位置 → 单一包络带（中位锚点聚类，供采样裁剪与 ASS 压位）。"""
     if not candidates:
         return None
     tops = sorted(top for top, _b in candidates)
@@ -149,6 +160,36 @@ def _pick_band(probes: list[FrameResult]) -> _Band | None:
     top = min(top for top, _b in same_band)
     bottom = max(bottom for _t, bottom in same_band)
     return _Band(max(0.0, top - _BAND_EXPAND), min(1.0, bottom + _BAND_EXPAND))
+
+
+def _pick_band(probes: list[FrameResult]) -> _Band | None:
+    """定位台词字幕带：探针帧中出现最多的纵向位置簇，排除常驻横幅。
+    """
+    return _band_from(_dialogue_candidates(probes))
+
+
+def _cluster_lines(candidates: list[tuple[float, float]]) -> list[_Band]:
+    """台词行位置 → 逐行框（top 间距超阈值即分行），供 delogo 逐行擦除。
+
+    行级矩形比整带紧：不擦行间空隙与带边缘的画面，涂抹痕迹更小
+    （2026-10-07 业主追加：只对检测到的文字行做擦除）。
+    """
+    if not candidates:
+        return []
+    tops = sorted(top for top, _b in candidates)
+    anchors = [tops[0]]
+    for top in tops[1:]:
+        if top - anchors[-1] > _BAND_EXPAND * 2:
+            anchors.append(top)
+    lines: list[_Band] = []
+    for anchor in anchors:
+        same = [(t, b) for t, b in candidates if abs(t - anchor) <= _BAND_EXPAND * 2]
+        if not same:
+            continue
+        top = min(t for t, _b in same)
+        bottom = max(b for _t, b in same)
+        lines.append(_Band(max(0.0, top - _BAND_EXPAND), min(1.0, bottom + _BAND_EXPAND)))
+    return lines
 
 
 def _extract_frame(video_path: Path, work_dir: Path, at: float) -> Path | None:

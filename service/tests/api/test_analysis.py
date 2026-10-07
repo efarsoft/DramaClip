@@ -665,7 +665,7 @@ def test_detected_subtitle_band_is_persisted(
     """extract_subtitles 回传的 band 必须落库，不能用完即弃。"""
 
     def fake_extract(*_a: Any, **_k: Any) -> Any:
-        return ([], (0.76, 0.9))
+        return ([], (0.76, 0.9), [(0.76, 0.82)])
 
     monkeypatch.setattr(analysis_api.subtitle_ocr, "extract_subtitles", fake_extract)
     project_id = _make_project(harness, tmp_path, sample_video, copies=1)
@@ -674,7 +674,9 @@ def test_detected_subtitle_band_is_persisted(
     episode_id = str(episodes_repo.list_by_project(memory_db, project_id)[0]["id"])
     record = analysis_repo.get(memory_db, episode_id)
     assert record is not None
-    assert json.loads(str(record["subtitle_band"])) == [0.76, 0.9]
+    stored = json.loads(str(record["subtitle_band"]))
+    assert stored["band"] == [0.76, 0.9], "band 落库"
+    assert stored["lines"] == [[0.76, 0.82]], "行框落库（逐行擦除用）"
 
 
 def test_ocr_import_error_leaves_band_null_and_does_not_crash(
