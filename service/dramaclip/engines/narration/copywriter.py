@@ -12,6 +12,7 @@ from dramaclip.engines import llm_prompts
 from dramaclip.engines.llm_trace import dump_trace, trace_path
 from dramaclip.engines.narration import casting, scriptwriter
 from dramaclip.engines.narration.models import NarrationText, PlanData, TimelineSegment
+from dramaclip.engines.narration.numerals import to_chinese_numerals
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
 
 logger = logging.getLogger(__name__)
@@ -137,7 +138,7 @@ def _sanitize(
         if not isinstance(item, dict):
             continue
         key = str(item.get("id", "")).strip()
-        value = str(item.get("text", "")).strip()
+        value = to_chinese_numerals(str(item.get("text", "")).strip())
         if key not in wanted or value == "":
             continue
         if len(value) > limit:

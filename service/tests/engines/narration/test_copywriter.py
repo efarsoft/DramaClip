@@ -91,8 +91,9 @@ def test_fills_every_slot_and_flips_planner(llm: Any) -> None:
         _plan(), _MATERIAL, _SETTINGS, mode_label=_MODE_LABEL, angle_block=""
     )
     assert plan.planner == "llm_script"
+    # 数字中文化是落库前的确定性兜底：夹具给阿拉伯数字，产物必须是中文
     assert [t.text for t in plan.narration_texts] == [
-        "第 1 条解说", "第 2 条解说", "第 3 条解说", "第 4 条解说"
+        "第 一 条解说", "第 二 条解说", "第 三 条解说", "第 四 条解说"
     ]
 
 

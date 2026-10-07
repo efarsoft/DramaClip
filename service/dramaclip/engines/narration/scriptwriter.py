@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError
 
 from dramaclip.engines.llm_trace import dump_trace
+from dramaclip.engines.narration.numerals import to_chinese_numerals
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,13 @@ FUNDAMENTALS = (
     "校准原则（比上面任何一条都重要）：禁令全员永远生效；"
     "动作类要求（情绪词/拉扯/锚点/预判）全稿稀疏轮换，一稿只挑 3~5 处下重手——"
     "每条规则都用满、每段都齐备，本身就是新的机器特征。真人是有偏科的。\n"
+    "主轴与人物（观众是第一次听这个故事，一脸懵逼就是失职）："
+    "开篇前两段必须钉死三件事——主角是谁（身份+名字：萧焱，一个厨子）、"
+    "核心反常设定是什么（背着卸不下来的铁锅，锅里封着他的修为）、"
+    "他要面对什么；此后每个名字**第一次出现必须挂身份标签**"
+    "（赵狂——赵家少爷，垂陆知意美色；陆行简——她哥），"
+    "全稿有名有姓的人物不超过五个，其余一律用身份代称（她哥/那个老东西/看台上的老师傅）；"
+    "跳时间线必须给路标（「八年前」「与此同时」），插叙可以、裸跳不行。\n"
     "结构与节奏：第一段解说必须在前 3 秒抛出全片最大的悬念或反差——"
     "必须是具体事实（身份/生死/数字/当众打脸），禁止「他竟然…」式空钩。"
     "每段只讲一个信息点；段间递进靠内容本身（结果反转/行动升级），"
@@ -104,6 +112,9 @@ FUNDAMENTALS = (
     "配音的悬念感一半来自标点。"
     "正文必须是一条连续故事线：背景起因→冲突升级→高潮反转，后一段承接前一段，"
     "禁止跳跃拼凑不相关片段。善用「半句钩」：把关键揭晓切在段落边界，答案留在下一段开头。"
+    "句式必须混排：「谁+动作：台词」的段落**连续不许超过两段**——"
+    "叙述句、引语句、解说员自己的点评（「注意，锅还在他背上」）要轮着来；"
+    "三十格连环画没有旁白，观众一脸懵逼。"
     "紧凑是指不灌水，不是砍完整度：冲突链条没铺开就收尾才是失败，"
     "片长服从故事——宁可有血有肉地写到十几分钟，不要干瘪压缩，也不要为空时长注水。\n"
     "选段纪律：相邻解说尽量压在同集、时间相接或因果相接的画面上；"
@@ -225,7 +236,7 @@ def _sanitize_episodes(raw: Any, durations: dict[int, float]) -> tuple[Script | 
         duration = durations[segment.episode]
         start = max(segment.start, cursors.get(segment.episode, 0.0))
         end = min(segment.end, duration) if duration > 0 else segment.end
-        text = segment.text.strip()
+        text = to_chinese_numerals(segment.text.strip())
         if end - start < 0.5 or text == "":
             continue
         updated = {"start": round(start, 2), "end": round(end, 2), "text": text}
