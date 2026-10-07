@@ -932,6 +932,7 @@ def render_export(
             dialogue_subtitle if plan_data.mode != "raw_clip" else None
         ),
         dialogue_zones=dialogue_zones,
+        subtitle_bands=subtitle_bands,
         out_size=out_size,
         loudness_target=loudness.LoudnessTarget.from_settings(context.settings),
     )

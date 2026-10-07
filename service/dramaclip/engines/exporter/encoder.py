@@ -257,12 +257,20 @@ def cut_segment_args(
     fade_out_s: float | None = None,
     afade_in_s: float | None = None,
     afade_out_s: float | None = None,
+    band: tuple[float, float] | None = None,
 ) -> list[str]:
     """构建单段切割命令（Phase A）。
 
     画布语义（业主裁决「16:9 就是 16:9，不要拉伸到 9:16」）：等比缩放进画布
     （force_original_aspect_ratio=decrease），不足处补黑——内容完整、比例忠实，
     不再覆盖裁切也不再要人脸裁窗（那是把横屏源塞竖屏画布的旧形状）。
+
+    `band`：源硬字幕带归一化 (top, bottom)——delogo 涂抹擦除（2026-10-06 业主
+    裁决「直接覆盖原始字幕」，推翻 90004e4 的只避让）。矩形按 dedup 微缩放后的
+    内容区折算成画布坐标（pad 居中的偏移计入），且必须紧贴 pad 之后：缩放与
+    居中 pad 定了内容在画布里的实际位置，后面 eq/fade 不改几何。横屏源被补黑
+    时带比例是相对源画面高的、落在画布中部——与 ASS 带内压位共用同一假设
+    （核心素材是 9:16 原生短剧，画布与源同比例）。
     """
     out_w, out_h = out_size
     dedup = dedup_params.generate(rng)
@@ -277,9 +285,28 @@ def cut_segment_args(
     # 音频收尾链：成对 afade + 限幅器（限幅器必须是进 AAC 前的最后一级，见混音分支注释）
     audio_tail = ",".join([*_xfade_filters("afade", out_dur, ain, aout), _peak_ceiling_filter()])
 
+    band_filter: list[str] = []
+    if band is not None:
+        top = min(max(float(band[0]), 0.0), 1.0)
+        bottom = min(max(float(band[1]), 0.0), 1.0)
+        if bottom - top > 0.01:
+            content_x = max(1, round((out_w - scaled_w) / 2))
+            content_y = max(1, round((out_h - scaled_h) / 2))
+            delogo_y = min(
+                max(1, content_y + round(top * scaled_h)), out_h - 2
+            )
+            delogo_h = min(
+                max(2, round((bottom - top) * scaled_h)), out_h - delogo_y - 1
+            )
+            delogo_w = max(2, scaled_w - 2 * content_x)
+            band_filter = [f"delogo=x={content_x}:y={delogo_y}:w={delogo_w}:h={delogo_h}"]
+
     filters = [
         f"scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease",
         f"pad={out_w}:{out_h}:(ow-iw)/2:(oh-ih)/2:color=black",
+        # delogo 紧贴 pad：矩形在「缩放后内容 + 居中 pad」的画布坐标系里折算，
+        # 计入微缩放的居中偏移（见 band_filter 注释）
+        *band_filter,
         f"eq=contrast={dedup.contrast}:brightness={dedup.brightness}",
         # 像素比必须在这里钉平：`scale` 保留输入 SAR，非方形源的段会带着它编进成片
         # ——存储尺寸对、显示比例错，播放器横向拉伸，烧进去的 ASS（PlayRes 出画尺寸）
@@ -734,6 +761,7 @@ def export_plan(
     out_size: tuple[int, int] = _DEFAULT_OUT_SIZE,
     loudness_target: loudness.LoudnessTarget | None = None,
     video_codec: str = "libx264",
+    subtitle_bands: dict[str, tuple[float, float]] | None = None,
 ) -> Path:
     """执行两阶段导出，返回成片路径。
 
@@ -753,6 +781,7 @@ def export_plan(
             out_size=out_size,
             loudness_target=loudness_target,
             video_codec=video_codec,
+            subtitle_bands=subtitle_bands,
             _allow_uniform_retry=True,
         )
     except _UniformCodecRetry:
@@ -773,6 +802,7 @@ def export_plan(
             out_size=out_size,
             loudness_target=loudness_target,
             video_codec=_FALLBACK_CODEC,
+            subtitle_bands=subtitle_bands,
             _allow_uniform_retry=False,
         )
 
@@ -793,6 +823,7 @@ def _export_plan_once(
     out_size: tuple[int, int] = _DEFAULT_OUT_SIZE,
     loudness_target: loudness.LoudnessTarget | None = None,
     video_codec: str = "libx264",
+    subtitle_bands: dict[str, tuple[float, float]] | None = None,
     _allow_uniform_retry: bool = True,
 ) -> Path:
     """单次导出尝试（统一重跑的循环体，见 export_plan）。
@@ -941,6 +972,7 @@ def _export_plan_once(
                     fade_out_s=vout,
                     afade_in_s=ain,
                     afade_out_s=aout,
+                    band=(subtitle_bands or {}).get(segment.episode_id),
                 ),
                 seg_path=seg_path,
                 inputs=inputs,

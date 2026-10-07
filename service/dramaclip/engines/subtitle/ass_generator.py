@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import math
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -65,7 +64,7 @@ def _layout_of(preset: dict[str, Any], key: str = "default") -> str:
 
 def _placement(
     layout: str,
-    preset_margin_v: int,
+    preset: dict[str, Any],
     source_band: tuple[float, float] | None = None,
     canvas: Canvas | None = None,
 ) -> tuple[int, int]:
@@ -74,14 +73,16 @@ def _placement(
     居中档（5）下 MarginV 不参与纵向定位，给 0：沿用贴底那档的小留白会把整行字
     沉到画面底缘之外（业主截图「字幕下半被裁」即此形状）。
 
-    避让（A2）只作用于 bottom_bar（\an2）：居中档 MarginV 本就无意义，top_title
+    带内压位只作用于 bottom_bar（\an2）：居中档 MarginV 本就无意义，top_title
     （\an8）的 MarginV 是距**顶**距离，底部源带与它不相干——两者零改动。
     """
     alignment = _ALIGNMENT.get(layout, _ALIGNMENT[_DEFAULT_LAYOUT])
+    preset_margin_v = _margin_v(preset, canvas)
     if alignment == 5:
         return (alignment, 0)
     if alignment == 2:
-        return (alignment, avoid_source_band_margin_v(source_band, preset_margin_v, canvas))
+        font = canvas.font_px(preset) if canvas is not None else _font_size(preset)
+        return (alignment, cover_band_margin_v(source_band, preset_margin_v, canvas, font))
     return (alignment, preset_margin_v)
 
 
@@ -109,26 +110,37 @@ def _margin_v(preset: dict[str, Any], canvas: Canvas | None = None) -> int:
 _AVOID_MARGIN_CAP_RATIO = 2 / 3
 
 
-def avoid_source_band_margin_v(
+def cover_band_margin_v(
     band: tuple[float, float] | None,
     preset_margin_v: int,
     canvas: Canvas | None = None,
+    font_px: int | None = None,
 ) -> int:
-    """归一化源字幕带 → bottom_bar 布局的 MarginV（避让源硬字幕，只抬不降）。
+    """归一化源字幕带 → bottom_bar 布局的 MarginV（带内居中压位）。
 
-    band 为 None（未探测/无硬字幕带/OCR 未装）或与预设边距不重叠时原样返回
-    preset_margin_v——降级不可见，生成的 ASS 与现状逐字节一致。
-    避让几何在**实际画布**坐标系里算（canvas.y，缺省基准 1920）。
+    前置：编码端已对该带 delogo 擦除，源字幕文字已不可见——我们的字幕放回带内
+    居中，是观众看竖屏短剧的字幕位置习惯（2026-10-06 业主裁决「直接覆盖原始字
+    幕」，推翻 90004e4 的「只避让不遮挡」）。
+
+    band 为 None（未探测/无硬字幕带/OCR 未装）→ 原样返回 preset_margin_v，
+    降级不可见，生成的 ASS 与无带现状逐字节一致。
+    几何在**实际画布**坐标系里算（canvas.y，缺省基准 1920）：
+    - 带底距画面底 = (1 - bottom) × res_y，是盒子底边的基准位；
+    - 盒子估高 box_h（字身 + 底框上下 padding 的经验系数 1.9，测试钉住）；
+    - margin = 带底基准 + (带高 - 盒高)/2（带比盒子矮时取 0 → 盒子贴带底向上长）；
+    - 封顶 PlayResY×2/3：带探到画面中部属异常形状，不把字幕抬出演示区。
     """
     if band is None:
         return preset_margin_v
     res_y = canvas.y if canvas is not None else _PLAY_RES_Y
     top = min(max(float(band[0]), 0.0), 1.0)
-    # ceil 不是 int：(1-0.85)×1920 在浮点里是 287.999…，截断成 287 就压回源带顶 1px，
-    # 「不重叠」的验收（margin ≥ 源带顶距底像素）直接失守。
-    required = math.ceil((1.0 - top) * res_y)
+    bottom = min(max(float(band[1]), 0.0), 1.0)
+    band_bottom_px = (1.0 - bottom) * res_y
+    band_h_px = (bottom - top) * res_y
+    box_h = (font_px if font_px else _DEFAULT_FONT_SIZE) * 1.9
+    margin = round(band_bottom_px + max(0.0, (band_h_px - box_h) / 2))
     cap = int(res_y * _AVOID_MARGIN_CAP_RATIO)
-    return max(preset_margin_v, min(required, cap))
+    return max(preset_margin_v, min(margin, cap))
 
 
 def _font_size(preset: dict[str, Any]) -> int:
@@ -167,9 +179,7 @@ def _header(
     canvas: Canvas | None = None,
 ) -> str:
     font = preset.get("font", {})
-    alignment, margin_v = _placement(
-        _layout_of(preset), _margin_v(preset, canvas), source_band, canvas
-    )
+    alignment, margin_v = _placement(_layout_of(preset), preset, source_band, canvas)
     res_x = canvas.x if canvas is not None else _PLAY_RES_X
     res_y = canvas.y if canvas is not None else _PLAY_RES_Y
     font_px = canvas.font_px(preset) if canvas is not None else _font_size(preset)
@@ -309,7 +319,7 @@ def _event_line(
         "climax" if emotion in ("anger", "triumph") and "climax" in layout_map else "default"
     )
     alignment, margin_v = _placement(
-        _layout_of(preset, layout_key), _margin_v(preset, canvas), source_band, canvas
+        _layout_of(preset, layout_key), preset, source_band, canvas
     )
 
     rhythm = str(dimensions.get("rhythm", {}).get("type", "whole_line"))

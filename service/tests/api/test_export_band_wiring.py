@@ -21,6 +21,7 @@ import pytest
 from dramaclip.api import export as export_api
 from dramaclip.engines.exporter import encoder
 from dramaclip.engines.narration.models import NarrationText, PlanData, TimelineSegment
+from dramaclip.engines.subtitle import presets
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import exports as exports_repo
@@ -211,16 +212,19 @@ def _ass_file(context: SimpleNamespace, export_id: str, index: int = 0) -> Path:
 def test_dialogue_subtitle_lifts_margin_over_source_band(
     monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    """band(0.85,0.95) → MarginV 抬到 ceil((1-0.85)×1920)=289（浮点 288.000…06 上取整，
-    正是 ceil 防「压回源带顶 1px」的用例），字幕底边在源带顶之上。"""
+    """band(0.85,0.95) → 带内压位：盒底 = (1-0.95)×1920，盒高按 preset 字号估。"""
     context, export_id, plan_row, plan_data, episode_id = _seed_original(memory_db, tmp_path)
     analysis_repo.update_subtitle_band(memory_db, episode_id, json.dumps([0.85, 0.95]))
     _render(monkeypatch, context, export_id, plan_row, plan_data)
     ass = _ass_file(context, export_id).read_text(encoding="utf-8")
     assert "今天天气不错" in ass
-    # Style 行的 MarginV（第 8 字段）必须是 289
+    from dramaclip.engines.subtitle.ass_generator import cover_band_margin_v
+
+    preset = presets.get_preset("conflict-impact")
+    font_px = int(preset.get("font", {}).get("size", 64))
+    expected = cover_band_margin_v((0.85, 0.95), 90, None, font_px)
     style = next(ln for ln in ass.splitlines() if ln.startswith("Style: DC,"))
-    assert style.split(",")[-2].strip() == "289"
+    assert style.split(",")[-2].strip() == str(expected)
 
 
 def test_dialogue_subtitle_without_band_is_byte_identical(
@@ -257,17 +261,22 @@ def test_dialogue_subtitle_survives_garbage_band(
 # ---- 旁白段（burn_subtitle 路径）----------------------------------------------
 
 
-def test_burn_subtitle_lifts_margin_over_source_band(
+def test_burn_subtitle_covers_source_band(
     monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    """burner 路径同样避让：band(0.80,0.92) → MarginV=ceil(0.2×1920)=384。"""
+    """burner 路径带内压位：band(0.80,0.92) → MarginV 按盒底贴带底、盒高按 preset 字号估。"""
     context, export_id, plan_row, plan_data, episode_id = _seed_narrated(memory_db, tmp_path)
     analysis_repo.update_subtitle_band(memory_db, episode_id, json.dumps([0.80, 0.92]))
     _render(monkeypatch, context, export_id, plan_row, plan_data)
     ass = _ass_file(context, export_id).read_text(encoding="utf-8")
     assert "他以为她只是个替身" in ass
+    from dramaclip.engines.subtitle.ass_generator import cover_band_margin_v
+
+    preset = presets.get_preset("conflict-impact")
+    font_px = int(preset.get("font", {}).get("size", 64))
+    expected = cover_band_margin_v((0.80, 0.92), 90, None, font_px)
     style = next(ln for ln in ass.splitlines() if ln.startswith("Style: DC,"))
-    assert style.split(",")[-2].strip() == "384"
+    assert style.split(",")[-2].strip() == str(expected)
 
 
 def test_burn_subtitle_non_overlapping_band_keeps_preset(

@@ -219,3 +219,41 @@ def test_cut_has_no_video_fade_but_short_afade() -> None:
     assert "fade=" not in vf
     assert "afade=t=in:st=0:d=0.100" in af
     assert af.endswith(encoder._peak_ceiling_filter())
+
+
+def test_cut_segment_args_band_erasure_delogo() -> None:
+    """带擦除（2026-10-06 裁决「直接覆盖原始字幕」）：有 band 才有 delogo，
+    矩形按微缩放后的内容区折算、含居中 pad 偏移、不出画布；无 band 零滤镜。"""
+    band = (0.7174, 0.8291)
+    args = cut_segment_args(
+        "src.mp4",
+        "seg.mp4",
+        start=1.0,
+        end=3.0,
+        audio="narration",
+        tts_audio=None,
+        rng=random.Random(42),
+        band=band,
+    )
+    joined = " ".join(args)
+    assert "delogo=" in joined, "有 band 必须有 delogo 擦除"
+    scale = next(a for a in args if a.startswith("scale="))
+    scaled_h = int(scale.split(":")[1].split(":")[0])
+    rect = joined.split("delogo=")[1].split(",")[0]
+    parts = dict(p.split("=") for p in rect.split(":"))
+    y, h = int(parts["y"]), int(parts["h"])
+    top_px = round(0.7174 * scaled_h)
+    assert y == max(1, round((1920 - scaled_h) / 2) + top_px), "y = pad 偏移 + 带顶×内容高"
+    assert h == round((0.8291 - 0.7174) * scaled_h), "h = 带高×内容高"
+    assert y + h <= 1919, "delogo 区域四周须留 1px 边界"
+
+    clean = cut_segment_args(
+        "src.mp4",
+        "seg2.mp4",
+        start=1.0,
+        end=3.0,
+        audio="narration",
+        tts_audio=None,
+        rng=random.Random(42),
+    )
+    assert "delogo=" not in " ".join(clean), "无 band 不加滤镜，与现状逐字节一致"
