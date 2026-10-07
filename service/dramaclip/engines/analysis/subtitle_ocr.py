@@ -21,6 +21,7 @@ _PROBE_COUNT = 10         # 字幕带定位探针帧数：台词有行间空隙�
 _SAMPLE_FPS = 1.0         # 抽帧率：短剧镜头 1.5~3s，字幕驻留普遍 ≥1s
 _ROI_WIDTH = 800          # 裁剪后缩放宽（识别耗时与像素量成正比）
 _BAND_EXPAND = 0.04       # 字幕带上下各扩 4% 画面高，容納描边/阴影
+_LINE_STROKE_MARGIN = 0.008  # 逐行擦除框的描边余量（≈15px@1920）：贴字不贴带
 _HEAD_PAD_S = 0.5         # 字幕条起点向前补（采样间隔一半）
 _TAIL_PAD_S = 1.0         # 字幕条结尾向后补（采样间隔 + 消失延迟）
 _OCR_WORKERS = 4        # 帧识别并行度（onnxruntime session 线程安全）
@@ -84,7 +85,7 @@ def extract_subtitles(
         probes = _probe_frames(video_path, work_dir, duration_s, ocr)
         candidates = _dialogue_candidates([boxes for _t, boxes in probes])
         picked_band = _band_from(candidates)
-        lines = _cluster_lines(candidates)
+        lines = _cluster_lines(candidates, picked_band)
     if picked_band is None:
         _LOGGER.info("未定位到字幕带，跳过 OCR 通道：%s", video_path.name)
         return [], None, None
@@ -168,14 +169,37 @@ def _pick_band(probes: list[FrameResult]) -> _Band | None:
     return _band_from(_dialogue_candidates(probes))
 
 
-def _cluster_lines(candidates: list[tuple[float, float]]) -> list[_Band]:
+def line_in_dialogue_band(
+    rect: tuple[float, float], band: tuple[float, float], tol: float = _BAND_EXPAND
+) -> bool:
+    """共享谓词：行框中心落在台词带内（含容差）才算台词行。
+
+    生产者（_cluster_lines）与消费端（export 读取存量行框）必须用同一个
+    判定——竖排花字人物卡/道具招幌是画面真实文字，但不是台词字幕，
+    禁止进擦除集（2026-10-07 审计：ep9「芋萬」招幌、ep1/ep6 花字卡）。
+    """
+    center = (float(rect[0]) + float(rect[1])) / 2
+    return (band[0] - tol) <= center <= (band[1] + tol)
+
+
+def _cluster_lines(
+    candidates: list[tuple[float, float]],
+    band: _Band | tuple[float, float] | None = None,
+) -> list[_Band]:
     """台词行位置 → 逐行框（top 间距超阈值即分行），供 delogo 逐行擦除。
 
     行级矩形比整带紧：不擦行间空隙与带边缘的画面，涂抹痕迹更小
     （2026-10-07 业主追加：只对检测到的文字行做擦除）。
+    行框余量是**描边级**（_LINE_STROKE_MARGIN≈15px），不吃 _BAND_EXPAND——
+    那是整带包络用的常量，套到逐行框上会把矩形撑到文字的 3 倍高（审计实测：
+    236px 擦除框够到人物嘴部）。
+    band 给定时，行框中心不在台词带内的簇（竖排花字/道具招幌）整簇剔除。
     """
     if not candidates:
         return []
+    band_rect: tuple[float, float] | None = None
+    if band is not None:
+        band_rect = (band.top, band.bottom) if isinstance(band, _Band) else band
     tops = sorted(top for top, _b in candidates)
     anchors = [tops[0]]
     for top in tops[1:]:
@@ -188,7 +212,14 @@ def _cluster_lines(candidates: list[tuple[float, float]]) -> list[_Band]:
             continue
         top = min(t for t, _b in same)
         bottom = max(b for _t, b in same)
-        lines.append(_Band(max(0.0, top - _BAND_EXPAND), min(1.0, bottom + _BAND_EXPAND)))
+        rect = _Band(
+            max(0.0, top - _LINE_STROKE_MARGIN), min(1.0, bottom + _LINE_STROKE_MARGIN)
+        )
+        if band_rect is not None and not line_in_dialogue_band(
+            (rect.top, rect.bottom), band_rect
+        ):
+            continue
+        lines.append(rect)
     return lines
 
 

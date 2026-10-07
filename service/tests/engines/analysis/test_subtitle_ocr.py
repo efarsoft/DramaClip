@@ -125,3 +125,34 @@ def test_extract_subtitles_passes_through_given_band(
     assert segments == []
     assert band == (0.5, 0.6), "外部传入的 band 原样回传（调用方拿它落库）"
     assert lines is None, "外部传入 band 时行框未知，回 None（调用方按整带回退）"
+
+
+# ---- 逐行擦除框：贴字不贴带 + 花字/道具字不进擦除集（2026-10-07 审计） ----
+
+
+def test_cluster_lines_stroke_margin_not_band_expand() -> None:
+    """行框余量是描边级（0.008≈15px），不是整带包络的 0.04（77px）——
+    此前逐行框吃 _BAND_EXPAND，矩形比文字高 3 倍，delogo 直接够到嘴。"""
+    candidates = [(0.653, 0.696), (0.660, 0.700)]
+    lines = subtitle_ocr._cluster_lines(candidates, (0.613, 0.740))
+    assert len(lines) == 1
+    assert abs(lines[0].top - (0.653 - 0.008)) < 1e-6
+    assert abs(lines[0].bottom - (0.700 + 0.008)) < 1e-6
+
+
+def test_cluster_lines_filters_decorative_text_by_band() -> None:
+    """真机 ep9 三脏行：竖排花字人物卡 (0.089,0.263)、道具招幌「芋萬」
+    (0.199,0.413) 都是画面真实文字——但不是台词字幕，禁止进擦除集。"""
+    candidates = [(0.089, 0.263), (0.199, 0.413), (0.653, 0.696), (0.660, 0.700)]
+    lines = subtitle_ocr._cluster_lines(candidates, (0.613, 0.740))
+    assert [(round(b.top, 3), round(b.bottom, 3)) for b in lines] == [
+        (round(0.653 - 0.008, 3), round(0.700 + 0.008, 3))
+    ], "只有台词带内的行能进擦除集"
+
+
+def test_line_in_dialogue_band_shared_predicate() -> None:
+    """共享谓词：export 读取端用它对存量行框再夹一次，两边永不漂移。"""
+    f = subtitle_ocr.line_in_dialogue_band
+    assert f((0.653, 0.696), (0.613, 0.740)) is True
+    assert f((0.089, 0.263), (0.613, 0.740)) is False
+    assert f((0.199, 0.413), (0.613, 0.740)) is False

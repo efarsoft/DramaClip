@@ -812,7 +812,14 @@ def render_export(
                 ):
                     subtitle_bands[episode_id] = (float(band_list[0]), float(band_list[1]))
                 raw_lines = parsed.get("lines")
-                if isinstance(raw_lines, list):
+                if isinstance(raw_lines, list) and subtitle_bands.get(episode_id):
+                    from dramaclip.engines.analysis.subtitle_ocr import (
+                        line_in_dialogue_band,
+                    )
+
+                    band = subtitle_bands[episode_id]
+                    # 存量行框再夹一次共享谓词：旧数据里可能混着花字/道具行
+                    # （2026-10-07 审计：ep1 花字卡、ep9 招幌曾被当台词行落库）
                     rects = [
                         (float(item[0]), float(item[1]))
                         for item in raw_lines
@@ -821,6 +828,9 @@ def render_export(
                         and all(
                             isinstance(v, (int, float)) and not isinstance(v, bool)
                             for v in item
+                        )
+                        and line_in_dialogue_band(
+                            (float(item[0]), float(item[1])), band
                         )
                     ]
                     if rects:
