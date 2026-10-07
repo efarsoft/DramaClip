@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from dramaclip.engines.llm_trace import dump_trace
 from dramaclip.engines.narration.numerals import to_chinese_numerals
@@ -194,6 +194,22 @@ class Script(BaseModel):
     hook: str = Field(min_length=1)
     segments: list[ScriptSegment] = Field(min_length=_MIN_SEGMENTS)
     cta: str = ""
+
+    @field_validator("hook", "cta")
+    @classmethod
+    def _cn_numeral_fields(cls, value: str) -> str:
+        # 出口单一收口：hook/正文/cta 三个字段的数字中文化在这里一次做完，
+        # 不靠提示词遵从率（真机 2,000 斤事故）
+        return to_chinese_numerals(value)
+
+    @field_validator("segments")
+    @classmethod
+    def _cn_numeral_segments(
+        cls, segments: list[ScriptSegment]
+    ) -> list[ScriptSegment]:
+        for segment in segments:
+            segment.text = to_chinese_numerals(segment.text)
+        return segments
     # 清洗层吃掉的段数（未知集号/越界/重叠/空文案）：随剧本一路带到方案卡，
     # 界面据此说"剧本丢弃 N 段"，不再让方案看起来天生就这么长。
     dropped_segments: int = 0
@@ -236,7 +252,7 @@ def _sanitize_episodes(raw: Any, durations: dict[int, float]) -> tuple[Script | 
         duration = durations[segment.episode]
         start = max(segment.start, cursors.get(segment.episode, 0.0))
         end = min(segment.end, duration) if duration > 0 else segment.end
-        text = to_chinese_numerals(segment.text.strip())
+        text = segment.text.strip()
         if end - start < 0.5 or text == "":
             continue
         updated = {"start": round(start, 2), "end": round(end, 2), "text": text}

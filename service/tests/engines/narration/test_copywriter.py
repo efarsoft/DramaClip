@@ -69,8 +69,15 @@ def _plan():
 def _lines() -> dict[str, Any]:
     return {
         "lines": [
-            {"id": f"full-{i + 1}", "text": f"第 {i + 1} 条解说"}
-            for i in range(len(_SCENES))
+            {"id": f"full-{i + 1}", "text": text}
+            for i, text in enumerate(
+                [
+                    "他背着玄铁锅下了山",
+                    "赵狂当众羞辱陆家",
+                    "比武台上剑指咽喉",
+                    "锅一脱修为当场解封",
+                ]
+            )
         ]
     }
 
@@ -91,9 +98,11 @@ def test_fills_every_slot_and_flips_planner(llm: Any) -> None:
         _plan(), _MATERIAL, _SETTINGS, mode_label=_MODE_LABEL, angle_block=""
     )
     assert plan.planner == "llm_script"
-    # 数字中文化是落库前的确定性兜底：夹具给阿拉伯数字，产物必须是中文
     assert [t.text for t in plan.narration_texts] == [
-        "第 一 条解说", "第 二 条解说", "第 三 条解说", "第 四 条解说"
+        "他背着玄铁锅下了山",
+        "赵狂当众羞辱陆家",
+        "比武台上剑指咽喉",
+        "锅一脱修为当场解封",
     ]
 
 
