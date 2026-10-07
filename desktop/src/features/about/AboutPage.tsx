@@ -2,7 +2,7 @@
  *
  * 「检查更新」与公众号/打赏二维码未实装——缺席而非假控件，实装后在此补。
  */
-import { InfoOutlined, PlayCircleFilled } from '@ant-design/icons';
+import { InfoOutlined } from '@ant-design/icons';
 import { App as AntdApp } from 'antd';
 import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
@@ -10,6 +10,7 @@ import { appPaths, appVersion, revealInFolder, systemApi } from '../../services/
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 import { OPEN_SOURCE } from './openSource';
+import logo from '../../assets/logo.png';
 import wechatQrcode from '../../assets/images/wechat-qrcode.jpg';
 
 /** 授权与合规声明（素材授权责任归使用者；全本机处理，素材不上传）。 */
@@ -62,21 +63,16 @@ function ProjectBlock(): ReactElement {
   return (
     <PageSection title="项目信息">
       <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceMd }}>
-        <span
+        <img
+          src={logo}
+          alt="DramaClip"
           style={{
             width: tokens.glyph.brandBox,
             height: tokens.glyph.brandBox,
             borderRadius: tokens.radiusControl,
-            background: tokens.gradientAccent,
-            color: tokens.colorWhite,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: tokens.glyph.brandMd,
+            display: 'block',
           }}
-        >
-          <PlayCircleFilled />
-        </span>
+        />
         <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs, minWidth: 0 }}>
           <span
             style={{

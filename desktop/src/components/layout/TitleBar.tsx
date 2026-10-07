@@ -1,12 +1,13 @@
 /** 自定义标题栏：拖拽区 + 项目搜索 + 窗口控制（frame:false 配套）。 */
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { BorderOutlined, CloseOutlined, MinusOutlined, PlayCircleFilled, SearchOutlined } from '@ant-design/icons';
+import { BorderOutlined, CloseOutlined, MinusOutlined, SearchOutlined } from '@ant-design/icons';
 import { projectApi, windowControl } from '../../services/client';
 import { rememberDrama } from '../../stores/lastDrama';
 import { hoverBg } from '../../styles/mixins';
 import { layout, tokens } from '../../styles/theme';
 import { dramaEntryPath } from '../../app/routes';
+import logo from '../../assets/logo.png';
 
 export function TitleBar(): React.ReactElement {
   const location = useLocation();
@@ -26,20 +27,16 @@ export function TitleBar(): React.ReactElement {
       } as CSSProperties}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
-        <span
+        <img
+          src={logo}
+          alt="DramaClip"
           style={{
             width: layout.titleBar.brand,
             height: layout.titleBar.brand,
             borderRadius: tokens.radiusControl,
-            background: tokens.gradientAccent,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: tokens.colorWhite,
+            display: 'block',
           }}
-        >
-          <PlayCircleFilled style={{ fontSize: tokens.glyph.brandSm }} />
-        </span>
+        />
         <span
           style={{
             fontWeight: 700,

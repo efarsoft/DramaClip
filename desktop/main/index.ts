@@ -1,5 +1,6 @@
 /** Electron 主进程入口（docs/desktop/00 §2 启动时序）。 */
 import { app, BrowserWindow, nativeTheme, protocol, screen, shell } from 'electron';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { registerIpc, broadcastEvent, resolveDataPaths, type IpcContext } from './ipc';
 import { createPreviewHandler, createPreviewRoots } from './services/preview-protocol';
@@ -31,7 +32,11 @@ function createMainWindow(): void {
   // 默认 1680×1050：1920×1080 在主流 1080p 屏扣掉任务栏（可用高约 1040px）放不下，
   // 1680×1050 在 1080p 与更大屏都完整可见；更小的屏钳到工作区尺寸，不越界
   const workArea = screen.getPrimaryDisplay().workAreaSize;
+  // 开发态窗口/任务栏图标；打包后 exe 已内嵌 build/icon.ico，缺文件时省略（降级不可见）
+  const devIcon = path.join(REPO_ROOT, 'build', 'icon.ico');
+
   mainWindow = new BrowserWindow({
+    icon: existsSync(devIcon) ? devIcon : undefined,
     width: Math.min(1680, workArea.width),
     height: Math.min(1050, workArea.height),
     minWidth: 1024,
