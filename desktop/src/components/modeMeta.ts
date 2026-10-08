@@ -16,7 +16,7 @@ export const MODE_INFO: readonly ModeInfoItem[] = [
   { mode: 'ultra_short_hook', label: '超短悬念版', desc: '信息流短平快款：开场钩子 + 最高冲突 + 悬念收尾，时长由冲突决定', needs: ['copy', 'voice'] },
   { mode: 'dialogue_narration', label: '剧情解说', desc: '完整讲一个故事的解说正片：起承转合拉完播，主打款', needs: ['copy', 'voice'] },
   { mode: 'full_narration', label: '全片解说', desc: '从头讲到尾的完整覆盖：信息密度最高，适合长视频号', needs: ['copy', 'voice'] },
-  { mode: 'subtitle_flow', label: '字幕金句流', desc: '金句大字卡点 + CTA，无声环境也抓人', needs: [] },
+  { mode: 'subtitle_flow', label: '字幕金句流', desc: '原声台词 + 金句大字卡点：靠剧里最狠的台词说话，静音刷也有字看', needs: [] },
   { mode: 'dual_host_chat', label: '双人对谈', desc: '双音色对话式解说，像两位博主聊剧', needs: ['copy', 'voice'] },
   { mode: 'inner_monologue', label: '内心独白', desc: '第一人称 OS 旁白，代入主角视角', needs: ['copy', 'voice'] },
 ];
