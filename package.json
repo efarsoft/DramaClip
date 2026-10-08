@@ -1,7 +1,7 @@
 {
   "name": "dramaclip",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "本地优先的短剧自动高光剪辑工具",
   "license": "MIT",
   "workspaces": [

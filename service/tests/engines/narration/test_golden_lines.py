@@ -6,9 +6,9 @@ LLM 不可用 → None，调用方回退规则打分（降级不可见）。
 
 from __future__ import annotations
 
-from dramaclip.engines.analysis.models import AsrSegment
 import pytest
 
+from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import golden_lines
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
 

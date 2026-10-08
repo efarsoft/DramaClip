@@ -1,7 +1,7 @@
 {
   "name": "@dramaclip/desktop",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "productName": "DramaClip",
   "description": "DramaClip 桌面应用（Electron + React）",
   "main": "dist-electron/main/index.js",

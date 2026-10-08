@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dramaclip.engines.narration.line_scoring import score_line
 
-
 # ---- 修辞结构分（2026-10-08 业主以《剑来》纠偏：文戏金句此前只得底分） ----
 
 
