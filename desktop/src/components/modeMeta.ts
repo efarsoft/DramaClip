@@ -9,8 +9,8 @@ export interface ModeInfoItem {
 }
 
 export const MODE_INFO: readonly ModeInfoItem[] = [
-  { mode: 'raw_clip', label: '纯原片剪辑', desc: 'AI 挑高光直接混剪，无解说，保留原声', needs: [] },
-  { mode: 'highlight_cut', label: '高光混剪', desc: '全剧高能场景 5 秒快切 + 情绪配乐，预告片形态', needs: [] },
+  { mode: 'raw_clip', label: '纯原片剪辑', desc: '保留原声台词的高光合集：长度跟剧情走，BGM 关', needs: [] },
+  { mode: 'highlight_cut', label: '高光混剪', desc: '5 秒快切 + 情绪配乐的预告片：不给结局只给瘾，BGM 主导', needs: [] },
   { mode: 'intro_narration', label: '片头解说', desc: '前置解说钩子 + 原片正片，开头 3 秒抓人', needs: ['copy', 'voice'] },
   { mode: 'cross_narration', label: '交叉解说', desc: '解说与原声交替推进，节奏感强', needs: ['copy', 'voice'] },
   { mode: 'ultra_short_hook', label: '超短悬念版', desc: '30 秒内钩子 + 反转收尾，适配信息流', needs: ['copy', 'voice'] },
