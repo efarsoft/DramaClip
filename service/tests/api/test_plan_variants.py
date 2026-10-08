@@ -145,7 +145,7 @@ def test_only_sound_only_modes_skip_tts_group() -> None:
 
     剧情解说在剧本链落地后每段都要配音，留在无 TTS 组等于宣称它没有旁白。
     """
-    tts_free = frozenset({"raw_clip", "subtitle_flow"})
+    tts_free = frozenset({"raw_clip", "subtitle_flow", "highlight_cut"})
     assert tts_free == narration_api._NO_TTS_MODES
 
 

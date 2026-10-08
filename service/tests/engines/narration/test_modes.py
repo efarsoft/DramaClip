@@ -112,3 +112,52 @@ def test_build_plan_refuses_dialogue_rule_arrangement() -> None:
         pipeline.build_plan(
             "dialogue_narration", stamp([(1, "ep1", _scenes())]), [], {}, {}
         )
+
+
+def test_highlight_cut_uniform_clips_chronological_best_first() -> None:
+    """高光混剪（预告形态）：冲突分头部 × 5 秒快切，时间序叙事、最高分前置。
+
+    零解说零 TTS，BGM 床由 selector 按主导情绪选曲（should_add_bgm 默认开）。
+    """
+    from dramaclip.engines.narration.modes import build_highlight_cut
+
+    scenes = stamp([(1, "ep1", _scenes()), (2, "ep2", _scenes())])
+    plan = build_highlight_cut(scenes, _STRATEGY)
+    assert plan.mode == "highlight_cut"
+    assert plan.narration_texts == [], "预告形态零解说零 TTS"
+    assert len(plan.timeline) == 14, "条数上限 15（夹具 14 场全取）"
+    episodes_order = [s.episode_id for s in plan.timeline]
+    assert episodes_order == sorted(episodes_order), "跨集按时间序（预告叙事）"
+    first = plan.timeline[0]
+    assert (first.start, first.end) == (24.5, 29.5), "score=90 场景居首，取中点 5 秒"
+    assert all(
+        s.end - s.start <= 5.0 + 1e-6 for s in plan.timeline
+    ), "单条 ≤5 秒（短场景取全长）"
+
+
+def test_highlight_cut_via_build_plan_dispatches() -> None:
+    """build_plan 分发冒烟：apply_transitions 后保结构（条数可为转场后处理值）。"""
+    plan = pipeline.build_plan(
+        "highlight_cut",
+        stamp([(1, "ep1", _scenes()), (2, "ep2", _scenes())]),
+        [],
+        {},
+        {},
+    )
+    assert plan.mode == "highlight_cut"
+    assert len(plan.timeline) >= 12, "快切预告形态：≥12 条高能切片"
+    assert plan.narration_texts == []
+
+
+def test_highlight_cut_skips_degenerate_scenes() -> None:
+    """零长度场景跳过，不产出负/零长段。"""
+    from dramaclip.engines.semantic.models import ConflictScore
+
+    plan = pipeline.build_plan(
+        "highlight_cut",
+        stamp([(1, "ep1", [ConflictScore(scene_index=0, start=5.0, end=5.0, score=90)])]),
+        [],
+        {},
+        {},
+    )
+    assert plan.timeline == []

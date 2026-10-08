@@ -22,6 +22,49 @@ _CTA_SLOT_ID = "cta-1"
 _CTA_FALLBACK_S = 2.0
 
 
+_HIGHLIGHT_CLIP_S = 5.0   # 高光混剪的单条时长（真机参考：13×5s ≈ 65s 预告）
+_HIGHLIGHT_MAX_CLIPS = 15  # 条数上限：时长让位≠无限堆料，预告形态 75s 内最猛
+
+
+def build_highlight_cut(
+    scenes: list[EpisodeScene],
+    strategy: StrategySpec,
+) -> PlanData:
+    """高光混剪（预告形态）：全剧最高冲突场景 × 5 秒快切 + 配乐床，零解说。
+
+    参考真机混剪流程：选段=冲突分头部、时长=统一 5 秒快切、顺序=时间序
+    （预告叙事），冲突分最高的场景前置做开场；零 TTS 零字幕加工，
+    BGM 床由 selector 按主导情绪选曲（should_add_bgm 默认开）。
+    """
+    if not scenes:
+        return PlanData(mode="highlight_cut", strategy=strategy)
+    ranked = sorted(scenes, key=score_order)[:_HIGHLIGHT_MAX_CLIPS]
+    ordered = sorted(ranked, key=episode_order)
+    best = max(ordered, key=lambda s: s.score)
+    if ordered[0] is not best:
+        ordered.remove(best)
+        ordered.insert(0, best)
+    timeline: list[TimelineSegment] = []
+    for scene in ordered:
+        span = scene.end - scene.start
+        if span <= 0:
+            continue
+        if span <= _HIGHLIGHT_CLIP_S:
+            start, end = scene.start, scene.end
+        else:
+            mid = (scene.start + scene.end) / 2
+            start, end = mid - _HIGHLIGHT_CLIP_S / 2, mid + _HIGHLIGHT_CLIP_S / 2
+        timeline.append(
+            TimelineSegment(
+                episode_id=scene.episode_id,
+                start=round(start, 3),
+                end=round(end, 3),
+                audio="original",
+            )
+        )
+    return PlanData(mode="highlight_cut", timeline=timeline, strategy=strategy)
+
+
 def build_raw_clip(
     scenes: list[EpisodeScene],
     highlights: list[HighlightSegment],

@@ -46,6 +46,7 @@ _ERR_PLAN_NOT_RENDERABLE = -32407
 
 SUPPORTED_MODES = (
     "raw_clip",
+    "highlight_cut",
     "intro_narration",
     "cross_narration",
     "ultra_short_hook",
@@ -57,7 +58,7 @@ SUPPORTED_MODES = (
 )
 
 # 与 TTS 合成并行的两组：剧情解说已由 LLM 剧本驱动，每段都要配音，不再属"无 TTS"。
-_NO_TTS_MODES = frozenset({"raw_clip", "subtitle_flow"})
+_NO_TTS_MODES = frozenset({"raw_clip", "subtitle_flow", "highlight_cut"})
 
 # 会产出旁白槽位、因而读 `settings["_style_directives"]` 的模式（copywriter /
 # scriptwriter 两侧都只往解说槽位里塞风格指令）。派生自上面两个集合，绝不另立

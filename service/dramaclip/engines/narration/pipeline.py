@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 MODE_LABELS = {
     "raw_clip": "纯原片剪辑",
+    "highlight_cut": "高光混剪",
     "intro_narration": "片头解说",
     "cross_narration": "交叉解说",
     "ultra_short_hook": "超短悬念版",
@@ -66,6 +67,8 @@ def build_plan(
     strategy = StrategySpec(platform="douyin")
     if mode == "raw_clip":
         return apply_transitions(modes.build_raw_clip(scenes, highlights, strategy))
+    if mode == "highlight_cut":
+        return apply_transitions(modes.build_highlight_cut(scenes, strategy))
     if mode == "intro_narration":
         return apply_transitions(modes.build_intro(scenes, strategy))
     if mode == "cross_narration":
