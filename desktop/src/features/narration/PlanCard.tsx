@@ -35,14 +35,18 @@ export function PlanCard({
   checked,
   recommended,
   onToggle,
+  episodeCovers = {},
 }: {
   plan: NarrationPlan;
   checked: boolean;
   recommended: boolean;
   onToggle: () => void;
+  /** 源集封面与集号（音画同步·降级态）：方案卡给出「取材第几集」的画面参考。 */
+  episodeCovers?: Record<string, { cover: string | null; number: number }>;
 }) {
   const card = planCardView(plan);
   const [copyOpen, setCopyOpen] = useState(false);
+  const sourceEpisode = episodeCovers[plan.plan_data.timeline[0]?.episode_id ?? ''];
   return (
     <Card
       size="small"
@@ -51,13 +55,29 @@ export function PlanCard({
         if (card.pickable) onToggle();
       }}
       style={{
+        display: 'flex',
+        flexDirection: 'row',
+        gap: tokens.spaceSm,
         borderColor: checked ? tokens.colorPrimary : tokens.border,
         background: checked ? tokens.accentSoft : undefined,
         opacity: card.pickable ? 1 : 0.55,
         cursor: card.pickable ? 'pointer' : 'not-allowed',
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm, minHeight: 130 }}>
+      {sourceEpisode?.cover ? (
+        <img
+          src={sourceEpisode.cover}
+          alt={`第${sourceEpisode.number}集`}
+          style={{
+            width: 54,
+            height: 96,
+            objectFit: 'cover',
+            borderRadius: tokens.radiusControl,
+            flexShrink: 0,
+          }}
+        />
+      ) : null}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm, minHeight: 130, flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, flexWrap: 'wrap' }}>
           {card.angle === '' ? (
             <strong style={{ color: tokens.textPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading }}>{modeLabel(card.mode)}</strong>
@@ -78,7 +98,9 @@ export function PlanCard({
         )}
         <span style={{ display: 'flex', gap: tokens.spaceMd, marginTop: 'auto', fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
           <span>{modeLabel(card.mode)}</span>
-          <span>{card.episodes}</span>
+          <span>
+            {sourceEpisode ? `取材 第${String(sourceEpisode.number)}集` : card.episodes}
+          </span>
           <span>预计 {formatDuration(estimatedDurationS(plan))}</span>
           <span>{card.overlap}</span>
           {card.dropped !== '' && (

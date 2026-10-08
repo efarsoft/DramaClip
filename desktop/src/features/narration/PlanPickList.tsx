@@ -21,6 +21,7 @@ export function PlanPickList({
   queue,
   episodeCount,
   avgBytes,
+  episodeCovers = {},
 }: {
   batch: PlanBatch;
   queue: ExportQueue;
@@ -28,6 +29,8 @@ export function PlanPickList({
   episodeCount: number;
   /** 本剧已完成成片的实测均值字节（磁盘预估系数）；null = 无实测口径。 */
   avgBytes: number | null;
+  /** 源集封面（音画同步·降级态）：方案卡显示「取材第几集」的画面参考。 */
+  episodeCovers?: Record<string, { cover: string | null; number: number }>;
 }) {
   const [picked, setPicked] = useState<string[]>([]);
   const [recommended, setRecommended] = useState<string[]>([]);
@@ -57,6 +60,7 @@ export function PlanPickList({
           <PlanCard
             key={plan.id}
             plan={plan}
+            episodeCovers={episodeCovers}
             recommended={recommended.includes(plan.id)}
             checked={picked.includes(plan.id)}
             onToggle={() => {

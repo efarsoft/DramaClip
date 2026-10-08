@@ -62,6 +62,9 @@ export function ProductionPage() {
   const [recLoading, setRecLoading] = useState(false);
   const [k, setK] = useState<number>(DEFAULT_K);
   const [exports, setExports] = useState<ExportJob[] | null>(null);
+  const [episodeCovers, setEpisodeCovers] = useState<
+    Record<string, { cover: string | null; number: number }>
+  >({});
   const { planningRef, exportRef } = useFocusScroll();
 
   useEffect(() => {
@@ -69,6 +72,14 @@ export function ProductionPage() {
     void projectApi.get(projectId).then((detail) => {
       setProject(detail.project);
       setEpisodeCount(detail.episodes.length);
+      setEpisodeCovers(
+        Object.fromEntries(
+          detail.episodes.map((episode) => [
+            episode.id,
+            { cover: episode.cover_path ?? null, number: episode.episode_number },
+          ]),
+        ),
+      );
       rememberDrama(detail.project.id, detail.project.name);
     });
     return () => {
@@ -167,7 +178,13 @@ export function ProductionPage() {
         {batch.planning ? (
           <PlanQueue batch={batch} spec={batch.spec} />
         ) : (
-          <PlanPickList batch={batch} queue={queue} episodeCount={episodeCount} avgBytes={avgBytes} />
+          <PlanPickList
+            batch={batch}
+            queue={queue}
+            episodeCount={episodeCount}
+            avgBytes={avgBytes}
+            episodeCovers={episodeCovers}
+          />
         )}
       </div>
       <div ref={exportRef}>
