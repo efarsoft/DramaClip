@@ -58,6 +58,7 @@ def build_plan(
     material: MaterialByEpisode,
     settings: dict[str, str],
     source_durations: dict[str, float] | None = None,
+    golden_lines: dict[str, list[tuple[float, float]]] | None = None,
 ) -> PlanData:
     """按模式生成编排方案（纯计算，不触 IO）。
 
@@ -84,7 +85,9 @@ def build_plan(
     if mode == "full_narration":
         return apply_transitions(modes_w8.build_full(scenes, strategy))
     if mode == "subtitle_flow":
-        return apply_transitions(modes_w9.build_subtitle_flow(scenes, material, strategy))
+        return apply_transitions(
+            modes_w9.build_subtitle_flow(scenes, material, strategy, golden_lines)
+        )
     if mode == "dual_host_chat":
         return apply_transitions(modes_p2.build_dual_host(scenes, strategy))
     if mode == "inner_monologue":

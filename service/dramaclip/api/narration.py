@@ -520,6 +520,20 @@ def _plan_one(
         )
 
     scenes, highlights, material = _casting_for(context, episodes, variant)
+    # 字幕金句流的金句判定交给 LLM（2026-10-08 业主裁决「规则打分不可靠，
+    # LLM 提取」）：按集编号回填零幻觉，LLM 不可用时 modes_w9 回退规则打分
+    golden = None
+    if mode == "subtitle_flow":
+        from dramaclip.engines.narration import golden_lines as golden_mod
+
+        dialogue_by_episode = {
+            episode_id: [
+                (no, seg.start, seg.end, seg.text)
+                for no, seg in enumerate(entry.asr, start=1)
+            ]
+            for episode_id, entry in material.items()
+        }
+        golden = golden_mod.pick_for_material(settings, dialogue_by_episode)
     plan = narration_pipeline.build_plan(
         mode,
         scenes,
@@ -531,6 +545,7 @@ def _plan_one(
         source_durations={
             str(episode["id"]): float(episode["duration"] or 0.0) for episode in episodes
         },
+        golden_lines=golden,
     )
     if not plan.timeline:
         # 空时间轴的方案渲染出来是一部 0 秒的片；规划期就该说清楚，不留到导出

@@ -34,6 +34,7 @@ def build_subtitle_flow(
     scenes: list[EpisodeScene],
     material: casting.MaterialByEpisode,
     strategy: StrategySpec,
+    golden: dict[str, list[tuple[float, float]]] | None = None,
 ) -> PlanData:
     """金句流编排：top 场景按叙事顺序，每段字幕=该场景最强金句，结尾 CTA 卡片。
 
@@ -48,6 +49,30 @@ def build_subtitle_flow(
     for scene in picked:
         dialogue = casting.dialogue_of(material, scene.episode_id)
         subtitle_text, span = strongest_line(scene, dialogue)
+        # LLM 金句优先（2026-10-08 业主裁决「规则打分不可靠，LLM 提取」）：
+        # 取与本场景窗口重叠最大的 LLM 金句行，字幕显示金句原文、窗长跟随它；
+        # 无重叠金句 → 回退规则打分。LLM 原文来自台词编号回填，零编造。
+        if golden is not None:
+            episode_golden = golden.get(scene.episode_id) or []
+            best: tuple[float, tuple[str, tuple[float, float]]] | None = None
+            for g_start, g_end in episode_golden:
+                overlap = min(g_end, scene.end) - max(g_start, scene.start)
+                if overlap <= 0:
+                    continue
+                matched = next(
+                    (
+                        seg
+                        for seg in dialogue
+                        if seg.start == g_start and seg.end == g_end
+                    ),
+                    None,
+                )
+                if matched is None:
+                    continue
+                if best is None or overlap > best[0]:
+                    best = (overlap, (matched.text.strip(), (g_start, g_end)))
+            if best is not None:
+                subtitle_text, span = best[1]
         duration = fit_scene_window(scene.end - scene.start, span)
         start = round(scene.start, 3)
         end = round(scene.start + duration, 3)
