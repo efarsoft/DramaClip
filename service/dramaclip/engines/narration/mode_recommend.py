@@ -93,19 +93,23 @@ def _ask_llm(settings: dict[str, str], genre: str, reasons: list[str]) -> list[d
         return _fallback([], f"返回不合法（{type(exc).__name__}）")
     picked = _validate(raw)
     if not picked:
-        return _fallback([], "推荐结果不含合法模式")
+        return _fallback([], "AI 推荐结果不在模式菜单内，已换为通用推荐")
     return _pad(picked)
 
 
 def _validate(raw: Any) -> list[dict[str, str]]:
-    """筛出菜单内的合法模式（去重）；reason 缺省给模式名，超长截断。"""
+    """筛出菜单内的合法模式（去重）；mode 兼容 id 或中文标签（LLM 偶尔
+    返回「高光混剪」而非 highlight_cut，能唯一映射回 id 就不整条丢弃）。
+    """
     out: list[dict[str, str]] = []
+    label_to_id = {label: mode for mode, label in MODE_LABELS.items()}
     if not isinstance(raw, dict):
         return out
     for item in raw.get("modes") or []:
         if not isinstance(item, dict):
             continue
         mode = str(item.get("mode") or "").strip()
+        mode = label_to_id.get(mode, mode)
         if mode not in MODE_LABELS or any(p["mode"] == mode for p in out):
             continue
         reason = str(item.get("reason") or "").strip()[:40] or str(MODE_LABELS[mode])
