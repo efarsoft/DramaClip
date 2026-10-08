@@ -32,7 +32,7 @@ _MAX_GOLDEN_PER_EPISODE = 8
 
 
 def pick_golden_lines(
-    llm: LlmClient, asr_lines: list[tuple[int, float, float, str]]
+    llm: LlmClient, asr_lines: list[tuple[float, float, float, str]]
 ) -> list[tuple[float, float]] | None:
     """单集金句提取：asr_lines = [(编号, start, end, text)]，回传选中行的 (start, end)。
 
@@ -45,11 +45,9 @@ def pick_golden_lines(
         f"{no}. [{start:.1f}-{end:.1f}s] {text.strip()}"
         for no, start, end, text in asr_lines
     )
-    try:
-        raw = llm.chat_json(_PROMPT, numbered)
-    except LlmUnavailable as exc:
-        logger.warning("LLM 金句提取失败，回退规则打分: %s", exc)
-        return None
+    # LlmUnavailable 不在此吞：上抛由 pick_for_material 包装成带原因的
+    # ValueError（无兜底裁决 2026-10-08——静默转 None 会丢失失败原因）
+    raw = llm.chat_json(_PROMPT, numbered)
     ids = raw.get("ids") if isinstance(raw, dict) else None
     if not isinstance(ids, list):
         return None

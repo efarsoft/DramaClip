@@ -7,6 +7,8 @@ LLM 不可用 → None，调用方回退规则打分（降级不可见）。
 from __future__ import annotations
 
 from dramaclip.engines.analysis.models import AsrSegment
+import pytest
+
 from dramaclip.engines.narration import golden_lines
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
 
@@ -49,12 +51,18 @@ def test_invalid_ids_are_dropped() -> None:
     assert spans == [(2.0, 5.0), (0.0, 2.0)], "越界/重复/非整数丢弃"
 
 
-def test_llm_unavailable_raises_with_reason_at_batch_entry() -> None:
+def test_llm_unavailable_raises_with_reason_at_batch_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """无兜底裁决（2026-10-08）：批量入口失败即抛带原因的 ValueError，
     不静默降级成规则打分。"""
     import pytest
 
-    llm = _FakeLlm(error=LlmUnavailable("端点挂了"))
+    class _FailLlm:
+        def chat_json(self, _system: str, _user: str):
+            raise LlmUnavailable("端点挂了")
+
+    monkeypatch.setattr(golden_lines, "LlmClient", lambda *_a, **_k: _FailLlm())
     with pytest.raises(ValueError, match="金句提取失败.*端点挂了"):
         golden_lines.pick_for_material(
             {"llm.base_url": "https://x/v1", "llm.model": "m"},
