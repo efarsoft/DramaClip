@@ -69,11 +69,5 @@ jobs:
           files: |
             desktop/release/*.exe
             desktop/release/*.zip
-          body: |
-            ## 安装说明
-
-            1. 下载 `DramaClip-Setup-*.exe`（或便携版 zip）运行安装
-            2. 首次启动后在 **引擎中心** 下载所需模型（语音识别 / 配音）
-            3. 在 **引擎中心 → 文案 LLM** 配置任意 OpenAI 兼容端点（可选，纯原片类模式无需配置）
-
-            > 安装包内置 FFmpeg 与全部运行时；无 NVIDIA 显卡同样可跑（自动 CPU 模式）。
+          # 发布说明统一维护在仓库根 upgrade.md（顶部小节 = 当前版本说明）
+          body_path: upgrade.md
