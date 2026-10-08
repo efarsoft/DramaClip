@@ -583,9 +583,12 @@ def _audit_duration(context: AppContext, plan_data: PlanData, actual_s: float) -
         if declared <= 0:
             return
         diff = actual_s - declared
+        # 台词保护区外扩的逐段合法余量（与自检同口径）：快切形态逐段累积可达数秒
+        protect_slack = 0.45 * len(plan_data.timeline)
         tolerance = max(
             declared * encoder.AUDIT_DURATION_REL_TOLERANCE,
             encoder.AUDIT_DURATION_ABS_TOLERANCE_S,
+            protect_slack,
         )
         if abs(diff) <= tolerance:
             return
@@ -639,6 +642,7 @@ def _selfcheck_one(context: AppContext, export_id: str) -> bool:
         mode=str(row["narration_mode"] or ""),
         budget_s=None if plan_data is None else _declared_duration_s(plan_data),
         planned_segments=None if plan_data is None else _planned_narration_segments(plan_data),
+        segment_count=0 if plan_data is None else len(plan_data.timeline),
     )
     exports_repo.set_selfcheck(
         context.conn,

@@ -40,6 +40,7 @@ _FREEZE_DURATION_RE = re.compile(r"freeze_duration:\s*(\d+(?:\.\d+)?)")
 # 光有音轨不够，那可能是纯原声顶替了解说。
 EXPECT_NARRATION: dict[str, str] = {
     "raw_clip": "none",
+    "highlight_cut": "none",
     "subtitle_flow": "none",
     "intro_narration": "one",
     "cross_narration": "many",
@@ -50,6 +51,9 @@ EXPECT_NARRATION: dict[str, str] = {
     "inner_monologue": "many",
 }
 _NARRATION_FLOOR = {"one": 1, "many": 2}
+# 台词保护区外扩的逐段合法余量：safe_times 避字外移 + 尾垫，单段 ≤0.45s
+# （±0.3s 挪移 + 台词尾 +0.15s）。逐段累积对快切形态不可忽略。
+_SEGMENT_PROTECT_SLACK_S = 0.45
 
 
 def _now_ms() -> int:
@@ -105,16 +109,25 @@ def measure_audio_video(
     return mean_volume_db, max(freezes, default=0.0)
 
 
-def check_duration(measured_s: float | None, budget_s: float | None) -> dict[str, Any]:
+def check_duration(
+    measured_s: float | None,
+    budget_s: float | None,
+    *,
+    segment_count: int = 0,
+) -> dict[str, Any]:
     """时长达标：实测 vs Σ 时间轴声明时长，阈值 max(8%, 3s)（与 _audit_duration 同判）。
 
-    budget 拿不到（方案已删/时间轴为空）或实测拿不到都归 null——「—」，不猜。
+    `segment_count` 提供时按段追加**台词保护区外扩余量**（每段 ≤0.45s：切点避字
+    会合法外移，逐段累积对快切形态不可忽略——真机 highlight 14 段累计 +5.5s
+    曾被误判时长不达标）。预算与余量都拿不到（方案已删/时间轴为空）或实测
+    拿不到都归 null——「—」，不猜。
     """
     if measured_s is None or budget_s is None or budget_s <= 0:
         return {"pass": None}
     tolerance = max(
         budget_s * encoder.AUDIT_DURATION_REL_TOLERANCE,
         encoder.AUDIT_DURATION_ABS_TOLERANCE_S,
+        segment_count * _SEGMENT_PROTECT_SLACK_S,
     )
     return {
         "pass": abs(measured_s - budget_s) <= tolerance,
@@ -182,6 +195,7 @@ def run(
     mode: str,
     budget_s: float | None,
     planned_segments: int | None,
+    segment_count: int = 0,
 ) -> dict[str, Any]:
     """四项全测，返回落库形状的成绩单（json.dumps 后进 export_jobs.selfcheck）。
 
@@ -192,7 +206,9 @@ def run(
     payload = {
         "version": 1,
         "checked_at": _now_ms(),
-        "duration": check_duration(measured_s, budget_s),
+        "duration": check_duration(
+            measured_s, budget_s, segment_count=segment_count
+        ),
         "narration": check_narration(has_audio, mode, planned_segments),
         "silence": check_silence(mean_volume_db, has_audio),
         "freeze": check_freeze(max_freeze_s),
