@@ -244,3 +244,19 @@ def test_ultra_short_dense_copy_passes() -> None:
     )
     # _cta_text 认最后一段旁白：时间轴尾段的 narration_id 必须接上 cta-1（与真实编排同形）
     assert defects(plan) == []
+
+
+def test_highlight_cut_pure_cut_skips_cta_gate() -> None:
+    """高光混剪与 raw_clip 同族：零旁白零 CTA，不判「收尾没有文案」。
+
+    2026-10-08 真机：新模式漏了豁免名单，恒为 draft 不能出片。"""
+    from dramaclip.engines.narration.models import PlanData, TimelineSegment
+
+    plan = PlanData(
+        mode="highlight_cut",
+        timeline=[
+            TimelineSegment(episode_id="ep1", start=24.5, end=29.5, audio="original"),  # type: ignore[arg-type]
+            TimelineSegment(episode_id="ep1", start=105.0, end=110.0, audio="original"),  # type: ignore[arg-type]
+        ],
+    )
+    assert defects(plan) == [], "纯剪辑形态不判收尾文案"

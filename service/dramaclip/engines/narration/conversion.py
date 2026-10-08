@@ -17,7 +17,9 @@ def defects(plan: PlanData) -> list[str]:
     if first.end - first.start < 0.5:
         issues.append("开场不足半秒，钩子站不住")
     issues.extend(_timeline_defects(plan))
-    if plan.mode == "raw_clip":
+    # 纯剪辑双兄弟（raw_clip / highlight_cut）零旁白零 CTA：只查时间轴。
+    # 收尾文案检查是给带解说/金句卡的形态用的。
+    if plan.mode in ("raw_clip", "highlight_cut"):
         return issues
     last = _cta_text(plan)
     if not last.strip():
