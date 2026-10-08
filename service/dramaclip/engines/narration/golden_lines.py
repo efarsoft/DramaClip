@@ -32,7 +32,7 @@ _MAX_GOLDEN_PER_EPISODE = 8
 
 
 def pick_golden_lines(
-    llm: LlmClient, asr_lines: list[tuple[float, float, float, str]]
+    llm: LlmClient, asr_lines: list[tuple[int, float, float, str]]
 ) -> list[tuple[float, float]] | None:
     """单集金句提取：asr_lines = [(编号, start, end, text)]，回传选中行的 (start, end)。
 
@@ -66,7 +66,7 @@ def pick_golden_lines(
 
 def pick_for_material(
     context_settings: dict[str, str],
-    dialogue_by_episode: dict[str, list[tuple[float, float, float, str]]],
+    dialogue_by_episode: dict[str, list[tuple[int, float, float, str]]],
 ) -> dict[str, list[tuple[float, float]]]:
     """多集批量提取：{集 id: [(start, end), ...]}。
 

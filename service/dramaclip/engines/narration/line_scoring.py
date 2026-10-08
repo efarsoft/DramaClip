@@ -60,7 +60,7 @@ def _couplet_bonus(text: str) -> int:
 def _anadiplosis_bonus(text: str) -> int:
     """顶真接龙：前句尾词 = 后句首词（「可问春风；春风不语」）——文戏金句的接骨法。"""
     halves = [h.strip(" ；;，,。") for h in re.split(r"[；;]", text)]
-    for a, b in zip(halves, halves[1:]):
+    for a, b in zip(halves, halves[1:], strict=False):
         if len(a) >= 2 and len(b) >= 2 and (a.endswith(b[:2]) or b.startswith(a[-2:])):
             return 14
     return 0

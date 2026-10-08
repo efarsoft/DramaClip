@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from dramaclip.engines.narration import golden_lines as golden_lines_mod
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.infra.storage.repos import plans as plans_repo
 from tests.api.test_plan_variants import (
@@ -32,6 +33,10 @@ def test_rule_mode_back_to_ready(
     harness.context.settings.update(_LLM_SETTINGS)
     calls: list[tuple[str, str]] = []
     _stub_language_and_tts(monkeypatch, calls)
+    # 金句提取走 LLM：测试桩按编号回填（与文案链打桩同款手法）
+    monkeypatch.setattr(golden_lines_mod, "LlmClient", lambda *_a, **_k: type(
+        "_GoldenFake", (), {"chat_json": staticmethod(lambda _s, _u: {"ids": [1, 2]})}
+    )())
 
     result = harness.rpc(
         "narration.plan_variants", {"project_id": project_id, "modes": [mode], "k": 1}
