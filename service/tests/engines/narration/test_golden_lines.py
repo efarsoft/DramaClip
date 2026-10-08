@@ -49,16 +49,27 @@ def test_invalid_ids_are_dropped() -> None:
     assert spans == [(2.0, 5.0), (0.0, 2.0)], "越界/重复/非整数丢弃"
 
 
-def test_llm_unavailable_returns_none() -> None:
+def test_llm_unavailable_raises_with_reason_at_batch_entry() -> None:
+    """无兜底裁决（2026-10-08）：批量入口失败即抛带原因的 ValueError，
+    不静默降级成规则打分。"""
+    import pytest
+
     llm = _FakeLlm(error=LlmUnavailable("端点挂了"))
-    assert golden_lines.pick_golden_lines(llm, [(1, 0.0, 2.0, "x")]) is None
+    with pytest.raises(ValueError, match="金句提取失败.*端点挂了"):
+        golden_lines.pick_for_material(
+            {"llm.base_url": "https://x/v1", "llm.model": "m"},
+            {"ep1": [(1, 0.0, 2.0, "x")]},
+        )
 
 
 def test_empty_lines_returns_none() -> None:
+    """空台词列表不是失败：该集无台词可挑，回 None 由调用方决策。"""
     llm = _FakeLlm({"ids": [1]})
     assert golden_lines.pick_golden_lines(llm, []) is None
 
 
-def test_pick_for_material_unconfigured_returns_empty() -> None:
-    result = golden_lines.pick_for_material({"llm.model": ""}, {"ep1": [(1, 0.0, 2.0, "x")]})
-    assert result == {}
+def test_pick_for_material_unconfigured_raises() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="金句提取需要文本模型"):
+        golden_lines.pick_for_material({"llm.model": ""}, {"ep1": [(1, 0.0, 2.0, "x")]})

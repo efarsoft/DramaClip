@@ -2,8 +2,9 @@
 
 按集一次调用：全部台词编号给 LLM，让它按「传播力」挑金句并**回填编号**——
 编号越界/重复/非整数一律丢弃，零幻觉风险（金句原文永远来自真实台词）。
-LLM 不可用/未配置 → 返回 None，调用方回退规则打分（line_scoring），
-降级不可见。
+LLM 不可用/未配置 → **抛 ValueError 明示原因**（业主裁决 2026-10-08：
+每域单启用、失败即报错不兜底——静默降级成规则打分，选出来的句子
+质量不可预期，用户还以为 LLM 挑的）。
 """
 
 from __future__ import annotations
@@ -67,16 +68,31 @@ def pick_golden_lines(
 
 def pick_for_material(
     context_settings: dict[str, str],
-    dialogue_by_episode: dict[str, list[tuple[int, float, float, str]]],
+    dialogue_by_episode: dict[str, list[tuple[float, float, float, str]]],
 ) -> dict[str, list[tuple[float, float]]]:
-    """多集批量提取：{集 id: [(start, end), ...]}；未配置/全失败的集不进结果。"""
+    """多集批量提取：{集 id: [(start, end), ...]}。
+
+    失败即抛（业主裁决「不需要兜底策略」）：LLM 未配置/不可用/某集提取失败
+    都原样上抛带原因的 ValueError——静默降级成规则打分，选出的句子质量
+    不可预期，用户还以为 LLM 挑的。"""
     config = LlmConfig.from_settings(context_settings)
     if not config.configured:
-        return {}
+        raise ValueError(
+            "金句提取需要文本模型：请在引擎中心配置 LLM 端点后重试"
+        )
     llm = LlmClient(config, timeout_s=float(context_settings.get("llm.timeout_s") or 120))
     result: dict[str, list[tuple[float, float]]] = {}
     for episode_id, asr_lines in dialogue_by_episode.items():
-        spans = pick_golden_lines(llm, asr_lines)
+        try:
+            spans = pick_golden_lines(llm, asr_lines)
+        except LlmUnavailable as exc:
+            raise ValueError(
+                f"金句提取失败（LLM 不可用）：{exc}——重试即可，或检查引擎中心配置"
+            ) from exc
+        if spans is None:
+            raise ValueError(
+                f"金句提取失败：{episode_id} 的台词未能得到有效的选择结果"
+            )
         if spans:
             result[episode_id] = spans
     return result
