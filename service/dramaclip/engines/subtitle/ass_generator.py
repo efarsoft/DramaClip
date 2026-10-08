@@ -79,6 +79,12 @@ def _placement(
     alignment = _ALIGNMENT.get(layout, _ALIGNMENT[_DEFAULT_LAYOUT])
     preset_margin_v = _margin_v(preset, canvas)
     if alignment == 5:
+        # climax 居中档：源片没有字幕带时保持垂直居中的冲击设计；
+        # 有源带（已被擦除）时字幕回到带内——悬空的居中大字挡脸，
+        # 观感就是「字幕位置不对」（2026-10-08 业主截图反馈）
+        if source_band is not None:
+            font = canvas.font_px(preset) if canvas is not None else _font_size(preset)
+            return (2, cover_band_margin_v(source_band, preset_margin_v, canvas, font))
         return (alignment, 0)
     if alignment == 2:
         font = canvas.font_px(preset) if canvas is not None else _font_size(preset)

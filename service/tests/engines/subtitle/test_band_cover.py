@@ -3,8 +3,10 @@
 语义（2026-10-06 业主裁决「直接覆盖原始字幕」，推翻 90004e4 的只避让）：
 编码端先对该带 delogo 擦除，我们的字幕**放回带内居中**——观众看竖屏短剧
 的字幕位置习惯。band 缺失降级为预设边距，逐字节一致。
+2026-10-08 扩展：居中档（climax/卡拉OK）在有源带时同样落带内压位——
+悬空的居中大字挡脸，观感即「字幕位置不对」（业主截图反馈）。
 
-几何单一真相：ass_generator 的 PlayResY=1920（\an2 下 MarginV=字幕底边距
+几何单一真相：ass_generator 的 PlayResY=1920（\\an2 下 MarginV=字幕底边距
 画面底的像素数）；盒子估高 = font_px × 1.9（字身 + 底框 padding）。
 """
 
@@ -83,28 +85,44 @@ def test_band_cover_moves_style_and_event_margin_together() -> None:
     assert "\\an2" in ass, "布局不变，只改边距"
 
 
-def test_climax_center_layout_unaffected_by_band() -> None:
-    """center_single（climax 档）：MarginV 不参与定位，band 给不给事件行零变化。"""
+def test_climax_center_layout_falls_into_band() -> None:
+    """climax 居中档：无源带保持垂直居中冲击设计；有源带落带内压位。
+
+    悬空的居中大字挡脸，观感即「字幕位置不对」（2026-10-08 业主截图反馈）——
+    带已被擦除，字幕回带内，字号冲击力保留。
+    """
     preset = presets.get_preset("conflict-impact")
     lines = [{"start": 0, "end": 2, "text": "我要报仇！"}]  # triumph → center_single
     baseline = build_ass(lines, preset)
-    assert "\\an5" in baseline
+    assert "\\an5" in baseline, "无带时保持居中冲击设计"
+    assert _event_fields(baseline)[7] == "0"
+
+    font_px = int(preset.get("font", {}).get("size", 64))
     with_band = build_ass(lines, preset, source_band=(0.5, 0.9))
-    assert _event_fields(with_band)[7] == "0", "居中事件 MarginV 必须仍为 0"
-    assert "\\an5" in with_band
+    assert "\\an2" in with_band, "有源带 → 落带内，不再悬空居中"
+    expected = cover_band_margin_v((0.5, 0.9), 90, None, font_px)
+    assert _event_fields(with_band)[7] == str(expected), "MarginV 按带内压位公式"
 
 
 def _event_line_of(ass: str) -> str:
     return next(line for line in ass.splitlines() if line.startswith("Dialogue:"))
 
 
-def test_karaoke_center_preset_unaffected_by_band() -> None:
+def test_karaoke_center_preset_falls_into_band() -> None:
+    """center_single（卡拉OK档）同样统一：无带居中，有源带落带内压位。"""
     preset = presets.get_preset("karaoke-pop")  # layout.default = center_single
-    assert build_ass(_LINES, preset, source_band=(0.5, 0.9)) == build_ass(_LINES, preset)
+    baseline = build_ass(_LINES, preset)
+    with_band = build_ass(_LINES, preset, source_band=(0.5, 0.9))
+    assert with_band != baseline, "有源带时落带，输出必然变化"
+    font_px = int(preset.get("font", {}).get("size", 64))
+    margin_v = int(preset.get("font", {}).get("margin_v", 80))
+    assert _event_fields(with_band)[7] == str(
+        cover_band_margin_v((0.5, 0.9), margin_v, None, font_px)
+    ), "MarginV 按带内压位公式"
 
 
 def test_top_title_unaffected_by_band() -> None:
-    """top_title（\an8）：MarginV 是距**顶**距离，底部源带压位不适用，零改动。"""
+    """top_title：MarginV 是距**顶**距离，底部源带压位不适用，零改动。"""
     preset = {
         "preset_id": "probe",
         "font": {"name": "X", "size": 64, "margin_v": 80},
