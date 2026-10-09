@@ -58,13 +58,13 @@ def test_build_ass_structure() -> None:
     assert "&H000000FF" in ass, "anger 情绪红色"
 
 
-def test_build_ass_climax_layout_centered() -> None:
+def test_build_ass_climax_layout_bottoms() -> None:
     preset = presets.get_preset("conflict-impact")
     ass = build_ass([{"start": 0, "end": 2, "text": "我要报仇！"}], preset)
-    # 报仇 → triumph 高潮情绪 → climax 布局 center_single：必须真的居中（\an5），
-    # 而不是贴底只留 10px——后者是「字幕下半被裁」的成因。
-    assert "\\an5" in ass and "\\fscx112" in ass and "&H0000D7FF" in ass
-    assert _event_fields(ass)[7] == "0", "居中对齐下 MarginV 不参与定位，须为 0"
+    # 报仇 → triumph 高潮情绪 → climax 布局：大字与情绪色保留，
+    # 位置统一落底部字幕带（2026-10-08 裁决：字幕禁止居中遮画面）。
+    assert "\\fscx112" in ass and "&H0000D7FF" in ass
+    assert "\\an2" in ass, "climax 大字落底部字幕带"
 
 
 def _event_fields(ass: str, index: int = 0) -> list[str]:
@@ -86,8 +86,8 @@ def test_layout_dimension_drives_alignment_not_just_margin() -> None:
     """
     by_layout = {
         "bottom_bar": 2,
-        "center_single": 5,
-        "center_multi": 5,
+        "center_single": 2,
+        "center_multi": 2,
         "top_title": 8,
     }
     for layout, alignment in by_layout.items():
@@ -110,9 +110,8 @@ def test_bottom_bar_keeps_clear_of_frame_edge() -> None:
 
 
 def test_karaoke_pop_default_layout_is_not_bottom_bar() -> None:
-    """karaoke-pop 的 layout.default 本就是 center_single：整片每行都该居中。
-
-    修复前它是**每一行**被裁（贴底 + MarginV 10），业主截图即此形状。
+    """karaoke-pop 的 center_single 现映射为贴底（2026-10-08 裁决：字幕
+    禁止居中）：整片每行落底部字幕带，不再有悬空居中行。
     """
     preset = presets.get_preset("karaoke-pop")
     ass = build_ass(
@@ -122,8 +121,7 @@ def test_karaoke_pop_default_layout_is_not_bottom_bar() -> None:
         ],
         preset,
     )
-    assert ass.count("\\an5") == 2
-    assert "\\an2" not in ass
+    assert ass.count("\\an2") == 2, "全部落底部字幕带"
 
 
 # --- 长解说拆行（业主立案②：整段一条字幕超长） --------------------------------

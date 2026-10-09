@@ -10,7 +10,9 @@ from typing import Any
 from dramaclip.engines.subtitle import caption_font
 from dramaclip.engines.subtitle.emotion_matcher import match_emotion
 
-_ALIGNMENT = {"bottom_bar": 2, "center_single": 5, "center_multi": 5, "top_title": 8}
+# 居中档（center_single/center_multi）统一落底：字幕禁止居中遮画面
+# （2026-10-08 业主裁决）。climax 的大字号/情绪色保留，位置进底部字幕带。
+_ALIGNMENT = {"bottom_bar": 2, "center_single": 2, "center_multi": 2, "top_title": 8}
 _DEFAULT_LAYOUT = "bottom_bar"
 _EFFECT_TAGS = {
     "none": "",
@@ -78,14 +80,6 @@ def _placement(
     """
     alignment = _ALIGNMENT.get(layout, _ALIGNMENT[_DEFAULT_LAYOUT])
     preset_margin_v = _margin_v(preset, canvas)
-    if alignment == 5:
-        # climax 居中档：源片没有字幕带时保持垂直居中的冲击设计；
-        # 有源带（已被擦除）时字幕回到带内——悬空的居中大字挡脸，
-        # 观感就是「字幕位置不对」（2026-10-08 业主截图反馈）
-        if source_band is not None:
-            font = canvas.font_px(preset) if canvas is not None else _font_size(preset)
-            return (2, cover_band_margin_v(source_band, preset_margin_v, canvas, font))
-        return (alignment, 0)
     if alignment == 2:
         font = canvas.font_px(preset) if canvas is not None else _font_size(preset)
         return (alignment, cover_band_margin_v(source_band, preset_margin_v, canvas, font))
@@ -117,7 +111,7 @@ _AVOID_MARGIN_CAP_RATIO = 2 / 3
 
 
 def cover_band_margin_v(
-    band: "tuple[float, float] | tuple[int, int] | None",
+    band: tuple[float, float] | tuple[int, int] | None,
     preset_margin_v: int,
     canvas: Canvas | None = None,
     font_px: int | None = None,

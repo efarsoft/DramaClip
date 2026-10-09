@@ -85,40 +85,34 @@ def test_band_cover_moves_style_and_event_margin_together() -> None:
     assert "\\an2" in ass, "布局不变，只改边距"
 
 
-def test_climax_center_layout_falls_into_band() -> None:
-    """climax 居中档：无源带保持垂直居中冲击设计；有源带落带内压位。
-
-    悬空的居中大字挡脸，观感即「字幕位置不对」（2026-10-08 业主截图反馈）——
-    带已被擦除，字幕回带内，字号冲击力保留。
-    """
+def test_climax_layout_bottoms_with_and_without_band() -> None:
+    """climax 大字档：位置统一落底部字幕带（2026-10-08 裁决：字幕禁止居中）——
+    有源带压带内（带已被擦除），无源带贴预设边距；字号与情绪色保留。"""
     preset = presets.get_preset("conflict-impact")
     lines = [{"start": 0, "end": 2, "text": "我要报仇！"}]  # triumph → center_single
-    baseline = build_ass(lines, preset)
-    assert "\\an5" in baseline, "无带时保持居中冲击设计"
-    assert _event_fields(baseline)[7] == "0"
-
     font_px = int(preset.get("font", {}).get("size", 64))
+
+    baseline = build_ass(lines, preset)
+    assert "\\an2" in baseline, "无源带 → 贴预设边距，不居中"
+    assert _event_fields(baseline)[7] == "90", "无带时用预设边距"
+
     with_band = build_ass(lines, preset, source_band=(0.5, 0.9))
-    assert "\\an2" in with_band, "有源带 → 落带内，不再悬空居中"
+    assert "\\an2" in with_band
     expected = cover_band_margin_v((0.5, 0.9), 90, None, font_px)
     assert _event_fields(with_band)[7] == str(expected), "MarginV 按带内压位公式"
+    assert "\\fscx112" in with_band, "climax 大字冲击力保留"
 
 
 def _event_line_of(ass: str) -> str:
     return next(line for line in ass.splitlines() if line.startswith("Dialogue:"))
 
 
-def test_karaoke_center_preset_falls_into_band() -> None:
-    """center_single（卡拉OK档）同样统一：无带居中，有源带落带内压位。"""
+def test_karaoke_center_preset_bottoms() -> None:
+    """卡拉OK档统一落底部字幕带（居中已废，2026-10-08 裁决）。"""
     preset = presets.get_preset("karaoke-pop")  # layout.default = center_single
-    baseline = build_ass(_LINES, preset)
-    with_band = build_ass(_LINES, preset, source_band=(0.5, 0.9))
-    assert with_band != baseline, "有源带时落带，输出必然变化"
-    font_px = int(preset.get("font", {}).get("size", 64))
-    margin_v = int(preset.get("font", {}).get("margin_v", 80))
-    assert _event_fields(with_band)[7] == str(
-        cover_band_margin_v((0.5, 0.9), margin_v, None, font_px)
-    ), "MarginV 按带内压位公式"
+    ass = build_ass(_LINES, preset, source_band=(0.5, 0.9))
+    assert "\\an2" in ass
+    assert "\\an5" not in ass
 
 
 def test_top_title_unaffected_by_band() -> None:
