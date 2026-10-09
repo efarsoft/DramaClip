@@ -209,6 +209,16 @@ export interface JobsListResult {
   readonly server_time_ms: number;
 }
 
+/** 全部已分析集一次性导出（逐集 SRT + 合并全剧台词 TXT）。 */
+export interface ExportTranscriptsResult {
+  readonly ok: boolean;
+  readonly dir: string;
+  readonly txt_path: string;
+  readonly files: string[];
+  readonly exported: number;
+  readonly skipped: number;
+}
+
 export interface AnalysisResults {
   readonly episodes: EpisodeAnalysisResult[];
   readonly asr_segments?: Readonly<Record<string, AsrSegment[]>>;
@@ -710,6 +720,7 @@ export const METHOD_NAMES = [
   'analysis.status',
   'analysis.cancel',
   'analysis.results',
+  'analysis.export_transcripts',
   'narration.plan_variants',
   'narration.recommend_modes',
   'narration.llm_traces',

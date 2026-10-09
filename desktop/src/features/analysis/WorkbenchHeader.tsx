@@ -1,12 +1,26 @@
-/** 工作台顶部：返回/项目信息/转写档位/批量操作 + 横向步骤导航。 */
+/** 工作台顶部：返回/项目信息/转写档位/批量操作/导出转写 + 横向步骤导航。 */
 import { Button, Tag } from 'antd';
-import { LeftOutlined } from '@ant-design/icons';
+import { DownloadOutlined, LeftOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { Project } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
 import type { TranscribeTier } from './analysisView';
 import { StepsNav } from './StepsNav';
 import { TierPicker } from './TierPicker';
+
+interface HeaderProps {
+  projectId: string;
+  project: Project | null;
+  total: number;
+  doneCount: number;
+  running: boolean;
+  progressPercent: number;
+  tier: TranscribeTier;
+  onTierChange: (next: TranscribeTier) => void;
+  onBatchAnalyze: () => void;
+  onCancel: () => void;
+  onExportTranscripts: () => void;
+}
 
 export function WorkbenchHeader({
   projectId,
@@ -19,18 +33,8 @@ export function WorkbenchHeader({
   onTierChange,
   onBatchAnalyze,
   onCancel,
-}: {
-  projectId: string;
-  project: Project | null;
-  total: number;
-  doneCount: number;
-  running: boolean;
-  progressPercent: number;
-  tier: TranscribeTier;
-  onTierChange: (next: TranscribeTier) => void;
-  onBatchAnalyze: () => void;
-  onCancel: () => void;
-}): React.ReactElement {
+  onExportTranscripts,
+}: HeaderProps): React.ReactElement {
   const navigate = useNavigate();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceMd }}>
@@ -49,6 +53,9 @@ export function WorkbenchHeader({
           </span>
         )}
         <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: tokens.spaceSm }}>
+          <Button size="small" icon={<DownloadOutlined />} disabled={doneCount === 0} onClick={onExportTranscripts}>
+            导出转写
+          </Button>
           <TierPicker tier={tier} onTierChange={onTierChange} disabled={running} />
           {running ? (
             <Button size="small" danger onClick={onCancel}>

@@ -1,46 +1,12 @@
 /** 渲染层唯一 IPC 出口（docs/desktop/01 §4）。组件禁止直接调 window.dramaclip。 */
 import type {
-  AnalysisJobStatus,
-  CopyFilesResult,
-  EngineConfig,
-  StyleInfo,
-  WorkItem as WorksItem,
-  ModelInfo,
-  AnalysisResults,
-  DashboardSummary,
-  DramaClipBridge,
-  DataPaths,
-  ExportJob,
-  ExportSubmitResult,
-  JobsListResult,
-  PlanDetail,
-  RevealResult,
-  TitleCandidate,
-  HealthResult,
-  ImportInspection,
-  ImportRecord,
-  JobInfo,
-  NarrationMode,
-  NarrationPlan,
-  OrphanCopy,
-  PingResult,
-  PlanVariantsResult,
-  Project,
-  ProjectGetResult,
-  ScannedEpisode,
-  SelftestResult,
-  SelftestResults,
-  ServiceEvent,
-  PromptsListResult,
-  RelayoutResult,
-  SubtitlePresetInfo,
-  TtsPreviewResult,
-  TtsCleanReferenceResult,
-  ModeRecommendation,
-  TtsAutoVoiceResult,
-  LlmTraceListResult,
-  PlanTraceResult,
-  VerifyReport,
+  AnalysisJobStatus, AnalysisResults, CopyFilesResult, DashboardSummary, DataPaths, DramaClipBridge,
+  EngineConfig, ExportJob, ExportSubmitResult, ExportTranscriptsResult, HealthResult, ImportInspection,
+  ImportRecord, JobInfo, JobsListResult, LlmTraceListResult, ModeRecommendation, ModelInfo, NarrationMode,
+  NarrationPlan, OrphanCopy, PingResult, PlanDetail, PlanTraceResult, PlanVariantsResult, Project,
+  ProjectGetResult, PromptsListResult, RevealResult, RelayoutResult, ScannedEpisode, SelftestResult,
+  SelftestResults, ServiceEvent, StyleInfo, SubtitlePresetInfo, TitleCandidate, TtsAutoVoiceResult,
+  TtsCleanReferenceResult, TtsPreviewResult, VerifyReport, WorkItem as WorksItem,
 } from '@dramaclip/protocol';
 
 function bridge(): DramaClipBridge {
@@ -147,6 +113,9 @@ export const analysisApi = {
     }),
   results: (projectId: string): Promise<AnalysisResults> =>
     rpc<AnalysisResults>('analysis.results', { project_id: projectId }),
+  /** 全部已分析集一次性导出：逐集 SRT + 合并全剧台词 TXT，产物在 data/exports/transcripts/。 */
+  exportTranscripts: (projectId: string): Promise<ExportTranscriptsResult> =>
+    rpc<ExportTranscriptsResult>('analysis.export_transcripts', { project_id: projectId }),
   /** 轻量预筛（转写档位「仅推荐集精转」的执行体）；thenAnalyze=预筛完自动精转推荐集。 */
   prescreen: (projectId: string, thenAnalyze?: boolean): Promise<{ job_id: string }> =>
     rpc<{ job_id: string }>(

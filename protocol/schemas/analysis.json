@@ -195,5 +195,27 @@
         }
       }
     }
+,
+    {
+      "name": "analysis.export_transcripts",
+      "summary": "全部已分析集一次性导出：逐集 SRT + 合并全剧台词 TXT，产物在 data/exports/transcripts/<剧名>/（同步返回）",
+      "params": {
+        "type": "object",
+        "required": ["project_id"],
+        "properties": { "project_id": { "type": "string" } }
+      },
+      "result": {
+        "type": "object",
+        "required": ["ok", "dir", "txt_path", "files", "exported", "skipped"],
+        "properties": {
+          "ok": { "type": "boolean" },
+          "dir": { "type": "string" },
+          "txt_path": { "type": "string" },
+          "files": { "type": "array", "items": { "type": "string" } },
+          "exported": { "type": "integer" },
+          "skipped": { "type": "integer" }
+        }
+      }
+    }
   ]
 }

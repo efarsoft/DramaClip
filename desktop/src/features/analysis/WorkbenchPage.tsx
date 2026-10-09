@@ -2,6 +2,7 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { Alert, App as AntdApp } from 'antd';
 import type { AnalysisResults } from '@dramaclip/protocol';
+import { analysisApi, revealInFolder } from '../../services/client';
 import { layout, tokens } from '../../styles/theme';
 import { prescreenCoverage } from './analysisView';
 import { useAnalysisWorkspace } from './useAnalysisWorkspace';
@@ -45,6 +46,9 @@ export function WorkbenchPage() {
         }}
         onCancel={() => {
           startAnalysis(workspace.cancel, message);
+        }}
+        onExportTranscripts={() => {
+          exportTranscripts(projectId, message);
         }}
       />
       <CoverageAlert results={workspace.results} />
@@ -112,6 +116,24 @@ function startAnalysis(
   start().catch((error: unknown) => {
     message.error(error instanceof Error ? error.message : String(error));
   });
+}
+
+/** 全部已分析集一次性导出（逐集 SRT + 全剧台词 TXT），完成自动打开导出目录。 */
+function exportTranscripts(
+  projectId: string,
+  message: { success: (text: string) => void; error: (text: string) => void },
+): void {
+  analysisApi
+    .exportTranscripts(projectId)
+    .then((result) => {
+      message.success(
+        `已导出 ${String(result.exported)} 集转写${result.skipped > 0 ? `（跳过未分析 ${String(result.skipped)} 集）` : ''}`,
+      );
+      void revealInFolder(result.txt_path);
+    })
+    .catch((error: unknown) => {
+      message.error(error instanceof Error ? error.message : String(error));
+    });
 }
 
 interface TwoColumnsProps {
