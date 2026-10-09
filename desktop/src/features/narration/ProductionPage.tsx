@@ -10,7 +10,6 @@ import { useUiStore } from '../../stores/ui';
 import { layout, tokens } from '../../styles/theme';
 import { ExportsCard } from './ExportsCard';
 import { ModePicker } from './ModePicker';
-import type { BatchSpec } from './PlanQueue';
 import { PlanPickList } from './PlanPickList';
 import { PlanQueue } from './PlanQueue';
 import { avgCompletedBytes } from './produceView';

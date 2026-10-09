@@ -80,7 +80,7 @@ it('作业失败时说出原因，同时取回已落库的部分方案（规划�
   });
 
   expect(result.current.error).toBe('编剧模型未配置');
-  expect(listPlans).toHaveBeenCalledWith('p1', 'job-1'), '失败也要取回已落库的部分';
+  expect(listPlans, '失败也要取回已落库的部分').toHaveBeenCalledWith('p1', 'job-1');
   expect(result.current.failDetail).toBe('编剧模型未配置');
 });
 

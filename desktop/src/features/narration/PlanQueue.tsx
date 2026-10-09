@@ -63,14 +63,14 @@ export function buildQueueRows(
     if (batchId !== null && plan.batch_id !== null && plan.batch_id !== undefined && plan.batch_id !== batchId) {
       continue;
     }
-    byKey.set(`${plan.narration_mode}#${plan.variant_index ?? 1}`, plan);
+    byKey.set(`${plan.narration_mode}#${String(plan.variant_index ?? 1)}`, plan);
   }
   const failures = parseFailures(failDetail);
   const rows: QueueRow[] = [];
   for (const mode of spec.modes) {
     const label = modeLabel(mode);
     for (let index = 1; index <= spec.k; index += 1) {
-      const plan = byKey.get(`${mode}#${index}`);
+      const plan = byKey.get(`${mode}#${String(index)}`);
       rows.push(
         plan !== undefined
           ? { mode, label, index, status: 'done', plan }
@@ -105,8 +105,6 @@ export function buildQueueRows(
   }
   return rows;
 }
-
-const FAIL_COLOR = tokens.colorError;
 
 export function PlanQueue({
   batch,
@@ -176,7 +174,7 @@ export function PlanQueue({
           />
         )}
       </div>
-      <LlmTraceModal open={tracesOpen} onClose={() => setTracesOpen(false)} />
+      <LlmTraceModal open={tracesOpen} onClose={() => { setTracesOpen(false); }} />
     </PageSection>
   );
 }
@@ -195,7 +193,7 @@ function DoneRow({ plan }: { plan: NarrationPlan }): React.ReactElement {
       }}
     >
       <Tag color="gold" style={{ marginRight: 0, flexShrink: 0 }}>
-        {plan.angle === null || plan.angle === undefined || plan.angle === '' ? label : plan.angle}
+        {plan.angle === '' ? label : plan.angle}
       </Tag>
       <strong style={{ color: tokens.textPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, flexShrink: 0 }}>
         {label}

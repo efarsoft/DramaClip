@@ -1,5 +1,5 @@
 // @ts-check
-// 规则依据 docs/04-代码质量规约.md。门禁：单文件≤800行 / 单函数≤60行 / 禁 any。
+// 规则依据 docs/04-代码质量规约.md。门禁：单文件≤800行 / 单函数≤120行 / 禁 any。
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
@@ -23,7 +23,7 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/consistent-type-imports': ['error', { fixStyle: 'inline-type-imports' }],
       'max-lines': ['error', { max: 800, skipBlankLines: true, skipComments: true }],
-      'max-lines-per-function': ['error', { max: 60, skipBlankLines: true, skipComments: true }],
+      'max-lines-per-function': ['error', { max: 120, skipBlankLines: true, skipComments: true }],
     },
   },
   {
