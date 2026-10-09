@@ -20,19 +20,22 @@ def upsert(
     genre: str | None = None,
     ocr_segments: str | None = None,
     subtitle_band: str | None = None,
+    visual_track: str | None = None,
 ) -> None:
     now = int(time.time() * 1000)
     conn.execute(
         "INSERT INTO episode_analysis"
         " (id, episode_id, asr_segments, scene_data, audio_features,"
-        "  conflict_scores, highlights, genre, ocr_segments, subtitle_band, analyzed_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "  conflict_scores, highlights, genre, ocr_segments, subtitle_band,"
+        "  visual_track, analyzed_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         " ON CONFLICT(episode_id) DO UPDATE SET"
         " asr_segments = excluded.asr_segments, scene_data = excluded.scene_data,"
         " audio_features = excluded.audio_features, conflict_scores = excluded.conflict_scores,"
         " highlights = excluded.highlights, genre = excluded.genre,"
         " ocr_segments = COALESCE(excluded.ocr_segments, episode_analysis.ocr_segments),"
         " subtitle_band = COALESCE(excluded.subtitle_band, episode_analysis.subtitle_band),"
+        " visual_track = COALESCE(excluded.visual_track, episode_analysis.visual_track),"
         " analyzed_at = excluded.analyzed_at",
         (
             uuid4().hex,
@@ -45,6 +48,7 @@ def upsert(
             genre,
             ocr_segments,
             subtitle_band,
+            visual_track,
             now,
         ),
     )
@@ -102,7 +106,7 @@ def update_semantic(
 def get(conn: sqlite3.Connection, episode_id: str) -> dict[str, Any] | None:
     row = conn.execute(
         "SELECT id, episode_id, asr_segments, scene_data, audio_features, conflict_scores,"
-        " highlights, genre, characters, ocr_segments, subtitle_band, analyzed_at"
+        " highlights, genre, characters, ocr_segments, subtitle_band, visual_track, analyzed_at"
         " FROM episode_analysis WHERE episode_id = ?",
         (episode_id,),
     ).fetchone()
@@ -120,6 +124,7 @@ def get(conn: sqlite3.Connection, episode_id: str) -> dict[str, Any] | None:
         "characters",
         "ocr_segments",
         "subtitle_band",
+        "visual_track",
         "analyzed_at",
     )
     return dict(zip(keys, row, strict=True))

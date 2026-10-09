@@ -92,3 +92,29 @@ def test_update_subtitle_band_roundtrip(memory_db: sqlite3.Connection) -> None:
     assert json.loads(str(row["subtitle_band"])) == [0.76, 0.9]
     assert row["ocr_segments"] == "[]", "其余列保留"
     assert repo.update_subtitle_band(memory_db, "nope", "[]") is False, "不存在的集返回 False"
+
+def test_visual_track_roundtrip(memory_db: sqlite3.Connection) -> None:
+    episode_id = _seed_episode(memory_db)
+    _upsert(memory_db, episode_id, visual_track=json.dumps({"contact_sheet": "/d/e1.png"}))
+    row = repo.get(memory_db, episode_id)
+    assert row is not None
+    assert json.loads(str(row["visual_track"])) == {"contact_sheet": "/d/e1.png"}
+
+
+def test_visual_track_null_by_default(memory_db: sqlite3.Connection) -> None:
+    """拼图未生成/失败 → NULL 透传，读端拿到 None（分档语义，消费端回退纯台词）。"""
+    episode_id = _seed_episode(memory_db)
+    _upsert(memory_db, episode_id)
+    row = repo.get(memory_db, episode_id)
+    assert row is not None and row["visual_track"] is None
+
+
+def test_reupsert_without_visual_track_preserves_previous(memory_db: sqlite3.Connection) -> None:
+    """COALESCE 语义：语义层单独重跑不带拼图，不清掉上一轮的视觉轨。"""
+    episode_id = _seed_episode(memory_db)
+    _upsert(memory_db, episode_id, visual_track=json.dumps({"contact_sheet": "/d/e1.png"}))
+    _upsert(memory_db, episode_id, highlights="[]")
+    row = repo.get(memory_db, episode_id)
+    assert row is not None
+    assert json.loads(str(row["visual_track"])) == {"contact_sheet": "/d/e1.png"}
+

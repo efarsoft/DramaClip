@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from dramaclip.api.context import AppContext, llm_trace_dir
 from dramaclip.engines.analysis import (
+    contact_sheet,
     fusion,
     pipeline,
     runtime,
@@ -681,6 +682,7 @@ def _analyze_one(
             ocr_json = (
                 json.dumps([o.model_dump() for o in ocr_segments]) if ocr_segments else None
             )
+            sheet = _contact_sheet(context, episode)
             analysis_repo.upsert(
                 context.conn,
                 episode_id,
@@ -688,6 +690,9 @@ def _analyze_one(
                 scene_data=json.dumps([scene.model_dump() for scene in raw.scenes]),
                 audio_features=raw.audio.model_dump_json(),
                 ocr_segments=ocr_json,
+                visual_track=(
+                    json.dumps({"contact_sheet": sheet}) if sheet is not None else None
+                ),
                 # 覆盖数据链落库：{"band": [t,b], "lines": [[t,b],...]}（旧库为纯 list，
                 # 读取端两种都认）。NULL=无硬字幕带/未探测/OCR 未装，消费端回退现状
                 subtitle_band=(
@@ -723,6 +728,28 @@ def _analyze_one(
         episodes_repo.set_status(context.conn, episode_id, "failed")
         context.notifier.log("error", f"{label} 分析失败: {exc}")
         return False
+
+
+def _contact_sheet(context: AppContext, episode: dict[str, Any]) -> str | None:
+    """生成逐集 contact sheet（视觉轨输入与预览资产），返回落库路径；失败仅留痕。
+
+    分档语义：拼图是增强品不是必需品——ffmpeg 失败/时长缺失只记 warn 落 NULL，
+    分析照常完成，消费端对 NULL 回退纯台词行为（同 subtitle_band 的 NULL 口径）。
+    """
+    try:
+        out = context.data_dir / "contact_sheets" / f"{episode['id']}.png"
+        contact_sheet.build_contact_sheet(
+            Path(str(episode["source_path"])),
+            out,
+            duration_s=float(episode["duration"] or 0.0),
+        )
+        return str(out)
+    except Exception as exc:
+        context.notifier.log(
+            "warn",
+            f"第{episode['episode_number']}集 拼图生成失败（不影响分析）: {exc}",
+        )
+        return None
 
 
 def _resumable_raw(
