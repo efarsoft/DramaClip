@@ -6,7 +6,7 @@ import { useState, type ReactElement } from 'react';
 import type { NarrationPlan } from '@dramaclip/protocol';
 import { modeLabel } from '../../components/modeMeta';
 import { tokens } from '../../styles/theme';
-import { planCardView } from './planCards';
+import { planCardView, type PlanCardView } from './planCards';
 
 /** 成片时长预估（秒）：有旁白按 字数/4.2（与服务端 estimate_duration 同一口径，
  *  回填后段长=实测音频≈此数）；纯原片没有旁白，画面窗即成片。
@@ -14,11 +14,11 @@ import { planCardView } from './planCards';
 const CHARS_PER_SECOND = 4.2;
 
 export function estimatedDurationS(plan: NarrationPlan): number {
-  const texts = plan.plan_data.narration_texts ?? [];
+  const texts = plan.plan_data.narration_texts;
   if (texts.length === 0) {
     return plan.plan_data.timeline.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
   }
-  return texts.reduce((sum, item) => sum + (item.text?.length ?? 0), 0) / CHARS_PER_SECOND;
+  return texts.reduce((sum, item) => sum + item.text.length, 0) / CHARS_PER_SECOND;
 }
 
 export function formatDuration(seconds: number): string {
@@ -28,6 +28,12 @@ export function formatDuration(seconds: number): string {
   if (minutes === 0) return `${String(rest)} 秒`;
   if (rest === 0) return `${String(minutes)} 分钟`;
   return `${String(minutes)} 分 ${String(rest)} 秒`;
+}
+
+/** 源集封面与集号（音画同步·降级态）：方案卡给出「取材第几集」的画面参考。 */
+interface SourceEpisode {
+  cover: string | null;
+  number: number;
 }
 
 export function PlanCard({
@@ -41,8 +47,7 @@ export function PlanCard({
   checked: boolean;
   recommended: boolean;
   onToggle: () => void;
-  /** 源集封面与集号（音画同步·降级态）：方案卡给出「取材第几集」的画面参考。 */
-  episodeCovers?: Record<string, { cover: string | null; number: number }>;
+  episodeCovers?: Record<string, SourceEpisode>;
 }) {
   const card = planCardView(plan);
   const [copyOpen, setCopyOpen] = useState(false);
@@ -64,53 +69,88 @@ export function PlanCard({
         cursor: card.pickable ? 'pointer' : 'not-allowed',
       }}
     >
-      {sourceEpisode?.cover ? (
-        <img
-          src={sourceEpisode.cover}
-          alt={`第${sourceEpisode.number}集`}
-          style={{
-            width: 54,
-            height: 96,
-            objectFit: 'cover',
-            borderRadius: tokens.radiusControl,
-            flexShrink: 0,
-          }}
-        />
-      ) : null}
+      {sourceEpisode?.cover ? <SourceCover source={sourceEpisode} /> : null}
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm, minHeight: 130, flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, flexWrap: 'wrap' }}>
-          {card.angle === '' ? (
-            <strong style={{ color: tokens.textPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading }}>{modeLabel(card.mode)}</strong>
-          ) : (
-            <>
-              <Tag color="gold" style={{ marginRight: 0 }}>
-                {card.angle}
-              </Tag>
-              <strong style={{ color: tokens.textPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading }}>{modeLabel(card.mode)}</strong>
-            </>
-          )}
-          <CardBadges recommended={recommended} checked={checked} pickable={card.pickable} />
-        </div>
+        <CardHeader card={card} recommended={recommended} checked={checked} />
         {card.hook !== '' && <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textPrimary }}>{card.hook}</span>}
         {card.reason !== '' && <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textSecondary }}>{card.reason}</span>}
         {card.gate !== '' && (
           <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.colorWarning }}>{card.gate}</span>
         )}
-        <span style={{ display: 'flex', gap: tokens.spaceMd, marginTop: 'auto', fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
-          <span>{modeLabel(card.mode)}</span>
-          <span>
-            {sourceEpisode ? `取材 第${String(sourceEpisode.number)}集` : card.episodes}
-          </span>
-          <span>预计 {formatDuration(estimatedDurationS(plan))}</span>
-          <span>{card.overlap}</span>
-          {card.dropped !== '' && (
-            <span style={{ color: tokens.colorWarning }}>{card.dropped}</span>
-          )}
-          <PlanCopyButton plan={plan} />
-        </span>
+        <CardFooter card={card} plan={plan} sourceEpisode={sourceEpisode} />
       </div>
-      <PlanCopyModal plan={plan} open={copyOpen} onClose={() => setCopyOpen(false)} />
+      <PlanCopyModal plan={plan} open={copyOpen} onClose={() => { setCopyOpen(false); }} />
     </Card>
+  );
+}
+
+/** 封面缩略图（54×96 竖图）。 */
+function SourceCover({ source }: { source: SourceEpisode }): ReactElement {
+  return (
+    <img
+      src={source.cover ?? ''}
+      alt={`第${String(source.number)}集`}
+      style={{
+        width: 54,
+        height: 96,
+        objectFit: 'cover',
+        borderRadius: tokens.radiusControl,
+        flexShrink: 0,
+      }}
+    />
+  );
+}
+
+/** 卡头：角度标签 + 模式名 + 推荐/已选/不可出片徽章。 */
+function CardHeader({
+  card,
+  recommended,
+  checked,
+}: {
+  card: PlanCardView;
+  recommended: boolean;
+  checked: boolean;
+}): ReactElement {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, flexWrap: 'wrap' }}>
+      {card.angle === '' ? (
+        <strong style={{ color: tokens.textPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading }}>{modeLabel(card.mode)}</strong>
+      ) : (
+        <>
+          <Tag color="gold" style={{ marginRight: 0 }}>
+            {card.angle}
+          </Tag>
+          <strong style={{ color: tokens.textPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading }}>{modeLabel(card.mode)}</strong>
+        </>
+      )}
+      <CardBadges recommended={recommended} checked={checked} pickable={card.pickable} />
+    </div>
+  );
+}
+
+/** 卡脚（压底）：模式/取材/时长预估/重叠率/丢弃数 + 文案全文入口。 */
+function CardFooter({
+  card,
+  plan,
+  sourceEpisode,
+}: {
+  card: PlanCardView;
+  plan: NarrationPlan;
+  sourceEpisode: SourceEpisode | undefined;
+}): ReactElement {
+  return (
+    <span style={{ display: 'flex', gap: tokens.spaceMd, marginTop: 'auto', fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
+      <span>{modeLabel(card.mode)}</span>
+      <span>
+        {sourceEpisode ? `取材 第${String(sourceEpisode.number)}集` : card.episodes}
+      </span>
+      <span>预计 {formatDuration(estimatedDurationS(plan))}</span>
+      <span>{card.overlap}</span>
+      {card.dropped !== '' && (
+        <span style={{ color: tokens.colorWarning }}>{card.dropped}</span>
+      )}
+      <PlanCopyButton plan={plan} />
+    </span>
   );
 }
 
@@ -130,7 +170,7 @@ function PlanCopyButton({ plan }: { plan: NarrationPlan }): ReactElement {
       >
         文案
       </Button>
-      <PlanCopyModal plan={plan} open={open} onClose={() => setOpen(false)} />
+      <PlanCopyModal plan={plan} open={open} onClose={() => { setOpen(false); }} />
     </>
   );
 }

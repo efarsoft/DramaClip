@@ -82,23 +82,7 @@ function StepRow({
       {step.done ? (
         <CheckCircleFilled style={{ color: tokens.colorSuccess, fontSize: tokens.glyph.icon, marginTop: layout.iconNudge }} />
       ) : (
-        <span
-          style={{
-            width: 18,
-            height: 18,
-            borderRadius: tokens.radiusDot,
-            border: `1px solid ${current ? tokens.colorPrimary : tokens.border}`,
-            color: current ? tokens.colorPrimary : tokens.textTertiary,
-            fontSize: tokens.text.badge.size,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-            marginTop: layout.iconNudge,
-          }}
-        >
-          {String(index)}
-        </span>
+        <StepDot index={index} current={current} />
       )}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
@@ -117,10 +101,39 @@ function StepRow({
         </div>
       </div>
       {step.action !== null && (
-        <Button size="small" style={{ flexShrink: 0, marginTop: layout.iconNudge }} onClick={() => onGo(step.action?.path ?? '')}>
+        <Button
+          size="small"
+          style={{ flexShrink: 0, marginTop: layout.iconNudge }}
+          onClick={() => {
+            onGo(step.action?.path ?? '');
+          }}
+        >
           {step.action.label}
         </Button>
       )}
     </div>
+  );
+}
+
+/** 未完成步的序号圆点（当前步高亮主色）。 */
+function StepDot({ index, current }: { index: number; current: boolean }): ReactElement {
+  return (
+    <span
+      style={{
+        width: 18,
+        height: 18,
+        borderRadius: tokens.radiusDot,
+        border: `1px solid ${current ? tokens.colorPrimary : tokens.border}`,
+        color: current ? tokens.colorPrimary : tokens.textTertiary,
+        fontSize: tokens.text.badge.size,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        marginTop: layout.iconNudge,
+      }}
+    >
+      {String(index)}
+    </span>
   );
 }

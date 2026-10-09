@@ -1,13 +1,13 @@
 /** 阶段②（规格 §6 的 ④）：只读方案卡 → 勾选 → 开始出片；卡头覆盖度行常驻（静默清单第 2 条），
  * 底栏成本预估一期口径（意见08）：条数 + 磁盘（估），耗时/LLM 没有实测口径就是「—」。 */
-import { Alert, Button, Card, Empty, Tag, Tooltip } from 'antd';
-import { useEffect, useState, type ReactElement } from 'react';
+import { Alert, Button, Empty, Tooltip } from 'antd';
+import { useEffect, useState } from 'react';
 import { PageSection } from '../../components/layout/PageKit';
 import type { NarrationPlan } from '@dramaclip/protocol';
 import { modeLabel } from '../../components/modeMeta';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
-import { planCardView, recommendedIds } from './planCards';
+import { recommendedIds } from './planCards';
 import { PlanCard } from './PlanCard';
 import { coverageOf, estimateDisk, type Coverage } from './produceView';
 import type { ExportQueue } from './useExportQueue';
@@ -15,6 +15,10 @@ import type { PlanBatch } from './usePlanBatch';
 
 const NO_METRIC_TIP = '暂无渲染侧实测口径——预估错了是噪音，不预估是诚实（意见08）';
 const monoSpan: React.CSSProperties = { fontFamily: tokens.fontFamilyMono };
+
+/** 勾选集合的纯翻转（选中→剔除，未选→追加）。 */
+const toggleId = (ids: string[], id: string): string[] =>
+  ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
 
 export function PlanPickList({
   batch,
@@ -63,9 +67,7 @@ export function PlanPickList({
             episodeCovers={episodeCovers}
             recommended={recommended.includes(plan.id)}
             checked={picked.includes(plan.id)}
-            onToggle={() => {
-              setPicked((prev) => (prev.includes(plan.id) ? prev.filter((id) => id !== plan.id) : [...prev, plan.id]));
-            }}
+            onToggle={() => { setPicked((prev) => toggleId(prev, plan.id)); }}
           />
         ))}
       </div>

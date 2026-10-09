@@ -2,7 +2,7 @@
  *  解决「IndexTTS 要参考音色，用户还得自己去剧集里找一段 wav」的摩擦——
  *  剧集本身就是最好的音色库，分析数据里连谁在什么时候说了什么都有。 */
 import { App, Button } from 'antd';
-import { useState, type ReactElement } from 'react';
+import { useState } from 'react';
 import { ttsApi } from '../../services/client';
 import { tokens } from '../../styles/theme';
 
