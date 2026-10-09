@@ -117,11 +117,14 @@ _AVOID_MARGIN_CAP_RATIO = 2 / 3
 
 
 def cover_band_margin_v(
-    band: tuple[float, float] | None,
+    band: "tuple[float, float] | tuple[int, int] | None",
     preset_margin_v: int,
     canvas: Canvas | None = None,
     font_px: int | None = None,
 ) -> int:
+    """band 两种形态：归一化分数（相对画面高），或画布像素区间 (top_px,
+    bottom_px)——后者供 16:9 源 letterbox 进 9:16 画布时的**内容锚定**换算
+    （带分数是相对源画面高的，画布补黑后必须按内容区折算，见 export 端）。"""
     """归一化源字幕带 → bottom_bar 布局的 MarginV（带内居中压位）。
 
     前置：编码端已对该带 delogo 擦除，源字幕文字已不可见——我们的字幕放回带内
@@ -139,8 +142,17 @@ def cover_band_margin_v(
     if band is None:
         return preset_margin_v
     res_y = canvas.y if canvas is not None else _PLAY_RES_Y
-    top = min(max(float(band[0]), 0.0), 1.0)
-    bottom = min(max(float(band[1]), 0.0), 1.0)
+    top_px, bottom_px = float(band[0]), float(band[1])
+    if top_px > 1 or bottom_px > 1:  # 画布像素带：直接用
+        margin = res_y - bottom_px
+        cap = int(res_y * _AVOID_MARGIN_CAP_RATIO)
+        return max(preset_margin_v, min(round(margin), cap))
+    top = min(max(top_px, 0.0), 1.0)
+    bottom = min(max(bottom_px, 0.0), 1.0)
+    if bottom - top > 0.35:
+        # 超高"带"（>35% 画布高）是满幅文字背景误检——压位跟随它会悬空
+        # 画面中部（2026-10-09 真机 16:9 片头字幕墙反馈），回退预设边距。
+        return preset_margin_v
     band_bottom_px = (1.0 - bottom) * res_y
     band_h_px = (bottom - top) * res_y
     box_h = (font_px if font_px else _DEFAULT_FONT_SIZE) * 1.9

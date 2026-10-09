@@ -156,3 +156,45 @@ def test_line_in_dialogue_band_shared_predicate() -> None:
     assert f((0.653, 0.696), (0.613, 0.740)) is True
     assert f((0.089, 0.263), (0.613, 0.740)) is False
     assert f((0.199, 0.413), (0.613, 0.740)) is False
+
+
+# ---- 单帧道具文字幕墙不得定带（2026-10-09 真机 ep6 满屏误擦） ----
+#
+# 台词字幕是「跨帧持续出现在同一位置」的通道；一帧里密集出现的竖排/整页
+# 文字（银票字据、片头字幕墙）只在该帧存在。旧实现按**框数**投票，一帧
+# 8 个框盖过 4 帧各 1 个真台词框 → 带定到脸上、擦除糊脸、真台词留在屏上。
+
+
+def _probes_with_prop_page() -> list[subtitle_ocr.FrameResult]:
+    """10 探针帧：4 帧底部台词、其中 1 帧另有整页字据（8 个高框）。"""
+    frames: list[subtitle_ocr.FrameResult] = [[] for _ in range(10)]
+    for i, index in enumerate((0, 3, 5, 8)):
+        frames[index] = [(f"台词{i}", 0.820, 0.891, 0.8)]
+    frames[1] = [
+        ("此银雨整", 0.413, 0.619, 0.81),
+        ("以解燃眉之急", 0.407, 0.693, 0.83),
+        ("皇后私扣一半", 0.416, 0.714, 0.72),
+        ("国丈自认", 0.437, 0.584, 0.52),
+        ("双贵于京城", 0.431, 0.652, 0.60),
+        ("皇后變賣首飾", 0.431, 0.732, 0.59),
+        ("今有同凭", 0.475, 0.669, 0.52),
+        ("家业不无", 0.627, 0.764, 0.55),
+    ]
+    return frames
+
+
+def test_pick_band_ignores_single_frame_prop_page() -> None:
+    band = _pick_band(_probes_with_prop_page())
+    assert band is not None
+    assert band.top >= 0.7, f"带被单帧字据定到脸上了：{band}"
+    assert band.bottom <= 0.95
+
+
+def test_prop_page_never_reaches_line_rects() -> None:
+    """整条 producer 链：字据框既不进带，也不进行框（否则 delogo 糊脸）。"""
+    probes = _probes_with_prop_page()
+    candidates = subtitle_ocr._dialogue_candidates(probes)
+    band = subtitle_ocr._band_from(candidates)
+    assert band is not None
+    lines = subtitle_ocr._cluster_lines(candidates, band)
+    assert [(round(b.top, 3), round(b.bottom, 3)) for b in lines] == [(0.812, 0.899)]

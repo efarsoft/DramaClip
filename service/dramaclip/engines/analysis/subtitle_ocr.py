@@ -7,7 +7,7 @@ import logging
 import subprocess
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -18,6 +18,7 @@ from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 _LOGGER = logging.getLogger(__name__)
 
 _PROBE_COUNT = 10         # 字幕带定位探针帧数：台词有行间空隙，4 探针可能全落空（ep4 实证）
+_MIN_FRAME_SUPPORT = 2    # 台词位置簇的最少贡献帧数：单帧密集文字是道具字据/幕墙，不是字幕通道
 _SAMPLE_FPS = 1.0         # 抽帧率：短剧镜头 1.5~3s，字幕驻留普遍 ≥1s
 _ROI_WIDTH = 800          # 裁剪后缩放宽（识别耗时与像素量成正比）
 _BAND_EXPAND = 0.04       # 字幕带上下各扩 4% 画面高，容納描边/阴影
@@ -39,6 +40,15 @@ class _Band:
 
     top: float
     bottom: float
+
+
+@dataclass
+class _Cluster:
+    """同一纵向位置上的候选框，以及贡献它们的探针帧（帧数=通道强度）。"""
+
+    anchor: float
+    frames: set[int] = field(default_factory=set)
+    spots: list[tuple[float, float]] = field(default_factory=list)
 
 
 def detect_band(
@@ -132,21 +142,50 @@ def _probe_frames(
 
 
 def _dialogue_candidates(probes: list[FrameResult]) -> list[tuple[float, float]]:
-    """探针帧里的台词字幕行位置（排除常驻横幅：几乎每帧都在同一位置的框）。"""
+    """探针帧里的台词字幕行位置。
+
+    台词字幕是「跨帧持续出现在同一位置、文字逐帧更换」的通道，据此做两类排除：
+    1) 常驻横幅——同一段文字几乎每帧都在同一位置（片头免责声明/剧名条）；
+    2) 单帧道具文字——整页字据/竖排题片只在那一帧出现，却一次给出十几个框。
+       按框数投票时它盖过跨帧的真台词（2026-10-09 真机 ep6：8 个框的一帧字据
+       把带定到 0.37-0.77，delogo 糊脸，底部真台词一字未擦、采样也裁错区域）。
+    """
+    persistent = _persistent_spots(probes)
+    spots = sorted(
+        (top, bottom, frame_index)
+        for frame_index, boxes in enumerate(probes)
+        for _text, top, bottom, _c in boxes
+        if (round(top, 2), round(bottom, 2)) not in persistent
+    )
+    clusters: list[_Cluster] = []
+    for top, bottom, frame_index in spots:
+        if clusters and top - clusters[-1].anchor <= _BAND_EXPAND * 2:
+            cluster = clusters[-1]
+        else:
+            cluster = _Cluster(anchor=top)
+            clusters.append(cluster)
+        cluster.frames.add(frame_index)
+        cluster.spots.append((top, bottom))
+    return [
+        spot
+        for cluster in clusters
+        if len(cluster.frames) >= _MIN_FRAME_SUPPORT
+        for spot in cluster.spots
+    ]
+
+
+def _persistent_spots(probes: list[FrameResult]) -> set[tuple[float, float]]:
+    """几乎每帧都在同一位置的常驻横幅（同文本同位置，不是台词）。"""
     by_text: dict[str, list[tuple[float, float]]] = {}
     for boxes in probes:
         for text, top, bottom, _c in boxes:
             by_text.setdefault(text, []).append((round(top, 2), round(bottom, 2)))
-    persistent: list[tuple[float, float]] = []
-    for _text, spots in by_text.items():
-        if len(spots) >= max(2, len(probes) - 1):
-            persistent.extend(spots)
-    return [
-        (top, bottom)
-        for boxes in probes
-        for text, top, bottom, _c in boxes
-        if (round(top, 2), round(bottom, 2)) not in persistent
-    ]
+    return {
+        spot
+        for spots in by_text.values()
+        if len(spots) >= max(2, len(probes) - 1)
+        for spot in spots
+    }
 
 
 def _band_from(candidates: list[tuple[float, float]]) -> _Band | None:
@@ -164,7 +203,7 @@ def _band_from(candidates: list[tuple[float, float]]) -> _Band | None:
 
 
 def _pick_band(probes: list[FrameResult]) -> _Band | None:
-    """定位台词字幕带：探针帧中出现最多的纵向位置簇，排除常驻横幅。
+    """定位台词字幕带：跨帧持续出现的位置簇（常驻横幅与单帧道具文字已排除）。
     """
     return _band_from(_dialogue_candidates(probes))
 

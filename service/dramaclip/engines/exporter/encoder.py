@@ -292,6 +292,11 @@ def cut_segment_args(
         bottom = min(max(float(rect_bottom), 0.0), 1.0)
         if bottom - top <= 0.01:
             continue
+        if bottom - top > 0.16:
+            # 超高"行框"（>16% 画布高 ≈ 台词行最高 9% 的近两倍）是满幅文字
+            # 背景的误检（片头字幕墙/竖排题字聚合），不是台词行——擦它等于
+            # 糊大半个屏幕（2026-10-09 真机 16:9 源反馈），整框跳过。
+            continue
         content_x = max(1, round((out_w - scaled_w) / 2))
         content_y = max(1, round((out_h - scaled_h) / 2))
         delogo_y = min(max(1, content_y + round(top * scaled_h)), out_h - 2)

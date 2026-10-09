@@ -129,3 +129,11 @@ def test_top_title_unaffected_by_band() -> None:
         "dimensions": {"layout": {"default": "top_title"}},
     }
     assert build_ass(_LINES, preset, source_band=(0.5, 0.9)) == build_ass(_LINES, preset)
+
+
+def test_garbage_band_falls_back_to_preset_margin() -> None:
+    """满幅文字背景误检的「带」（高 >35% 画布）不采信：回退预设底部边距，
+    字幕不悬空画面中部（2026-10-09 真机 16:9 片头字幕墙反馈）。"""
+    garbage_band = (0.135, 0.816)  # 高 68%：真机误检形状
+    ass = build_ass(_LINES, presets.get_preset("conflict-impact"), source_band=garbage_band)
+    assert _event_fields(ass)[7] == "90", "conflict-impact 预设边距 90，不跟随垃圾带"
