@@ -158,6 +158,29 @@ def test_line_in_dialogue_band_shared_predicate() -> None:
     assert f((0.199, 0.413), (0.613, 0.740)) is False
 
 
+# ---- 台词行形状闸（2026-10-09 业主裁决 B：位置不做判据，形状做判据）----
+#
+# 「字幕不许落在画面中间」与「字幕精准覆盖原字幕」在源字幕本就烧在中部时互斥。
+# 业主选覆盖优先，于是信任判据只剩形状与跨帧强度：一条真台词行的行框高度是
+# 有界的（真机 10 集实测 0.094–0.108），而误检聚合（两行 OCR 合并、片头字幕墙、
+# 道具字据整页）高度翻倍。位置不是证据——横屏剧把字幕烧在 0.55 也是真字幕。
+
+
+def test_line_is_caption_row_shape_gate() -> None:
+    f = subtitle_ocr.line_is_caption_row
+    assert f((0.809, 0.903)) is True  # 第6集真机行框 h=0.094
+    assert f((0.798, 0.906)) is True  # 第2集真机行框 h=0.108（十集里最宽的一档）
+    assert f((0.619, 0.772)) is False  # 第6集存量脏行 h=0.153，正糊在下半张脸
+    assert f((0.840, 0.856)) is False  # 切镜半帧采到的标点残迹
+
+
+def test_cluster_lines_drops_out_of_shape_rows() -> None:
+    """带心在台词带内、但高度不像一行台词（两行 OCR 合并成一条高框）→ 不擦。"""
+    candidates = [(0.820, 0.891), (0.620, 0.760)]
+    lines = subtitle_ocr._cluster_lines(candidates, (0.600, 0.930))
+    assert [(round(b.top, 3), round(b.bottom, 3)) for b in lines] == [(0.812, 0.899)]
+
+
 # ---- 单帧道具文字幕墙不得定带（2026-10-09 真机 ep6 满屏误擦） ----
 #
 # 台词字幕是「跨帧持续出现在同一位置」的通道；一帧里密集出现的竖排/整页

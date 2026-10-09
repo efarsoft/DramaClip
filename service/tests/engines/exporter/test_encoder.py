@@ -257,3 +257,180 @@ def test_cut_segment_args_band_erasure_delogo() -> None:
         rng=random.Random(42),
     )
     assert "delogo=" not in " ".join(clean), "无 band 不加滤镜，与现状逐字节一致"
+
+
+# ---- 擦除按台词驻留时间窗开合（2026-10-09 业主裁决③）--------------------------
+#
+# 源字幕是间歇出现的（一句话 2~4s，镜头间常消失），而 delogo 默认整段挂着：
+# 没字的画面上糊一块动过的补丁，就是业主说的「大幅遮盖画面」。OCR 条的驻留
+# 区间（episode_analysis.ocr_segments，源绝对秒）已经落库，用它给擦除开合。
+#
+# 时间基（易错，钉住）：滤镜链里 delogo 在 `setpts=PTS/speed` **之前**，它看到的
+# t 是「裁剪后、变速前」的时间 = 源时间 - 段起点；dedup 变速不参与折算。
+
+
+def _vf(args: list[str]) -> str:
+    return args[args.index("-vf") + 1]
+
+
+def test_erase_windows_open_and_close_delogo() -> None:
+    """两条驻留窗 → enable 里两段 between，坐标按「源时间 - 段起点」折算。"""
+    args = cut_segment_args(
+        "src.mp4",
+        "seg.mp4",
+        start=10.0,
+        end=20.0,
+        audio="original",
+        tts_audio=None,
+        rng=random.Random(42),
+        erase_rects=[(0.8, 0.9)],
+        erase_windows=[(11.0, 13.0), (15.5, 17.0)],
+    )
+    assert _vf(args).count("delogo=") == 1, "行框一条，enable 挂在它身上"
+    assert (
+        "delogo=x=" in _vf(args)
+        and ":enable='between(t,1.000,3.000)+between(t,5.500,7.000)'" in _vf(args)
+    ), f"实际：{_vf(args)}"
+
+
+def test_erase_windows_clamp_to_segment_edges() -> None:
+    """跨段沿的窗夹到 [0, 段长]：越界部分不写（enable 出界=整段失效）。"""
+    args = cut_segment_args(
+        "src.mp4",
+        "seg.mp4",
+        start=10.0,
+        end=20.0,
+        audio="original",
+        tts_audio=None,
+        rng=random.Random(42),
+        erase_rects=[(0.8, 0.9)],
+        erase_windows=[(8.0, 11.0), (19.0, 25.0)],
+    )
+    assert ":enable='between(t,0.000,1.000)+between(t,9.000,10.000)'" in _vf(args)
+
+
+def test_erase_window_covering_whole_segment_writes_no_enable() -> None:
+    """窗本就盖住整段 → 不写 enable（与现状逐字节一致，不加无意义滤镜文本）。"""
+    args = cut_segment_args(
+        "src.mp4",
+        "seg.mp4",
+        start=10.0,
+        end=20.0,
+        audio="original",
+        tts_audio=None,
+        rng=random.Random(42),
+        erase_rects=[(0.8, 0.9)],
+        erase_windows=[(5.0, 30.0)],
+    )
+    assert ":enable=" not in _vf(args)
+
+
+def test_erase_windows_outside_segment_drop_the_rect() -> None:
+    """整段没有台词驻留 → 这块擦除矩形根本不该出现在滤镜里（宁缺不糊）。"""
+    args = cut_segment_args(
+        "src.mp4",
+        "seg.mp4",
+        start=10.0,
+        end=20.0,
+        audio="original",
+        tts_audio=None,
+        rng=random.Random(42),
+        erase_rects=[(0.8, 0.9)],
+        erase_windows=[(31.0, 33.0)],
+    )
+    assert "delogo=" not in _vf(args), "无交集的窗要整框跳过"
+
+
+def test_erase_windows_gap_beyond_merge_threshold_stays_two_spans() -> None:
+    """相邻台词之间超过合并阈值的空隙要留住：中缝无字幕却持续擦 = 无谓糊画面。"""
+    args = cut_segment_args(
+        "src.mp4",
+        "seg.mp4",
+        start=10.0,
+        end=20.0,
+        audio="original",
+        tts_audio=None,
+        rng=random.Random(42),
+        erase_rects=[(0.8, 0.9)],
+        erase_windows=[(12.0, 13.0), (13.5, 14.0)],
+    )
+    assert _vf(args).count("between(t,") == 2
+    assert ":enable='between(t,2.000,3.000)+between(t,3.500,4.000)'" in _vf(args)
+
+
+def test_erase_windows_touching_spans_merge() -> None:
+    """空隙短于合并阈值（两句台词间的一次切镜/半秒停顿）→ 合并成一扇窗，少切开关。"""
+    args = cut_segment_args(
+        "src.mp4",
+        "seg.mp4",
+        start=10.0,
+        end=20.0,
+        audio="original",
+        tts_audio=None,
+        rng=random.Random(42),
+        erase_rects=[(0.8, 0.9)],
+        erase_windows=[(12.0, 13.0), (13.1, 14.0)],
+    )
+    assert _vf(args).count("between(t,") == 1
+    assert ":enable='between(t,2.000,4.000)'" in _vf(args)
+
+
+def test_erase_windows_shorter_than_min_span_are_dropped() -> None:
+    """不足一行字时长的窗（标点残迹/半帧抖动）不值得开一次擦除。"""
+    args = cut_segment_args(
+        "src.mp4",
+        "seg.mp4",
+        start=10.0,
+        end=20.0,
+        audio="original",
+        tts_audio=None,
+        rng=random.Random(42),
+        erase_rects=[(0.8, 0.9)],
+        erase_windows=[(11.0, 11.04), (13.0, 15.0)],
+    )
+    assert ":enable='between(t,3.000,5.000)'" in _vf(args)
+
+
+def test_erase_windows_are_emitted_in_time_order() -> None:
+    """enable 串按时间递增：命令串是签名的一部分，乱序会让同一段每次重编。"""
+    args = cut_segment_args(
+        "src.mp4",
+        "seg.mp4",
+        start=10.0,
+        end=20.0,
+        audio="original",
+        tts_audio=None,
+        rng=random.Random(42),
+        erase_rects=[(0.8, 0.9)],
+        erase_windows=[(15.5, 17.0), (11.0, 13.0)],
+    )
+    assert ":enable='between(t,1.000,3.000)+between(t,5.500,7.000)'" in _vf(args)
+
+
+def test_missing_windows_keep_full_length_erase() -> None:
+    """窗缺失（None / 空表 / OCR 未跑）→ 不收窄，退回整段擦（现状逐字节一致）。"""
+    baseline = _vf(
+        cut_segment_args(
+            "src.mp4",
+            "seg.mp4",
+            start=10.0,
+            end=20.0,
+            audio="original",
+            tts_audio=None,
+            rng=random.Random(42),
+            erase_rects=[(0.8, 0.9)],
+        )
+    )
+    for windows in (None, []):
+        args = cut_segment_args(
+            "src.mp4",
+            "seg.mp4",
+            start=10.0,
+            end=20.0,
+            audio="original",
+            tts_audio=None,
+            rng=random.Random(42),
+            erase_rects=[(0.8, 0.9)],
+            erase_windows=windows,
+        )
+        assert _vf(args) == baseline, f"窗={windows} 降级必须不可见"

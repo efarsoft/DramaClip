@@ -23,6 +23,8 @@ _SAMPLE_FPS = 1.0         # 抽帧率：短剧镜头 1.5~3s，字幕驻留普遍
 _ROI_WIDTH = 800          # 裁剪后缩放宽（识别耗时与像素量成正比）
 _BAND_EXPAND = 0.04       # 字幕带上下各扩 4% 画面高，容納描边/阴影
 _LINE_STROKE_MARGIN = 0.008  # 逐行擦除框的描边余量（≈15px@1920）：贴字不贴带
+_LINE_H_MIN = 0.03        # 台词行框高度下限：切镜半帧的标点残迹不够一行字
+_LINE_H_MAX = 0.13        # 上限：真机 10 集实测最宽一档 0.108，两行合并/幕墙聚合 ≥0.15
 _HEAD_PAD_S = 0.5         # 字幕条起点向前补（采样间隔一半）
 _TAIL_PAD_S = 1.0         # 字幕条结尾向后补（采样间隔 + 消失延迟）
 _OCR_WORKERS = 4        # 帧识别并行度（onnxruntime session 线程安全）
@@ -208,6 +210,20 @@ def _pick_band(probes: list[FrameResult]) -> _Band | None:
     return _band_from(_dialogue_candidates(probes))
 
 
+def line_is_caption_row(rect: tuple[float, float]) -> bool:
+    """共享形状谓词：这条框像不像**一行**台词字幕。
+
+    位置不能当信任判据——横屏剧把硬字幕烧在画面中部也是真字幕，用它做闸等于
+    把这类剧永久判成「不覆盖」（2026-10-09 业主裁决：覆盖优先于位置禁令）。
+    能当判据的是形状：真台词行框高在真机 10 集上落 0.094–0.108，而误检聚合
+    （两行 OCR 合并、片头字幕墙、道具字据整页）翻倍到 0.15 以上；下限挡切镜
+    半帧采到的标点残迹。生产者（_cluster_lines）与消费端（export 存量再夹）
+    共用它，两边永不漂移。
+    """
+    height = float(rect[1]) - float(rect[0])
+    return _LINE_H_MIN <= height <= _LINE_H_MAX
+
+
 def line_in_dialogue_band(
     rect: tuple[float, float], band: tuple[float, float], tol: float = _BAND_EXPAND
 ) -> bool:
@@ -232,7 +248,8 @@ def _cluster_lines(
     行框余量是**描边级**（_LINE_STROKE_MARGIN≈15px），不吃 _BAND_EXPAND——
     那是整带包络用的常量，套到逐行框上会把矩形撑到文字的 3 倍高（审计实测：
     236px 擦除框够到人物嘴部）。
-    band 给定时，行框中心不在台词带内的簇（竖排花字/道具招幌）整簇剔除。
+    band 给定时，行框中心不在台词带内的簇（竖排花字/道具招幌）整簇剔除；
+    形状不像一行台词的（`line_is_caption_row`）同样剔除。
     """
     if not candidates:
         return []
@@ -257,6 +274,9 @@ def _cluster_lines(
         if band_rect is not None and not line_in_dialogue_band(
             (rect.top, rect.bottom), band_rect
         ):
+            continue
+        if not line_is_caption_row((rect.top, rect.bottom)):
+            _LOGGER.info("行框形状不像一行台词，剔除不擦：%.3f-%.3f", rect.top, rect.bottom)
             continue
         lines.append(rect)
     return lines

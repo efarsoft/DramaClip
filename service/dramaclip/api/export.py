@@ -12,8 +12,10 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from dramaclip.api.context import AppContext
-from dramaclip.engines.analysis.models import SpeechZone
+from dramaclip.engines.analysis.models import OcrSegment, SpeechZone
 from dramaclip.engines.exporter import encoder, loudness, selfcheck
 from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
@@ -431,6 +433,33 @@ def _as_float(value: Any) -> float | None:
     return float(value)
 
 
+def _dwell_windows(raw: Any) -> list[tuple[float, float]]:
+    """episode_analysis.ocr_segments → 台词在屏上的驻留窗（源绝对秒）。
+
+    给编码端把 delogo 收窄成「只在有字的那几秒挂」（2026-10-09 业主裁决③）。
+    逐条走 `OcrSegment` 校验：非 JSON、非列表、元素形状不对、区间倒挂一律丢弃，
+    全丢光就是空表——空表在编码端等于「不收窄，整段擦」，坏数据不会让源字幕
+    漏擦（漏擦=原片台词留在屏上，是可见缺陷）。
+    """
+    if not raw:
+        return []
+    try:
+        items = json.loads(str(raw))
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(items, list):
+        return []
+    windows: list[tuple[float, float]] = []
+    for item in items:
+        try:
+            bar = OcrSegment.model_validate(item)
+        except ValidationError:
+            continue
+        if bar.end > bar.start:
+            windows.append((float(bar.start), float(bar.end)))
+    return windows
+
+
 def crop_dialogue_lines(
     items: list[dict[str, Any]], win_start: float, win_end: float
 ) -> list[dict[str, Any]]:
@@ -790,6 +819,8 @@ def render_export(
     subtitle_bands: dict[str, tuple[float, float]] = {}
     # 行级擦除矩形（2026-10-07 业主追加：只擦检测到的文字行，不擦整带）
     subtitle_line_rects: dict[str, list[tuple[float, float]]] = {}
+    # 台词驻留窗（2026-10-09 业主追加：擦除只在有字的那几秒挂）：episode_id → 源绝对秒
+    subtitle_erase_windows: dict[str, list[tuple[float, float]]] = {}
     for segment in plan_data.timeline:
         episode_id = segment.episode_id
         if episode_id in dialogue_zones:
@@ -819,11 +850,14 @@ def render_export(
                 if isinstance(raw_lines, list) and subtitle_bands.get(episode_id):
                     from dramaclip.engines.analysis.subtitle_ocr import (
                         line_in_dialogue_band,
+                        line_is_caption_row,
                     )
 
                     band = subtitle_bands[episode_id]
-                    # 存量行框再夹一次共享谓词：旧数据里可能混着花字/道具行
-                    # （2026-10-07 审计：ep1 花字卡、ep9 招幌曾被当台词行落库）
+                    # 存量行框再夹两次：① 共享形状谓词——旧数据里可能混着花字/道具行
+                    # （2026-10-07 审计：ep1 花字卡、ep9 招幌曾被当台词行落库），
+                    # 也混着两行合并成的高框（ep6 存量 0.619-0.772 h=0.153 糊下半张脸）；
+                    # ② 台词带内位置闸。判据与生产者 _cluster_lines 同一处发号。
                     rects = [
                         (float(item[0]), float(item[1]))
                         for item in raw_lines
@@ -833,6 +867,7 @@ def render_export(
                             isinstance(v, (int, float)) and not isinstance(v, bool)
                             for v in item
                         )
+                        and line_is_caption_row((float(item[0]), float(item[1])))
                         and line_in_dialogue_band(
                             (float(item[0]), float(item[1])), band
                         )
@@ -845,6 +880,9 @@ def render_export(
                 and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in parsed)
             ):
                 subtitle_bands[episode_id] = (float(parsed[0]), float(parsed[1]))
+        dwell = _dwell_windows(record.get("ocr_segments"))
+        if dwell:
+            subtitle_erase_windows[episode_id] = dwell
         if not record["asr_segments"]:
             continue
         try:
@@ -877,6 +915,20 @@ def render_export(
     # 就是「字幕超出屏幕」的新产房。
     out_size = encoder.resolve_canvas(episode_paths, _output_size(context.settings))
     ass_canvas = Canvas(*out_size)
+
+    def cover_rect(episode_id: str) -> tuple[float, float] | None:
+        """压位定位的目标矩形：采信行框的**并集**优先，行框缺失才回退整带包络。
+
+        擦除用逐行框（贴行不贴带），定位也必须用同一批框的并集——整带含
+        _BAND_EXPAND 上下各 4% 的描边余量、还可能比台词实际占位宽得多，跟它走
+        中心就偏（2026-10-09 真机第6集：带 (0.600,0.930) 里台词只在 (0.809,0.903)，
+        按包络压位把字放到了脸上）。跨行台词的并集中心落在两行共同的中间，
+        正是覆盖语义要的位置。与 subtitle_erase_rects 同源，两边不会漂。
+        """
+        rects = subtitle_line_rects.get(episode_id)
+        if not rects:
+            return subtitle_bands.get(episode_id)
+        return (min(r[0] for r in rects), max(r[1] for r in rects))
 
     def burn_subtitle(segment_index: int, text: str, duration_s: float) -> str:
         """生成段级 ass 文件并返回路径（相对时间轴 0→duration）。
@@ -911,7 +963,7 @@ def render_export(
             build_ass(
                 lines,
                 preset,
-                source_band=subtitle_bands.get(
+                source_band=cover_rect(
                     plan_data.timeline[segment_index].episode_id
                     if 0 <= segment_index < len(plan_data.timeline)
                     else ""
@@ -946,7 +998,7 @@ def render_export(
         ass_dir.mkdir(parents=True, exist_ok=True)
         ass_path = ass_dir / f"seg_{segment_index:03d}.ass"
         ass_path.write_text(
-            build_ass(lines, preset, source_band=subtitle_bands.get(episode_id), play_res=out_size),
+            build_ass(lines, preset, source_band=cover_rect(episode_id), play_res=out_size),
             encoding="utf-8",
         )
         return str(ass_path)
@@ -976,6 +1028,7 @@ def render_export(
         dialogue_zones=dialogue_zones,
         subtitle_bands=subtitle_bands,
         subtitle_erase_rects=subtitle_line_rects,
+        subtitle_erase_windows=subtitle_erase_windows,
         out_size=out_size,
         loudness_target=loudness.LoudnessTarget.from_settings(context.settings),
     )

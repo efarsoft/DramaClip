@@ -93,21 +93,29 @@ def _margin_v(preset: dict[str, Any], canvas: Canvas | None = None) -> int:
     return round(preset_value * (canvas.y / _PLAY_RES_Y)) if canvas is not None else preset_value
 
 
-# ── A2 源硬字幕带避让（不是擦除：源片像素不动，只把我们烧的字幕抬到源带顶之上）──
+# ── A2 源硬字幕带压位（覆盖，不是避让：源带像素由编码端 delogo 擦掉，我们的字放回原位）──
 #
-# 业主立锁「硬字幕擦除不当核心」约束的是擦除那条线；这里是避让——短剧源片常自带
-# 底部硬字幕，我们默认也烧底部，两行叠加观感崩。抬到不重叠为止，别的不做。
+# 业主立锁「硬字幕擦除不当核心」约束的是擦除那条线；这里是位置——短剧源片常自带
+# 底部硬字幕，擦掉后把我们的字幕放回同一处，才是观众看竖屏短剧的阅读位置
+# （2026-10-06 裁决「直接覆盖原始字幕」推翻早期「只抬到带顶之上」的避让语义）。
 #
 # 换算几何（单一真相，两处写死的数字都会在这里被测试钉住）：
 # - PlayResY = 1920（本文件 `_PLAY_RES_Y`，头部唯一来源）；视频按 PlayRes 坐标渲染，
-#   源带是「占画面高度比例」的归一化值，直接乘 PlayResY 就是像素，无需知道真实分辨率。
-# - \an2（bottom_bar）下 MarginV = 字幕**底边**距画面**底边**的像素数。
-# - 源带 top 是距画面**顶**的比例，故源带顶距画面底 = (1 - top) × PlayResY。
-# - 不重叠 ⇔ 我们字幕底边 ≥ 源带顶（像素）⇔ MarginV ≥ (1 - band.top) × PlayResY。
-#   仅在真重叠（所需 > 预设值）时抬：预设 80/90 只占画面底 ~4%，源带顶低于它时
-#   根本不重叠，无谓抬字幕会压画面主体、也偏离既有审美。
-# - 封顶 PlayResY×2/3：避让不能把字幕抬出演示区（源带探到画面中部属异常形状）。
-_AVOID_MARGIN_CAP_RATIO = 2 / 3
+#   带/行框是「占画面高度比例」的归一化值，直接乘 PlayResY 就是像素，无需知道真实分辨率。
+# - \an2（bottom_bar）下 MarginV = 字幕**盒底**距画面**底边**的像素数。
+# - 目标 top 是距画面**顶**的比例，故目标中心距画面底 = (1 - center) × PlayResY。
+# - 覆盖 ⇔ 我们的**墨迹中心**落在目标中心 ⇔ MarginV = (1 - center)×PlayResY - 墨迹锚距。
+# - 下限 preset_margin_v：目标比预设字幕线还贴底时不往下挪（预设 80/90 只占画面底 ~4%）。
+# - 封顶 PlayResY×2/3：目标探到画面中部属异常形状，不把字幕抬出演示区。
+_MARGIN_CAP_RATIO = 2 / 3
+
+# \an2 的 MarginV 锚的是字幕**盒底**，不是墨迹中心：随包字面（Noto Sans SC）的
+# 一行的墨迹中心落在盒底上方 0.455 个字号处（ascent/descent 1160:288 与 CJK
+# ideographic em box 合成，真机逐集量得）。旧实现按经验系数 font×1.9 造了个
+# 幻影盒把它居中，墨迹因此系统性偏低 ~31px——「精准覆盖原有字幕」差的就是
+# 这一段（2026-10-09 业主裁决 B 覆盖优先）。tests/engines/subtitle/test_band_cover.py
+# 用实测数钉住这个常量，改字号模型不改这里必红。
+_INK_CENTER_TO_ANCHOR = 0.455
 
 
 def cover_band_margin_v(
@@ -116,10 +124,7 @@ def cover_band_margin_v(
     canvas: Canvas | None = None,
     font_px: int | None = None,
 ) -> int:
-    """band 两种形态：归一化分数（相对画面高），或画布像素区间 (top_px,
-    bottom_px)——后者供 16:9 源 letterbox 进 9:16 画布时的**内容锚定**换算
-    （带分数是相对源画面高的，画布补黑后必须按内容区折算，见 export 端）。"""
-    """归一化源字幕带 → bottom_bar 布局的 MarginV（带内居中压位）。
+    """归一化目标矩形 → bottom_bar 布局的 MarginV（墨迹中心对齐矩形中心）。
 
     前置：编码端已对该带 delogo 擦除，源字幕文字已不可见——我们的字幕放回带内
     居中，是观众看竖屏短剧的字幕位置习惯（2026-10-06 业主裁决「直接覆盖原始字
@@ -127,11 +132,16 @@ def cover_band_margin_v(
 
     band 为 None（未探测/无硬字幕带/OCR 未装）→ 原样返回 preset_margin_v，
     降级不可见，生成的 ASS 与无带现状逐字节一致。
+    band 两种形态：归一化分数（相对画面高），或画布像素区间 (top_px, bottom_px)
+    ——后者供 16:9 源 letterbox 进 9:16 画布时的**内容锚定**换算（带分数是相对
+    源画面高的，画布补黑后必须按内容区折算，见 export 端）。
     几何在**实际画布**坐标系里算（canvas.y，缺省基准 1920）：
-    - 带底距画面底 = (1 - bottom) × res_y，是盒子底边的基准位；
-    - 盒子估高 box_h（字身 + 底框上下 padding 的经验系数 1.9，测试钉住）；
-    - margin = 带底基准 + (带高 - 盒高)/2（带比盒子矮时取 0 → 盒子贴带底向上长）；
-    - 封顶 PlayResY×2/3：带探到画面中部属异常形状，不把字幕抬出演示区。
+    - 目标中心距画面底 = (1 - center) × res_y，center 为矩形上下沿中值；
+      调用端优先给**采信行框的并集**（比整带紧，中心即台词墨迹中心），
+      行框缺失才回退整带包络；
+    - margin = 该中心 - _INK_CENTER_TO_ANCHOR × 字号（盒底锚点换算，见常量注释）；
+    - 下限 preset_margin_v：源字比预设位置还贴底时不往下挪；
+    - 封顶 PlayResY×2/3：目标探到画面中部属异常形状，不把字幕抬出演示区。
     """
     if band is None:
         return preset_margin_v
@@ -139,7 +149,7 @@ def cover_band_margin_v(
     top_px, bottom_px = float(band[0]), float(band[1])
     if top_px > 1 or bottom_px > 1:  # 画布像素带：直接用
         margin = res_y - bottom_px
-        cap = int(res_y * _AVOID_MARGIN_CAP_RATIO)
+        cap = int(res_y * _MARGIN_CAP_RATIO)
         return max(preset_margin_v, min(round(margin), cap))
     top = min(max(top_px, 0.0), 1.0)
     bottom = min(max(bottom_px, 0.0), 1.0)
@@ -147,11 +157,10 @@ def cover_band_margin_v(
         # 超高"带"（>35% 画布高）是满幅文字背景误检——压位跟随它会悬空
         # 画面中部（2026-10-09 真机 16:9 片头字幕墙反馈），回退预设边距。
         return preset_margin_v
-    band_bottom_px = (1.0 - bottom) * res_y
-    band_h_px = (bottom - top) * res_y
-    box_h = (font_px if font_px else _DEFAULT_FONT_SIZE) * 1.9
-    margin = round(band_bottom_px + max(0.0, (band_h_px - box_h) / 2))
-    cap = int(res_y * _AVOID_MARGIN_CAP_RATIO)
+    center = (top + bottom) / 2
+    font = font_px if font_px else _DEFAULT_FONT_SIZE
+    margin = round((1.0 - center) * res_y - _INK_CENTER_TO_ANCHOR * font)
+    cap = int(res_y * _MARGIN_CAP_RATIO)
     return max(preset_margin_v, min(margin, cap))
 
 

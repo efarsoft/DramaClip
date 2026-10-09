@@ -6,8 +6,8 @@
 2026-10-08 扩展：居中档（climax/卡拉OK）在有源带时同样落带内压位——
 悬空的居中大字挡脸，观感即「字幕位置不对」（业主截图反馈）。
 
-几何单一真相：ass_generator 的 PlayResY=1920（\\an2 下 MarginV=字幕底边距
-画面底的像素数）；盒子估高 = font_px × 1.9（字身 + 底框 padding）。
+几何单一真相：ass_generator 的 PlayResY=1920（\\an2 下 MarginV=字幕**盒底**距画面
+底的像素数）；墨迹中心在盒底上方 0.455×字号处（随包字面真机标定）。
 """
 
 from __future__ import annotations
@@ -23,6 +23,10 @@ from dramaclip.engines.subtitle.ass_generator import (
 
 _PRESET_MARGIN = 80
 _REAL_BAND = (0.7174, 0.8291)  # 真机《钟情错付》实测带：顶 71.7%、底 82.9%
+# 真机标定：\an2 锚的是盒底，墨迹中心在它上方 0.455 个字号处。
+# 旧实现按 font_px×1.9 的「盒子」在带内居中，墨迹因此系统性偏低 ~30px——
+# 业主「字幕要精准覆盖原有字幕」差的就是这一段（2026-10-09 逐集量出）。
+_INK_CENTER_ABOVE_ANCHOR = 0.455
 
 
 def _event_fields(ass: str, index: int = 0) -> list[str]:
@@ -42,14 +46,18 @@ def test_missing_band_keeps_preset_margin() -> None:
     assert cover_band_margin_v(None, _PRESET_MARGIN) == _PRESET_MARGIN
 
 
-def test_band_centers_the_caption_box() -> None:
-    """真机形状：盒底 = 带底，再上提 (带高-盒高)/2 让盒子在带内居中。"""
+def test_margin_puts_ink_center_on_target_center() -> None:
+    """覆盖优先的对齐目标：**墨迹中心**落在目标矩形中心（±1px 取整）。
+
+    真机三档形状各验一次（下部带 / 中部带 / 贴近底缘），旧公式按幻影盒
+    （font×1.9）居中，墨迹系统性偏低 ~30px，这条用例正是当时的空档。
+    """
     font_px = 64
-    margin = cover_band_margin_v(_REAL_BAND, _PRESET_MARGIN, None, font_px)
-    band_bottom_px = (1 - 0.8291) * _PLAY_RES_Y
-    band_h = (0.8291 - 0.7174) * _PLAY_RES_Y
-    expected = round(band_bottom_px + (band_h - font_px * 1.9) / 2)
-    assert margin == max(_PRESET_MARGIN, expected)
+    for rect in ((0.7174, 0.8291), (0.613, 0.740), (0.85, 0.95)):
+        margin = cover_band_margin_v(rect, _PRESET_MARGIN, None, font_px)
+        ink_center = margin + _INK_CENTER_ABOVE_ANCHOR * font_px  # 距画面底
+        target = (1 - (rect[0] + rect[1]) / 2) * _PLAY_RES_Y
+        assert abs(ink_center - target) <= 1, f"{rect}：墨迹中心差 {ink_center - target:+.1f}px"
 
 
 def test_thin_band_puts_box_bottom_on_band_bottom() -> None:

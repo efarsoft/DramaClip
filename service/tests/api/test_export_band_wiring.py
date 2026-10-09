@@ -212,7 +212,7 @@ def _ass_file(context: SimpleNamespace, export_id: str, index: int = 0) -> Path:
 def test_dialogue_subtitle_lifts_margin_over_source_band(
     monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    """band(0.85,0.95) → 带内压位：盒底 = (1-0.95)×1920，盒高按 preset 字号估。"""
+    """band(0.85,0.95) 且无行框 → 压位跟随整带包络（回退档）。"""
     context, export_id, plan_row, plan_data, episode_id = _seed_original(memory_db, tmp_path)
     analysis_repo.update_subtitle_band(memory_db, episode_id, json.dumps([0.85, 0.95]))
     _render(monkeypatch, context, export_id, plan_row, plan_data)
@@ -225,6 +225,76 @@ def test_dialogue_subtitle_lifts_margin_over_source_band(
     expected = cover_band_margin_v((0.85, 0.95), 90, None, font_px)
     style = next(ln for ln in ass.splitlines() if ln.startswith("Style: DC,"))
     assert style.split(",")[-2].strip() == str(expected)
+
+
+def test_dialogue_subtitle_position_follows_line_union_not_band_envelope(
+    monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """有采信行框时，压位跟随**行框并集**而不是整带包络（2026-10-09 裁决①）。
+
+    带包络含 _BAND_EXPAND 上下各 4% 的描边余量，行框才是墨迹实际位置：真机
+    第6集带 (0.600,0.930) 里台词只占 (0.809,0.903)，跟包络走会把字放到脸上。
+    """
+    context, export_id, plan_row, plan_data, episode_id = _seed_original(memory_db, tmp_path)
+    analysis_repo.update_subtitle_band(
+        memory_db,
+        episode_id,
+        json.dumps({"band": [0.600, 0.930], "lines": [[0.809, 0.903]]}),
+    )
+    _render(monkeypatch, context, export_id, plan_row, plan_data)
+    ass = _ass_file(context, export_id).read_text(encoding="utf-8")
+    from dramaclip.engines.subtitle.ass_generator import cover_band_margin_v
+
+    font_px = int(presets.get_preset("conflict-impact").get("font", {}).get("size", 64))
+    style = next(ln for ln in ass.splitlines() if ln.startswith("Style: DC,"))
+    assert style.split(",")[-2].strip() == str(
+        cover_band_margin_v((0.809, 0.903), 90, None, font_px)
+    ), "定位必须跟随行框中心"
+    assert style.split(",")[-2].strip() != str(
+        cover_band_margin_v((0.600, 0.930), 90, None, font_px)
+    ), "用例自证：跟随包络时这条断言与上一条同值，等于没测"
+
+
+def test_multirow_line_union_centers_between_the_rows(
+    monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """两行台词 → 并集跨两行，字幕落在两行共同的中心（擦除也擦这两行）。"""
+    context, export_id, plan_row, plan_data, episode_id = _seed_original(memory_db, tmp_path)
+    analysis_repo.update_subtitle_band(
+        memory_db,
+        episode_id,
+        json.dumps({"band": [0.700, 0.950], "lines": [[0.809, 0.903], [0.715, 0.800]]}),
+    )
+    _render(monkeypatch, context, export_id, plan_row, plan_data)
+    ass = _ass_file(context, export_id).read_text(encoding="utf-8")
+    from dramaclip.engines.subtitle.ass_generator import cover_band_margin_v
+
+    font_px = int(presets.get_preset("conflict-impact").get("font", {}).get("size", 64))
+    style = next(ln for ln in ass.splitlines() if ln.startswith("Style: DC,"))
+    assert style.split(",")[-2].strip() == str(
+        cover_band_margin_v((0.715, 0.903), 90, None, font_px)
+    )
+
+
+def test_untrusted_lines_only_fall_back_to_band_envelope(
+    monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """行框全被信任闸拦掉（花字/道具/超高框）→ 回退整带包络，不留空定位。"""
+    context, export_id, plan_row, plan_data, episode_id = _seed_original(memory_db, tmp_path)
+    analysis_repo.update_subtitle_band(
+        memory_db,
+        episode_id,
+        json.dumps({"band": [0.850, 0.950], "lines": [[0.089, 0.263]]}),
+    )
+    _render(monkeypatch, context, export_id, plan_row, plan_data)
+    ass = _ass_file(context, export_id).read_text(encoding="utf-8")
+    from dramaclip.engines.subtitle.ass_generator import cover_band_margin_v
+
+    font_px = int(presets.get_preset("conflict-impact").get("font", {}).get("size", 64))
+    style = next(ln for ln in ass.splitlines() if ln.startswith("Style: DC,"))
+    assert style.split(",")[-2].strip() == str(
+        cover_band_margin_v((0.850, 0.950), 90, None, font_px)
+    )
 
 
 def test_dialogue_subtitle_without_band_is_byte_identical(
@@ -258,8 +328,81 @@ def test_dialogue_subtitle_survives_garbage_band(
         assert style.split(",")[-2].strip() == "90", f"垃圾 band {garbage!r} 改了 MarginV"
 
 
-# ---- 旁白段（burn_subtitle 路径）----------------------------------------------
+def test_stale_out_of_shape_line_rect_never_reaches_delogo(
+    monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """存量脏行框（两行合并 h=0.153，第6集实测正糊在下半张脸）不擦；真行照擦。
 
+    编码端那道 16% 高度闸差 7px 没拦住它——信任判据在读取端，与生产者同源。
+    """
+    context, export_id, plan_row, plan_data, episode_id = _seed_original(memory_db, tmp_path)
+    analysis_repo.update_subtitle_band(
+        memory_db,
+        episode_id,
+        json.dumps({"band": [0.600, 0.930], "lines": [[0.619, 0.772], [0.809, 0.903]]}),
+    )
+    calls = _render(monkeypatch, context, export_id, plan_row, plan_data)
+    joined = " ".join(" ".join(c) for c in calls)
+    assert joined.count("delogo=") == 1, f"只该擦形状像一行台词的框：{joined}"
+
+
+def test_erase_narrowed_to_subtitle_dwell_windows(
+    monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """ocr_segments 有驻留窗 → delogo 挂 enable，只在该集台词在屏的那几秒擦。
+
+    段声明 20~30s、台词条 22~24s（含生产者补的头尾余量）→ 滤镜时间基是
+    「源时间 − 实际切点」（safe_times 桩成恒等，故切点=20），得 between(t,2,4)。
+    """
+    context, export_id, plan_row, plan_data, episode_id = _seed_original(memory_db, tmp_path)
+    analysis_repo.update_subtitle_band(
+        memory_db, episode_id, json.dumps({"band": [0.80, 0.92], "lines": [[0.809, 0.903]]})
+    )
+    analysis_repo.update_ocr_segments(
+        memory_db,
+        episode_id,
+        json.dumps([{"start": 22.0, "end": 24.0, "text": "今天天气不错", "conf": 0.9}]),
+    )
+    calls = _render(monkeypatch, context, export_id, plan_row, plan_data)
+    joined = " ".join(" ".join(c) for c in calls)
+    assert joined.count("delogo=") == 1
+    assert ":enable='between(t,2.000,4.000)'" in joined, f"窗没接进滤镜：{joined}"
+
+
+def test_erase_without_windows_is_byte_identical(
+    monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """ocr_segments 缺失（NULL）→ 不收窄：无 enable，命令与「整段擦」现状一致。
+
+    宁多擦不漏擦——漏擦等于源台词留在屏上，那是可见缺陷。
+    """
+    context, export_id, plan_row, plan_data, episode_id = _seed_original(memory_db, tmp_path)
+    analysis_repo.update_subtitle_band(
+        memory_db, episode_id, json.dumps({"band": [0.80, 0.92], "lines": [[0.809, 0.903]]})
+    )
+    calls = _render(monkeypatch, context, export_id, plan_row, plan_data)
+    joined = " ".join(" ".join(c) for c in calls)
+    assert joined.count("delogo=") == 1
+    assert ":enable=" not in joined, "无窗数据时不得收窄"
+
+
+def test_erase_windows_survive_garbage_ocr_json(
+    monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """坏窗数据（非 JSON / 元素形状不对 / 倒挂区间）→ 不炸，按「无窗」整段擦。"""
+    for garbage in ("not-json", '[{"start": 1}]', "[[22, 24]]", '[{"start": 24.0, "end": 22.0}]'):
+        context, export_id, plan_row, plan_data, episode_id = _seed_original(memory_db, tmp_path)
+        analysis_repo.update_subtitle_band(
+            memory_db, episode_id, json.dumps({"band": [0.80, 0.92], "lines": [[0.809, 0.903]]})
+        )
+        analysis_repo.update_ocr_segments(memory_db, episode_id, garbage)
+        calls = _render(monkeypatch, context, export_id, plan_row, plan_data)
+        joined = " ".join(" ".join(c) for c in calls)
+        assert joined.count("delogo=") == 1, f"坏窗 {garbage!r} 把擦除整块弄没了"
+        assert ":enable=" not in joined, f"坏窗 {garbage!r} 竟被采信成时间窗"
+
+
+# ---- 旁白段（burn_subtitle 路径）----------------------------------------------
 
 def test_burn_subtitle_covers_source_band(
     monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path

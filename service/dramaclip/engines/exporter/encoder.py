@@ -240,6 +240,54 @@ def resolve_canvas(episode_paths: dict[str, str], cap: tuple[int, int]) -> tuple
     return (width, height)
 
 
+# 擦除时间窗的收口常量：短于 50ms 的一闪不值得挂 delogo（它在邻帧间做插值，
+# 闪一帧只会让补丁边缘抖）；间隙 ≤200ms 的两段并成一段——同一句台词的 OCR 条
+# 在采样边界上常被劈成两条，enable 碎片化不改变画面却增加解析成本。
+_ERASE_SPAN_MIN_S = 0.05
+_ERASE_SPAN_MERGE_S = 0.20
+
+
+def _erase_enable_suffix(
+    windows: list[tuple[float, float]] | None, start: float, end: float
+) -> tuple[str, bool]:
+    """台词驻留窗（源绝对秒）→ delogo 的 `:enable=` 片段 + 这段到底擦不擦。
+
+    源字幕是间歇出现的，而 delogo 默认整段挂着——没字的画面上糊一块动过的补丁，
+    就是业主反馈的「大幅遮盖画面」（2026-10-09 裁决③：擦除按台词时间窗开合）。
+
+    时间基（易错）：滤镜链里 delogo 排在 `setpts=PTS/speed` **之前**，它看到的 t
+    是「裁剪后、变速前」= 源时间 − 段起点，dedup 微变速不参与折算。
+
+    返回 `(后缀, 有交集)`：
+    - 窗缺失/空 → `("", True)`：不收窄，整段擦（OCR 未跑时与现状逐字节一致，
+      宁多擦不漏擦——漏擦等于源台词留在屏上，是可见缺陷）；
+    - 夹到段内后无一段有效 → `("", False)`：这段画面里一帧台词都没有，矩形整框跳过；
+    - 单扇窗本就盖住整段 → `("", True)`：不加无意义的 enable 文本。
+    """
+    if not windows:
+        return "", True
+    clip = max(end - start, 0.0)
+    clipped = sorted(
+        (max(w_start - start, 0.0), min(w_end - start, clip))
+        for w_start, w_end in windows
+        if w_end - w_start > 0.0
+    )
+    spans: list[tuple[float, float]] = []
+    for lo, hi in clipped:
+        if hi - lo <= _ERASE_SPAN_MIN_S:
+            continue
+        if spans and lo <= spans[-1][1] + _ERASE_SPAN_MERGE_S:
+            spans[-1] = (spans[-1][0], max(spans[-1][1], hi))
+        else:
+            spans.append((lo, hi))
+    if not spans:
+        return "", False
+    if len(spans) == 1 and spans[0][0] <= 0.001 and spans[0][1] >= clip - 0.001:
+        return "", True
+    terms = "+".join(f"between(t,{lo:.3f},{hi:.3f})" for lo, hi in spans)
+    return f":enable='{terms}'", True
+
+
 def cut_segment_args(
     source: str,
     out_path: str,
@@ -258,6 +306,7 @@ def cut_segment_args(
     afade_in_s: float | None = None,
     afade_out_s: float | None = None,
     erase_rects: list[tuple[float, float]] | None = None,
+    erase_windows: list[tuple[float, float]] | None = None,
 ) -> list[str]:
     """构建单段切割命令（Phase A）。
 
@@ -272,6 +321,13 @@ def cut_segment_args(
     且必须紧贴 pad 之后：缩放与居中 pad 定了内容在画布里的实际位置，后面
     eq/fade 不改几何。横屏源被补黑时行比例相对源画面高、落在画布中部——与
     ASS 带内压位共用同一假设（核心素材是 9:16 原生短剧，画布与源同比例）。
+
+    `erase_windows`：该集台词在屏上的驻留窗（源绝对秒，OCR 通道产物）。给了它
+    就把 delogo 用 `enable` 收成「只在有字的那几秒挂」——整段涂抹会在无字画面上
+    留一块动过的补丁（2026-10-09 业主裁决③）。逐行框的时间窗没有单独落库
+    （OCR 条按帧拼接整行文本，`OcrSegment` 只有 start/end/text/conf），所以窗是
+    **整带级**的：多行台词时，某行不在屏上的那几秒照样被同扇窗盖住擦——比整段
+    挂着的旧行为窄，比逐行精确粗，取中间值是有意的（要逐行窗须先改生产者）。
     """
     out_w, out_h = out_size
     dedup = dedup_params.generate(rng)
@@ -286,8 +342,9 @@ def cut_segment_args(
     # 音频收尾链：成对 afade + 限幅器（限幅器必须是进 AAC 前的最后一级，见混音分支注释）
     audio_tail = ",".join([*_xfade_filters("afade", out_dur, ain, aout), _peak_ceiling_filter()])
 
+    enable_suffix, has_subtitle = _erase_enable_suffix(erase_windows, start, end)
     band_filter: list[str] = []
-    for rect_top, rect_bottom in erase_rects or []:
+    for rect_top, rect_bottom in (erase_rects or []) if has_subtitle else []:
         top = min(max(float(rect_top), 0.0), 1.0)
         bottom = min(max(float(rect_bottom), 0.0), 1.0)
         if bottom - top <= 0.01:
@@ -302,7 +359,9 @@ def cut_segment_args(
         delogo_y = min(max(1, content_y + round(top * scaled_h)), out_h - 2)
         delogo_h = min(max(2, round((bottom - top) * scaled_h)), out_h - delogo_y - 1)
         delogo_w = max(2, scaled_w - 2 * content_x)
-        band_filter.append(f"delogo=x={content_x}:y={delogo_y}:w={delogo_w}:h={delogo_h}")
+        band_filter.append(
+            f"delogo=x={content_x}:y={delogo_y}:w={delogo_w}:h={delogo_h}{enable_suffix}"
+        )
 
     filters = [
         f"scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease",
@@ -766,6 +825,7 @@ def export_plan(
     video_codec: str = "libx264",
     subtitle_bands: dict[str, tuple[float, float]] | None = None,
     subtitle_erase_rects: dict[str, list[tuple[float, float]]] | None = None,
+    subtitle_erase_windows: dict[str, list[tuple[float, float]]] | None = None,
 ) -> Path:
     """执行两阶段导出，返回成片路径。
 
@@ -787,6 +847,7 @@ def export_plan(
             video_codec=video_codec,
             subtitle_bands=subtitle_bands,
             subtitle_erase_rects=subtitle_erase_rects,
+            subtitle_erase_windows=subtitle_erase_windows,
             _allow_uniform_retry=True,
         )
     except _UniformCodecRetry:
@@ -809,6 +870,7 @@ def export_plan(
             video_codec=_FALLBACK_CODEC,
             subtitle_bands=subtitle_bands,
             subtitle_erase_rects=subtitle_erase_rects,
+            subtitle_erase_windows=subtitle_erase_windows,
             _allow_uniform_retry=False,
         )
 
@@ -831,6 +893,7 @@ def _export_plan_once(
     video_codec: str = "libx264",
     subtitle_bands: dict[str, tuple[float, float]] | None = None,
     subtitle_erase_rects: dict[str, list[tuple[float, float]]] | None = None,
+    subtitle_erase_windows: dict[str, list[tuple[float, float]]] | None = None,
     _allow_uniform_retry: bool = True,
 ) -> Path:
     """单次导出尝试（统一重跑的循环体，见 export_plan）。
@@ -992,6 +1055,10 @@ def _export_plan_once(
                         if ass_path is not None
                         else None
                     ),
+                    # 台词驻留窗（源绝对秒）：delogo 只在有字的那几秒挂，无字画面的
+                    # 补丁痕迹消失（2026-10-09 裁决③）。整集窗共用，不按行分——
+                    # OCR 条按帧拼接整行文本，行级时间没有落库。
+                    erase_windows=(subtitle_erase_windows or {}).get(segment.episode_id),
                 ),
                 seg_path=seg_path,
                 inputs=inputs,
