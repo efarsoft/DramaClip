@@ -166,12 +166,16 @@ AI 替你把全剧看完、稿写好、角色原声克隆成解说嗓、画面�
 
 ## 🖼️ 界面一览
 
-| 工作台 | 成品库（按剧分组海报墙） |
+| 分析工作台（转写 / 冲突曲线 / 逐句校正） | 出片中心（十种模式 · 方案卡） |
 |---|---|
-| ![工作台](docs/images/ui-workbench.png) | ![成品库](docs/images/ui-works.png) |
+| ![工作台](docs/images/ui-workbench.png) | ![出片中心](docs/images/ui-produce.png) |
+
+| 成品库（按剧分组海报墙） | 成片详情（自检四项 · 解说文案 · 候选标题） |
+|---|---|
+| ![成品库](docs/images/ui-works.png) | ![成片详情](docs/images/ui-works-detail.png) |
 
 <details>
-<summary>更多界面：引擎中心 · 模型库 · GPU 状态</summary>
+<summary>更多界面：引擎中心 · 模型资产 · GPU 状态</summary>
 
 ![引擎中心](docs/images/ui-engines.png)
 
