@@ -49,23 +49,19 @@ function sectionStyle(): React.CSSProperties {
   return { display: 'flex', flexDirection: 'column', gap: layout.page.gap };
 }
 
-/** 规划和渲染是两步：先看清 K 条方案各说什么，再决定出哪几条。 */
-export function ProductionPage() {
-  const { projectId = '' } = useParams();
+/** 页面装载：拉项目详情（名称/集数/源集封面）+ 登记当前项目与最近打开的剧。
+ * 卸载时清当前项目，但 rememberDrama 不清——「最近剧库」是跨页面的。 */
+function useProductionProject(projectId: string): {
+  project: Project | null;
+  episodeCount: number;
+  episodeCovers: Record<string, { cover: string | null; number: number }>;
+} {
   const setCurrentProjectId = useUiStore((state) => state.setCurrentProjectId);
-  const serviceState = useUiStore((state) => state.serviceState);
   const [project, setProject] = useState<Project | null>(null);
   const [episodeCount, setEpisodeCount] = useState(0);
-  const [modes, setModes] = useState<NarrationMode[]>([]);
-  const [recommendation, setRecommendation] = useState<ModeRecommendation | null>(null);
-  const [recLoading, setRecLoading] = useState(false);
-  const [k, setK] = useState<number>(DEFAULT_K);
-  const [exports, setExports] = useState<ExportJob[] | null>(null);
   const [episodeCovers, setEpisodeCovers] = useState<
     Record<string, { cover: string | null; number: number }>
   >({});
-  const { planningRef, exportRef } = useFocusScroll();
-
   useEffect(() => {
     setCurrentProjectId(projectId === '' ? null : projectId);
     void projectApi.get(projectId).then((detail) => {
@@ -85,6 +81,20 @@ export function ProductionPage() {
       setCurrentProjectId(null);
     };
   }, [projectId, setCurrentProjectId]);
+  return { project, episodeCount, episodeCovers };
+}
+
+/** 规划和渲染是两步：先看清 K 条方案各说什么，再决定出哪几条。 */
+export function ProductionPage() {
+  const { projectId = '' } = useParams();
+  const serviceState = useUiStore((state) => state.serviceState);
+  const [modes, setModes] = useState<NarrationMode[]>([]);
+  const [recommendation, setRecommendation] = useState<ModeRecommendation | null>(null);
+  const [recLoading, setRecLoading] = useState(false);
+  const [k, setK] = useState<number>(DEFAULT_K);
+  const [exports, setExports] = useState<ExportJob[] | null>(null);
+  const { project, episodeCount, episodeCovers } = useProductionProject(projectId);
+  const { planningRef, exportRef } = useFocusScroll();
 
   const reloadExports = useCallback(async () => {
     setExports(await exportApi.list(projectId));

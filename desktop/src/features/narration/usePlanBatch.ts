@@ -33,6 +33,32 @@ export interface PlanBatch {
   cancel: () => Promise<void>;
 }
 
+/** 没有在跑作业：页面只呈现**最近一批**方案——跨批全量刷屏没人看得过来，
+ * 旧批次仍在库里（多次「生成方案」按批次累积落库），按 created_at 找最新一批圈定。 */
+function latestBatch(all: NarrationPlan[]): { batchId: string | null; plans: NarrationPlan[] } {
+  const latest = all.reduce<NarrationPlan | null>(
+    (acc, p) => (acc === null || p.created_at > acc.created_at ? p : acc),
+    null,
+  );
+  const batchId = latest?.batch_id ?? null;
+  return { batchId, plans: batchId === null ? all : all.filter((p) => p.batch_id === batchId) };
+}
+
+/** 在跑批次的提交规格从项目设置恢复（服务端创建批次时写入 last_plan_batch）；
+ * 键缺失/形状不对返回 null（骨架显示退化，不报错）。 */
+async function restoreSpec(projectId: string): Promise<PlanBatchSpec | null> {
+  const detail = await projectApi.get(projectId);
+  const stored: unknown = detail.project.settings.last_plan_batch;
+  if (!(stored instanceof Object) || !Array.isArray((stored as { modes?: unknown }).modes)) {
+    return null;
+  }
+  const k: unknown = (stored as { k?: unknown }).k;
+  return {
+    modes: (stored as { modes: NarrationMode[] }).modes,
+    k: typeof k === 'number' ? k : 1,
+  };
+}
+
 export function usePlanBatch(projectId: string): PlanBatch {
   const [planning, setPlanning] = useState(false);
   const [percent, setPercent] = useState(0);
@@ -108,33 +134,25 @@ export function usePlanBatch(projectId: string): PlanBatch {
 
   // 页面重进：先找回在跑的规划作业（type=narration + 同 ref_id + 未终态）重新挂轮询；
   // 没有在跑作业时也要把库里已有方案捞回来——方案是持久资产，不该随导航消失。
-  // 多次「生成方案」的产物按批次累积落库（不丢数据），页面只呈现**最近一批**。
-  // 在跑批次的规格从项目设置恢复（服务端创建批次时写入 last_plan_batch）。
+  // 卸载守卫必须经 stopped() 读：立即调用的异步 IIFE 按 IIFE 声明点内联分析，
+  // let 布尔和对象属性都会被初始值收窄成字面量 false；函数返回类型不参与收窄。
   useEffect(() => {
     if (projectId === '' || jobIdRef.current !== null) return;
-    let cancelled = false;
-    (async (): Promise<void> => {
+    const guard: { cancelled: boolean } = { cancelled: false };
+    const stopped = (): boolean => guard.cancelled;
+    void (async (): Promise<void> => {
       try {
         const { jobs } = await jobsApi.list(20, true);
-        if (cancelled) return;
+        if (stopped()) return;
         const active = jobs.find(
-          (job) =>
-            job.type === 'narration' &&
-            job.ref_id === projectId &&
-            (job.status === 'running' || job.status === 'pending'),
+          (job) => job.type === 'narration' && job.ref_id === projectId && (job.status === 'running' || job.status === 'pending'),
         );
         const all = await narrationApi.listPlans(projectId);
-        if (cancelled) return;
+        if (stopped()) return;
         if (active === undefined) {
-          // 没有在跑作业：展示**最近一批**方案——跨批全量刷屏没人看得过来，
-          // 旧批次仍在库里，按 created_at 找最新一批的 batch_id 圈定展示范围。
-          const latest = all.reduce<NarrationPlan | null>(
-            (acc, p) => (acc === null || (p.created_at ?? 0) > (acc.created_at ?? 0) ? p : acc),
-            null,
-          );
-          const batch = latest?.batch_id ?? null;
-          setBatchId(batch);
-          setPlans(batch === null ? all : all.filter((p) => p.batch_id === batch));
+          const picked = latestBatch(all);
+          setBatchId(picked.batchId);
+          setPlans(picked.plans);
           return;
         }
         jobIdRef.current = active.id;
@@ -144,39 +162,26 @@ export function usePlanBatch(projectId: string): PlanBatch {
         setStageText(active.label ?? '');
         setFailDetail(active.error ?? '');
         setPlans(all.filter((p) => p.batch_id === active.id));
-        if (cancelled) return;
+        if (stopped()) return;
         try {
-          const detail = await projectApi.get(projectId);
-          const stored = (
-            (detail.project.settings ?? {}) as Record<string, unknown>
-          )['last_plan_batch'];
-          if (
-            !cancelled &&
-            stored &&
-            typeof stored === 'object' &&
-            Array.isArray((stored as { modes?: unknown }).modes)
-          ) {
-            setSpec({
-              modes: (stored as { modes: string[] }).modes as NarrationMode[],
-              k: typeof (stored as { k?: unknown }).k === 'number' ? (stored as { k: number }).k : 1,
-            });
-          }
+          const restored = await restoreSpec(projectId);
+          if (restored !== null && !stopped()) setSpec(restored);
         } catch {
           // 规格恢复失败只影响骨架显示，不影响轮询
         }
-        if (cancelled) return;
+        if (stopped()) return;
         await pollUntilTerminal(active.id, active.id);
       } catch {
         // 找回失败按「没有在跑作业」处理：不打扰用户
       } finally {
-        if (!cancelled) {
+        if (!stopped()) {
           setPlanning(false);
           setStageText('');
         }
       }
     })();
     return () => {
-      cancelled = true;
+      guard.cancelled = true;
     };
   }, [pollUntilTerminal, projectId]);
 
