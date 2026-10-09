@@ -18,7 +18,7 @@ export type Reports = ReadonlyMap<string, VerifyReport>;
 
 export type AssetState = 'ready' | 'untested' | 'unverified' | 'incomplete' | 'missing' | 'reserve';
 
-export type EngineTab = 'asr' | 'tts' | 'llm';
+export type EngineTab = 'asr' | 'tts' | 'llm' | 'vision';
 
 const LABEL: Record<AssetState, string> = {
   ready: '就绪',

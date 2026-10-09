@@ -244,6 +244,20 @@ def resolve_revision(kind: str, repo: str, endpoints: Endpoints) -> str | None:
     return None
 
 
+def _apply_download_allowlist(spec: ModelSpec, files: list[FileEntry]) -> list[FileEntry]:
+    """下载白名单（GGUF 等同仓多量化仓库）：只留登记的文件，F16 级巨物不碰。
+
+    白名单为空 = 整仓下载（旧行为）；登记了却一个都对不上 = 仓库改了名，如实报错。
+    """
+    if not spec.download_files:
+        return files
+    wanted = set(spec.download_files)
+    out = [item for item in files if item[0] in wanted]
+    if not out:
+        raise RuntimeError(f"仓库里找不到登记的下载文件: {sorted(wanted)}")
+    return out
+
+
 def _download_from(
     kind: str,
     repo: str,
@@ -266,6 +280,7 @@ def _download_from(
     files = list_tree(kind, repo, endpoints)
     if not files:
         raise RuntimeError("仓库文件清单为空")
+    files = _apply_download_allowlist(spec, files)
     notifier.log("info", f"开始从 {kind} 下载 {spec.name}（{len(files)} 个文件）")
     total = sum(size for _rel, size, _sha, _blob in files)
     state = {"done": 0, "base": 0, "percent": -1}

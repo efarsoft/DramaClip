@@ -370,3 +370,44 @@ def test_rate_meter_starts_without_guessing() -> None:
     speed, eta = meter.update(0)
     assert speed == 0.0
     assert eta is None
+
+def test_vision_specs_registered_with_paired_files() -> None:
+    """视觉三档入库：kind=vision、白名单=体检必需集（双文件，一个不多）。"""
+    vision = [spec for spec in builtin_specs() if spec.kind == "vision"]
+    assert [spec.model_id for spec in vision] == ["qwen3-vl-2b", "qwen3-vl-4b", "qwen3-vl-8b"]
+    for spec in vision:
+        assert spec.engine == "qwen3_vl"
+        assert spec.download_files == spec.required_files
+        assert len(spec.download_files) == 2
+        assert any(name.startswith("mmproj") for name in spec.download_files)
+
+
+def test_download_allowlist_filters_quantization_zoo() -> None:
+    """GGUF 同仓多量化：只拉登记文件，F16 巨物与 README 杂项都不进清单。"""
+    spec = _spec("qwen3-vl-4b")
+    files: list[downloader.FileEntry] = [
+        ("Qwen3VL-4B-Instruct-F16.gguf", 16_000_000_000, None, "x" * 40),
+        ("Qwen3VL-4B-Instruct-Q4_K_M.gguf", 2_500_000_000, None, "x" * 40),
+        ("mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf", 450_000_000, None, "x" * 40),
+        ("README.md", 1024, None, "x" * 40),
+    ]
+    kept = downloader._apply_download_allowlist(spec, files)
+    assert [item[0] for item in kept] == [
+        "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+        "mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf",
+    ]
+
+
+def test_download_allowlist_empty_keeps_whole_repo() -> None:
+    """白名单为空 = 旧行为整仓下载（whisper 系不受影响）。"""
+    spec = _spec("faster-whisper-base")
+    files: list[downloader.FileEntry] = [("model.bin", 1, None, "x" * 40)]
+    assert downloader._apply_download_allowlist(spec, files) == files
+
+
+def test_download_allowlist_total_miss_raises() -> None:
+    """仓库改了名一个都对不上：如实报错，不静默整仓。"""
+    spec = _spec("qwen3-vl-4b")
+    with pytest.raises(RuntimeError, match="找不到登记的下载文件"):
+        downloader._apply_download_allowlist(spec, [("renamed.gguf", 1, None, "x" * 40)])
+

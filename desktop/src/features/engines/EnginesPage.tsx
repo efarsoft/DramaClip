@@ -12,6 +12,7 @@ import { OverviewTab } from './OverviewTab';
 import { AsrTab } from './AsrTab';
 import { TtsTab } from './TtsTab';
 import { LlmTab } from './LlmTab';
+import { VisionTab } from './VisionTab';
 import { PromptsTab } from './PromptsTab';
 import { EngineTabNav } from './EngineTabNav';
 import { ImportModelModal } from './ImportModelModal';
@@ -131,6 +132,7 @@ function TabBody({
   };
   if (tab === 'asr') return <AsrTab {...domain} />;
   if (tab === 'tts') return <TtsTab {...domain} />;
+  if (tab === 'vision') return <VisionTab {...domain} />;
   if (tab === 'llm') return <LlmTab onChanged={domain.onChanged} />;
   if (tab === 'prompts') return <PromptsTab />;
   return (
@@ -147,6 +149,6 @@ function TabBody({
 }
 
 function tabFromPath(pathname: string): EngineTabKey {
-  const match = /\/engines\/(asr|tts|llm|prompts)/.exec(pathname);
+  const match = /\/engines\/(asr|tts|llm|vision|prompts)/.exec(pathname);
   return (match?.[1] as EngineTabKey | undefined) ?? 'overview';
 }

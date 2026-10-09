@@ -30,6 +30,9 @@ class ModelSpec:
     # 必需文件集覆盖：同一引擎挂多份资产时（如 paraformer 的主模型与 vad/分离
     # 辅助模型），引擎级 _REQUIREMENTS 表只有一份——覆盖字段让每份资产各判各的。
     required_files: tuple[str, ...] = ()
+    # 下载白名单：GGUF 等仓库同仓多量化（F16 单文件 16GB），整仓下载是灾难——
+    # 非空时只下载列出的仓库相对路径，体检必需集仍走 required_files。
+    download_files: tuple[str, ...] = ()
 
     def sources(self) -> list[tuple[str, str]]:
         """可用下载源（国内优先排序）：[(kind, repo)]，kind ∈ modelscope/hf_mirror/huggingface。
@@ -44,6 +47,12 @@ class ModelSpec:
             out.append(("hf_mirror", self.repo_id))
             out.append(("huggingface", self.repo_id))
         return out
+
+
+# 视觉档位的双文件组（主模型 GGUF + mmproj 视觉编码器）：登记/白名单/体检三处共用一份事实。
+_VL2B_FILES = ("Qwen3VL-2B-Instruct-Q4_K_M.gguf", "mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf")
+_VL4B_FILES = ("Qwen3VL-4B-Instruct-Q4_K_M.gguf", "mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf")
+_VL8B_FILES = ("Qwen3VL-8B-Instruct-Q4_K_M.gguf", "mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf")
 
 
 def builtin_specs() -> list[ModelSpec]:
@@ -224,6 +233,58 @@ def builtin_specs() -> list[ModelSpec]:
             desc="声纹嵌入+聚类，把台词按角色聚类并标注说话人（角色A/B…）",
             required_files=("campplus_cn_common.bin",),
         ),
+        # ---- 视觉轨（vision）：Qwen3-VL 三档，GGUF+mmproj 双文件（管理先行，运行接入见 P2b）----
+        ModelSpec(
+            model_id="qwen3-vl-2b",
+            kind="vision",
+            engine="qwen3_vl",
+            repo_id="Qwen/Qwen3-VL-2B-Instruct-GGUF",
+            ms_repo="Qwen/Qwen3-VL-2B-Instruct-GGUF",
+            placement="vl/qwen3-vl-2b",
+            name="Qwen3-VL 2B（视觉·轻量档）",
+            notes="主模型 + mmproj 视觉编码器双文件；运行需 llama.cpp（接入中）",
+            size_label="~1.6GB",
+            tier="fast",
+            speed=5,
+            quality=2,
+            desc="逐集拼图画面理解·轻量档：16GB 内存机器可跑，弱机/尝鲜",
+            required_files=_VL2B_FILES,
+            download_files=_VL2B_FILES,
+        ),
+        ModelSpec(
+            model_id="qwen3-vl-4b",
+            kind="vision",
+            engine="qwen3_vl",
+            repo_id="Qwen/Qwen3-VL-4B-Instruct-GGUF",
+            ms_repo="Qwen/Qwen3-VL-4B-Instruct-GGUF",
+            placement="vl/qwen3-vl-4b",
+            name="Qwen3-VL 4B（视觉·均衡档）",
+            notes="主模型 + mmproj 视觉编码器双文件；运行需 llama.cpp（接入中）",
+            size_label="~3GB",
+            tier="balanced",
+            speed=4,
+            quality=3,
+            desc="逐集拼图画面理解·均衡档：默认推荐候选，真机 CPU 一张拼图约 15~30 秒",
+            required_files=_VL4B_FILES,
+            download_files=_VL4B_FILES,
+        ),
+        ModelSpec(
+            model_id="qwen3-vl-8b",
+            kind="vision",
+            engine="qwen3_vl",
+            repo_id="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+            ms_repo="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+            placement="vl/qwen3-vl-8b",
+            name="Qwen3-VL 8B（视觉·高配档）",
+            notes="主模型 + mmproj 视觉编码器双文件；运行需 llama.cpp（接入中）",
+            size_label="~5.8GB",
+            tier="accurate",
+            speed=3,
+            quality=4,
+            desc="逐集拼图画面理解·高配档：32GB+ 内存机器",
+            required_files=_VL8B_FILES,
+            download_files=_VL8B_FILES,
+        ),
     ]
 
 
@@ -328,7 +389,7 @@ _REQUIREMENTS: dict[str, tuple[str, ...]] = {
     # 目录（文本前端词表）。清单量自 HF Fun-CosyVoice3-0.5B-2512（本机验证组合的取文件集）。
     "cosyvoice3": ("cosyvoice3.yaml", "llm.pt", "flow.pt", "hift.pt", "speech_tokenizer_v3.onnx"),
 }
-_WEIGHT_SUFFIXES = (".bin", ".pth", ".pt", ".onnx", ".safetensors")
+_WEIGHT_SUFFIXES = (".bin", ".pth", ".pt", ".onnx", ".safetensors", ".gguf")
 _HEX = set("0123456789abcdef")
 
 

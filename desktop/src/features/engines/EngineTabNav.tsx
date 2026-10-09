@@ -4,6 +4,7 @@ import {
   AudioOutlined,
   CustomerServiceOutlined,
   DashboardOutlined,
+  EyeOutlined,
   ProfileOutlined,
 } from '@ant-design/icons';
 import type { ReactElement } from 'react';
@@ -16,6 +17,7 @@ const TAB_ICONS: Record<EngineTabKey, typeof DashboardOutlined> = {
   asr: AudioOutlined,
   tts: CustomerServiceOutlined,
   llm: ApiOutlined,
+  vision: EyeOutlined,
   prompts: ProfileOutlined,
 };
 
@@ -24,10 +26,11 @@ const TAB_LABELS: Record<EngineTabKey, string> = {
   asr: '语音识别 ASR',
   tts: '配音 TTS',
   llm: '文案 LLM',
+  vision: '画面理解 VL',
   prompts: '提示词',
 };
 
-const TAB_ORDER: readonly EngineTabKey[] = ['overview', 'asr', 'tts', 'llm', 'prompts'];
+const TAB_ORDER: readonly EngineTabKey[] = ['overview', 'asr', 'tts', 'llm', 'vision', 'prompts'];
 
 export function EngineTabNav({
   tab,
