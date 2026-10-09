@@ -321,10 +321,18 @@ export interface SelfCheckItem {
   readonly planned_segments?: number;
   readonly mean_volume_db?: number;
   readonly max_freeze_s?: number;
+  /** 画面侧落位（caption_placement）专用：四个边界与两个长度都是**画面高占比**，不是秒。 */
+  readonly measured_top?: number;
+  readonly measured_bottom?: number;
+  readonly expected_top?: number;
+  readonly expected_bottom?: number;
+  readonly center_offset?: number;
+  readonly cover_tolerance?: number;
   readonly reason?: string;
 }
 
-/** 成片自检成绩单（export_jobs.selfcheck，导出期产出字段 = 接口改动点 #29）。 */
+/** 成片自检成绩单（export_jobs.selfcheck，导出期产出字段 = 接口改动点 #29）。
+ *  四项是交付徽章口径；caption_placement 是画面侧实测，不进 overall_state 汇总。 */
 export interface SelfCheck {
   readonly version?: number;
   readonly checked_at: number;
@@ -332,6 +340,7 @@ export interface SelfCheck {
   readonly narration: SelfCheckItem;
   readonly silence: SelfCheckItem;
   readonly freeze: SelfCheckItem;
+  readonly caption_placement?: SelfCheckItem;
 }
 
 /** 自检汇总态：passed 四项全绿 / failed 任一红 / partial 有灰无红；null = 从未自检。 */

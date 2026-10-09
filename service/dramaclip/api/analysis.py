@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+from pydantic import ValidationError
 
 from dramaclip.api.context import AppContext, llm_trace_dir
 from dramaclip.engines.analysis import (
@@ -50,6 +53,9 @@ def register(router: Router, context: AppContext) -> None:
     router.register("analysis.status", lambda params: status(context, params))
     router.register("analysis.cancel", lambda params: cancel(context, params))
     router.register("analysis.results", lambda params: results(context, params))
+    router.register(
+        "analysis.export_transcripts", lambda params: export_transcripts(context, params)
+    )
 
 
 def autostart_after_scan(
@@ -273,6 +279,79 @@ def cancel(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     if event is not None:
         event.set()
     return {"ok": True}
+
+
+def _srt_ts(seconds: float) -> str:
+    """SRT 时间轴：00:00:01,500（逗号毫秒）。"""
+    total_ms = max(0, round(float(seconds) * 1000))
+    hours, rest = divmod(total_ms, 3_600_000)
+    minutes, rest = divmod(rest, 60_000)
+    secs, ms = divmod(rest, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{ms:03d}"
+
+
+def _safe_filename(name: str) -> str:
+    """Windows 文件名非法字符替换为下划线。"""
+    return re.sub(r'[\/:*?"<>|]', "_", name).strip() or "未命名"
+
+
+def export_transcripts(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """全部已分析集 → 逐集 SRT + 合并全剧台词 TXT，一次导出（2026-10-09 业主追加）。
+
+    产物落 data/exports/transcripts/<剧名>/，前端 revealInFolder 直达。
+    SRT 用融合转写结果（台词保护区的同源数据），放回视频旁即可被「同名 .srt
+    优先」机制在下次分析时当金标准。未分析的集跳过并计数，不挡其他集。
+    """
+    project_id = str(params.get("project_id", ""))
+    project = projects_repo.get(context.conn, project_id)
+    if project is None:
+        raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
+    episodes = episodes_repo.list_by_project(context.conn, project_id)
+    safe_name = _safe_filename(str(project["name"]))
+    out_dir = context.data_dir / "exports" / "transcripts" / safe_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    files: list[str] = []
+    combined: list[str] = [f"《{project['name']}》全剧台词", ""]
+    exported = 0
+    skipped = 0
+    for episode in episodes:
+        if episode["status"] != "done":
+            skipped += 1
+            continue
+        record = analysis_repo.get(context.conn, str(episode["id"]))
+        raw = record.get("asr_segments") if record is not None else None
+        try:
+            segs = [AsrSegment.model_validate(item) for item in json.loads(str(raw or "[]"))]
+        except (TypeError, json.JSONDecodeError, ValidationError):
+            segs = []
+        if not segs:
+            skipped += 1
+            continue
+        number = int(episode["episode_number"])
+        srt_lines: list[str] = []
+        txt_lines: list[str] = [f"【第{number}集】"]
+        for index, seg in enumerate(segs, start=1):
+            srt_lines.append(str(index))
+            srt_lines.append(f"{_srt_ts(seg.start)} --> {_srt_ts(seg.end)}")
+            srt_lines.append(seg.text.strip())
+            srt_lines.append("")
+            txt_lines.append(seg.text.strip())
+        srt_name = f"{_safe_filename(str(episode['name']))}.srt"
+        (out_dir / srt_name).write_text("\n".join(srt_lines) + "\n", encoding="utf-8")
+        files.append(srt_name)
+        combined.extend(txt_lines)
+        combined.append("")
+        exported += 1
+    txt_path = out_dir / f"{safe_name}_全剧台词.txt"
+    txt_path.write_text("\n".join(combined) + "\n", encoding="utf-8")
+    return {
+        "ok": True,
+        "dir": str(out_dir),
+        "txt_path": str(txt_path),
+        "files": files,
+        "exported": exported,
+        "skipped": skipped,
+    }
 
 
 def update_asr(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:

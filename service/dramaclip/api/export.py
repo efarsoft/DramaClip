@@ -24,6 +24,7 @@ from dramaclip.engines.subtitle.ass_generator import (
     TRAILING_MARKS,
     Canvas,
     build_ass,
+    coverage_promised,
     line_char_cap,
     split_subtitle_text,
 )
@@ -460,6 +461,114 @@ def _dwell_windows(raw: Any) -> list[tuple[float, float]]:
     return windows
 
 
+@dataclass(frozen=True)
+class SubtitleCover:
+    """一集的源硬字幕覆盖数据（`episode_analysis` 三列的解析结果）。
+
+    渲染预取和出片后自检读的是同一份数据、同一个并集口径——两处各解析一遍就是
+    第二处真相源，「成绩单说盖住了」和「字幕实际盖住了」从此对不上号。
+    """
+
+    band: tuple[float, float] | None = None
+    line_rects: tuple[tuple[float, float], ...] = ()
+    dwell_windows: tuple[tuple[float, float], ...] = ()
+
+    @property
+    def cover_rect(self) -> tuple[float, float] | None:
+        """压位与擦除共同跟随的目标矩形：采信行框的**并集**优先，行框缺失才回退整带包络。
+
+        擦除用逐行框（贴行不贴带），定位也必须用同一批框的并集——整带含
+        `_BAND_EXPAND` 上下各 4% 的描边余量、还可能比台词实际占位宽得多，跟它走
+        中心就偏（2026-10-09 真机第6集：带 (0.600,0.930) 里台词只在 (0.809,0.903)，
+        按包络压位把字放到了脸上）。跨行台词的并集中心落在两行共同的中间，
+        正是覆盖语义要的位置。
+        """
+        if not self.line_rects:
+            return self.band
+        return (min(rect[0] for rect in self.line_rects), max(rect[1] for rect in self.line_rects))
+
+
+def _as_pair(raw: Any) -> tuple[float, float] | None:
+    """两元素数值对 → (float, float)；形状不对（含 bool）一律 None。"""
+    if (
+        isinstance(raw, list)
+        and len(raw) == 2
+        and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in raw)
+    ):
+        return (float(raw[0]), float(raw[1]))
+    return None
+
+
+def _subtitle_cover(record: dict[str, Any]) -> SubtitleCover:
+    """`episode_analysis` 行 → 覆盖数据（带 / 采信行框 / 台词驻留窗）的唯一解析处。
+
+    A2 源硬字幕带（覆盖，不是避让：擦掉源字再把我们的字放回原位）：subtitle_band 两种
+    落库格式都认——新 = dict（band + lines），旧 = 纯 list（band）。缺字段/坏 JSON/
+    形状不对一律不进结果 → 消费端收 None/空 → 现状 margin_v、整段擦，逐字节不变。
+
+    存量行框再夹两次：① 共享形状谓词——旧数据里可能混着花字/道具行
+    （2026-10-07 审计：ep1 花字卡、ep9 招幌曾被当台词行落库），也混着两行合并成的
+    高框（ep6 存量 0.619-0.772 h=0.153 糊下半张脸）；② 台词带内位置闸。判据与生产者
+    `_cluster_lines` 同一处发号。
+    """
+    band: tuple[float, float] | None = None
+    rects: tuple[tuple[float, float], ...] = ()
+    band_raw = record.get("subtitle_band")
+    if band_raw:
+        try:
+            parsed = json.loads(str(band_raw))
+        except (TypeError, json.JSONDecodeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            band = _as_pair(parsed.get("band"))
+            raw_lines = parsed.get("lines")
+            if band is not None and isinstance(raw_lines, list):
+                from dramaclip.engines.analysis.subtitle_ocr import (
+                    line_in_dialogue_band,
+                    line_is_caption_row,
+                )
+
+                rects = tuple(
+                    rect
+                    for item in raw_lines
+                    if (rect := _as_pair(item)) is not None
+                    and line_is_caption_row(rect)
+                    and line_in_dialogue_band(rect, band)
+                )
+        else:
+            band = _as_pair(parsed)
+    return SubtitleCover(
+        band=band,
+        line_rects=rects,
+        dwell_windows=tuple(_dwell_windows(record.get("ocr_segments"))),
+    )
+
+
+def _plan_cover_promise(
+    context: AppContext, plan_data: PlanData | None
+) -> tuple[float, float] | None:
+    """这条片子的**覆盖承诺**：时间轴涉及各集 cover_rect 的并集，只收生成端真承诺的形状。
+
+    自检的画面侧度量拿它当基准。判据与渲染端同源：同一处解析（`_subtitle_cover`）、
+    同一个承诺定义（`ass_generator.coverage_promised`）。多集异画幅把并集撑成误检形状
+    时返回 None（那一项归灰）——宁灰，不冤枉成红。
+    """
+    if plan_data is None:
+        return None
+    rects: list[tuple[float, float]] = []
+    for episode_id in dict.fromkeys(segment.episode_id for segment in plan_data.timeline):
+        record = analysis_repo.get(context.conn, str(episode_id))
+        if record is None:
+            continue
+        rect = _subtitle_cover(record).cover_rect
+        if rect is not None and coverage_promised(rect):
+            rects.append(rect)
+    if not rects:
+        return None
+    union = (min(rect[0] for rect in rects), max(rect[1] for rect in rects))
+    return union if coverage_promised(union) else None
+
+
 def crop_dialogue_lines(
     items: list[dict[str, Any]], win_start: float, win_end: float
 ) -> list[dict[str, Any]]:
@@ -672,6 +781,8 @@ def _selfcheck_one(context: AppContext, export_id: str) -> bool:
         budget_s=None if plan_data is None else _declared_duration_s(plan_data),
         planned_segments=None if plan_data is None else _planned_narration_segments(plan_data),
         segment_count=0 if plan_data is None else len(plan_data.timeline),
+        caption_band=_plan_cover_promise(context, plan_data),
+        work_dir=context.work_dir,
     )
     exports_repo.set_selfcheck(
         context.conn,
@@ -812,10 +923,6 @@ def render_export(
     # 原声段台词字幕的源（批次二）：同一份 asr_segments JSON 的**原始 dict** 视图，
     # 带 text/words（SpeechZone 只有 start/end，是 jitter 保护区的最小形状，不改它）。
     dialogue_items: dict[str, list[dict[str, Any]]] = {}
-    # A2 源硬字幕带（避让，不是擦除）：episode_id → (top, bottom) 归一化区间。
-    # 与 asr 同一趟预取循环顺带解析（每集一次 get，不逐段查库）；缺集/坏 JSON/
-    # 形状不对（非两元素数值对）一律不进缓存 → build_ass 收 None → 现状 margin_v，
-    # 逐字节不变。
     subtitle_bands: dict[str, tuple[float, float]] = {}
     # 行级擦除矩形（2026-10-07 业主追加：只擦检测到的文字行，不擦整带）
     subtitle_line_rects: dict[str, list[tuple[float, float]]] = {}
@@ -828,61 +935,13 @@ def render_export(
         record = analysis_repo.get(context.conn, episode_id)
         if record is None:
             continue
-        band_raw = record.get("subtitle_band")
-        if band_raw:
-            try:
-                parsed = json.loads(str(band_raw))
-            except (TypeError, json.JSONDecodeError):
-                parsed = None
-            # 两种落库格式都认：新 = dict（band+lines）；旧 = 纯 list（band）
-            if isinstance(parsed, dict):
-                band_list = parsed.get("band")
-                if (
-                    isinstance(band_list, list)
-                    and len(band_list) == 2
-                    and all(
-                        isinstance(v, (int, float)) and not isinstance(v, bool)
-                        for v in band_list
-                    )
-                ):
-                    subtitle_bands[episode_id] = (float(band_list[0]), float(band_list[1]))
-                raw_lines = parsed.get("lines")
-                if isinstance(raw_lines, list) and subtitle_bands.get(episode_id):
-                    from dramaclip.engines.analysis.subtitle_ocr import (
-                        line_in_dialogue_band,
-                        line_is_caption_row,
-                    )
-
-                    band = subtitle_bands[episode_id]
-                    # 存量行框再夹两次：① 共享形状谓词——旧数据里可能混着花字/道具行
-                    # （2026-10-07 审计：ep1 花字卡、ep9 招幌曾被当台词行落库），
-                    # 也混着两行合并成的高框（ep6 存量 0.619-0.772 h=0.153 糊下半张脸）；
-                    # ② 台词带内位置闸。判据与生产者 _cluster_lines 同一处发号。
-                    rects = [
-                        (float(item[0]), float(item[1]))
-                        for item in raw_lines
-                        if isinstance(item, list)
-                        and len(item) == 2
-                        and all(
-                            isinstance(v, (int, float)) and not isinstance(v, bool)
-                            for v in item
-                        )
-                        and line_is_caption_row((float(item[0]), float(item[1])))
-                        and line_in_dialogue_band(
-                            (float(item[0]), float(item[1])), band
-                        )
-                    ]
-                    if rects:
-                        subtitle_line_rects[episode_id] = rects
-            elif (
-                isinstance(parsed, list)
-                and len(parsed) == 2
-                and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in parsed)
-            ):
-                subtitle_bands[episode_id] = (float(parsed[0]), float(parsed[1]))
-        dwell = _dwell_windows(record.get("ocr_segments"))
-        if dwell:
-            subtitle_erase_windows[episode_id] = dwell
+        cover = _subtitle_cover(record)
+        if cover.band is not None:
+            subtitle_bands[episode_id] = cover.band
+        if cover.line_rects:
+            subtitle_line_rects[episode_id] = list(cover.line_rects)
+        if cover.dwell_windows:
+            subtitle_erase_windows[episode_id] = list(cover.dwell_windows)
         if not record["asr_segments"]:
             continue
         try:
@@ -917,18 +976,11 @@ def render_export(
     ass_canvas = Canvas(*out_size)
 
     def cover_rect(episode_id: str) -> tuple[float, float] | None:
-        """压位定位的目标矩形：采信行框的**并集**优先，行框缺失才回退整带包络。
-
-        擦除用逐行框（贴行不贴带），定位也必须用同一批框的并集——整带含
-        _BAND_EXPAND 上下各 4% 的描边余量、还可能比台词实际占位宽得多，跟它走
-        中心就偏（2026-10-09 真机第6集：带 (0.600,0.930) 里台词只在 (0.809,0.903)，
-        按包络压位把字放到了脸上）。跨行台词的并集中心落在两行共同的中间，
-        正是覆盖语义要的位置。与 subtitle_erase_rects 同源，两边不会漂。
-        """
-        rects = subtitle_line_rects.get(episode_id)
-        if not rects:
-            return subtitle_bands.get(episode_id)
-        return (min(r[0] for r in rects), max(r[1] for r in rects))
+        """压位定位的目标矩形（并集口径的唯一实现处见 `SubtitleCover.cover_rect`）。"""
+        return SubtitleCover(
+            band=subtitle_bands.get(episode_id),
+            line_rects=tuple(subtitle_line_rects.get(episode_id) or ()),
+        ).cover_rect
 
     def burn_subtitle(segment_index: int, text: str, duration_s: float) -> str:
         """生成段级 ass 文件并返回路径（相对时间轴 0→duration）。

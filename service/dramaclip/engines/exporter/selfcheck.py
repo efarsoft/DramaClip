@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from dramaclip.engines.analysis import subtitle_ocr
 from dramaclip.engines.exporter import encoder
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 
@@ -170,6 +171,69 @@ def check_freeze(max_freeze_s: float | None) -> dict[str, Any]:
     return {"pass": max_freeze_s < MAX_FREEZE_S, "max_freeze_s": max_freeze_s}
 
 
+# 成片文字落位的容差：承诺带半高 + 这一项。OCR 框贴着字面走，量的是墨迹不是盒，
+# 描边/阴影带来的边界抖动取 2% 画面高（≈38px@1920）——再小就被抽帧采样噪声吃掉。
+_CAPTION_CENTER_TOL = 0.02
+
+
+def measure_caption_band(
+    video: Path,
+    *,
+    work_dir: Path,
+    duration_s: float,
+    ocr: subtitle_ocr.OcrCallable | None = None,
+) -> tuple[float, float] | None:
+    """成片里 OCR 到的台词文字带（top/bottom 占成片高）；量不到给 None。
+
+    直接复用分析层那条探测线（10 探针帧投票），不另造一套判据。OCR 依赖没装、
+    抽帧失败、成片确实一个字都没有——一律 None：那是「量不到」，不是「落位错」。
+    """
+    try:
+        return subtitle_ocr.detect_band(
+            video, work_dir, duration_s=duration_s, ocr=ocr
+        )
+    except Exception:  # noqa: BLE001 - 画面侧度量绝不炸掉整张成绩单
+        return None
+
+
+def check_caption_placement(
+    measured: tuple[float, float] | None,
+    expected: tuple[float, float] | None,
+) -> dict[str, Any]:
+    """画面侧那一项：成片实测的文字中心，盖在承诺覆盖的源台词带上吗。
+
+    与出片前的静态闸分工不同：闸在 ASS 里反解每一行的墨迹区间（事前、逐行、
+    漂了不出片），这里量的是**成品像素**（事后）——所以 scale/pad/delogo/
+    letterbox 折算这些「生成端算对了但画面被后续环节挪走」的形状才有数。
+
+    判据 `|实测中心 - 承诺中心| ≤ 承诺带半高 + _CAPTION_CENTER_TOL`：中心落在带内
+    （含抖动余量）就算盖住，**贴边也算**。承诺由调用端按 `coverage_promised` 过滤后
+    才传进来，这里不再判形状——两处判据会漂。四个 top/bottom 与两个长度项都是**画面高
+    占比**（不是秒，故不带 `_s` 后缀；`cover_tolerance` 与时长项的 `tolerance_s`
+    不同单位）。
+    """
+    if expected is None:
+        return {"pass": None, "reason": "无覆盖承诺"}
+    if measured is None:
+        return {"pass": None, "reason": "成片文字未量到"}
+    measured_center = (measured[0] + measured[1]) / 2
+    expected_center = (expected[0] + expected[1]) / 2
+    # 判定读成绩单里那三个小数：结论必须能从记录复算出来，否则观众会看到
+    # 「两个数一模一样却判红」。差值本来就只精确到千分高（≈2px@1920），
+    # 先四舍五入再比，不改变任何真实结论，只让「贴边算盖住」这条线可验证。
+    center_offset = round(measured_center - expected_center, 3)
+    cover_tolerance = round((expected[1] - expected[0]) / 2 + _CAPTION_CENTER_TOL, 3)
+    return {
+        "pass": abs(center_offset) <= cover_tolerance,
+        "measured_top": round(measured[0], 3),
+        "measured_bottom": round(measured[1], 3),
+        "expected_top": round(expected[0], 3),
+        "expected_bottom": round(expected[1], 3),
+        "center_offset": center_offset,
+        "cover_tolerance": cover_tolerance,
+    }
+
+
 _ITEMS = ("duration", "narration", "silence", "freeze")
 
 
@@ -178,6 +242,10 @@ def overall_state(checks: dict[str, Any]) -> str:
 
     partial 覆盖「有灰项且无红项」的全部组合（含四项全 null）：量不全的片子
     不冒充通过，也不冤枉成失败。
+
+    `caption_placement` 刻意不在 `_ITEMS` 里：四项是既有交付徽章的口径，画面侧
+    那一项是这一批新加的实测，红不该把一张「四项全绿」的成绩单整体改色——它自己
+    有徽章位置呈现。
     """
     flags = [checks[name]["pass"] for name in _ITEMS]
     if any(flag is False for flag in flags):
@@ -196,13 +264,23 @@ def run(
     budget_s: float | None,
     planned_segments: int | None,
     segment_count: int = 0,
+    caption_band: tuple[float, float] | None = None,
+    work_dir: Path | None = None,
 ) -> dict[str, Any]:
-    """四项全测，返回落库形状的成绩单（json.dumps 后进 export_jobs.selfcheck）。
+    """四项全测 + 画面侧落位实测，返回落库形状的成绩单（json.dumps 后进 export_jobs.selfcheck）。
 
     measured_s/has_audio 来自调用方已有的 probe 结果（零额外成本）；解码测量
     只有 mean_volume 与冻结帧两项，合并一遍。
+
+    `caption_band` 是调用端按 `coverage_promised` 过滤后的**覆盖承诺**（源台词带）：
+    只有真承诺了才付成片 OCR 的账（10 探针帧），没承诺/没 work_dir 直接灰，不猜。
     """
     mean_volume_db, max_freeze_s = measure_audio_video(video)
+    measured_caption: tuple[float, float] | None = None
+    if caption_band is not None and work_dir is not None and measured_s:
+        measured_caption = measure_caption_band(
+            video, work_dir=work_dir, duration_s=measured_s
+        )
     payload = {
         "version": 1,
         "checked_at": _now_ms(),
@@ -212,5 +290,6 @@ def run(
         "narration": check_narration(has_audio, mode, planned_segments),
         "silence": check_silence(mean_volume_db, has_audio),
         "freeze": check_freeze(max_freeze_s),
+        "caption_placement": check_caption_placement(measured_caption, caption_band),
     }
     return payload

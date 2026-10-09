@@ -23,6 +23,7 @@ from dramaclip.engines.exporter import encoder, selfcheck
 from dramaclip.engines.narration.models import PlanData, TimelineSegment
 from dramaclip.infra import jobs as jobs_mod
 from dramaclip.infra.ffmpeg import probe as probe_mod
+from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import exports as exports_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
@@ -158,6 +159,202 @@ def test_run_payload_shape(sample_video: Path, monkeypatch: pytest.MonkeyPatch) 
     assert json.loads(json.dumps(payload))["freeze"]["max_freeze_s"] == 0.5
 
 
+# ---- 画面侧度量：成片文字落位 vs 覆盖承诺（业主裁决④）----
+
+
+def test_measure_caption_band_reuses_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """度量原语直通透传 detect_band 的参数（带=成片里 OCR 到的文字带）。"""
+    seen: dict[str, Any] = {}
+
+    def fake_detect(video: Path, work_dir: Path, **kwargs: Any) -> tuple[float, float]:
+        seen["video"] = video
+        seen["work_dir"] = work_dir
+        seen.update(kwargs)
+        return (0.81, 0.91)
+
+    monkeypatch.setattr(selfcheck.subtitle_ocr, "detect_band", fake_detect)
+    film = tmp_path / "film.mp4"
+    film.write_bytes(b"x")
+    measured = selfcheck.measure_caption_band(film, work_dir=tmp_path / "w", duration_s=30.0)
+    assert measured == (0.81, 0.91)
+    assert seen == {"video": film, "work_dir": tmp_path / "w", "duration_s": 30.0, "ocr": None}
+
+
+def test_measure_caption_band_unusable_ocr_is_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OCR 依赖没装/探测崩 = 量不到（None），不是「落位错」的判定——自检绝不炸批。"""
+
+    def boom(*_a: Any, **_k: Any) -> None:
+        raise RuntimeError("rapidocr 未安装")
+
+    monkeypatch.setattr(selfcheck.subtitle_ocr, "detect_band", boom)
+    assert (
+        selfcheck.measure_caption_band(
+            tmp_path / "film.mp4", work_dir=tmp_path / "w", duration_s=30.0
+        )
+        is None
+    )
+
+
+def test_check_caption_placement_truth_table() -> None:
+    # 没承诺（无带/带被判误检）与量不到都是灰，不判
+    assert selfcheck.check_caption_placement((0.8, 0.9), None)["pass"] is None
+    assert selfcheck.check_caption_placement(None, (0.8, 0.9))["pass"] is None
+    # 中心对齐 → 绿
+    ok = selfcheck.check_caption_placement((0.79, 0.91), (0.80, 0.90))
+    assert ok["pass"] is True and ok["center_offset"] == 0.0
+    # 容差 = 承诺带半高 + 量的抖动：贴边算盖住，越出去一行算漂
+    edge = selfcheck.check_caption_placement((0.86, 0.98), (0.80, 0.90))
+    assert edge["center_offset"] == 0.07 and edge["cover_tolerance"] == 0.07
+    assert edge["pass"] is True, "阈值含等号：实测中心正好压在容差线上 = 盖住"
+    drift = selfcheck.check_caption_placement((0.87, 0.99), (0.80, 0.90))
+    assert drift["pass"] is False and drift["center_offset"] == 0.08
+    assert drift["cover_tolerance"] == 0.07
+    # 悬空画面中部：真机反馈的缺陷形状，红且把两组数都记进成绩单
+    red = selfcheck.check_caption_placement((0.40, 0.52), (0.80, 0.90))
+    assert red["pass"] is False
+    assert red["measured_top"] == 0.4 and red["expected_bottom"] == 0.9
+    # 结论必须能从成绩单里那几个数复算出来——否则「记录 0.07/0.07 却判红」无法解释
+    for measured, expected in (
+        ((0.86, 0.98), (0.80, 0.90)),
+        ((0.87, 0.99), (0.80, 0.90)),
+        ((0.79, 0.91), (0.80, 0.90)),
+    ):
+        item = selfcheck.check_caption_placement(measured, expected)
+        assert item["pass"] is (abs(item["center_offset"]) <= item["cover_tolerance"])
+
+
+def test_run_measures_caption_only_when_promise_exists(
+    sample_video: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """成本纪律：没有覆盖承诺的片子不付成片 OCR 的账。"""
+    monkeypatch.setattr(selfcheck, "measure_audio_video", lambda _v: (-20.0, 0.5))
+    calls: list[tuple[Any, ...]] = []
+
+    def fake_measure(*args: Any, **kwargs: Any) -> tuple[float, float]:
+        calls.append((args, kwargs))
+        return (0.80, 0.92)
+
+    monkeypatch.setattr(selfcheck, "measure_caption_band", fake_measure)
+    work_dir = sample_video.parent / "cache"
+    grey = selfcheck.run(
+        sample_video, measured_s=3.0, has_audio=True, mode="raw_clip",
+        budget_s=3.0, planned_segments=None, work_dir=work_dir,
+    )
+    assert grey["caption_placement"]["pass"] is None and calls == []
+
+    judged = selfcheck.run(
+        sample_video, measured_s=3.0, has_audio=True, mode="raw_clip",
+        budget_s=3.0, planned_segments=None,
+        caption_band=(0.79, 0.91), work_dir=work_dir,
+    )
+    assert judged["caption_placement"]["pass"] is True
+    assert len(calls) == 1, "有承诺才测一次"
+
+    nowhere = selfcheck.run(
+        sample_video, measured_s=3.0, has_audio=True, mode="raw_clip",
+        budget_s=3.0, planned_segments=None,
+        caption_band=(0.79, 0.91),
+    )
+    assert nowhere["caption_placement"]["pass"] is None and len(calls) == 1, (
+        "有承诺但没落点目录 = 探针帧没地方放，灰着不猜（run 的 work_dir 是可选形参，"
+        "缺省调用不许炸自检）"
+    )
+
+    no_duration = selfcheck.run(
+        sample_video, measured_s=None, has_audio=True, mode="raw_clip",
+        budget_s=3.0, planned_segments=None,
+        caption_band=(0.79, 0.91), work_dir=work_dir,
+    )
+    assert no_duration["caption_placement"]["pass"] is None and len(calls) == 1, (
+        "成片时长没探到 = 抽帧位置无从算起，不拿 None 去喂探测器"
+    )
+
+
+def test_overall_state_keeps_four_items() -> None:
+    """画面侧那一项不进交付四项汇总：四项徽章语义不变（红由徽章自己呈现）。"""
+    base = {name: {"pass": True} for name in ("duration", "narration", "silence", "freeze")}
+    base["caption_placement"] = {"pass": False}
+    assert selfcheck.overall_state(base) == "passed"
+
+
+def test_plan_cover_promise_only_for_promised_shapes(
+    memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """自检基准只收生成端真承诺的形状（判据与渲染端同源，两处不各写一份）。"""
+    context, _export_id, plan_row, plan_data = _seed_render(memory_db, tmp_path)
+    episode_id = str(
+        episodes_repo.list_by_project(memory_db, str(plan_row["project_id"]))[0]["id"]
+    )
+    analysis_repo.upsert(
+        memory_db, episode_id, asr_segments="[]", scene_data=None, audio_features=None
+    )
+
+    def promise(raw: str | None) -> Any:
+        if raw is not None:
+            analysis_repo.update_subtitle_band(memory_db, episode_id, raw)
+        return export_api._plan_cover_promise(context, plan_data)
+
+    assert promise(json.dumps([0.135, 0.816])) is None, "带高 68% = 满幅误检，本就没承诺"
+    assert promise(json.dumps([0.1, 0.3])) is None, "带心在上半 = 2/3 封顶辖区，不是覆盖承诺"
+    assert promise(json.dumps([0.80, 0.90])) == (0.80, 0.90), "旧格式（纯 list 带）照收"
+    assert promise(json.dumps({"band": [0.60, 0.95], "lines": [[0.80, 0.90]]})) == (
+        0.80,
+        0.90,
+    ), "新格式收行框并集，不收整带包络"
+    assert promise(json.dumps({"band": [0.70, 0.90], "lines": [[0.09, 0.26]]})) == (
+        0.70,
+        0.90,
+    ), "花字行不采信 → 回退整带"
+    # 坏形状一律不进承诺面（落库列是自由 JSON，布尔/单元素/坏文本都能出现）
+    assert promise(json.dumps([True, False])) is None, "布尔不是坐标"
+    assert promise(json.dumps([0.8])) is None, "单元素不是区间"
+    assert promise("{not json") is None, "坏 JSON = 没探过，不是判红"
+
+
+def test_plan_cover_promise_unions_episodes_and_drops_unpromiseable(
+    memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """跨集取并集当基准；并集被撑成没承诺的形状（异画幅/远距台词带）归灰不判红。"""
+    source = tmp_path / "ep.mp4"
+    source.write_bytes(b"x")
+    project_id = str(projects_repo.create(memory_db, "跨集剧", str(tmp_path))["id"])
+    episodes_repo.replace_all(
+        memory_db,
+        project_id,
+        [
+            {"episode_number": 1, "source_path": str(source), "duration": 120.0},
+            {"episode_number": 2, "source_path": str(source), "duration": 120.0},
+        ],
+    )
+    ids = [str(ep["id"]) for ep in episodes_repo.list_by_project(memory_db, project_id)]
+    for episode_id, band in zip(ids, [(0.74, 0.84), (0.80, 0.90)], strict=True):
+        analysis_repo.upsert(
+            memory_db, episode_id, asr_segments="[]", scene_data=None, audio_features=None
+        )
+        analysis_repo.update_subtitle_band(memory_db, episode_id, json.dumps(band))
+    plan_data = PlanData(
+        mode="raw_clip",
+        timeline=[
+            TimelineSegment(episode_id=ids[0], start=0.0, end=10.0, audio="original"),
+            TimelineSegment(episode_id=ids[1], start=0.0, end=10.0, audio="original"),
+        ],
+    )
+    context = SimpleNamespace(conn=memory_db, data_dir=tmp_path, work_dir=tmp_path / "cache")
+    assert export_api._plan_cover_promise(context, plan_data) == (0.74, 0.90)
+
+    # 第 2 集换成上半带：它自己不算承诺，并集只剩第 1 集那条
+    analysis_repo.update_subtitle_band(memory_db, ids[1], json.dumps([0.1, 0.2]))
+    assert export_api._plan_cover_promise(context, plan_data) == (0.74, 0.84)
+
+    # 两集各在自己那半都算承诺，但并集 (0.52,0.90) 高 38% 超过误检线：不判（宁灰不冤枉红）
+    analysis_repo.update_subtitle_band(memory_db, ids[1], json.dumps([0.84, 0.90]))
+    assert export_api._plan_cover_promise(context, plan_data) == (0.74, 0.90)
+    analysis_repo.update_subtitle_band(memory_db, ids[0], json.dumps([0.52, 0.58]))
+    assert export_api._plan_cover_promise(context, plan_data) is None
+
+
 # ---- 完成钩子：导出尾部自动落成绩单，坏了不挡导出 ----
 
 
@@ -265,6 +462,56 @@ def test_completion_hook_reports_red_without_blocking(
     assert row["selfcheck_state"] == "failed"
     payload = json.loads(str(row["selfcheck"]))
     assert payload["duration"]["pass"] is False and payload["freeze"]["pass"] is False
+
+
+def test_completion_hook_records_caption_placement(
+    monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """库里有采信带 → 出片尾部量画面侧：承诺 (0.80,0.90)、成片量到 (0.81,0.91) → 绿。
+
+    四项汇总不受它影响（`_ITEMS` 仍是四项），但数必须落进成绩单——「字幕到处乱跑」
+    这件事从此有实测数，不靠肉眼。
+    """
+    context, export_id, plan_row, plan_data = _seed_render(memory_db, tmp_path)
+    episode_id = str(
+        episodes_repo.list_by_project(memory_db, str(plan_row["project_id"]))[0]["id"]
+    )
+    analysis_repo.upsert(
+        memory_db, episode_id, asr_segments="[]", scene_data=None, audio_features=None
+    )
+    assert analysis_repo.update_subtitle_band(
+        memory_db, episode_id, json.dumps({"band": [0.70, 0.95], "lines": [[0.80, 0.90]]})
+    ), "种数据没种上，这条用例等于没测"
+    monkeypatch.setattr(selfcheck, "measure_audio_video", lambda _v: (-20.0, 0.5))
+    monkeypatch.setattr(selfcheck, "measure_caption_band", lambda *_a, **_k: (0.81, 0.91))
+    _render(monkeypatch, context, export_id, plan_row, plan_data)
+
+    row = exports_repo.get(memory_db, export_id)
+    assert row is not None and row["selfcheck_state"] == "passed"
+    payload = json.loads(str(row["selfcheck"]))
+    caption = payload["caption_placement"]
+    assert caption["pass"] is True
+    assert caption["expected_top"] == 0.8 and caption["expected_bottom"] == 0.9
+    assert caption["measured_top"] == 0.81
+
+
+def test_completion_hook_caption_grey_without_band(
+    monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """无覆盖承诺（库里没带）→ 画面侧那一项灰，且不去跑成片 OCR。"""
+    context, export_id, plan_row, plan_data = _seed_render(memory_db, tmp_path)
+
+    def boom(*_a: Any, **_k: Any) -> None:
+        raise AssertionError("无承诺不该量画面侧")
+
+    monkeypatch.setattr(selfcheck, "measure_audio_video", lambda _v: (-20.0, 0.5))
+    monkeypatch.setattr(selfcheck, "measure_caption_band", boom)
+    _render(monkeypatch, context, export_id, plan_row, plan_data)
+
+    row = exports_repo.get(memory_db, export_id)
+    assert row is not None and row["selfcheck_state"] == "passed"
+    payload = json.loads(str(row["selfcheck"]))
+    assert payload["caption_placement"]["pass"] is None
 
 
 def test_selfcheck_crash_never_blocks_export(

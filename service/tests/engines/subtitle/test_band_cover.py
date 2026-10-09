@@ -14,11 +14,15 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from dramaclip.engines.subtitle import presets
 from dramaclip.engines.subtitle.ass_generator import (
     _PLAY_RES_Y,
     build_ass,
     cover_band_margin_v,
+    coverage_promised,
+    placement_violations,
 )
 
 _PRESET_MARGIN = 80
@@ -139,3 +143,107 @@ def test_garbage_band_falls_back_to_preset_margin() -> None:
     garbage_band = (0.135, 0.816)  # 高 68%：真机误检形状
     ass = build_ass(_LINES, presets.get_preset("conflict-impact"), source_band=garbage_band)
     assert _event_fields(ass)[7] == "90", "conflict-impact 预设边距 90，不跟随垃圾带"
+
+
+# ---- 出片前覆盖性静态闸（业主裁决④：字幕要盖在源台词带上，不许漂）--------------
+
+_PRESET = presets.get_preset("conflict-impact")  # bottom_bar / margin_v 90
+_BAND = (0.7174, 0.8291)  # 真机《钟情错付》实测带
+
+
+def _with_event_margin(ass: str, margin_v: int) -> str:
+    """把 Dialogue 的 MarginV 字段改成给定值（模拟「生成的 ASS 漂了」）。"""
+    rows: list[str] = []
+    for line in ass.splitlines():
+        if line.startswith("Dialogue:"):
+            fields = line.split(",")
+            fields[7] = str(margin_v)
+            line = ",".join(fields)
+        rows.append(line)
+    return "\n".join(rows)
+
+
+def test_gate_passes_when_caption_sits_on_band() -> None:
+    """正常覆盖形状零违规——闸不能对今天的出片路径开火（误报即挡片）。"""
+    ass = build_ass(_LINES, _PRESET, source_band=_BAND)
+    assert placement_violations(ass, _BAND, 90) == []
+
+
+def test_gate_flags_caption_below_band() -> None:
+    """接线漏传 source_band 的形状：字幕仍贴预设底线，源带在 0.72–0.83。
+    「盖不住」就是业主看到的「字幕到处乱跑」，必须在编码前拦住。"""
+    drifted = _with_event_margin(build_ass(_LINES, _PRESET), 90)
+    violations = placement_violations(drifted, _BAND, 90)
+    assert len(violations) == 1, violations
+    assert "0.717" in violations[0] and "0.829" in violations[0]
+
+
+def test_gate_flags_caption_above_band() -> None:
+    """MarginV 语义被改坏的形状：整行抬到画面中部，糊住人物（业主立案的原话形状）。"""
+    drifted = _with_event_margin(build_ass(_LINES, _PRESET, source_band=_BAND), 900)
+    assert len(placement_violations(drifted, _BAND, 90)) == 1
+
+
+def test_gate_judges_every_row() -> None:
+    """逐行判：一段里两行字幕，漂一行报一行（拆行的两行各自定时定距）。"""
+    lines = [
+        {"start": 0, "end": 2, "text": "第一行"},
+        {"start": 2, "end": 4, "text": "第二行"},
+    ]
+    ass = _with_event_margin(build_ass(lines, _PRESET, source_band=_BAND), 90)
+    assert len(placement_violations(ass, _BAND, 90)) == 2
+
+
+def test_gate_stays_quiet_without_a_promise() -> None:
+    """生成端本就没承诺覆盖的四种形状，闸不追一个没做的承诺（误报即挡片）。"""
+    preset_margin = 90
+    ass = build_ass(_LINES, _PRESET, source_band=_BAND)
+    no_basis = _with_event_margin(build_ass(_LINES, _PRESET), 90)
+    cases = [
+        (ass, None, "无带 → 无基准"),
+        (ass, (0.135, 0.816), "带高 68% → 满幅误检，生成端回退预设"),
+        (ass, (0.1, 0.3), "带心在上半 → 2/3 封顶区，不是底部承诺区"),
+        (no_basis, (0.93, 0.99), "带整体在预设墨迹以下 → 刻意不往下挪"),
+    ]
+    for text, band, why in cases:
+        assert placement_violations(text, band, preset_margin) == [], why
+
+
+def test_gate_only_judges_bottom_aligned_rows() -> None:
+    """\an8（top_title）的 MarginV 是距顶距离，与底部源带不相干：不参与判定。"""
+    preset = {
+        "preset_id": "probe",
+        "font": {"name": "X", "size": 64, "margin_v": 80},
+        "dimensions": {"layout": {"default": "top_title"}},
+    }
+    ass = build_ass(_LINES, preset, source_band=(0.5, 0.9))
+    assert "\\an8" in ass
+    assert placement_violations(ass, (0.5, 0.9), 80) == []
+
+
+def test_build_ass_gates_before_returning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """闸真的接在生成端：判出不一致就不返回 ASS（漏接线/字段漂/语义改坏都到不了编码）。"""
+    monkeypatch.setattr(
+        "dramaclip.engines.subtitle.ass_generator.placement_violations",
+        lambda *a, **k: ["模拟：墨迹 0.92–0.95 不在带 0.717–0.829 内"],
+    )
+    with pytest.raises(ValueError, match="模拟：墨迹"):
+        build_ass(_LINES, _PRESET, source_band=_BAND)
+
+
+def test_coverage_promised_is_the_single_definition_of_the_promise() -> None:
+    """「承诺覆盖」的唯一判据：闸与成片画面侧度量共用，两边不各写一份。
+
+    两种放弃的形状都是生成端在 `cover_band_margin_v` 里回退预设边距的那两处。
+    """
+    assert coverage_promised(None) is False, "无带 = 无基准"
+    assert coverage_promised((0.135, 0.816)) is False, "带高 68% = 满幅文字背景误检"
+    assert coverage_promised((0.1, 0.3)) is False, "带心在上半 = 2/3 封顶辖区，不是覆盖承诺"
+    assert coverage_promised((0.7174, 0.8291)) is True, "真机底部台词带"
+    assert coverage_promised((0.45, 0.55)) is True, "带心 0.5 = 分界线上，仍算下半"
+    # 两条阈值的**数值**也钉住：调常数必须显式改这里，不许静默放宽承诺面
+    assert coverage_promised((0.5, 0.85)) is True, "带高正好 0.35 = 含等号，仍算台词带"
+    assert coverage_promised((0.49, 0.85)) is False, "带高 0.36 = 越线，误检"
+    assert coverage_promised((0.44, 0.55)) is False, "带心 0.495 = 上半，不承诺"

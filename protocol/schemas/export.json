@@ -41,6 +41,30 @@
         "max_freeze_s": {
           "type": "number"
         },
+        "measured_top": {
+          "type": "number",
+          "description": "成片 OCR 到的文字带上沿（占成片高比例）"
+        },
+        "measured_bottom": {
+          "type": "number",
+          "description": "成片 OCR 到的文字带下沿（占成片高比例）"
+        },
+        "expected_top": {
+          "type": "number",
+          "description": "承诺覆盖的源台词带上沿（占画面高比例，行框并集口径）"
+        },
+        "expected_bottom": {
+          "type": "number",
+          "description": "承诺覆盖的源台词带下沿（占画面高比例，行框并集口径）"
+        },
+        "center_offset": {
+          "type": "number",
+          "description": "实测带中心 - 承诺带中心（正=偏下），画面高比例"
+        },
+        "cover_tolerance": {
+          "type": "number",
+          "description": "覆盖容差 = 承诺带半高 + OCR 边界抖动（画面高比例；与时长项的 tolerance_s 不同单位）"
+        },
         "reason": {
           "type": "string"
         }
@@ -48,7 +72,7 @@
     },
     "SelfCheck": {
       "type": "object",
-      "description": "成片自检成绩单（09-10 §4.5 四项；engines/exporter/selfcheck.py 度量，判据与 scripts/verify_modes.py 同源）",
+      "description": "成片自检成绩单（09-10 §4.5 四项 + 画面侧落位实测；engines/exporter/selfcheck.py 度量，音画判据与 scripts/verify_modes.py 同源）。caption_placement 刻意不在 required、也不进四项汇总态：四项徽章口径不变，它自己有呈现位",
       "required": [
         "checked_at",
         "duration",
@@ -73,6 +97,9 @@
           "$ref": "#/x-models/SelfCheckItem"
         },
         "freeze": {
+          "$ref": "#/x-models/SelfCheckItem"
+        },
+        "caption_placement": {
           "$ref": "#/x-models/SelfCheckItem"
         }
       }

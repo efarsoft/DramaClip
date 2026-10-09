@@ -109,6 +109,11 @@ def _margin_v(preset: dict[str, Any], canvas: Canvas | None = None) -> int:
 # - 封顶 PlayResY×2/3：目标探到画面中部属异常形状，不把字幕抬出演示区。
 _MARGIN_CAP_RATIO = 2 / 3
 
+# 超高「带」（>35% 画布高）是满幅文字背景误检——压位跟随它会悬空画面中部
+# （2026-10-09 真机 16:9 片头字幕墙反馈），回退预设边距。覆盖闸取同一条线：
+# 生成端在这里放弃承诺，闸就不追一个没做的承诺。
+_BAND_GARBAGE_MAX_H = 0.35
+
 # \an2 的 MarginV 锚的是字幕**盒底**，不是墨迹中心：随包字面（Noto Sans SC）的
 # 一行的墨迹中心落在盒底上方 0.455 个字号处（ascent/descent 1160:288 与 CJK
 # ideographic em box 合成，真机逐集量得）。旧实现按经验系数 font×1.9 造了个
@@ -153,15 +158,118 @@ def cover_band_margin_v(
         return max(preset_margin_v, min(round(margin), cap))
     top = min(max(top_px, 0.0), 1.0)
     bottom = min(max(bottom_px, 0.0), 1.0)
-    if bottom - top > 0.35:
-        # 超高"带"（>35% 画布高）是满幅文字背景误检——压位跟随它会悬空
-        # 画面中部（2026-10-09 真机 16:9 片头字幕墙反馈），回退预设边距。
+    if bottom - top > _BAND_GARBAGE_MAX_H:
+        # 满幅文字背景误检：跟随它会悬空画面中部，回退预设边距（见常量注释）
         return preset_margin_v
     center = (top + bottom) / 2
     font = font_px if font_px else _DEFAULT_FONT_SIZE
     margin = round((1.0 - center) * res_y - _INK_CENTER_TO_ANCHOR * font)
     cap = int(res_y * _MARGIN_CAP_RATIO)
     return max(preset_margin_v, min(margin, cap))
+
+
+# ── 出片前覆盖性静态闸（业主裁决④：字幕盖在源台词带上，漂了就不出片）──
+#
+# 「我需要的是字幕精准覆盖原有字幕，而不是到处乱跑」——生成端自洽不代表落点对：
+# 接线漏传 source_band、Dialogue 字段索引漂了、`\an` 与 MarginV 的语义被改坏，
+# ASS 照样能生成、烧出来却贴底或悬空。闸读**最终 ASS 文本**独立反解落点，编码前
+# raise：位置错是观众一眼看得见的缺陷，不出片优于出错片（质量优先，无降级）。
+_PLACEMENT_TOL_RATIO = 0.01  # 覆盖容差 ≈19px@1920：吃下取整与描边，不容错位一行
+_PLACEMENT_MIN_CENTER_RATIO = 0.5  # 承诺区是画面下半；上半的带归 2/3 封顶管辖区
+# 墨迹高度上界：CJK 方块字一行不超过一个字号高。刻意取上界而非实测值——闸拦的是
+# 「整行漂出带外」这种形状级错位，不为几像素的墨迹边界较真。
+_INK_HALF_TO_FONT = 0.5
+
+_PLAY_RES_Y_RE = re.compile(r"^PlayResY:[ \t]*(\d+)", re.MULTILINE)
+_AN_OVERRIDE_RE = re.compile(r"\\an([1-9])")
+_FS_OVERRIDE_RE = re.compile(r"\\fs(\d+)")
+_TAG_RE = re.compile(r"\{[^}]*\}")
+
+
+def _ink_interval(margin_v: float, font_px: float, res_y: float) -> tuple[float, float]:
+    """`\an2` 的一行 → 墨迹纵向区间（占画面高的比例，自顶向下）。
+
+    MarginV 锚的是**盒底**距画面底：墨迹中心在锚点上方 `_INK_CENTER_TO_ANCHOR` 个
+    字号处，再按 `_INK_HALF_TO_FONT` 铺开上下沿。
+    """
+    center = margin_v + _INK_CENTER_TO_ANCHOR * font_px
+    half = _INK_HALF_TO_FONT * font_px
+    return (1.0 - (center + half) / res_y, 1.0 - (center - half) / res_y)
+
+
+def coverage_promised(band: tuple[float, float] | None) -> bool:
+    """生成端对这块源带**承诺覆盖**吗——两种放弃承诺的形状在这里一次说清。
+
+    「承诺」的定义只能有一处真相：出片前的静态闸和成片后的画面侧度量都读它，
+    否则「闸放过的形状被度量判红」这种自相矛盾迟早会出现。
+
+    False 的两种（`cover_band_margin_v` 在这两处都回退预设边距）：
+    - 带高 > `_BAND_GARBAGE_MAX_H`：满幅文字背景误检，跟它走字幕悬空画面中部；
+    - 带心在画面下半之外（< 0.5）：抬进上部归 `_MARGIN_CAP_RATIO` 封顶管辖区，
+      不属于「把字放回原字幕位」的承诺。
+    """
+    if band is None:
+        return False
+    top, bottom = float(band[0]), float(band[1])
+    return (
+        bottom - top <= _BAND_GARBAGE_MAX_H
+        and (top + bottom) / 2 >= _PLACEMENT_MIN_CENTER_RATIO
+    )
+
+
+def placement_violations(
+    ass_text: str,
+    band: tuple[float, float] | None,
+    preset_margin_v: int,
+) -> list[str]:
+    """生成的 ASS 是否把每行底部字幕盖在源台词带上；返回违规描述（空表=通过）。
+
+    判据与 `cover_band_margin_v` 独立：从最终文本反解 PlayResY、Style 字号/对齐/
+    边距，逐行取 `\\an`、`\\fs` 覆盖与 MarginV 字段——所以「公式自洽但接线漂了」才
+    拦得住（拿生成端的中间量对生成端的输出，等于没测）。
+
+    不判的两种形状（误报即挡片）：
+    - `coverage_promised` 为假 → 无带/满幅误检带/上半带，生成端本就没承诺覆盖；
+    - 带顶已在预设字幕墨迹以下 → 生成端刻意不往预设线以下挪。
+    只判 `\an2` 的行：`\an8`（top_title）的 MarginV 是距**顶**距离，与底部带不相干。
+    """
+    if band is None or not coverage_promised(band):
+        return []  # `band is None` 只为把类型收到二元组，判据在 coverage_promised 里
+    res_y_match = _PLAY_RES_Y_RE.search(ass_text)
+    style = next((line for line in ass_text.splitlines() if line.startswith("Style:")), "")
+    fields = style.split(",")
+    if res_y_match is None or len(fields) < 22:
+        return []  # 不是本模块生成的 ASS 形状，没有可反解的基准
+    res_y = float(res_y_match.group(1))
+    top, bottom = float(band[0]), float(band[1])
+    font_px = float(fields[2])
+    if top >= _ink_interval(preset_margin_v, font_px, res_y)[0]:
+        return []  # 整块带贴在预设字幕线以下：往下追不是承诺
+    base_align = int(fields[18])
+    base_margin = int(fields[21])
+    violations: list[str] = []
+    for line in ass_text.splitlines():
+        if not line.startswith("Dialogue:"):
+            continue
+        parts = line.split(",", 9)
+        if len(parts) < 10:
+            continue
+        text = parts[9]
+        align_match = _AN_OVERRIDE_RE.search(text)
+        if (int(align_match.group(1)) if align_match else base_align) != 2:
+            continue
+        # MarginV 字段 0 在 ASS 里是「跟随 Style」的缺省语义
+        margin_v = float(parts[7]) or base_margin
+        fs_match = _FS_OVERRIDE_RE.search(text)
+        ink_top, ink_bottom = _ink_interval(
+            margin_v, float(fs_match.group(1)) if fs_match else font_px, res_y
+        )
+        if ink_top < top - _PLACEMENT_TOL_RATIO or ink_bottom > bottom + _PLACEMENT_TOL_RATIO:
+            violations.append(
+                f"「{_TAG_RE.sub('', text).strip()[:12]}」墨迹 {ink_top:.3f}–{ink_bottom:.3f}"
+                f" 盖不住源台词带 {top:.3f}–{bottom:.3f}（容差 ±{_PLACEMENT_TOL_RATIO:.2f}）"
+            )
+    return violations
 
 
 def _font_size(preset: dict[str, Any]) -> int:
@@ -446,12 +554,12 @@ def build_ass(
 ) -> str:
     """生成 ASS 字幕全文。
 
-    `source_band`（A2 避让口子）：源片硬字幕带的归一化 (top, bottom)，来自
-    episode_analysis.subtitle_band（JSON 两元数组）。给了且与 bottom_bar 布局真重叠
-    时抬 MarginV 避让；None/不重叠 → 输出与不给时逐字节一致（降级不可见）。
-    只影响 bottom_bar：center_single/center_multi/top_title 零改动。
-    接线（api/export.py，另一子任务名下）：从 analysis_repo.get(...)["subtitle_band"]
-    读 JSON 两元数组转 tuple，作关键字参传进来即可。
+    `source_band`：要覆盖上去的源硬字幕带（归一化 (top, bottom)，编码端已对它
+    delogo 擦除），来自 episode_analysis.subtitle_band（JSON 两元数组）。给了且形状
+    可信时按带内压位定 MarginV（见 `cover_band_margin_v`）；None → 输出与不给时逐字
+    节一致（降级不可见）。只影响 `\an2`：top_title（`\an8`）零改动。
+    返回前过 `placement_violations` 覆盖闸：生成的落点盖不住这块带 → raise ValueError
+    （承诺在此作出，也在此核验；调用端漏不漏接线都拦得住）。
     `play_res`：实际出图画布（encoder.resolve_canvas 的结果）——PlayRes/字号/边距/
     拆行上限全部按它推导；缺省回基准竖屏（逐字节兼容旧输出）。
     """
@@ -461,4 +569,8 @@ def build_ass(
         for line in lines
         if (event := _event_line(line, preset, source_band, canvas)) is not None
     ]
-    return "\n".join([_header(preset, source_band, canvas), *events]) + "\n"
+    ass_text = "\n".join([_header(preset, source_band, canvas), *events]) + "\n"
+    violations = placement_violations(ass_text, source_band, _margin_v(preset, canvas))
+    if violations:
+        raise ValueError("字幕覆盖闸：\n" + "\n".join(violations))
+    return ass_text
