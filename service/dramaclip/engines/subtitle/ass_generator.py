@@ -174,10 +174,22 @@ def cover_band_margin_v(
 # 接线漏传 source_band、Dialogue 字段索引漂了、`\an` 与 MarginV 的语义被改坏，
 # ASS 照样能生成、烧出来却贴底或悬空。闸读**最终 ASS 文本**独立反解落点，编码前
 # raise：位置错是观众一眼看得见的缺陷，不出片优于出错片（质量优先，无降级）。
-_PLACEMENT_TOL_RATIO = 0.01  # 覆盖容差 ≈19px@1920：吃下取整与描边，不容错位一行
+#
+# 判的是**中心**，不是「墨迹装得下带」（2026-10-09 真机：《大明》10 集拦 8 集）：
+# 生成端的承诺是「墨迹中心对齐带心」（见 `cover_band_margin_v`），包含式判据却要求
+# 墨迹高 ≤ 带高——墨迹高 = 字号÷画布高，是个与 MarginV 无关的常量（竖屏 72/1920≈0.037，
+# 横屏 128/1080≈0.119），带高却是 OCR 实测值。源字幕比我们的字小是常态，于是「任何
+# MarginV 都不成立」的空判据把完全居中的落位当缺陷挡掉。业主口径：「保障字幕始终在原
+# 视频字幕位置/区域，能完全覆盖就完全覆盖，不能覆盖不用太在意」——区域一致即中心一致，
+# 尺寸差不是缺陷、也不该是挡片理由。
+# 事后画面侧度量（exporter/selfcheck.check_caption_placement）同向判中心，只在容差上更松：
+# 那边读数来自成片 OCR、有噪声，这边读的是自己刚写下的 ASS。两个数是两种测量噪声预算，
+# 不是同一含义的第二处真相源——别把它们并成一个常量。
+# 容差 ≈19px@1920 / 11px@1080：吃下 MarginV 取整与字体模型误差，不容错位一行。
+_PLACEMENT_TOL_RATIO = 0.01
 _PLACEMENT_MIN_CENTER_RATIO = 0.5  # 承诺区是画面下半；上半的带归 2/3 封顶管辖区
-# 墨迹高度上界：CJK 方块字一行不超过一个字号高。刻意取上界而非实测值——闸拦的是
-# 「整行漂出带外」这种形状级错位，不为几像素的墨迹边界较真。
+# 墨迹高度上界：CJK 方块字一行不超过一个字号高。判定只用中心（这个上界在中心式判据里
+# 两侧对称、自行抵消），留着是为了让报错文案里的区间和烧出来的字形对得上。
 _INK_HALF_TO_FONT = 0.5
 
 _PLAY_RES_Y_RE = re.compile(r"^PlayResY:[ \t]*(\d+)", re.MULTILINE)
@@ -186,15 +198,23 @@ _FS_OVERRIDE_RE = re.compile(r"\\fs(\d+)")
 _TAG_RE = re.compile(r"\{[^}]*\}")
 
 
+def _ink_center(margin_v: float, font_px: float, res_y: float) -> float:
+    """`\an2` 一行的墨迹纵向中心（占画面高的比例，自顶向下）——承诺的落点就是它。
+
+    MarginV 锚的是**盒底**距画面底，随包字面的一行墨迹中心在锚点上方
+    `_INK_CENTER_TO_ANCHOR` 个字号处（真机标定，见常量注释）。
+    """
+    return 1.0 - (margin_v + _INK_CENTER_TO_ANCHOR * font_px) / res_y
+
+
 def _ink_interval(margin_v: float, font_px: float, res_y: float) -> tuple[float, float]:
     """`\an2` 的一行 → 墨迹纵向区间（占画面高的比例，自顶向下）。
 
-    MarginV 锚的是**盒底**距画面底：墨迹中心在锚点上方 `_INK_CENTER_TO_ANCHOR` 个
-    字号处，再按 `_INK_HALF_TO_FONT` 铺开上下沿。
+    中心即 `_ink_center`，上下沿各按 `_INK_HALF_TO_FONT` 个字号铺开。
     """
-    center = margin_v + _INK_CENTER_TO_ANCHOR * font_px
-    half = _INK_HALF_TO_FONT * font_px
-    return (1.0 - (center + half) / res_y, 1.0 - (center - half) / res_y)
+    center = _ink_center(margin_v, font_px, res_y)
+    half = _INK_HALF_TO_FONT * font_px / res_y
+    return (center - half, center + half)
 
 
 def coverage_promised(band: tuple[float, float] | None) -> bool:
@@ -222,15 +242,16 @@ def placement_violations(
     band: tuple[float, float] | None,
     preset_margin_v: int,
 ) -> list[str]:
-    """生成的 ASS 是否把每行底部字幕盖在源台词带上；返回违规描述（空表=通过）。
+    """生成的 ASS 是否把每行底部字幕的**中心**放回源台词带；返回违规描述（空表=通过）。
 
     判据与 `cover_band_margin_v` 独立：从最终文本反解 PlayResY、Style 字号/对齐/
     边距，逐行取 `\\an`、`\\fs` 覆盖与 MarginV 字段——所以「公式自洽但接线漂了」才
-    拦得住（拿生成端的中间量对生成端的输出，等于没测）。
+    拦得住（拿生成端的中间量对生成端的输出，等于没测）。判中心而非判「装得下」：
+    理由见上方常量段的真机记录。
 
     不判的两种形状（误报即挡片）：
     - `coverage_promised` 为假 → 无带/满幅误检带/上半带，生成端本就没承诺覆盖；
-    - 带顶已在预设字幕墨迹以下 → 生成端刻意不往预设线以下挪。
+    - 带心已在预设墨迹中心以下 → `cover_band_margin_v` 的下限钳生效，生成端刻意不往下挪。
     只判 `\an2` 的行：`\an8`（top_title）的 MarginV 是距**顶**距离，与底部带不相干。
     """
     if band is None or not coverage_promised(band):
@@ -242,9 +263,10 @@ def placement_violations(
         return []  # 不是本模块生成的 ASS 形状，没有可反解的基准
     res_y = float(res_y_match.group(1))
     top, bottom = float(band[0]), float(band[1])
+    band_center = (top + bottom) / 2
     font_px = float(fields[2])
-    if top >= _ink_interval(preset_margin_v, font_px, res_y)[0]:
-        return []  # 整块带贴在预设字幕线以下：往下追不是承诺
+    if band_center >= _ink_center(preset_margin_v, font_px, res_y):
+        return []  # 带心贴在预设墨迹中心以下：往下挪被下限钳挡住，不是承诺
     base_align = int(fields[18])
     base_margin = int(fields[21])
     violations: list[str] = []
@@ -264,10 +286,14 @@ def placement_violations(
         ink_top, ink_bottom = _ink_interval(
             margin_v, float(fs_match.group(1)) if fs_match else font_px, res_y
         )
-        if ink_top < top - _PLACEMENT_TOL_RATIO or ink_bottom > bottom + _PLACEMENT_TOL_RATIO:
+        ink_center = (ink_top + ink_bottom) / 2
+        offset = abs(ink_center - band_center)
+        if offset > _PLACEMENT_TOL_RATIO:
             violations.append(
-                f"「{_TAG_RE.sub('', text).strip()[:12]}」墨迹 {ink_top:.3f}–{ink_bottom:.3f}"
-                f" 盖不住源台词带 {top:.3f}–{bottom:.3f}（容差 ±{_PLACEMENT_TOL_RATIO:.2f}）"
+                f"「{_TAG_RE.sub('', text).strip()[:12]}」落点中心 {ink_center:.3f}"
+                f" 偏离源台词带中心 {band_center:.3f}（带 {top:.3f}–{bottom:.3f}，"
+                f"墨迹 {ink_top:.3f}–{ink_bottom:.3f}）偏移 {offset:.3f}"
+                f" > 容差 ±{_PLACEMENT_TOL_RATIO:.2f}"
             )
     return violations
 
@@ -558,7 +584,7 @@ def build_ass(
     delogo 擦除），来自 episode_analysis.subtitle_band（JSON 两元数组）。给了且形状
     可信时按带内压位定 MarginV（见 `cover_band_margin_v`）；None → 输出与不给时逐字
     节一致（降级不可见）。只影响 `\an2`：top_title（`\an8`）零改动。
-    返回前过 `placement_violations` 覆盖闸：生成的落点盖不住这块带 → raise ValueError
+    返回前过 `placement_violations` 覆盖闸：生成的落点中心不在这块带上 → raise ValueError
     （承诺在此作出，也在此核验；调用端漏不漏接线都拦得住）。
     `play_res`：实际出图画布（encoder.resolve_canvas 的结果）——PlayRes/字号/边距/
     拆行上限全部按它推导；缺省回基准竖屏（逐字节兼容旧输出）。

@@ -170,7 +170,7 @@ function SeekButton({
 
 function SourceBadge({ source }: { source: string | undefined }): React.ReactElement | null {
   if (source === 'ocr_fixed') {
-    return <Chip text="OCR 校对" color={tokens.colorSuccess} />;
+    return <Chip text="字幕补字" color={tokens.colorSuccess} />;
   }
   if (source === 'review') {
     return <Chip text="待复核" color={tokens.colorWarning} />;

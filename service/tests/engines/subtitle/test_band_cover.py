@@ -169,6 +169,46 @@ def test_gate_passes_when_caption_sits_on_band() -> None:
     assert placement_violations(ass, _BAND, 90) == []
 
 
+# 真机《大明：灭国前，我觉醒了》：源画幅 1920×1080，ep8 采信行框并集。
+_LANDSCAPE = (1920, 1080)
+_LANDSCAPE_BAND = (0.811, 0.903)
+_LANDSCAPE_PRESET_MARGIN = 51  # round(90 × 1080/1920) —— _margin_v 的纵向缩放
+
+
+def test_gate_passes_landscape_caption_taller_than_band() -> None:
+    """横屏画布上「我们的字比源字幕高」是几何必然，闸不能因为它挡片（真机 10 集拦 8 集）。
+
+    墨迹高 = 字号 ÷ 画布高，而字号随**宽**缩放：同一预设竖屏 72/1920≈0.037，横屏
+    128/1080≈0.119，换个画幅大 3 倍。源台词带高却是 OCR 实测值（这批素材
+    0.088–0.109）。要求墨迹「装得下」这块带，等于要求 MarginV 去解一个跟 MarginV
+    无关的不等式——它取任何值都不成立，闸于是对分毫不差的居中落位开火
+    （真机报错：墨迹 0.798–0.916 vs 带 0.811–0.903，两者中心都是 0.857）。
+    """
+    ass = build_ass(_LINES, _PRESET, source_band=_LANDSCAPE_BAND, play_res=_LANDSCAPE)
+    assert placement_violations(ass, _LANDSCAPE_BAND, _LANDSCAPE_PRESET_MARGIN) == []
+
+
+def test_gate_still_flags_drift_on_landscape_canvas() -> None:
+    """横屏放开的只有「尺寸差」这一种形状，漏接线那种照样拦（预设线 vs 带心差 0.041）。"""
+    drifted = _with_event_margin(
+        build_ass(_LINES, _PRESET, play_res=_LANDSCAPE), _LANDSCAPE_PRESET_MARGIN
+    )
+    violations = placement_violations(drifted, _LANDSCAPE_BAND, _LANDSCAPE_PRESET_MARGIN)
+    assert len(violations) == 1, violations
+
+
+def test_gate_does_not_judge_below_the_preset_clamp() -> None:
+    """带心已在预设墨迹中心以下 → `cover_band_margin_v` 的下限钳生效，闸不追钳住兑现不了的位移。
+
+    判据必须是钳子的镜像：`max(preset_margin_v, ...)` 在「目标比预设线还低」时把字幕
+    留在预设位，此时任何要求它下移的判定都是追一个本就没做的承诺。用带**顶**判是旧
+    包含式的近似，中间有一条漏区（带顶在预设墨迹之上、带心却在其下）。
+    """
+    band = (0.90, 1.00)  # 带顶 0.90 < 预设墨迹顶 0.917，但带心 0.95 > 预设墨迹中心 0.936
+    ass = build_ass(_LINES, _PRESET, source_band=band)
+    assert placement_violations(ass, band, 90) == []
+
+
 def test_gate_flags_caption_below_band() -> None:
     """接线漏传 source_band 的形状：字幕仍贴预设底线，源带在 0.72–0.83。
     「盖不住」就是业主看到的「字幕到处乱跑」，必须在编码前拦住。"""
