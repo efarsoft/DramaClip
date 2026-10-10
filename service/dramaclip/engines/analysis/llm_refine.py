@@ -51,6 +51,16 @@ class _Char:
     end: float = 0.0
 
 
+@dataclass
+class _Entry:
+    """修复后的内容字：字、句序、时间戳（None = 无原字对应，取相邻有据字）。"""
+
+    char: str
+    sent: int
+    start: float | None
+    end: float | None
+
+
 def _pinyin(char: str) -> str:
     """单字拼音（无声调）；无法注音（标点/符号）返回空。"""
     if not char or char in _PUNCT or not char.isalpha():
@@ -94,36 +104,74 @@ def _marks(text: str) -> list[tuple[str, bool]]:
     return [(ch, ch not in _PUNCT) for ch in text]
 
 
-def _audit(
-    raw: list[_Char],
-    sentences: list[str],
-    ocr_text: str,
-) -> str:
-    """对齐审计：输出字流 vs 原始字流。返回空串=通过；否则拒绝原因。
+def _repair(
+    raw: list[_Char], sentences: list[str], ocr_text: str
+) -> tuple[list[list[_Entry]], int]:
+    """对齐修复：非法编辑回退原字/丢弃，合法修正保留——护栏从「拒绝」升级为「自动修复」。
 
-    规则：内容删除 → 拒；替换/插入 → 拼音同/近（插入须字幕读数有据）→ 否则拒。
-    标点自由。NW 对齐按内容字，标点在两侧各自剥离后比对。
-    """
-    raw_chars = [c.char for c in raw if c.char not in _PUNCT]
-    out_chars = [ch for sentence in sentences for ch in _content(sentence)]
+    - 内容删除（原文字被 LLM 丢掉）→ 还原原字（丢话最危险，一律还原）
+    - 替换不同音 → 回退原字（防改写句式）
+    - 替换同音/近音 → 保留修正
+    - 凭空插入（字幕读数无据）→ 丢弃；有据（OCR 读到的字）→ 保留
+    - 标点 → 原样保留
+    返回：每句的 [(内容字, start|None, end|None)]（None=该字无原字对应，时间取邻字），
+    以及回退/丢弃的字数。"""
     import difflib
 
-    matcher = difflib.SequenceMatcher(a=raw_chars, b=out_chars, autojunk=False)
+    raw_content = [c for c in raw if c.char not in _PUNCT]
+    tagged: list[tuple[str, int]] = []
+    for index, sentence in enumerate(sentences):
+        for ch in _content(sentence):
+            tagged.append((ch, index))
+    matcher = difflib.SequenceMatcher(
+        a=[c.char for c in raw_content], b=[t[0] for t in tagged], autojunk=False
+    )
+    repaired: list[list[_Entry]] = [[] for _ in sentences]
+    issues = 0
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag == "delete":
-            return f"内容删除：原文 {i2 - i1} 字在输出中丢失（{''.join(raw_chars[i1:i2])}）"
-        if tag == "insert":
-            inserted = "".join(out_chars[j1:j2])
-            if inserted not in ocr_text:
-                return f"无据插入：{''.join(out_chars[j1:j2])} 不在字幕读数中"
-            continue
-        if tag == "replace":
+        if tag == "equal":
+            for k in range(j2 - j1):
+                char, sent = tagged[j1 + k]
+                rc = raw_content[i1 + k]
+                repaired[sent].append(_Entry(char, sent, rc.start, rc.end))
+        elif tag == "delete":
+            fallback_sent = (
+                tagged[j1][1] if j1 < len(tagged) else len(sentences) - 1
+            )
+            for k in range(i1, i2):
+                rc = raw_content[k]
+                repaired[fallback_sent].append(_Entry(rc.char, fallback_sent, rc.start, rc.end))
+            issues += i2 - i1
+        elif tag == "insert":
+            for k in range(j1, j2):
+                char, sent = tagged[k]
+                if char in ocr_text:
+                    repaired[sent].append(_Entry(char, sent, None, None))
+                else:
+                    issues += 1
+        elif tag == "replace":
             for k in range(max(i2 - i1, j2 - j1)):
-                r = raw_chars[i1 + k] if i1 + k < i2 else ""
-                o = out_chars[j1 + k] if j1 + k < j2 else ""
-                if r and o and not _pinyin_compatible(r, o):
-                    return f"非近音改写：{r} → {o}"
-    return ""
+                r = raw_content[i1 + k] if i1 + k < i2 else None
+                t = tagged[j1 + k] if j1 + k < j2 else None
+                if t is None:
+                    if r is not None:
+                        repaired[len(sentences) - 1].append(
+                            _Entry(r.char, len(sentences) - 1, r.start, r.end)
+                        )
+                        issues += 1
+                    continue
+                if r is None:
+                    if t[0] in ocr_text:
+                        repaired[t[1]].append(_Entry(t[0], t[1], None, None))
+                    else:
+                        issues += 1
+                    continue
+                if _pinyin_compatible(r.char, t[0]):
+                    repaired[t[1]].append(_Entry(t[0], t[1], r.start, r.end))
+                else:
+                    repaired[t[1]].append(_Entry(r.char, t[1], r.start, r.end))
+                    issues += 1
+    return repaired, issues
 
 
 def refine_segments(
@@ -171,37 +219,67 @@ def refine_segments(
         return RefineOutcome(segments=segments, applied=False, detail=detail)
 
     ocr_reference = ocr_text.replace(" ", "")
-    reject = _audit(raw=stream, sentences=sentences, ocr_text=ocr_reference)
-    if reject:
-        _LOGGER.warning("转写精炼护栏拒绝（%s）；产物为原生分段", reject)
-        return RefineOutcome(segments=segments, applied=False, detail=f"护栏拒绝: {reject}")
-
-    refined = _to_segments(stream, sentences)
-    _LOGGER.info(
-        "转写精炼完成：%d 段 → %d 句（原文 %d 字 → %d 字）",
-        len(segments), len(refined), len(raw_text), sum(len(s.text) for s in refined),
+    repaired, issues = _repair(stream, sentences, ocr_reference)
+    refined = _to_segments(sentences, repaired)
+    if issues:
+        _LOGGER.warning("转写精炼护栏自动修复 %d 处（回退原字/丢弃无据字）", issues)
+    return RefineOutcome(
+        segments=refined,
+        applied=True,
+        detail="ok" if issues == 0 else f"护栏自动修复 {issues} 处",
     )
-    return RefineOutcome(segments=refined, applied=True, detail="ok")
 
 
-def _to_segments(stream: list[_Char], sentences: list[str]) -> list[AsrSegment]:
-    """句子 → AsrSegment：时间取句内首末字戳（标点不占字位）。"""
-    content_stream = [c for c in stream if c.char not in _PUNCT]
+def _to_segments(
+    sentences: list[str],
+    repaired: list[list[_Entry]],
+) -> list[AsrSegment]:
+    """句子 → AsrSegment：内容字取修复结果、按原句标点模板重排；时间=首末有据字戳。"""
     result: list[AsrSegment] = []
-    cursor = 0
-    for sentence in sentences:
-        size = len(_content(sentence))
-        chunk = content_stream[cursor:cursor + size]
-        cursor += size
-        if not chunk:
-            continue
-        result.append(
-            AsrSegment(
-                start=round(chunk[0].start, 3),
-                end=round(chunk[-1].end, 3),
-                text=sentence.strip(),
+    for index, sentence in enumerate(sentences):
+        contents = repaired[index] if index < len(repaired) else []
+        template: list[tuple[str, int | None]] = []
+        cursor = 0
+        for ch in sentence:
+            if ch in _PUNCT:
+                template.append((ch, None))
+            else:
+                template.append((ch, cursor))
+                cursor += 1
+        parts: list[str] = []
+        start: float | None = None
+        end: float | None = None
+        ci = 0
+        for ch, pos in template:
+            if pos is None:
+                parts.append(ch)
+            elif pos < len(contents):
+                entry = contents[pos]
+                parts.append(entry.char)
+                if start is None and entry.start is not None:
+                    start = entry.start
+                if entry.end is not None:
+                    end = entry.end
+                ci += 1
+        # 还原/有据补字超出模板的部分尾部续齐（护栏还原的删字、字幕有据补字）
+        while ci < len(contents):
+            entry = contents[ci]
+            parts.append(entry.char)
+            if start is None and entry.start is not None:
+                start = entry.start
+            if entry.end is not None:
+                end = entry.end
+            ci += 1
+        text = "".join(parts).strip()
+        if text and _content(text):
+            end_known = end if end is not None else start
+            result.append(
+                AsrSegment(
+                    start=round(start, 3) if start is not None else 0.0,
+                    end=round(end_known, 3) if end_known is not None else 0.0,
+                    text=text,
+                )
             )
-        )
     return result
 
 

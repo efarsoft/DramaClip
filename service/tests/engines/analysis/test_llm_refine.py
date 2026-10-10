@@ -89,27 +89,31 @@ def test_refine_near_pinyin_with_ocr_evidence_passes(monkeypatch: pytest.MonkeyP
     assert outcome.segments[0].text == "就是杀了大明两大蛀虫"
 
 
-def test_refine_rejects_content_deletion(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_refine_repairs_content_deletion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LLM 丢掉的内容 → 护栏自动还原原字（修复而非拒绝）。"""
     raw = [_seg("就是杀了大明两大蛀虫", start=3.5)]
     outcome = _run(monkeypatch, ["就是杀了大明"], raw, ocr_text="")
-    assert not outcome.applied
-    assert "内容删除" in outcome.detail
-    assert outcome.segments[0].text == "就是杀了大明两大蛀虫", "回退=原生分段原样"
+    assert outcome.applied
+    assert "自动修复 4 处" in outcome.detail
+    assert "大明两大蛀虫" in outcome.segments[0].text, "被删内容完整还原"
 
 
-def test_refine_rejects_unrelated_substitution(monkeypatch: pytest.MonkeyPatch) -> None:
-    """丁→戊 既不同音也非近音 → 拒（防 LLM 改写句式的幻觉）。"""
+def test_refine_repairs_unrelated_substitution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """丁→戊 既不同音也非近音 → 回退原字（防 LLM 改写句式的幻觉）。"""
     raw = [_seg("甲乙丙丁", start=0.0)]
     outcome = _run(monkeypatch, ["甲乙丙戊"], raw, ocr_text="戊")
-    assert not outcome.applied
-    assert "非近音改写" in outcome.detail
+    assert outcome.applied
+    assert "自动修复 1 处" in outcome.detail
+    assert outcome.segments[0].text == "甲乙丙丁", "非法替换回退原字"
 
 
-def test_refine_rejects_unbacked_insertion(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_refine_repairs_unbacked_insertion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """无据插入 → 丢弃（修复语义：掉字不炸整集）。"""
     raw = [_seg("甲乙丙丁", start=0.0)]
     outcome = _run(monkeypatch, ["甲乙丙丁戊"], raw, ocr_text="")
-    assert not outcome.applied
-    assert "无据插入" in outcome.detail
+    assert outcome.applied
+    assert "自动修复 1 处" in outcome.detail
+    assert outcome.segments[0].text == "甲乙丙丁"
 
 
 def test_refine_llm_unconfigured_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
