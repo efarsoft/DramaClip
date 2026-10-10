@@ -27,6 +27,8 @@ DEFAULTS: dict[str, str] = {
     # 行为与 auto 等价，原因见该处 docstring。
     "asr.compute_type": "auto",
     "asr.language": "zh",
+    # 视觉轨档位（P2b）：kind=vision 的 model_id（qwen3-vl-2b/4b/8b）；空 = 视觉轨关闭（分档语义）
+    "vision.model": "",
     # 说话人分离（仅 paraformer 生效）：聚类自动判人数（1~15），num_speakers>0
     # 则经 preset_spk_num 指定。分离模型未下载时 funasr 按别名自行拉取（cam++/
     # fsmn-vad 共约 30MB），资产库登记项可管理下载。

@@ -32,6 +32,7 @@ from dramaclip.engines.analysis.models import (
     SceneInfo,
 )
 from dramaclip.engines.semantic import pipeline as semantic_pipeline
+from dramaclip.engines.vision import runtime as vision_engine
 from dramaclip.infra import config
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -562,6 +563,13 @@ def _run_job(
     """执行池任务：全剧 OCR→热词→逐集分析，单集失败不中断其余。"""
     context.job_store.mark_running(job_id)
     projects_repo.set_status(context.conn, project_id, "analyzing")
+    vision = vision_engine.open_session(
+        context.data_dir, context.data_dir / "models", context.settings
+    )
+    if vision is not None:
+        context.notifier.log(
+            "info", f"视觉轨启用（{vision.model_id}）：逐集画面理解将随分析进行", job_id=job_id
+        )
     total = len(targets)
     failures = 0
     language = runtime.language(context.settings)
@@ -602,6 +610,7 @@ def _run_job(
                 total,
                 language,
                 cancel_event,
+                vision=vision,
                 ocr_bars=bars,
                 ocr_lines=lines_by_episode.get(episode_id),
                 ocr_band=bands_by_episode.get(episode_id),
@@ -613,6 +622,8 @@ def _run_job(
         context.job_store.mark_failed(job_id, str(exc))
         context.notifier.log("error", f"分析任务失败: {exc}")
     finally:
+        if vision is not None:
+            vision.close()
         _restore_unprocessed(context, targets)
         context.cancel_events.pop(job_id, None)
         projects_repo.set_status(context.conn, project_id, "ready")
@@ -629,6 +640,7 @@ def _analyze_one(
     language: str,
     cancel_event: threading.Event,
     *,
+    vision: vision_engine.VisionSession | None = None,
     ocr_bars: list[OcrSegment] | None = None,
     ocr_band: tuple[float, float] | None = None,
     ocr_lines: list[tuple[float, float]] | None = None,
@@ -683,6 +695,13 @@ def _analyze_one(
                 json.dumps([o.model_dump() for o in ocr_segments]) if ocr_segments else None
             )
             sheet = _contact_sheet(context, episode)
+            frames = _describe_frames(context, vision, episode, episode_id, report)
+            track: dict[str, Any] = {}
+            if sheet is not None:
+                track["contact_sheet"] = sheet
+            if frames:
+                track["frames"] = frames
+                track["engine"] = vision.model_id if vision is not None else ""
             analysis_repo.upsert(
                 context.conn,
                 episode_id,
@@ -690,9 +709,7 @@ def _analyze_one(
                 scene_data=json.dumps([scene.model_dump() for scene in raw.scenes]),
                 audio_features=raw.audio.model_dump_json(),
                 ocr_segments=ocr_json,
-                visual_track=(
-                    json.dumps({"contact_sheet": sheet}) if sheet is not None else None
-                ),
+                visual_track=json.dumps(track) if track else None,
                 # 覆盖数据链落库：{"band": [t,b], "lines": [[t,b],...]}（旧库为纯 list，
                 # 读取端两种都认）。NULL=无硬字幕带/未探测/OCR 未装，消费端回退现状
                 subtitle_band=(
@@ -750,6 +767,35 @@ def _contact_sheet(context: AppContext, episode: dict[str, Any]) -> str | None:
             f"第{episode['episode_number']}集 拼图生成失败（不影响分析）: {exc}",
         )
         return None
+
+
+def _describe_frames(
+    context: AppContext,
+    vision: vision_engine.VisionSession | None,
+    episode: dict[str, Any],
+    episode_id: str,
+    report: Callable[[float, str], None],
+) -> list[dict[str, Any]]:
+    """视觉轨逐图描述（P2b）：采样 16 帧 → 4 张一组多图请求 → 编号回填解析。
+
+    会话由任务级持有（模型跨集复用）；任何失败按分档落 []——分析照常完成，
+    消费端对空 frames 回退纯台词行为，重跑单集可补。
+    """
+    if vision is None:
+        return []
+    try:
+        return vision.describe_episode(
+            Path(str(episode["source_path"])),
+            float(episode["duration"] or 0.0),
+            context.work_dir / episode_id / "vl",
+            on_progress=lambda frac, text: report(round(frac, 3), text),
+        )
+    except Exception as exc:
+        context.notifier.log(
+            "warn",
+            f"第{episode['episode_number']}集 画面理解失败（不影响分析）: {exc}",
+        )
+        return []
 
 
 def _resumable_raw(
