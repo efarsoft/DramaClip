@@ -74,10 +74,13 @@ def sample_frames_args(
     ]
 
 
-def parse_descriptions(text: str, count: int, episode_s: float) -> list[dict[str, Any]]:
+def parse_descriptions(
+    text: str, count: int, episode_s: float, *, offset: int = 0
+) -> list[dict[str, Any]]:
     """逐行解析模型输出 → 时间戳帧描述；坏行跳过不炸（分档语义）。
 
     第 i 帧的时间取该帧采样窗的中点 (i-0.5)*时长/帧数——帧按时间序采样，序号即时间轴。
+    ``offset``：多图分组的全局帧序偏移——模型每组各自从 1 计数，解析时补回全局序。
     """
     frames: list[dict[str, Any]] = []
     step = episode_s / count if count > 0 else 0.0
@@ -93,7 +96,7 @@ def parse_descriptions(text: str, count: int, episode_s: float) -> list[dict[str
             continue
         index = int(item["index"])
         frames.append({
-            "t": round((index - 0.5) * step, 2),
+            "t": round((offset + index - 0.5) * step, 2),
             "shot": str(item.get("shot", "")),
             "scene": str(item.get("scene", "")),
             "people": str(item.get("people", "")),
@@ -189,19 +192,28 @@ class VisionSession:
         frames = sorted(work_dir.glob("frame-*.png"))
         if not frames:
             raise RuntimeError("帧采样未产出")
-        pieces: list[str] = []
-        groups = [frames[i:i + _FRAMES_PER_REQUEST] for i in range(0, len(frames), _FRAMES_PER_REQUEST)]
+        frames_out: list[dict[str, Any]] = []
+        groups = [
+            frames[i:i + _FRAMES_PER_REQUEST] for i in range(0, len(frames), _FRAMES_PER_REQUEST)
+        ]
         for index, group in enumerate(groups, start=1):
             if on_progress is not None:
                 on_progress(index / len(groups), f"画面理解 {index}/{len(groups)} 组")
-            pieces.append(self._ask_group(group, len(frames)))
-        return parse_descriptions("\n".join(pieces), len(frames), episode_s)
+            text = self._ask_group(group, len(group))
+            # 模型每组各自从 1 计数——解析按组序补全局偏移，时间戳才落在真实采样窗
+            frames_out.extend(
+                parse_descriptions(
+                    text, len(frames), episode_s, offset=(index - 1) * _FRAMES_PER_REQUEST
+                )
+            )
+        return frames_out
 
     def _ask_group(self, frames: list[Path], total: int) -> str:
         content: list[dict[str, Any]] = []
         for frame in frames:
             b64 = base64.b64encode(frame.read_bytes()).decode()
-            content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
+            url = f"data:image/png;base64,{b64}"
+            content.append({"type": "image_url", "image_url": {"url": url}})
         content.append({"type": "text", "text": _prompt_for(total)})
         payload = json.dumps({
             "temperature": 0,

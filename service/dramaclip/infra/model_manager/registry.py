@@ -362,9 +362,11 @@ def engine_ready(spec: ModelSpec) -> bool:
         from dramaclip.engines.tts.factory import supported
     elif spec.kind == "asr":
         from dramaclip.engines.analysis.runtime import supported
-    else:
-        return False
-    return spec.engine in supported()
+    elif spec.kind == "vision":
+        # 视觉运行时（engines/vision）已接线：档位激活的实 gate 是模型文件在场
+        # （体检 ok）+ 分析时 open_session 对 llama-server 的二次判据。
+        return True
+    return spec.kind in ("tts", "asr") and spec.engine in supported()
 
 
 # 每引擎的必需相对路径（相对「模型根目录」；含 * 者按一次通配匹配，目录直接写名字）。
