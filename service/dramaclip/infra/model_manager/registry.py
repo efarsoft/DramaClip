@@ -285,6 +285,36 @@ def builtin_specs() -> list[ModelSpec]:
             required_files=_VL8B_FILES,
             download_files=_VL8B_FILES,
         ),
+        ModelSpec(
+            model_id="dashscope-paraformer",
+            kind="asr",
+            engine="dashscope_paraformer",
+            repo_id="",
+            ms_repo="",
+            placement="asr/dashscope-paraformer",
+            name="百炼 Paraformer（云端）",
+            notes="需 API Key（asr.api_key）；按音频时长计费；说话人分离暂不返回；需联网",
+            size_label="—（云端）",
+            tier="accurate",
+            speed=5,
+            quality=5,
+            desc="云端 paraformer-v2：无 GPU/弱机的 ASR 跃升路径，字级时间戳同构",
+        ),
+        ModelSpec(
+            model_id="cosyvoice-cloud",
+            kind="tts",
+            engine="cosyvoice_cloud",
+            repo_id="",
+            ms_repo="",
+            placement="tts/cosyvoice-cloud",
+            name="CosyVoice-v2（云端）",
+            notes="需 API Key（tts.api_key）；按字符计费；音色传云端音色/克隆 id；需联网",
+            size_label="—（云端）",
+            tier="balanced",
+            speed=5,
+            quality=4,
+            desc="云端 cosyvoice-v2：弱机不装 TTS 运行环境，Key 直出",
+        ),
     ]
 
 
@@ -299,7 +329,31 @@ def whisper_cache(base: Path, spec: ModelSpec) -> Path | None:
 
 
 def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
-    """探测单个模型的安装状态：placement 目录下有实质文件即视为已安装。"""
+    """探测单个模型的安装状态：placement 目录下有实质文件即视为已安装。
+
+    云端引擎（_is_cloud）没有本地资产：引擎接线（engine_ready）即视为已安装——
+    真可用性（API Key/网络）由运行时在调用期判，缺失会按分档语义报错留痕。
+    """
+    if _is_cloud(spec):
+        return {
+            "model_id": spec.model_id,
+            "kind": spec.kind,
+            "engine": spec.engine,
+            "repo_id": spec.repo_id,
+            "name": spec.name,
+            "required": spec.required,
+            "notes": spec.notes,
+            "size_label": spec.size_label,
+            "tier": spec.tier,
+            "speed": spec.speed,
+            "quality": spec.quality,
+            "desc": spec.desc,
+            "sources": [],
+            "status": "installed" if engine_ready(spec) else "not_installed",
+            "path": None,
+            "size_bytes": 0,
+            "engine_ready": engine_ready(spec),
+        }
     base = models_dir / spec.placement
     installed = False
     resolved: Path | None = None
@@ -350,6 +404,16 @@ def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
 def _dir_bytes(root: Path) -> int:
     """目录树内全部普通文件字节数之和。"""
     return sum(path.stat().st_size for path in root.rglob("*") if path.is_file())
+
+
+def _is_cloud(spec: ModelSpec) -> bool:
+    """云端引擎判据：无任何下载源、无必需文件、无下载白名单——本地零资产。"""
+    return (
+        spec.repo_id == ""
+        and spec.ms_repo == ""
+        and not spec.required_files
+        and not spec.download_files
+    )
 
 
 def engine_ready(spec: ModelSpec) -> bool:
@@ -465,6 +529,27 @@ def verify(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
     （见 tests/infra/model_manager/test_verify.py 的模块 docstring）。
     """
     checks: list[dict[str, Any]] = []
+
+    if _is_cloud(spec):
+        ready = engine_ready(spec)
+        checks.append(
+            {"name": "云端引擎", "status": "pass" if ready else "fail",
+             "detail": "运行时已接线，无需本地资产" if ready else "运行时未接线"}
+        )
+        checks.append(
+            {"name": "API Key", "status": "skip",
+             "detail": "运行期校验：缺 Key 会在调用期按分档报错"}
+        )
+        return {
+            "model_id": spec.model_id,
+            "name": spec.name,
+            "kind": spec.kind,
+            "engine": spec.engine,
+            "engine_ready": ready,
+            "path": None,
+            "ok": ready,
+            "checks": checks,
+        }
 
     def add(name: str, status: str, detail: str = "", *, paths: list[str] | None = None) -> None:
         # paths：给修复动作用的结构化白名单（如「删除多余副本」只删这里列出的路径）。

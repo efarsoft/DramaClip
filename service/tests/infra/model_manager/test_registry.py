@@ -53,9 +53,17 @@ def test_requirements_table_has_no_row_for_a_gone_engine() -> None:
     """
     from dramaclip.engines.analysis.runtime import supported as asr_supported
     from dramaclip.engines.tts.factory import _MODEL_DIRS
+    from dramaclip.infra.model_manager.registry import _is_cloud
 
     local_tts = {engine for engine, relative in _MODEL_DIRS.items() if relative is not None}
-    assert set(registry._REQUIREMENTS) == set(asr_supported()) | local_tts
+    # 云端引擎（无本地资产）按设计不进必需文件表——判据只管「本地要加载文件」的引擎
+    cloud = {
+        spec.engine
+        for spec in registry.builtin_specs()
+        if _is_cloud(spec)
+    }
+    expected = (set(asr_supported()) | local_tts) - cloud
+    assert set(registry._REQUIREMENTS) == expected
 
 
 def test_a_source_less_spec_offers_no_download_source() -> None:
