@@ -219,9 +219,27 @@ export interface ExportTranscriptsResult {
   readonly skipped: number;
 }
 
+/** 视觉轨单帧描述（P2b）：t 为该集相对秒中点。 */
+export interface VisualFrame {
+  readonly t: number;
+  readonly shot?: string;
+  readonly scene: string;
+  readonly people?: string;
+  readonly action?: string;
+  readonly mood?: string;
+}
+
+/** 视觉轨产物：逐集画面描述（qwen3-vl 离线推理，未跑视觉的集缺席）。 */
+export interface VisualTrack {
+  readonly contact_sheet?: string;
+  readonly engine?: string;
+  readonly frames?: readonly VisualFrame[];
+}
+
 export interface AnalysisResults {
   readonly episodes: EpisodeAnalysisResult[];
   readonly asr_segments?: Readonly<Record<string, AsrSegment[]>>;
+  readonly visual_tracks?: Readonly<Record<string, VisualTrack>>;
   readonly highlights?: Readonly<Record<string, HighlightSegment[]>>;
   readonly conflict_scores?: Readonly<Record<string, ConflictScorePoint[]>>;
   readonly prescreen?: Readonly<Record<string, PrescreenRow>>;

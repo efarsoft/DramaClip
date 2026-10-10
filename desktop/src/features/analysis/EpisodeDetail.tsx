@@ -2,7 +2,7 @@
 import { tokens } from '../../styles/theme';
 import { App as AntdApp, Alert, Card, Empty } from 'antd';
 import { useMemo } from 'react';
-import type { AnalysisResults, AsrSegment, Episode } from '@dramaclip/protocol';
+import type { AnalysisResults, AsrSegment, Episode, VisualFrame } from '@dramaclip/protocol';
 import { ActionsCard, PlayerHighlightsRow } from './DetailCards';
 import { reanalyzeEpisode } from './reanalyze';
 import { CurveCard } from './CurveCard';
@@ -48,6 +48,11 @@ export function EpisodeDetail({
     () => (activeEpisodeId === null ? [] : (results?.conflict_scores?.[activeEpisodeId] ?? [])),
     [activeEpisodeId, results],
   );
+  const visualTrack = useMemo(
+    () => (activeEpisodeId === null ? undefined : results?.visual_tracks?.[activeEpisodeId]),
+    [activeEpisodeId, results],
+  );
+  const visualFrames = visualTrack?.frames ?? [];
 
     if (episode === null) return <EmptyDetail />;
   return (
@@ -66,6 +71,9 @@ export function EpisodeDetail({
         onSeek={seek}
       />
       <CurveCard points={conflicts} onSeek={seek} />
+      {visualFrames.length > 0 && (
+        <VisualTrackCard frames={visualFrames} engine={visualTrack?.engine} onSeek={seek} />
+      )}
       <BottomCards
         transcript={transcript}
         resyncing={resync.running}
@@ -129,4 +137,69 @@ function transcriptOf(
 ): readonly { start: number; end: number; text: string }[] {
   if (activeEpisodeId === null || results === null) return [];
   return results.asr_segments?.[activeEpisodeId] ?? [];
+}
+
+/** 画面轨卡（P2b）：逐帧画面实据，点时间戳跳播；视觉档关闭/未跑的集不出现。 */
+function VisualTrackCard({
+  frames,
+  engine,
+  onSeek,
+}: {
+  frames: readonly VisualFrame[];
+  engine?: string;
+  onSeek: (seconds: number) => void;
+}): React.ReactElement {
+  const mono = { fontFamily: tokens.fontFamilyMono } as const;
+  return (
+    <Card
+      size="small"
+      title={
+        <span>
+          画面轨{' '}
+          <span style={{ ...mono, color: tokens.textTertiary }}>
+            {String(frames.length)} 帧{engine ? ` · ${engine}` : ''}
+          </span>
+        </span>
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}>
+        {frames.map((frame) => (
+          <div
+            key={`${frame.t}-${frame.scene}`}
+            style={{ display: 'flex', gap: tokens.spaceSm, alignItems: 'baseline' }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                onSeek(frame.t);
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: tokens.colorPrimary,
+                cursor: 'pointer',
+                padding: 0,
+                fontSize: tokens.text.meta.size,
+                fontFamily: tokens.fontFamilyMono,
+                flexShrink: 0,
+              }}
+            >
+              {`${frame.t.toFixed(1)}s`}
+            </button>
+            <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textSecondary }}>
+              {[
+                frame.shot,
+                frame.scene,
+                frame.people,
+                frame.action,
+                frame.mood ? `（${frame.mood}）` : '',
+              ]
+                .filter((part) => part !== '')
+                .join(' ')}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
 }

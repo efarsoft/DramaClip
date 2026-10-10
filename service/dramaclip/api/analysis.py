@@ -477,6 +477,7 @@ def results(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     highlights_map: dict[str, list[dict[str, Any]]] = {}
     conflict_map: dict[str, list[dict[str, Any]]] = {}
     prescreen_map: dict[str, dict[str, Any]] = {}
+    visual_map: dict[str, dict[str, Any]] = {}
     for episode in episodes:
         episode_id = str(episode["id"])
         prescreen = prescreen_repo.get(context.conn, episode_id)
@@ -494,6 +495,9 @@ def results(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
             conflict_map[episode_id] = conflict_scores
         if prescreen is not None:
             prescreen_map[episode_id] = prescreen
+        visual = json.loads(record["visual_track"]) if record and record["visual_track"] else None
+        if isinstance(visual, dict) and visual.get("frames"):
+            visual_map[episode_id] = visual
         entry: dict[str, Any] = {
             "episode_id": episode_id,
             "episode_number": episode["episode_number"],
@@ -516,6 +520,7 @@ def results(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     return {
         "episodes": summary,
         "asr_segments": asr_map,
+        "visual_tracks": visual_map,
         "highlights": highlights_map,
         "conflict_scores": conflict_map,
         "prescreen": prescreen_map,
