@@ -655,8 +655,12 @@ def _analyze_one(
     episode_id = str(episode["id"])
     label = f"第{episode['episode_number']}集"
 
+    # 单调钳制：转写管线报完「分析完成 100%」后视觉轨还会续报——不钳会 100%→48% 回跳
+    peak = [float("-inf")]
+
     def report(percent: float, message: str) -> None:
-        overall = 30 + (index + percent) / total * 70
+        overall = max(30 + (index + percent) / total * 70, peak[0])
+        peak[0] = overall
         context.job_store.set_progress(job_id, round(overall, 1), f"{label} {message}")
         context.notifier.progress(job_id, round(overall, 1), f"{label} {message}")
 
