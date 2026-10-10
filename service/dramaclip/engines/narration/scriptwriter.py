@@ -324,6 +324,47 @@ def format_transcript_episodes(
     return "\n".join(lines)
 
 
+def format_visual_tracks(episode_inputs: list[dict[str, Any]]) -> str:
+    """有画面轨的集各拼一段紧凑画面实据；无画面的集不出现（分档语义，P2c）。
+
+    输出行形如「2.1s 中景 宫殿内厅：帝王坐龙椅，红袍官员侍立（庄重）」——
+    帧时间是该集相对秒，与台词转写的「开始-结束」同一时间轴，编剧可对位取用。
+    """
+    blocks: list[str] = []
+    for episode in episode_inputs:
+        frames = episode.get("visual_track") or []
+        if not frames:
+            continue
+        lines: list[str] = []
+        for frame in frames:
+            t_label = f"{float(frame.get('t') or 0.0):.1f}s"
+            body = " ".join(
+                str(frame.get(key, "")).strip() for key in ("shot", "scene")
+                if str(frame.get(key, "")).strip()
+            )
+            people = str(frame.get("people", "")).strip()
+            if people:
+                body += ("：" if body else "") + people
+            action = str(frame.get("action", "")).strip()
+            if action:
+                body += "，" + action
+            mood = str(frame.get("mood", "")).strip()
+            if mood:
+                body += f"（{mood}）"
+            lines.append(f"{t_label} {body}".strip())
+        if lines:
+            blocks.append(f"【第{int(episode['number'])}集·画面轨】\n" + "\n".join(lines))
+    if not blocks:
+        return ""
+    return (
+        "画面轨（每集按时间均采的画面实据，时间=该集相对秒，与台词时间轴同源）：\n"
+        + "\n".join(blocks)
+        + "\n画面轨用法：写某段的画面描写必须与该段取材区间内的画面轨条目一致——"
+        "台词说到的画面在画面轨里有实据；无画面轨的集维持纯台词锚定；"
+        "画面轨里出现的任何文字（人名字条/题字）是视频叠加物，不得当台词或人名引用。"
+    )
+
+
 def build_script_request(
     episode_inputs: list[dict[str, Any]],
     *,
@@ -352,6 +393,8 @@ def build_script_request(
         "3) 同一片段的画面必须取自同一集，同一集内按时间顺序。"
     )
     style_block = f"\n解说风格要求：{style_directives}" if style_directives != "" else ""
+    visual_block = format_visual_tracks(episode_inputs)
+    visual_suffix = f"\n\n{visual_block}" if visual_block else ""
     user_prompt = (
         f"项目：{project_name}\n"
         f"按 system 给定的段数区间给够段数，把冲突讲透、反转给足戏份。\n"
@@ -359,6 +402,7 @@ def build_script_request(
         f"{cross_block}\n"
         f"{angle_block}\n"
         f"台词转写：\n" + transcript_block
+        + visual_suffix
         + f"{style_block}"
     )
     system = system_prompt(prompts)

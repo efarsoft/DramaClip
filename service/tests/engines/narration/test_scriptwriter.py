@@ -448,3 +448,53 @@ def test_clamped_segments_are_counted_in_trace(tmp_path) -> None:
 
     attempt = json.loads(trace.read_text(encoding="utf-8"))["attempts"][-1]
     assert attempt["segments_clamped"] == 1
+
+def test_format_visual_tracks_renders_frames_per_episode() -> None:
+    """有画面轨的集各拼一段（集号分组、帧一行）；无画面轨的集不出现（分档）。"""
+    inputs = [
+        {
+            "number": 1,
+            "visual_track": [
+                {
+                    "t": 2.12, "shot": "中景", "scene": "宫殿内厅",
+                    "people": "帝王坐龙椅", "action": "拍案", "mood": "威严",
+                },
+                {"t": 6.35, "scene": "雪地", "people": "孤影", "action": "", "mood": ""},
+            ],
+        },
+        {"number": 2, "visual_track": []},
+    ]
+    block = scriptwriter.format_visual_tracks(inputs)
+    assert "【第1集·画面轨】" in block
+    assert "2.1s 中景 宫殿内厅：帝王坐龙椅，拍案（威严）" in block
+    assert "6.3s 雪地：孤影" in block
+    assert "第2集" not in block
+    assert "不得当台词或人名引用" in block, "名条/题字防泄漏约束随块下发"
+
+
+def test_build_script_request_appends_visual_block() -> None:
+    """画面轨块挂在台词转写之后；全剧无画面轨时整块缺席（不产空标题）。"""
+    base = {
+        "number": 1,
+        "duration": 68.0,
+        "segments": [{"start": 1.0, "end": 3.0, "text": "台词一句", "speaker": ""}],
+    }
+    with_track = [
+        {
+            **base,
+            "visual_track": [
+                {"t": 2.0, "scene": "大殿", "people": "帝王", "action": "拍案", "mood": "怒"}
+            ],
+        },
+    ]
+    system, user = scriptwriter.build_script_request(
+        with_track, project_name="剧", angle_block="", style_directives=""
+    )
+    assert "画面轨" in user
+    assert user.index("台词转写") < user.index("画面轨"), "块在台词之后"
+
+    _, user_plain = scriptwriter.build_script_request(
+        [base], project_name="剧", angle_block="", style_directives=""
+    )
+    assert "画面轨" not in user_plain
+
