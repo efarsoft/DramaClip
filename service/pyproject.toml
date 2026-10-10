@@ -14,6 +14,8 @@ dependencies = [
   "edge-tts>=7.0",
   # jieba：OCR 字幕热词挖掘（全剧高频专名 → ASR hotwords 事前注入）
   "jieba>=0.42",
+  # pypinyin：转写精炼的拼音护栏（同音/近音校验，防 LLM 幻觉改写）
+  "pypinyin>=0.53",
 ]
 
 [project.optional-dependencies]
