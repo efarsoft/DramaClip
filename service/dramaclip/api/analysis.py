@@ -16,6 +16,7 @@ from dramaclip.api.context import AppContext, llm_trace_dir
 from dramaclip.engines.analysis import (
     contact_sheet,
     fusion,
+    llm_refine,
     pipeline,
     runtime,
     subtitle_ocr,
@@ -735,6 +736,28 @@ def _analyze_one(
             )
             if signature is not None:
                 episodes_repo.set_source_signature(context.conn, episode_id, signature)
+            # 转写精炼（LLM 断句+语境校对）：本地 ASR 完成后、语义前——下游全线吃到干净文本。
+            # 分档：LLM 未配置/护栏拒绝/调用失败都回退融合产物，不挡分析。
+            refine_outcome = llm_refine.refine_segments(
+                asr_segments,
+                ocr_text="".join(o.text for o in (ocr_segments or [])),
+                project_name=_project_name_of(context, episode),
+                hotwords=hotwords,
+                settings=context.settings,
+            )
+            if refine_outcome.applied:
+                asr_segments = refine_outcome.segments
+                context.notifier.log(
+                    "info",
+                    f"{label} 转写精炼：{len(asr_segments)} 句（{refine_outcome.detail}）",
+                    job_id=job_id,
+                )
+            elif refine_outcome.detail not in ("LLM 未配置",):
+                context.notifier.log(
+                    "warn",
+                    f"{label} 转写精炼未生效（{refine_outcome.detail}）；产物为融合分段",
+                    job_id=job_id,
+                )
         semantic_result = semantic_pipeline.enhance(
             raw,
             context.settings,
@@ -754,6 +777,14 @@ def _analyze_one(
         episodes_repo.set_status(context.conn, episode_id, "failed")
         context.notifier.log("error", f"{label} 分析失败: {exc}")
         return False
+
+
+def _project_name_of(context: AppContext, episode: dict[str, Any]) -> str:
+    """项目名（精炼提示词的语境）；取不到用占位。"""
+    from dramaclip.infra.storage.repos import projects as projects_repo
+
+    project = projects_repo.get(context.conn, str(episode["project_id"]))
+    return str(project["name"]) if project else "这部剧"
 
 
 def _contact_sheet(context: AppContext, episode: dict[str, Any]) -> str | None:

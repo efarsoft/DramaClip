@@ -172,6 +172,9 @@ function SourceBadge({ source }: { source: string | undefined }): React.ReactEle
   if (source === 'ocr_fixed') {
     return <Chip text="字幕补字" color={tokens.colorSuccess} />;
   }
+  if (source === 'llm_refined') {
+    return <Chip text="AI 校对" color={tokens.colorPrimary} />;
+  }
   if (source === 'review') {
     return <Chip text="待复核" color={tokens.colorWarning} />;
   }
