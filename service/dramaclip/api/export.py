@@ -1121,10 +1121,18 @@ def _needs_voice(plan: PlanData) -> bool:
     return False
 
 
-def _ensure_voiced(context: AppContext, plan_row: dict[str, Any], plan_data: PlanData) -> PlanData:
+def _ensure_voiced(
+    context: AppContext,
+    plan_row: dict[str, Any],
+    plan_data: PlanData,
+    report: Callable[[float, str], None] | None = None,
+) -> PlanData:
     """勾选导出时才配音：规划阶段故意不合成。克隆引擎没有参考音色时，
     先**自动从剧集提取**（主角最清晰的 4~10s 台词段，人声分离去 BGM）——
-    自动化纪律：音色从哪来不该问用户，剧集本身就是最好的音色库。"""
+    自动化纪律：音色从哪来不该问用户，剧集本身就是最好的音色库。
+
+    `report`：TTS 段进度出口（占导出进度 0~35% 波段）——TTS 是导出耗时大头，
+    恒 0% 会被当成卡死（业主实测反馈）。"""
     if not _needs_voice(plan_data):
         return plan_data
     from dramaclip.api import narration as narration_api
@@ -1136,7 +1144,12 @@ def _ensure_voiced(context: AppContext, plan_row: dict[str, Any], plan_data: Pla
     }
     settings = narration_api._effective_settings(context, project_id)
     _ensure_clone_voice(context, plan_row, project_id, episodes_repo, settings)
-    voiced = narration_api._voice(context, plan_data, settings, durations)
+
+    def tts_progress(done: int, total: int) -> None:
+        if report is not None:
+            report(round(35 * done / total, 1), f"配音合成 {done}/{total} 段")
+
+    voiced = narration_api._voice(context, plan_data, settings, durations, on_progress=tts_progress)
     plans_repo.update_plan_data(context.conn, str(plan_row["id"]), voiced.model_dump())
     if _needs_voice(voiced):
         raise ValueError("旁白音频合成失败，不能用原声顶替")
@@ -1225,17 +1238,24 @@ def _run_export(context: AppContext, job_id: str, run: ExportRun) -> None:
             context.job_store.mark_cancelled(job_id)
             context.notifier.log("info", "导出已取消")
             return
+        # 进度波段：需配音时 TTS 占 0~35%、渲染占 35~100；纯剪辑渲染独占 0~100
+        tts_needed = _needs_voice(run.plan_data)
         voiced = ExportRun(
             export_id=run.export_id,
             project_id=run.project_id,
             plan_row=run.plan_row,
-            plan_data=_ensure_voiced(context, run.plan_row, run.plan_data),
+            plan_data=_ensure_voiced(
+                context, run.plan_row, run.plan_data, report=report if tts_needed else None
+            ),
             cancel_event=run.cancel_event,
         )
         # 标题先生成再渲染：render_export 尾部的封面字层要用第一条标题，
         # 而 titles 生成不依赖渲染产物（LLM 只吃 plan_data），顺序对调零副作用。
         _ensure_titles(context, run.plan_row)
-        out_path = render_export(context, voiced, report=report)
+        render_report = (
+            (lambda pct, label: report(35 + pct * 0.65, label)) if tts_needed else report
+        )
+        out_path = render_export(context, voiced, report=render_report)
         context.job_store.mark_completed(job_id)
         context.notifier.log("info", f"导出完成: {out_path.name}")
     except Exception as exc:

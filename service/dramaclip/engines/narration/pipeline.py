@@ -619,6 +619,7 @@ def synthesize_narration_texts(
     *,
     source_durations: dict[str, float],
     log: LogFn | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> PlanData:
     """逐段合成旁白并按 narration_id 回填时长与解说字幕。
 
@@ -641,6 +642,7 @@ def synthesize_narration_texts(
     speed = str(settings.get("tts.speed", "") or "")
     cache_dir = work_dir / "cache"
     voiced: dict[str, tuple[str, str, float]] = {}  # id → (audio_path, text, duration)
+    total_segments = len(plan.narration_texts)
     for item in plan.narration_texts:
         # 段级 voice 优先（双人对谈的双音色），缺省用全局设置
         voice = item.voice or pool.voice_for(settings)
@@ -660,6 +662,8 @@ def synthesize_narration_texts(
         # 其余段原样通过。失败保留原音频，不影响下面的回填与越界守卫。
         audio_path, duration = _align_to_hook_slot(item.id, audio_path, float(duration), log)
         voiced[item.id] = (str(audio_path), item.text, float(duration))
+        if on_progress is not None:
+            on_progress(len(voiced), total_segments)
     _evict_cache(cache_dir, _CACHE_MAX_BYTES)
 
     # 布局分发（2026-10-06 业主裁决「先出语音、再选画面」）：超短（带候选池）与

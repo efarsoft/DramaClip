@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -668,6 +669,7 @@ def _voice(
     plan: PlanData,
     settings: dict[str, str],
     source_durations: dict[str, float],
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> PlanData:
     """出片前配音出口：规划阶段不调用。负责给出 tts 目录与 models 目录。
 
@@ -675,6 +677,8 @@ def _voice(
     `start + 实测音频时长`，跑出源长的窗口 ffmpeg 不报错、只把旁白截掉（业主立案③的
     另一半，判据见 `pipeline._assert_within_source`）。缺键由 pipeline 判失败，
     这里不兜底：拿不到源长就等于无法证明这条片子不会被截断。
+    `on_progress`（已完成段数, 总段数）透传给合成循环——TTS 是导出耗时大头，
+    恒 0% 会被当成卡死（业主实测反馈）。
     """
     return narration_pipeline.synthesize_narration_texts(
         plan,
@@ -683,6 +687,7 @@ def _voice(
         context.data_dir / "models",
         source_durations=source_durations,
         log=context.notifier.log,
+        on_progress=on_progress,
     )
 
 
