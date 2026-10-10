@@ -50,7 +50,7 @@ def test_merge_runs_joins_same_text() -> None:
     segments = _merge_runs(results)
     assert [s.text for s in segments] == ["你好", "再见"]
     assert segments[0].start == 0.0
-    assert segments[0].end == 2.0
+    assert segments[0].end == 1.5, "邻条各让到采样中点，不各补各的 1.0s"
     assert abs(segments[0].conf - 0.925) < 1e-6
 
 
@@ -74,6 +74,52 @@ def test_merge_runs_drops_single_char_fragments() -> None:
     results = [(0.0, boxes("你")), (1.0, boxes("你是谁"))]
     segments = _merge_runs(results)
     assert [s.text for s in segments] == ["你是谁"], "单字残条丢弃，不污染对齐"
+
+
+# ---- 条驻留区间：标点噪声与补时重叠（2026-10-09 真机 ep1 取证）----
+#
+# 两条独立的病，同一处修：
+# 1) 标点参与相似度判据 → 同一条字幕因描边碎符号裂成两条。真机 42~43s 实测
+#    「他的皇节早就包经换了一个人，」/「～，。他的皇节早就已经换了一个人」
+#    原文相似度 0.80 < 阈值 0.85 判不延续；去标点后 0.96 判延续。
+# 2) 头尾补时（-0.5/+1.0）逐条独立补 → 相邻条必然重叠：台词连着念时条间隔就是
+#    采样间隔 1s，而补量合计 1.5s。真机 ep1 28 条里 13 对重叠。修法不是调小常量
+#    （拍阈值），是按邻条位置划分间隔——重叠在构造上不可能，空白间隔照旧补满。
+
+
+def test_merge_runs_punctuation_jitter_joins_and_strips() -> None:
+    boxes = lambda t: [(t, 0.66, 0.68, 0.9)]  # noqa: E731
+    results = [
+        (42.0, boxes("他的皇节早就包经换了一个人，")),
+        (43.0, boxes("～，。他的皇节早就已经换了一个人")),
+    ]
+    segments = _merge_runs(results)
+    assert [s.text for s in segments] == ["他的皇节早就包经换了一个人"], (
+        "标点不是台词语义：判延续前先剥，条文本里也不留碎符号"
+    )
+
+
+def test_merge_runs_adjacent_bars_never_overlap() -> None:
+    boxes = lambda t: [(t, 0.66, 0.68, 0.9)]  # noqa: E731
+    results = [(float(i), boxes(f"第{i}句台词")) for i in range(4)]
+    bars = _merge_runs(results)
+    assert len(bars) == 4
+    for index in range(len(bars) - 1):
+        prev, nxt = bars[index], bars[index + 1]
+        assert nxt.start >= prev.end, f"驻留窗重叠：{prev} / {nxt}"
+    assert (bars[0].start, bars[0].end) == (0.0, 0.5)
+    assert (bars[1].start, bars[1].end) == (0.5, 1.5)
+    assert (bars[3].start, bars[3].end) == (2.5, 4.0), "末条无邻条，尾补按消失延迟补满"
+
+
+def test_merge_runs_keeps_padding_across_blank_frames() -> None:
+    """隔了空白帧的邻条不挤窄补时：起止误差兜底要留够，否则擦除窗早关漏擦。"""
+    boxes = lambda t: [(t, 0.66, 0.68, 0.9)]  # noqa: E731
+    results = [(0.0, boxes("你好")), (1.0, []), (2.0, []), (3.0, boxes("再见"))]
+    bars = _merge_runs(results)
+    assert [b.text for b in bars] == ["你好", "再见"]
+    assert bars[0].end == 1.0, "间隔 3s > 补量：尾补满 1.0s"
+    assert bars[1].start == 2.5, "头补 0.5s 是采样间隔的一半，不是邻条边界"
 
 
 # ── A2：extract_subtitles 回传探测到的字幕带（用完即弃 → 落库避让）────────────

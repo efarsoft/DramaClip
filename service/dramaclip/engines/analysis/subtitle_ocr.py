@@ -25,8 +25,8 @@ _BAND_EXPAND = 0.04       # 字幕带上下各扩 4% 画面高，容納描边/�
 _LINE_STROKE_MARGIN = 0.008  # 逐行擦除框的描边余量（≈15px@1920）：贴字不贴带
 _LINE_H_MIN = 0.03        # 台词行框高度下限：切镜半帧的标点残迹不够一行字
 _LINE_H_MAX = 0.13        # 上限：真机 10 集实测最宽一档 0.108，两行合并/幕墙聚合 ≥0.15
-_HEAD_PAD_S = 0.5         # 字幕条起点向前补（采样间隔一半）
-_TAIL_PAD_S = 1.0         # 字幕条结尾向后补（采样间隔 + 消失延迟）
+_HEAD_PAD_S = 0.5         # 字幕条起点向前补（采样间隔一半；邻条间距的一半封顶，见 _merge_runs）
+_TAIL_PAD_S = 1.0         # 字幕条结尾向后补（采样间隔 + 消失延迟；同样受邻条间距封顶）
 _OCR_WORKERS = 4        # 帧识别并行度（onnxruntime session 线程安全）
 _MERGE_RATIO = 0.85       # 相邻帧文本相似度阈值（OCR 抖动容差）
 _MIN_BAR_CHARS = 2        # 字幕条最短字数：单字残条=切镜半帧噪声
@@ -51,6 +51,16 @@ class _Cluster:
     anchor: float
     frames: set[int] = field(default_factory=set)
     spots: list[tuple[float, float]] = field(default_factory=list)
+
+
+@dataclass
+class _Run:
+    """一条字幕条的原始驻留区间（首末采样帧）与逐帧置信，补时前不含边界兜底。"""
+
+    text: str
+    start: float
+    end: float
+    confs: list[float] = field(default_factory=list)
 
 
 def detect_band(
@@ -317,53 +327,78 @@ def _sample_frames(video_path: Path, work_dir: Path, band: _Band) -> list[Path]:
 
 
 def _merge_runs(results: list[tuple[float, FrameResult]]) -> list[OcrSegment]:
-    """相邻帧同文本合并为字幕条：时间取首末帧（前后补采样间隔），文本取最长。
+    """相邻帧同文本合并为字幕条，再把驻留窗按「邻条中点」收口。
+
+    补时（头 0.5s/尾 1.0s）是给 1fps 采样的起止误差兜底的，但逐条独立补必然过界：
+    台词连着念时条间隔就是采样间隔 1s，两条补量合计 1.5s（真机 ep1 28 条里 13 对
+    重叠——重叠窗污染落库数据，热词挖掘按条取词会把一句切成两个候选，融合端也会把
+    下刀点判给两条）。改法不是把常量调小（那是拍阈值，空白间隔的兜底会一起削掉），
+    而是按邻条位置划分间隔：各让一半，重叠在构造上不可能，隔了空白帧的照旧补满。
     """
-    frame_texts: list[tuple[float, str, float]] = []
-    for t0, boxes in results:
-        if not boxes:
-            frame_texts.append((t0, "", 0.0))
-            continue
-        ordered = sorted(boxes, key=lambda box: box[1])
-        text = simplify("".join(box[0] for box in ordered))
-        conf = sum(box[3] for box in ordered) / len(ordered)
-        frame_texts.append((t0, text, float(conf)))
-
+    runs = _collect_runs(_frame_texts(results))
     segments: list[OcrSegment] = []
-    run_text: str | None = None
-    run_start = run_end = 0.0
-    run_confs: list[float] = []
-
-    def flush() -> None:
-        # 单字残条 = 快速切镜采到半帧字幕，只会污染融合对齐，整条丢弃
-        if run_text is None or len(run_text.strip()) < _MIN_BAR_CHARS:
-            return
+    for index, run in enumerate(runs):
+        head = _HEAD_PAD_S
+        tail = _TAIL_PAD_S
+        if index > 0:
+            head = min(head, (run.start - runs[index - 1].end) / 2)
+        if index + 1 < len(runs):
+            tail = min(tail, (runs[index + 1].start - run.end) / 2)
         segments.append(
             OcrSegment(
-                start=round(max(0.0, run_start - _HEAD_PAD_S), 3),
-                end=round(run_end + _TAIL_PAD_S, 3),
-                text=run_text,
-                conf=round(sum(run_confs) / len(run_confs), 3) if run_confs else 1.0,
+                start=round(max(0.0, run.start - head), 3),
+                end=round(run.end + tail, 3),
+                text=run.text,
+                conf=round(sum(run.confs) / len(run.confs), 3) if run.confs else 1.0,
             )
         )
+    return segments
 
+
+def _frame_texts(results: list[tuple[float, FrameResult]]) -> list[tuple[float, str, float]]:
+    """逐帧文本：带内多行按纵向顺序拼接 → 繁简归一 → 剥标点噪声。"""
+    out: list[tuple[float, str, float]] = []
+    for t0, boxes in results:
+        if not boxes:
+            out.append((t0, "", 0.0))
+            continue
+        ordered = sorted(boxes, key=lambda box: box[1])
+        text = _strip_punctuation(simplify("".join(box[0] for box in ordered)))
+        conf = sum(box[3] for box in ordered) / len(ordered)
+        out.append((t0, text, float(conf)))
+    return out
+
+
+def _strip_punctuation(text: str) -> str:
+    """只留字词，标点/符号/空白一律剥掉。
+
+    OCR 会把字幕描边、引号、波浪线读成「～，。」这类碎符号，还逐帧抖动——标点参与
+    相似度判据时，同一条字幕会因碎符号掉到阈值以下裂成两条（真机 ep1 42~43s 实测
+    原文 0.80、去标点 0.96）。文本真相归 ASR（融合分工），OCR 条里的标点既不是台词
+    也不是证据，留着只会裂条、被当补字灌进字流，并跟着热词挖掘进下一轮转写。
+    """
+    return "".join(char for char in text if char.isalnum())
+
+
+def _collect_runs(frame_texts: list[tuple[float, str, float]]) -> list[_Run]:
+    """帧文本流 → 字幕条（同文本连续帧合并）；空白帧关条，单字残条丢弃。"""
+    runs: list[_Run] = []
+    open_run = False
     for t0, text, conf in frame_texts:
         if not text:
-            flush()
-            run_text = None
-            run_confs = []
+            open_run = False
             continue
-        if run_text is not None and _similar(text, run_text):
-            run_end = t0
-            run_confs.append(conf)
-            if len(text) > len(run_text):
-                run_text = text
+        if open_run and _similar(text, runs[-1].text):
+            run = runs[-1]
+            run.end = t0
+            run.confs.append(conf)
+            if len(text) > len(run.text):
+                run.text = text
         else:
-            flush()
-            run_text, run_start, run_end = text, t0, t0
-            run_confs = [conf]
-    flush()
-    return segments
+            runs.append(_Run(text=text, start=t0, end=t0, confs=[conf]))
+        open_run = True
+    # 单字残条 = 快速切镜采到半帧字幕，只会污染融合对齐，整条丢弃
+    return [run for run in runs if len(run.text) >= _MIN_BAR_CHARS]
 
 
 def _similar(a: str, b: str) -> bool:
