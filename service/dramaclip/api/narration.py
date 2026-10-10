@@ -722,9 +722,23 @@ def _collect_episode_inputs(
                 # 剪口落在换镜头处=画面不撕裂。切点缺失（旧库/解析失败）时空表，
                 # 编排层原值返回。
                 "scene_cuts": _scene_cuts_of(record.get("scene_data")),
+                # 画面轨（P2c·文画咬合）：逐帧画面实据；未跑视觉轨的集空表（分档语义）
+                "visual_track": _visual_frames_of(record.get("visual_track")),
             }
         )
     return inputs
+
+
+def _visual_frames_of(raw: Any) -> list[dict[str, Any]]:
+    """visual_track JSON → 紧凑画面轨条目；缺失/坏数据 → 空表（分档，不报错）。"""
+    try:
+        track = json.loads(str(raw)) if raw else {}
+    except (json.JSONDecodeError, TypeError):
+        return []
+    frames = track.get("frames") if isinstance(track, dict) else None
+    if not isinstance(frames, list):
+        return []
+    return [frame for frame in frames if isinstance(frame, dict) and frame.get("scene")]
 
 
 def _parse_conflicts(raw: str | None) -> list[ConflictScore]:
