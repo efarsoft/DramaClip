@@ -1,5 +1,5 @@
 /** 分析页数据与任务编排（UI 解耦）。 */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   AnalysisJobStatus,
   AnalysisResults,
@@ -122,12 +122,32 @@ export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
     if (serviceState === 'ready') void loadAll();
   }, [loadAll, serviceState]);
 
-  const refreshJob = useCallback(async (jobId: string) => {
-    const status = await analysisApi.status(jobId);
-    setJob(status);
-    setEpisodes((prev) => mergeEpisodeStatuses(prev, status.episodes));
-    if (SETTLED_STATUSES.includes(status.status)) await loadAll();
-  }, [loadAll]);
+  const doneIdsSeen = useRef<Set<string>>(new Set());
+  const lastJobId = useRef<string>("");
+  const refreshJob = useCallback(
+    async (jobId: string) => {
+      const status = await analysisApi.status(jobId);
+      setJob(status);
+      // 新任务（含对已完成集的重跑）：清空已见集合，重跑完成的集也要刷新结果
+      if (status.job_id !== lastJobId.current) {
+        lastJobId.current = status.job_id;
+        doneIdsSeen.current.clear();
+      }
+      // 有新完成的集就增量拉一次结果：转写/画面轨随集点亮，不等全批终结
+      // （此前结果只在任务终结时刷新，批内面板一直显示旧转写——业主实测立案）。
+      const doneIds = (status.episodes ?? [])
+        .filter((episode) => episode.status === 'done')
+        .map((episode) => episode.episode_id);
+      const hasNewDone = doneIds.some((episodeId) => !doneIdsSeen.current.has(episodeId));
+      if (hasNewDone) {
+        for (const episodeId of doneIds) doneIdsSeen.current.add(episodeId);
+        await loadAll();
+      }
+      setEpisodes((prev) => mergeEpisodeStatuses(prev, status.episodes));
+      if (SETTLED_STATUSES.includes(status.status)) await loadAll();
+    },
+    [loadAll],
+  );
 
   useJobPolling(job, refreshJob);
 
