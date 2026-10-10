@@ -7,13 +7,27 @@ from __future__ import annotations
 
 from dramaclip.engines.narration import audit as A
 
-
 _TRANSCRIPT = [
-    {"episode": 1, "start": 0.0, "end": 12.5, "speaker": "[角色A]", "text": "[角色A]：苏明月，你这般贱婢也配进我苏府大门？"},
-    {"episode": 1, "start": 12.5, "end": 24.0, "speaker": "[角色B]", "text": "[角色B]：姐姐莫怕，这婚书是我替你藏下的。"},
-    {"episode": 1, "start": 24.0, "end": 38.0, "speaker": "[角色A]", "text": "[角色A]：八千两银子，够买你半条命了。"},
-    {"episode": 2, "start": 0.0, "end": 15.0, "speaker": "[角色C]", "text": "[角色C]：摄政王到，众人跪迎。"},
-    {"episode": 2, "start": 15.0, "end": 30.0, "speaker": "[角色B]", "text": "[角色B]：原来那夜救我的，竟是当朝九千岁。"},
+    {
+        "episode": 1, "start": 0.0, "end": 12.5, "speaker": "[角色A]",
+        "text": "[角色A]：苏明月，你这般贱婢也配进我苏府大门？",
+    },
+    {
+        "episode": 1, "start": 12.5, "end": 24.0, "speaker": "[角色B]",
+        "text": "[角色B]：姐姐莫怕，这婚书是我替你藏下的。",
+    },
+    {
+        "episode": 1, "start": 24.0, "end": 38.0, "speaker": "[角色A]",
+        "text": "[角色A]：八千两银子，够买你半条命了。",
+    },
+    {
+        "episode": 2, "start": 0.0, "end": 15.0, "speaker": "[角色C]",
+        "text": "[角色C]：摄政王到，众人跪迎。",
+    },
+    {
+        "episode": 2, "start": 15.0, "end": 30.0, "speaker": "[角色B]",
+        "text": "[角色B]：原来那夜救我的，竟是当朝九千岁。",
+    },
 ]
 
 
@@ -21,7 +35,10 @@ def _good_script() -> dict:
     return {
         "hook": "全城最怂的账房先生，竟是黑帮最怕的杀手。",
         "segments": [
-            {"episode": 1, "start": 0.0, "end": 12.5, "text": "苏明月被嫡姐当众羞辱，婚书却早被妹妹藏下。"},
+            {
+                "episode": 1, "start": 0.0, "end": 12.5,
+                "text": "苏明月被嫡姐当众羞辱，婚书却早被妹妹藏下。",
+            },
             {"episode": 1, "start": 24.0, "end": 38.0, "text": "八千两银子，够买她半条命。"},
         ],
         "cta": "她到底是谁救的？点击左下角，免费看全集。",
@@ -32,7 +49,10 @@ def _bad_script() -> dict:
     return {
         "hook": "他竟然藏着惊天秘密，后续更精彩！",
         "segments": [
-            {"episode": 1, "start": 0.0, "end": 12.5, "text": "在这镜头里，苏明月被[角色A]当众羞辱。"},
+            {
+                "episode": 1, "start": 0.0, "end": 12.5,
+                "text": "在这镜头里，苏明月被[角色A]当众羞辱。",
+            },
             {"start": 13.0, "end": 60.0, "text": "八千两银子买半条命，[角色A]狠辣尽显。"},
             {"episode": 2, "start": 0.0, "end": 30.0, "text": "摄政王到场，局势陡变。"},
         ],
@@ -105,7 +125,8 @@ def test_real_fanfiction_sample_surfaces_soft_risks() -> None:
     复现 2026-10-10 用户样本：模型为凑「真实锚点」硬造「八千两/九千岁」，
     并用「竟是」抖包袱。无转写时仍须把这些标成 soft 需人工复核。
     """
-    import json, pathlib
+    import json
+    import pathlib
     here = pathlib.Path(__file__).resolve().parent
     sample = json.loads(
         (here.parent.parent.parent / "review_fixtures" / "real_script_user.json")

@@ -12,6 +12,7 @@ import pytest
 
 from dramaclip.engines.analysis import runtime
 from dramaclip.engines.analysis.transcriber import (
+    DashscopeParaformerEngine,
     FasterWhisperEngine,
     ParaformerEngine,
     SenseVoiceEngine,
@@ -25,6 +26,7 @@ _BUILDS: dict[str, type] = {
     "faster_whisper": FasterWhisperEngine,
     "sensevoice": SenseVoiceEngine,
     "paraformer": ParaformerEngine,
+    "dashscope_paraformer": DashscopeParaformerEngine,
 }
 
 

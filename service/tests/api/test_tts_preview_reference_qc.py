@@ -37,7 +37,7 @@ class FakeEngine:
 def fake_engine(monkeypatch: pytest.MonkeyPatch) -> FakeEngine:
     stub = FakeEngine()
     monkeypatch.setattr(
-        tts_api, "create_tts", lambda name, models_dir=None: stub  # noqa: ARG005
+        tts_api, "create_tts", lambda name, models_dir=None, api_key="": stub  # noqa: ARG005
     )
     monkeypatch.setattr(tts_api, "audio_duration_s", lambda _path: 2.5)
     monkeypatch.setattr(tts_api, "audio_container", lambda _path: "mp3")

@@ -10,9 +10,10 @@ from dramaclip.engines.analysis.transcriber import DashscopeParaformerEngine
 from dramaclip.engines.tts.engines.dashscope import DashscopeCosyVoiceEngine
 
 
-def test_dashscope_asr_requires_api_key() -> None:
+def test_dashscope_asr_requires_api_key(tmp_path: Path) -> None:
+    engine = DashscopeParaformerEngine(api_key="  ")
     with pytest.raises(ValueError, match="asr.api_key"):
-        DashscopeParaformerEngine(api_key="  ")
+        engine.transcribe(tmp_path / "ep.wav")
 
 
 def test_dashscope_tts_requires_api_key() -> None:

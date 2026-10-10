@@ -67,7 +67,12 @@ def test_verify_without_id_covers_installed_only(tmp_path: Path) -> None:
 
     reports = models_api.verify(context, {})
 
-    assert [r["model_id"] for r in reports] == [_SENSEVOICE]
+    # 云端引擎（已接线、无本地资产）也在总览体检里如实报 ok
+    assert [r["model_id"] for r in reports] == [
+        _SENSEVOICE,
+        "dashscope-paraformer",
+        "cosyvoice-cloud",
+    ]
 
 
 def test_verify_rejects_unknown_model_id(tmp_path: Path) -> None:

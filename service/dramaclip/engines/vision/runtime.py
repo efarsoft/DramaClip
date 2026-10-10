@@ -90,7 +90,9 @@ def parse_descriptions(
             continue
         try:
             item = json.loads(line)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as _debug_exc:
+            import sys as _sys
+            print(f"[parse-debug] skip: {_debug_exc} | line={line!r}", file=_sys.stderr)
             continue
         if not isinstance(item, dict) or "index" not in item:
             continue

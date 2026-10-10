@@ -30,10 +30,13 @@ def test_sample_frames_args_rejects_bad_duration() -> None:
 
 
 def test_parse_descriptions_maps_index_to_time() -> None:
-    text = (
-        '{"index": 1, "shot": "特写", "scene": "室内", "people": "甲", "action": "看", "mood": "静"}\n'
-        '{"index": 3, "shot": "全景", "scene": "大殿", "people": "乙", "action": "跪", "mood": "肃"}'
-    )
+    import json
+
+    rows = [
+        {"index": 1, "shot": "特写", "scene": "室内", "people": "甲", "action": "看", "mood": "静"},
+        {"index": 3, "shot": "全景", "scene": "大殿", "people": "乙", "action": "跪", "mood": "肃"},
+    ]
+    text = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
     frames = runtime.parse_descriptions(text, count=4, episode_s=68.0)
     assert [f["t"] for f in frames] == [8.5, 42.5]
     assert frames[0]["people"] == "甲" and frames[1]["mood"] == "肃"
@@ -44,7 +47,8 @@ def test_parse_descriptions_tolerates_noise() -> None:
     text = (
         "```json\n"
         "\n"
-        '{"index": 1, "shot": "特写", "scene": "室内", "people": "甲", "action": "看", "mood": "静"}\n'
+        '{"index": 1, "shot": "特写", "scene": "室内",'
+        ' "people": "甲", "action": "看", "mood": "静"}\n'
         "这不是 JSON 的行\n"
         '{"index": 2, "scene": "大殿"}\n'
         "```"

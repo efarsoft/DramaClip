@@ -6,8 +6,8 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-import time
 import re
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -477,12 +477,9 @@ class DashscopeParaformerEngine:
     _POLL_TIMEOUT_S = 600.0
 
     def __init__(self, api_key: str, model: str = "paraformer-v2") -> None:
-        key = api_key.strip()
-        if key == "":
-            raise ValueError(
-                "百炼 Paraformer（云端）需要 API Key：请在引擎中心填写 asr.api_key"
-            )
-        self._api_key = key
+        # Key 缺失不在构造期拦：所有已接线引擎必须能空载构造（wired 不变量），
+        # 真正的调用在 transcribe 期按分档报错。
+        self._api_key = api_key.strip()
         self._model = model
 
     @property
@@ -495,6 +492,10 @@ class DashscopeParaformerEngine:
         import dashscope
         from dashscope.audio.asr import Transcription
 
+        if self._api_key == "":
+            raise ValueError(
+                "百炼 Paraformer（云端）需要 API Key：请在引擎中心填写 asr.api_key"
+            )
         dashscope.api_key = self._api_key
         hints = ["zh"] if language.startswith("zh") else [language]
         # 内联热词云端不支持（需预建 vocabulary_id，P1 后续接）；参数如实不透传

@@ -14,17 +14,21 @@
 且方向会翻转。旧实现正是栽在两处时间判据上——①用 `seg.start±0.3` 的窗挑条，两套
 时钟一错开就把邻段的条连文本一起搬过来；②用条的时间窗在字流里下刀，刀口劈开词
 （真机「大明两」「权势滔天贪」「生我比」）。这里改成：条只决定「字落在哪一行」，
-行时间直接取条窗——驻留窗互不重叠（#117），行重叠从此不可能出现。
+行时间直接取条窗——驻留窗互不重叠（#117 在 OCR 侧修好并单测守住），行重叠从此不可能
+出现；本模块不再二次钳制时间，窗若回退成重叠，这里会照抄，防线守在上游那条单测上。
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from dramaclip.engines.analysis.models import AsrSegment, OcrSegment, WordSpan
 
+_LOGGER = logging.getLogger(__name__)
+
 _PUNCT = set("，。！？、：；“”‘’…—，")
-_REVIEW_DIST = 2  # 同一行上两通道对不上的字数：单字多是 OCR 字形误读，≥2 才值人工
+_REVIEW_DIST = 2  # 行内对不上的字数（错配+无佐证+吞下的误读字）：单字差多是字形误读
 
 
 @dataclass(frozen=True)
@@ -44,6 +48,7 @@ class _Line:
     exact: int = 0
     mismatch: int = 0
     extras: int = 0
+    swallowed: int = 0  # 本行吞下的「被无佐证条咬着」的语音字数
     units: list[int] = field(default_factory=list)
 
 
@@ -112,7 +117,8 @@ class _Align:
     def _source(self, line: _Line, *, filled: bool) -> str | None:
         if filled:
             return "ocr_fixed"
-        return "review" if line.mismatch + line.extras >= _REVIEW_DIST else None
+        distance = line.mismatch + line.extras + line.swallowed
+        return "review" if distance >= _REVIEW_DIST else None
 
 
 def fuse(
@@ -122,7 +128,13 @@ def fuse(
     """融合主入口：返回逐字幕条成行的段列表（文本取 ASR，时间取条窗）。"""
     runs = _dwell_runs(ocr_segments)
     units = _char_units(asr_segments)
-    if not runs or units is None:
+    if units is None:
+        _LOGGER.warning(
+            "融合回落纯 ASR：%d 条转写段的字级戳与文本对不上，未做整集对齐（分行/时间未取字幕窗）",
+            len(asr_segments),
+        )
+        return asr_segments
+    if not runs or not units:
         return asr_segments
     ocr, line_of = _flatten(runs)
     cells = _needleman_wunsch(ocr, [unit.char for unit in units])
@@ -139,9 +151,16 @@ def fuse(
     _tally(align)
     claimed = set(align.claimable)
     if not claimed:
+        _LOGGER.warning(
+            "融合回落纯 ASR：%d 条字幕无一获得逐字佐证（OCR %d 字 vs 转写 %d 字对不上），"
+            "面板按转写段显示，请人工核对识别链路",
+            len(runs),
+            len(ocr),
+            len(units),
+        )
         return asr_segments
     _assign_units(align, claimed)
-    return [align.row(index) for index in sorted(claimed) if align.lines[index].units]
+    return [align.row(index) for index in sorted(claimed)]
 
 
 def _dwell_runs(bars: list[OcrSegment]) -> list[list[OcrSegment]]:
@@ -172,20 +191,17 @@ def _flatten(runs: list[list[OcrSegment]]) -> tuple[list[str], list[int]]:
 def _char_units(segments: list[AsrSegment]) -> list[_Unit] | None:
     """ASR 字流：逐字单元加原位标点；任一段的字数与文本对不上就不产流（整集回落）。
 
-    缺字级戳或两侧字数不符时，对齐会静默吞掉对不上的字——面板少字比少分行更坏。
+    字流只认文本侧：词戳与文本谁多谁少都是坏数据，硬塞进对齐就会在面板上丢字或凭空
+    造字（真机守卫收口：旧条件放行了「文本空、词戳有字」的段，面板行成了「你好凭空」）。
     """
     units: list[_Unit] = []
     for index, seg in enumerate(segments):
         stream = [(word, char) for word in seg.words for char in _content(word.word)]
         marks = _marks(seg.text)
-        paced = len(stream) == len(marks)
-        if not paced and marks:
+        if len(stream) != len(marks):
             return None
         for position, (word, char) in enumerate(stream):
-            units.append(
-                _Unit(char=char, post=marks[position][1] if paced else "",
-                      seg=index, word=word)
-            )
+            units.append(_Unit(char=char, post=marks[position][1], seg=index, word=word))
     return units
 
 
@@ -232,18 +248,20 @@ def _assign_units(align: _Align, claimed: set[int]) -> None:
 
     无佐证的条在配对里可能正咬着这些字（「枚势滔失蛙虫」咬住「祯皇帝如何再」），但它
     不产行——字属于语音侧，跟着前一条走才不会把词劈开（真机「权势滔天贪」的下刀位）。
+    吞进来多少字要记在**这一行**上：面板给人看的是行，分歧只记在不成行的条上就等于没刷。
     """
     known = -1
     for oi, ai in align.cells:
         if ai is None:
             continue
-        if oi is not None and align.line_of[oi] in claimed:
-            known = align.line_of[oi]
-        # known 停在上一条：无佐证条咬住的字、条间隙里的字都回挂它
-        if known >= 0:
-            align.lines[known].units.append(ai)
-        else:
-            align.lines[min(claimed)].units.append(ai)  # 行首孤字前挂第一条
+        bar = align.line_of[oi] if oi is not None else None
+        if bar is not None and bar in claimed:
+            known = bar
+        # known 停在上一条：无佐证条咬住的字、条间隙里的字都回挂它；行首孤字前挂第一条
+        owner = known if known >= 0 else min(claimed)
+        align.lines[owner].units.append(ai)
+        if bar is not None and bar != owner:  # 这条字原本被无佐证的误读条咬着
+            align.lines[owner].swallowed += 1
 
 
 def _needleman_wunsch(

@@ -62,7 +62,7 @@ def _install(
     registry: dict[str, _CountingTts],
     created: list[str],
 ) -> None:
-    def fake_create(engine: str, models_dir: Any = None) -> Any:
+    def fake_create(engine: str, models_dir: Any = None, *, api_key: str = "") -> Any:
         created.append(engine)
         if engine not in registry:
             raise ValueError(f"未知 TTS 引擎: {engine}")

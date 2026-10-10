@@ -243,6 +243,43 @@ def test_cut_segment_never_inherits_an_unclaimed_bar() -> None:
     assert "ocr_fixed" not in {r.source for r in result}
 
 
+def test_row_swallowing_a_misread_bar_is_reviewed() -> None:
+    """吞下无佐证条的字要计入**这一行**的分歧距离：徽标是给人看行的，只记在条上等于没刷。
+
+    真机 ep1 实测形状（2026-10-10 审查）：「我穿成崇」有佐证成行，「枚势滔失蛙虫」无佐证
+    被删，但它咬住的「祯皇帝如何再」整串回挂进前一行——那一行自有分歧只 1 字，按条记账
+    不带徽标，于是面板上一行掺着整条误读的字却告诉人工「不用看」。
+    """
+    seg = _long_seg(10.0, 23.0, "我穿成崇祯皇帝如何再造大明")
+    bars = (
+        _bars("我穿成崇", 10.0, 14.0)
+        + _bars("枚势滔失蛙虫", 14.0, 18.0)
+        + _bars("何再造大明", 18.0, 23.0)
+    )
+    result = fuse([seg], bars)
+    assert result[0].source == "review", "吞了整条误读的行必须交人工"
+
+
+def test_textless_segment_with_word_stamps_falls_back_whole_episode() -> None:
+    """文本侧一个字没有、词戳侧却有字：坏数据，整集回落——字流只认文本，凭空造字比少分行更坏。
+
+    `if not paced and marks` 的旧守卫只看「文本有没有内容字」，文本空时直接放行：
+    词戳里的字照样进对齐流，面板于是多出文本侧从未存在过的字。
+    """
+    good = _seg("你好")
+    bad = AsrSegment(
+        start=12.0,
+        end=16.0,
+        text="",
+        words=[
+            WordSpan(start=12.0, end=13.0, word="凭"),
+            WordSpan(start=13.0, end=14.0, word="空"),
+        ],
+    )
+    result = fuse([good, bad], _bars("你好", 9.8, 12.0))
+    assert result == [good, bad], "整集回落到未融合的 ASR 段：词戳侧的字不许上面板"
+
+
 def test_head_orphans_attach_forward_to_the_first_claimed_row() -> None:
     """第一条字幕出现之前就在说的话（片头旁白）：前挂第一条，一个字不丢。"""
     seg = _long_seg(0.0, 12.0, "开场白没有字幕我说的是你")
@@ -265,7 +302,10 @@ def test_mega_segment_tail_after_last_subtitle_survives() -> None:
 
 
 def test_mega_segment_overlapping_windows_do_not_duplicate_chars() -> None:
-    """驻留窗时间重叠（真机 5.5-7.0 与 6.5-8.0 就是）：字必须划分，不得两窗各取一遍。"""
+    """两条时间交叠时字仍须划分，不得两窗各取一遍。
+
+    #117 之后上游不再产交叠驻留窗；本行按内容归属划分，留着防回归。
+    """
     seg = _long_seg(10.0, 19.0, "我穿成崇祯皇帝如")
     bars = _bars("我穿成崇桢", 10.0, 15.0) + _bars("皇帝如", 14.0, 19.0)
     result = fuse([seg], bars)
@@ -274,7 +314,7 @@ def test_mega_segment_overlapping_windows_do_not_duplicate_chars() -> None:
 
 
 def test_row_times_never_overlap_even_when_speech_runs_long() -> None:
-    """行时间钳在相邻行起点之前：字戳跑到下一条之后也不许两行同屏（业主「不要到处乱跑」）。"""
+    """语音跑到下一条字幕之后，行时间仍互不重叠：时间取自互不重叠的条窗，不是事后钳制。"""
     seg = _long_seg(10.0, 40.0, "我穿成崇祯皇帝如何再造大明")
     bars = (
         _bars("我穿成崇", 10.0, 14.0)

@@ -581,6 +581,13 @@ def crop_dialogue_lines(
     一半以上音节落在段内，观众就能在本段听到它，字幕跟声音走；恰好压线归本段
     （前半在本段听得到，后半切掉了也要把词标出来，否则台词缺字）。
 
+    双时钟归一（2026-10-10 立案④）：行窗（item 的 start/end，=融合行的字幕驻留窗，编码端
+    擦除读的同一个数）是**唯一显示时钟**；词戳只定「哪几个词属于本段」和行内节奏，不直接
+    决定字在屏上出现的时刻。所以归属前先把该行词戳区间整体仿射贴合到行窗
+    （`[词戳跨度起点, 词戳跨度终点] → [s, e]`），行内比例保留、绝对位置换成字幕窗。
+    旧实现两套时钟并用：真机 ep1 实测中位差 3.80s、最大 13.34s，23 行里 16 行的烧录时刻与
+    源字幕窗重叠为 0（源字幕在屏时我们的字不在），整行词戳全落段外时台词整行消失。
+
     无 words 的旧库（words 空/缺失）降级为句级：整句与窗口有交集就显示整句，
     区间钳到窗口——旧数据不 raise，也不假装能词级对齐。
     """
@@ -608,9 +615,14 @@ def crop_dialogue_lines(
                     continue
                 valid_words.append({"ws": ws, "we": we, "wt": wt})
         if text and valid_words:
+            span0 = min(entry["ws"] for entry in valid_words)
+            span1 = max(entry["we"] for entry in valid_words)
+            scale = (e - s) / (span1 - span0)
             kept: list[dict[str, Any]] = []
             for entry in valid_words:
-                ws, we, wt = entry["ws"], entry["we"], entry["wt"]
+                ws = s + (entry["ws"] - span0) * scale
+                we = s + (entry["we"] - span0) * scale
+                wt = entry["wt"]
                 length = we - ws
                 overlap = min(we, win_end) - max(ws, win_start)
                 if overlap * 2 < length:
@@ -646,6 +658,28 @@ def crop_dialogue_lines(
             }
         )
     return cropped
+
+
+def _clock_audit(
+    cropped: list[dict[str, Any]], win_start: float, dwell_windows: list[tuple[float, float]]
+) -> tuple[int, int]:
+    """烧录行 vs 字幕驻留窗 → (可对照行数, 与任一驻留窗零重叠的行数)；驻留窗空表记 (0, 0)。
+
+    立案④的可见化：烧录时钟和擦除时钟的关系过去只存在于临时探针脚本里，缺陷跑完也没留痕。
+    零重叠行**不等于缺陷**——画外音/纯 ASR 行本就没有屏上对应物：真机库内 10 集 272 行实测
+    24 行（8.8%）落在所有驻留窗之外，十集都有。把这条度量当判据就是重演覆盖闸包含式判据
+    拦下 8/10 集的老路，所以只记账不拦片。无驻留窗时编码端整段擦，两套时钟无从对照，交
+    (0, 0) 让调用方把「可对照 0 行」如实报出来——unknown 不许当成 ok。
+    """
+    if not dwell_windows:
+        return (0, 0)
+    stray = 0
+    for row in cropped:
+        start = win_start + float(row["start"])
+        end = win_start + float(row["end"])
+        if all(min(end, we) - max(start, ws) <= 0.0 for ws, we in dwell_windows):
+            stray += 1
+    return (len(cropped), stray)
 
 
 def _dialogue_word_chunks(
@@ -709,6 +743,27 @@ def _dialogue_ass_lines(item: dict[str, Any], cap: int) -> list[dict[str, Any]]:
         lines.append({"start": cursor, "end": cursor + span, "text": chunk})
         cursor += span
     return lines
+
+
+def _log_clock_audit(context: AppContext, stats: list[tuple[int, int, int]]) -> None:
+    """台词时钟对账的出片明账：一条 info，把「烧了几行 / 几行有屏上对应物 / 几行没有」说全。
+
+    判据与不拦片的理由见 `_clock_audit`。三个数一起报，是因为多集拼片可能一部分集有驻留窗、
+    一部分没有——只报「烧了几行、几行零重叠」会把没对照的集算进分母（第二处口径）。
+    与 `_audit_duration` 同规矩：事后体检，自身任何异常都静默吞掉，绝不反过来挡已成功的导出。"""
+    if not any(row_count for row_count, _c, _s in stats):
+        return
+    with contextlib.suppress(Exception):
+        rows = sum(row_count for row_count, _c, _s in stats)
+        checked = sum(c for _r, c, _s in stats)
+        stray = sum(s for _r, _c, s in stats)
+        context.notifier.log(
+            "info",
+            f"台词时钟对账：烧录台词 {rows} 行，可对照 {checked} 行，"
+            f"其中 {stray} 行与字幕驻留窗零重叠"
+            "——零重叠不等于缺陷（画外音/纯增字幕本无屏上对应物）；可对照 0 行＝该剧无驻留窗"
+            "（擦除整段挂），比例升高请核对分析链路",
+        )
 
 
 def _audit_duration(context: AppContext, plan_data: PlanData, actual_s: float) -> None:
@@ -982,6 +1037,9 @@ def render_export(
             line_rects=tuple(subtitle_line_rects.get(episode_id) or ()),
         ).cover_rect
 
+    # 台词时钟对账（立案④）：逐段记 (烧录行数, 可对照行数, 零重叠行数)，出片后汇总一条明账。
+    clock_stats: list[tuple[int, int, int]] = []
+
     def burn_subtitle(segment_index: int, text: str, duration_s: float) -> str:
         """生成段级 ass 文件并返回路径（相对时间轴 0→duration）。
 
@@ -1053,6 +1111,10 @@ def render_export(
             build_ass(lines, preset, source_band=cover_rect(episode_id), play_res=out_size),
             encoding="utf-8",
         )
+        checked, stray = _clock_audit(
+            cropped, win_start, subtitle_erase_windows.get(episode_id) or []
+        )
+        clock_stats.append((len(cropped), checked, stray))
         return str(ass_path)
 
     # 输出编码：auto=硬编探测（黑帧实编验证，NVENC/QSV/VT 按平台候选），失败/关闭回退 libx264
@@ -1084,6 +1146,7 @@ def render_export(
         out_size=out_size,
         loudness_target=loudness.LoudnessTarget.from_settings(context.settings),
     )
+    _log_clock_audit(context, clock_stats)
     exports_repo.mark_completed(context.conn, export_id, str(out_path))
     try:
         media = probe.probe(out_path)

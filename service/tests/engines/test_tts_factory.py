@@ -20,7 +20,7 @@ from dramaclip.engines.tts import factory
 
 def test_factory_supports_exactly_the_wired_engines() -> None:
     assert factory.supported() == frozenset(
-        {"edge", "kokoro", "indextts2", "cosyvoice", "cosyvoice3"}
+        {"edge", "kokoro", "indextts2", "cosyvoice", "cosyvoice3", "cosyvoice_cloud"}
     )
 
 
