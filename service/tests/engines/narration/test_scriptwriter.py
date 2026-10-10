@@ -46,7 +46,7 @@ class FakeLLM:
         self.systems: list[str] = []
         self.users: list[str] = []
 
-    def chat_json(self, system: str, user: str) -> dict[str, Any]:
+    def chat_json(self, system: str, user: str, temperature: float = 0.3) -> dict[str, Any]:
         # 单元素脚本视为"每次都返回该结果"（write_script_episodes 内部会重试一次）
         self.calls += 1
         self.systems.append(system)
@@ -190,8 +190,8 @@ def test_system_carries_the_rules_the_sanitizer_enforces() -> None:
     """
     system = _system_sent()
     assert '"episode": 集号整数' in system, "格式示例漏掉 episode，模型照抄就缺字段"
-    assert "下一段的 start 不得早于前一段的 end" in system
-    assert "本集台词截至" in system, "未把清洗层的时间上界告诉模型"
+    assert "互不重叠" in system, "未把清洗层的同集不重叠规则告诉模型"
+    assert "该集上界" in system, "未把清洗层的时间上界告诉模型"
 
 
 def test_user_block_points_at_the_band_instead_of_canceling_it() -> None:
@@ -207,15 +207,15 @@ def test_user_block_points_at_the_band_instead_of_canceling_it() -> None:
 
 def test_default_system_carries_both_layers() -> None:
     system = _system_sent()
-    assert "【解说基本功——逐条强制遵守】" in system
-    assert "正文 12-28 段" in system
+    assert "【解说基本功——逐条强制遵守】" in system, "缺基本功层"
+    assert "输出推广解说剧本 JSON" in system, "缺结构层"
 
 
 def test_structure_override_replaces_only_the_structure() -> None:
     """换掉结构指令不该把基本功层一起带走：两层各自独立才可分别调。"""
     system = _system_sent(**{"prompt.scriptwriter_system": "只回 JSON。"})
     assert system.startswith("只回 JSON。")
-    assert "正文 12-28 段" not in system
+    assert "输出推广解说剧本 JSON" not in system, "结构覆盖应只换结构层"
     assert "【解说基本功——逐条强制遵守】" in system
 
 

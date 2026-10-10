@@ -21,7 +21,7 @@ class FakeSelector:
         self.result = result
         self.prompts: list[tuple[str, str]] = []
 
-    def chat_json(self, system: str, user: str) -> Any:
+    def chat_json(self, system: str, user: str, temperature: float = 0.3) -> Any:
         self.prompts.append((system, user))
         if isinstance(self.result, Exception):
             raise self.result

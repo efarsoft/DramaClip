@@ -1,0 +1,44 @@
+[
+  {
+    "number": 1,
+    "duration": 38.0,
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 12.5,
+        "speaker": "角色A",
+        "text": "苏明月，你这般贱婢也配进我苏府大门？"
+      },
+      {
+        "start": 12.5,
+        "end": 24.0,
+        "speaker": "角色B",
+        "text": "姐姐莫怕，这婚书是我替你藏下的。"
+      },
+      {
+        "start": 24.0,
+        "end": 38.0,
+        "speaker": "角色A",
+        "text": "八千两银子，够买你半条命了。"
+      }
+    ]
+  },
+  {
+    "number": 2,
+    "duration": 30.0,
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 15.0,
+        "speaker": "角色C",
+        "text": "摄政王到，众人跪迎。"
+      },
+      {
+        "start": 15.0,
+        "end": 30.0,
+        "speaker": "角色B",
+        "text": "原来那夜救我的，竟是当朝九千岁。"
+      }
+    ]
+  }
+]

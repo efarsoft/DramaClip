@@ -57,7 +57,9 @@ class LlmClient:
     def model(self) -> str:
         return self._config.model
 
-    def chat_json(self, system: str, user: str) -> dict[str, Any] | list[Any]:
+    def chat_json(
+        self, system: str, user: str, temperature: float | None = None
+    ) -> dict[str, Any] | list[Any]:
         if not self._config.configured:
             raise LlmUnavailable("LLM 未配置（需要 base_url 与 model）")
         payload = {
@@ -66,7 +68,8 @@ class LlmClient:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            "temperature": 0.3,
+            # 创意链路（剧本/逐槽填词/标题/金句）走 0.75，其余默认 0.3 保稳。
+            "temperature": temperature if temperature is not None else 0.3,
         }
         content = self._post(payload)
         return parse_json_blob(content)

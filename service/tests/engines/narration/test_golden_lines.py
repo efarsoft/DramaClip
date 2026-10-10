@@ -19,7 +19,7 @@ class _FakeLlm:
         self.error = error
         self.calls: list[tuple[str, str]] = []
 
-    def chat_json(self, system: str, user: str):
+    def chat_json(self, system: str, user: str, temperature: float = 0.3):
         self.calls.append((system, user))
         if self.error is not None:
             raise self.error
@@ -59,7 +59,7 @@ def test_llm_unavailable_raises_with_reason_at_batch_entry(
     import pytest
 
     class _FailLlm:
-        def chat_json(self, _system: str, _user: str):
+        def chat_json(self, _system: str, _user: str, temperature: float = 0.3):
             raise LlmUnavailable("端点挂了")
 
     monkeypatch.setattr(golden_lines, "LlmClient", lambda *_a, **_k: _FailLlm())

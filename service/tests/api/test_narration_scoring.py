@@ -384,7 +384,7 @@ def test_scoring_leaves_a_trace_file(
         def __init__(self, _config: Any, timeout_s: float = 60.0) -> None:
             self.timeout_s = timeout_s
 
-        def chat_json(self, _system: str, user: str) -> Any:
+        def chat_json(self, _system: str, user: str, temperature: float = 0.3) -> Any:
             calls.append((_system, user))
             indexes = [
                 int(match) for match in __import__("re").findall(r"\[方案 (\d+)\]", user)

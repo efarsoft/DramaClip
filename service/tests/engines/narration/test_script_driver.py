@@ -68,7 +68,7 @@ class FakeLlmClient:
     def __init__(self, _config: Any, timeout_s: float = 60.0) -> None:
         self.timeout_s = timeout_s
 
-    def chat_json(self, system: str, user: str) -> Any:
+    def chat_json(self, system: str, user: str, temperature: float = 0.3) -> Any:
         FakeLlmClient.calls.append((system, user))
         queue = FakeLlmClient.queue
         item = queue.pop(0) if len(queue) > 1 else queue[0]

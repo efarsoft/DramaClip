@@ -22,7 +22,7 @@ def _stub_llm(monkeypatch: pytest.MonkeyPatch) -> None:
         def __init__(self, _config: Any, timeout_s: float = 60.0) -> None:
             self.timeout_s = timeout_s
 
-        def chat_json(self, system: str, user: str) -> dict[str, Any]:
+        def chat_json(self, system: str, user: str, temperature: float = 0.3) -> dict[str, Any]:
             if "选题操盘手" in system:  # angles._SYSTEM_PROMPT
                 return {
                     "angles": [

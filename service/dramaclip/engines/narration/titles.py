@@ -37,7 +37,7 @@ def generate(
     client = LlmClient(config, timeout_s=timeout_s)
     system = llm_prompts.system_override(settings, "prompt.titles_system") or _SYSTEM_PROMPT
     user = "解说文案：\n" + "\n".join(texts)
-    data = client.chat_json(system, user)
+    data = client.chat_json(system, user, temperature=0.75)
     raw = data.get("titles", []) if isinstance(data, dict) else []
     titles = [
         {"text": title.strip(), "selected": False}

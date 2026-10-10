@@ -18,7 +18,7 @@ class FakeLLM:
         self.payload = payload
         self.prompts: list[str] = []
 
-    def chat_json(self, _system: str, user: str) -> Any:
+    def chat_json(self, _system: str, user: str, temperature: float = 0.3) -> Any:
         self.prompts.append(user)
         if isinstance(self.payload, Exception):
             raise self.payload

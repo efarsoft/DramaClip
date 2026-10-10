@@ -129,7 +129,7 @@ def _probe(context: Any, job_id: str, *rest: Any) -> None:
 
 
 def _stub_chat_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake(self: LlmClient, system: str, user: str) -> Any:
+    def fake(self: LlmClient, system: str, user: str, **_k: Any) -> Any:
         for marker, reply in _REPLIES.items():
             if marker in system:
                 return reply

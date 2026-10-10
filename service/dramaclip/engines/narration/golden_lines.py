@@ -47,7 +47,7 @@ def pick_golden_lines(
     )
     # LlmUnavailable 不在此吞：上抛由 pick_for_material 包装成带原因的
     # ValueError（无兜底裁决 2026-10-08——静默转 None 会丢失失败原因）
-    raw = llm.chat_json(_PROMPT, numbered)
+    raw = llm.chat_json(_PROMPT, numbered, temperature=0.75)
     ids = raw.get("ids") if isinstance(raw, dict) else None
     if not isinstance(ids, list):
         return None

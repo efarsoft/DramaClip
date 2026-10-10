@@ -85,7 +85,7 @@ SPECS: list[PromptSpec] = [
         "prompt.copywriter_system",
         "逐槽填词·结构指令",
         "六槽位模式（片头/交叉/超短/全片/双人/独白）共用的槽位契约与硬性要求",
-        _default("dramaclip.engines.narration.copywriter", "_STRUCTURE_PROMPT"),
+        _default("dramaclip.engines.narration.copywriter", "_COPY_STRUCTURE_DEFAULT"),
     ),
     PromptSpec(
         "prompt.titles_system",

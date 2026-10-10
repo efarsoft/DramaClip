@@ -171,7 +171,7 @@ class _FakeLlm:
     def __init__(self, _config: Any, timeout_s: float = 60.0) -> None:
         self.timeout_s = timeout_s
 
-    def chat_json(self, system: str, user: str) -> Any:
+    def chat_json(self, system: str, user: str, temperature: float = 0.3) -> Any:
         _FakeLlm.calls.append((system, user))
         if "风格库" in system:  # styles._SELECT_SYSTEM_PROMPT
             return {"style_id": _PLANTED_STYLE_ID, "reason": "全剧靠反问推进"}
@@ -465,7 +465,7 @@ def _stub_language_and_tts(
         def __init__(self, _config: Any, timeout_s: float = 60.0) -> None:
             self.timeout_s = timeout_s
 
-        def chat_json(self, system: str, user: str) -> Any:
+        def chat_json(self, system: str, user: str, temperature: float = 0.3) -> Any:
             llm_calls.append((system, user))
             if "选题操盘手" in system:  # angles._SYSTEM_PROMPT
                 wanted = int(re.search(r"需要 (\d+) 条", user).group(1))  # type: ignore[union-attr]

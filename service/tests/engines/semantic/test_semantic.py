@@ -24,7 +24,7 @@ class FakeLlm:
     def model(self) -> str:
         return "fake-model"
 
-    def chat_json(self, system: str, user: str) -> dict | list:
+    def chat_json(self, system: str, user: str, temperature: float = 0.3) -> dict | list:
         self.calls.append((system, user))
         return parse_json_blob(self.reply)
 
@@ -76,7 +76,7 @@ def test_conflict_falls_back_without_llm() -> None:
 
 def test_conflict_llm_failure_falls_back() -> None:
     class Broken(FakeLlm):
-        def chat_json(self, system: str, user: str) -> dict | list:
+        def chat_json(self, system: str, user: str, temperature: float = 0.3) -> dict | list:
             raise LlmUnavailable("网络炸了")
 
     scenes = [SceneInfo(start=0, end=10)]
@@ -146,7 +146,7 @@ def test_conflict_trace_counts_scenes_the_model_left_unanswered(tmp_path: Path) 
 
 def test_conflict_trace_records_why_it_degraded(tmp_path: Path) -> None:
     class Broken(FakeLlm):
-        def chat_json(self, system: str, user: str) -> dict | list:
+        def chat_json(self, system: str, user: str, temperature: float = 0.3) -> dict | list:
             raise LlmUnavailable("网络炸了")
 
     trace = tmp_path / "conflict.json"

@@ -18,7 +18,7 @@ class FakeClient:
         self.payload = payload
         self.systems: list[str] = []
 
-    def chat_json(self, system: str, _user: str) -> Any:
+    def chat_json(self, system: str, _user: str, temperature: float = 0.3) -> Any:
         self.systems.append(system)
         return self.payload
 

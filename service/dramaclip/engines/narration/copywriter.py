@@ -35,46 +35,30 @@ def _line_cap_of(mode: str) -> int:
 
 # 注册表/可编辑 UI 的缺省文本（通用 60 字档）。运行时按模式组装见 _structure_prompt——
 # 超短不设 60 字帽（时长让位），但可编辑覆盖仍按单键单默认文本管理。
-_STRUCTURE_PROMPT = (
-    "你是短剧推广解说编剧。下面给出若干旁白槽位，每个槽位标注了它承担的职责、"
-    "覆盖的画面区间，以及该区间内的原片台词。为每个槽位各写一条解说文案。\n"
-    '只输出 JSON：{"lines": [{"id": "槽位id", "text": "解说文案"}]}，不要其他文字。\n'
-    f"硬性要求：lines 必须覆盖全部槽位 id（数量与 id 一字不差）；每条不超过 {_MAX_LINE_CHARS} 字；"
-    "槽位的职责标注是契约：文案必须完成该槽位要做的事，不得答非所问；"
-    "开场槽必须 3 秒内抛出具体反差事实，禁止「他竟然…」；"
-    "收尾/CTA 槽必须留缺口并引导去看全集（可带剧名），禁止关注/点赞/二维码，禁止剧透最大反转；"
-    "按给定顺序书写，相邻两条要能连读成一条故事线；鼓励在条尾留半句钩勾住下一条；"
-    "情节、细节、称谓只能来自给定台词，禁止编造台词之外的事件。"
-)
+# 旧 _STRUCTURE_PROMPT 常量已移除：运行期用 _structure_prompt(mode)，缺省见 _COPY_STRUCTURE_DEFAULT。
+
 
 
 def _structure_prompt(mode: str) -> str:
-    """结构指令按模式组装：行长上限随模式（超短的字数由内容决定，不设 60 字帽）。"""
+    """结构指令按模式组装：行长上限随模式（超短不设 60 字帽，时长让位）。"""
     return (
-        # 身份先行（sepia persona 模板的实测结论：给骨架得到填表，给身份得到声音）
-        "你是这部剧的专属解说编剧：全集你看了三遍，角色底细如数家珍，"
-        "现在在饭桌上给朋友讲它——讲完他要连夜去刷原剧。"
-        "身份是你的，怎么组织是你的自由；事实只来自下面给出的台词。\n"
-        "下面给出若干旁白槽位，每个槽位标注了它承担的职责、"
-        "覆盖的画面区间，以及该区间内的原片台词。为每个槽位各写一条解说文案。\n"
-        '只输出 JSON：{"lines": [{"id": "槽位id", "text": "解说文案"}]}，不要其他文字。\n'
-        f"硬性要求：lines 必须覆盖全部槽位 id（数量与 id 一字不差）；"
+        "你是这部剧的专属解说编剧：全集看了三遍，角色底细如数家珍，"
+        "现在在饭桌上给朋友讲它——讲完他要连夜去刷原剧。事实只来自下面给出的台词。"
+        "下面给出若干旁白槽位，每个标注了「要做的事」、覆盖的画面区间、区间内原片台词。"
+        "为每个槽位各写一条解说文案。"
+        '只输出 JSON：{"lines": [{"id": "槽位id", "text": "解说文案"}]}，不要其他文字。'
+        f"硬性要求（一字不差）：lines 必须覆盖全部槽位 id；"
         f"每条不超过 {_line_cap_of(mode)} 字；"
-        "槽位的职责标注是契约：文案必须完成该槽位要做的事，不得答非所问；"
-        "开场槽必须 3 秒内抛出具体反差事实，禁止「他竟然…」；"
-        "开场可直接引用区间内最冲突的原片台词（冲突前置——台词比转述狠）；"
-        "收尾/CTA 槽必须留缺口并引导去看全集（可带剧名），禁止关注/点赞/二维码，禁止剧透最大反转；"
-        "缺口可升级为「代价式」：暗示现在退出的损失（不看完你都会惦记），禁止编造不存在的情节；"
-        "按给定顺序书写，相邻两条要能连读成一条故事线；鼓励在条尾留半句钩勾住下一条；"
-        "写法要像人在饭桌上讲八卦：短句为主、长短交错、口语词优先（结果/当场/直接），"
-        "禁书面连接词（然而/随即/顿时/缓缓/宛如）与先否后肯（不是…而是…），"
-        "转折只用「结果/谁知/哪成想」；相邻两条不得同一主语起手，"
-        "每条原话引用至多一处，数字一律写中文（两千斤/八年，不写 2,000），"
-        "禁元叙述——「第X集」「画面里」「镜头」这类讲文件的字眼一个不许有，"
-        "禁止每条结尾都收束总结——允许半句钩把答案留给下一条；每条写完默念一遍，"
-        "念着拗口的句子重写——这段文字是要被配音念出来的，不是给人看的文章；"
+        "文案必须完成该槽位的「要做的事」，不得答非所问；"
         "情节、细节、称谓只能来自给定台词，禁止编造台词之外的事件。"
+        "写法（稀疏用，别每段齐备——真人有偏科）：开场可引区内最冲突原话、"
+        "条尾可留半句钩勾住下一条；口语短句，转折只用结果/谁知/哪成想；"
+        "念着拗口就重写，这段要被配音念出来，不是给人看的文章。"
     )
+
+
+_COPY_STRUCTURE_DEFAULT = _structure_prompt("")  # 可编辑 UI 缺省；运行期复用带人设的好版本
+
 
 
 def system_prompt(settings: dict[str, str], mode: str = "") -> str:
@@ -85,7 +69,7 @@ def system_prompt(settings: dict[str, str], mode: str = "") -> str:
     """
     overrides = llm_prompts.overrides_from(settings)
     structure = overrides.get("prompt.copywriter_system") or _structure_prompt(mode)
-    return structure + scriptwriter.fundamentals_layer(overrides)
+    return structure + scriptwriter.fundamentals_layer(overrides, scope="slot")
 
 
 def _slot_block(
@@ -150,6 +134,36 @@ def _sanitize(
     return got
 
 
+def build_copy_request(
+    plan: PlanData,
+    material: casting.MaterialByEpisode,
+    settings: dict[str, str],
+    *,
+    mode_label: str,
+    angle_block: str,
+) -> tuple[str, str]:
+    """纯函数：组装逐槽文案链路的 (system, user) 提示词，不调用 LLM。
+
+    与 write_plan_copy 同源——审计/回放工具拿到的是真实发出去的提示词。
+    """
+    project_name = str(settings.get("_project_name") or "").strip()
+    if not project_name:
+        raise ValueError("缺少项目名：编剧需要剧名作为称谓")
+    genre = str(settings.get("_genre") or "").strip()
+    directives = str(settings.get("_style_directives") or "").strip()
+    user_prompt = (
+        f"项目：{project_name}"
+        + (f"（题材：{genre}）" if genre else "")
+        + f"\n模式：{mode_label}"
+        + angle_block
+        + "\n文案槽位：\n"
+        + _slot_block(plan.narration_texts, plan.timeline, material)
+        + (f"\n\n解说风格要求：{directives}" if directives else "")
+    )
+    system = system_prompt(settings, mode=plan.mode)
+    return system, user_prompt
+
+
 def write_plan_copy(
     plan: PlanData,
     material: casting.MaterialByEpisode,
@@ -175,26 +189,17 @@ def write_plan_copy(
     # 行长上限按模式：超短的全部文案就这一两条，60 字/段的分段阅读规则套在它身上
     # 会逼出 6 秒残件（首版实测）——给它 4 倍空间，密度由 brief 的效果要求保证。
     line_cap = _ULTRA_SHORT_LINE_CHARS if plan.mode == "ultra_short_hook" else _MAX_LINE_CHARS
-    genre = str(settings.get("_genre") or "").strip()
-    directives = str(settings.get("_style_directives") or "").strip()
-    user_prompt = (
-        f"项目：{project_name}"
-        + (f"（题材：{genre}）" if genre else "")
-        + f"\n模式：{mode_label}"
-        + angle_block
-        + "\n文案槽位：\n"
-        + _slot_block(plan.narration_texts, plan.timeline, material)
-        + (f"\n\n解说风格要求：{directives}" if directives else "")
-    )
     llm = LlmClient(
         config, timeout_s=float(settings.get("llm.timeout_s") or COPY_LLM_TIMEOUT_S)
     )
-    system = system_prompt(settings, mode=plan.mode)
+    system, user_prompt = build_copy_request(
+        plan, material, settings, mode_label=mode_label, angle_block=angle_block
+    )
     attempts: list[dict[str, Any]] = []
     filled: dict[str, str] | None = None
     for round_index in range(_ATTEMPTS):
         try:
-            raw = llm.chat_json(system, user_prompt)
+            raw = llm.chat_json(system, user_prompt, temperature=0.75)
             filled = _sanitize(
                 raw, plan.narration_texts, int(line_cap * _OVERSIZE_TOLERANCE)
             )

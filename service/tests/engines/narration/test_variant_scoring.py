@@ -51,7 +51,7 @@ class FakeClient:
         self.users: list[str] = []
         self.calls = 0
 
-    def chat_json(self, system: str, user: str) -> Any:
+    def chat_json(self, system: str, user: str, temperature: float = 0.3) -> Any:
         self.calls += 1
         self.systems.append(system)
         self.users.append(user)

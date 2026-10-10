@@ -35,7 +35,7 @@ def test_rule_mode_back_to_ready(
     _stub_language_and_tts(monkeypatch, calls)
     # 金句提取走 LLM：测试桩按编号回填（与文案链打桩同款手法）
     monkeypatch.setattr(golden_lines_mod, "LlmClient", lambda *_a, **_k: type(
-        "_GoldenFake", (), {"chat_json": staticmethod(lambda _s, _u: {"ids": [1, 2]})}
+        "_GoldenFake", (), {"chat_json": staticmethod(lambda _s, _u, **_k: {"ids": [1, 2]})}
     )())
 
     result = harness.rpc(

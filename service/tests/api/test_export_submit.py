@@ -350,7 +350,7 @@ def test_cancelled_export_is_not_a_failure(
         raise FfmpegError("已取消", cancelled=True)
 
     monkeypatch.setattr(export_api, "render_export", boom)
-    monkeypatch.setattr(export_api, "_ensure_voiced", lambda _c, _r, data: data)
+    monkeypatch.setattr(export_api, "_ensure_voiced", lambda _c, _r, data, **_k: data)
 
     export_api._run_export(
         harness.context,  # type: ignore[arg-type]
@@ -416,6 +416,6 @@ def test_ensure_voiced_fails_when_synthesis_leaves_a_slot_silent(
     assert plan_row is not None
     from dramaclip.api import narration as narration_api
 
-    monkeypatch.setattr(narration_api, "_voice", lambda _c, data, _s, _d: data)
+    monkeypatch.setattr(narration_api, "_voice", lambda _c, data, _s, _d, **_k: data)
     with pytest.raises(ValueError, match="旁白音频合成失败"):
         export_api._ensure_voiced(harness.context, plan_row, plan)  # type: ignore[arg-type]

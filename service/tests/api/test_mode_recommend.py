@@ -31,7 +31,7 @@ class _FakeLlm:
         self.timeout_s = timeout_s
         _FakeLlm.instances.append(self)
 
-    def chat_json(self, _system: str, user: str) -> dict:
+    def chat_json(self, _system: str, user: str, temperature: float = 0.3) -> dict:
         self.last_user = user
         if isinstance(_FakeLlm.reply, Exception):
             raise _FakeLlm.reply
