@@ -59,7 +59,7 @@ def fake_engine(monkeypatch: pytest.MonkeyPatch) -> FakeEngine:
     """替身工厂：create 返回同一个替身，被要求的引擎名记在 `created`。"""
     stub = FakeEngine()
 
-    def _create(name: str, models_dir: Path | None = None) -> FakeEngine:
+    def _create(name: str, models_dir: Path | None = None, *, api_key: str = "") -> FakeEngine:
         stub.created.append(name)
         return stub
 
@@ -172,7 +172,7 @@ def test_preview_reports_engine_failure_instead_of_swapping_engine(
     stub = ExplodingEngine()
     created: list[str] = []
 
-    def _create(name: str, models_dir: Path | None = None) -> ExplodingEngine:
+    def _create(name: str, models_dir: Path | None = None, *, api_key: str = "") -> ExplodingEngine:
         created.append(name)
         return stub
 

@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
+import time
 import re
 from collections.abc import Iterator
 from pathlib import Path
@@ -460,3 +462,91 @@ def _group_by_gap(
         else:
             runs.append([word])
     return runs
+
+
+class DashscopeParaformerEngine:
+    """百炼 Paraformer（云端，DashScope 文件转写）：无本地模型，按量计费。
+
+    与本地 paraformer 的同源模型，云端推理——弱机/无 GPU 用户的 ASR 跃升路径
+    （P1 云端化）。文件转写是异步任务：提交 → 轮询 → 拉转写 JSON。
+    句级时间戳 + 字级 words 全有，AsrSegment 同构，OCR 融合照常工作。
+    说话人分离云端不返回（speaker=None）；诊断与融合不依赖它也能工作。
+    """
+
+    _POLL_INTERVAL_S = 3.0
+    _POLL_TIMEOUT_S = 600.0
+
+    def __init__(self, api_key: str, model: str = "paraformer-v2") -> None:
+        key = api_key.strip()
+        if key == "":
+            raise ValueError(
+                "百炼 Paraformer（云端）需要 API Key：请在引擎中心填写 asr.api_key"
+            )
+        self._api_key = key
+        self._model = model
+
+    @property
+    def name(self) -> str:
+        return f"dashscope_paraformer:{self._model}"
+
+    def transcribe(
+        self, wav_path: Path, language: str = "zh", *, hotwords: str = ""
+    ) -> list[AsrSegment]:
+        import dashscope
+        from dashscope.audio.asr import Transcription
+
+        dashscope.api_key = self._api_key
+        hints = ["zh"] if language.startswith("zh") else [language]
+        # 内联热词云端不支持（需预建 vocabulary_id，P1 后续接）；参数如实不透传
+        submit = Transcription.call(
+            model=self._model,
+            file_urls=[str(wav_path)],
+            language_hints=hints,
+        )
+        if submit.status_code != 200:
+            raise RuntimeError(f"转写任务提交失败: {submit.message}")
+        task_id = submit.output["task_id"]
+        deadline = time.monotonic() + self._POLL_TIMEOUT_S
+        while time.monotonic() < deadline:
+            polled = Transcription.fetch(task=task_id)
+            if polled.status_code != 200:
+                raise RuntimeError(f"转写任务查询失败: {polled.message}")
+            status = polled.output.get("task_status")
+            if status in ("PENDING", "RUNNING"):
+                time.sleep(self._POLL_INTERVAL_S)
+                continue
+            if status != "SUCCEEDED":
+                raise RuntimeError(f"转写任务失败: {polled.output.get('message')}")
+            return self._collect(polled.output.get("results") or [])
+        raise RuntimeError(f"转写任务超时（{self._POLL_TIMEOUT_S:.0f}s）")
+
+    def _collect(self, results: list[dict[str, Any]]) -> list[AsrSegment]:
+        """各文件转写 JSON 的 sentences → AsrSegment（字级 words 原样带上）。"""
+        import urllib.request
+
+        segments: list[AsrSegment] = []
+        for item in results:
+            url = item.get("transcription_url")
+            if not url:
+                continue
+            with urllib.request.urlopen(urllib.request.Request(url), timeout=60) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            for transcript in payload.get("transcripts", []):
+                for sentence in transcript.get("sentences", []):
+                    words = [
+                        WordSpan(
+                            start=int(w.get("begin_time", 0)) / 1000.0,
+                            end=int(w.get("end_time", 0)) / 1000.0,
+                            word=str(w.get("text", "")),
+                        )
+                        for w in sentence.get("words", [])
+                    ]
+                    segments.append(
+                        AsrSegment(
+                            start=int(sentence.get("begin_time", 0)) / 1000.0,
+                            end=int(sentence.get("end_time", 0)) / 1000.0,
+                            text=str(sentence.get("text", "")).strip(),
+                            words=words,
+                        )
+                    )
+        return segments

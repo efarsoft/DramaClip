@@ -35,7 +35,8 @@ def _line_cap_of(mode: str) -> int:
 
 # 注册表/可编辑 UI 的缺省文本（通用 60 字档）。运行时按模式组装见 _structure_prompt——
 # 超短不设 60 字帽（时长让位），但可编辑覆盖仍按单键单默认文本管理。
-# 旧 _STRUCTURE_PROMPT 常量已移除：运行期用 _structure_prompt(mode)，缺省见 _COPY_STRUCTURE_DEFAULT。
+# 旧 _STRUCTURE_PROMPT 常量已移除：运行期用 _structure_prompt(mode)，
+# 缺省见 _COPY_STRUCTURE_DEFAULT。
 
 
 

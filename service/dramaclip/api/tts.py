@@ -219,7 +219,8 @@ def _preview_audio(
     cached = _find_cached(root, key)
     if cached is not None:
         return cached
-    return _synthesize(engine, voice, text, models_dir, root, key)
+    api_key = str(context.settings.get("tts.api_key", ""))
+    return _synthesize(engine, voice, text, models_dir, root, key, api_key=api_key)
 
 
 def _content_key(engine: str, voice: str, text: str) -> str:
@@ -241,12 +242,18 @@ def _has_audio(path: Path) -> bool:
 
 
 def _synthesize(
-    engine: str, voice: str, text: str, models_dir: Path, root: Path, key: str
+    engine: str,
+    voice: str,
+    text: str,
+    models_dir: Path,
+    root: Path,
+    key: str,
+    api_key: str = "",
 ) -> Path:
     """先写临时名、成功后按真实容器原子搬正：半途失败的残留不能被下次当成缓存播出去。"""
     staging = root / f"{key}.{uuid.uuid4().hex}.mp3"
     try:
-        create_tts(engine, models_dir).synthesize(text, voice, staging)
+        create_tts(engine, models_dir, api_key=api_key).synthesize(text, voice, staging)
         if not _has_audio(staging):
             raise RuntimeError("引擎返回了空文件（0 字节），没有任何声音可播")
         path = root / f"{key}.{_extension_of(staging)}"

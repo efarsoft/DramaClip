@@ -495,7 +495,11 @@ class _EnginePool:
     """
 
     def __init__(
-        self, setting: str, models_dir: Path | None, log: LogFn | None
+        self,
+        setting: str,
+        models_dir: Path | None,
+        log: LogFn | None,
+        api_key: str = "",
     ) -> None:
         self._setting = setting
         self._explicit = not _is_auto(setting)
@@ -505,10 +509,13 @@ class _EnginePool:
         )
         self._models_dir = models_dir
         self._log = log
+        self._api_key = api_key
         self._instances: dict[str, tts_base.TtsEngine] = {}
         if self._explicit:
             # 显式引擎构造失败必须当场炸（未知引擎名 = 配置错误，不许当 auto 兜走）
-            self._instances[self._requested] = create_tts(self._requested, models_dir)
+            self._instances[self._requested] = create_tts(
+                self._requested, models_dir, api_key=api_key
+            )
 
     @property
     def label(self) -> str:
@@ -533,7 +540,7 @@ class _EnginePool:
             engine = self._instances.get(name)
             if engine is None:
                 try:
-                    engine = create_tts(name, self._models_dir)
+                    engine = create_tts(name, self._models_dir, api_key=self._api_key)
                 except Exception as exc:  # noqa: BLE001 - auto 链跳过构造不了的引擎
                     reasons.append(f"{name}: 构造失败 {type(exc).__name__}: {exc}")
                     continue
@@ -636,7 +643,7 @@ def synthesize_narration_texts(
     if not plan.narration_texts:
         return plan
     engine_setting = settings.get("tts.engine", "")
-    pool = _EnginePool(engine_setting, models_dir, log)
+    pool = _EnginePool(engine_setting, models_dir, log, api_key=settings.get("tts.api_key", ""))
     # 音色按引擎独立成键；兼容升级前仅存全局 tts.voice 的旧库。
     # auto 链下每段可能落在不同引擎上，段级 voice 缺省时逐引擎取键。
     speed = str(settings.get("tts.speed", "") or "")

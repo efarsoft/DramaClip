@@ -16,6 +16,7 @@ from dramaclip.engines.tts.base import EngineCaps, TtsEngine
 # 不同名是有意的：同引擎名将来还要装 CosyVoice3（placement funcosyvoice3），各占各目录。
 _MODEL_DIRS: dict[str, Path | None] = {
     "edge": None,
+    "cosyvoice_cloud": None,
     "kokoro": Path("tts") / "kokoro" / "Kokoro-82M-v1.1-zh",
     "indextts2": Path("tts") / "indextts2",
     "cosyvoice": Path("tts") / "cosyvoice300m",
@@ -39,11 +40,15 @@ def model_dir(models_dir: Path, engine: str) -> Path:
     return models_dir / relative
 
 
-def create(engine: str, models_dir: Path | None = None) -> TtsEngine:
+def create(engine: str, models_dir: Path | None = None, *, api_key: str = "") -> TtsEngine:
     if engine == "edge":
         from dramaclip.engines.tts.engines.edge import EdgeTtsEngine
 
         return EdgeTtsEngine()
+    if engine == "cosyvoice_cloud":
+        from dramaclip.engines.tts.engines.dashscope import DashscopeCosyVoiceEngine
+
+        return DashscopeCosyVoiceEngine(api_key=api_key)
     if engine == "kokoro":
         from dramaclip.engines.tts.engines.kokoro import KokoroEngine
 

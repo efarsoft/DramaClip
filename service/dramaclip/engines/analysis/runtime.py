@@ -6,6 +6,7 @@ from pathlib import Path
 
 from dramaclip.engines.analysis.transcriber import (
     AsrEngine,
+    DashscopeParaformerEngine,
     FasterWhisperEngine,
     ParaformerEngine,
     SenseVoiceEngine,
@@ -34,7 +35,7 @@ def supported() -> frozenset[str]:
     AED 无原生时间戳且单次推理上限 60s（整集 wav 必须先过 VAD 分窗）——清单不再挂
     「永远装不上」的死资产。
     """
-    return frozenset({"faster_whisper", "sensevoice", "paraformer"})
+    return frozenset({"faster_whisper", "sensevoice", "paraformer", "dashscope_paraformer"})
 
 
 def _build_transcriber(settings: config.Settings, models_dir: Path) -> AsrEngine:
@@ -44,6 +45,11 @@ def _build_transcriber(settings: config.Settings, models_dir: Path) -> AsrEngine
         raise ValueError(f"未知 ASR 引擎: {engine}（可用: {available}）")
     if engine == "sensevoice":
         return SenseVoiceEngine(models_dir=models_dir)
+    if engine == "dashscope_paraformer":
+        return DashscopeParaformerEngine(
+            api_key=settings.get("asr.api_key", ""),
+            model=settings.get("asr.model", "paraformer-v2") or "paraformer-v2",
+        )
     if engine == "paraformer":
         diarize = config.get_bool(settings, "asr.diarization")
         return ParaformerEngine(
