@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from dramaclip.engines.analysis.llm_refine import RefineOutcome, refine_segments
-from dramaclip.engines.analysis.models import AsrSegment, WordSpan
+from dramaclip.engines.analysis.models import AsrSegment, OcrSegment, WordSpan
 from dramaclip.engines.semantic.llm_client import LlmConfig
 
 _SETTINGS = {
@@ -15,6 +15,10 @@ _SETTINGS = {
     "llm.api_key": "sk-test",
     "llm.model": "test-model",
 }
+
+
+def _win(start: float, end: float, text: str) -> OcrSegment:
+    return OcrSegment(start=start, end=end, text=text, conf=0.9)
 
 
 def _seg(text: str, start: float = 0.0) -> AsrSegment:
@@ -45,6 +49,7 @@ def _run(
     reply: list[str],
     segments: list[AsrSegment],
     ocr_text: str = "",
+    windows: list[OcrSegment] | None = None,
 ) -> RefineOutcome:
     _FakeClient.reply = reply
     monkeypatch.setattr(
@@ -53,7 +58,9 @@ def _run(
     )
     return refine_segments(
         segments,
-        ocr_text=ocr_text,
+        ocr_segments=(
+            windows if windows is not None else ([_win(0.0, 1.0, ocr_text)] if ocr_text else [])
+        ),
         project_name="大明：灭国前，我觉醒了",
         hotwords="东厂 崇祯 锦衣卫",
         settings=_SETTINGS,
@@ -61,19 +68,21 @@ def _run(
 
 
 def test_refine_splits_and_fixes_homophones(monkeypatch: pytest.MonkeyPatch) -> None:
-    """并句+同音错字一次修：传承→穿成（同音）跨句断开，时间取字戳。"""
+    """并句+同音错字一次修：传承→穿成（同音）；行时间=字幕窗锚定（窗锚定核心断言）。"""
     raw = [_seg("我传承崇祯皇帝干的第一件事", start=1.5)]
     outcome = _run(
         monkeypatch,
         ["我穿成崇祯皇帝", "干的第一件事"],
         raw,
-        ocr_text="我穿成崇祯皇帝干的第一件事",
+        windows=[_win(0.0, 1.5, "我穿成崇祯皇帝"), _win(2.0, 3.5, "干的第一件事")],
     )
     assert outcome.applied
     assert [s.text for s in outcome.segments] == ["我穿成崇祯皇帝", "干的第一件事"]
-    assert outcome.segments[0].start == pytest.approx(1.5)
-    assert outcome.segments[0].end == pytest.approx(2.2), "句末=末个有据字（帝）的时间戳"
-    assert "字幕参考" in _FakeClient.last_user, "字幕读数作为证据进提示词"
+    assert outcome.segments[0].start == pytest.approx(0.0), "窗锚定：行时间=窗起点"
+    assert outcome.segments[0].end == pytest.approx(1.5), "窗锚定：行时间=窗终点"
+    assert outcome.segments[1].start == pytest.approx(2.0)
+    assert outcome.segments[1].end == pytest.approx(3.5)
+    assert "字幕窗" in _FakeClient.last_user, "字幕窗列表进提示词"
 
 
 def test_refine_near_pinyin_with_ocr_evidence_passes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -83,7 +92,7 @@ def test_refine_near_pinyin_with_ocr_evidence_passes(monkeypatch: pytest.MonkeyP
         monkeypatch,
         ["就是杀了大明两大蛀虫"],
         raw,
-        ocr_text="就是杀了大明两大蛀虫一个是权势滔天",
+        windows=[_win(3.5, 5.0, "就是杀了大明两大蛀虫"), _win(6.0, 8.0, "一个是权势滔天")],
     )
     assert outcome.applied
     assert outcome.segments[0].text == "就是杀了大明两大蛀虫"
@@ -101,7 +110,7 @@ def test_refine_repairs_content_deletion(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_refine_repairs_unrelated_substitution(monkeypatch: pytest.MonkeyPatch) -> None:
     """丁→戊 既不同音也非近音 → 回退原字（防 LLM 改写句式的幻觉）。"""
     raw = [_seg("甲乙丙丁", start=0.0)]
-    outcome = _run(monkeypatch, ["甲乙丙戊"], raw, ocr_text="戊")
+    outcome = _run(monkeypatch, ["甲乙丙戊"], raw, ocr_text="")
     assert outcome.applied
     assert "自动修复 1 处" in outcome.detail
     assert outcome.segments[0].text == "甲乙丙丁", "非法替换回退原字"
@@ -123,7 +132,7 @@ def test_refine_llm_unconfigured_falls_back(monkeypatch: pytest.MonkeyPatch) -> 
         lambda _s: _FakeClient(),
     )
     outcome = refine_segments(
-        raw, ocr_text="", project_name="剧", hotwords="", settings={"llm.base_url": ""}
+        raw, ocr_segments=[], project_name="剧", hotwords="", settings={"llm.base_url": ""}
     )
     assert not outcome.applied
     assert outcome.detail == "LLM 未配置"
@@ -141,7 +150,7 @@ def test_refine_llm_failure_falls_back_with_detail(monkeypatch: pytest.MonkeyPat
     )
     raw = [_seg("甲乙丙丁", start=0.0)]
     outcome = refine_segments(
-        raw, ocr_text="", project_name="剧", hotwords="", settings=_SETTINGS
+        raw, ocr_segments=[], project_name="剧", hotwords="", settings=_SETTINGS
     )
     assert not outcome.applied
     assert "boom" in outcome.detail
@@ -168,7 +177,7 @@ def test_refine_retries_once_on_bad_shape(monkeypatch: pytest.MonkeyPatch) -> No
     )
     outcome = refine_segments(
         [_seg("甲乙丙丁", start=0.0)],
-        ocr_text="",
+        ocr_segments=[],
         project_name="剧",
         hotwords="",
         settings=_SETTINGS,

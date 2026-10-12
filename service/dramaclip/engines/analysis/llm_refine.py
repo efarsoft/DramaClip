@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from pypinyin import lazy_pinyin
 
-from dramaclip.engines.analysis.models import AsrSegment
+from dramaclip.engines.analysis.models import AsrSegment, OcrSegment
 from dramaclip.engines.semantic.llm_client import (
     LlmConfig,
 )
@@ -177,12 +177,17 @@ def _repair(
 def refine_segments(
     segments: list[AsrSegment],
     *,
-    ocr_text: str,
+    ocr_segments: list[OcrSegment] | None,
     project_name: str,
     hotwords: str,
     settings: dict[str, str],
 ) -> RefineOutcome:
-    """精炼主入口：断句+校对单次调用 → 护栏 → 映射。任何失败按分档回退原生分段。"""
+    """精炼主入口：断句+校对单次调用 → 护栏 → 字幕窗时间映射。失败按分档回退原生分段。
+
+    字幕窗（画面事实）作为输入信息喂给 LLM——原作者的分句节奏对模型可见，
+    断句粒度与时间轴自然锚定；LLM 只做它最擅长的：语义断句微调与同音纠错。
+    """
+    windows = _windows(ocr_segments or [])
     if not segments:
         return RefineOutcome(segments=segments, applied=False, detail="无输入段")
     stream = stream_of(segments)
@@ -198,7 +203,7 @@ def refine_segments(
     client = llm_from_settings(settings)
 
     raw_text = "".join(c.char for c in stream)
-    prompt_user = _user_prompt(raw_text, ocr_text, project_name, hotwords)
+    prompt_user = _user_prompt(raw_text, windows, project_name, hotwords)
     system = _SYSTEM_PROMPT
 
     sentences: list[str] | None = None
@@ -218,9 +223,9 @@ def refine_segments(
         _LOGGER.warning("转写精炼跳过：%s；产物为原生分段", detail)
         return RefineOutcome(segments=segments, applied=False, detail=detail)
 
-    ocr_reference = ocr_text.replace(" ", "")
+    ocr_reference = "".join(text for _s, _e, text in windows).replace(" ", "")
     repaired, issues = _repair(stream, sentences, ocr_reference)
-    refined = _to_segments(sentences, repaired)
+    refined = _to_segments(sentences, repaired, windows)
     if issues:
         _LOGGER.warning("转写精炼护栏自动修复 %d 处（回退原字/丢弃无据字）", issues)
     return RefineOutcome(
@@ -230,12 +235,33 @@ def refine_segments(
     )
 
 
+def _windows(ocr_segments: list[OcrSegment]) -> list[tuple[float, float, str]]:
+    """字幕窗：相邻同文本条合并为驻留窗——窗=一条字幕的在屏时间与读数。"""
+    windows: list[tuple[float, float, str]] = []
+    for bar in ocr_segments:
+        text = bar.text.strip()
+        if not text:
+            continue
+        compact = text.replace(" ", "")
+        if windows and windows[-1][2].replace(" ", "") == compact:
+            s0, e0, _ = windows[-1]
+            windows[-1] = (min(s0, bar.start), max(e0, bar.end), text)
+        else:
+            windows.append((bar.start, bar.end, text))
+    return windows
+
+
 def _to_segments(
     sentences: list[str],
     repaired: list[list[_Entry]],
+    windows: list[tuple[float, float, str]],
 ) -> list[AsrSegment]:
-    """句子 → AsrSegment：内容字取修复结果、按原句标点模板重排；时间=首末有据字戳。"""
+    """句子 → AsrSegment：文本=修复后内容字按标点模板重排；时间=字幕窗锚定。
+
+    数量不符（LLM 断句数与窗数不一致）时按比例分配窗时间。
+    """
     result: list[AsrSegment] = []
+    n, w = len(sentences), len(windows)
     for index, sentence in enumerate(sentences):
         contents = repaired[index] if index < len(repaired) else []
         template: list[tuple[str, int | None]] = []
@@ -261,7 +287,6 @@ def _to_segments(
                 if entry.end is not None:
                     end = entry.end
                 ci += 1
-        # 还原/有据补字超出模板的部分尾部续齐（护栏还原的删字、字幕有据补字）
         while ci < len(contents):
             entry = contents[ci]
             parts.append(entry.char)
@@ -271,24 +296,37 @@ def _to_segments(
                 end = entry.end
             ci += 1
         text = "".join(parts).strip()
-        if text and _content(text):
-            end_known = end if end is not None else start
-            result.append(
-                AsrSegment(
-                    start=round(start, 3) if start is not None else 0.0,
-                    end=round(end_known, 3) if end_known is not None else 0.0,
-                    text=text,
-                )
-            )
+        if not text or not _content(text):
+            continue
+        start_f: float = 0.0
+        end_f: float = 0.0
+        if w > 0:
+            lo = index * w // n
+            hi = min(max((index + 1) * w // n, lo + 1), w)
+            start_f, end_f = windows[lo][0], windows[hi - 1][1]
+        else:
+            if contents:
+                start_f = contents[0].start or 0.0
+                end_f = contents[-1].end or 0.0
+        result.append(AsrSegment(start=round(start_f, 3), end=round(end_f, 3), text=text))
     return result
 
 
-def _user_prompt(raw_text: str, ocr_text: str, project_name: str, hotwords: str) -> str:
+def _user_prompt(
+    raw_text: str,
+    windows: list[tuple[float, float, str]],
+    project_name: str,
+    hotwords: str,
+) -> str:
     parts = [f"剧名：《{project_name}》"]
     if hotwords.strip():
         parts.append(f"热词（可能涉及的专有名）：{hotwords.strip()}")
-    if ocr_text.strip():
-        parts.append(f"字幕参考（画面叠加字幕，仅供纠错参考）：{ocr_text}")
+    if windows:
+        lines = [f"[{s:.1f}-{e:.1f}s] {text}" for s, e, text in windows]
+        parts.append(
+            "字幕窗（每条字幕的在屏时间与读数——原作者的分句节奏，"
+            "你的断句应与此节奏对应；窗内读数仅供纠错参考）：\n" + "\n".join(lines)
+        )
     parts.append(f"语音识别字流：\n{raw_text}")
     return "\n".join(parts)
 

@@ -740,7 +740,7 @@ def _analyze_one(
             # 分档：LLM 未配置/护栏拒绝/调用失败都回退融合产物，不挡分析。
             refine_outcome = llm_refine.refine_segments(
                 asr_segments,
-                ocr_text="".join(o.text for o in (ocr_segments or [])),
+                ocr_segments=ocr_segments,
                 project_name=_project_name_of(context, episode),
                 hotwords=hotwords,
                 settings=context.settings,
