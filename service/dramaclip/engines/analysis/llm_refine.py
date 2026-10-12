@@ -273,41 +273,25 @@ def _to_segments(
                 template.append((ch, cursor))
                 cursor += 1
         parts: list[str] = []
-        start: float | None = None
-        end: float | None = None
-        ci = 0
         for ch, pos in template:
             if pos is None:
                 parts.append(ch)
             elif pos < len(contents):
-                entry = contents[pos]
-                parts.append(entry.char)
-                if start is None and entry.start is not None:
-                    start = entry.start
-                if entry.end is not None:
-                    end = entry.end
-                ci += 1
-        while ci < len(contents):
-            entry = contents[ci]
-            parts.append(entry.char)
-            if start is None and entry.start is not None:
-                start = entry.start
-            if entry.end is not None:
-                end = entry.end
-            ci += 1
+                parts.append(contents[pos].char)
+        # 护栏还原/有据补字超出 LLM 模板槽位的部分尾部续齐（内容完整性优先）
+        while cursor < len(contents):
+            parts.append(contents[cursor].char)
+            cursor += 1
         text = "".join(parts).strip()
         if not text or not _content(text):
             continue
-        start_f: float = 0.0
-        end_f: float = 0.0
+        start_f = contents[0].start if contents and contents[0].start is not None else 0.0
+        end_last = contents[-1] if contents else None
+        end_f = end_last.end if end_last is not None and end_last.end is not None else start_f
         if w > 0:
             lo = index * w // n
             hi = min(max((index + 1) * w // n, lo + 1), w)
             start_f, end_f = windows[lo][0], windows[hi - 1][1]
-        else:
-            if contents:
-                start_f = contents[0].start or 0.0
-                end_f = contents[-1].end or 0.0
         result.append(AsrSegment(start=round(start_f, 3), end=round(end_f, 3), text=text))
     return result
 
