@@ -7,11 +7,13 @@ import contextlib
 import json
 import logging
 import re
+import shutil
 import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from dramaclip.engines.analysis import pause_split
 from dramaclip.engines.analysis.models import AsrSegment, WordSpan
 
 _LOGGER = logging.getLogger(__name__)
@@ -262,6 +264,38 @@ class ParaformerEngine:
         self, wav_path: Path, language: str = "zh", *, hotwords: str = ""
     ) -> list[AsrSegment]:
         model = self._ensure_model()
+        try:
+            clips = pause_split.speech_clips(wav_path)
+        except (OSError, ValueError):
+            # 停顿分析失败（文件不可读/过短）→ 退回整条直喂（分档：老路径仍可用）
+            clips = []
+        with _punc_false_alarm_silenced():
+            if len(clips) <= 1:
+                return self._transcribe_one(model, wav_path, language, hotwords)
+            # 停顿切分：BGM 素材下 funasr 内部 VAD 分不清「人声停了」与「安静」，
+            # 跨停顿并句 + 字戳插值漂移都源于整条直喂。按能量谷切短语片段逐段转写，
+            # 时间戳以片段起点为锚（真实切分位置），并句/串音物理消失。
+            work = wav_path.parent / f"{wav_path.stem}-clips"
+            segments: list[AsrSegment] = []
+            try:
+                for clip, clip_path in pause_split.split_wav(wav_path, clips, work):
+                    for seg in self._transcribe_one(model, clip_path, language, hotwords):
+                        segments.append(
+                            seg.model_copy(
+                                update={
+                                    "start": round(seg.start + clip.start, 3),
+                                    "end": round(seg.end + clip.start, 3),
+                                }
+                            )
+                        )
+            finally:
+                shutil.rmtree(work, ignore_errors=True)
+            segments.sort(key=lambda s: s.start)
+            return segments
+
+    def _transcribe_one(
+        self, model: AutoModel, wav_path: Path, language: str, hotwords: str
+    ) -> list[AsrSegment]:
         with _punc_false_alarm_silenced():
             raw = model.generate(
                 input=str(wav_path),

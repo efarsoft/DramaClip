@@ -29,6 +29,8 @@ DEFAULTS: dict[str, str] = {
     "asr.language": "zh",
     # 视觉轨档位（P2b）：kind=vision 的 model_id（qwen3-vl-2b/4b/8b）；空 = 视觉轨关闭（分档语义）
     "vision.model": "",
+    # 停顿切分（P1 本地 ASR 基础设施）：能量检测找句间停顿，按停顿切片段逐段转写；"0"=整条直喂
+    "asr.pause_split": "1",
     # P1 云端引擎凭据（按量计费；空 = 云端引擎不可用，本地引擎不受影响）
     "asr.api_key": "",
     "tts.api_key": "",

@@ -7,7 +7,8 @@
 
 单次 LLM 调用输出「切好句、修同音错字」的句子数组；**对齐审计护栏（纯代码）**
 验证输出不得丢失内容、替换必须拼音同/近音、凭空插入必须有字幕读数佐证——
-LLM 的自由度被数学约束在「移动边界 + 同音替换 + 有据补字」内。
+LLM 的自由度被数学约束在「移动边界 + 同音替换 + 有据补字」内；非法编辑
+（丢字/改写句式/凭空造字）由护栏**自动修复**（回退原字/丢弃），合法修正全保留。
 护栏拒绝 → 回退 paraformer 原生分段（完整句兜底）+ WARN，不挡分析（分档语义）。
 """
 
@@ -88,7 +89,7 @@ def stream_of(segments: list[AsrSegment]) -> list[_Char] | None:
     stream: list[_Char] = []
     for seg in segments:
         words = [(word, ch) for word in seg.words for ch in _content(word.word)]
-        text_chars = [ch for ch in _marks(seg.text)]
+        text_chars = [ch for ch in seg.text if ch not in _PUNCT]
         if len(words) != len(text_chars):
             return None
         for (word, ch), _mark in zip(words, text_chars, strict=True):
@@ -98,10 +99,6 @@ def stream_of(segments: list[AsrSegment]) -> list[_Char] | None:
 
 def _content(text: str) -> str:
     return "".join(ch for ch in text if ch not in _PUNCT)
-
-
-def _marks(text: str) -> list[tuple[str, bool]]:
-    return [(ch, ch not in _PUNCT) for ch in text]
 
 
 def _repair(
