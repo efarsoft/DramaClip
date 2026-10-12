@@ -289,7 +289,14 @@ def _to_segments(
             lo = index * w // n
             hi = min(max((index + 1) * w // n, lo + 1), w)
             start_f, end_f = windows[lo][0], windows[hi - 1][1]
-        result.append(AsrSegment(start=round(start_f, 3), end=round(end_f, 3), text=text))
+        result.append(
+            AsrSegment(
+                start=round(start_f, 3),
+                end=round(end_f, 3),
+                text=text,
+                source="llm_refined",
+            )
+        )
     return result
 
 

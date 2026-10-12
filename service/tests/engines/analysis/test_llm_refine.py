@@ -78,6 +78,7 @@ def test_refine_splits_and_fixes_homophones(monkeypatch: pytest.MonkeyPatch) -> 
     )
     assert outcome.applied
     assert [s.text for s in outcome.segments] == ["我穿成崇祯皇帝", "干的第一件事"]
+    assert all(s.source == "llm_refined" for s in outcome.segments), "精炼段必须带身份标记"
     assert outcome.segments[0].start == pytest.approx(0.0), "窗锚定：行时间=窗起点"
     assert outcome.segments[0].end == pytest.approx(1.5), "窗锚定：行时间=窗终点"
     assert outcome.segments[1].start == pytest.approx(2.0)
