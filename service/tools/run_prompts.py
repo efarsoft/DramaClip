@@ -20,11 +20,10 @@ import os
 import sys
 from pathlib import Path
 
-from dramaclip.engines.narration import scriptwriter as SW
-from dramaclip.engines.narration import copywriter as CW
 from dramaclip.engines.narration import audit as A
-from dramaclip.engines.semantic.llm_client import LlmClient, from_settings, LlmUnavailable
-
+from dramaclip.engines.narration import copywriter as CW
+from dramaclip.engines.narration import scriptwriter as SW
+from dramaclip.engines.semantic.llm_client import LlmClient, from_settings
 
 # ---------------------------------------------------------------------------
 # 样例
@@ -64,7 +63,7 @@ def _slots_fixture() -> list[dict]:
 
 def _mock_script(project: str) -> dict:
     return {
-        "hook": f"被当众骂作贱婢的苏明月，竟藏着能掀翻整座苏府的婚书。",
+        "hook": "被当众骂作贱婢的苏明月，竟藏着能掀翻整座苏府的婚书。",
         "segments": [
             {"episode": 1, "start": 0.0, "end": 12.5,
              "text": "苏明月被嫡姐当众斥作贱婢，可没人知道，那纸婚书早被妹妹悄悄藏了起来。"},
@@ -159,11 +158,11 @@ def cmd_run(args) -> int:
         report = A.review_copy(output, slots, mode=args.mode_label or "")
 
     print("=" * 70)
-    print(f"真实组装的 SYSTEM 提示词（来自 build_*_request，与生成函数同源）")
+    print("真实组装的 SYSTEM 提示词（来自 build_*_request，与生成函数同源）")
     print("=" * 70)
     print(system)
     print("\n" + "=" * 70)
-    print(f"真实组装的 USER 提示词")
+    print("真实组装的 USER 提示词")
     print("=" * 70)
     print(user)
     print("\n" + "=" * 70)

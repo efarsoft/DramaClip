@@ -24,6 +24,22 @@ _SELECT_TIMEOUT_S = 60.0
 LogFn = Callable[[str, str], None]
 
 
+def _resolve_min_segments(settings: dict[str, str]) -> int:
+    """段数下限旋钮：默认走 scriptwriter 常量；settings.narration_min_segments
+    可被业主微调。业主优先级为「质量/完整度 > 时长」，故默认压得很低，避免逼
+    短故事复述或整条失败；题材需要时调高即可（2~30 之外忽略，回落默认）。
+    """
+    raw = settings.get("narration_min_segments") if isinstance(settings, dict) else None
+    if raw:
+        try:
+            val = int(str(raw).strip())
+            if 2 <= val <= 30:
+                return val
+        except (TypeError, ValueError):
+            pass
+    return scriptwriter._MIN_BODY_SEGMENTS
+
+
 def resolve_run_style(
     settings: dict[str, str],
     episode_inputs: list[dict[str, Any]],
@@ -68,7 +84,7 @@ def script_dialogue_plan(
     *,
     angle_block: str,
     trace_dir: Any = None,
-    min_segments: int = scriptwriter._MIN_BODY_SEGMENTS,
+    min_segments: int | None = None,
 ) -> tuple[PlanData, list[str]]:
     """跨集剧本驱动的对话解说。LLM 未配置或剧本不合格一律抛（降级已禁止）。
     """
@@ -81,6 +97,8 @@ def script_dialogue_plan(
 
     # 基本功层内置于编剧 system prompt；口味层 directives 注入 user prompt
     llm = LlmClient(config, timeout_s=SCRIPT_LLM_TIMEOUT_S)
+    if min_segments is None:
+        min_segments = _resolve_min_segments(settings)
     trace_path = None
     if trace_dir is not None:
         trace_dir = Path(trace_dir)

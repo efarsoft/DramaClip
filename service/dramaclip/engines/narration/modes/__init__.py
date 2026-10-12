@@ -24,6 +24,38 @@ _CTA_FALLBACK_S = 2.0
 
 _HIGHLIGHT_CLIP_S = 5.0   # 高光混剪的单条时长（真机参考：13×5s ≈ 65s 预告）
 _HIGHLIGHT_MAX_CLIPS = 15  # 条数上限：时长让位≠无限堆料，预告形态 75s 内最猛
+_ADJACENT_GAP_S = 1.5  # 邻接合并阈值：同集间隙 ≤1.5s（基本贴合）才合并；间隙大的各自成段保留节奏
+_HIGHLIGHT_CLIP_S = 5.0   # 高光混剪的单条时长（真机参考：13×5s ≈ 65s 预告）
+_HIGHLIGHT_MAX_CLIPS = 15  # 条数上限：时长让位≠无限堆料，预告形态 75s 内最猛
+
+
+def _merge_adjacent(ordered: list[EpisodeScene]) -> list[EpisodeScene]:
+    """邻接合并：同集且首尾间隙 ≤8s 的选中场景合成一个连续块。
+
+    纯冲突分排序会让时间轴在高分场景之间反复横跳（真机 raw_clip 20 段 11 跳场、
+    高光混剪 6 处）——相邻的高分场景本就是连续剧情，合并成块播放，块内不再
+    跳场，叙事完整度优先于碎片化快切。
+    """
+    if not ordered:
+        return ordered
+    merged: list[EpisodeScene] = [ordered[0]]
+    for scene in ordered[1:]:
+        last = merged[-1]
+        if (
+            scene.episode_id == last.episode_id
+            and 0.0 <= scene.start - last.end <= _ADJACENT_GAP_S
+        ):
+            merged[-1] = EpisodeScene(
+                episode_id=last.episode_id,
+                number=last.number,
+                scene_index=last.scene_index,
+                start=last.start,
+                end=scene.end,
+                score=max(last.score, scene.score),
+            )
+        else:
+            merged.append(scene)
+    return merged
 
 
 def build_highlight_cut(
@@ -35,6 +67,7 @@ def build_highlight_cut(
     参考真机混剪流程：选段=冲突分头部、时长=统一 5 秒快切、顺序=时间序
     （预告叙事），冲突分最高的场景前置做开场；零 TTS 零字幕加工，
     BGM 床由 selector 按主导情绪选曲（should_add_bgm 默认开）。
+    邻接合并不适用于此模式：快切本身就是节奏，碎片化是设计意图而非缺陷。
     """
     if not scenes:
         return PlanData(mode="highlight_cut", strategy=strategy)
@@ -85,6 +118,8 @@ def build_raw_clip(
         candidates = ranked
 
     ordered = sorted(candidates, key=episode_order)
+    # 邻接合并：相邻高分场景合成连续块播放，减少时间轴反复横跳
+    ordered = _merge_adjacent(ordered)
     best = max(ordered, key=lambda s: s.score)
     # 身份比较用 `is`，不用 `scene_index`：scene_index 只在**一集内**唯一，
     # 第 1 集的第 4 个场景与第 5 集的第 4 个场景 index 相同，跨集时按 index 判

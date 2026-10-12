@@ -201,7 +201,7 @@ def test_user_block_points_at_the_band_instead_of_canceling_it() -> None:
     """
     user = _user_sent()
     assert "段数由剧情需要决定" not in user
-    assert "段数区间" in user
+    assert "段数随剧情需要" in user
 
 
 

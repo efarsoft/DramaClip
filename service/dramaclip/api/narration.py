@@ -445,6 +445,14 @@ def _score_batch(
     rows = plans_repo.list_by_batch(context.conn, project_id, job_id)
     if not rows:
         return
+    # 纯原片剪辑/字幕金句流/高光混剪设计上就没有旁白文案：拿「文案六维」去评它们，
+    # 评分器只能给全 1 分外加一句「补上开场首句口播」——那是把设计当缺陷报。
+    # 真机实测：1.0 分把这三个模式永久踩在方案列表底部，建议还劝用户给不该有
+    # 旁白的模式加旁白。它们不参与文案评分，score_total 留 NULL，
+    # 由 rank_variants 的「无分沉底」处理，顺序语义不变。
+    rows = [row for row in rows if row.get("narration_mode") not in _NO_TTS_MODES]
+    if not rows:
+        return
     try:
         scored = variant_scoring.score_variants(
             rows, settings, trace_dir=llm_trace_dir(context)
