@@ -165,7 +165,7 @@ function VisualTrackCard({
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}>
         {frames.map((frame) => (
           <div
-            key={`${frame.t}-${frame.scene}`}
+            key={`${String(frame.t)}-${frame.scene}`}
             style={{ display: 'flex', gap: tokens.spaceSm, alignItems: 'baseline' }}
           >
             <button
