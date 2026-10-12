@@ -56,9 +56,10 @@ target-version = "py312"
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
-# scriptwriter 的主体是中文提示词数据（内容即数据，行长不是代码行长；
-# 折行会改发往 LLM 的字节，宁可不折）。
+# scriptwriter 与 tools/* 的主体是中文提示词/夹具数据（内容即数据，行长不是
+# 代码行长；折行会改发往 LLM 的字节，宁可不折）。
 "**/narration/scriptwriter.py" = ["E501"]
+"tools/*" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

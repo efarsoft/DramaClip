@@ -100,10 +100,11 @@ def cmd_suggest(args) -> int:
     if not Path(args.log).exists():
         print(f"无日志 {args.log}，先跑 audit --log")
         return 2
-    records = [json.loads(l) for l in Path(args.log).read_text(encoding="utf-8").splitlines() if l.strip()]
+    lines = Path(args.log).read_text(encoding="utf-8").splitlines()
+    records = [json.loads(line) for line in lines if line.strip()]
     props = A.propose_prompt_tweaks(records, min_hits=args.min_hits)
     if not props:
-        print("暂无反复失守（fail>=%d）的硬规则，prompt 暂不需加固。" % args.min_hits)
+        print(f"暂无反复失守（fail>={args.min_hits}）的硬规则，prompt 暂不需加固。")
         return 0
     print(f"# 持续优化建议（基于 {len(records)} 条审查记录）\n")
     for p in props:
