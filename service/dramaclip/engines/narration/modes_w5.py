@@ -78,8 +78,9 @@ def build_cross(
                 audio="original",
             )
         )
-        # 场景间插入旁白段（画面延续到下一场景开头；末尾场景后用本场景尾部）
-        anchor = picked[index + 1] if index + 1 < len(picked) else scene
+        # 场景间插入旁白段（画面锚**当前场景尾部**——旁白压在刚看过画面的延续帧上，
+        # 下一场景原声出场时是全新画面。旧实现锚下一场景开头：旁白预览+原声重播
+        # 同一段画面连放两遍，业主实测=重复/闪烁）
         narration_seconds = _HOOK_TTS_FALLBACK_S
         slot_id = f"cross-{index + 1}"
         texts.append(
@@ -91,14 +92,13 @@ def build_cross(
                 "一句指向看全集，禁止关注/点赞",
             )
         )
+        # 旁白画面：当前场景尾部（收尾旁白=末场景自己的尾巴）
+        tail_start = round(max(scene.start, scene.end - narration_seconds), 3)
         segments.append(
             TimelineSegment(
-                # 集号跟**锚点**走，不跟上一段的 scene 走：这一段画面就是 anchor 的开头。
-                # 沿用 scene.episode_id 会让渲染去另一集的同一秒取画面（`export_plan`
-                # 按 segment.episode_id 查 episode_paths），出错片而不报错。
-                episode_id=anchor.episode_id,
-                start=round(anchor.start, 3),
-                end=round(anchor.start + narration_seconds, 3),
+                episode_id=scene.episode_id,
+                start=tail_start,
+                end=round(scene.end, 3),
                 audio="narration",
                 narration_id=slot_id,
             )

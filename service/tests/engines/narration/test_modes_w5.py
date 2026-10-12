@@ -73,8 +73,9 @@ def _material_with_beats(beats: tuple[float, ...]) -> casting.MaterialByEpisode:
 
 
 def test_cross_original_ends_snap_but_narration_ends_do_not() -> None:
-    """原声段 end 吸附到 0.1s 外的拍点；23.9 这个拍点紧贴第一个旁白段 end（24.0），
-    旁白段仍不动——旁白段长由 TTS 实测回填（批次一逻辑），规划期吸附它没有意义。"""
+    """原声段 end 吸附到 0.1s 外的拍点；旁白段改压**当前场景尾部**（修复业主实测
+    重复/闪烁：旧锚定预览下一场景开头后原声又重播同段画面）。旁白段仍不吸附拍点
+    ——长度归 TTS 实测回填，规划期吸附它没有意义。"""
     beats = tuple(_BEATS_NEAR_ORIGINAL_ENDS) + (23.9,)
     plan = build_cross(stamp([(1, "ep1", _scenes())]), _STRATEGY, _material_with_beats(beats))
     originals = [seg for seg in plan.timeline if seg.audio == "original"]
@@ -82,7 +83,15 @@ def test_cross_original_ends_snap_but_narration_ends_do_not() -> None:
     assert [seg.end for seg in originals] == _BEATS_NEAR_ORIGINAL_ENDS
     # 起点是镜头边界，不吸附
     assert [seg.start for seg in originals] == [0.0, 20.0, 60.0, 80.0, 100.0, 140.0]
-    assert [seg.end for seg in narrations] == [24.0, 64.0, 84.0, 104.0, 144.0, 144.0]
+    # 旁白画面=当前场景尾 4s：六个桥接段各自压本场景 [end-4, end]
+    assert [(seg.start, seg.end) for seg in narrations] == [
+        (11.0, 15.0),
+        (31.0, 35.0),
+        (71.0, 75.0),
+        (91.0, 95.0),
+        (111.0, 115.0),
+        (151.0, 155.0),
+    ]
 
 
 def test_ultra_short_conflict_window_snaps_hook_and_cta_do_not() -> None:

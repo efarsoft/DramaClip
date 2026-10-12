@@ -149,8 +149,8 @@ def test_cross_original_window_follows_the_line() -> None:
     originals = [s for s in plan.timeline if s.audio == "original"]
     assert (originals[0].start, originals[0].end) == (0.0, 3.5)
     narrations = [s for s in plan.timeline if s.audio == "narration"]
-    assert (narrations[0].start, narrations[0].end) == (0.0, 4.0), (
-        "旁白占位段不随台词收缩——它的长度归 TTS 实测回填"
+    assert (narrations[0].start, narrations[0].end) == (8.0, 12.0), (
+        "旁白画面锚当前场景尾部（场景 0-12s 的尾 4s）；长度归 TTS 实测回填"
     )
 
 
