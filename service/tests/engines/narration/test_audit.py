@@ -122,8 +122,9 @@ def test_propose_aggregates_repeated_hard_fails() -> None:
 def test_real_fanfiction_sample_surfaces_soft_risks() -> None:
     """真实出稿：结构全过但内容为编造时，审计器不能假绿。
 
-    复现 2026-10-10 用户样本：模型为凑「真实锚点」硬造「八千两/九千岁」，
-    并用「竟是」抖包袱。无转写时仍须把这些标成 soft 需人工复核。
+    复现 2026-10-10 用户样本：模型为凑「真实锚点」硬造「八千两/九千岁」。
+    揭晓腔规则已按业主裁决移除（竟/居然合法），无转写时仍须把编造锚点、
+    跨集因果标成 soft 需人工复核。
     """
     import json
     import pathlib
@@ -134,7 +135,6 @@ def test_real_fanfiction_sample_surfaces_soft_risks() -> None:
     )
     rep = A.review_script(sample, transcript=None)  # 无转写：编造检查跳过，但新软规则必须触发
     flagged = {f.rule_id for f in rep.soft_flags}
-    assert "FUND_NO_REVEAL_TELL" in flagged        # segment[2] 「竟是当朝九千岁」
     assert "FUND_NO_INVENTED_ANCHOR" in flagged    # 「八千两」「九千岁」转写外硬锚点
     assert "FUND_CROSS_EPISODE_BRIDGE" in flagged  # ep1→ep2 跨集需人工确认因果
     # 结构上仍判 PASS（无 hard 失守），但绝不能「无脑全绿」

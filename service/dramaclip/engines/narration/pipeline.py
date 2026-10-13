@@ -525,6 +525,18 @@ class _EnginePool:
         """音色按引擎独立成键；兼容升级前仅存全局 tts.voice 的旧库。"""
         return settings.get(f"tts.voice.{self._setting}") or settings.get("tts.voice") or ""
 
+    def accepts_voice(self, voice: str) -> bool:
+        """段级音色对请求引擎是否有意义；克隆系引擎要求真实存在的音频文件。
+
+        双人对谈/内心独白模式在槽位里硬编码的是 Edge 音色名——引擎切到克隆系
+        （indextts2，音色=参考音频文件）时段级名字不再是文件，必须回退引擎默认
+        音色，否则克隆引擎拿 Edge 名当路径直接报错（真机：mono-1 合成失败）。
+        edge/kokoro 的音色名体系维持现状（非空即有效）。
+        """
+        if self._requested != "indextts2":
+            return True
+        return bool(voice) and Path(voice).is_file()
+
     def synthesize_item(
         self,
         item_id: str,
@@ -651,8 +663,12 @@ def synthesize_narration_texts(
     voiced: dict[str, tuple[str, str, float]] = {}  # id → (audio_path, text, duration)
     total_segments = len(plan.narration_texts)
     for item in plan.narration_texts:
-        # 段级 voice 优先（双人对谈的双音色），缺省用全局设置
+        # 段级 voice 优先（双人对谈的双音色）——但仅当它对当前引擎有意义：
+        # 双人/独白槽位硬编码的是 Edge 音色名，引擎切到克隆系后名字不再是文件，
+        # 必须回退引擎默认音色（voice_for），否则克隆引擎拿名字当路径报错。
         voice = item.voice or pool.voice_for(settings)
+        if item.voice and not pool.accepts_voice(item.voice):
+            voice = pool.voice_for(settings)
         try:
             audio_path = pool.synthesize_item(
                 item.id, item.text, voice, speed, work_dir, cache_dir

@@ -7,6 +7,7 @@ import {
   InfoOutlined,
   PlaySquareOutlined,
   SettingOutlined,
+  ToolOutlined,
 } from '@ant-design/icons';
 
 export type NavGroup = 'loop' | 'config';
@@ -24,6 +25,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { path: '/', label: '工作台', icon: DashboardOutlined, group: 'loop' },
   { path: '/projects', label: '项目', icon: FolderOutlined, group: 'loop' },
   { path: '/works', label: '成品', icon: PlaySquareOutlined, group: 'loop' },
+  { path: '/tools', label: '工具箱', icon: ToolOutlined, group: 'loop' },
   { path: '/engines', label: '引擎', icon: CloudServerOutlined, group: 'config' },
   { path: '/settings', label: '设置', icon: SettingOutlined, group: 'config' },
   { path: '/about', label: '关于', icon: InfoOutlined, group: 'config' },

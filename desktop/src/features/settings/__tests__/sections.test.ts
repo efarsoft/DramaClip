@@ -20,6 +20,9 @@ const KNOWN_KEYS = new Set([
   'export.encoder',
   'export.width',
   'export.height',
+  'agent_gateway.enabled',
+  'agent_gateway.port',
+  'agent_gateway.token',
   'download.hf_mirror',
   'download.ms_base',
   'hardware.max_parallel_jobs',
@@ -75,12 +78,13 @@ describe('键与消费端同源验收', () => {
     }
   });
 
-  it('分区顺序：出片 → 生产线默认值 → 分析 → 字幕 → 下载 → 硬件', () => {
+  it('分区顺序：出片 → 生产线默认值 → 分析 → 字幕 → Agent 网关 → 下载 → 硬件', () => {
     expect(buildSections(dynamic).map((s) => s.id)).toEqual([
       'export',
       'production',
       'analysis',
       'subtitle',
+      'agent-gateway',
       'download',
       'hardware',
     ]);

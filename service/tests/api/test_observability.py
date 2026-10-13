@@ -294,11 +294,16 @@ def test_generate_titles_leaves_a_trace(
     _stub_chat_json(monkeypatch)
     _project_id, plan_id = _seed_plan(memory_db, tmp_path, _voiced_plan(tmp_path))
 
-    titles = _rpc(harness, "narration.generate_titles", {"plan_id": plan_id})["titles"]
-    assert titles[0]["text"] == "她当众揭穿未婚夫"
+    payload = _rpc(harness, "narration.generate_titles", {"plan_id": plan_id})
+    assert payload["titles"][0]["text"] == "她当众揭穿未婚夫"
     blob = _traces(tmp_path).get(f"llm_titles_{plan_id}.json")
     assert blob is not None, f"候选标题未留痕：{sorted(_traces(tmp_path))}"
     assert blob["raw"] == _REPLIES["短剧推广视频标题专家"] and blob["accepted"] == 1
+    # 发布物料与标题同一往返落库；假 LLM 没给 caption/tags 时落空值而非报错
+    from dramaclip.infra.storage.repos import plans as plans_repo
+
+    row = plans_repo.get(memory_db, plan_id)
+    assert row["publish_meta"] == {"caption": None, "tags": []}
 
 
 # ── 永久守卫：api 层调进 LLM 的每一处都必须给出留痕落点 ─────────────────────

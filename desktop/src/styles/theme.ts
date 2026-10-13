@@ -34,6 +34,8 @@ export const tokens = {
   successSoft: 'rgba(52,211,153,0.12)',
   warningSoft: 'rgba(251,191,36,0.12)',
   errorSoft: 'rgba(248,113,113,0.12)',
+  /** 失败/错误正文色（与 errorSoft 同族）：提取失败等状态文案。 */
+  errorText: '#F87171',
   /** 关闭按钮热区：非重复色，收进此处后组件里不再出现裸 hex。 */
   closeHot: '#C43A3A',
   /** 海报/视频的黑底与底部渐隐（原先在四个文件里逐字重复）。 */

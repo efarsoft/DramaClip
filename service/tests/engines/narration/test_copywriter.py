@@ -415,3 +415,43 @@ def test_format_failure_does_not_back_off(
             _plan(), _MATERIAL, _SETTINGS, mode_label=_MODE_LABEL, angle_block=""
         )
     assert slept == [], "格式类失败不该退避"
+
+
+# ------------------------------------------------- 收尾定向重写（落库前代码兜底）
+
+
+def _bad_closing_lines() -> dict[str, Any]:
+    lines = _lines()
+    lines["lines"][3]["text"] = "锅一脱修为当场解封，这笔账往下看只会越算越狠"
+    return lines
+
+
+def test_closing_without_cta_gets_one_targeted_rewrite(llm: Any) -> None:
+    """收尾缺「看全集」转化指令：只对收尾槽定向重写一次，其余槽位保持原稿。
+
+    2026-10-13 真机：cross 收尾写了合格的留缺口却没带转化指令，整条方案被门禁
+    标 draft——一句收尾废全稿。代码兜底 = 成稿后查收尾，缺就带硬要求重写一次。
+    """
+    llm.queue = [
+        _bad_closing_lines(),
+        {"text": "锅一脱修为当场解封，想看这笔账怎么算清，点击左下角看全集"},
+    ]
+    plan = copywriter.write_plan_copy(
+        _plan(), _MATERIAL, _SETTINGS, mode_label=_MODE_LABEL, angle_block=""
+    )
+    assert len(llm.calls) == 2, "只对收尾槽补一次定向重写"
+    assert "看全集" in plan.narration_texts[-1].text
+    assert plan.narration_texts[0].text == "他背着玄铁锅下了山", "其余槽位保持原稿"
+
+
+def test_closing_repair_failure_keeps_original_for_the_gate(llm: Any) -> None:
+    """重写仍不合格：保留原稿交门禁照常拦（行为与修复前一致），不硬塞不过关的句子。"""
+    llm.queue = [
+        _bad_closing_lines(),
+        {"text": "还是没带全集字样的收尾"},
+    ]
+    plan = copywriter.write_plan_copy(
+        _plan(), _MATERIAL, _SETTINGS, mode_label=_MODE_LABEL, angle_block=""
+    )
+    assert "看全集" not in plan.narration_texts[-1].text
+    assert plan.planner == "llm_script"

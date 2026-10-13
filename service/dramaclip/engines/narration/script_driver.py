@@ -109,6 +109,7 @@ def script_dialogue_plan(
         project_name=str(settings.get("_project_name") or "这部剧"),
         angle_block=angle_block,
         style_directives=str(settings.get("_style_directives") or ""),
+        genre=str(settings.get("_genre") or ""),
         trace_path=trace_path,
         prompts=llm_prompts.overrides_from(settings),
         min_segments=min_segments,

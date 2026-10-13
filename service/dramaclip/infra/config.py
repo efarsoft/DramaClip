@@ -60,6 +60,11 @@ DEFAULTS: dict[str, str] = {
     "export.width": str(EXPORT_WIDTH),
     "export.height": str(EXPORT_HEIGHT),
     "hardware.max_parallel_jobs": "2",
+    # Agent 网关（本机 127.0.0.1 HTTP 工具面：外部 agent 调用审查/出稿；api/agent_gateway.py）
+    "agent_gateway.enabled": "false",
+    "agent_gateway.port": "8340",
+    # 空 = 首次启用时自动生成并写回（偏好设置页可见）
+    "agent_gateway.token": "",
 }
 
 Settings = dict[str, str]

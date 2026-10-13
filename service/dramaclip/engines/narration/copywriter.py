@@ -10,7 +10,7 @@ from typing import Any
 
 from dramaclip.engines import llm_prompts
 from dramaclip.engines.llm_trace import dump_trace, trace_path
-from dramaclip.engines.narration import casting, scriptwriter
+from dramaclip.engines.narration import casting, conversion, scriptwriter
 from dramaclip.engines.narration.models import NarrationText, PlanData, TimelineSegment
 from dramaclip.engines.narration.numerals import to_chinese_numerals
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
@@ -156,6 +156,7 @@ def build_copy_request(
         f"项目：{project_name}"
         + (f"（题材：{genre}）" if genre else "")
         + f"\n模式：{mode_label}"
+        + scriptwriter.genre_emphasis_block(genre)
         + angle_block
         + "\n文案槽位：\n"
         + _slot_block(plan.narration_texts, plan.timeline, material)
@@ -217,6 +218,10 @@ def write_plan_copy(
             continue
         attempts.append({"raw": raw, "accepted": True})
         break
+    if filled is not None:
+        filled, repair = _repair_closing(plan, filled, llm, system, line_cap)
+        if repair is not None:
+            attempts.append(repair)
     stamp_time = time.strftime("%m%d_%H%M%S")
     dump_trace(
         trace_path(trace_dir, f"llm_copy_{plan.mode}_{stamp_time}.json"),
@@ -231,3 +236,41 @@ def write_plan_copy(
         ],
         "planner": "llm_script",
     })
+
+
+def _repair_closing(
+    plan: PlanData, filled: dict[str, str], llm: LlmClient, system: str, line_cap: int
+) -> tuple[dict[str, str], dict[str, Any] | None]:
+    """收尾槽缺「看全集」转化指令时定向重写一次（落库前代码兜底）。
+
+    2026-10-13 真机：cross 收尾写了合格的留缺口（「往下看，这笔账…」）却没带转化
+    指令，整条方案被门禁标 draft——一句收尾废掉全稿成本太高。重写仍不合格则保留
+    原稿，交由门禁照常拦截（行为与修复前一致）。
+    """
+    if plan.mode in ("raw_clip", "highlight_cut") or not plan.timeline:
+        return filled, None
+    closing_id = plan.timeline[-1].narration_id
+    if closing_id is None or closing_id not in filled:
+        return filled, None
+    original = filled[closing_id]
+    if not conversion.cta_missing(original):
+        return filled, None
+    prompt = (
+        f"你写的收尾文案缺「指向看全集」的转化引导。原稿：{original}\n"
+        f"重写这一句：保留悬念缺口与既有的冲突信息，结尾必须包含「全集」或「点进去」"
+        f"字样（如「想看这笔账怎么算清，点击左下角看全集」）；不超过 {line_cap} 字；"
+        "禁「关注/点赞/二维码」；不得编造转写外情节。"
+        '只输出 JSON：{"text": "重写后的收尾"}'
+    )
+    try:
+        raw = llm.chat_json(system, prompt, temperature=0.75)
+        text_raw = raw.get("text") if isinstance(raw, dict) else None
+        text = to_chinese_numerals(str(text_raw or "").strip())
+    except (LlmUnavailable, ValueError, TypeError, KeyError):
+        return filled, {"closing_repair_failed": original}
+    oversize_cap = int(line_cap * _OVERSIZE_TOLERANCE)
+    if text and len(text) <= oversize_cap and not conversion.cta_missing(text):
+        return {**filled, closing_id: text}, {
+            "closing_repair": {"original": original, "repaired": text}
+        }
+    return filled, {"closing_repair_failed": original}

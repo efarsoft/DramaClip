@@ -37,4 +37,8 @@ def update(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     for key, value in values.items():
         settings_repo.set_value(context.conn, key, str(value))
         context.settings[key] = str(value)
+    gateway = getattr(context, "gateway", None)
+    if gateway is not None:
+        # agent_gateway.* 改动热生效（启停/换端口/token 轮换）；其余键同步是无操作
+        gateway.sync(context.settings)
     return {"ok": True, "updated": len(values)}

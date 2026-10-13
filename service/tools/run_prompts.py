@@ -90,6 +90,34 @@ def _mock_copy(slots: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _load_settings(args) -> dict:
+    if getattr(args, "from_db", False):
+        # 本机数据库直读：agent/会话无需经手密钥。库不在默认位置时用 DRAMACLIP_DATA 指目录。
+        default_db = Path(__file__).resolve().parents[2] / "data" / "data.db"
+        data_dir = os.environ.get("DRAMACLIP_DATA")
+        db_path = Path(data_dir) / "data.db" if data_dir else default_db
+        import sqlite3
+
+        from dramaclip.infra.storage import db as db_mod
+
+        conn = sqlite3.connect(db_path)
+        try:
+            try:
+                rows = conn.execute(
+                    "SELECT key, value FROM settings WHERE key LIKE 'llm%'"
+                ).fetchall()
+            except sqlite3.OperationalError:
+                # 新 clone 的库还没有表：自动迁移建表后重查
+                db_mod.migrate(conn)
+                rows = conn.execute(
+                    "SELECT key, value FROM settings WHERE key LIKE 'llm%'"
+                ).fetchall()
+        finally:
+            conn.close()
+        env = {key: value for key, value in rows if value}
+        if any(env.values()):
+            return env
+        print("⚠️ --from-db：数据库里没有 llm.* 配置，请先在「引擎」页配置文本模型。")
+        return {}
     if args.settings:
         return json.loads(Path(args.settings).read_text(encoding="utf-8"))
     env = {
@@ -155,7 +183,9 @@ def cmd_run(args) -> int:
         else:
             output = client.chat_json(system, user, temperature=0.75)
             src = "REAL"
-        report = A.review_copy(output, slots, mode=args.mode_label or "")
+        # chat_json 返回 {"lines": [...]}，mock 直接是列表：审查器只吃 lines 列表
+        lines = output.get("lines", []) if isinstance(output, dict) else output
+        report = A.review_copy(lines, slots, mode=args.mode_label or "")
 
     print("=" * 70)
     print("真实组装的 SYSTEM 提示词（来自 build_*_request，与生成函数同源）")
@@ -219,6 +249,11 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--transcript", help="episodes.json（script 模式）")
     pr.add_argument("--slots", help="slots.json（copy 模式）")
     pr.add_argument("--settings", help="含 llm.base_url/api_key/model 的 JSON")
+    pr.add_argument(
+        "--from-db",
+        action="store_true",
+        help="llm.* 配置直接读本机数据库（DramaClip/data/data.db），免手填密钥",
+    )
     pr.add_argument("--mock", action="store_true", help="无凭证时跑合规示例稿")
     pr.add_argument("--project", default="苏府风云")
     pr.add_argument("--angle", default="")

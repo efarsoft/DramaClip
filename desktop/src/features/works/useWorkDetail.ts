@@ -1,13 +1,14 @@
-/** 成片详情数据：job/项目名/解说文案/候选标题/追溯（角度·取材集）/自检 的加载与动作（UI 解耦）。 */
+/** 成片详情数据：job/项目名/解说文案/候选标题/发布物料/追溯（角度·取材集）/自检 的加载与动作（UI 解耦）。 */
 import { useCallback, useEffect, useState } from 'react';
 import { App as AntdApp } from 'antd';
-import type { Episode, ExportJob, TitleCandidate } from '@dramaclip/protocol';
+import type { Episode, ExportJob, PublishMeta, TitleCandidate } from '@dramaclip/protocol';
 import { exportApi, projectApi, rpc, titlesApi } from '../../services/client';
 import { useJobsStore } from '../../stores/jobs';
 import { useUiStore } from '../../stores/ui';
 
 interface PlanSlice {
   titles?: TitleCandidate[];
+  publish_meta?: PublishMeta | null;
   angle?: string;
   episode_ids?: string[];
   plan_data?: { narration_texts?: { id: string; text: string }[] };
@@ -20,6 +21,8 @@ interface LoadedDetail {
   episodes: Episode[];
   titles: TitleCandidate[];
   setTitles: (titles: TitleCandidate[]) => void;
+  publish: PublishMeta | null;
+  setPublish: (publish: PublishMeta | null) => void;
   narrationTexts: { id: string; text: string }[];
   angle: string | null;
   episodeIds: string[] | null;
@@ -34,6 +37,7 @@ function useLoadedDetail(exportId: string, reloadTick: number): LoadedDetail {
   const [projectName, setProjectName] = useState('…');
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [titles, setTitles] = useState<TitleCandidate[]>([]);
+  const [publish, setPublish] = useState<PublishMeta | null>(null);
   const [narrationTexts, setNarrationTexts] = useState<{ id: string; text: string }[]>([]);
   const [angle, setAngle] = useState<string | null>(null);
   const [episodeIds, setEpisodeIds] = useState<string[] | null>(null);
@@ -58,6 +62,7 @@ function useLoadedDetail(exportId: string, reloadTick: number): LoadedDetail {
           void rpc<{ plan: PlanSlice }>('narration.get_plan', { plan_id: row.narration_plan_id })
             .then((detail) => {
               setTitles(detail.plan.titles ?? []);
+              setPublish(detail.plan.publish_meta ?? null);
               setNarrationTexts(detail.plan.plan_data?.narration_texts ?? []);
               setAngle(detail.plan.angle ?? null);
               setEpisodeIds(detail.plan.episode_ids ?? null);
@@ -69,11 +74,18 @@ function useLoadedDetail(exportId: string, reloadTick: number): LoadedDetail {
         setFailed(true);
       });
   }, [exportId, serviceState, reloadTick]);
-  return { job, failed, projectName, episodes, titles, setTitles, narrationTexts, angle, episodeIds, planId };
+  return {
+    job, failed, projectName, episodes, titles, setTitles, publish, setPublish,
+    narrationTexts, angle, episodeIds, planId,
+  };
 }
 
-/** 动作侧：重生成标题 + 补测此片（排入自检作业并展开抽屉；结果落库后点「刷新」看成绩单）。 */
-function useDetailActions(planId: string, setTitles: (titles: TitleCandidate[]) => void) {
+/** 动作侧：重生成标题（发布文案/标签随之刷新）+ 补测此片（排入自检作业并展开抽屉；结果落库后点「刷新」看成绩单）。 */
+function useDetailActions(
+  planId: string,
+  setTitles: (titles: TitleCandidate[]) => void,
+  setPublish: (publish: PublishMeta | null) => void,
+) {
   const { message } = AntdApp.useApp();
   const setDrawerOpen = useJobsStore((state) => state.setDrawerOpen);
   const [generating, setGenerating] = useState(false);
@@ -83,6 +95,7 @@ function useDetailActions(planId: string, setTitles: (titles: TitleCandidate[]) 
       .generate(planId)
       .then((r) => {
         setTitles(r.titles);
+        setPublish({ caption: r.caption, tags: r.tags });
       })
       .catch((error: unknown) => {
         message.error(error instanceof Error ? error.message : String(error));
@@ -90,7 +103,7 @@ function useDetailActions(planId: string, setTitles: (titles: TitleCandidate[]) 
       .finally(() => {
         setGenerating(false);
       });
-  }, [planId, setTitles, message]);
+  }, [planId, setTitles, setPublish, message]);
   const onSelfcheck = useCallback((exportId: string): void => {
     void exportApi
       .selfcheck([exportId])
@@ -112,7 +125,7 @@ function useDetailActions(planId: string, setTitles: (titles: TitleCandidate[]) 
 export function useWorkDetail(exportId: string): WorkDetail {
   const [reloadTick, setReloadTick] = useState(0);
   const loaded = useLoadedDetail(exportId, reloadTick);
-  const actions = useDetailActions(loaded.planId, loaded.setTitles);
+  const actions = useDetailActions(loaded.planId, loaded.setTitles, loaded.setPublish);
   const reload = useCallback(() => {
     setReloadTick((tick) => tick + 1);
   }, []);

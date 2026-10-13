@@ -82,6 +82,7 @@ export function WorksDetailPage(): ReactElement {
             <NarrationSection texts={detail.narrationTexts} mode={detail.job.narration_mode} />
             <TitlesSection
               titles={detail.titles}
+              publish={detail.publish}
               generating={detail.generating}
               hasPlan={detail.planId !== ''}
               onGenerate={detail.onGenerate}

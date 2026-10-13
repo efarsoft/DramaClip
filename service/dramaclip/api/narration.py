@@ -129,7 +129,7 @@ def generate_titles(context: AppContext, params: dict[str, Any]) -> dict[str, An
     if row is None:
         raise RpcDomainError(_ERR_PLAN_NOT_FOUND, f"编排方案不存在: {plan_id}")
     try:
-        titles = titles_engine.generate(
+        result = titles_engine.generate(
             row["plan_data"],
             context.settings,
             trace_path=llm_trace_dir(context) / f"llm_titles_{plan_id}.json",
@@ -138,8 +138,19 @@ def generate_titles(context: AppContext, params: dict[str, Any]) -> dict[str, An
         raise RpcDomainError(_ERR_LLM, str(exc)) from exc
     except ValueError as exc:
         raise RpcDomainError(_ERR_LLM, str(exc)) from exc
-    plans_repo.set_titles(context.conn, plan_id, json.dumps(titles, ensure_ascii=False))
-    return {"titles": titles}
+    plans_repo.set_titles(context.conn, plan_id, json.dumps(result["titles"], ensure_ascii=False))
+    plans_repo.set_publish_meta(
+        context.conn,
+        plan_id,
+        json.dumps(
+            {"caption": result["caption"], "tags": result["tags"]}, ensure_ascii=False
+        ),
+    )
+    return {
+        "titles": result["titles"],
+        "caption": result["caption"],
+        "tags": result["tags"],
+    }
 
 
 def update_titles(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:

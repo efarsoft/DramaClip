@@ -29,6 +29,9 @@ dev = [
 ml = [
   "numpy>=2.0",
   "faster-whisper>=1.2",
+  # av 上界：faster-whisper 1.2 的 decode_audio 依赖 av.open(metadata_errors=)，
+  # av 14 起移除该参数导致转写开场即崩（2026-10-13 真机：分析任务卡 analyzing）
+  "av<14",
   "ctranslate2>=4.5",
   "scenedetect>=0.7",
   "librosa>=0.10",

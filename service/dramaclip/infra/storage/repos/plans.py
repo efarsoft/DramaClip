@@ -11,7 +11,7 @@ from uuid import uuid4
 _COLUMNS = (
     "id", "project_id", "narration_mode", "episode_ids", "plan_data", "status", "created_at",
     "angle", "angle_reason", "variant_index", "overlap_max", "batch_id", "titles",
-    "score_total", "score_dims", "suggestion",
+    "score_total", "score_dims", "suggestion", "publish_meta",
 )
 
 
@@ -26,11 +26,21 @@ def _row_to_dict(row: tuple) -> dict[str, Any]:  # type: ignore[type-arg]
     data["titles"] = json.loads(data["titles"]) if data["titles"] else []
     # B10 评分三列：NULL=未评分（score_dims 学 titles 列的解析形状）
     data["score_dims"] = json.loads(data["score_dims"]) if data["score_dims"] else None
+    # 发布物料：{"caption": str|null, "tags": [str]}（NULL=尚未随标题生成过）
+    data["publish_meta"] = json.loads(data["publish_meta"]) if data["publish_meta"] else None
     return data
 
 
 def set_titles(conn: sqlite3.Connection, plan_id: str, titles: str) -> None:
     conn.execute("UPDATE narration_plans SET titles = ? WHERE id = ?", (titles, plan_id))
+    conn.commit()
+
+
+def set_publish_meta(conn: sqlite3.Connection, plan_id: str, publish_meta: str) -> None:
+    """发布物料（caption/tags JSON）落库：与 titles 同源生成、独立存取，互不覆盖。"""
+    conn.execute(
+        "UPDATE narration_plans SET publish_meta = ? WHERE id = ?", (publish_meta, plan_id)
+    )
     conn.commit()
 
 

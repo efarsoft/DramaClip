@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from dramaclip.api.agent_gateway import AgentGateway
 from dramaclip.engines.analysis.runtime import AnalysisRuntime
 from dramaclip.infra import config, jobs
 from dramaclip.transport.notify import Notifier
@@ -26,6 +27,8 @@ class AppContext:
     work_dir: Path  # 分析/中间产物缓存目录（<data>/cache/analysis）
     data_dir: Path  # 数据根：outputs/ models/ logs/ covers/ 的唯一锚点
     cancel_events: dict[str, threading.Event] = field(default_factory=dict)
+    # Agent 网关（agent_gateway.* 设置键驱动，settings.update 后热生效）；测试 harness 可缺省
+    gateway: AgentGateway | None = None
 
 
 def llm_trace_dir(context: AppContext) -> Path:

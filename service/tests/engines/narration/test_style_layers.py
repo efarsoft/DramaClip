@@ -61,7 +61,7 @@ def test_empty_transcript_short_circuits(monkeypatch) -> None:
 
 def test_fundamentals_layer_injected_into_system_prompt() -> None:
     system = scriptwriter_lib.system_prompt()
-    for keyword in ("解说基本功", "人称二选一", "半句钩", "禁止编造转写外", "前 3 秒抛出"):
+    for keyword in ("解说基本功", "人称二选一", "半句钩", "禁止编造转写外", "前 3 秒"):
         assert keyword in system
 
 

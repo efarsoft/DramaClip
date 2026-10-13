@@ -179,7 +179,9 @@ class IndexTts2Engine:
             )
         if voice == "" or not Path(voice).is_file():
             raise ValueError(
-                "IndexTTS 需要参考音频作为音色（任意 3~10 秒人声 wav），当前 voice 为空"
+                "IndexTTS 需要参考音频作为音色（任意 3~10 秒人声 wav），"
+                f"当前 voice 不是有效文件：{voice or '(空)'}"
+                "——请在引擎中心选择参考音频，或把配音引擎切到 Edge/Kokoro"
             )
         # B6 质检：poor 只留痕不阻断——质检是报告不是门禁，用户可能就是要用这段
         # 参考，拦死是假门禁（硬约束是批次一的「显式引擎不回退」，不在这一层）。

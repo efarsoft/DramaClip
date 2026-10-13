@@ -90,7 +90,7 @@ SPECS: list[PromptSpec] = [
     PromptSpec(
         "prompt.titles_system",
         "候选标题",
-        "成片信息流标题：8 条候选，让人点进去看全集",
+        "发布包装：8 条候选标题 + 发布文案 + 话题标签，让人点进去看全集",
         _default("dramaclip.engines.narration.titles", "_SYSTEM_PROMPT"),
     ),
     PromptSpec(

@@ -63,6 +63,32 @@
             "null"
           ],
           "description": "一次 plan_variants 调用产出全组的标识，取该作业 job_id"
+        },
+        "publish_meta": {
+          "$ref": "#/x-models/PublishMeta"
+        }
+      }
+    },
+    "PublishMeta": {
+      "type": "object",
+      "required": [
+        "caption",
+        "tags"
+      ],
+      "properties": {
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "发布文案：1~2 句钩子短句，留缺口引导追剧；null=未生成"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "话题标签（不带 # 号）：题材情绪标签配高流量行为标签"
         }
       }
     },
@@ -283,6 +309,20 @@
             "items": {
               "$ref": "#/x-models/TitleCandidate"
             }
+          },
+          "caption": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "发布文案（随标题同一次往返产出）"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "话题标签（不带 # 号）"
           }
         }
       }

@@ -39,7 +39,11 @@ def build_dual_host(
         voice = _VOICE_A if index % 2 == 0 else _VOICE_B
         speaker = "主持人 A" if index % 2 == 0 else "嘉宾 B"
         if index == 0:
-            brief = f"{speaker} 开场抛话题：用剧名点出这片为什么值得看"
+            # 「听说…」反问开场是双人对谈体裁的高赞实证句式，把观众拽进对话
+            brief = (
+                f"{speaker} 开场抛话题：用剧名点出这片为什么值得看，"
+                "可用「听说…」式反问开场（「听说两个人相约追剧，总有人忍不住先看？」式）"
+            )
         elif index == count - 1:
             brief = f"{speaker} 收尾：放狠话评结局并引导看全集"
         elif index % 2 == 1:
@@ -77,7 +81,11 @@ def build_monologue(
     for index, scene in enumerate(picked):
         slot_id = f"mono-{index + 1}"
         if index == 0:
-            brief = "第一人称开场：主角此刻的处境与误判，一句话"
+            # 「当你…」代入句是第一视角体裁的高赞实证句式（「当你开着迈巴赫回村」）
+            brief = (
+                "第一人称开场：「当你…」式代入把观众按进主角位置，"
+                "一句话抛出此刻的处境与误判"
+            )
         elif index == count - 1:
             brief = "第一人称收尾：态度反转落定，留缺口引导看全集"
         elif scene.score >= 85:

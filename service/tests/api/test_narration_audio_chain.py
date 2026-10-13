@@ -233,3 +233,46 @@ def test_render_export_feeds_settings_loudness_target_to_phase_c(
     assert len(targets) == 1, "Phase C 必须被调用恰好一次"
     assert targets[0].integrated_lufs == -12.0, "目标必须来自 settings，而不是写死值"
     assert targets[0].true_peak_dbtp == -1.5, "settings 未给的键应回退 DEFAULTS"
+
+
+def test_monologue_edge_voice_falls_back_to_clone_reference(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """双人对谈/内心独白槽位硬编码的 Edge 音色名，在克隆引擎（indextts2）下必须
+    回退引擎默认参考音频——段级名字不是音频文件，克隆引擎拿它当路径直接报错
+    （2026-10-13 真机：mono-1 合成失败 engine=indextts2 当前 voice 为空）。"""
+    from dramaclip.engines.narration.modes_p2 import build_monologue
+
+    reference = tmp_path / "ref.wav"
+    reference.write_bytes(b"riff")
+    recorded: list[str] = []
+
+    class _RecordingTts:
+        def synthesize(self, text: str, voice: str | None, out_path: Path) -> Path:
+            recorded.append(voice or "")
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_bytes(b"x")
+            return out_path
+
+    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: _RecordingTts())
+    monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: _TTS_DURATION_S)
+
+    plan = build_monologue(stamp([(1, "ep1", _scenes())]), StrategySpec())
+    assert all(t.voice for t in plan.narration_texts), "夹具前提：独白槽位带硬编码音色名"
+    # 编排产出的是带 brief 的空槽：配音前按上游契约回填文案
+    plan = plan.model_copy(update={
+        "narration_texts": [
+            t.model_copy(update={"text": f"第 {i} 段独白"})
+            for i, t in enumerate(plan.narration_texts)
+        ]
+    })
+    pipeline.synthesize_narration_texts(
+        plan,
+        {"tts.engine": "indextts2", "tts.voice.indextts2": str(reference)},
+        tmp_path / "cache" / "tts",
+        source_durations={"ep1": 120.0},
+    )
+    assert recorded, "旁白应全部合成"
+    assert all(voice == str(reference) for voice in recorded), (
+        "合成应使用参考音频，而非 Edge 音色名"
+    )

@@ -71,7 +71,9 @@ _PERSON_FIRST = ("我", "咱们", "咱")
 _PERSON_SECOND = ("你", "你们", "您")
 _SPEAKER_LABEL_RE = re.compile(r"\[角色[^\]]*\]")
 _FORBIDDEN_CTA_RE = re.compile(r"关注|点赞|收藏|二维码")
-_SUSPECT_EMPTY_RE = re.compile(r"他竟然|竟然|居然|后续更精彩|更精彩")
+# 只拦空钩模式；裸「竟然/居然」可带实体事实（揭晓词已由业主裁决放开），
+# 实体锚由 HOOK_ANCHOR 软检兜底
+_SUSPECT_EMPTY_RE = re.compile(r"他竟然|后续更精彩|更精彩")
 _IDENTITY_DEATH_RE = re.compile(r"死|亡|杀|真实身份|竟是|身份竟|公主|皇子|王爷|娘娘|陛下|皇帝")
 # 具体反差锚点（除数字/身份/生死外的「物件/信物」类，避免漏判好 hook）
 _CONCRETE_OBJECT_RE = re.compile(
@@ -86,8 +88,6 @@ _SURNAME = (
 _FABRIC_RE = re.compile(r"^([" + _SURNAME + r"])[爷娘姐妹哥弟子女君主公婆夫郎妃后王帝翁侄]$")
 _CLICK_RE = re.compile(r"点击|左下角|右下角")
 _WATCH_ALL_RE = re.compile(r"免费|立即观看|看全集|全集")
-# 揭晓腔（全篇禁，不只 hook）：事后抖包袱式「竟是/竟然/居然/原来/没想到」
-_REVEAL_RE = re.compile(r"竟是|竟然|居然|原来如此|没想到|万万没")
 # 可疑数量/专名锚点：无转写时也要标软风险（arabic 数 + 中文数量/称谓式专名）
 _QUANTITY_RE = re.compile(
     r"\d{2,}|[零〇一二三四五六七八九十百千万亿]+\s*(两|金银|斤|块|岁|人|个|贯|锭|两银)"
@@ -307,25 +307,6 @@ def review_script(
             prompt_quote="所有情节、细节、台词必须来自给定转写，禁止编造转写外的事件或设定；",
             needs_human=True,
         ))
-
-    # —— 揭晓腔（全篇禁，软+需人工）：无转写也要抓「竟是/竟然」式抖包袱 ——
-    reveal_hits = []
-    for key, txt in (("hook", hook), ("cta", cta)):
-        if _REVEAL_RE.search(txt):
-            reveal_hits.append(key)
-    for i, s in enumerate(segs):
-        if _REVEAL_RE.search(s.get("text", "") or ""):
-            reveal_hits.append(f"segment[{i}]")
-    findings.append(Finding(
-        "FUND_NO_REVEAL_TELL", "fund_base", "soft",
-        not reveal_hits,
-        "全篇无「竟是/竟然」式揭晓腔"
-        if not reveal_hits
-        else f"出现揭晓腔：{reveal_hits}（应在画面里自然带出，不靠'竟是'抖包袱）",
-        location=";".join(reveal_hits) if reveal_hits else "",
-        prompt_quote="全篇禁揭晓腔：禁「竟是/竟然/居然/原来/没想到」式事后揭秘——解说在讲正在发生的事，不是抖包袱；",
-        needs_human=True,
-    ))
 
     # —— 可疑数量/称号锚点（软+需人工）：转写外「八千两/九千岁」式硬锚点，需对照核实 ——
     invent_hits = []

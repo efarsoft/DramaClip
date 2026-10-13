@@ -204,6 +204,12 @@ export interface TitleCandidate {
   readonly text: string;
   readonly selected: boolean;
 }
+
+/** 方案发布物料：caption 一句发布文案 + tags 话题标签（随候选标题同一次往返产出）。 */
+export interface PublishMeta {
+  readonly caption: string | null;
+  readonly tags: string[];
+}
 export interface JobsListResult {
   readonly jobs: JobInfo[];
   readonly server_time_ms: number;
@@ -296,6 +302,8 @@ export interface NarrationPlan {
   readonly batch_id?: string | null;
   /** 过不了转化门禁时的第一条原因；ready 方案无此字段。 */
   readonly block_reason?: string;
+  /** 发布文案+话题标签（随候选标题生成）；旧方案无此字段。 */
+  readonly publish_meta?: PublishMeta | null;
 }
 
 /** 一条方案的成本账（规格 4.4 成本预估卡数据源）。 */
@@ -582,6 +590,44 @@ export interface TtsPreviewResult {
   readonly text: string;
 }
 
+/** tools.extract_start 返回体。 */
+export interface ToolsExtractStartResult {
+  readonly job_id: string;
+}
+
+/** tools.get_result 的产物载荷（completed 后才有）。 */
+export interface ToolsExtractPayload {
+  readonly video_path: string;
+  readonly txt_path: string;
+  readonly srt_path: string;
+  readonly text: string;
+  readonly chars: number;
+  readonly duration_s: number;
+  readonly lines: number;
+}
+
+/** tools.get_result 返回体。 */
+export interface ToolsGetResultResult {
+  readonly status: string;
+  readonly error?: string | null;
+  readonly result?: ToolsExtractPayload | null;
+}
+
+/** tools.tts 返回体：长文合成的音频落 data/tools/tts/。 */
+export interface ToolsTtsResult {
+  readonly path: string;
+  readonly engine: string;
+  readonly voice: string;
+  readonly chars: number;
+}
+
+/** tools.rewrite 返回体：改写风格 + 通用审查标注。 */
+export interface ToolsRewriteResult {
+  readonly text: string;
+  readonly style: string;
+  readonly notes: readonly string[];
+}
+
 export interface LlmTraceInfo {
   readonly name: string;
   readonly size: number;
@@ -793,6 +839,11 @@ export const METHOD_NAMES = [
   'prompts.list',
   'prompts.save',
   'prompts.reset',
+  'tools.extract_start',
+  'tools.get_result',
+  'tools.asr_start',
+  'tools.rewrite',
+  'tools.tts',
 ] as const;
 
 export const NOTIFICATION_NAMES = ['progress.update', 'log.append', 'models.download_progress'] as const;

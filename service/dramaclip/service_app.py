@@ -10,7 +10,8 @@ from typing import Any
 
 from dramaclip import PROTOCOL_VERSION, __version__
 from dramaclip.api import build_router
-from dramaclip.api.context import AppContext
+from dramaclip.api.agent_gateway import AgentGateway
+from dramaclip.api.context import AppContext, llm_trace_dir
 from dramaclip.engines.analysis.runtime import AnalysisRuntime
 from dramaclip.engines.tts.engines import indextts2
 from dramaclip.infra import config, gpu, jobs, paths
@@ -84,6 +85,11 @@ class ServiceApp:
             data_dir=data_dir,
         )
         router = build_router(context, self._shutdown)
+        # Agent 网关：agent_gateway.enabled=true 时随服务常驻本机端口；settings.update 热生效
+        gateway = AgentGateway(conn, trace_dir=llm_trace_dir(context))
+        context.gateway = gateway
+        if (state := gateway.sync(settings)) is not None:
+            print(f"[agent-gateway] {state}")
         self._install_signal_handlers()
         try:
             self._serve(router, executor)
@@ -101,6 +107,7 @@ class ServiceApp:
             # 先等作业收尾再收 worker：合成中的段先落完，避免最后一问没有应答；
             # 常驻 worker 不收会在 Windows 上留占着模型内存的孤儿进程
             indextts2.shutdown_worker()
+            gateway.stop()
             if self._connection is not None:
                 self._connection.close()
             conn.close()

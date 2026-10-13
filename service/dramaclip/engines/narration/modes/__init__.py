@@ -172,7 +172,9 @@ def build_intro(
         narration_texts=[
             NarrationText(
                 id=_INTRO_SLOT_ID,
-                brief="片头钩子：两三句把最大冲突抛出来，不要复述剧情梗概",
+                # 行为指令句式来自平台高赞实证：预设观看反应比复述剧情更留人
+                brief="片头钩子：两三句把最大冲突抛出来，不要复述剧情梗概；"
+                "可用行为指令句式预设观看反应（「看这集的时候小点声笑，容易梦醒」式）",
             ),
             NarrationText(
                 id=_CTA_SLOT_ID,

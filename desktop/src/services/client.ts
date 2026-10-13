@@ -6,6 +6,7 @@ import type {
   NarrationPlan, OrphanCopy, PingResult, PlanDetail, PlanTraceResult, PlanVariantsResult, Project,
   ProjectGetResult, PromptsListResult, RevealResult, RelayoutResult, ScannedEpisode, SelftestResult,
   SelftestResults, ServiceEvent, StyleInfo, SubtitlePresetInfo, TitleCandidate, TtsAutoVoiceResult,
+  ToolsExtractStartResult, ToolsGetResultResult, ToolsRewriteResult, ToolsTtsResult,
   TtsCleanReferenceResult, TtsPreviewResult, VerifyReport, WorkItem as WorksItem,
 } from '@dramaclip/protocol';
 
@@ -35,6 +36,10 @@ export function pickFolder(): Promise<string | null> {
 
 export function pickAudioFile(): Promise<string | null> {
   return bridge().pickAudioFile();
+}
+
+export function pickVideoFile(): Promise<string | null> {
+  return bridge().pickVideoFile();
 }
 
 export function revealInFolder(path: string): Promise<RevealResult> {
@@ -202,8 +207,9 @@ export const exportApi = {
 } as const;
 
 export const titlesApi = {
-  generate: (planId: string): Promise<{ titles: TitleCandidate[] }> =>
-    rpc<{ titles: TitleCandidate[] }>('narration.generate_titles', { plan_id: planId }),
+  generate: (planId: string): Promise<{ titles: TitleCandidate[]; caption: string | null; tags: string[] }> =>
+    rpc<{ titles: TitleCandidate[]; caption: string | null; tags: string[] }>(
+      'narration.generate_titles', { plan_id: planId }),
   update: (planId: string, titles: TitleCandidate[]): Promise<{ titles: TitleCandidate[] }> =>
     rpc<{ titles: TitleCandidate[] }>('narration.update_titles', { plan_id: planId, titles }),
 } as const;
@@ -275,6 +281,19 @@ export const ttsApi = {
     rpc<TtsCleanReferenceResult>('tts.clean_reference', { path, mode }),
   /** 从剧集自动提取主角参考音色并设为 IndexTTS 参考（无需手动找 wav）。 */
   autoVoice: (): Promise<TtsAutoVoiceResult> => rpc<TtsAutoVoiceResult>('tts.auto_voice', {}),
+} as const;
+
+/** 工具箱：文案提取（异步作业）与长文文字转语音。 */
+export const toolsApi = {
+  extractStart: (videoPath: string): Promise<ToolsExtractStartResult> =>
+    rpc<ToolsExtractStartResult>('tools.extract_start', { video_path: videoPath }),
+  getResult: (jobId: string): Promise<ToolsGetResultResult> =>
+    rpc<ToolsGetResultResult>('tools.get_result', { job_id: jobId }),
+  asrStart: (audioPath: string): Promise<ToolsExtractStartResult> =>
+    rpc<ToolsExtractStartResult>('tools.asr_start', { media_path: audioPath }),
+  rewrite: (text: string, style: 'paraphrase' | 'card'): Promise<ToolsRewriteResult> =>
+    rpc<ToolsRewriteResult>('tools.rewrite', { text, style }),
+  tts: (text: string): Promise<ToolsTtsResult> => rpc<ToolsTtsResult>('tools.tts', { text }),
 } as const;
 
 /** 能力层自检（§10.3）：校验=文件层，自检=能力层，两者都过才叫 ready。 */

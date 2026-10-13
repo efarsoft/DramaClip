@@ -139,3 +139,24 @@ describe('自检分区', () => {
     });
   });
 });
+
+describe('发布物料', () => {
+  it('方案带发布文案/话题标签：随候选标题区一并上屏', async () => {
+    api.rpc.mockResolvedValue({
+      plan: {
+        titles: [{ text: '替嫁新娘当众揭穿真心', selected: true }],
+        publish_meta: { caption: '她替嫁三年，换来一纸休书。结局在全集。', tags: ['短剧推荐', '爽剧'] },
+        plan_data: { narration_texts: [] },
+      },
+    });
+    page();
+    expect(await screen.findByText('她替嫁三年，换来一纸休书。结局在全集。')).toBeTruthy();
+    expect(screen.getByText('#短剧推荐 #爽剧')).toBeTruthy();
+  });
+
+  it('旧方案无发布物料：只有标题列表，不渲染空行', async () => {
+    page();
+    expect(await screen.findByText('替身真相')).toBeTruthy();
+    expect(screen.queryByText('发布文案')).toBeNull();
+  });
+});

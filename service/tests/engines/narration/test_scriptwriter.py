@@ -231,7 +231,7 @@ def test_floor_override_replaces_the_floor() -> None:
 def test_saving_the_default_floor_verbatim_does_not_duplicate_it() -> None:
     """界面上「原样存回默认」是最常见的误操作：正文重复会让模型看到两份互相矛盾的底线。"""
     system = _system_sent(**{"prompt.scriptwriter_fundamentals": scriptwriter.FUNDAMENTALS})
-    for token in ("【解说基本功——逐条强制遵守】", "人称二选一", "悬念管理"):
+    for token in ("【解说基本功——逐条强制遵守】", "人称二选一", "文风标杆"):
         assert system.count(token) == 1, token
 
 
@@ -340,7 +340,7 @@ def test_drop_count_is_in_the_trace_too(tmp_path) -> None:
 
 
 # ------------------------------------------------------------- 输出防御闭环（批次一 A2）
-# 参考项目调研：NarratoAI/autoclip 都有「钳制到边界 + 重试注入格式强化 + 坏响应留痕」，
+# 业界通行做法：「钳制到边界 + 重试注入格式强化 + 坏响应留痕」，
 # 我们只有 pydantic 结构校验——LLM 幻觉时间戳只能等渲染期暴雷。
 
 

@@ -162,6 +162,34 @@ const DOWNLOAD_SECTION: SectionSpec = {
   ],
 };
 
+/** Agent 网关：本机回环 HTTP 工具面（外部 agent 调用文案审查与标题出稿）。 */
+const AGENT_GATEWAY_SECTION: SectionSpec = {
+  id: 'agent-gateway',
+  title: 'Agent 网关',
+  fields: [
+    {
+      key: 'agent_gateway.enabled',
+      label: '启用 Agent 网关',
+      type: 'switch',
+      help: '在本机 127.0.0.1 起 HTTP 工具面，外部 agent 可调用文案审查与标题出稿；保存后立即生效',
+    },
+    {
+      key: 'agent_gateway.port',
+      label: '端口',
+      type: 'number',
+      min: 1024,
+      max: 65535,
+      help: '监听端口；改动保存即重启监听',
+    },
+    {
+      key: 'agent_gateway.token',
+      label: '访问 Token',
+      type: 'text',
+      help: '调用方携带 Authorization: Bearer <token>；留空保存时自动生成并回填',
+    },
+  ],
+};
+
 const HARDWARE_SECTION: SectionSpec = {
   id: 'hardware',
   title: '硬件',
@@ -177,13 +205,14 @@ const HARDWARE_SECTION: SectionSpec = {
   ],
 };
 
-/** 分区按使用频率排序：出片 → 生产线默认值 → 分析 → 字幕 → 下载 → 硬件（DSS §4.1）。 */
+/** 分区按使用频率排序：出片 → 生产线默认值 → 分析 → 字幕 → Agent 网关 → 下载 → 硬件（DSS §4.1）。 */
 export function buildSections(dynamic: DynamicOptions): readonly SectionSpec[] {
   return [
     EXPORT_SECTION,
     productionSection(dynamic),
     ANALYSIS_SECTION,
     subtitleSection(dynamic),
+    AGENT_GATEWAY_SECTION,
     DOWNLOAD_SECTION,
     HARDWARE_SECTION,
   ];

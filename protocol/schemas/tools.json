@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dramaclip.dev/protocol/tools.json",
+  "title": "tools 命名空间",
+  "namespace": "tools",
+  "x-methods": [
+    {
+      "name": "tools.extract_start",
+      "summary": "文案提取：对任意视频文件跑 ASR+硬字幕 OCR 融合转写（异步作业，产物落 data/tools/<job_id>/）",
+      "params": {
+        "type": "object",
+        "required": ["video_path"],
+        "properties": {
+          "video_path": {
+            "type": "string",
+            "description": "视频文件本机路径（渲染层经文件选择对话框取得）"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["job_id"],
+        "properties": {
+          "job_id": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "tools.get_result",
+      "summary": "查询工具作业状态与产物（completed 时返回文案全文/SRT 路径等）",
+      "params": {
+        "type": "object",
+        "required": ["job_id"],
+        "properties": {
+          "job_id": { "type": "string" }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["status", "result"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "pending | running | completed | failed | cancelled"
+          },
+          "error": {
+            "type": ["string", "null"],
+            "description": "failed 时的人读原因"
+          },
+          "result": {
+            "type": ["object", "null"],
+            "properties": {
+              "video_path": { "type": "string" },
+              "txt_path": { "type": "string" },
+              "srt_path": { "type": "string" },
+              "text": { "type": "string" },
+              "chars": { "type": "integer" },
+              "duration_s": { "type": "number" },
+              "lines": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tools.asr_start",
+      "summary": "语音文件转文字：纯 ASR（无 OCR），异步作业，产物同 data/tools/<job_id>/",
+      "params": {
+        "type": "object",
+        "required": ["media_path"],
+        "properties": {
+          "media_path": {
+            "type": "string",
+            "description": "音频文件本机路径（mp3/wav/m4a/aac/flac/ogg）"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["job_id"],
+        "properties": {
+          "job_id": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "tools.rewrite",
+      "summary": "文案改写：原文复述 / 按文风卡重写两种风格（LLM 同步往返），产出附通用审查标注",
+      "params": {
+        "type": "object",
+        "required": ["text"],
+        "properties": {
+          "text": { "type": "string", "description": "要改写的文案全文" },
+          "style": {
+            "type": "string",
+            "enum": ["paraphrase", "card"],
+            "description": "paraphrase=原文复述（换说法不换事实）；card=按文风卡重写（语感手法对齐文风标杆）。缺省 paraphrase"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["text", "style", "notes"],
+        "properties": {
+          "text": { "type": "string", "description": "改写后的全文" },
+          "style": { "type": "string" },
+          "notes": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "通用审查标注（元叙述/违禁引导词），空数组=无标注"
+          }
+        }
+      }
+    },
+    {
+      "name": "tools.tts",
+      "summary": "长文文字转语音：当前引擎+默认音色合成整段文案，产物落 data/tools/tts/",
+      "params": {
+        "type": "object",
+        "required": ["text"],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "要合成的文案全文（引擎内部切块，长度不限）"
+          },
+          "engine": {
+            "type": "string",
+            "description": "缺省取设置项 tts.engine"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["path", "engine", "voice", "chars"],
+        "properties": {
+          "path": { "type": "string", "description": "音频文件绝对路径（内容寻址缓存）" },
+          "engine": { "type": "string" },
+          "voice": { "type": "string" },
+          "chars": { "type": "integer" }
+        }
+      }
+    }
+  ]
+}

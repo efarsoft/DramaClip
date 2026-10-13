@@ -4,7 +4,7 @@ import { NAV_GROUPS, NAV_ITEMS, isNavActive, navByGroup } from '../navItems';
 describe('导轨清单', () => {
   it('分两组', () => {
     expect(NAV_GROUPS).toEqual(['loop', 'config']);
-    expect(navByGroup('loop').map((item) => item.label)).toEqual(['工作台', '项目', '成品']);
+    expect(navByGroup('loop').map((item) => item.label)).toEqual(['工作台', '项目', '成品', '工具箱']);
     expect(navByGroup('config').map((item) => item.label)).toEqual(['引擎', '设置', '关于']);
   });
 

@@ -27,9 +27,14 @@ def defects(plan: PlanData) -> list[str]:
         return issues
     if any(token in last for token in _BANNED):
         issues.append("收尾禁止关注/点赞/二维码")
-    if not any(token in last for token in _CTA_OK):
+    if cta_missing(last):
         issues.append("收尾没有指向看全集")
     return issues
+
+
+def cta_missing(text: str) -> bool:
+    """收尾是否缺「看全集」转化指令（门禁与填词定向重试共用的同一判定）。"""
+    return not any(token in text for token in _CTA_OK)
 
 
 def _timeline_defects(plan: PlanData) -> list[str]:
