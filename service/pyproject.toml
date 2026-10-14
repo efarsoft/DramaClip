@@ -32,6 +32,10 @@ ml = [
   # av 上界：faster-whisper 1.2 的 decode_audio 依赖 av.open(metadata_errors=)，
   # av 14 起移除该参数导致转写开场即崩（2026-10-13 真机：分析任务卡 analyzing）
   "av<14",
+  # funasr 的 fbank 后端：funasr 1.4 自身缺 fbank 实现时会报
+  # "torchaudio is not installed"——torchaudio 与 torch 版本强耦合难装，
+  # knf 是无 torch 依赖的独立 C++ 实现（2026-10-14 真机：环境重建后 ASR 全挂）
+  "kaldi-native-fbank>=1.20",
   "ctranslate2>=4.5",
   "scenedetect>=0.7",
   "librosa>=0.10",

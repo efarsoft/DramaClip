@@ -85,15 +85,33 @@ def _pinyin_compatible(raw: str, new: str) -> bool:
 
 
 def stream_of(segments: list[AsrSegment]) -> list[_Char] | None:
-    """ASR 字流：逐内容字带时间戳；任一段「词戳字数与文本字数不符」→ None（坏数据）。"""
+    """ASR 字流：逐内容字带时间戳。
+
+    OCR 补入的字（source=ocr_fixed，真机：fusion 补「三复」两字）没有实测字戳：
+    时间戳置 0，由 _repair 按「OCR 有据补字」保留、_to_segments 按邻字插值补时间。
+    词戳与文本字数不符不再判坏数据——补字是融合的正常产物（真机：EP1 精炼跳过即此误判）。
+    仅在段文本为空（连文本都没有，无从对齐）时判 None。
+    """
     stream: list[_Char] = []
     for seg in segments:
-        words = [(word, ch) for word in seg.words for ch in _content(word.word)]
-        text_chars = [ch for ch in seg.text if ch not in _PUNCT]
-        if len(words) != len(text_chars):
+        if not seg.text.strip():
             return None
-        for (word, ch), _mark in zip(words, text_chars, strict=True):
-            stream.append(_Char(char=ch, start=word.start, end=word.end))
+        pairs: list[tuple[float, float]] = []
+        for word in seg.words:
+            for _ch in _content(word.word):
+                pairs.append((word.start, word.end))
+        text_chars = [ch for ch in seg.text if ch not in _PUNCT]
+        last: tuple[float, float] | None = None
+        for i, ch in enumerate(text_chars):
+            if i < len(pairs):
+                start, end = pairs[i]
+                last = (start, end)
+            elif last is not None:
+                # 超出词戳的补字：钳到最后一个实测字的结束时刻
+                start, end = last
+            else:
+                start, end = 0.0, 0.0
+            stream.append(_Char(char=ch, start=start, end=end))
     return stream
 
 

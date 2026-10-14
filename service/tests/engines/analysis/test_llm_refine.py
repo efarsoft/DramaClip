@@ -187,14 +187,17 @@ def test_refine_retries_once_on_bad_shape(monkeypatch: pytest.MonkeyPatch) -> No
     assert "JSON 格式" in calls[1], "重试带格式强化"
 
 
-def test_stream_mismatch_falls_back_before_llm(monkeypatch: pytest.MonkeyPatch) -> None:
-    """词戳字数与文本字数不符（坏数据）→ 不调 LLM 直接回退。"""
+def test_stream_mismatch_still_refines_with_placeholder_stamps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """词戳与文本字数不符（OCR 补字场景，source=ocr_fixed 的正常形状）→ 不再判坏数据：
+    按文本字流精炼，缺戳字时间由 _rebuild_words 插值补齐。"""
     broken = AsrSegment(
         start=0.0, end=1.0, text="甲乙丙丁", words=[WordSpan(start=0.0, end=0.5, word="甲")]
     )
     outcome = _run(monkeypatch, ["甲乙丙丁"], [broken], ocr_text="")
-    assert not outcome.applied
-    assert "字流校验失败" in outcome.detail
+    assert outcome.applied, "OCR 补字段不再跳过精炼"
+    assert outcome.segments[0].words, "重建字戳不得为空"
 
 
 def test_refined_segments_preserve_word_stamps(
