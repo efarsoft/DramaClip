@@ -33,13 +33,26 @@ _MMPROJ_PREFIX = "mmproj"
 
 
 def enabled(settings: dict[str, str]) -> bool:
+    """视觉轨是否开启：云端配置启用（vision.cloud=1）或本地档位（vision.model）非空。"""
+    if settings.get("vision.cloud", "").strip() == "1":
+        return True
     return settings.get(MODEL_KEY, "").strip() != ""
 
 
 def open_session(
     data_dir: Path, models_dir: Path, settings: dict[str, str]
-) -> VisionSession | None:
-    """按 vision.model 设置开会话；档位空/模型未装/llama-server 缺失 → None（分档，不报错）。"""
+) -> VisionSession | CloudVisionSession | None:
+    """按设置开会话：云端配置启用走 OpenAI 兼容端点（qwen-vl 等），否则本地 llama-server。
+
+    档位空/模型未装/llama-server 缺失/云端键缺失 → None（分档，不报错）。
+    """
+    if settings.get("vision.cloud", "").strip() == "1":
+        base_url = settings.get("vision.cloud_base_url", "").strip().rstrip("/")
+        api_key = settings.get("vision.cloud_api_key", "").strip()
+        model = settings.get("vision.cloud_model", "").strip()
+        if base_url == "" or api_key == "" or model == "":
+            return None
+        return CloudVisionSession(base_url=base_url, api_key=api_key, model=model)
     model_id = settings.get(MODEL_KEY, "").strip()
     if model_id == "":
         return None
@@ -126,6 +139,112 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def _describe_with(
+    video: Path,
+    episode_s: float,
+    work_dir: Path,
+    *,
+    count: int,
+    on_progress: Callable[[float, str], None] | None,
+    ask_group: Callable[[list[Path], int], str],
+) -> list[dict[str, Any]]:
+    """采样 → 分组多图请求 → 解析的公共流程；ask_group 由本地/云端会话各自提供。"""
+    if episode_s <= 0:
+        raise ValueError(f"集时长非法: {episode_s}")
+    work_dir.mkdir(parents=True, exist_ok=True)
+    pattern = str(work_dir / "frame-%02d.png")
+    runner.run(
+        sample_frames_args(str(video), pattern, duration_s=episode_s, count=count),
+        total_duration_s=episode_s,
+    )
+    frames = sorted(work_dir.glob("frame-*.png"))
+    if not frames:
+        raise RuntimeError("帧采样未产出")
+    frames_out: list[dict[str, Any]] = []
+    groups = [
+        frames[i:i + _FRAMES_PER_REQUEST] for i in range(0, len(frames), _FRAMES_PER_REQUEST)
+    ]
+    for index, group in enumerate(groups, start=1):
+        if on_progress is not None:
+            on_progress(index / len(groups), f"画面理解 {index}/{len(groups)} 组")
+        text = ask_group(group, len(group))
+        # 模型每组各自从 1 计数——解析按组序补全局偏移，时间戳才落在真实采样窗
+        frames_out.extend(
+            parse_descriptions(
+                text, len(frames), episode_s, offset=(index - 1) * _FRAMES_PER_REQUEST
+            )
+        )
+    return frames_out
+
+
+def _group_content(frames: list[Path], total: int) -> list[dict[str, Any]]:
+    """多图请求的消息内容：base64 图序列 + 逐图 JSON 提示词（本地/云端同构）。"""
+    content: list[dict[str, Any]] = []
+    for frame in frames:
+        b64 = base64.b64encode(frame.read_bytes()).decode()
+        url = f"data:image/png;base64,{b64}"
+        content.append({"type": "image_url", "image_url": {"url": url}})
+    content.append({"type": "text", "text": _prompt_for(total)})
+    return content
+
+
+class CloudVisionSession:
+    """云端视觉会话（OpenAI 兼容端点，qwen-vl 等）：无本地模型，按 token 计费。
+
+    与本地 VisionSession 同接口（describe_episode/close）——帧采样、提示词、
+    逐图 JSON 解析全量复用，只把传输从 llama-server 换成远端 chat/completions。
+    逐组同步调用（云端无会话生命周期），close 是空操作（接口对齐用）。
+    """
+
+    _REQUEST_TIMEOUT_S = 300.0
+
+    def __init__(self, *, base_url: str, api_key: str, model: str) -> None:
+        self.model_id = f"cloud:{model}"
+        self._endpoint = f"{base_url.rstrip('/')}/chat/completions"
+        self._api_key = api_key
+        self._model = model
+
+    def describe_episode(
+        self,
+        video: Path,
+        episode_s: float,
+        work_dir: Path,
+        *,
+        count: int = 16,
+        on_progress: Callable[[float, str], None] | None = None,
+    ) -> list[dict[str, Any]]:
+        return _describe_with(
+            video, episode_s, work_dir, count=count, on_progress=on_progress,
+            ask_group=self._ask_group,
+        )
+
+    def _ask_group(self, frames: list[Path], total: int) -> str:
+        payload = json.dumps({
+            "temperature": 0,
+            "max_tokens": 2048,
+            "model": self._model,
+            "messages": [{"role": "user", "content": _group_content(frames, total)}],
+        }).encode()
+        request = urllib.request.Request(
+            self._endpoint,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self._api_key}",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self._REQUEST_TIMEOUT_S) as resp:
+                body = json.load(resp)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")[:300]
+            raise RuntimeError(f"云端视觉请求失败 HTTP {exc.code}: {detail}") from exc
+        return str(body["choices"][0]["message"]["content"])
+
+    def close(self) -> None:
+        """云端无会话生命周期；接口与本地会话对齐。"""
+
+
 class VisionSession:
     """一只 llama-server 子进程：跨集复用模型，用完 close。"""
 
@@ -179,46 +298,16 @@ class VisionSession:
         on_progress: Callable[[float, str], None] | None = None,
     ) -> list[dict[str, Any]]:
         """采样 → 分组多图请求 → 解析；任一环失败上抛（调用方按分档落空）。"""
-        if episode_s <= 0:
-            raise ValueError(f"集时长非法: {episode_s}")
-        self._ensure()
-        assert self._proc is not None
-        work_dir.mkdir(parents=True, exist_ok=True)
-        pattern = str(work_dir / "frame-%02d.png")
-        runner.run(
-            sample_frames_args(str(video), pattern, duration_s=episode_s, count=count),
-            total_duration_s=episode_s,
+        return _describe_with(
+            video, episode_s, work_dir,
+            count=count, on_progress=on_progress, ask_group=self._ask_group,
         )
-        frames = sorted(work_dir.glob("frame-*.png"))
-        if not frames:
-            raise RuntimeError("帧采样未产出")
-        frames_out: list[dict[str, Any]] = []
-        groups = [
-            frames[i:i + _FRAMES_PER_REQUEST] for i in range(0, len(frames), _FRAMES_PER_REQUEST)
-        ]
-        for index, group in enumerate(groups, start=1):
-            if on_progress is not None:
-                on_progress(index / len(groups), f"画面理解 {index}/{len(groups)} 组")
-            text = self._ask_group(group, len(group))
-            # 模型每组各自从 1 计数——解析按组序补全局偏移，时间戳才落在真实采样窗
-            frames_out.extend(
-                parse_descriptions(
-                    text, len(frames), episode_s, offset=(index - 1) * _FRAMES_PER_REQUEST
-                )
-            )
-        return frames_out
 
     def _ask_group(self, frames: list[Path], total: int) -> str:
-        content: list[dict[str, Any]] = []
-        for frame in frames:
-            b64 = base64.b64encode(frame.read_bytes()).decode()
-            url = f"data:image/png;base64,{b64}"
-            content.append({"type": "image_url", "image_url": {"url": url}})
-        content.append({"type": "text", "text": _prompt_for(total)})
         payload = json.dumps({
             "temperature": 0,
             "max_tokens": 2048,
-            "messages": [{"role": "user", "content": content}],
+            "messages": [{"role": "user", "content": _group_content(frames, total)}],
         }).encode()
         request = urllib.request.Request(
             f"http://127.0.0.1:{self._port}/v1/chat/completions",

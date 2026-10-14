@@ -7,6 +7,7 @@ import os
 import shutil
 import sqlite3
 import time
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -131,10 +132,20 @@ class Harness:
 
 
 @pytest.fixture
-def harness(memory_db: sqlite3.Connection, tmp_path: Path) -> Harness:
+def harness(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[Harness]:
+    # OCR 全局桩：analysis 单元测试只验落库与进度语义，不跑真识别
+    # （v6 引擎模型加载+推理把任务拖过 wait_done 窗口；OCR 语义有自己的测试文件）。
+    monkeypatch.setattr(analysis_api.subtitle_ocr, "extract_subtitles", _no_ocr_extract)
     instance = Harness(memory_db, tmp_path / "work", FakeTranscriber(), data_dir=tmp_path)
     yield instance
     instance.close()
+
+
+def _no_ocr_extract(*_a: Any, **_k: Any) -> Any:
+    """OCR 桩：单元测试不跑真识别（v6 模型加载+推理超出任务等待窗口）。"""
+    return ([], None, None)
 
 
 def _make_project(harness: Harness, tmp_path: Path, sample_video: Path, copies: int = 2) -> str:
@@ -146,7 +157,10 @@ def _make_project(harness: Harness, tmp_path: Path, sample_video: Path, copies: 
 
 
 def test_start_completes_and_persists(
-    harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+    harness: Harness,
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
 ) -> None:
     project_id = _make_project(harness, tmp_path, sample_video)
     result = harness.rpc("analysis.start", {"project_id": project_id})
@@ -199,9 +213,13 @@ def test_cancel_between_episodes(
 
 
 def test_start_marks_targets_analyzing_immediately(
-    memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """受理即标 analyzing：前置挖掘阶段集状态不得冻结旧值（用户可见「点了没反应」）。"""
+    monkeypatch.setattr(analysis_api.subtitle_ocr, "extract_subtitles", _no_ocr_extract)
     instance = Harness(
         memory_db, tmp_path / "work", FakeTranscriber(delay_s=1.0), data_dir=tmp_path
     )
@@ -244,7 +262,10 @@ def test_cancel_restores_unprocessed_episodes(
 
 
 def test_mining_phase_reports_progress(
-    harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+    harness: Harness,
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
 ) -> None:
     """全剧热词挖掘阶段必须有进度播报——此前该阶段数分钟任务标签纹丝不动。"""
     project_id = _make_project(harness, tmp_path, sample_video)
@@ -406,7 +427,9 @@ def test_start_reanalyzes_stale_analyzing_episode(
 
 
 def test_scan_at_or_below_threshold_autostarts_analysis(
-    harness: Harness, tmp_path: Path, sample_video: Path
+    harness: Harness,
+    tmp_path: Path,
+    sample_video: Path,
 ) -> None:
     """≤N 集导入扫完即交全量分析，不用人点「批量分析」。"""
     harness.context.settings["analysis.full_threshold"] = "15"

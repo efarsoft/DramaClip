@@ -1,5 +1,6 @@
-/** 端点配置弹窗：新增/编辑表单 + 保存前连通性测试；失败原文进内联横幅，不闪一次就消失。 */
-import { App as AntdApp, Alert, Button, Input, Modal } from 'antd';
+/** 端点配置弹窗：新增/编辑表单 + 保存前连通性测试；失败原文进内联横幅，不闪一次就消失。
+ * 传 presets（按域的服务商预设）时表单顶部出预设下拉——选中即填地址与默认模型。 */
+import { App as AntdApp, Alert, Button, Input, Modal, Select } from 'antd';
 import { useState, type ChangeEvent, type ReactElement } from 'react';
 import { engineConfigsApi } from '../../services/client';
 import { tokens } from '../../styles/theme';
@@ -11,6 +12,13 @@ export interface FormState {
   readonly model: string;
 }
 
+/** 服务商预设：选中自动填 API 地址与默认模型（自定义=手填）。 */
+export interface CloudPreset {
+  readonly label: string;
+  readonly base_url: string;
+  readonly model: string;
+}
+
 const FIELDS = [
   { key: 'name', label: '名称', placeholder: '如 DashScope qwen-plus' },
   { key: 'base_url', label: 'API 地址', placeholder: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
@@ -19,7 +27,7 @@ const FIELDS = [
 ] as const;
 
 /** 连通性测试：按当前草稿直测端点（保存前即可验证）；失败原因进弹窗内横幅。 */
-function useConnectionTest(draft: FormState): {
+function useConnectionTest(draft: FormState, domain: string): {
   readonly testing: boolean;
   readonly testError: string | null;
   readonly test: () => void;
@@ -28,14 +36,15 @@ function useConnectionTest(draft: FormState): {
   const [testing, setTesting] = useState(false);
   const [testError, setTestError] = useState<string | null>(null);
   const test = (): void => {
-    if (draft.base_url.trim() === '' || draft.model.trim() === '') {
-      setTestError('先填写 API 地址与模型名：这两项为空时无从测起');
+    if (draft.model.trim() === '') {
+      setTestError('先填写模型名：为空时无从测起');
       return;
     }
     setTesting(true);
     setTestError(null);
     engineConfigsApi
       .test({
+        domain,
         base_url: draft.base_url.trim(),
         api_key: draft.api_key.trim(),
         model: draft.model.trim(),
@@ -61,17 +70,22 @@ export function ConfigModal({
   initial,
   saving,
   saveError,
+  presets,
+  domain = 'llm',
   onSave,
   onClose,
 }: {
   initial: FormState;
   saving: boolean;
   saveError: string | null;
+  /** 按域的服务商预设：不传 = 纯手填（LLM 域现状）。 */
+  presets?: readonly CloudPreset[];
+  domain?: string;
   onSave: (form: FormState) => void;
   onClose: () => void;
 }): ReactElement {
   const [draft, setDraft] = useState<FormState>(initial);
-  const { testing, testError, test } = useConnectionTest(draft);
+  const { testing, testError, test } = useConnectionTest(draft, domain);
   const field = (key: keyof FormState) => ({
     value: draft[key],
     onChange: (event: ChangeEvent<HTMLInputElement>) => {
@@ -97,6 +111,29 @@ export function ConfigModal({
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceMd, paddingTop: tokens.spaceSm }}>
         <FailureBanners saveError={saveError} testError={testError} />
+        {presets !== undefined && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceMd }}>
+            <span style={{ width: 64, flexShrink: 0, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textSecondary }}>
+              服务商
+            </span>
+            <Select
+              size="small"
+              style={{ flex: 1 }}
+              placeholder="选预设自动填地址与默认模型"
+              options={presets.map((preset) => ({ label: preset.label, value: preset.label }))}
+              onChange={(label: string) => {
+                const preset = presets.find((item) => item.label === label);
+                if (preset === undefined) return;
+                setDraft({
+                  ...draft,
+                  name: draft.name === '' ? preset.label : draft.name,
+                  base_url: preset.base_url,
+                  model: preset.model,
+                });
+              }}
+            />
+          </label>
+        )}
         {FIELDS.map((spec) => (
           <LabeledInput
             key={spec.key}

@@ -24,6 +24,8 @@ export interface EngineConfigActions {
   readonly close: () => void;
   readonly save: (form: FormState) => void;
   readonly enable: (config: EngineConfig) => void;
+  /** 清空本域全部云端配置启用（切回本地引擎；与设置键写入配合完成一次切换）。 */
+  readonly enableLocal: () => Promise<void>;
   readonly remove: (config: EngineConfig) => void;
 }
 
@@ -189,6 +191,15 @@ export function useEngineConfigs(domain: string, onChanged?: () => void): Engine
     enable: (config) => {
       enableConfig(app, config, afterChange);
     },
+    enableLocal: () =>
+      engineConfigsApi
+        .enableLocal(domain)
+        .then(() => {
+          reload();
+        })
+        .catch((error: unknown) => {
+          app.message.error(errorText(error, '切回本地失败'));
+        }),
     remove: (config) => {
       confirmRemove(app, config, afterChange);
     },

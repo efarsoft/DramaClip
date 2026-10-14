@@ -35,6 +35,8 @@ interface LibraryProps {
   onImport: () => void;
   /** 域自带的行内动作（配音域放试听）：资产库不懂各域的事，只负责摆位置。 */
   renderPreview?: ((model: ModelInfo) => ReactElement) | undefined;
+  /** 卡头分段控件（本地模型 | 云端配置）：位置在工具栏左侧，两个 pane 各带一份。 */
+  segment?: ReactElement;
 }
 
 type GroupProps = Omit<LibraryProps, 'models' | 'externals' | 'importError' | 'onForget' | 'onImport'> & {
@@ -56,6 +58,7 @@ export function AssetLibrary({
   onForget,
   onImport,
   renderPreview,
+  segment,
 }: LibraryProps): ReactElement {
   useDownloadSettled(onChanged);
   const [keyword, setKeyword] = useState('');
@@ -67,12 +70,15 @@ export function AssetLibrary({
     <PageSection
       title="资产库"
       extra={
-        <LibraryToolbar
-          keyword={keyword}
-          onKeyword={setKeyword}
-          onVerifyAll={onChanged}
-          onImport={onImport}
-        />
+        <span style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceMd }}>
+          {segment}
+          <LibraryToolbar
+            keyword={keyword}
+            onKeyword={setKeyword}
+            onVerifyAll={onChanged}
+            onImport={onImport}
+          />
+        </span>
       }
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>

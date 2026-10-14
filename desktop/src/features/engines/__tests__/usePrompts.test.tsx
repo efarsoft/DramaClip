@@ -15,6 +15,16 @@ const list = vi.hoisted(() => vi.fn());
 const save = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../services/client', () => ({
+  engineConfigsApi: {
+    list: vi.fn(() => Promise.resolve({ configs: [] })),
+    create: vi.fn(() => Promise.resolve({ id: 'cfg1', domain: '', name: '', base_url: '', api_key: '', model: '', enabled: 0, api_key_masked: '' })),
+    update: vi.fn(() => Promise.resolve({})),
+    remove: vi.fn(() => Promise.resolve({ ok: true })),
+    enable: vi.fn(() => Promise.resolve({})),
+    enableLocal: vi.fn(() => Promise.resolve({ ok: true })),
+    test: vi.fn(() => Promise.resolve({ ok: true, latency_s: 0.1, error: null })),
+  },
+
   promptsApi: {
     list: (): unknown => list(),
     save: (key: string, text: string): unknown => save(key, text),

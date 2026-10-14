@@ -40,7 +40,9 @@ def model_dir(models_dir: Path, engine: str) -> Path:
     return models_dir / relative
 
 
-def create(engine: str, models_dir: Path | None = None, *, api_key: str = "") -> TtsEngine:
+def create(
+    engine: str, models_dir: Path | None = None, *, api_key: str = "", model: str = ""
+) -> TtsEngine:
     if engine == "edge":
         from dramaclip.engines.tts.engines.edge import EdgeTtsEngine
 
@@ -48,7 +50,7 @@ def create(engine: str, models_dir: Path | None = None, *, api_key: str = "") ->
     if engine == "cosyvoice_cloud":
         from dramaclip.engines.tts.engines.dashscope import DashscopeCosyVoiceEngine
 
-        return DashscopeCosyVoiceEngine(api_key=api_key)
+        return DashscopeCosyVoiceEngine(api_key=api_key, model=model or "cosyvoice-v2")
     if engine == "kokoro":
         from dramaclip.engines.tts.engines.kokoro import KokoroEngine
 

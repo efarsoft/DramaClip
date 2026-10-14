@@ -89,21 +89,25 @@
     },
     {
       "name": "engine_configs.enable",
-      "summary": "启用配置（同域单启用；LLM 域镜像至 settings）",
+      "summary": "启用配置（同域单启用，启用即镜像至 settings）；local=true 清空该域全部启用（切回本地引擎）",
       "params": {
         "type": "object",
-        "required": ["id"],
-        "properties": { "id": { "type": "string" } }
+        "properties": {
+          "id": { "type": "string" },
+          "domain": { "type": "string" },
+          "local": { "type": "boolean" }
+        }
       },
       "result": { "$ref": "#/x-models/EngineConfig" }
     },
     {
       "name": "engine_configs.test",
-      "summary": "连通性测试（最小请求测延迟）",
+      "summary": "连通性测试：按域发一次真实最小请求（LLM ping / ASR 短音频转写 / TTS 单字合成 / VL 单图；缺 domain 走 LLM ping）",
       "params": {
         "type": "object",
         "required": ["base_url", "model"],
         "properties": {
+          "domain": { "type": "string" },
           "base_url": { "type": "string" },
           "api_key": { "type": "string" },
           "model": { "type": "string" }

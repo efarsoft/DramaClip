@@ -15,7 +15,7 @@ import {
 
 describe('配音引擎下拉与音色表', () => {
   it('下拉里只有工厂真能创建的引擎：kokoro + indextts2 本地，edge 云端', () => {
-    expect([...TTS_ENGINES]).toEqual(['kokoro', 'edge', 'indextts2']);
+    expect([...TTS_ENGINES]).toEqual(['kokoro', 'edge', 'indextts2', 'cosyvoice_cloud']);
   });
 
   it('indextts2 音色=参考音频不走下拉，标签如实', () => {

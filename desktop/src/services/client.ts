@@ -362,7 +362,11 @@ export const engineConfigsApi = {
     rpc<{ ok: boolean }>('engine_configs.delete', { id }),
   enable: (id: string): Promise<EngineConfig> =>
     rpc<EngineConfig>('engine_configs.enable', { id }),
+  /** 切回本地引擎：清空该域全部云端配置启用（选本地模型时与设置键写入同用）。 */
+  enableLocal: (domain: string): Promise<{ ok: boolean }> =>
+    rpc<{ ok: boolean }>('engine_configs.enable', { domain, local: true }),
   test: (input: {
+    domain?: string;
     base_url: string;
     api_key: string;
     model: string;

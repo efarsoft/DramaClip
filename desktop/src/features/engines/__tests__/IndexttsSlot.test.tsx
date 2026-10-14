@@ -16,6 +16,16 @@ import { specsFromHealth } from '../machineFit';
 import { model, report, reportsOf } from './fixtures';
 
 vi.mock('../../../services/client', () => ({
+  engineConfigsApi: {
+    list: vi.fn(() => Promise.resolve({ configs: [] })),
+    create: vi.fn(() => Promise.resolve({ id: 'cfg1', domain: '', name: '', base_url: '', api_key: '', model: '', enabled: 0, api_key_masked: '' })),
+    update: vi.fn(() => Promise.resolve({})),
+    remove: vi.fn(() => Promise.resolve({ ok: true })),
+    enable: vi.fn(() => Promise.resolve({})),
+    enableLocal: vi.fn(() => Promise.resolve({ ok: true })),
+    test: vi.fn(() => Promise.resolve({ ok: true, latency_s: 0.1, error: null })),
+  },
+
   modelsApi: {
     list: vi.fn(() => Promise.resolve([])),
     verify: vi.fn(() => Promise.resolve([])),

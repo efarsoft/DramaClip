@@ -646,7 +646,7 @@ def _analyze_one(
     language: str,
     cancel_event: threading.Event,
     *,
-    vision: vision_engine.VisionSession | None = None,
+    vision: vision_engine.VisionSession | vision_engine.CloudVisionSession | None = None,
     ocr_bars: list[OcrSegment] | None = None,
     ocr_band: tuple[float, float] | None = None,
     ocr_lines: list[tuple[float, float]] | None = None,
@@ -811,7 +811,7 @@ def _contact_sheet(context: AppContext, episode: dict[str, Any]) -> str | None:
 
 def _describe_frames(
     context: AppContext,
-    vision: vision_engine.VisionSession | None,
+    vision: vision_engine.VisionSession | vision_engine.CloudVisionSession | None,
     episode: dict[str, Any],
     episode_id: str,
     report: Callable[[float, str], None],

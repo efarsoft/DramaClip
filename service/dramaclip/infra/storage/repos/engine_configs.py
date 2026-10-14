@@ -94,3 +94,9 @@ def set_enabled(conn: sqlite3.Connection, domain: str, config_id: str) -> None:
             "UPDATE engine_configs SET enabled = 1 WHERE id = ? AND domain = ?",
             (config_id, domain),
         )
+
+
+def clear_enabled(conn: sqlite3.Connection, domain: str) -> None:
+    """全清启用（切回本地引擎用）：同域全部置 0。"""
+    with conn:
+        conn.execute("UPDATE engine_configs SET enabled = 0 WHERE domain = ?", (domain,))

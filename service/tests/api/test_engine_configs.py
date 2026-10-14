@@ -156,3 +156,94 @@ def test_test_reports_unreachable_endpoint_without_raising(
     )
     assert result["ok"] is False
     assert result["error"]
+
+
+# ── 云端域镜像：启用配置写进既有设置键，运行时消费方零改动 ─────────────────────
+
+
+def test_enable_asr_cloud_mirrors_three_keys(memory_db: sqlite3.Connection) -> None:
+    settings: dict[str, str] = {}
+    harness = Harness(memory_db, settings)
+    config = _create(harness, domain="asr_cloud", model="paraformer-v2")
+    harness.rpc("engine_configs.enable", {"id": config["id"]})
+    mirrored = settings_repo.get_all(memory_db)
+    assert mirrored["asr.engine"] == "dashscope_paraformer"
+    assert mirrored["asr.api_key"] == "sk-test-1234"
+    assert mirrored["asr.model"] == "paraformer-v2"
+
+
+def test_enable_tts_cloud_mirrors_three_keys(memory_db: sqlite3.Connection) -> None:
+    settings: dict[str, str] = {}
+    harness = Harness(memory_db, settings)
+    config = _create(harness, domain="tts_cloud", model="cosyvoice-v2")
+    harness.rpc("engine_configs.enable", {"id": config["id"]})
+    mirrored = settings_repo.get_all(memory_db)
+    assert mirrored["tts.engine"] == "cosyvoice_cloud"
+    assert mirrored["tts.api_key"] == "sk-test-1234"
+    assert mirrored["tts.model"] == "cosyvoice-v2"
+
+
+def test_enable_vision_cloud_mirrors_four_keys(memory_db: sqlite3.Connection) -> None:
+    settings: dict[str, str] = {}
+    harness = Harness(memory_db, settings)
+    config = _create(harness, domain="image", model="qwen-vl-max")
+    harness.rpc("engine_configs.enable", {"id": config["id"]})
+    mirrored = settings_repo.get_all(memory_db)
+    assert mirrored["vision.cloud"] == "1"
+    assert mirrored["vision.cloud_base_url"] == "https://api.example.com/v1"
+    assert mirrored["vision.cloud_api_key"] == "sk-test-1234"
+    assert mirrored["vision.cloud_model"] == "qwen-vl-max"
+
+
+class _FakeVision(BaseHTTPRequestHandler):
+    """假多模态端点：校验 Bearer 头与路径，回一条 chat 结构。"""
+
+    seen_auth = ""
+    seen_path = ""
+
+    def do_POST(self) -> None:  # noqa: N802 - http.server 命名约定
+        _FakeVision.seen_auth = str(self.headers.get("Authorization", ""))
+        _FakeVision.seen_path = self.path
+        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        body = json.dumps(
+            {"choices": [{"message": {"role": "assistant", "content": "白色"}}]}
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args: Any) -> None:
+        return
+
+
+def test_vision_test_hits_chat_completions_with_bearer(
+    memory_db: sqlite3.Connection,
+) -> None:
+    server = HTTPServer(("127.0.0.1", 0), _FakeVision)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        harness = Harness(memory_db, {})
+        result = harness.rpc(
+            "engine_configs.test",
+            {
+                "domain": "image",
+                "base_url": f"http://127.0.0.1:{server.server_port}",
+                "api_key": "sk-vl",
+                "model": "qwen-vl-max",
+            },
+        )
+        assert result["ok"] is True, result["error"]
+        assert _FakeVision.seen_path == "/chat/completions"
+        assert _FakeVision.seen_auth == "Bearer sk-vl"
+    finally:
+        server.shutdown()
+
+
+def test_vision_test_missing_fields_is_honest_false(memory_db: sqlite3.Connection) -> None:
+    harness = Harness(memory_db, {})
+    result = harness.rpc("engine_configs.test", {"domain": "image"})
+    assert result["ok"] is False
+    assert "不能为空" in str(result["error"])

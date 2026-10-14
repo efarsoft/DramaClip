@@ -2,7 +2,7 @@
  * 两段式骨架：卡上每句状态都由传入的 models/reports 折算，不得是组件里写死的常量。
  * 把装好的模型改成未落盘，卡片必须从「就绪」翻成「缺模型」，行内也不给「选为生效」。
  */
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ModelInfo, SelftestResults, VerifyReport } from '@dramaclip/protocol';
 import { TtsTab } from '../TtsTab';
@@ -11,6 +11,17 @@ import { specsFromHealth } from '../machineFit';
 import { model, report, reportsOf } from './fixtures';
 
 vi.mock('../../../services/client', () => ({
+  engineConfigsApi: {
+    list: vi.fn(() => Promise.resolve({ configs: engineConfigsSeed })),
+    create: vi.fn(() =>
+      Promise.resolve({ id: 'cfg1', domain: '', name: '', base_url: '', api_key: '', model: '', enabled: 0, api_key_masked: '' })),
+    update: vi.fn(() => Promise.resolve({})),
+    remove: vi.fn(() => Promise.resolve({ ok: true })),
+    enable: vi.fn(() => Promise.resolve({})),
+    enableLocal: vi.fn(() => Promise.resolve({ ok: true })),
+    test: vi.fn(() => Promise.resolve({ ok: true, latency_s: 0.1, error: null })),
+  },
+
   modelsApi: {
     list: vi.fn(() => Promise.resolve([])),
     verify: vi.fn(() => Promise.resolve([])),
@@ -35,6 +46,19 @@ vi.mock('../../../services/client', () => ({
 }));
 
 type Reports = ReadonlyMap<string, VerifyReport>;
+
+// 云端配置种子：默认空；云端态用例里放一条启用中的配置
+let engineConfigsSeed: readonly Record<string, unknown>[] = [];
+const cloudConfig = {
+  id: 'cfg-cloud-1',
+  domain: 'asr_cloud',
+  name: '百炼·paraformer-v2',
+  base_url: 'https://dashscope.aliyuncs.com',
+  api_key: 'sk-test-abcd1234',
+  model: 'paraformer-v2',
+  enabled: 1,
+  api_key_masked: 'sk-t••••1234',
+};
 
 const noop = (): void => {
   // 渲染测试只验状态，不验写回
@@ -178,5 +202,52 @@ describe('语音识别 ASR · 同构骨架', () => {
     expect(screen.getByText('资产库')).toBeTruthy();
     expect(screen.getAllByText('Whisper Small').length).toBeGreaterThan(0);
     expect(screen.getAllByText('就绪').length).toBeGreaterThan(0);
+  });
+});
+
+describe('语音识别 ASR · 云端配置分段与生效切换', () => {
+  afterEach(() => {
+    cleanup();
+    engineConfigsSeed = [];
+  });
+
+  function asr(settings: Record<string, string>): void {
+    render(
+      <AsrTab
+        models={[]}
+        imported={[]}
+        importError=""
+        machine={specsFromHealth(null)}
+        reports={new Map()}
+        settings={settings}
+        onSave={noop}
+        onChanged={noop}
+        onVerify={noop}
+        onForget={noop}
+        onImport={noop}
+      />,
+    );
+  }
+
+  it('默认本地段：资产库卡头带分段，云端配置卡不出现', () => {
+    asr({ 'asr.engine': 'faster_whisper' });
+    expect(screen.getByText('本地模型')).toBeTruthy();
+    expect(screen.getByText('云端配置')).toBeTruthy();
+    expect(screen.queryByText('还没有云端配置')).toBeNull();
+  });
+
+  it('有启用中的云端配置：生效卡翻成云端形态（配置名+按量计费+测连接），生效下拉含混排分组', async () => {
+    engineConfigsSeed = [cloudConfig];
+    asr({ 'asr.engine': 'dashscope_paraformer' });
+    expect(
+      await screen.findByText('百炼·paraformer-v2', {}, { timeout: 5000 }),
+    ).toBeTruthy();
+    expect(screen.getByText(/云端转写 · 按量计费/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: '测连接' })).toBeTruthy();
+    // 分段切到云端配置段：配置列表出现（含使用中徽标）
+    fireEvent.click(screen.getAllByText('云端配置')[0]);
+    await waitFor(() => {
+      expect(screen.getAllByText('使用中').length).toBeGreaterThan(0);
+    });
   });
 });

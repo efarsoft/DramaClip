@@ -6,9 +6,9 @@
  */
 import type { DefaultOptionType } from 'antd/es/select';
 
-export type TtsEngineName = 'kokoro' | 'edge' | 'indextts2';
+export type TtsEngineName = 'kokoro' | 'edge' | 'indextts2' | 'cosyvoice_cloud';
 
-export const TTS_ENGINES: readonly TtsEngineName[] = ['kokoro', 'edge', 'indextts2'];
+export const TTS_ENGINES: readonly TtsEngineName[] = ['kokoro', 'edge', 'indextts2', 'cosyvoice_cloud'];
 
 /** 不需要本地模型的引擎：Edge 走云端，故它没有「缺模型」这一态。其余引擎一律以资产为准。 */
 export const TTS_MODEL_FREE_ENGINES: readonly TtsEngineName[] = ['edge'];
@@ -82,6 +82,12 @@ const EDGE_VOICES: { label: string; value: string }[] = [
   { label: '曉雨 · 女声（台湾）', value: 'zh-TW-HsiaoYuNeural' },
 ];
 
+// CosyVoice-v2 云端音色（百炼预置音色 id，克隆音色在控制台/接口创建后填 id 同样可用）
+const COSYVOICE_CLOUD = [
+  ...female(['longxiaochun_v2', 'longwan_v2', 'longshu_v2', 'longjing_v2', 'longmiao_v2']),
+  ...male(['longcheng_v2', 'longhua_v2', 'longxiang_v2', 'longfei_v2', 'longqiang_v2']),
+];
+
 export const TTS_VOICE_OPTIONS: Record<TtsEngineName, DefaultOptionType[]> = {
   kokoro: [
     { label: '女声', options: female(KOKORO_FEMALE_IDS) },
@@ -89,4 +95,5 @@ export const TTS_VOICE_OPTIONS: Record<TtsEngineName, DefaultOptionType[]> = {
   ],
   edge: EDGE_VOICES,
   indextts2: [], // 音色=参考音频文件（零样本克隆），不走下拉，见 RefVoiceRow
+  cosyvoice_cloud: COSYVOICE_CLOUD,
 };

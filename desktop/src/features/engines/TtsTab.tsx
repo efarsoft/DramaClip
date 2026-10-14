@@ -4,9 +4,11 @@
  * 免模型的云端引擎单独走「无需本地模型」说明，不冒充体检结果。
  */
 import { Button, Segmented } from 'antd';
+import { useState } from 'react';
 import type { ReactElement } from 'react';
-import type { ModelInfo } from '@dramaclip/protocol';
+import type { EngineConfig, ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
+import { PageSection } from '../../components/layout/PageKit';
 import type { DomainTabProps } from './EnginesPage';
 import type { AssetState, Reports } from './assetState';
 import {
@@ -21,6 +23,13 @@ import {
 import { DownloadSourceButton } from './ModelDownloadPopover';
 import { type ActiveCardProps, ActiveEngineCard } from './ActiveEngineCard';
 import { AssetLibrary } from './AssetLibrary';
+import {
+  CloudConfigsPane,
+  CloudSegment,
+  CloudTestButton,
+  MixedEnginePicker,
+  activeCloudConfig,
+} from './CloudDomainUI';
 import { IndexttsRuntimeSlot } from './IndexttsRuntimeSlot';
 import { AutoVoiceButton } from './AutoVoiceButton';
 import { RefCleanButton } from './RefCleanButton';
@@ -29,6 +38,7 @@ import { SettingSelect } from './SettingSelect';
 import { TtsPreviewButton } from './TtsPreviewButton';
 import { previewNotice } from './ttsPreview';
 import { useDownloadProgress } from './useDownloadProgress';
+import { useEngineConfigs } from './useEngineConfigs';
 import {
   TTS_ENGINES,
   isModelFreeEngine,
@@ -41,12 +51,14 @@ const ENGINE_KIND_LABEL: Record<string, string> = {
   kokoro: '本地 · 免费离线',
   edge: '云端 · 免费无需 API Key',
   indextts2: '本地 · 音色克隆（N 卡实时 / CPU 预生成）',
+  cosyvoice_cloud: '云端 · 百炼按量计费',
 };
 
 const VOICE_HINT: Record<string, string> = {
   kokoro: 'Kokoro 提供 100 个中文音色（55 女 + 45 男），下拉可搜索',
   edge: '微软官方中文音色，覆盖普通话 / 东北 / 陕西 / 粤语 / 台湾',
   indextts2: '零样本克隆：选一段 3~10 秒干净人声做音色（如剧集主角台词）；截自剧集的参考带 BGM，先点「人声分离」',
+  cosyvoice_cloud: '百炼预置音色，下拉可换；克隆音色在百炼控制台创建后把 id 填进自定义',
 };
 
 export function TtsTab({
@@ -63,45 +75,153 @@ export function TtsTab({
   onForget,
   onImport,
 }: DomainTabProps): ReactElement {
+  const cloud = useEngineConfigs('tts_cloud', onChanged);
+  const [pane, setPane] = useState<'local' | 'cloud'>('local');
+  const activeCloud = activeCloudConfig(cloud.configs);
   const engine = settings['tts.engine'] ?? '';
   const domainModels = models.filter((model) => model.kind === 'tts');
   const active = isModelFreeEngine(engine) ? undefined : activeAsset(models, 'tts', settings);
+  const segment = <CloudSegment value={pane} onChange={setPane} />;
+  const pickCloud = (config: EngineConfig): void => {
+    cloud.enable(config);
+  };
+  const pickLocalEngine = (name: string): void => {
+    cloud
+      .enableLocal()
+      .catch(() => undefined)
+      .finally(() => {
+        onSave({ 'tts.engine': name });
+      });
+  };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
-      <ActiveCard
-        active={active}
-        engine={engine}
-        settings={settings}
-        reports={reports}
-        selftests={selftests}
-        onSave={onSave}
-        onChanged={onChanged}
-        onVerify={onVerify}
-      />
+      {activeCloud !== undefined ? (
+        <CloudActiveCard
+          config={activeCloud}
+          settings={settings}
+          configs={cloud.configs}
+          onSave={onSave}
+          onPickLocalEngine={pickLocalEngine}
+          onPickCloud={pickCloud}
+        />
+      ) : (
+        <ActiveCard
+          active={active}
+          engine={engine}
+          settings={settings}
+          reports={reports}
+          selftests={selftests}
+          onSave={onSave}
+          onChanged={onChanged}
+          onVerify={onVerify}
+          configs={cloud.configs}
+          onPickCloud={pickCloud}
+        />
+      )}
       {/* IndexTTS 运行环境安装槽：配音页固定显示（业主裁决 2026-09-24）——入口可见性
           不该押在「先切到 indextts2」上，资产库那行的试听/选为生效随时会撞上它。
           判据仍是 models.indextts_status：装好后槽自己消失，不是常驻横幅。
           2~6GB 的独立 Python + torch 不悄悄装——「选为生效」不代装，给显式一键引导，
           试听/自检/导出的失败文案指的就是这扇门（曾经只有文案没有门）。 */}
       <IndexttsRuntimeSlot />
-      <AssetLibrary
-        models={domainModels}
-        externals={externalAssets(imported, 'tts')}
-        importError={importError}
-        reports={reports}
-        selftests={selftests}
-        specs={machine}
-        activeModelId={active?.model_id}
-        onActivate={(model) => {
-          onSave(activateSettings(model));
-        }}
-        onChanged={onChanged}
-        onVerify={onVerify}
-        onForget={onForget}
-        onImport={onImport}
-        renderPreview={previewRenderer(settings, reports)}
-      />
+      {pane === 'local' ? (
+        <AssetLibrary
+          models={domainModels}
+          externals={externalAssets(imported, 'tts')}
+          importError={importError}
+          reports={reports}
+          selftests={selftests}
+          specs={machine}
+          activeModelId={active?.model_id}
+          onActivate={(model) => {
+            pickLocalEngine(activateSettings(model)['tts.engine'] ?? model.engine);
+          }}
+          onChanged={onChanged}
+          onVerify={onVerify}
+          onForget={onForget}
+          onImport={onImport}
+          renderPreview={previewRenderer(settings, reports)}
+          segment={segment}
+        />
+      ) : (
+        <PageSectionCloud
+          segment={segment}
+          actions={cloud}
+          onChanged={onChanged}
+          note="云端合成按「配置」接入：可添加多个服务商与模型，同一时刻启用一条，切换即改生效引擎。密钥只存本机数据库、界面脱敏显示；未测通的配置可以保存，但启用前建议先测连接。"
+        />
+      )}
     </div>
+  );
+}
+/** 云端生效卡：配音走启用中的云端配置；音色行沿用按引擎键（tts.voice.cosyvoice_cloud）。 */
+function CloudActiveCard({
+  config,
+  settings,
+  configs,
+  onSave,
+  onPickLocalEngine,
+  onPickCloud,
+}: {
+  config: EngineConfig;
+  settings: DomainTabProps['settings'];
+  configs: readonly EngineConfig[];
+  onSave: DomainTabProps['onSave'];
+  onPickLocalEngine: (name: string) => void;
+  onPickCloud: (config: EngineConfig) => void;
+}): ReactElement {
+  const engine = 'cosyvoice_cloud';
+  const voice = settings[voiceSettingKey(engine)] ?? '';
+  const card: ActiveCardProps = {
+    domain: '配音 TTS',
+    title: config.name,
+    state: null,
+    hint: `云端合成 · 按量计费 · 模型 ${config.model}`,
+    picker: (
+      <MixedEnginePicker
+        localValue=""
+        localOptions={TTS_ENGINES.map((name) => ({ label: ttsEngineLabel(name), value: name }))}
+        configs={configs}
+        onPickLocal={onPickLocalEngine}
+        onPickCloud={onPickCloud}
+      />
+    ),
+    actions: <CloudTestButton config={config} domain="tts_cloud" />,
+    props: [
+      {
+        label: '音色',
+        value: (
+          <span style={{ display: 'inline-flex', alignItems: 'flex-start', gap: tokens.spaceSm }}>
+            <VoiceSelect engine={engine} settings={settings} onSave={onSave} />
+            <TtsPreviewButton engine={engine} voice={voice} blocked={undefined} />
+          </span>
+        ),
+      },
+      { label: '接口地址', value: config.base_url === '' ? '服务商标准端点' : config.base_url },
+      { label: '密钥', value: config.api_key_masked },
+      { label: '生效时机', value: '保存后下次任务' },
+    ],
+    footnote: `${VOICE_HINT[engine] ?? ''} · 切回本地模型用上方下拉选「本地模型」分组`,
+  };
+  return <ActiveEngineCard {...card} />;
+}
+
+/** 云端配置段的卡片外壳（与资产库同一张卡型，分段控件常驻卡头）。 */
+function PageSectionCloud({
+  segment,
+  actions,
+  onChanged,
+  note,
+}: {
+  segment: ReactElement;
+  actions: ReturnType<typeof useEngineConfigs>;
+  onChanged: () => void;
+  note: string;
+}): ReactElement {
+  return (
+    <PageSection title="云端配置" extra={segment}>
+      <CloudConfigsPane domain="tts_cloud" actions={actions} onChanged={onChanged} note={note} />
+    </PageSection>
   );
 }
 

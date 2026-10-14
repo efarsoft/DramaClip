@@ -16,6 +16,16 @@ let captured: ((event: ServiceEvent) => void) | null = null;
 // vi.mock 会被提升到 import 之前执行，但工厂里的闭包在测试期才被调用——
 // 届时 download / captured 都已初始化，这正是「替身只接线、不抢跑」的写法。
 vi.mock('../../../services/client', () => ({
+  engineConfigsApi: {
+    list: vi.fn(() => Promise.resolve({ configs: [] })),
+    create: vi.fn(() => Promise.resolve({ id: 'cfg1', domain: '', name: '', base_url: '', api_key: '', model: '', enabled: 0, api_key_masked: '' })),
+    update: vi.fn(() => Promise.resolve({})),
+    remove: vi.fn(() => Promise.resolve({ ok: true })),
+    enable: vi.fn(() => Promise.resolve({})),
+    enableLocal: vi.fn(() => Promise.resolve({ ok: true })),
+    test: vi.fn(() => Promise.resolve({ ok: true, latency_s: 0.1, error: null })),
+  },
+
   modelsApi: { download: (id: string, source?: string) => download(id, source) },
   onServiceEvent: (cb: (event: ServiceEvent) => void) => {
     captured = cb;
