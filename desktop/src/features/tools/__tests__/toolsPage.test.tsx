@@ -32,6 +32,7 @@ const api = vi.hoisted(() => ({
   pickVideoFile: vi.fn(),
   pickAudioFile: vi.fn(),
   revealInFolder: vi.fn(),
+  saveTextFile: vi.fn(),
 }));
 
 vi.mock('../../../services/client', () => ({
@@ -45,6 +46,7 @@ vi.mock('../../../services/client', () => ({
   pickVideoFile: api.pickVideoFile,
   pickAudioFile: api.pickAudioFile,
   revealInFolder: api.revealInFolder,
+  saveTextFile: api.saveTextFile,
   mediaUrl: (path: string) => `dramaclip://local/${path}`,
 }));
 
@@ -115,6 +117,31 @@ describe('工具箱页（Tabs）', () => {
     ).toBeTruthy();
     expect(await screen.findByText(/提取 12 字 · 2 行/)).toBeTruthy();
     expect(api.getResult).toHaveBeenCalledWith('j1');
+  });
+
+  it('保存 SRT：原生保存框以「视频名.srt」为默认名落盘', { timeout: 20000 }, async () => {
+    api.extractStart.mockResolvedValue({ job_id: 'j1' });
+    api.getResult.mockResolvedValue({ status: 'completed', error: null, result: RESULT });
+    api.saveTextFile.mockResolvedValue('D:/out/ep1.srt');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ text: (): Promise<string> => Promise.resolve('1\n00:00:01,000 --> 00:00:03,000\n皇后\n') }),
+    );
+    page();
+    await pickVideoAndStartExtract();
+    fireEvent.click(await screen.findByRole('button', { name: /保存 SRT/ }, { timeout: 10000 }));
+    await waitFor(() => {
+      expect(api.saveTextFile).toHaveBeenCalledWith('ep1.srt', '1\n00:00:01,000 --> 00:00:03,000\n皇后\n');
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it('作业查询连续失败：常驻失败原因上屏而非静默轮询', { timeout: 20000 }, async () => {
+    api.extractStart.mockResolvedValue({ job_id: 'jx' });
+    api.getResult.mockRejectedValue(new Error('rpc down'));
+    page();
+    await pickVideoAndStartExtract();
+    expect(await screen.findByText(/失败：.*服务无响应/, {}, { timeout: 15000 })).toBeTruthy();
   });
 
   it('结果区改写：按文风卡改写产出上屏并带审查标注', async () => {

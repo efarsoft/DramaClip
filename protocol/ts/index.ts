@@ -731,6 +731,8 @@ export interface DramaClipBridge {
   /** 原生视频文件选择；用户取消返回 null。 */
   pickVideoFile(): Promise<string | null>;
   pickAudioFile(): Promise<string | null>;
+  /** 保存文本内容到用户选定路径（原生保存框，默认文件名）；取消返回 null。 */
+  saveTextFile(defaultName: string, content: string): Promise<string | null>;
   /** 在系统文件管理器中定位文件；路径不存在时 ok=false 带原因（按钮不装死）。 */
   revealInFolder(path: string): Promise<RevealResult>;
   /** 复制文件到指定目录（成品库批量「复制到…」）；同名不覆盖，逐个报成败。 */

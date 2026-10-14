@@ -12,19 +12,60 @@ import {
 } from '@ant-design/icons';
 import { App as AntdApp, Button, Input, Select, Spin, Tabs } from 'antd';
 import type { ReactElement } from 'react';
-import { useCallback, useState } from 'react';
-import type { ToolsExtractPayload } from '@dramaclip/protocol';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ToolsExtractPayload, ToolsGetResultResult } from '@dramaclip/protocol';
 import {
   mediaUrl,
   pickAudioFile,
   pickVideoFile,
   revealInFolder,
+  saveTextFile,
   toolsApi,
 } from '../../services/client';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import { tokens } from '../../styles/theme';
 
 const PAGE_DESC = '不依赖项目流程的独立小工具：贴视频/音频出文案，一键改写，文字转语音。';
+
+/** 作业轮询：每 2s 查一次直至终态；连续 3 次查询失败判为异常终止（组件卸载即停）。 */
+function useJobPoll(): { start: (jobId: string, onDone: (detail: ToolsGetResultResult) => void) => void } {
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const failures = useRef(0);
+  const stop = useCallback((): void => {
+    if (timer.current !== null) {
+      clearInterval(timer.current);
+      timer.current = null;
+    }
+  }, []);
+  useEffect(() => stop, [stop]);
+  const start = useCallback(
+    (jobId: string, onDone: (detail: ToolsGetResultResult) => void): void => {
+      stop();
+      failures.current = 0;
+      timer.current = setInterval(() => {
+        void toolsApi
+          .getResult(jobId)
+          .then((detail) => {
+            if (detail.status === 'running' || detail.status === 'pending') return;
+            stop();
+            onDone(detail);
+          })
+          .catch(() => {
+            failures.current += 1;
+            if (failures.current >= 3) {
+              stop();
+              onDone({
+                status: 'failed',
+                error: '查询作业状态失败（服务无响应），请重试',
+              });
+            }
+          });
+      }, 2000);
+    },
+    [stop],
+  );
+  return { start };
+}
 
 /** 工具箱页。 */
 export function ToolsPage(): ReactElement {
@@ -65,8 +106,10 @@ export function ToolsPage(): ReactElement {
 /** 工具一：视频文案提取（ASR + 硬字幕 OCR 融合，短剧文案的金标准链路）。 */
 function CopyExtractTool({ onSendToTts }: { onSendToTts: (text: string) => void }): ReactElement {
   const { message } = AntdApp.useApp();
+  const poll = useJobPoll();
   const [videoPath, setVideoPath] = useState('');
   const [status, setStatus] = useState<'idle' | 'queued' | 'running' | 'failed'>('idle');
+  const [failReason, setFailReason] = useState('');
   const [result, setResult] = useState<ToolsExtractPayload | null>(null);
 
   const busy = status === 'queued' || status === 'running';
@@ -83,29 +126,20 @@ function CopyExtractTool({ onSendToTts }: { onSendToTts: (text: string) => void 
       return;
     }
     setResult(null);
+    setFailReason('');
     setStatus('queued');
     void toolsApi
       .extractStart(videoPath)
       .then((r) => {
-        const poll = setInterval(() => {
-          void toolsApi
-            .getResult(r.job_id)
-            .then((detail) => {
-              if (detail.status === 'running' || detail.status === 'pending') {
-                setStatus('running');
-                return;
-              }
-              clearInterval(poll);
-              if (detail.status === 'completed' && detail.result) {
-                setStatus('idle');
-                setResult(detail.result);
-              } else {
-                setStatus('failed');
-                message.error(detail.error ?? '提取失败');
-              }
-            })
-            .catch(() => undefined);
-        }, 2000);
+        poll.start(r.job_id, (detail) => {
+          if (detail.status === 'completed' && detail.result) {
+            setStatus('idle');
+            setResult(detail.result);
+          } else {
+            setStatus('failed');
+            setFailReason(detail.error ?? '提取失败');
+          }
+        });
       })
       .catch((error: unknown) => {
         setStatus('idle');
@@ -117,12 +151,17 @@ function CopyExtractTool({ onSendToTts }: { onSendToTts: (text: string) => void 
     if (result === null) return;
     void fetch(mediaUrl(result.srt_path))
       .then((resp) => resp.text())
-      .then((content) => navigator.clipboard.writeText(content))
-      .then(() => message.success('SRT 内容已复制（可直接存为 .srt 文件）'))
-      .catch(() => {
-        void navigator.clipboard
-          .writeText(result.srt_path)
-          .then(() => message.success('SRT 文件路径已复制'));
+      .then((content) => {
+        const base = videoPath.replaceAll('\\', '/').split('/').pop() ?? '文案';
+        const dot = base.lastIndexOf('.');
+        const stem = dot > 0 ? base.slice(0, dot) : base;
+        return saveTextFile(`${stem}.srt`, content);
+      })
+      .then((saved) => {
+        if (saved !== null) message.success('SRT 已保存');
+      })
+      .catch((error: unknown) => {
+        message.error(error instanceof Error ? error.message : 'SRT 保存失败');
       });
   };
 
@@ -148,7 +187,11 @@ function CopyExtractTool({ onSendToTts }: { onSendToTts: (text: string) => void 
           开始提取
         </Button>
       </div>
-      <ExtractStatus busy={busy} failed={status === 'failed'} />
+      <ExtractStatus
+        busy={busy}
+        failReason={failReason}
+        runningHint="转写与硬字幕识别中，耗时与视频时长成正比；完成后结果出现在下方"
+      />
       {result !== null && (
         <CopyResultPanel
           text={result.text}
@@ -160,7 +203,7 @@ function CopyExtractTool({ onSendToTts }: { onSendToTts: (text: string) => void 
               icon={<DownloadOutlined />}
               onClick={onDownloadSrt}
             >
-              复制 SRT
+              保存 SRT
             </Button>
           }
         />
@@ -169,8 +212,16 @@ function CopyExtractTool({ onSendToTts }: { onSendToTts: (text: string) => void 
   );
 }
 
-/** 提取中的进度占位与失败提示（两个互斥状态，闲时都不渲染）。 */
-function ExtractStatus({ busy, failed }: { busy: boolean; failed: boolean }): ReactElement | null {
+/** 运行中的进度占位与失败常驻提示（互斥状态，闲时都不渲染；失败原因常驻可读）。 */
+function ExtractStatus({
+  busy,
+  failReason,
+  runningHint,
+}: {
+  busy: boolean;
+  failReason: string;
+  runningHint: string;
+}): ReactElement | null {
   if (busy) {
     return (
       <div
@@ -183,15 +234,15 @@ function ExtractStatus({ busy, failed }: { busy: boolean; failed: boolean }): Re
       >
         <Spin size="small" />
         <span style={{ fontSize: tokens.text.meta.size, color: tokens.textTertiary }}>
-          转写与硬字幕识别中，耗时与视频时长成正比；完成后结果出现在下方
+          {runningHint}
         </span>
       </div>
     );
   }
-  if (failed) {
+  if (failReason !== '') {
     return (
       <div style={{ marginTop: tokens.spaceMd, color: tokens.errorText }}>
-        提取失败，请重试或更换文件
+        失败：{failReason}（请重试或更换文件）
       </div>
     );
   }
@@ -201,8 +252,10 @@ function ExtractStatus({ busy, failed }: { busy: boolean; failed: boolean }): Re
 /** 工具二：语音文件转文字（纯 ASR，无 OCR）。 */
 function AsrTool({ onSendToTts }: { onSendToTts: (text: string) => void }): ReactElement {
   const { message } = AntdApp.useApp();
+  const poll = useJobPoll();
   const [audioPath, setAudioPath] = useState('');
   const [busy, setBusy] = useState(false);
+  const [failReason, setFailReason] = useState('');
   const [text, setText] = useState('');
   const [meta, setMeta] = useState('');
 
@@ -219,27 +272,21 @@ function AsrTool({ onSendToTts }: { onSendToTts: (text: string) => void }): Reac
     }
     setBusy(true);
     setText('');
+    setFailReason('');
     void toolsApi
       .asrStart(audioPath)
       .then((r) => {
-        const poll = setInterval(() => {
-          void toolsApi
-            .getResult(r.job_id)
-            .then((detail) => {
-              if (detail.status === 'running' || detail.status === 'pending') return;
-              clearInterval(poll);
-              setBusy(false);
-              if (detail.status === 'completed' && detail.result) {
-                setText(detail.result.text);
-                setMeta(
-                  `转写 ${String(detail.result.chars)} 字 · 音频 ${String(detail.result.duration_s)} 秒`,
-                );
-              } else {
-                message.error(detail.error ?? '转写失败');
-              }
-            })
-            .catch(() => undefined);
-        }, 2000);
+        poll.start(r.job_id, (detail) => {
+          setBusy(false);
+          if (detail.status === 'completed' && detail.result) {
+            setText(detail.result.text);
+            setMeta(
+              `转写 ${String(detail.result.chars)} 字 · 音频 ${String(detail.result.duration_s)} 秒`,
+            );
+          } else {
+            setFailReason(detail.error ?? '转写失败');
+          }
+        });
       })
       .catch((error: unknown) => {
         setBusy(false);
@@ -261,14 +308,11 @@ function AsrTool({ onSendToTts }: { onSendToTts: (text: string) => void }): Reac
           开始转写
         </Button>
       </div>
-      {busy && (
-        <div style={{ marginTop: tokens.spaceMd, display: 'flex', gap: tokens.spaceSm, alignItems: 'center' }}>
-          <Spin size="small" />
-          <span style={{ fontSize: tokens.text.meta.size, color: tokens.textTertiary }}>
-            转写中，耗时与音频时长成正比
-          </span>
-        </div>
-      )}
+      <ExtractStatus
+        busy={busy}
+        failReason={failReason}
+        runningHint="转写中，耗时与音频时长成正比"
+      />
       {text !== '' && (
         <CopyResultPanel text={text} meta={meta} onSendToTts={onSendToTts} />
       )}
@@ -378,9 +422,12 @@ function CopyResultPanel(props: {
 }): ReactElement {
   const { message } = AntdApp.useApp();
 
-  const copy = useCallback((content: string, tip: string): void => {
-    void navigator.clipboard.writeText(content).then(() => message.success(tip));
-  }, []);
+  const copy = useCallback(
+    (content: string, tip: string): void => {
+      void navigator.clipboard.writeText(content).then(() => message.success(tip));
+    },
+    [message],
+  );
 
   return (
     <div style={{ marginTop: tokens.spaceMd }}>
@@ -464,11 +511,16 @@ function TextToSpeechTool({
           onDraft(event.target.value);
         }}
       />
-      <div style={{ marginTop: tokens.spaceSm, display: 'flex', gap: tokens.spaceSm }}>
+      <div style={{ marginTop: tokens.spaceSm, display: 'flex', gap: tokens.spaceSm, alignItems: 'center' }}>
         <Button type="primary" icon={<AudioOutlined />} loading={synthesizing} onClick={onSynthesize}>
           合成语音
         </Button>
-        {audioPath !== '' && (
+        {synthesizing && (
+          <span style={{ fontSize: tokens.text.meta.size, color: tokens.textTertiary }}>
+            合成中，长文自动分块逐段合成
+          </span>
+        )}
+        {audioPath !== '' && !synthesizing && (
           <>
             <Button
               icon={<PlaySquareOutlined />}

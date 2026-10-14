@@ -11,6 +11,8 @@ const AUDIO_FILTERS = [
   { name: '全部文件', extensions: ['*'] },
 ];
 
+const TEXT_FILTERS = [{ name: '文本文件', extensions: ['srt', 'txt', 'lrc'] }];
+
 export function pickAudioFile(window: BaseWindow | null): Promise<string | null> {
   const options = { properties: ['openFile' as const], filters: AUDIO_FILTERS };
   const result = window === null ? dialog.showOpenDialogSync(options) : dialog.showOpenDialogSync(window, options);
@@ -29,4 +31,20 @@ export function pickVideoFile(window: BaseWindow | null): Promise<string | null>
   const options = { properties: ['openFile' as const], filters: VIDEO_FILTERS };
   const result = window === null ? dialog.showOpenDialogSync(options) : dialog.showOpenDialogSync(window, options);
   return Promise.resolve(result?.[0] ?? null);
+}
+
+/** 保存文本内容：弹保存框（默认文件名），落盘返回保存路径；取消返回 null。 */
+export function saveTextFile(
+  window: BaseWindow | null,
+  defaultName: string,
+  content: string,
+): Promise<string | null> {
+  const options = { defaultPath: defaultName, filters: TEXT_FILTERS };
+  const result = window === null ? dialog.showSaveDialogSync(options) : dialog.showSaveDialogSync(window, options);
+  if (!result) {
+    return Promise.resolve(null);
+  }
+  return import('node:fs/promises')
+    .then((fs) => fs.writeFile(result, content, 'utf8'))
+    .then(() => result);
 }

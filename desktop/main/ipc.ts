@@ -10,7 +10,7 @@ import {
   type RevealResult,
   type ServiceEvent,
 } from '@dramaclip/protocol';
-import { pickAudioFile, pickFolder, pickVideoFile } from './services/dialog';
+import { pickAudioFile, pickFolder, pickVideoFile, saveTextFile } from './services/dialog';
 
 export interface IpcContext {
   /** RPC 转发目标（ServiceManager.rpc）。 */
@@ -79,6 +79,12 @@ export function registerIpc(context: IpcContext): void {
   ipcMain.handle('dialog:pickAudioFile', (event) =>
     pickAudioFile(BrowserWindow.fromWebContents(event.sender)),
   );
+  ipcMain.handle('dialog:saveTextFile', (_event, defaultName: unknown, content: unknown) => {
+    if (typeof defaultName !== 'string' || defaultName.length === 0 || typeof content !== 'string') {
+      return Promise.reject(new Error('saveTextFile 参数不合法'));
+    }
+    return saveTextFile(BrowserWindow.fromWebContents(_event.sender), defaultName, content);
+  });
   ipcMain.handle('shell:reveal', (_event, targetPath: unknown): RevealResult => {
     if (typeof targetPath !== 'string' || targetPath.length === 0) {
       return { ok: false, reason: '路径为空' };

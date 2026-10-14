@@ -42,6 +42,11 @@ export function pickVideoFile(): Promise<string | null> {
   return bridge().pickVideoFile();
 }
 
+/** 保存文本内容（原生保存框，默认文件名）；用户取消返回 null。 */
+export function saveTextFile(defaultName: string, content: string): Promise<string | null> {
+  return bridge().saveTextFile(defaultName, content);
+}
+
 export function revealInFolder(path: string): Promise<RevealResult> {
   return bridge().revealInFolder(path);
 }

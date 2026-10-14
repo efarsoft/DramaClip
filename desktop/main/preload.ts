@@ -14,6 +14,8 @@ const api = {
     ipcRenderer.invoke('dialog:pickVideoFile') as Promise<string | null>,
   pickAudioFile: (): Promise<string | null> =>
     ipcRenderer.invoke('dialog:pickAudioFile') as Promise<string | null>,
+  saveTextFile: (defaultName: string, content: string): Promise<string | null> =>
+    ipcRenderer.invoke('dialog:saveTextFile', defaultName, content) as Promise<string | null>,
   revealInFolder: (path: string): Promise<RevealResult> =>
     ipcRenderer.invoke('shell:reveal', path) as Promise<RevealResult>,
   copyFiles: (files: readonly string[], destDir: string): Promise<CopyFilesResult> =>
