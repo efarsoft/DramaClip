@@ -73,12 +73,13 @@ export function WorkbenchHeader({
   );
 }
 
-/** 页标题：与 PageHeader 同一档（§1.1 唯一用处），中文走 500。 */
+/** 项目名：sectionTitle 档（20px/600）——工作台头部是工具栏语义（small 按钮与小徽标并排），
+ * 页面主标题档（28px）在这里断层突兀（真机业主反馈）；仍高于下方区块标题一档。 */
 const PAGE_TITLE = {
   margin: 0,
-  fontSize: tokens.text.pageTitle.size,
-  lineHeight: tokens.text.pageTitle.leading,
-  fontWeight: tokens.text.pageTitle.weight,
+  fontSize: tokens.text.sectionTitle.size,
+  lineHeight: tokens.text.sectionTitle.leading,
+  fontWeight: tokens.text.sectionTitle.weight,
   color: tokens.textPrimary,
 } as const;
 
