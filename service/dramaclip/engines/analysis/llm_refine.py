@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 from pypinyin import lazy_pinyin
 
-from dramaclip.engines.analysis.models import AsrSegment, OcrSegment
+from dramaclip.engines.analysis.models import AsrSegment, OcrSegment, WordSpan
 from dramaclip.engines.semantic.llm_client import (
     LlmConfig,
 )
@@ -284,20 +284,95 @@ def _to_segments(
             continue
         start_f = contents[0].start if contents and contents[0].start is not None else 0.0
         end_last = contents[-1] if contents else None
-        end_f = end_last.end if end_last is not None and end_last.end is not None else start_f
+        end_f = (end_last.end if end_last.end is not None else start_f) if end_last else start_f
         if w > 0:
             lo = index * w // n
             hi = min(max((index + 1) * w // n, lo + 1), w)
             start_f, end_f = windows[lo][0], windows[hi - 1][1]
+        # 字戳随段重建：有据字取实测时间；LLM 无据插字取相邻有据字线性插值
+        # （段边缘钳到段边界）。没有这一步，精炼后段全丢字戳，下游 OCR×ASR
+        # 融合永远回落纯 ASR——字幕窗对齐名存实亡（真机 EP1 实测）。
+        words = _rebuild_words(contents, start_f, end_f)
         result.append(
             AsrSegment(
                 start=round(start_f, 3),
                 end=round(end_f, 3),
                 text=text,
                 source="llm_refined",
+                words=words,
             )
         )
     return result
+
+
+def _rebuild_words(
+    contents: list[_Entry], start_f: float, end_f: float
+) -> list[WordSpan]:
+    """条目 → 字戳列表：实测优先；无据插字取相邻实测字线性插值（段边缘钳边界）。
+
+    精炼后段若丢字戳，下游 OCR×ASR 融合永远回落纯 ASR——字幕窗对齐名存实亡
+    （真机 EP1 实测：精炼产物无 words 字段，融合整集回落）。无据字是 LLM 插入
+    的少数插字，插值误差远小于整段丢戳。
+    """
+    stamped: list[tuple[int, float, float]] = [
+        (
+            idx,
+            entry.start if entry.start is not None else start_f,
+            entry.end if entry.end is not None else start_f,
+        )
+        for idx, entry in enumerate(contents)
+        if entry.start is not None and entry.end is not None
+    ]
+    if not stamped:
+        span = max(end_f - start_f, 0.0)
+        step = span / len(contents)
+        return [
+            WordSpan(
+                start=round(start_f + i * step, 3),
+                end=round(start_f + (i + 1) * step, 3),
+                word=entry.char,
+            )
+            for i, entry in enumerate(contents)
+        ]
+    words: list[WordSpan] = []
+    for idx, entry in enumerate(contents):
+        prev_pairs = [pair for pair in stamped if pair[0] < idx]
+        next_pairs = [pair for pair in stamped if pair[0] > idx]
+        if (entry.start is not None and entry.end is not None) or not stamped:
+            words.append(
+                WordSpan(
+                    start=round(entry.start, 3) if entry.start is not None else round(start_f, 3),
+                    end=round(entry.end, 3) if entry.end is not None else round(start_f, 3),
+                    word=entry.char,
+                )
+            )
+            continue
+        left_pair = prev_pairs[-1] if prev_pairs else None
+        right_pair = next_pairs[0] if next_pairs else None
+        if left_pair is not None and right_pair is not None:
+            left_idx, left_end = left_pair[0], left_pair[2]
+            right_idx, right_start = right_pair[0], right_pair[1]
+            slot = max(right_idx - left_idx, 1)
+            ratio = (idx - left_idx) / slot
+            start = left_end
+            end = left_end + (right_start - left_end) * ratio
+        elif left_pair is not None:
+            start = left_pair[2]
+            end = left_pair[2]
+        elif right_pair is not None:
+            start = right_pair[1]
+            end = right_pair[1]
+        else:
+            start = start_f
+            end = start_f
+        words.append(
+            WordSpan(
+                start=round(max(start, 0.0), 3),
+                end=round(max(end, start), 3),
+                word=entry.char,
+            )
+        )
+    return words
 
 
 def _user_prompt(

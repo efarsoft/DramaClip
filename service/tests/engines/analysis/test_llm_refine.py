@@ -195,3 +195,32 @@ def test_stream_mismatch_falls_back_before_llm(monkeypatch: pytest.MonkeyPatch) 
     outcome = _run(monkeypatch, ["甲乙丙丁"], [broken], ocr_text="")
     assert not outcome.applied
     assert "字流校验失败" in outcome.detail
+
+
+def test_refined_segments_preserve_word_stamps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """精炼产物必须随段重建字戳：丢了下游 OCR×ASR 融合整集回落纯 ASR。
+
+    真机 EP1 实测：精炼产物无 words 字段 → 融合永远回落 → 字幕窗对齐名存实亡。
+    修复 = _to_segments 从修复后条目重建 words（实测优先、无据插字插值）。
+    """
+    seg = _seg("皇后变卖首饰，才凑出五千两")
+    outcome = _run(
+        monkeypatch,
+        ["皇后变卖首饰，才凑出五千两", "国丈地窖里的银子，转眼全成了借款"],
+        [seg],
+        windows=[
+            _win(0.0, 2.6, "皇后变卖首饰"),
+            _win(2.6, 5.0, "才凑出五千两"),
+            _win(5.0, 7.4, "国丈地窖里的银子"),
+        ],
+    )
+    assert outcome.applied is True
+    assert len(outcome.segments) >= 2
+    for refined in outcome.segments:
+        assert refined.words, f"精炼段丢失字戳: {refined.text}"
+        # 字戳内容与文本内容字一一对应（融合 _char_units 的对齐前提）
+        stream = "".join(w.word for w in refined.words)
+        content = "".join(ch for ch in refined.text if ch not in "，。！？、；：")
+        assert stream == content, f"字戳流与文本内容字不一致: {stream!r} vs {content!r}"
