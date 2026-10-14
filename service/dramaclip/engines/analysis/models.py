@@ -34,12 +34,15 @@ class OcrSegment(BaseModel):
 
     不是「人工校对文本」——艺术字/遮挡下 RapidOCR 的字形误读（崇桢、蛙虫、枚势滔失）
     在真机上占多数，故它只能供时间与补字，不能改写语音文本。
+
+    engine 记产出引擎代际（extract 时打上）：跨轮复用按它判新旧，引擎换代缓存自动失效。
     """
 
     start: float
     end: float
     text: str
     conf: float = 1.0
+    engine: str | None = None
 
 
 class SceneInfo(BaseModel):

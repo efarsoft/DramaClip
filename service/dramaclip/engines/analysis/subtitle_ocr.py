@@ -30,6 +30,7 @@ _TAIL_PAD_S = 1.0         # 字幕条结尾向后补（采样间隔 + 消失延�
 _OCR_WORKERS = 4        # 帧识别并行度（onnxruntime session 线程安全）
 _MERGE_RATIO = 0.85       # 相邻帧文本相似度阈值（OCR 抖动容差）
 _MIN_BAR_CHARS = 2        # 字幕条最短字数：单字残条=切镜半帧噪声
+ENGINE_TAG = "rapidocr3-ppocrv6"  # 引擎代际标记：跨轮缓存按它判新旧（换代即失效）
 
 # OCR 单帧结果：文本 + 归一化纵向位置（top, bottom）
 FrameResult = list[tuple[str, float, float, float]]
@@ -350,6 +351,7 @@ def _merge_runs(results: list[tuple[float, FrameResult]]) -> list[OcrSegment]:
                 end=round(run.end + tail, 3),
                 text=run.text,
                 conf=round(sum(run.confs) / len(run.confs), 3) if run.confs else 1.0,
+                engine=ENGINE_TAG,
             )
         )
     return segments
@@ -406,20 +408,28 @@ def _similar(a: str, b: str) -> bool:
 
 
 def _rapidocr() -> OcrCallable:
-    """懒加载 RapidOCR（ml extras），输出归一化为 FrameResult。"""
-    from rapidocr_onnxruntime import RapidOCR  # ml extras 懒加载
+    """懒加载 RapidOCR（ml extras），输出归一化为 FrameResult。
+
+    rapidocr 3.x 统一包（PP-OCRv6 系模型，艺术字容错显著优于旧 v4 系）：
+    引擎 onnxruntime，模型随 wheel 分发首次用时校验。v3 返回 RapidOCROutput
+    （boxes/txts/scores 三列表），归一化回 FrameResult 与旧格式对齐。
+    """
+    from rapidocr import RapidOCR
 
     engine = RapidOCR()
 
     def call(image_path: str) -> FrameResult:
-        raw, _elapse = engine(image_path)
-        if not raw:
+        result = engine(image_path)
+        txts = getattr(result, "txts", None)
+        boxes = getattr(result, "boxes", None)
+        scores = getattr(result, "scores", None)
+        if txts is None or boxes is None or scores is None or len(txts) == 0:
             return []
         height = _image_height(image_path)
         return [
-            (str(item[1]), min(p[1] for p in item[0]) / height,
-             max(p[1] for p in item[0]) / height, float(item[2]))
-            for item in raw
+            (str(text), min(point[1] for point in box) / height,
+             max(point[1] for point in box) / height, float(score))
+            for text, box, score in zip(txts, boxes, scores, strict=False)
         ]
 
     return call

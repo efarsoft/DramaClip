@@ -16,7 +16,7 @@ import pytest
 from dramaclip.api import analysis as analysis_api
 from dramaclip.api import project as project_api
 from dramaclip.engines.analysis import pipeline
-from dramaclip.engines.analysis.models import AsrSegment, AudioFeatures
+from dramaclip.engines.analysis.models import AsrSegment, AudioFeatures, OcrSegment
 from dramaclip.infra import jobs
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -689,7 +689,7 @@ def test_ocr_import_error_leaves_band_null_and_does_not_crash(
     """降级不可见：rapidocr 未装（ImportError）→ 分析照常完成，band 落 NULL。"""
 
     def fake_extract(*_a: Any, **_k: Any) -> Any:
-        raise ImportError("rapidocr_onnxruntime")
+        raise ImportError("rapidocr")
 
     monkeypatch.setattr(analysis_api.subtitle_ocr, "extract_subtitles", fake_extract)
     project_id = _make_project(harness, tmp_path, sample_video, copies=1)
@@ -698,3 +698,53 @@ def test_ocr_import_error_leaves_band_null_and_does_not_crash(
     episode_id = str(episodes_repo.list_by_project(memory_db, project_id)[0]["id"])
     record = analysis_repo.get(memory_db, episode_id)
     assert record is not None and record["subtitle_band"] is None
+
+
+# ── 跨轮缓存按引擎代际判新旧（换代即失效，新引擎读数不被缓存吞掉）──────────────
+
+
+def _fake_extract(engine_tag: str | None, calls: list[int]) -> Any:
+    def fake(*_a: Any, **_k: Any) -> Any:
+        calls.append(1)
+        return (
+            [OcrSegment(start=1.0, end=2.0, text="测试字幕", conf=0.9, engine=engine_tag)],
+            (0.76, 0.9),
+            [(0.76, 0.82)],
+        )
+
+    return fake
+
+
+def test_ocr_cache_invalidated_when_engine_generation_changes(
+    harness: Harness,
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """存量条目缺 engine 标记（旧代际产物）→ 跨轮缓存不复用，重挖打上新代际。"""
+    calls: list[int] = []
+    monkeypatch.setattr(
+        analysis_api.subtitle_ocr, "extract_subtitles", _fake_extract(None, calls)
+    )
+    project_id = _make_project(harness, tmp_path, sample_video, copies=1)
+    first = harness.rpc("analysis.start", {"project_id": project_id})
+    assert harness.wait_done(str(first["job_id"]))["status"] == "completed"
+    episode_id = str(episodes_repo.list_by_project(memory_db, project_id)[0]["id"])
+    stored = json.loads(str(analysis_repo.get(memory_db, episode_id)["ocr_segments"]))
+    assert all("engine" not in bar or bar["engine"] is None for bar in stored)
+
+    monkeypatch.setattr(
+        analysis_api.subtitle_ocr,
+        "extract_subtitles",
+        _fake_extract(analysis_api.subtitle_ocr.ENGINE_TAG, calls),
+    )
+    second = harness.rpc("analysis.start", {"project_id": project_id, "episode_ids": [episode_id]})
+    assert harness.wait_done(str(second["job_id"]))["status"] == "completed"
+    assert len(calls) == 2, "旧代际缓存必须失效重挖"
+    stored = json.loads(str(analysis_repo.get(memory_db, episode_id)["ocr_segments"]))
+    assert all(bar["engine"] == analysis_api.subtitle_ocr.ENGINE_TAG for bar in stored)
+
+    third = harness.rpc("analysis.start", {"project_id": project_id, "episode_ids": [episode_id]})
+    assert harness.wait_done(str(third["job_id"]))["status"] == "completed"
+    assert len(calls) == 2, "同代际产物命中缓存，不重挖"

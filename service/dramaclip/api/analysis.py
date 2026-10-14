@@ -101,7 +101,7 @@ def _ocr_channel_available(context: AppContext) -> bool:
     if context.settings.get("analysis.ocr_enabled", "1") != "1":
         return False
     try:
-        importlib.import_module("rapidocr_onnxruntime")
+        importlib.import_module("rapidocr")
     except ImportError:
         return False
     return True
@@ -902,6 +902,8 @@ def _cached_mining(
 
     判据：视频 mtime ≤ analyzed_at（分析晚于素材改动）。ocr_channel 不参与——
     缓存的是 OCR 输出本身，通道开关只影响新鲜度与下次签名，不影响已有产物。
+    引擎代际也参与：存量条目缺 engine 标记或代际不符（引擎升级过）一律不复用，
+    否则换代后新引擎永远跑不起来、读数质量提升被缓存吞掉（真机 EP1 实证）。
     """
     if not ocr_enabled:
         return None
@@ -916,6 +918,8 @@ def _cached_mining(
         return None
     try:
         bars = [OcrSegment.model_validate(b) for b in json.loads(row["ocr_segments"])]
+        if not bars or any(bar.engine != subtitle_ocr.ENGINE_TAG for bar in bars):
+            return None
         parsed = json.loads(row["subtitle_band"])
         # 两种落库格式都认：新 = {"band": [...], "lines": [[t,b],...]}；旧 = [t, b]
         if isinstance(parsed, dict):
