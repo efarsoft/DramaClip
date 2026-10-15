@@ -253,7 +253,13 @@ def _render(
     """桩掉 ffmpeg/抖动/probe，走生产 render_export，返回每段切割命令。"""
     monkeypatch.setattr(encoder.jitter, "safe_times", lambda s, e, _z, **_k: (s, e))
     calls: list[list[str]] = []
-    monkeypatch.setattr(encoder, "_run_cut", lambda args, *_a, **_k: calls.append(args))
+
+    def _fake_cut(args: list[str], *_a: Any, **_k: Any) -> None:
+        calls.append(args)
+        # Phase B 按 jobs 清单逐段验盘（_concat_manifest），假切割也必须落产物
+        Path(args[-1]).write_bytes(b"seg")
+
+    monkeypatch.setattr(encoder, "_run_cut", _fake_cut)
     monkeypatch.setattr(
         encoder, "_concat", lambda _files, target: Path(target).write_bytes(b"film")
     )

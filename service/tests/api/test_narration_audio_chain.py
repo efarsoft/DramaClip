@@ -115,7 +115,13 @@ def _render(
 
     commands: list[list[str]] = []
     loudness_targets: list[Any] = []
-    monkeypatch.setattr(encoder, "_run_cut", lambda args, *_a, **_k: commands.append(args))
+
+    def _fake_cut(args: list[str], *_a: Any, **_k: Any) -> None:
+        commands.append(args)
+        # Phase B 按 jobs 清单逐段验盘（_concat_manifest），假切割也必须落产物
+        Path(args[-1]).write_bytes(b"seg")
+
+    monkeypatch.setattr(encoder, "_run_cut", _fake_cut)
     monkeypatch.setattr(encoder, "_concat", lambda _files, _out: None)
     # Phase C 不真跑 ffmpeg，但记录它收到的目标值——接线证明靠这份记录
     monkeypatch.setattr(

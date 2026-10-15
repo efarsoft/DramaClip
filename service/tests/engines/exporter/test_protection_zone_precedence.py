@@ -48,7 +48,10 @@ def _zones_seen(
         return start, end
 
     monkeypatch.setattr(encoder.jitter, "safe_times", _capture)
-    monkeypatch.setattr(encoder, "_run_cut", lambda *_a, **_k: None)
+    # Phase B 按 jobs 清单逐段验盘（_concat_manifest），假切割也必须落产物
+    monkeypatch.setattr(
+        encoder, "_run_cut", lambda args, *_a, **_k: Path(args[-1]).write_bytes(b"seg")
+    )
     monkeypatch.setattr(encoder, "_concat", lambda _files, _out: None)
     encoder.export_plan(
         _plan(), {"ep1": str(_source(tmp_path))}, tmp_path / "out.mp4", tmp_path / "work",

@@ -1152,7 +1152,10 @@ def test_export_plan_runs_loudness_after_concat(
     plan, source = _one_segment_plan(tmp_path)
     out = tmp_path / "final.mp4"
     calls: list[str] = []
-    monkeypatch.setattr(encoder, "_run_cut", lambda *_a, **_k: None)
+    # Phase B 按 jobs 清单逐段验盘（_concat_manifest），假切割也必须落产物
+    monkeypatch.setattr(
+        encoder, "_run_cut", lambda args, *_a, **_k: Path(args[-1]).write_bytes(b"seg")
+    )
     monkeypatch.setattr(
         encoder, "_concat", lambda _files, target: Path(target).write_bytes(b"film")
     )
@@ -1181,7 +1184,10 @@ def test_export_plan_skips_loudness_when_target_none(
     而且 Task 9 的出口判据要求九个模式全部落在响度窗口内——给 raw_clip 开口子会把它打破。
     """
     plan, source = _one_segment_plan(tmp_path)
-    monkeypatch.setattr(encoder, "_run_cut", lambda *_a, **_k: None)
+    # Phase B 按 jobs 清单逐段验盘（_concat_manifest），假切割也必须落产物
+    monkeypatch.setattr(
+        encoder, "_run_cut", lambda args, *_a, **_k: Path(args[-1]).write_bytes(b"seg")
+    )
     monkeypatch.setattr(
         encoder, "_concat", lambda _files, target: Path(target).write_bytes(b"film")
     )

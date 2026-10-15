@@ -179,7 +179,13 @@ def _render(
 ) -> list[list[str]]:
     monkeypatch.setattr(encoder.jitter, "safe_times", lambda s, e, _z, **_k: (s, e))
     calls: list[list[str]] = []
-    monkeypatch.setattr(encoder, "_run_cut", lambda args, *_a, **_k: calls.append(args))
+
+    def _fake_cut(args: list[str], *_a: Any, **_k: Any) -> None:
+        calls.append(args)
+        # Phase B 按 jobs 清单逐段验盘（_concat_manifest），假切割也必须落产物
+        Path(args[-1]).write_bytes(b"seg")
+
+    monkeypatch.setattr(encoder, "_run_cut", _fake_cut)
     monkeypatch.setattr(encoder, "_concat", lambda _f, target: Path(target).write_bytes(b"film"))
     monkeypatch.setattr(encoder.loudness, "normalize_in_place", lambda *_a, **_k: None)
     monkeypatch.setattr(export_api.ffmpeg_cover, "extract_cover", lambda *_a, **_k: False)

@@ -219,6 +219,14 @@ class EpisodeSourceMissing(Exception):
     """时间轴引用的源集文件缺失。"""
 
 
+class FilmIntegrityError(Exception):
+    """拼出来的片子不完整：清单里的段不在盘上，或成片实测时长偏离各段实测和超容差。
+
+    两者都是「观众会少看一段/多看一段」的缺陷，按 §3.3.1 属禁止级降级——宁可失败，
+    不出带伤的片子。失败粒度=单条方案（api 层 except 会 mark_failed 带原因）。
+    """
+
+
 def resolve_canvas(episode_paths: dict[str, str], cap: tuple[int, int]) -> tuple[int, int]:
     """成片画布跟随首个源集的画幅（业主裁决：16:9 进 → 16:9 出，不裁不拉）。
 
@@ -658,8 +666,8 @@ def _fallback_eligible(exc: runner.FfmpegError, args: list[str]) -> bool:
 # 成对性与原子性：sig 与 seg 同生命周期——任何一边缺失/损坏都重编；sig 只在段
 # 编码成功且产物存在后写，tmp+replace 原子落盘（与 A5 TTS 缓存同形状），崩溃留下
 # 的半成品（cancel/进程被杀）永远没有 sig，下次自然重编。
-# 陈旧尾段：上次更长的计划留下的 seg/sig（索引 >= 本次段数）必须清掉，否则会被
-# Phase B 的 glob("seg_*.mp4") 捡进 concat。
+# 陈旧尾段：上次更长的计划留下的 seg/sig（索引 >= 本次段数）清掉。Phase B 按 jobs
+# 清单取段（见 _concat_manifest），尾段进不了成片，清它只为不留垃圾占盘。
 _SIG_VERSION = 1
 
 
@@ -794,8 +802,9 @@ def _reusable_subtitles(
 def _prune_stale_segments(work_dir: Path, segment_count: int) -> None:
     """清掉上次更长的计划留下的 seg/sig 尾段（索引 >= 本次段数）。
 
-    不清就会被 Phase B 的 glob("seg_*.mp4") 捡进 concat——旧尾段的输入签名再对
-    也没人要它了。只按 seg_NNN 命名清 .mp4/.sig 两种，不碰 api 层的 seg_NNN.ass。
+    Phase B 已改成按 jobs 清单取段（`_concat_manifest`），尾段进不了成片；这里清它们
+    只为不留垃圾占盘、不让 sig 复用判据在下次更长的计划里吃到过期产物。
+    只按 seg_NNN 命名清 .mp4/.sig 两种，不碰 api 层的 seg_NNN.ass。
     """
     for pattern in ("seg_*.mp4", "seg_*.sig"):
         for path in work_dir.glob(pattern):
@@ -1212,8 +1221,7 @@ def _export_plan_once(
     if fallback_seen["v"] and _allow_uniform_retry:
         raise _UniformCodecRetry()
 
-    segment_files = sorted(work_dir.glob("seg_*.mp4"))
-    _concat(segment_files, out_path)
+    _concat(_concat_manifest(jobs), out_path)
     if loudness_target is not None:
         loudness.normalize_in_place(
             out_path, target=loudness_target, work_dir=work_dir / "loudnorm"
@@ -1223,13 +1231,50 @@ def _export_plan_once(
     return out_path
 
 
+def _concat_manifest(jobs: list[_SegmentJob]) -> list[Path]:
+    """Phase B 段清单以 **jobs 为准逐段验盘**，不按 `glob("seg_*.mp4")` 收。
+
+    glob 回答的是"目录里恰好有什么"，不是"这次渲染产出了什么"：某段 ffmpeg 退出码 0
+    却没落文件（`_finish` 见文件不在就静默不写 sig）、0 字节残留、命名恰好匹配的杂项，
+    都会静默改变成片内容——缺一段就是少讲一段剧情。这类偏差改变观众所见，按 §3.3.1
+    属禁止级，当场判死。顺带两笔账：清单按 `job.index` 排（词法排序会把 `seg_1000`
+    插到 `seg_999` 前面），且本次段集不再受 work_dir 里别的文件影响。
+    """
+    paths: list[Path] = []
+    broken: list[str] = []
+    for job in sorted(jobs, key=lambda job: job.index):
+        try:
+            usable = job.seg_path.stat().st_size > 0
+        except OSError:  # 缺盘/目录/权限问题一律按"这块产物不可信"
+            usable = False
+        if usable:
+            paths.append(job.seg_path)
+        else:
+            broken.append(f"第 {job.index + 1} 段（{job.seg_path.name}）")
+    if broken:
+        raise FilmIntegrityError(
+            f"编码报成功的段有 {len(broken)}/{len(jobs)} 段不在盘上或为空文件："
+            f"{'、'.join(broken[:5])}——缺段成片不予交付"
+        )
+    return paths
+
+
+def _concat_list_line(path: Path) -> str:
+    r"""concat 清单的一行：单引号串内 ffmpeg 只认 `'\''` 这一种转义写法。
+
+    裸拼 `file '<路径>'` 时，路径里的单引号会提前终结字符串，后半截变成解析垃圾。
+    """
+    quoted = path.resolve().as_posix().replace("'", "'\\''")
+    return f"file '{quoted}'\n"
+
+
 def _concat(segment_files: list[Path], out_path: Path) -> None:
     """Phase B：concat demuxer 拼接 + 元数据擦除。
 
-    A4-2 签名守卫：各段视频流签名（codec_name/profile/level/pix_fmt/宽高）一致才走
+    A4-2 签名守卫：各段视频流签名（codec_name/profile/level/pix_fmt/宽高/SAR）一致才走
     `-c copy` 流复制；不齐（典型：某段硬编失败回退了 libx264）或签名探测自身失败时
     保守整体重编码 concat——流复制混拼不一致的流是「导出到 90% 崩」的一条路。
-    拼完做时长审计（实测 vs 各段声明和，超阈值只 warn 不失败；审计自身异常静默）。
+    拼完做时长审计（实测 vs 各段实测和，超阈值抛错不出片；测不出只 warn 留痕）。
     """
     if len(segment_files) == 1:
         out_path.write_bytes(segment_files[0].read_bytes())
@@ -1242,9 +1287,10 @@ def _concat(segment_files: list[Path], out_path: Path) -> None:
             "段视频流签名不齐或不可测（%s）：concat 整体重编码而非流复制",
             signatures,
         )
-    list_file = out_path.parent / "concat.txt"
-    lines = "".join(f"file '{segment.resolve().as_posix()}'\n" for segment in segment_files)
-    list_file.write_text(lines, encoding="utf-8")
+    # 清单名跟着 out_path 走而非固定名：out_path 落在 `data/outputs/<project>/`，同项目的
+    # K 条方案并发导出时固定 `concat.txt` 会被后写者顶掉——A 拼出 B 的段。
+    list_file = out_path.with_name(f"{out_path.stem}.concat.txt")
+    lines = "".join(_concat_list_line(segment) for segment in segment_files)
     codec_args = (
         ["-c", "copy"]
         if uniform
@@ -1253,30 +1299,34 @@ def _concat(segment_files: list[Path], out_path: Path) -> None:
             "-c:a", "aac", "-b:a", "128k", "-ar", str(_SEGMENT_SAMPLE_RATE),
         ]
     )
-    subprocess.run(  # noqa: S603
-        [
-            resolve_ffmpeg(),
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            str(list_file),
-            *codec_args,
-            "-map_metadata",
-            "-1",
-            str(out_path),
-        ],
-        check=True,
-        capture_output=True,
-        # 重编码 concat 是整片再编一遍，预算要比流复制宽（300s 对长片不够）
-        timeout=300 if uniform else 3600,
-    )
-    list_file.unlink(missing_ok=True)
+    try:
+        list_file.write_text(lines, encoding="utf-8")
+        subprocess.run(  # noqa: S603
+            [
+                resolve_ffmpeg(),
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(list_file),
+                *codec_args,
+                "-map_metadata",
+                "-1",
+                str(out_path),
+            ],
+            check=True,
+            capture_output=True,
+            # 重编码 concat 是整片再编一遍，预算要比流复制宽（300s 对长片不够）
+            timeout=300 if uniform else 3600,
+        )
+    finally:
+        # 超时/check=True 抛错时也要收走：留在成片目录里的是一个指向已失效段的垃圾文件
+        list_file.unlink(missing_ok=True)
     _audit_film_duration(out_path, segment_files)
 
 
@@ -1323,7 +1373,7 @@ def _video_signature(path: Path) -> tuple[str, str, int, str, int, int, str] | N
         return None
 
 
-# 时长容差的**唯一**落点：三处判据（本层段和 warn、api 层渲染后 warn、
+# 时长容差的**唯一**落点：三处判据（本层段和闸=超阈值抛错、api 层渲染后 warn、
 # selfcheck 成品库红绿）全部引用这两个名字——改一处即三处同改，界面绿/日志 warn
 # 的分叉没有第二种写法。容得下 dedup 微变速（±0.4%）、切点抖动与 AAC/concat
 # 的毫秒级出入，只抓缺段/重复级真偏差。
@@ -1332,18 +1382,36 @@ AUDIT_DURATION_ABS_TOLERANCE_S = 3.0
 
 
 def _audit_film_duration(out_path: Path, segment_files: list[Path]) -> None:
-    """成片实测时长 vs 各段声明和：超阈值 warn 明账；审计自身任何异常静默吞掉。"""
-    with contextlib.suppress(Exception):
-        declared = sum(ffprobe_mod.probe(segment).duration_s for segment in segment_files)
-        if declared <= 0:
-            return
-        actual = ffprobe_mod.probe(out_path).duration_s
-        diff = actual - declared
-        tolerance = max(
-            declared * AUDIT_DURATION_REL_TOLERANCE, AUDIT_DURATION_ABS_TOLERANCE_S
+    """成片实测时长 vs **各段实测和**：超阈值即抛，量不出来只留痕、绝不伪装成通过。
+
+    分母是"段产物自己加起来多少"，与 jitter、台词保护区外扩无关，超线只能是缺段/
+    重复段/拼错——那是观众看得见的差异，按 §3.3.1 与响度同判据改成抛错。
+    **别和 `api/export._audit_duration` 混为一谈**：那条量的是"成片 vs 计划声明"，
+    分母里合法混着抖动余量，仍是 warn。
+    测量自身失败不在本片内容里造假，也不拿它挡门——记 warn，缺段那一半已由
+    `_concat_manifest` 的清单对账兜住。
+    """
+    try:
+        segments_total_s = sum(
+            ffprobe_mod.probe(segment).duration_s for segment in segment_files
         )
-        if abs(diff) > tolerance:
-            _LOGGER.warning(
-                "成片时长审计：实测 %.1fs vs 段声明和 %.1fs（差 %+.1fs，超阈值 ±%.1fs）",
-                actual, declared, diff, tolerance,
-            )
+        actual = ffprobe_mod.probe(out_path).duration_s
+    except Exception as exc:  # noqa: BLE001 - 测不出 ≠ 通过，但也不许拿它挡已拼好的片
+        _LOGGER.warning(
+            "成片时长审计未能测量（%s）：本条成片没有时长核对", str(exc)[:200],
+        )
+        return
+    if segments_total_s <= 0:
+        _LOGGER.warning(
+            "成片时长审计未能测量（各段实测和 %.1fs）：本条成片没有时长核对", segments_total_s
+        )
+        return
+    diff = actual - segments_total_s
+    tolerance = max(
+        segments_total_s * AUDIT_DURATION_REL_TOLERANCE, AUDIT_DURATION_ABS_TOLERANCE_S
+    )
+    if abs(diff) > tolerance:
+        raise FilmIntegrityError(
+            f"成片时长审计：实测 {actual:.1f}s vs 各段实测和 {segments_total_s:.1f}s"
+            f"（差 {diff:+.1f}s，超出阈值 ±{tolerance:.1f}s）——疑似缺段/重复段，不出片"
+        )

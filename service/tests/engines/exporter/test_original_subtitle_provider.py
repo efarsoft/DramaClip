@@ -39,6 +39,8 @@ def _run(
     calls: list[tuple[int, list[str]]] = []
 
     def fake_cut(args: list[str], *_a: Any, **_k: Any) -> None:
+        # Phase B 按 jobs 清单逐段验盘（_concat_manifest），假切割也必须落产物
+        Path(args[-1]).write_bytes(b"seg")
         index = int(
             next(arg for arg in args if arg.endswith(".mp4") and "seg_" in arg)
             .split("seg_")[1][:3]

@@ -1,10 +1,13 @@
-"""B2 渲染后时长审计：实测 vs 声明超阈值只警告，不改状态、不失败；审计自身异常静默。
+"""B2 渲染后时长审计（**实测 vs 计划声明**）：超阈值只警告，不改状态、不失败。
 
 诚实失败哲学（调研①JJYB）：成片时长与时间轴声明对不上时，把差值写成明账
 （warn 日志含实测/声明/差值），而不是伪造元信息或把导出标失败。
 阈值 max(8%, 3s)：渲染层的微变速（dedup speed 0.996~1.004）与切点安全抖动
 （jitter ±0.3s、保护区顺延 ≤1s）天然带来数个百分点偏差，阈值必须容得下它们，
 只抓「段丢了/拼重了」级别的真偏差。
+**别把这条与 encoder 的段和闸混为一谈**：`_audit_film_duration` 量的是"成片 vs
+各段实测和"，能分辨缺段、拼重，已按 §3.3.1 改成抛错；本条量的是"成片 vs 计划声明"，
+分母里混着 jitter 与保护区外扩这些**合法**余量（`protect_slack`），拦不动，留 warn。
 """
 
 from __future__ import annotations
@@ -79,7 +82,11 @@ def _render(
     probe_raises: bool = False,
 ) -> Path:
     """桩掉 ffmpeg 执行链与 probe，走生产入口 render_export。"""
-    monkeypatch.setattr(encoder, "_run_cut", lambda *_a, **_k: None)
+    # Phase B 按 jobs 清单逐段验盘（_concat_manifest），假切割也必须落产物
+    def _fake_cut(args: list[str], *_a: Any, **_k: Any) -> None:
+        Path(args[-1]).write_bytes(b"seg")
+
+    monkeypatch.setattr(encoder, "_run_cut", _fake_cut)
 
     def _fake_concat(_files: list[Path], target: Path) -> None:
         Path(target).write_bytes(b"film")

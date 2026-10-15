@@ -1,7 +1,7 @@
 """时长审计容差只有一个真相源：`encoder.AUDIT_DURATION_*`。
 
 三处判据（`api/export._audit_duration` 渲染后 warn、`encoder._audit_film_duration`
-段和 warn、`selfcheck.check_duration` 成品库红绿门禁）过去各写一份 0.08 / 3.0，
+段和超容差抛错、`selfcheck.check_duration` 成品库红绿门禁）过去各写一份 0.08 / 3.0，
 靠三段注释互相指认"同判据"。注释不改代码：改一处就出现「界面绿、日志 warn」。
 本文件把「它们是同一个数」从注释升级成门禁。
 """

@@ -1,4 +1,4 @@
-"""A4-2 Phase B 签名守卫：段流签名齐→-c copy；不齐/测不出→整体重编码；时长审计 warn。
+"""A4-2 Phase B 签名守卫：段流签名齐→-c copy；不齐/测不出→整体重编码；时长闸超容差即抛。
 
 回退段是 libx264、其余段是硬编时，concat -c copy 混拼不同流签名会出「导出到 90% 崩」。
 ffmpeg/ffprobe 全用 monkeypatch 桩（不真跑），量的是命令形状与决策分支。
@@ -42,6 +42,7 @@ def _stub(
     signature_by_path: dict[Path, str] | None = None,
     sar_by_path: dict[Path, str] | None = None,
     probe_fail: bool = False,
+    film_duration: float = 20.0,
 ) -> list[list[str]]:
     """桩掉 resolve_ffmpeg/ffprobe/subprocess.run/probe.probe，返回 ffmpeg 调用命令。"""
     monkeypatch.setattr(encoder, "resolve_ffmpeg", lambda: "ffmpeg")
@@ -66,8 +67,10 @@ def _stub(
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     def fake_probe(path: Path) -> Any:
+        # 段各 10s；成片时长默认取各段实测和，让时长闸在纯形状测试里保持放行
         return encoder.ffprobe_mod.MediaInfo(
-            duration_s=10.0, width=1080, height=1920, fps=30.0, has_audio=True
+            duration_s=10.0 if path.name.startswith("seg_") else film_duration,
+            width=1080, height=1920, fps=30.0, has_audio=True,
         )
 
     monkeypatch.setattr(encoder.ffprobe_mod, "probe", fake_probe)
@@ -139,7 +142,7 @@ def test_probe_failure_falls_back_to_reencode(
 def test_single_segment_copy_bytes_still_audits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    calls = _stub(monkeypatch)
+    calls = _stub(monkeypatch, film_duration=10.0)
     seg = _segments(tmp_path, 1)[0]
     out = tmp_path / "out.mp4"
     encoder._concat([seg], out)
@@ -147,12 +150,15 @@ def test_single_segment_copy_bytes_still_audits(
     assert not [c for c in calls if c[0] == "ffmpeg"], "单段不该起 ffmpeg"
 
 
-def test_duration_audit_warns_on_large_drift(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+def test_duration_audit_fails_on_large_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """concat 后时长审计：实测与段声明和差超 max(8%,3s) 阈值→warn 明账，不失败。"""
+    """concat 后实测与各段实测和差超 max(8%,3s)：抛错不出片（§3.3.1 禁止级降级）。
+
+    旧口径是 warn 放行，前提是「审计不该反过来挡已成功的导出」；但缺一段/多一段正是
+    这条审计在抓的东西，放行等于把缺陷片推到发布位——与响度实测超容差同判据，改抛。
+    """
     _stub(monkeypatch)
-    caplog.set_level(logging.WARNING, logger="dramaclip.engines.exporter.encoder")
     durations = {"seg": 10.0, "out": 60.0}
 
     def fake_probe(path: Path) -> Any:
@@ -162,14 +168,15 @@ def test_duration_audit_warns_on_large_drift(
         )
 
     monkeypatch.setattr(encoder.ffprobe_mod, "probe", fake_probe)
-    encoder._concat(_segments(tmp_path), tmp_path / "out.mp4")  # 声明 20s，实测 60s
-    assert any("时长审计" in r.getMessage() for r in caplog.records), "超阈值必须 warn"
+    with pytest.raises(encoder.FilmIntegrityError, match="时长审计"):
+        encoder._concat(_segments(tmp_path), tmp_path / "out.mp4")  # 各段和 20s，成片 60s
 
 
-def test_duration_audit_silent_within_threshold(
+def test_duration_audit_boundary_is_the_shared_tolerance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    _stub(monkeypatch)  # 段 10s×2=20s，成片 10s→改让成片 20.5s
+    """阈值内（段 20s / 实测 20.5s）照常交付，且不留 warn——闸门不制造噪音。"""
+    _stub(monkeypatch)
     caplog.set_level(logging.WARNING, logger="dramaclip.engines.exporter.encoder")
 
     def fake_probe(path: Path) -> Any:
@@ -183,14 +190,67 @@ def test_duration_audit_silent_within_threshold(
     assert not [r for r in caplog.records if "时长审计" in r.getMessage()]
 
 
-def test_duration_audit_probe_crash_never_blocks(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_duration_audit_probe_crash_leaves_a_trace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """审计自身异常（probe 崩）静默吞掉：concat 照常成功。"""
+    """审计自己测不出来：不挡已拼好的片（允许级），但必须留痕——「没量到」不等于「合格」。"""
     _stub(monkeypatch)
+    caplog.set_level(logging.WARNING, logger="dramaclip.engines.exporter.encoder")
 
     def boom(_path: Path) -> Any:
         raise ValueError("ffprobe 挂了")
 
     monkeypatch.setattr(encoder.ffprobe_mod, "probe", boom)
     encoder._concat(_segments(tmp_path), tmp_path / "out.mp4")  # 不抛即过
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("未能测量" in m for m in messages), f"测不出必须留痕：{messages}"
+
+
+# ---- 清单文件：并发隔离 / 转义 / 失败也收走 ----
+
+
+def test_concat_list_file_is_per_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """清单名跟着 out_path 走：固定 `concat.txt` 落在同项目目录里会被并发导出互盖。
+
+    api 层只换文件名、不换目录（`api/export.render_export`：
+    `data/outputs/<project_id>/<项目>_<模式>_<id前6位>.mp4`），同一剧的 K 条方案同时
+    拼片时，后写的清单决定前者拼出什么——那是「A 的成片装着 B 的段」级别的事故。
+    """
+    calls = _stub(monkeypatch)
+    out = tmp_path / "projA_full_narration_ab12cd.mp4"
+    encoder._concat(_segments(tmp_path), out)
+    ffmpeg_call = next(c for c in calls if c[0] == "ffmpeg")
+    list_path = Path(ffmpeg_call[ffmpeg_call.index("-i") + 1])
+    assert list_path.name.startswith(out.stem), f"清单必须按产物命名：{list_path}"
+    assert list_path.name != "concat.txt", "固定名 = 并发作业共用同一个文件"
+    assert not list_path.exists(), "拼完收走，不在成片目录里留垃圾"
+
+
+def test_concat_list_removed_when_ffmpeg_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ffmpeg 非零退出（check=True 抛错）也要在 finally 里清掉清单。"""
+    _stub(monkeypatch)
+
+    def boom(cmd: list[str], **_kwargs: Any) -> Any:
+        raise subprocess.CalledProcessError(1, [str(part) for part in cmd])
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    with pytest.raises(subprocess.CalledProcessError):
+        encoder._concat(_segments(tmp_path), tmp_path / "out.mp4")
+    assert [p.name for p in tmp_path.iterdir() if "concat" in p.name] == [], (
+        "失败路径漏在盘上=下次渲染的幽灵输入"
+    )
+
+
+def test_concat_list_escapes_single_quotes_in_paths(tmp_path: Path) -> None:
+    r"""路径里的单引号必须写成 `'\''`，否则清单从该处断开、后半截被 ffmpeg 当语法垃圾。"""
+    quoted_dir = tmp_path / "it's"
+    quoted_dir.mkdir()
+    segment = quoted_dir / "seg_000.mp4"
+    segment.write_bytes(b"seg")
+    line = encoder._concat_list_line(segment)
+    assert line.startswith("file '") and line.endswith("'\n"), line
+    body = line[len("file '") : -len("'\n")]
+    assert "'\\''" in body, f"单引号未按 ffmpeg 约定转义：{body}"
+    assert "'" not in body.replace("'\\''", ""), f"残留裸单引号会提前终结字符串：{body}"

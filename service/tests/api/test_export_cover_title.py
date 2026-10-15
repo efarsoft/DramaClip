@@ -69,7 +69,10 @@ def _stub_pipeline(
     monkeypatch: pytest.MonkeyPatch, cover_calls: list[dict[str, Any]]
 ) -> None:
     """桩掉 ffmpeg 执行链，记录 extract_cover 收到的 kwargs。"""
-    monkeypatch.setattr(encoder, "_run_cut", lambda *_a, **_k: None)
+    # Phase B 按 jobs 清单逐段验盘（_concat_manifest），假切割也必须落产物
+    monkeypatch.setattr(
+        encoder, "_run_cut", lambda args, *_a, **_k: Path(args[-1]).write_bytes(b"seg")
+    )
 
     def _fake_concat(_files: list[Path], target: Path) -> None:
         Path(target).write_bytes(b"film")

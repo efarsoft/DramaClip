@@ -130,6 +130,11 @@
 | `amix` 默认归一化把音量砍半 | `encoder.cut_segment_args` | **禁止 → 关掉归一化** | 声明的 0.2/0.12 是假的，响度失控无人负责 |
 | 混音求和可削顶 → 放行 | `encoder.cut_segment_args`（`amix` 之后） | **禁止 → 求和挂前瞻限幅器** | 关掉归一化同时关掉了 amix 顺带白送的 6 dB 余量；实测混音段 +4.02 dBTP（平顶硬削，不可逆失真），比它引起的门限失败更严重。天花板 `_MIX_PEAK_CEILING_DBFS = -3.0`，`alimiter` `level=disabled`（`level` 默认 true 是自动电平，会把天花板自己抵消）；限幅不接管绝对响度，Phase C 仍是唯一负责人 |
 | 成片响度实测超容差 → 放行 | `exporter/loudness.py`（P-1.5 新建） | **禁止 → 抛错** | 响度观众听得见；两遍法后的实测复核就是它的验收线 |
+| 段编码报成功但产物缺盘/0 字节 → glob 少拼一段 | `encoder._concat_manifest`（原 `sorted(work_dir.glob("seg_*.mp4"))`） | **禁止 → 抛错** | glob 回答"目录里恰好有什么"，不回答"这次产出了什么"：某段 ffmpeg 退出码 0 却没落文件时，写 sig 那步见文件不在直接跳过，缺段成片一路"成功"到底。顺带治两个词法序病（`seg_1000` 排在 `seg_999` 前）与 work_dir 撞名杂物 |
+| 并发导出共用同一份 `concat.txt` | `encoder._concat`（清单命名 + `finally` 收走） | **禁止 → 已消除** | 成片落在 `data/outputs/<project_id>/`（`api/export.render_export`），同一剧的 K 条方案并发导出时固定名会被后写者顶掉，A 拼出 B 的段；改按产物命名并转义单引号。实测：清单里 `it's` 不转义时 ffmpeg 把路径读成 `its`、退出码非 0 |
+| 成片实测时长偏离**各段实测和**超容差 → 放行 | `encoder._audit_film_duration` | **禁止 → 抛错** | 这条量的分母是"段产物自己加起来多少"，与 jitter/保护区外扩无关，超线只能是缺段/重复段/拼错——正是观众看得见的差异；与上一行响度同判据 |
+| 成片实测时长偏离**计划声明**超容差 → 放行 | `api/export._audit_duration` | **允许，但必须留痕（warn）** | 与上一行是两条不同的审计，不许合并：这条的分母里合法混着切点抖动与台词保护区外扩（`protect_slack`），拦不动；`docs/research/2026-09-22-competitor-teardown.md` B2 的「差值超阈值只警告不伪造」指的就是它 |
+| 时长审计自身测量失败 → 静默当合格 | `encoder._audit_film_duration`（原 `contextlib.suppress(Exception)`） | **允许，但必须留痕** | 量不出既不改变成片内容也不该挡已拼好的片，但"没量到"≠"合格"：改 warn 明账，缺段那一半已由清单对账兜住 |
 | 口味层 LLM 选题失败 → 题材静态映射 | `script_driver`（现）/ `resolve_run_style`（后） | **允许，但必须留痕** | 兜底值仍是人写的风格指令，不是假文案 |
 | 分析层 LLM → 关键词打分 | `semantic/conflict.py`、`genre.py` | **允许，界面必须可见** | 影响选段而非文案；可见性归 §3.3，界面在 P-3 |
 | CUDA → CPU | `analysis/transcriber.py` | **允许** | 同结果，只慢 |

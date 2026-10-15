@@ -46,7 +46,13 @@ def _run_export_plan(
     monkeypatch.setattr(
         encoder.jitter, "safe_times", lambda s, e, _z, **_k: (s, e)
     )
-    monkeypatch.setattr(encoder, "_run_cut", fake_cut)
+
+    def cut_that_lands(args: list[str], *a: Any, **k: Any) -> None:
+        fake_cut(args, *a, **k)
+        # Phase B 按 jobs 清单逐段验盘（_concat_manifest），假切割也必须落产物
+        Path(args[-1]).write_bytes(b"seg")
+
+    monkeypatch.setattr(encoder, "_run_cut", cut_that_lands)
     monkeypatch.setattr(
         encoder, "_concat", lambda _files, target: Path(target).write_bytes(b"film")
     )
@@ -124,7 +130,9 @@ def test_no_on_progress_keeps_run_cut_kwargs_harmless(
     """不给 on_progress（默认）：行为与现在完全一致，_run_cut 照常收 kwargs 不炸。"""
     plan, sources = _two_segment_plan(tmp_path)
     monkeypatch.setattr(encoder.jitter, "safe_times", lambda s, e, _z, **_k: (s, e))
-    monkeypatch.setattr(encoder, "_run_cut", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        encoder, "_run_cut", lambda args, *_a, **_k: Path(args[-1]).write_bytes(b"seg")
+    )
     monkeypatch.setattr(
         encoder, "_concat", lambda _files, target: Path(target).write_bytes(b"film")
     )
