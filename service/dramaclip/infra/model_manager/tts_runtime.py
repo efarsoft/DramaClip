@@ -257,11 +257,9 @@ def install(
     if not (src_root / "pyproject.toml").is_file():
         _pct(72, "获取 IndexTTS 源码")
         _fetch_first(_INDEXTTS_SOURCES, runtimes / "indextts-src.zip", _INDEXTTS_ZIP_SIZE, cancel)
-        with zipfile.ZipFile(runtimes / "indextts-src.zip") as zf:
-            zf.extractall(runtimes / "indextts-src-tmp")
-        inner = next((runtimes / "indextts-src-tmp").iterdir())
-        shutil.move(str(inner), str(src_root))
-        shutil.rmtree(runtimes / "indextts-src-tmp", ignore_errors=True)
+        # 与 CosyVoice 同一条解包路：裸 extractall 不校验成员名，归档里一个 ../ 就写到
+        # runtimes 外面；剥一层前缀的做法也顺手替掉 move + rmtree 的临时目录
+        _extract_zip_stripped(runtimes / "indextts-src.zip", src_root)
         (runtimes / "indextts-src.zip").unlink(missing_ok=True)
     # IndexTTS 上游 pyproject 用了 uv 专属 TOML 扩展写 optional-deps（PEP 517 解析
     # 直接拒），不走 pip——与 CosyVoice 同构：源码落位，运行时经 sys.path 引入
@@ -322,15 +320,32 @@ def install(
     _pct(100, "完成")
 
 
+def _member_parts(name: str) -> tuple[str, ...]:
+    """归档成员名的形状闸：绝对路径、盘符、``..`` 逃逸一律当场报错，其余返回规范化路径段。
+
+    解包的是第三方镜像拉下来的仓库归档，成员名属于外部输入：一条 ``repo-x/../../evil``
+    就能把文件写到 runtimes 之外，而装运行环境这步正握着用户目录的写权限。
+    宁可报错也不悄悄跳过——跳过只会得到一棵缺文件的源码树，然后在 pip 构建那步
+    抛一句看不出根因的错误。
+    """
+    parts = tuple(p for p in name.replace("\\", "/").split("/") if p not in ("", "."))
+    if name.startswith(("/", "\\")) or (len(name) > 1 and name[1] == ":") or not parts:
+        raise RuntimeError(f"归档成员是绝对路径，拒绝解包：{name!r}")
+    if ".." in parts:
+        raise RuntimeError(f"归档成员路径逃逸目标目录，拒绝解包：{name!r}")
+    return parts
+
+
 def _extract_zip_stripped(archive: Path, dest: Path) -> None:
     """GitHub zip 有一层 <repo>-<rev>/ 前缀，剥掉后落 dest。"""
     with zipfile.ZipFile(archive) as zf:
         prefix = zf.namelist()[0].split("/")[0]
         for member in zf.infolist():
+            _member_parts(member.filename)  # 原始名先过闸：绝对成员剥完前缀看着就"听话"了
             name = member.filename.removeprefix(prefix + "/")
             if not name:
                 continue
-            target = dest / name
+            target = dest.joinpath(*_member_parts(name))
             if member.is_dir():
                 target.mkdir(parents=True, exist_ok=True)
                 continue
@@ -339,15 +354,34 @@ def _extract_zip_stripped(archive: Path, dest: Path) -> None:
 
 
 def _extract_tar_stripped(archive: Path, dest: Path) -> None:
-    """GitHub /archive/<sha>.tar.gz 有一层 <repo>-<sha>/ 前缀，剥掉后落 dest。"""
+    """GitHub /archive/<sha>.tar.gz 有一层 <repo>-<sha>/ 前缀，剥掉后落 dest。
+
+    不走 ``tar.extract``：它按成员类型建符号链接/硬链接/设备节点，而链接本身就是
+    第二条逃逸通道（先落一个 ``a -> /``，再写 ``a/etc/...`` 就出圈了）。这里只认
+    目录与常规文件。
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(archive, "r:gz") as tar:
         members = tar.getmembers()
         strip = members[0].name.split("/")[0]
         for member in members:
-            member.name = member.name.removeprefix(strip + "/")
-            if member.name:
-                tar.extract(member, dest)
+            _member_parts(member.name)
+            name = member.name.removeprefix(strip + "/")
+            if not name:
+                continue
+            target = dest.joinpath(*_member_parts(name))
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+            elif member.isfile():
+                handle = tar.extractfile(member)
+                if handle is None:
+                    raise RuntimeError(f"归档成员读不出来：{member.name}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(handle.read())
+            else:
+                raise RuntimeError(
+                    f"归档里有非常规成员（{member.type!r}），拒绝解包：{member.name}"
+                )
 
 
 def _run_uv(uv: Path, venv: Path, *args: str) -> None:

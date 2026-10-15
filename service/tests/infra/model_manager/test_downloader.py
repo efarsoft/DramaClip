@@ -127,6 +127,22 @@ def test_dest_layout_keeps_hf_cache(tmp_path: Path) -> None:
     assert downloader._dest(tmp_path, other, "a/b.pth", "main") == tmp_path / "tts/kokoro/a/b.pth"
 
 
+def test_dest_rejects_upstream_paths_that_escape(tmp_path: Path) -> None:
+    """``rel`` 与 ``revision`` 都是远端 API 给的字符串：拼路径前先闸住。
+
+    报错而不是丢条目——清单里出现逃逸路径只可能是仓库被投毒或接口被劫持，
+    静默跳过会落出一份「体检说权重齐、实际缺一件」的模型。
+    """
+    spec = _spec("kokoro-82m")
+    for bad in ("../../evil.pth", "..\\evil.pth", "/etc/passwd", "C:/Windows/x", ""):
+        with pytest.raises(ValueError, match="相对路径|逃逸"):
+            downloader._dest(tmp_path, spec, bad, "main")
+
+    whisper = _spec("faster-whisper-base")
+    with pytest.raises(ValueError, match="逃逸"):
+        downloader._dest(tmp_path, whisper, "model.bin", "../../out")
+
+
 # ---------------------------------------------------------------- 提交号解析
 
 

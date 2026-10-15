@@ -71,10 +71,18 @@ def inject_dll_dirs(data_dir: Path) -> int:
     return injected
 
 
+_SHA_ANCHOR = re.compile(r"#sha256=([0-9a-fA-F]{64})")
+
+
 def _wheel_meta(pkg: str, version: str) -> dict[str, Any]:
-    """取 win_amd64 wheel 的 {url, size}：清华 simple 索引直取（国内可达），
+    """取 win_amd64 wheel 的 {url, size, sha256}：清华 simple 索引直取（国内可达），
     pypi.org JSON API 仅兜底——其 DNS 在国内网络常挂起且 socket 超时管不到。
-    wheel 文件名用规范化下划线包名；镜像 href 带 #sha256 锚点与相对路径。"""
+    wheel 文件名用规范化下划线包名；镜像 href 带 #sha256 锚点与相对路径。
+
+    锚点里的 SHA256 就是 wheel 内容的对账凭据，两条源都给（pypi 的在
+    ``digests.sha256``）——装的是会被进程加载的 DLL，只比字节数放得过「长度对、
+    内容被换过」的文件。
+    """
     filename = f"{pkg.replace('-', '_')}-{version}-py3-none-win_amd64.whl"
     simple = f"{_MIRRORS[0]}/simple/{pkg}/"
     try:
@@ -84,7 +92,12 @@ def _wheel_meta(pkg: str, version: str) -> dict[str, Any]:
         match = re.search(r'href="([^"]*' + re.escape(filename) + r'[^"]*)"', text)
         if match:
             url = urllib.parse.urljoin(simple, match.group(1))
-            return {"url": url, "size": _content_length(url), "filename": filename}
+            return {
+                "url": url,
+                "size": _content_length(url),
+                "filename": filename,
+                "sha256": _href_sha256(match.group(1)),
+            }
     except Exception:  # noqa: BLE001 - 镜像失败落 pypi.org 兜底
         pass
     data: dict[str, Any] = json.loads(
@@ -93,8 +106,20 @@ def _wheel_meta(pkg: str, version: str) -> dict[str, Any]:
     for item in data.get("urls", []):
         name = str(item.get("filename", ""))
         if name.endswith(".whl") and "win_amd64" in name:
-            return {"url": str(item["url"]), "size": int(item["size"]), "filename": name}
+            digests = item.get("digests") or {}
+            return {
+                "url": str(item["url"]),
+                "size": int(item["size"]),
+                "filename": name,
+                "sha256": str(digests.get("sha256") or "").strip().lower(),
+            }
     raise ValueError(f"{pkg} {version} 无 win_amd64 wheel")
+
+
+def _href_sha256(href: str) -> str:
+    """simple 索引 href 的 ``#sha256=`` 锚点；没有或形状不对就给空串（宁缺毋滥）。"""
+    match = _SHA_ANCHOR.search(href)
+    return match.group(1).lower() if match else ""
 
 
 def _content_length(url: str) -> int:
@@ -144,6 +169,7 @@ def install(
                     _mirror_url(meta["url"], mirror),
                     root / wheel.name,
                     meta["size"],
+                    expected_sha256=meta["sha256"] or None,
                     cancel=cancel,
                     on_progress=_make_progress(idx, meta["size"], total, on_progress),
                 )

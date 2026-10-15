@@ -30,15 +30,6 @@ def fetch_json(url: str, *, timeout: float = 30.0) -> object:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def sha256_of(path: Path) -> str:
-    """整文件 SHA256（十六进制小写）。落盘后校验与迁移补清单共用这一处实现。"""
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(_CHUNK), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def sha256_and_blob_id_of(path: Path) -> tuple[str, str]:
     """一次读盘同时算两个哈希：内容 SHA256 + git blob SHA1（HF trees 清单的 blob_id）。
 
@@ -63,6 +54,7 @@ def download_file(
     expected_size: int,
     *,
     expected_sha256: str | None = None,
+    expected_blob_id: str = "",
     cancel: threading.Event,
     on_progress: Callable[[int], None] | None = None,
 ) -> None:
@@ -71,6 +63,10 @@ def download_file(
     ``expected_sha256`` 给得上就逐字节对账（HF 的 lfs.oid / ModelScope 的 Sha256 都是
     文件内容的 SHA256）：只比字节数的校验放得过「长度碰巧对、内容断了半截」的文件。
     校验失败的半成品直接删——留着它，下次续传会把坏内容当合法前缀接着拼。
+
+    ``expected_blob_id`` 是 HF 非 LFS 小文件的 git blob SHA1：这类文件上游不给 SHA256
+    （tree API 的 oid 就是 blob 号），过去只有字节数一道闸。blob 号本机可算
+    （:func:`sha256_and_blob_id_of` 同一次读盘），补上它，清单里每条都真的有对账。
     """
     tmp = dest.with_name(dest.name + TMP_SUFFIX)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -100,12 +96,18 @@ def download_file(
     if expected_size > 0 and actual != expected_size:
         tmp.unlink(missing_ok=True)
         raise OSError(f"大小校验失败：期望 {expected_size} 字节，实际 {actual} 字节")
-    if expected_sha256:
-        digest = sha256_of(tmp)
-        if digest != expected_sha256.strip().lower():
+    if expected_sha256 or expected_blob_id:
+        digest, blob = sha256_and_blob_id_of(tmp)
+        if expected_sha256 and digest != expected_sha256.strip().lower():
             tmp.unlink(missing_ok=True)
             raise OSError(
                 f"SHA256 校验失败：期望 {expected_sha256[:12]}…，实际 {digest[:12]}…"
+                "（半成品已删，重试将整文件重下）"
+            )
+        if expected_blob_id and blob != expected_blob_id.strip().lower():
+            tmp.unlink(missing_ok=True)
+            raise OSError(
+                f"git blob 校验失败：期望 {expected_blob_id[:12]}…，实际 {blob[:12]}…"
                 "（半成品已删，重试将整文件重下）"
             )
     if dest.exists():

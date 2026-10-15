@@ -314,7 +314,13 @@ def _download_from(
         for attempt in (1, 2):
             try:
                 fetch.download_file(
-                    url, dest, size, expected_sha256=sha256, cancel=cancel, on_progress=_report
+                    url,
+                    dest,
+                    size,
+                    expected_sha256=sha256,
+                    expected_blob_id=blob_id,
+                    cancel=cancel,
+                    on_progress=_report,
                 )
                 break
             except DownloadCancelled:
@@ -507,9 +513,28 @@ def _dest(models_dir: Path, spec: ModelSpec, rel: str, revision: str) -> Path:
 
     ``revision`` 由 :func:`resolve_revision` 解析；解析不到时调用方传 "main"，
     落出体检能认出的退化形态（warn「无从对账」），不再冒充提交号。
+
+    ``rel`` 与 ``revision`` 都是上游 API 给的字符串，直接拼进路径就等于让远端决定
+    写到哪儿——所以先过 :func:`_safe_rel_parts`，越界就是清单坏了，当场失败。
     """
     root = models_dir / spec.placement
+    parts = _safe_rel_parts(rel)
     if spec.engine == "faster_whisper":
         cache = f"models--{spec.repo_id.replace('/', '--')}"
-        return root / cache / "snapshots" / revision / rel
-    return root / rel
+        return root / cache / "snapshots" / _safe_rel_parts(revision) / parts
+    return root / parts
+
+
+def _safe_rel_parts(text: str) -> Path:
+    """上游 API 给的相对路径 → 受控 Path；绝对路径、盘符、``..`` 逃逸一律拒。
+
+    清单来自远端，直接拼路径等于让上游决定写到哪儿。报错而不是跳过：清单里出现
+    逃逸路径只可能是仓库被投毒或接口被劫持，静默丢掉一条权重会得到一份「体检说
+    权重齐、实际缺一件」的模型。
+    """
+    parts = [p for p in text.replace("\\", "/").split("/") if p not in ("", ".")]
+    if text.startswith(("/", "\\")) or (len(text) > 1 and text[1] == ":") or not parts:
+        raise ValueError(f"上游给的路径不是相对路径：{text!r}")
+    if ".." in parts:
+        raise ValueError(f"上游给的路径逃逸模型目录：{text!r}")
+    return Path(*parts)

@@ -1,4 +1,4 @@
-"""fetch 原语：Range 续传、镜像忽略 Range 时覆盖写、size/SHA256 校验与取消。"""
+"""fetch 原语：Range 续传、镜像忽略 Range 时覆盖写、size/SHA256/blob 校验与取消。"""
 
 from __future__ import annotations
 
@@ -52,6 +52,12 @@ def _get(tmp_path: Path, base: str) -> tuple[Path, Path]:
     dest = tmp_path / "model.bin"
     url = f"{base}/model.bin"
     return dest, url
+
+
+def _blob_id(payload: bytes) -> str:
+    """git blob SHA1 的对照实现（非流式，故意与生产代码不同路）。"""
+    header = b"blob " + str(len(payload)).encode("ascii") + b"\0"
+    return hashlib.sha1(header + payload, usedforsecurity=False).hexdigest()
 
 
 def test_download_then_resume_from_partial(tmp_path: Path, server: str) -> None:
@@ -116,6 +122,32 @@ def test_cancelled_before_read(tmp_path: Path, server: str) -> None:
     cancel.set()
     with pytest.raises(fetch.DownloadCancelled):
         fetch.download_file(url, dest, 0, cancel=cancel)
+
+
+def test_blob_id_match_passes(tmp_path: Path, server: str) -> None:
+    """HF 非 LFS 小文件没有 SHA256 可对（tree API 的 oid 就是 blob 号）——本机现算补上这道闸。"""
+    dest, url = _get(tmp_path, server)
+    payload = _FILES["/model.bin"]
+    fetch.download_file(
+        url,
+        dest,
+        len(payload),
+        expected_blob_id=_blob_id(payload).upper(),  # 大小写不敏感
+        cancel=threading.Event(),
+    )
+    assert dest.read_bytes() == payload
+
+
+def test_blob_id_mismatch_deletes_partial(tmp_path: Path, server: str) -> None:
+    """字节数对得上但内容被换过（坏代理/截断重组）：blob 号一算就露馅。"""
+    dest, url = _get(tmp_path, server)
+    with pytest.raises(IOError, match="blob 校验失败"):
+        fetch.download_file(
+            url, dest, len(_FILES["/model.bin"]), expected_blob_id="0" * 40,
+            cancel=threading.Event(),
+        )
+    assert not dest.exists()
+    assert not dest.with_name(dest.name + fetch.TMP_SUFFIX).exists()
 
 
 def test_sha256_and_blob_id_single_pass(tmp_path: Path) -> None:
