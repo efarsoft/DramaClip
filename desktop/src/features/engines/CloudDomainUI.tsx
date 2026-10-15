@@ -15,9 +15,8 @@ import type { EngineConfigActions } from './useEngineConfigs';
 /** 按域的服务商预设：选中即填接口地址与默认模型；自定义=手填。 */
 export const CLOUD_PRESETS: Record<string, readonly CloudPreset[]> = {
   asr_cloud: [
-    { label: '阿里百炼 Paraformer v2（默认）', base_url: 'https://dashscope.aliyuncs.com', model: 'paraformer-v2' },
-    { label: '阿里百炼 Fun-ASR（方言强）', base_url: 'https://dashscope.aliyuncs.com', model: 'fun-asr' },
-    { label: '阿里百炼 Qwen-Audio 3.1 ASR（新一代）', base_url: 'https://dashscope.aliyuncs.com', model: 'qwen-audio-3.1-asr-flash-filetrans' },
+    { label: '阿里百炼 Qwen-Audio 3.1 ASR（默认·说话人分离）', base_url: 'https://dashscope.aliyuncs.com', model: 'qwen-audio-3.1-asr-flash' },
+    { label: '阿里百炼 Fun-ASR Flash（方言强）', base_url: 'https://dashscope.aliyuncs.com', model: 'fun-asr-flash-2026-06-15' },
     { label: '自定义', base_url: '', model: '' },
   ],
   tts_cloud: [
@@ -25,9 +24,7 @@ export const CLOUD_PRESETS: Record<string, readonly CloudPreset[]> = {
     { label: '自定义', base_url: '', model: '' },
   ],
   image: [
-    { label: '阿里百炼 qwen3-vl-plus（旗舰）', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3-vl-plus' },
-    { label: '阿里百炼 qwen3-vl-flash（经济）', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3-vl-flash' },
-    { label: '阿里百炼 qwen-vl-max（上一代）', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-vl-max' },
+    { label: '阿里百炼 qwen3-vl-plus（默认）', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3-vl-plus' },
     { label: '自定义', base_url: '', model: '' },
   ],
 };

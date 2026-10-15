@@ -28,7 +28,7 @@ _DOMAINS = ("llm", "tts_cloud", "asr_cloud", "image", "video")
 # 启用即镜像：域 → 设置键写法（消费方读的还是原设置键，零改动）。
 _MIRROR: dict[str, Callable[[dict[str, Any]], dict[str, str]]] = {
     "asr_cloud": lambda cfg: {
-        "asr.engine": "dashscope_paraformer",
+        "asr.engine": "dashscope_cloud",
         "asr.api_key": str(cfg["api_key"]),
         "asr.model": str(cfg["model"]),
     },
@@ -159,10 +159,10 @@ def _test_llm(base_url: str, api_key: str, model: str) -> dict[str, Any]:
 
 
 def _test_asr(api_key: str, model: str) -> dict[str, Any]:
-    """ASR 连通：0.5s 静音 wav 走一次真实文件转写（异步任务提交→轮询，端到端可信）。"""
+    """ASR 连通：0.5s 静音 wav 走一次同步切片转写（端到端可信）。"""
     import time
 
-    from dramaclip.engines.analysis.transcriber import DashscopeParaformerEngine
+    from dramaclip.engines.analysis.transcriber import DashscopeCloudAsrEngine
 
     if api_key.strip() == "" or model.strip() == "":
         return {"ok": False, "latency_s": None, "error": "API Key 与模型不能为空"}
@@ -171,7 +171,7 @@ def _test_asr(api_key: str, model: str) -> dict[str, Any]:
         wav = Path(tmp) / "ping.wav"
         _write_silent_wav(wav, seconds=0.5)
         try:
-            DashscopeParaformerEngine(api_key=api_key, model=model).transcribe(wav)
+            DashscopeCloudAsrEngine(api_key=api_key, model=model).transcribe(wav)
         except Exception as exc:  # noqa: BLE001 - 连通失败是一条诚实结果
             return {"ok": False, "latency_s": None, "error": str(exc)[:300]}
     return {"ok": True, "latency_s": round(time.monotonic() - started, 2), "error": None}

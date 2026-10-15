@@ -164,12 +164,12 @@ def test_test_reports_unreachable_endpoint_without_raising(
 def test_enable_asr_cloud_mirrors_three_keys(memory_db: sqlite3.Connection) -> None:
     settings: dict[str, str] = {}
     harness = Harness(memory_db, settings)
-    config = _create(harness, domain="asr_cloud", model="paraformer-v2")
+    config = _create(harness, domain="asr_cloud", model="qwen-audio-3.1-asr-flash")
     harness.rpc("engine_configs.enable", {"id": config["id"]})
     mirrored = settings_repo.get_all(memory_db)
-    assert mirrored["asr.engine"] == "dashscope_paraformer"
+    assert mirrored["asr.engine"] == "dashscope_cloud"
     assert mirrored["asr.api_key"] == "sk-test-1234"
-    assert mirrored["asr.model"] == "paraformer-v2"
+    assert mirrored["asr.model"] == "qwen-audio-3.1-asr-flash"
 
 
 def test_enable_tts_cloud_mirrors_three_keys(memory_db: sqlite3.Connection) -> None:

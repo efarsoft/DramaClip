@@ -4,11 +4,9 @@
 from __future__ import annotations
 
 import contextlib
-import json
 import logging
 import re
 import shutil
-import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -498,23 +496,28 @@ def _group_by_gap(
     return runs
 
 
-class DashscopeParaformerEngine:
-    """百炼 Paraformer（云端，DashScope 文件转写）：无本地模型，按量计费。
+class DashscopeCloudAsrEngine:
+    """百炼语音识别（云端，同步切片）：无本地模型，按音频时长计费。
 
-    与本地 paraformer 的同源模型，云端推理——弱机/无 GPU 用户的 ASR 跃升路径
-    （P1 云端化）。文件转写是异步任务：提交 → 轮询 → 拉转写 JSON。
-    句级时间戳 + 字级 words 全有，AsrSegment 同构，OCR 融合照常工作。
-    说话人分离跟随 asr.diarization（云端 diarization_enabled，句级 speaker_id
-    → 角色A/B…，与本地聚类标签同格式）。本地音频先经 SDK 临时上传桥
-    （oss_utils.check_and_upload_local）换公网 URL 再提交——file_urls 只收
-    HTTP(S) 地址，本地路径直传服务端不认。
+    qwen-audio-3.1-asr-flash 走 DashScope 同步多模态端点——SDK 对 content
+    里本地文件路径自动上传并在请求头开启 OssResourceResolve 解析，无
+    filetrans「公网 URL 单收」死路。官方单次调用音频上限 5 分钟，整集 wav
+    先按能量停顿切 ≤4 分钟片（pause_split 同一套基础设施），逐片同步转写
+    后按片起点偏移合并。句级+字级时间戳固定开启；qwen-audio-3.1 系
+    speaker_diarization_enabled 开说话人分离，说话人取字级 speaker_id
+    （句级字段是聚合对象不可信）→ 角色A/B…，与本地聚类标签同格式。
+    各片独立分离，跨片编号不保证对齐——已知局限。fun-asr 系无分离，
+    说话人为 None。
     """
 
-    _POLL_INTERVAL_S = 3.0
-    _POLL_TIMEOUT_S = 600.0
+    # 单片上限：官方 5 分钟/次，切 4 分钟留合并与边界余量
+    _CHUNK_S = 240.0
 
     def __init__(
-        self, api_key: str, model: str = "paraformer-v2", diarization: bool = True
+        self,
+        api_key: str,
+        model: str = "qwen-audio-3.1-asr-flash",
+        diarization: bool = True,
     ) -> None:
         # Key 缺失不在构造期拦：所有已接线引擎必须能空载构造（wired 不变量），
         # 真正的调用在 transcribe 期按分档报错。
@@ -524,95 +527,121 @@ class DashscopeParaformerEngine:
 
     @property
     def name(self) -> str:
-        return f"dashscope_paraformer:{self._model}"
+        return f"dashscope_cloud:{self._model}"
 
     def transcribe(
         self, wav_path: Path, language: str = "zh", *, hotwords: str = ""
     ) -> list[AsrSegment]:
+        import tempfile
+        import wave
+
         import dashscope
-        from dashscope.audio.asr import Transcription
-        from dashscope.utils.oss_utils import check_and_upload_local
+        from dashscope import MultiModalConversation
 
         if self._api_key == "":
             raise ValueError(
-                "百炼 Paraformer（云端）需要 API Key：请在引擎中心填写 asr.api_key"
+                "百炼语音识别（云端）需要 API Key：请在引擎中心填写 asr.api_key"
             )
+        # language/hotwords 同步端点参数名未在官方示例中给出，如实不透传
+        # （语种自动检测；热词待文档确认后接）
         dashscope.api_key = self._api_key
-        # 本地文件 → 百炼临时 OSS URL（已是 http/oss 地址则原样透传）
-        _, file_url, _ = check_and_upload_local(
-            model=self._model, content=str(wav_path), api_key=self._api_key
-        )
-        # language_hints 仅 paraformer 系接受（fun-asr / qwen 系传了报参数错误）
-        submit_kwargs: dict[str, Any] = {"diarization_enabled": self._diarization}
-        if self._model.startswith("paraformer"):
-            submit_kwargs["language_hints"] = (
-                ["zh"] if language.startswith("zh") else [language]
-            )
-        # 内联热词云端不支持（需预建 vocabulary_id，后续接）；参数如实不透传
-        submit = Transcription.call(
-            model=self._model,
-            file_urls=[file_url],
-            **submit_kwargs,
-        )
-        if submit.status_code != 200:
-            raise RuntimeError(f"转写任务提交失败: {submit.message}")
-        task_id = submit.output["task_id"]
-        deadline = time.monotonic() + self._POLL_TIMEOUT_S
-        while time.monotonic() < deadline:
-            polled = Transcription.fetch(task=task_id)
-            if polled.status_code != 200:
-                raise RuntimeError(f"转写任务查询失败: {polled.message}")
-            status = polled.output.get("task_status")
-            if status in ("PENDING", "RUNNING"):
-                time.sleep(self._POLL_INTERVAL_S)
-                continue
-            if status != "SUCCEEDED":
-                raise RuntimeError(f"转写任务失败: {polled.output.get('message')}")
-            return self._collect(polled.output.get("results") or [])
-        raise RuntimeError(f"转写任务超时（{self._POLL_TIMEOUT_S:.0f}s）")
-
-    def _collect(self, results: list[dict[str, Any]]) -> list[AsrSegment]:
-        """各文件转写 JSON 的 sentences → AsrSegment（字级 words 原样带上）。"""
-        import urllib.request
-
+        with wave.open(str(wav_path), "rb") as wf:
+            sample_rate = wf.getframerate()
+        chunks = self._chunks(wav_path)
         segments: list[AsrSegment] = []
-        labels: dict[int, str] = {}  # 云端 speaker_id → 角色X，按出场顺序（与本地同格式）
-        for item in results:
-            url = item.get("transcription_url")
-            if not url:
-                continue
-            with urllib.request.urlopen(urllib.request.Request(url), timeout=60) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-            for transcript in payload.get("transcripts", []):
-                for sentence in transcript.get("sentences", []):
-                    start = int(sentence.get("begin_time", 0)) / 1000.0
-                    end = int(sentence.get("end_time", 0)) / 1000.0
-                    words = [
-                        WordSpan(
-                            start=int(w.get("begin_time", 0)) / 1000.0,
-                            end=int(w.get("end_time", 0)) / 1000.0,
-                            word=str(w.get("text", "")),
-                        )
-                        for w in sentence.get("words", [])
-                    ]
-                    text = str(sentence.get("text", "")).strip()
-                    if not words and text:
-                        # 无字级时间戳的模型（fun-asr / qwen 系）：整句一个词，时间不丢
-                        words = [WordSpan(start=start, end=end, word=text)]
-                    raw_speaker = sentence.get("speaker_id")
-                    speaker: str | None = None
-                    if raw_speaker is not None:
-                        key = int(raw_speaker)
-                        if key not in labels:
-                            labels[key] = _speaker_label(len(labels))
-                        speaker = labels[key]
-                    segments.append(
-                        AsrSegment(
-                            start=start,
-                            end=end,
-                            text=text,
-                            speaker=speaker,
-                            words=words,
-                        )
-                    )
+        labels: dict[int, str] = {}  # 云端 speaker_id → 角色X，出场顺序全局累计
+        with tempfile.TemporaryDirectory(prefix="asr-cloud-") as tmp:
+            work = Path(tmp)
+            for clip, clip_path in pause_split.split_wav(wav_path, chunks, work):
+                for sentence in self._call(MultiModalConversation, clip_path, sample_rate):
+                    segments.append(self._segment(clip.start, sentence, labels))
+        segments.sort(key=lambda s: s.start)
         return segments
+
+    def _chunks(self, wav_path: Path) -> list[pause_split.Clip]:
+        """能量停顿切 ≤_CHUNK_S 片；分析失败退整条，超限片硬等分兜底。"""
+        import wave
+
+        try:
+            clips = pause_split.speech_clips(wav_path, max_clip_s=self._CHUNK_S)
+        except (OSError, ValueError):
+            with wave.open(str(wav_path), "rb") as wf:
+                duration = wf.getnframes() / wf.getframerate()
+            clips = [pause_split.Clip(0.0, duration)]
+        chunks: list[pause_split.Clip] = []
+        for clip in clips:
+            span = clip.end - clip.start
+            if span <= self._CHUNK_S:
+                chunks.append(clip)
+                continue
+            parts = int(span / self._CHUNK_S) + (1 if span % self._CHUNK_S else 0)
+            step = span / parts
+            for k in range(parts):
+                chunks.append(
+                    pause_split.Clip(clip.start + k * step, clip.start + (k + 1) * step)
+                )
+        return chunks
+
+    def _call(
+        self, client: Any, clip_path: Path, sample_rate: int
+    ) -> list[dict[str, Any]]:
+        """单片同步转写，返回 sentences 列表（字级 words 含 speaker_id）。"""
+        kwargs: dict[str, Any] = {}
+        if self._diarization:
+            kwargs["speaker_diarization_enabled"] = True
+        rsp = client.call(
+            model=self._model,
+            messages=[{"role": "user", "content": [{"audio": f"file://{clip_path}"}]}],
+            format="wav",
+            sample_rate=str(sample_rate),
+            **kwargs,
+        )
+        if rsp.status_code != 200:
+            raise RuntimeError(
+                f"云端转写失败（{self._model}）: {rsp.code} {rsp.message}"
+            )
+        out = rsp.output
+        sents = out.get("sentences")
+        if not sents:
+            inner = out.get("output")
+            sents = inner.get("sentences") if isinstance(inner, dict) else None
+        return list(sents or [])
+
+    def _segment(
+        self, offset_s: float, sentence: dict[str, Any], labels: dict[int, str]
+    ) -> AsrSegment:
+        """单句 → AsrSegment：片内毫秒时间戳 + 片起点偏移锚定到整集时间轴。"""
+        start = int(sentence.get("begin_time", 0)) / 1000.0 + offset_s
+        end = int(sentence.get("end_time", 0)) / 1000.0 + offset_s
+        words: list[WordSpan] = []
+        speaker_raw: int | None = None
+        for w in sentence.get("words", []):
+            text = str(w.get("text", "")).strip()
+            if text == "":
+                continue  # 词间空隙占位（" "）不带语义
+            raw = w.get("speaker_id")
+            if speaker_raw is None and raw is not None:
+                speaker_raw = int(raw)
+            words.append(
+                WordSpan(
+                    start=round(int(w.get("begin_time", 0)) / 1000.0 + offset_s, 3),
+                    end=round(int(w.get("end_time", 0)) / 1000.0 + offset_s, 3),
+                    word=text,
+                )
+            )
+        text = str(sentence.get("text", "")).strip()
+        if not words and text:
+            # 无字级明细的模型（fun-asr 系）：整句一个词，时间不丢
+            words = [WordSpan(start=round(start, 3), end=round(end, 3), word=text)]
+        speaker: str | None = None
+        if speaker_raw is not None:
+            if speaker_raw not in labels:
+                labels[speaker_raw] = _speaker_label(len(labels))
+            speaker = labels[speaker_raw]
+        return AsrSegment(
+            start=round(start, 3),
+            end=round(end, 3),
+            text=text,
+            speaker=speaker,
+            words=words,
+        )

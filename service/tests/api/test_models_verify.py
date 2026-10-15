@@ -70,7 +70,7 @@ def test_verify_without_id_covers_installed_only(tmp_path: Path) -> None:
     # 云端引擎（已接线、无本地资产）也在总览体检里如实报 ok
     assert [r["model_id"] for r in reports] == [
         _SENSEVOICE,
-        "dashscope-paraformer",
+        "dashscope-cloud-asr",
         "cosyvoice-cloud",
     ]
 

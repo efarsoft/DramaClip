@@ -52,10 +52,10 @@ let engineConfigsSeed: readonly Record<string, unknown>[] = [];
 const cloudConfig = {
   id: 'cfg-cloud-1',
   domain: 'asr_cloud',
-  name: '百炼·paraformer-v2',
+  name: '百炼·qwen-audio-3.1-asr-flash',
   base_url: 'https://dashscope.aliyuncs.com',
   api_key: 'sk-test-abcd1234',
-  model: 'paraformer-v2',
+  model: 'qwen-audio-3.1-asr-flash',
   enabled: 1,
   api_key_masked: 'sk-t••••1234',
 };
@@ -238,9 +238,9 @@ describe('语音识别 ASR · 云端配置分段与生效切换', () => {
 
   it('有启用中的云端配置：生效卡翻成云端形态（配置名+按量计费+测连接），生效下拉含混排分组', async () => {
     engineConfigsSeed = [cloudConfig];
-    asr({ 'asr.engine': 'dashscope_paraformer' });
+    asr({ 'asr.engine': 'dashscope_cloud' });
     expect(
-      await screen.findByText('百炼·paraformer-v2', {}, { timeout: 5000 }),
+      await screen.findByText('百炼·qwen-audio-3.1-asr-flash', {}, { timeout: 5000 }),
     ).toBeTruthy();
     expect(screen.getByText(/云端转写 · 按量计费/)).toBeTruthy();
     expect(screen.getByRole('button', { name: '测连接' })).toBeTruthy();
