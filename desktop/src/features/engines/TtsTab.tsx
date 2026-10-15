@@ -3,7 +3,7 @@
  * 状态一律以 models.list 的 engine_ready/status 与 models.verify 的结论为准，前端不写死；
  * 免模型的云端引擎单独走「无需本地模型」说明，不冒充体检结果。
  */
-import { Button, Segmented } from 'antd';
+import { Button } from 'antd';
 import { useState } from 'react';
 import type { ReactElement } from 'react';
 import type { EngineConfig, ModelInfo } from '@dramaclip/protocol';
@@ -255,6 +255,8 @@ function ActiveCard({
   onSave,
   onChanged,
   onVerify,
+  configs,
+  onPickCloud,
 }: {
   active: ModelInfo | undefined;
   engine: string;
@@ -264,6 +266,8 @@ function ActiveCard({
   onSave: DomainTabProps['onSave'];
   onChanged: () => void;
   onVerify: DomainTabProps['onVerify'];
+  configs: readonly EngineConfig[];
+  onPickCloud: (config: EngineConfig) => void;
 }): ReactElement {
   const modelFree = isModelFreeEngine(engine);
   const report = active === undefined ? undefined : reportFor(reports, active.model_id);
@@ -280,13 +284,14 @@ function ActiveCard({
     stateNote: state === null ? undefined : activeStateNote(state, report),
     progress: useDownloadProgress(active),
     picker: (
-      <Segmented
-        size="small"
-        value={engine}
-        options={TTS_ENGINES.map((name) => ({ label: ttsEngineLabel(name), value: name }))}
-        onChange={(value) => {
+      <MixedEnginePicker
+        localValue={engine}
+        localOptions={TTS_ENGINES.map((name) => ({ label: ttsEngineLabel(name), value: name }))}
+        configs={configs}
+        onPickLocal={(value) => {
           onSave({ 'tts.engine': value });
         }}
+        onPickCloud={onPickCloud}
       />
     ),
     actions: cardActions(active, state, onChanged, onVerify),

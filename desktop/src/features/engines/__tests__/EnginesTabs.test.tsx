@@ -245,7 +245,11 @@ describe('语音识别 ASR · 云端配置分段与生效切换', () => {
     expect(screen.getByText(/云端转写 · 按量计费/)).toBeTruthy();
     expect(screen.getByRole('button', { name: '测连接' })).toBeTruthy();
     // 分段切到云端配置段：配置列表出现（含使用中徽标）
-    fireEvent.click(screen.getAllByText('云端配置')[0]);
+    const cloudTab = screen.getAllByText('云端配置')[0];
+    expect(cloudTab).toBeDefined();
+    if (cloudTab !== undefined) {
+      fireEvent.click(cloudTab);
+    }
     await waitFor(() => {
       expect(screen.getAllByText('使用中').length).toBeGreaterThan(0);
     });

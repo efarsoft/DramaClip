@@ -18,6 +18,7 @@ export const TTS_ENGINE_LABEL: Record<TtsEngineName, string> = {
   kokoro: 'Kokoro 82M',
   edge: 'Edge',
   indextts2: 'IndexTTS-2.5',
+  cosyvoice_cloud: 'CosyVoice 云端',
 };
 
 /** 设置值 → 展示名；未登记引擎原样回显（不编名字）。 */
