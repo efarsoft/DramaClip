@@ -184,8 +184,8 @@ const AGENT_GATEWAY_SECTION: SectionSpec = {
     {
       key: 'agent_gateway.token',
       label: '访问 Token',
-      type: 'text',
-      help: '调用方携带 Authorization: Bearer <token>；留空保存时自动生成并回填',
+      type: 'password',
+      help: '调用方携带 Authorization: Bearer <token>；留空保存时自动生成并回填；显示为掩码，原样保存不会覆写',
     },
   ],
 };

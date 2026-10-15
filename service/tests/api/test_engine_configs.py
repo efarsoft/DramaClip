@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from dramaclip.api import engine_configs as engine_configs_api
+from dramaclip.infra.storage.repos import engine_configs as configs_repo
 from dramaclip.infra.storage.repos import settings as settings_repo
 from dramaclip.transport.rpc import Router, RpcRequest
 
@@ -51,6 +52,61 @@ def test_create_and_list_by_domain(memory_db: sqlite3.Connection) -> None:
     assert masked.startswith("sk-a") and masked.endswith("ijkl")
     configs = harness.rpc("engine_configs.list", {"domain": "llm"})["configs"]
     assert [c["id"] for c in configs] == [created["id"], long_one["id"]]
+
+
+def test_plaintext_key_never_leaves_the_api(memory_db: sqlite3.Connection) -> None:
+    """裁决「密钥不回显」：create/list/update/enable 四条出参都只带掩码，无明文键。"""
+    harness = Harness(memory_db, {})
+    created = _create(harness)
+    updated = harness.rpc(
+        "engine_configs.update",
+        {"id": created["id"], "name": "a", "base_url": "https://x/v1", "api_key": "", "model": "m"},
+    )
+    enabled = harness.rpc("engine_configs.enable", {"id": created["id"]})
+    listed = harness.rpc("engine_configs.list", {"domain": "llm"})
+    for name, payload in {
+        "create": created,
+        "list": listed["configs"][0],
+        "update": updated,
+        "enable": enabled,
+    }.items():
+        assert "api_key" not in payload, f"{name} 出参仍带明文键"
+        assert "sk-test-1234" not in json.dumps(payload, ensure_ascii=False), name
+
+
+def test_update_with_blank_key_keeps_the_stored_secret(memory_db: sqlite3.Connection) -> None:
+    """出参脱敏后编辑弹窗不再回填明文：留空 = 保持库中现值，改其他字段不受影响。"""
+    harness = Harness(memory_db, {})
+    created = _create(harness)
+    updated = harness.rpc(
+        "engine_configs.update",
+        {
+            "id": created["id"],
+            "name": "改名",
+            "base_url": "https://new.example/v1",
+            "api_key": "",
+            "model": "qwen-max",
+        },
+    )
+    assert updated["name"] == "改名"
+    assert updated["api_key_masked"] == "sk-t••••1234"
+    assert configs_repo.get_secret(memory_db, str(created["id"])) == "sk-test-1234"
+
+
+def test_update_with_new_key_replaces_the_stored_secret(memory_db: sqlite3.Connection) -> None:
+    harness = Harness(memory_db, {})
+    created = _create(harness)
+    harness.rpc(
+        "engine_configs.update",
+        {
+            "id": created["id"],
+            "name": "a",
+            "base_url": "https://x/v1",
+            "api_key": "sk-brand-new-9999",
+            "model": "m",
+        },
+    )
+    assert configs_repo.get_secret(memory_db, str(created["id"])) == "sk-brand-new-9999"
 
 
 def test_enable_is_single_per_domain(memory_db: sqlite3.Connection) -> None:
@@ -247,3 +303,35 @@ def test_vision_test_missing_fields_is_honest_false(memory_db: sqlite3.Connectio
     result = harness.rpc("engine_configs.test", {"domain": "image"})
     assert result["ok"] is False
     assert "不能为空" in str(result["error"])
+
+
+def test_test_with_id_and_blank_key_uses_the_stored_secret(
+    memory_db: sqlite3.Connection,
+) -> None:
+    """出参脱敏后「测连接」不能再指望前端传明文：带 id、key 留空 → 服务端内部取现值。"""
+    server = HTTPServer(("127.0.0.1", 0), _FakeVision)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        harness = Harness(memory_db, {})
+        config = _create(
+            harness,
+            domain="image",
+            api_key="sk-vl-stored",
+            base_url=f"http://127.0.0.1:{server.server_port}",
+            model="qwen-vl-max",
+        )
+        result = harness.rpc(
+            "engine_configs.test",
+            {
+                "id": config["id"],
+                "domain": "image",
+                "base_url": f"http://127.0.0.1:{server.server_port}",
+                "api_key": "",
+                "model": "qwen-vl-max",
+            },
+        )
+        assert result["ok"] is True, result["error"]
+        assert _FakeVision.seen_auth == "Bearer sk-vl-stored"
+    finally:
+        server.shutdown()

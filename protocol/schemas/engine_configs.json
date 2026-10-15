@@ -6,13 +6,12 @@
   "x-models": {
     "EngineConfig": {
       "type": "object",
-      "required": ["id", "domain", "name", "base_url", "api_key", "model", "enabled", "api_key_masked"],
+      "required": ["id", "domain", "name", "base_url", "model", "enabled", "api_key_masked"],
       "properties": {
         "id": { "type": "string" },
         "domain": { "type": "string" },
         "name": { "type": "string" },
         "base_url": { "type": "string" },
-        "api_key": { "type": "string" },
         "model": { "type": "string" },
         "enabled": { "type": "integer" },
         "api_key_masked": { "type": "string" },
@@ -59,7 +58,7 @@
     },
     {
       "name": "engine_configs.update",
-      "summary": "更新配置（启用中的配置同步镜像）",
+      "summary": "更新配置（api_key 留空=保持库中现值；启用中的配置同步镜像）",
       "params": {
         "type": "object",
         "required": ["id", "name"],
@@ -102,12 +101,13 @@
     },
     {
       "name": "engine_configs.test",
-      "summary": "连通性测试：按域发一次真实最小请求（LLM ping / ASR 短音频转写 / TTS 单字合成 / VL 单图；缺 domain 走 LLM ping）",
+      "summary": "连通性测试：按域发一次真实最小请求（LLM ping / ASR 短音频转写 / TTS 单字合成 / VL 单图；缺 domain 走 LLM ping；带 id 且 api_key 留空=用库中现值）",
       "params": {
         "type": "object",
         "required": ["base_url", "model"],
         "properties": {
           "domain": { "type": "string" },
+          "id": { "type": "string" },
           "base_url": { "type": "string" },
           "api_key": { "type": "string" },
           "model": { "type": "string" }

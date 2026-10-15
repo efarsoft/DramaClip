@@ -21,9 +21,19 @@ def _mask(value: str) -> str:
 
 
 def _row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
+    """出参口径：明文 api_key 一律不出仓（裁决：密钥不回显）。消费方要真值走 get_secret。"""
     data = dict(zip(_COLUMNS, row, strict=True))
     data["api_key_masked"] = _mask(str(data["api_key"]))
+    data.pop("api_key")
     return data
+
+
+def get_secret(conn: sqlite3.Connection, config_id: str) -> str:
+    """服务端内部取明文 key（镜像 settings / 连通测试用），绝不并入 RPC 出参。"""
+    row = conn.execute(
+        "SELECT api_key FROM engine_configs WHERE id = ?", (config_id,)
+    ).fetchone()
+    return "" if row is None else str(row[0])
 
 
 def list_by_domain(conn: sqlite3.Connection, domain: str) -> list[dict[str, Any]]:

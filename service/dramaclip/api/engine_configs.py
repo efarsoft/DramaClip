@@ -82,12 +82,16 @@ def update(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     existing = configs_repo.get(context.conn, config_id)
     if existing is None:
         raise RpcDomainError(_ERR_NOT_FOUND, f"配置不存在: {config_id}")
+    # 出参已无明文 key：空 api_key = 保持库中现值（桌面编辑不再回填明文）
+    api_key = str(params.get("api_key", "")).strip()
+    if api_key == "":
+        api_key = configs_repo.get_secret(context.conn, config_id)
     configs_repo.update(
         context.conn,
         config_id,
         name=name,
         base_url=str(params.get("base_url", "")),
-        api_key=str(params.get("api_key", "")),
+        api_key=api_key,
         model=str(params.get("model", "")),
     )
     updated = configs_repo.get(context.conn, config_id)
@@ -128,11 +132,18 @@ def enable(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
 
 
 def test(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
-    """连通性测试：按域发一次真实最小请求（LLM ping / ASR 短音频转写 / TTS 单字合成 / VL 单图）。"""
+    """连通性测试：按域发一次真实最小请求（LLM ping / ASR 短音频转写 / TTS 单字合成 / VL 单图）。
+
+    带 id 且 api_key 留空时用库中现值——出参脱敏后前端不再持有明文 key，
+    「测连接/自检」改走服务端内部取值（与 _mirror 同一扇入口，不落日志）。
+    """
     domain = str(params.get("domain") or "").strip()
     base_url = str(params.get("base_url", ""))
     api_key = str(params.get("api_key", ""))
     model = str(params.get("model", ""))
+    config_id = str(params.get("id", ""))
+    if config_id != "" and api_key.strip() == "":
+        api_key = configs_repo.get_secret(context.conn, config_id)
     if domain in ("", "llm"):
         return _test_llm(base_url, api_key, model)
     if domain == "asr_cloud":
@@ -269,16 +280,20 @@ def _enable(context: AppContext, domain: str, config_id: str) -> None:
 
 
 def _mirror(context: AppContext, domain: str, config: dict[str, Any]) -> None:
-    """启用配置镜像到既有设置键：llm 三键（历史路径）或各云端域的映射表。"""
+    """启用配置镜像到既有设置键：llm 三键（历史路径）或各云端域的映射表。
+
+    出参 dict 已脱敏（无明文 api_key），镜像在建库取真值——内部通道，不外发。
+    """
     from dramaclip.infra.storage.repos import settings as settings_repo
 
+    cfg = {**config, "api_key": configs_repo.get_secret(context.conn, str(config["id"]))}
     if domain == "llm":
-        _mirror_llm_settings(context, config)
+        _mirror_llm_settings(context, cfg)
         return
     builder = _MIRROR.get(domain)
     if builder is None:
         return
-    for key, value in builder(config).items():
+    for key, value in builder(cfg).items():
         settings_repo.set_value(context.conn, key, value)
         context.settings[key] = value
 

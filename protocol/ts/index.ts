@@ -671,13 +671,12 @@ export interface TtsCleanReferenceResult {
   };
 }
 
-/** 引擎配置（云端/服务端点多实例，单启用）。 */
+/** 引擎配置（云端/服务端点多实例，单启用；出参不含明文 api_key，只出 masked）。 */
 export interface EngineConfig {
   readonly id: string;
   readonly domain: string;
   readonly name: string;
   readonly base_url: string;
-  readonly api_key: string;
   readonly model: string;
   readonly enabled: number;
   readonly api_key_masked: string;

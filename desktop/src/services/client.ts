@@ -367,6 +367,8 @@ export const engineConfigsApi = {
     rpc<{ ok: boolean }>('engine_configs.enable', { domain, local: true }),
   test: (input: {
     domain?: string;
+    /** 已存配置：带 id 且 api_key 留空=服务端用库中现值（出参不再含明文 key） */
+    id?: string;
     base_url: string;
     api_key: string;
     model: string;

@@ -59,7 +59,7 @@ export function CloudTestButton({ config, domain }: { config: EngineConfig; doma
   const onTest = (): void => {
     setTesting(true);
     engineConfigsApi
-      .test({ domain, base_url: config.base_url, api_key: config.api_key, model: config.model })
+      .test({ domain, id: config.id, base_url: config.base_url, api_key: '', model: config.model })
       .then((res) => {
         if (res.ok) message.success(`连接正常 · ${String(res.latency_s ?? 0)}s`);
         else message.error(res.error ?? '连接失败');
@@ -171,7 +171,7 @@ export function CloudConfigsPane({
   const onTest = (config: EngineConfig): void => {
     setTests((prev) => ({ ...prev, [config.id]: { ok: true, text: '测试中…' } }));
     engineConfigsApi
-      .test({ domain, base_url: config.base_url, api_key: config.api_key, model: config.model })
+      .test({ domain, id: config.id, base_url: config.base_url, api_key: '', model: config.model })
       .then((res) => {
         setTests((prev) => ({
           ...prev,
@@ -231,6 +231,7 @@ export function CloudConfigsPane({
           saveError={actions.saveError}
           presets={presets}
           domain={domain}
+          editingId={actions.editing?.id}
           onSave={actions.save}
           onClose={actions.close}
         />
@@ -281,7 +282,7 @@ function ConfigRow({
         </div>
         <div style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
           {config.model} · {config.base_url === '' ? '服务商标准端点' : config.base_url}
-          {config.api_key !== '' && ` · ${config.api_key_masked}`}
+          {config.api_key_masked !== '' && ` · ${config.api_key_masked}`}
         </div>
         {test !== undefined && (
           <div style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: test.ok ? tokens.colorSuccess : tokens.colorWarning }}>

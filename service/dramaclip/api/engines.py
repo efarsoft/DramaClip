@@ -119,12 +119,16 @@ def _cloud(context: AppContext, domain: str) -> dict[str, Any]:
             _ERR_SELFTEST_STATE,
             f"能力域 {domain} 没有启用中的配置——先在「云端配置」里配好并启用再自检",
         )
-    # 委托既有连通测试（§10.6：只调用，不改 engine_configs 的实现）
+    # 委托既有连通测试（§10.6：只调用，不改 engine_configs 的实现）。
+    # 出参已无明文 key：带 id 走服务端内部取值；domain 必须传——
+    # 否则 tts_cloud/asr_cloud 的自检会落进 llm ping 分支（旧 bug，一并纠正）。
     return engine_configs.test(
         context,
         {
+            "id": str(enabled["id"]),
+            "domain": domain,
             "base_url": str(enabled.get("base_url") or ""),
-            "api_key": str(enabled.get("api_key") or ""),
+            "api_key": "",
             "model": str(enabled.get("model") or ""),
         },
     )

@@ -26,8 +26,10 @@ const FIELDS = [
   { key: 'model', label: '模型名', placeholder: 'qwen-plus' },
 ] as const;
 
-/** 连通性测试：按当前草稿直测端点（保存前即可验证）；失败原因进弹窗内横幅。 */
-function useConnectionTest(draft: FormState, domain: string): {
+/** 连通性测试：按当前草稿直测端点（保存前即可验证）；失败原因进弹窗内横幅。
+ * editingId 存在时随请求带上——出参已无明文 key，编辑态草稿里 key 留空，
+ * 由服务端按 id 取库中现值，否则空 key 一定测挂。 */
+function useConnectionTest(draft: FormState, domain: string, editingId?: string): {
   readonly testing: boolean;
   readonly testError: string | null;
   readonly test: () => void;
@@ -44,6 +46,7 @@ function useConnectionTest(draft: FormState, domain: string): {
     setTestError(null);
     engineConfigsApi
       .test({
+        id: editingId,
         domain,
         base_url: draft.base_url.trim(),
         api_key: draft.api_key.trim(),
@@ -72,6 +75,7 @@ export function ConfigModal({
   saveError,
   presets,
   domain = 'llm',
+  editingId,
   onSave,
   onClose,
 }: {
@@ -81,11 +85,13 @@ export function ConfigModal({
   /** 按域的服务商预设：不传 = 纯手填（LLM 域现状）。 */
   presets?: readonly CloudPreset[];
   domain?: string;
+  /** 编辑态的建档 id：决定「测试连接」是否走服务端取密钥、密钥框留空语义。 */
+  editingId?: string;
   onSave: (form: FormState) => void;
   onClose: () => void;
 }): ReactElement {
   const [draft, setDraft] = useState<FormState>(initial);
-  const { testing, testError, test } = useConnectionTest(draft, domain);
+  const { testing, testError, test } = useConnectionTest(draft, domain, editingId);
   const field = (key: keyof FormState) => ({
     value: draft[key],
     onChange: (event: ChangeEvent<HTMLInputElement>) => {
@@ -138,7 +144,11 @@ export function ConfigModal({
           <LabeledInput
             key={spec.key}
             label={spec.label}
-            placeholder={spec.placeholder}
+            placeholder={
+              spec.key === 'api_key' && editingId !== undefined
+                ? '留空即保持库中现值'
+                : spec.placeholder
+            }
             type={'secret' in spec ? 'password' : 'text'}
             {...field(spec.key)}
           />

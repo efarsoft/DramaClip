@@ -17,6 +17,13 @@ from dramaclip.transport.rpc import Router, RpcDomainError
 _ERR_UNKNOWN_KEY = -32001
 _ERR_BAD_VALUE = -32002
 
+#: settings.get 出参里密钥类值的替位；update 认得它=「保持原值」，原样回传不会覆写真 key
+MASK_SENTINEL = "••••••••"
+
+
+def _is_secret(key: str) -> bool:
+    return key.endswith((".api_key", ".token"))
+
 
 def register(router: Router, context: AppContext) -> None:
     router.register("settings.get", lambda _params: get(context))
@@ -24,7 +31,11 @@ def register(router: Router, context: AppContext) -> None:
 
 
 def get(context: AppContext) -> dict[str, str]:
-    return dict(context.settings)
+    """出参脱敏（裁决：密钥不回显）。真值仍留在 context.settings 供内部消费。"""
+    return {
+        key: (MASK_SENTINEL if _is_secret(key) and value != "" else value)
+        for key, value in context.settings.items()
+    }
 
 
 def update(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -34,11 +45,15 @@ def update(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     unknown = [key for key in values if key not in config.DEFAULTS]
     if unknown:
         raise RpcDomainError(_ERR_UNKNOWN_KEY, f"未知设置键: {', '.join(unknown)}")
+    kept = 0
     for key, value in values.items():
+        if _is_secret(key) and str(value) == MASK_SENTINEL:
+            kept += 1  # 前端把掩码原样送回：保持库中真值，不覆写
+            continue
         settings_repo.set_value(context.conn, key, str(value))
         context.settings[key] = str(value)
     gateway = getattr(context, "gateway", None)
     if gateway is not None:
         # agent_gateway.* 改动热生效（启停/换端口/token 轮换）；其余键同步是无操作
         gateway.sync(context.settings)
-    return {"ok": True, "updated": len(values)}
+    return {"ok": True, "updated": len(values) - kept}

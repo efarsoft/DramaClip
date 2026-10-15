@@ -124,7 +124,8 @@ function editActions(
         form: {
           name: config.name,
           base_url: config.base_url,
-          api_key: config.api_key,
+          // 出参已无明文 key：留空保存=保持现值（帮助文案在弹窗字段上）
+          api_key: '',
           model: config.model,
         },
       });

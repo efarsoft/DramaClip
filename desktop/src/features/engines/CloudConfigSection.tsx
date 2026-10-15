@@ -42,6 +42,7 @@ export function CloudConfigSection({
           initial={initial}
           saving={actions.saving}
           saveError={actions.saveError}
+          editingId={actions.editing?.id}
           onSave={actions.save}
           onClose={actions.close}
         />

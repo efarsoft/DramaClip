@@ -227,6 +227,11 @@ def test_cloud_selftest_delegates_to_engine_configs(
     assert result["key"] == "cloud:llm"
     assert seen["base_url"] == "https://api.example.com"
     assert seen["model"] == "model-x"
+    # 域必须透传：漏了 domain 会一律掉进 LLM ping 分支，asr/tts/image 云端自检全变成打 LLM
+    assert seen["domain"] == "llm"
+    # 密钥改走服务端内部取值：委托参数只带 id，不带明文
+    assert seen["id"] == str(config["id"])
+    assert seen["api_key"] == ""
 
 
 def test_cloud_selftest_without_enabled_config_says_so(
