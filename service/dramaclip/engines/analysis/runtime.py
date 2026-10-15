@@ -49,6 +49,7 @@ def _build_transcriber(settings: config.Settings, models_dir: Path) -> AsrEngine
         return DashscopeParaformerEngine(
             api_key=settings.get("asr.api_key", ""),
             model=settings.get("asr.model", "paraformer-v2") or "paraformer-v2",
+            diarization=config.get_bool(settings, "asr.diarization"),
         )
     if engine == "paraformer":
         diarize = config.get_bool(settings, "asr.diarization")

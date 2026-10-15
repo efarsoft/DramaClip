@@ -504,17 +504,23 @@ class DashscopeParaformerEngine:
     与本地 paraformer 的同源模型，云端推理——弱机/无 GPU 用户的 ASR 跃升路径
     （P1 云端化）。文件转写是异步任务：提交 → 轮询 → 拉转写 JSON。
     句级时间戳 + 字级 words 全有，AsrSegment 同构，OCR 融合照常工作。
-    说话人分离云端不返回（speaker=None）；诊断与融合不依赖它也能工作。
+    说话人分离跟随 asr.diarization（云端 diarization_enabled，句级 speaker_id
+    → 角色A/B…，与本地聚类标签同格式）。本地音频先经 SDK 临时上传桥
+    （oss_utils.check_and_upload_local）换公网 URL 再提交——file_urls 只收
+    HTTP(S) 地址，本地路径直传服务端不认。
     """
 
     _POLL_INTERVAL_S = 3.0
     _POLL_TIMEOUT_S = 600.0
 
-    def __init__(self, api_key: str, model: str = "paraformer-v2") -> None:
+    def __init__(
+        self, api_key: str, model: str = "paraformer-v2", diarization: bool = True
+    ) -> None:
         # Key 缺失不在构造期拦：所有已接线引擎必须能空载构造（wired 不变量），
         # 真正的调用在 transcribe 期按分档报错。
         self._api_key = api_key.strip()
         self._model = model
+        self._diarization = diarization
 
     @property
     def name(self) -> str:
@@ -525,18 +531,28 @@ class DashscopeParaformerEngine:
     ) -> list[AsrSegment]:
         import dashscope
         from dashscope.audio.asr import Transcription
+        from dashscope.utils.oss_utils import check_and_upload_local
 
         if self._api_key == "":
             raise ValueError(
                 "百炼 Paraformer（云端）需要 API Key：请在引擎中心填写 asr.api_key"
             )
         dashscope.api_key = self._api_key
-        hints = ["zh"] if language.startswith("zh") else [language]
-        # 内联热词云端不支持（需预建 vocabulary_id，P1 后续接）；参数如实不透传
+        # 本地文件 → 百炼临时 OSS URL（已是 http/oss 地址则原样透传）
+        _, file_url, _ = check_and_upload_local(
+            model=self._model, content=str(wav_path), api_key=self._api_key
+        )
+        # language_hints 仅 paraformer 系接受（fun-asr / qwen 系传了报参数错误）
+        submit_kwargs: dict[str, Any] = {"diarization_enabled": self._diarization}
+        if self._model.startswith("paraformer"):
+            submit_kwargs["language_hints"] = (
+                ["zh"] if language.startswith("zh") else [language]
+            )
+        # 内联热词云端不支持（需预建 vocabulary_id，后续接）；参数如实不透传
         submit = Transcription.call(
             model=self._model,
-            file_urls=[str(wav_path)],
-            language_hints=hints,
+            file_urls=[file_url],
+            **submit_kwargs,
         )
         if submit.status_code != 200:
             raise RuntimeError(f"转写任务提交失败: {submit.message}")
@@ -560,6 +576,7 @@ class DashscopeParaformerEngine:
         import urllib.request
 
         segments: list[AsrSegment] = []
+        labels: dict[int, str] = {}  # 云端 speaker_id → 角色X，按出场顺序（与本地同格式）
         for item in results:
             url = item.get("transcription_url")
             if not url:
@@ -568,6 +585,8 @@ class DashscopeParaformerEngine:
                 payload = json.loads(resp.read().decode("utf-8"))
             for transcript in payload.get("transcripts", []):
                 for sentence in transcript.get("sentences", []):
+                    start = int(sentence.get("begin_time", 0)) / 1000.0
+                    end = int(sentence.get("end_time", 0)) / 1000.0
                     words = [
                         WordSpan(
                             start=int(w.get("begin_time", 0)) / 1000.0,
@@ -576,11 +595,23 @@ class DashscopeParaformerEngine:
                         )
                         for w in sentence.get("words", [])
                     ]
+                    text = str(sentence.get("text", "")).strip()
+                    if not words and text:
+                        # 无字级时间戳的模型（fun-asr / qwen 系）：整句一个词，时间不丢
+                        words = [WordSpan(start=start, end=end, word=text)]
+                    raw_speaker = sentence.get("speaker_id")
+                    speaker: str | None = None
+                    if raw_speaker is not None:
+                        key = int(raw_speaker)
+                        if key not in labels:
+                            labels[key] = _speaker_label(len(labels))
+                        speaker = labels[key]
                     segments.append(
                         AsrSegment(
-                            start=int(sentence.get("begin_time", 0)) / 1000.0,
-                            end=int(sentence.get("end_time", 0)) / 1000.0,
-                            text=str(sentence.get("text", "")).strip(),
+                            start=start,
+                            end=end,
+                            text=text,
+                            speaker=speaker,
                             words=words,
                         )
                     )

@@ -293,7 +293,8 @@ def builtin_specs() -> list[ModelSpec]:
             ms_repo="",
             placement="asr/dashscope-paraformer",
             name="百炼 Paraformer（云端）",
-            notes="需 API Key（asr.api_key）；按音频时长计费；说话人分离暂不返回；需联网",
+            notes="需 API Key（asr.api_key）；按音频时长计费；说话人分离跟随 asr.diarization；"
+            "本地音频自动临时上传；模型可换 fun-asr / qwen 系（同引擎）；需联网",
             size_label="—（云端）",
             tier="accurate",
             speed=5,

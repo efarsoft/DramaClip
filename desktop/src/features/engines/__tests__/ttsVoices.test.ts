@@ -37,4 +37,18 @@ describe('配音引擎下拉与音色表', () => {
     expect(isModelFreeEngine('edge')).toBe(true);
     expect(isModelFreeEngine('kokoro')).toBe(false);
   });
+
+  it('cosyvoice 云端音色表对齐官方列表：性别分组修正、下架音色移除', () => {
+    const options = voiceOptions('cosyvoice_cloud');
+    expect(options.length).toBeGreaterThan(0);
+    const labelOf = new Map(options.map((o) => [o.value as string, o.label as string]));
+    // 官方音色列表核对（help.aliyun.com/zh/model-studio/cosyvoice-voice-list）：
+    // longhua_v2 / longqiang_v2 是女声、longshu_v2 是男声——错组会把业主引向错误音色
+    expect(labelOf.get('longhua_v2')).toContain('女声');
+    expect(labelOf.get('longqiang_v2')).toContain('女声');
+    expect(labelOf.get('longshu_v2')).toContain('男声');
+    expect(labelOf.get('longlaotie_v2')).toContain('男声');
+    // longxiang_v2 已不在官方列表——留在表里就是一条合不成的路
+    expect(labelOf.has('longxiang_v2')).toBe(false);
+  });
 });

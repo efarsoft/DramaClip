@@ -82,10 +82,24 @@ const EDGE_VOICES: { label: string; value: string }[] = [
   { label: '曉雨 · 女声（台湾）', value: 'zh-TW-HsiaoYuNeural' },
 ];
 
-// CosyVoice-v2 云端音色（百炼预置音色 id，克隆音色在控制台/接口创建后填 id 同样可用）
+// CosyVoice-v2 云端音色（逐条核对官方音色列表 help.aliyun.com/zh/model-studio/cosyvoice-voice-list；
+// 克隆音色在控制台/接口创建后填 id 同样可用）
 const COSYVOICE_CLOUD = [
-  ...female(['longxiaochun_v2', 'longwan_v2', 'longshu_v2', 'longjing_v2', 'longmiao_v2']),
-  ...male(['longcheng_v2', 'longhua_v2', 'longxiang_v2', 'longfei_v2', 'longqiang_v2']),
+  { label: 'longwan_v2 · 女声（知性上进）', value: 'longwan_v2' },
+  { label: 'longhua_v2 · 女声（活力甜美）', value: 'longhua_v2' },
+  { label: 'longxiaochun_v2 · 女声（知性积极）', value: 'longxiaochun_v2' },
+  { label: 'longxiaoxia_v2 · 女声（沉稳权威）', value: 'longxiaoxia_v2' },
+  { label: 'longxiaobai_v2 · 女声（沉稳播报）', value: 'longxiaobai_v2' },
+  { label: 'longyue_v2 · 女声（温暖磁性·有声书）', value: 'longyue_v2' },
+  { label: 'longjing_v2 · 女声（新闻播报）', value: 'longjing_v2' },
+  { label: 'longmiao_v2 · 女声（抑扬顿挫·解说感）', value: 'longmiao_v2' },
+  { label: 'loongstella_v2 · 女声（干练利落）', value: 'loongstella_v2' },
+  { label: 'longqiang_v2 · 女声（浪漫甜魅）', value: 'longqiang_v2' },
+  { label: 'longcheng_v2 · 男声（睿智青年）', value: 'longcheng_v2' },
+  { label: 'longshu_v2 · 男声（沉稳青年）', value: 'longshu_v2' },
+  { label: 'longxiaocheng_v2 · 男声（磁性低音）', value: 'longxiaocheng_v2' },
+  { label: 'longfei_v2 · 男声（激情磁性）', value: 'longfei_v2' },
+  { label: 'longlaotie_v2 · 男声（东北直率·方言）', value: 'longlaotie_v2' },
 ];
 
 export const TTS_VOICE_OPTIONS: Record<TtsEngineName, DefaultOptionType[]> = {
