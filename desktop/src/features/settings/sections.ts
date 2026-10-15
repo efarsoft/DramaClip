@@ -137,8 +137,17 @@ const EXPORT_SECTION: SectionSpec = {
         { label: '纯 CPU（libx264）', value: 'libx264' },
       ],
     },
-    { key: 'export.width', label: '输出宽度 (px)', type: 'number', min: 480, max: 2160 },
-    { key: 'export.height', label: '输出高度 (px)', type: 'number', min: 480, max: 2160 },
+    // 画布跟随源画幅（ADR-010）：这两个键只是**上限**，不是成片尺寸——横屏源出 16:9、
+    // 竖屏源出 9:16，不足处补黑。label 若写成「输出宽度」就是在承诺一个已经不存在的固定尺寸。
+    {
+      key: 'export.width',
+      label: '画布宽上限 (px)',
+      type: 'number',
+      min: 480,
+      max: 2160,
+      help: '成片画幅跟随源视频（横屏源出 16:9、竖屏源出 9:16），这里只定大小上限',
+    },
+    { key: 'export.height', label: '画布高上限 (px)', type: 'number', min: 480, max: 2160 },
   ],
 };
 

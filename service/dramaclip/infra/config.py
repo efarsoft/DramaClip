@@ -10,7 +10,10 @@ from dramaclip.infra.storage.repos import settings as settings_repo
 # 单一真相源（docs/04 §5.2）：以下数值只在此处定义一次，别处一律 import 不再各写一份。
 # 放在 infra 而非渲染层，是因为依赖方向恒为 engines → infra——
 # 反过来让 encoder 当设置的源会成环，所以设置的默认值与渲染几何同源读这里。
-EXPORT_WIDTH = 1080  # 竖屏画幅（无 UI 覆盖，仅 settings 键可改；见 docs/service/04 §3）
+# 画布**上限**而非成片尺寸：成片画幅跟随首集源等比确定（encoder.resolve_canvas，
+# 长边贴这里的长边），横屏源出 16:9、竖屏源出 9:16，不足处补黑 —— ADR-010。
+# settings 键 export.width/height 可改，设置页「出片」分区有输入框。
+EXPORT_WIDTH = 1080
 EXPORT_HEIGHT = 1920
 PRESCREEN_THRESHOLD = 70  # 预筛推荐线：评分量纲 0-100（prescreen 四项权重和为 100）
 

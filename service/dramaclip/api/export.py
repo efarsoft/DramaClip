@@ -415,7 +415,8 @@ def tts_audio_by_segment(plan: PlanData) -> dict[int, str]:
 
 
 def _output_size(settings: config.Settings) -> tuple[int, int]:
-    """输出分辨率：读设置键 export.width/height（默认值源在 infra.config），偶数化并钳制最小 480。
+    """画布上限（不是成片尺寸——`resolve_canvas` 会按首集源画幅等比定，ADR-010）：
+    读设置键 export.width/height（默认值源在 infra.config），偶数化并钳制最小 480。
     """
     width = max(config.get_int(settings, "export.width"), 480)
     height = max(config.get_int(settings, "export.height"), 480)
