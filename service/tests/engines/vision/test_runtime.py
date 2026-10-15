@@ -1,6 +1,10 @@
-"""vision.runtime：采样参数纯函数 + 解析容差 + 会话开闭的分档判据。"""
+"""vision.runtime：采样参数纯函数 + 解析容差 + 会话开闭的分档判据 + 本地会话拉进程。"""
 
 from __future__ import annotations
+
+import json
+import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -80,3 +84,95 @@ def test_open_session_gates(tmp_path) -> None:
     exe.write_bytes(b"MZ")
     session = runtime.open_session(tmp_path, models, {"vision.model": "qwen3-vl-4b"})
     assert session is not None and session.model_id == "qwen3-vl-4b"
+
+
+class _FakeResp:
+    """urlopen 返回体：/health 只看 status，chat 走 json.load(→read)。"""
+
+    def __init__(self, body: str = "{}") -> None:
+        self.status = 200
+        self._body = body
+
+    def __enter__(self) -> _FakeResp:
+        return self
+
+    def __exit__(self, *_args: object) -> bool:
+        return False
+
+    def read(self) -> str:
+        return self._body
+
+
+def _fake_chat_body(total: int) -> str:
+    row = {
+        "shot": "特写", "scene": "室内", "people": "甲", "action": "看", "mood": "静",
+    }
+    lines = [json.dumps({"index": i, **row}, ensure_ascii=False) for i in range(1, total + 1)]
+    return json.dumps({"choices": [{"message": {"content": "\n".join(lines)}}]}, ensure_ascii=False)
+
+
+@pytest.fixture()
+def local_session(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    """一只"能跑起来"的本地会话：Popen/端口/urlopen/ffmpeg 采样全部替身，只留流程本身。"""
+    spawned: list[list[str]] = []
+    asked: list[str] = []
+
+    class _FakeProc:
+        returncode = None
+
+        def poll(self) -> None:
+            return None
+
+        def terminate(self) -> None:
+            return None
+
+    def fake_popen(cmd: list[str], **_kwargs: object) -> _FakeProc:
+        spawned.append(list(cmd))
+        return _FakeProc()
+
+    def fake_urlopen(request: object, *_args: object, **_kwargs: object) -> _FakeResp:
+        url = str(request.full_url) if hasattr(request, "full_url") else str(request)
+        asked.append(url)
+        return _FakeResp() if url.endswith("/health") else _FakeResp(_fake_chat_body(2))
+
+    def fake_run(args: list[str], **_kwargs: object) -> None:
+        pattern = str(args[-1])  # 已是 work_dir 下的绝对 frame-%02d.png
+        for index in (1, 2):
+            Path(pattern % index).write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    monkeypatch.setattr(runtime.subprocess, "Popen", fake_popen)  # type: ignore[attr-defined]
+    monkeypatch.setattr(runtime, "_free_port", lambda: 45123)
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(runtime.runner, "run", fake_run)
+    session = runtime.VisionSession(
+        model_id="qwen3-vl-4b",
+        exe=tmp_path / "llama-server.exe",
+        model=tmp_path / "model.gguf",
+        mmproj=tmp_path / "mmproj.gguf",
+    )
+    return session, spawned, asked
+
+
+def test_describe_episode_boots_llama_server_before_asking(
+    local_session: tuple[runtime.VisionSession, list[list[str]], list[str]], tmp_path
+) -> None:
+    """回归钉（4fcfde8）：抽公共 _describe_with 时丢了 self._ensure()——_port 只在
+    _ensure 里赋值，漏掉就是 AttributeError，本地视觉轨整条哑掉（云端仍正常，
+    所以当时没有任何测试报警）。"""
+    session, spawned, asked = local_session
+    frames = session.describe_episode(tmp_path / "ep01.mp4", 68.0, tmp_path / "work", count=2)
+
+    assert spawned[0][0].endswith("llama-server.exe")
+    assert spawned[0][spawned[0].index("--port") + 1] == "45123"
+    assert "http://127.0.0.1:45123/v1/chat/completions" in asked
+    assert [f["shot"] for f in frames] == ["特写", "特写"]
+
+
+def test_describe_episode_reuses_the_live_server(
+    local_session: tuple[runtime.VisionSession, list[list[str]], list[str]], tmp_path
+) -> None:
+    """跨集复用是同一只进程：第二次描述不该再拉一次 llama-server。"""
+    session, spawned, _asked = local_session
+    for _ in range(2):
+        session.describe_episode(tmp_path / "ep.mp4", 60.0, tmp_path / "work", count=2)
+    assert len(spawned) == 1

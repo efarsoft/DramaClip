@@ -298,6 +298,9 @@ class VisionSession:
         on_progress: Callable[[float, str], None] | None = None,
     ) -> list[dict[str, Any]]:
         """采样 → 分组多图请求 → 解析；任一环失败上抛（调用方按分档落空）。"""
+        # 起进程这一步不能省：_port 只在 _ensure 里赋值，漏掉就是
+        # AttributeError（4fcfde8 抽公共流程时丢了这行，本地视觉轨整条哑掉）
+        self._ensure()
         return _describe_with(
             video, episode_s, work_dir,
             count=count, on_progress=on_progress, ask_group=self._ask_group,
