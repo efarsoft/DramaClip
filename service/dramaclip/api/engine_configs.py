@@ -26,19 +26,18 @@ _ERR_NOT_FOUND = -32311
 _DOMAINS = ("llm", "tts_cloud", "asr_cloud", "image", "video")
 
 # 启用即镜像：域 → 设置键写法（消费方读的还是原设置键，零改动）。
-# 引擎名按配置端点判服务商：火山语音域走自研 HTTP 适配器，其余回落百炼。
 _MIRROR: dict[str, Callable[[dict[str, Any]], dict[str, str]]] = {
     "asr_cloud": lambda cfg: {
-        "asr.engine": _cloud_engine("asr_cloud", str(cfg["base_url"])),
+        "asr.engine": "dashscope_paraformer",
         "asr.api_key": str(cfg["api_key"]),
         "asr.model": str(cfg["model"]),
     },
     "tts_cloud": lambda cfg: {
-        "tts.engine": _cloud_engine("tts_cloud", str(cfg["base_url"])),
+        "tts.engine": "cosyvoice_cloud",
         "tts.api_key": str(cfg["api_key"]),
         "tts.model": str(cfg["model"]),
     },
-    # 视觉云端：OpenAI 兼容端点（qwen-vl / 豆包 vision 等）；vision.cloud=1 时 runtime 走云端会话
+    # 视觉云端：OpenAI 兼容端点（qwen-vl 等）；vision.cloud=1 时 runtime 走云端会话
     "image": lambda cfg: {
         "vision.cloud": "1",
         "vision.cloud_base_url": str(cfg["base_url"]),
@@ -46,18 +45,6 @@ _MIRROR: dict[str, Callable[[dict[str, Any]], dict[str, str]]] = {
         "vision.cloud_model": str(cfg["model"]),
     },
 }
-
-
-def _volc_provider(base_url: str) -> bool:
-    """配置端点是否火山系（openspeech.bytedance.com / ark.*.volces.com）。"""
-    host = base_url.lower()
-    return "bytedance" in host or "volces" in host
-
-
-def _cloud_engine(domain: str, base_url: str) -> str:
-    if _volc_provider(base_url):
-        return "volc_file_asr" if domain == "asr_cloud" else "volc_tts"
-    return "dashscope_paraformer" if domain == "asr_cloud" else "cosyvoice_cloud"
 
 
 def register(router: Router, context: AppContext) -> None:
@@ -149,9 +136,9 @@ def test(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     if domain in ("", "llm"):
         return _test_llm(base_url, api_key, model)
     if domain == "asr_cloud":
-        return _test_asr(base_url, api_key, model)
+        return _test_asr(api_key, model)
     if domain == "tts_cloud":
-        return _test_tts(base_url, api_key, model)
+        return _test_tts(api_key, model)
     if domain in ("image", "video"):
         return _test_vision(base_url, api_key, model)
     raise RpcDomainError(_ERR_BAD, f"不支持的能力域: {domain}")
@@ -171,14 +158,11 @@ def _test_llm(base_url: str, api_key: str, model: str) -> dict[str, Any]:
     return {"ok": True, "latency_s": round(latency, 2), "error": None}
 
 
-def _test_asr(base_url: str, api_key: str, model: str) -> dict[str, Any]:
-    """ASR 连通：0.5s 静音 wav 走一次真实转写（火山静音返回 20000003 空段，同样算通）。"""
+def _test_asr(api_key: str, model: str) -> dict[str, Any]:
+    """ASR 连通：0.5s 静音 wav 走一次真实文件转写（异步任务提交→轮询，端到端可信）。"""
     import time
 
-    from dramaclip.engines.analysis.transcriber import (
-        DashscopeParaformerEngine,
-        VolcFileAsrEngine,
-    )
+    from dramaclip.engines.analysis.transcriber import DashscopeParaformerEngine
 
     if api_key.strip() == "" or model.strip() == "":
         return {"ok": False, "latency_s": None, "error": "API Key 与模型不能为空"}
@@ -187,35 +171,26 @@ def _test_asr(base_url: str, api_key: str, model: str) -> dict[str, Any]:
         wav = Path(tmp) / "ping.wav"
         _write_silent_wav(wav, seconds=0.5)
         try:
-            engine: DashscopeParaformerEngine | VolcFileAsrEngine
-            if _volc_provider(base_url):
-                engine = VolcFileAsrEngine(api_key=api_key, model=model)
-            else:
-                engine = DashscopeParaformerEngine(api_key=api_key, model=model)
-            engine.transcribe(wav)
+            DashscopeParaformerEngine(api_key=api_key, model=model).transcribe(wav)
         except Exception as exc:  # noqa: BLE001 - 连通失败是一条诚实结果
             return {"ok": False, "latency_s": None, "error": str(exc)[:300]}
     return {"ok": True, "latency_s": round(time.monotonic() - started, 2), "error": None}
 
 
-def _test_tts(base_url: str, api_key: str, model: str) -> dict[str, Any]:
-    """TTS 连通：合成单字「好」落临时文件（按端点分派百炼/火山引擎）。"""
+def _test_tts(api_key: str, model: str) -> dict[str, Any]:
+    """TTS 连通：合成单字「好」落临时文件。"""
     import time
 
     from dramaclip.engines.tts.engines.dashscope import DashscopeCosyVoiceEngine
-    from dramaclip.engines.tts.engines.volc import VolcTtsEngine
 
     if api_key.strip() == "" or model.strip() == "":
         return {"ok": False, "latency_s": None, "error": "API Key 与模型不能为空"}
     started = time.monotonic()
     with tempfile.TemporaryDirectory() as tmp:
         try:
-            engine: DashscopeCosyVoiceEngine | VolcTtsEngine
-            if _volc_provider(base_url):
-                engine = VolcTtsEngine(api_key=api_key, model=model)
-            else:
-                engine = DashscopeCosyVoiceEngine(api_key=api_key, model=model)
-            engine.synthesize("好", "", Path(tmp) / "ping.wav")
+            DashscopeCosyVoiceEngine(api_key=api_key, model=model).synthesize(
+                "好", "", Path(tmp) / "ping.wav"
+            )
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "latency_s": None, "error": str(exc)[:300]}
     return {"ok": True, "latency_s": round(time.monotonic() - started, 2), "error": None}

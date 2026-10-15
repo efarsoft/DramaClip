@@ -12,12 +12,11 @@ export interface FormState {
   readonly model: string;
 }
 
-/** 服务商预设：选中自动填 API 地址与默认模型（自定义=手填）；hint 提示凭证格式。 */
+/** 服务商预设：选中自动填 API 地址与默认模型（自定义=手填）。 */
 export interface CloudPreset {
   readonly label: string;
   readonly base_url: string;
   readonly model: string;
-  readonly hint?: string;
 }
 
 const FIELDS = [
@@ -86,7 +85,6 @@ export function ConfigModal({
   onClose: () => void;
 }): ReactElement {
   const [draft, setDraft] = useState<FormState>(initial);
-  const [presetHint, setPresetHint] = useState('');
   const { testing, testError, test } = useConnectionTest(draft, domain);
   const field = (key: keyof FormState) => ({
     value: draft[key],
@@ -132,7 +130,6 @@ export function ConfigModal({
                   base_url: preset.base_url,
                   model: preset.model,
                 });
-                setPresetHint(preset.hint ?? '');
               }}
             />
           </label>
@@ -146,18 +143,6 @@ export function ConfigModal({
             {...field(spec.key)}
           />
         ))}
-        {presetHint !== '' && (
-          <div
-            style={{
-              fontSize: tokens.text.meta.size,
-              lineHeight: tokens.text.meta.leading,
-              color: tokens.textTertiary,
-              marginTop: `-${tokens.spaceSm}`,
-            }}
-          >
-            {presetHint}
-          </div>
-        )}
       </div>
     </Modal>
   );

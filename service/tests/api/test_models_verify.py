@@ -71,9 +71,7 @@ def test_verify_without_id_covers_installed_only(tmp_path: Path) -> None:
     assert [r["model_id"] for r in reports] == [
         _SENSEVOICE,
         "dashscope-paraformer",
-        "volc-file-asr",
         "cosyvoice-cloud",
-        "volc-tts",
     ]
 
 

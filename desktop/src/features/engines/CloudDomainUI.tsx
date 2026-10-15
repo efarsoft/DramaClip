@@ -12,31 +12,18 @@ import { tokens } from '../../styles/theme';
 import { ConfigModal, type CloudPreset, type FormState } from './CloudConfigModal';
 import type { EngineConfigActions } from './useEngineConfigs';
 
-/** 按域的服务商预设：选中即填接口地址与默认模型；hint 提示该域的凭证格式；自定义=手填。 */
+/** 按域的服务商预设：选中即填接口地址与默认模型；自定义=手填。 */
 export const CLOUD_PRESETS: Record<string, readonly CloudPreset[]> = {
   asr_cloud: [
     { label: '阿里百炼（DashScope）', base_url: 'https://dashscope.aliyuncs.com', model: 'paraformer-v2' },
-    {
-      label: '火山引擎（豆包语音）',
-      base_url: 'https://openspeech.bytedance.com',
-      model: 'volc.bigasr.auc_turbo',
-      hint: '凭证：旧版控制台填 AppID:Access Token（冒号分隔），新版控制台填 API Key',
-    },
     { label: '自定义', base_url: '', model: '' },
   ],
   tts_cloud: [
     { label: '阿里百炼（DashScope）', base_url: 'https://dashscope.aliyuncs.com', model: 'cosyvoice-v2' },
-    {
-      label: '火山引擎（豆包语音）',
-      base_url: 'https://openspeech.bytedance.com',
-      model: 'volcano_tts',
-      hint: '凭证：AppID:Access Token（语音控制台两段凭证，冒号分隔）',
-    },
     { label: '自定义', base_url: '', model: '' },
   ],
   image: [
     { label: '阿里百炼（DashScope）', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-vl-max' },
-    { label: '火山方舟（豆包视觉）', base_url: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seed-1-6-vision-250815' },
     { label: '自定义', base_url: '', model: '' },
   ],
 };
@@ -58,12 +45,6 @@ interface TestState {
 /** 生效下拉的云端分支判定：该域启用中的配置（存在即云端生效）。 */
 export function activeCloudConfig(configs: readonly EngineConfig[]): EngineConfig | undefined {
   return configs.find((config) => config.enabled === 1);
-}
-
-/** TTS 云端配置对应的引擎名（与镜像 `_cloud_engine` 同一判据）：火山端点走火山适配器。 */
-export function cloudTtsEngineOf(config: EngineConfig): 'volc_tts' | 'cosyvoice_cloud' {
-  const host = config.base_url.toLowerCase();
-  return host.includes('bytedance') || host.includes('volces') ? 'volc_tts' : 'cosyvoice_cloud';
 }
 
 /** 生效卡「测连接」按钮（云端生效时替换「校验资产」位）。 */

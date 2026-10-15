@@ -9,8 +9,6 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from types import SimpleNamespace
 from typing import Any
 
-import pytest
-
 from dramaclip.api import engine_configs as engine_configs_api
 from dramaclip.infra.storage.repos import settings as settings_repo
 from dramaclip.transport.rpc import Router, RpcRequest
@@ -249,66 +247,3 @@ def test_vision_test_missing_fields_is_honest_false(memory_db: sqlite3.Connectio
     result = harness.rpc("engine_configs.test", {"domain": "image"})
     assert result["ok"] is False
     assert "不能为空" in str(result["error"])
-
-
-def test_enable_volc_asr_cloud_mirrors_volc_engine(memory_db: sqlite3.Connection) -> None:
-    """火山端点的 ASR 配置镜像成 volc_file_asr 引擎（判据是端点域名）。"""
-    settings: dict[str, str] = {}
-    harness = Harness(memory_db, settings)
-    config = _create(
-        harness,
-        domain="asr_cloud",
-        base_url="https://openspeech.bytedance.com",
-        model="volc.bigasr.auc_turbo",
-    )
-    harness.rpc("engine_configs.enable", {"id": config["id"]})
-    mirrored = settings_repo.get_all(memory_db)
-    assert mirrored["asr.engine"] == "volc_file_asr"
-    assert mirrored["asr.api_key"] == "sk-test-1234"
-    assert mirrored["asr.model"] == "volc.bigasr.auc_turbo"
-
-
-def test_enable_volc_tts_cloud_mirrors_volc_engine(memory_db: sqlite3.Connection) -> None:
-    settings: dict[str, str] = {}
-    harness = Harness(memory_db, settings)
-    config = _create(
-        harness,
-        domain="tts_cloud",
-        base_url="https://openspeech.bytedance.com",
-        model="volcano_tts",
-    )
-    harness.rpc("engine_configs.enable", {"id": config["id"]})
-    mirrored = settings_repo.get_all(memory_db)
-    assert mirrored["tts.engine"] == "volc_tts"
-    assert mirrored["tts.model"] == "volcano_tts"
-
-
-def test_asr_test_dispatches_volc_engine(
-    memory_db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """「测连接」按端点分派火山引擎（桩掉真实 HTTP，只验证选型与调用链）。"""
-    seen: dict[str, Any] = {}
-
-    class _FakeVolc:
-        def __init__(self, api_key: str, model: str = "") -> None:
-            seen["model"] = model
-
-        def transcribe(self, wav: object) -> list:
-            seen["called"] = True
-            return []
-
-    monkeypatch.setattr(
-        "dramaclip.engines.analysis.transcriber.VolcFileAsrEngine", _FakeVolc
-    )
-    harness = Harness(memory_db, {})
-    result = harness.rpc(
-        "engine_configs.test",
-        {
-            "domain": "asr_cloud",
-            "base_url": "https://openspeech.bytedance.com",
-            "api_key": "k",
-            "model": "volc.bigasr.auc_turbo",
-        },
-    )
-    assert result["ok"] is True, result["error"]
-    assert seen == {"model": "volc.bigasr.auc_turbo", "called": True}

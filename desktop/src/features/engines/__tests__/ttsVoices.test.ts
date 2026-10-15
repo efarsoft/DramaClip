@@ -14,14 +14,8 @@ import {
 } from '../ttsVoices';
 
 describe('配音引擎下拉与音色表', () => {
-  it('下拉里只有工厂真能创建的引擎：kokoro + indextts2 本地，edge/百炼/火山云端', () => {
-    expect([...TTS_ENGINES]).toEqual([
-      'kokoro',
-      'edge',
-      'indextts2',
-      'cosyvoice_cloud',
-      'volc_tts',
-    ]);
+  it('下拉里只有工厂真能创建的引擎：kokoro + indextts2 本地，edge 云端', () => {
+    expect([...TTS_ENGINES]).toEqual(['kokoro', 'edge', 'indextts2', 'cosyvoice_cloud']);
   });
 
   it('indextts2 音色=参考音频不走下拉，标签如实', () => {
@@ -41,13 +35,6 @@ describe('配音引擎下拉与音色表', () => {
 
   it('只有云端引擎免装模型：本地引擎一律有「缺模型」这一态', () => {
     expect(isModelFreeEngine('edge')).toBe(true);
-    expect(isModelFreeEngine('cosyvoice_cloud')).toBe(true);
-    expect(isModelFreeEngine('volc_tts')).toBe(true);
     expect(isModelFreeEngine('kokoro')).toBe(false);
-  });
-
-  it('火山音色表只收 V1 接口可用的大模型音色，且与展示名成对', () => {
-    expect(voiceOptions('volc_tts').length).toBeGreaterThan(0);
-    expect(ttsEngineLabel('volc_tts')).toBe('火山引擎（豆包语音）');
   });
 });
