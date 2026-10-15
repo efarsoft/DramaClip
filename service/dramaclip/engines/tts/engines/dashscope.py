@@ -1,8 +1,10 @@
-"""百炼 CosyVoice-v2（云端 TTS）：无本地模型，按量计费，克隆音色用云端 voice id。
+"""百炼语音合成（云端 TTS）：无本地模型，按量计费，克隆音色用云端 voice id。
 
 P1 云端化的 TTS 跃升路径：弱机不装 IndexTTS2 运行环境，一个 API Key 直出。
-音色约定：`voice` 传云端音色 id（如 longxiaochun_v2）或已克隆的 voice id；
-空值回落引擎默认音色。参考音频的云端克隆走百炼控制台/接口，本引擎只消费 id。
+CosyVoice v2/v3 系与 Qwen-Audio-TTS 三族同走 audio/tts/SpeechSynthesizer HTTP
+端点（请求形状一致，均实测 22050Hz），非流式返回音频文件 URL（24 小时有效）
+再下载落盘——不依赖 SDK 的代际适配进度。三族音色体系互不相通（v2 音色 v3
+不收），默认音色按模型代际回落。`voice` 传云端音色 id 或已克隆的 voice id。
 """
 
 from __future__ import annotations
@@ -11,11 +13,20 @@ from pathlib import Path
 
 from dramaclip.engines.tts.base import EngineCaps
 
-_DEFAULT_VOICE = "longxiaochun_v2"
+_TTS_URL = "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"
+
+
+def _default_voice(model: str) -> str:
+    """模型代际 → 默认音色（三族音色体系互不相通，各自取官方标杆音色）。"""
+    if model.startswith("qwen-audio"):
+        return "longanhuan_v3.6"
+    if "v3" in model:
+        return "longanyang"
+    return "longxiaochun_v2"
 
 
 class DashscopeCosyVoiceEngine:
-    """CosyVoice-v2（DashScope 同步合成）：`call` 一次返回完整音频字节。"""
+    """百炼云端合成（CosyVoice v2/v3 系与 Qwen-Audio-TTS 同引擎）：HTTP 直连。"""
 
     def __init__(self, api_key: str, model: str = "cosyvoice-v2") -> None:
         key = api_key.strip()
@@ -42,21 +53,42 @@ class DashscopeCosyVoiceEngine:
         )
 
     def is_available(self) -> tuple[bool, str]:
-        import importlib.util
-
-        if importlib.util.find_spec("dashscope") is None:
-            return False, "未装运行环境：缺 dashscope 依赖（pip install dashscope）"
+        # HTTP 直连只需标准库，Key 在构造期已校验非空
         return True, "云端可达（百炼，按量计费）"
 
     def synthesize(self, text: str, voice: str, out_path: Path) -> Path:
-        from dashscope.audio.tts_v2 import AudioFormat, SpeechSynthesizer
+        import json
+        import urllib.error
+        import urllib.request
 
-        synthesizer = SpeechSynthesizer(
-            model=self._model,
-            voice=voice.strip() or _DEFAULT_VOICE,
-            format=AudioFormat.WAV_22050HZ_MONO_16BIT,
+        payload = {
+            "model": self._model,
+            "input": {
+                "text": text,
+                "voice": voice.strip() or _default_voice(self._model),
+                "format": "wav",
+                "sample_rate": 22050,
+            },
+        }
+        req = urllib.request.Request(
+            _TTS_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            },
         )
-        audio = synthesizer.call(text)
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")[:300]
+            raise RuntimeError(f"CosyVoice 云端合成失败: {detail}") from exc
+        audio_url = ((body.get("output") or {}).get("audio") or {}).get("url")
+        if not audio_url:
+            raise RuntimeError(f"CosyVoice 云端合成未返回音频地址: {str(body)[:200]}")
+        with urllib.request.urlopen(audio_url, timeout=120) as audio_resp:
+            audio = audio_resp.read()
         if not audio:
             raise RuntimeError("CosyVoice 云端合成返回空音频")
         out_path.parent.mkdir(parents=True, exist_ok=True)

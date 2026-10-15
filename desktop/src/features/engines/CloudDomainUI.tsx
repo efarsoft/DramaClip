@@ -20,11 +20,15 @@ export const CLOUD_PRESETS: Record<string, readonly CloudPreset[]> = {
     { label: '自定义', base_url: '', model: '' },
   ],
   tts_cloud: [
-    { label: '阿里百炼（DashScope）', base_url: 'https://dashscope.aliyuncs.com', model: 'cosyvoice-v2' },
+    { label: '阿里百炼 CosyVoice v3 Flash（新代·情感与方言）', base_url: 'https://dashscope.aliyuncs.com', model: 'cosyvoice-v3-flash' },
+    { label: '阿里百炼 CosyVoice v2（稳定）', base_url: 'https://dashscope.aliyuncs.com', model: 'cosyvoice-v2' },
+    { label: '阿里百炼 Qwen-Audio TTS Flash（新代）', base_url: 'https://dashscope.aliyuncs.com', model: 'qwen-audio-3.0-tts-flash' },
     { label: '自定义', base_url: '', model: '' },
   ],
   image: [
-    { label: '阿里百炼 qwen3-vl-plus（默认）', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3-vl-plus' },
+    { label: '阿里百炼 qwen3.8-max（旗舰）', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3.8-max' },
+    { label: '阿里百炼 qwen3.8-flash（轻量）', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3.8-flash' },
+    { label: '阿里百炼 qwen3-vl-plus（旧版）', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3-vl-plus' },
     { label: '自定义', base_url: '', model: '' },
   ],
 };

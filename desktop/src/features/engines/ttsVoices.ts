@@ -31,8 +31,17 @@ export function isModelFreeEngine(engine: string): boolean {
 }
 
 /** 设置值 → 该引擎的音色下拉；未登记的引擎没有音色可给。 */
-export function voiceOptions(engine: string): DefaultOptionType[] {
+export function voiceOptions(engine: string, model = ''): DefaultOptionType[] {
+  if (engine === 'cosyvoice_cloud') return cloudVoiceOptions(model);
   return (TTS_VOICE_OPTIONS as Record<string, DefaultOptionType[]>)[engine] ?? [];
+}
+
+/** 云端模型代际 → 音色表：三族音色体系互不相通（v2 音色 v3 不收，反之亦然）；
+ *  自定义/未知模型按 v2 表回落（克隆音色 id 不在表内，手填同样可用）。 */
+export function cloudVoiceOptions(model: string): DefaultOptionType[] {
+  if (model.startsWith('qwen-audio')) return QWEN_AUDIO_TTS_VOICES;
+  if (model.includes('v3')) return COSYVOICE_V3_VOICES;
+  return COSYVOICE_CLOUD;
 }
 
 /** 引擎 → 音色设置键。切换引擎互不覆盖各自的音色选择。 */
@@ -82,7 +91,7 @@ const EDGE_VOICES: { label: string; value: string }[] = [
   { label: '曉雨 · 女声（台湾）', value: 'zh-TW-HsiaoYuNeural' },
 ];
 
-// CosyVoice-v2 云端音色（逐条核对官方音色列表 help.aliyun.com/zh/model-studio/cosyvoice-voice-list；
+// CosyVoice-v2 云端音色（只适用于 v2 代模型；逐条核对官方音色列表 help.aliyun.com/zh/model-studio/cosyvoice-voice-list；
 // 克隆音色在控制台/接口创建后填 id 同样可用）
 const COSYVOICE_CLOUD = [
   { label: 'longwan_v2 · 女声（知性上进）', value: 'longwan_v2' },
@@ -100,6 +109,38 @@ const COSYVOICE_CLOUD = [
   { label: 'longxiaocheng_v2 · 男声（磁性低音）', value: 'longxiaocheng_v2' },
   { label: 'longfei_v2 · 男声（激情磁性）', value: 'longfei_v2' },
   { label: 'longlaotie_v2 · 男声（东北直率·方言）', value: 'longlaotie_v2' },
+];
+
+// CosyVoice v3 系音色（官方音色列表 v3 代命名；短剧解说向精选——旁白知性/磁性 + 台词情感/沧桑）
+const COSYVOICE_V3_VOICES = [
+  { label: 'longanwen_v3 · 女声（优雅知性）', value: 'longanwen_v3' },
+  { label: 'longxiaochun_v3 · 女声（知性积极）', value: 'longxiaochun_v3' },
+  { label: 'longwan_v3 · 女声（细腻柔声）', value: 'longwan_v3' },
+  { label: 'longanrou_v3 · 女声（温柔闺蜜）', value: 'longanrou_v3' },
+  { label: 'longxing_v3 · 女声（温婉邻家）', value: 'longxing_v3' },
+  { label: 'longyingling_v3 · 女声（温和共情）', value: 'longyingling_v3' },
+  { label: 'longxiu_v3 · 男声（博才说书）', value: 'longxiu_v3' },
+  { label: 'longtian_v3 · 男声（磁性理智）', value: 'longtian_v3' },
+  { label: 'longsanshu_v3 · 男声（沉稳质感）', value: 'longsanshu_v3' },
+  { label: 'longanzhi_v3 · 男声（睿智轻熟）', value: 'longanzhi_v3' },
+  { label: 'longshu_v3 · 男声（沉稳青年）', value: 'longshu_v3' },
+  { label: 'longcheng_v3 · 男声（智慧青年）', value: 'longcheng_v3' },
+  { label: 'longanhuan_v3 · 女声（欢脱元气·台词）', value: 'longanhuan_v3' },
+  { label: 'longhan_v3 · 男声（温暖痴情·台词）', value: 'longhan_v3' },
+  { label: 'longhao_v3 · 男声（多情忧郁·台词）', value: 'longhao_v3' },
+  { label: 'longlaobo_v3 · 男声（沧桑岁月·台词）', value: 'longlaobo_v3' },
+];
+
+// Qwen-Audio-TTS 官方音色（qwen-audio-tts-voice-list，带显式性别；与 CosyVoice 音色互不相通）
+const QWEN_AUDIO_TTS_VOICES = [
+  { label: 'longanhuan_v3.6 · 女声（龙安欢）', value: 'longanhuan_v3.6' },
+  { label: 'longanlingxin · 女声（龙安灵心）', value: 'longanlingxin' },
+  { label: 'longanfengyue · 女声（龙安风悦）', value: 'longanfengyue' },
+  { label: 'longanyuanfei · 女声（龙安元妃）', value: 'longanyuanfei' },
+  { label: 'longchuanshu_v3.6 · 男声（龙川叔）', value: 'longchuanshu_v3.6' },
+  { label: 'longhuohuo_v3.6 · 男声（龙火火）', value: 'longhuohuo_v3.6' },
+  { label: 'longanlufeng · 男声（龙安鲁风）', value: 'longanlufeng' },
+  { label: 'longjielidou_v3.6 · 男声（龙杰力豆）', value: 'longjielidou_v3.6' },
 ];
 
 export const TTS_VOICE_OPTIONS: Record<TtsEngineName, DefaultOptionType[]> = {

@@ -192,7 +192,7 @@ function CloudActiveCard({
         label: '音色',
         value: (
           <span style={{ display: 'inline-flex', alignItems: 'flex-start', gap: tokens.spaceSm }}>
-            <VoiceSelect engine={engine} settings={settings} onSave={onSave} />
+            <VoiceSelect engine={engine} settings={settings} onSave={onSave} model={config.model} />
             <TtsPreviewButton engine={engine} voice={voice} blocked={undefined} />
           </span>
         ),
@@ -373,16 +373,18 @@ function VoiceSelect({
   engine,
   settings,
   onSave,
+  model = '',
 }: {
   engine: string;
   settings: DomainTabProps['settings'];
   onSave: DomainTabProps['onSave'];
+  model?: string;
 }): ReactElement {
   const key = voiceSettingKey(engine);
   return (
     <SettingSelect
       value={settings[key] ?? ''}
-      options={voiceOptions(engine)}
+      options={voiceOptions(engine, model)}
       searchable={engine === 'kokoro'}
       onChange={(value: string) => {
         onSave({ [key]: value });

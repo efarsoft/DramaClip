@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import wave
 from pathlib import Path
 from typing import Any
@@ -31,41 +32,75 @@ def test_dashscope_tts_requires_api_key() -> None:
         DashscopeCosyVoiceEngine(api_key="")
 
 
-def test_dashscope_tts_synthesizes_wav_via_stubbed_sdk(
+class _BytesResp:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def __enter__(self) -> _BytesResp:
+        return self
+
+    def __exit__(self, *_a: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._data
+
+
+def _stub_tts_http(
+    monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any], audio: bytes
+) -> None:
+    """桩 HTTP 链：合成端点返回音频 URL → 下载字节；请求载荷收进 captured。"""
+
+    def _fake_urlopen(request: Any, timeout: float) -> _BytesResp:
+        url = str(getattr(request, "full_url", request))
+        if "SpeechSynthesizer" in url:
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            captured["auth"] = request.headers.get("Authorization")
+            body = {"output": {"audio": {"url": "http://audio-result/x.wav"}}}
+            return _BytesResp(json.dumps(body).encode("utf-8"))
+        return _BytesResp(audio)
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+
+
+def test_dashscope_tts_synthesizes_wav_via_http_stub(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """桩 SDK：call 返回字节 → 落 .wav；空音色回落引擎默认。"""
-    captured: dict[str, str] = {}
-
-    class _FakeFormat:
-        WAV_22050HZ_MONO_16BIT = "wav-22050"
-
-    class _FakeSynthesizer:
-        def __init__(self, *, model: str, voice: str, format: str) -> None:  # noqa: A002
-            captured["model"] = model
-            captured["voice"] = voice
-            captured["format"] = str(format)
-
-        def call(self, text: str) -> bytes:
-            captured["text"] = text
-            return b"RIFF fake audio"
-
-    monkeypatch.setattr(
-        "dashscope.audio.tts_v2.SpeechSynthesizer", _FakeSynthesizer, raising=False
-    )
-    monkeypatch.setattr(
-        "dashscope.audio.tts_v2.AudioFormat", _FakeFormat, raising=False
-    )
+    """桩 HTTP：POST 合成端点 → 音频 URL → 下载落盘；载荷形状与鉴权头如实传。"""
+    captured: dict[str, Any] = {}
+    _stub_tts_http(monkeypatch, captured, b"RIFF fake audio")
 
     engine = DashscopeCosyVoiceEngine(api_key="sk-test")
-    out = engine.synthesize("第一句台词", "", tmp_path / "seg-1.mp3")
-    assert out == tmp_path / "seg-1.wav" and out.read_bytes().startswith(b"RIFF")
-    assert captured == {
+    out = engine.synthesize("第一句台词", "longwan_v2", tmp_path / "seg-1.mp3")
+    assert out == tmp_path / "seg-1.wav" and out.read_bytes() == b"RIFF fake audio"
+    assert captured["auth"] == "Bearer sk-test"
+    assert captured["payload"] == {
         "model": "cosyvoice-v2",
-        "voice": "longxiaochun_v2",
-        "format": "wav-22050",
-        "text": "第一句台词",
+        "input": {
+            "text": "第一句台词",
+            "voice": "longwan_v2",
+            "format": "wav",
+            "sample_rate": 22050,
+        },
     }
+
+
+def test_dashscope_tts_default_voice_follows_model_gen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """三族音色体系互不相通：空音色按模型代际回落各自官方默认。"""
+    cases = {
+        "cosyvoice-v2": "longxiaochun_v2",
+        "cosyvoice-v3-flash": "longanyang",
+        "qwen-audio-3.0-tts-flash": "longanhuan_v3.6",
+    }
+    for model, expected_voice in cases.items():
+        captured: dict[str, Any] = {}
+        _stub_tts_http(monkeypatch, captured, b"RIFF")
+        DashscopeCosyVoiceEngine(api_key="sk-test", model=model).synthesize(
+            "台词", "", tmp_path / "t.wav"
+        )
+        assert captured["payload"]["input"]["voice"] == expected_voice, model
 
 
 def _stub_sync_asr(

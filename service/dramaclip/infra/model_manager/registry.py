@@ -308,13 +308,14 @@ def builtin_specs() -> list[ModelSpec]:
             repo_id="",
             ms_repo="",
             placement="tts/cosyvoice-cloud",
-            name="CosyVoice-v2（云端）",
-            notes="需 API Key（tts.api_key）；按字符计费；音色传云端音色/克隆 id；需联网",
+            name="百炼语音合成（云端）",
+            notes="需 API Key（tts.api_key）；按字符计费；音色传云端音色/克隆 id（按模型代际，"
+            "CosyVoice v2/v3 与 Qwen-Audio-TTS 三族音色互不相通）；需联网",
             size_label="—（云端）",
             tier="balanced",
             speed=5,
             quality=4,
-            desc="云端 cosyvoice-v2：弱机不装 TTS 运行环境，Key 直出",
+            desc="云端 cosyvoice-v2 / v3 系 / qwen-audio-tts：弱机不装 TTS 运行环境，Key 直出",
         ),
     ]
 
