@@ -259,7 +259,11 @@ def test_start_job_leaves_conflict_and_genre_traces(
     )
     monkeypatch.setattr(analysis_api.pipeline, "analyze_episode", lambda **_kw: raw)
     monkeypatch.setattr(analysis_api, "_mine_hotwords", lambda *_a, **_k: ({}, {}, {}, ""))
-    monkeypatch.setattr(analysis_api, "_fuse_ocr", lambda *_a, **_k: ([], None, None, None))
+    # 融合桩 = 原样透传：`fusion.fuse` 的每一条回落分支都返回入参段列表，非空转写
+    # 不可能被掏空；桩成 [] 会造出「库里空、语义非空」这个生产里不存在的双真相。
+    monkeypatch.setattr(
+        analysis_api, "_fuse_ocr", lambda _c, _e, asr, *_a, **_k: (asr, None, None, None)
+    )
 
     _rpc(harness, "analysis.start", {"project_id": project_id})
     traces = _traces(tmp_path)

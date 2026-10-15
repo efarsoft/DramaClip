@@ -747,6 +747,14 @@ def _analyze_one(
             )
             if refine_outcome.applied:
                 asr_segments = refine_outcome.segments
+                # 回写这一列：上面的 upsert 存的是融合分段，只改内存变量的话
+                # narration/auto_voice 读到的仍是精炼前文本，本层等于白跑。
+                # 崩在两次写之间不丢数据：重入判据看的是语义列，补跑吃库里这份融合段。
+                analysis_repo.update_asr_segments(
+                    context.conn,
+                    episode_id,
+                    json.dumps([seg.model_dump() for seg in asr_segments]),
+                )
                 context.notifier.log(
                     "info",
                     f"{label} 转写精炼：{len(asr_segments)} 句（{refine_outcome.detail}）",
@@ -758,6 +766,10 @@ def _analyze_one(
                     f"{label} 转写精炼未生效（{refine_outcome.detail}）；产物为融合分段",
                     job_id=job_id,
                 )
+            # 语义层必须吃库里那一份：`raw` 携带的是融合前的原生分段，而重入路径
+            # `_resumable_raw` 从库里重建——两份并存时，同一集会因「上轮有没有死在
+            # 语义层」跑出不同的高光/冲突打分。
+            raw = raw.model_copy(update={"asr_segments": asr_segments})
         semantic_result = semantic_pipeline.enhance(
             raw,
             context.settings,
