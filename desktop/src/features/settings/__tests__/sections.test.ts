@@ -20,6 +20,7 @@ const KNOWN_KEYS = new Set([
   'export.encoder',
   'export.width',
   'export.height',
+  'export.ai_label',
   'agent_gateway.enabled',
   'agent_gateway.port',
   'agent_gateway.token',
@@ -67,6 +68,14 @@ describe('两分区补入', () => {
       { label: '自动匹配（推荐）', value: 'auto' },
       { label: '通用', value: 'general' },
     ]);
+  });
+});
+
+describe('AI 生成标注开关（业主裁决 2026-10-15：用户可决、默认关闭）', () => {
+  it('「出片」分区含 export.ai_label 开关（有真消费端：export 渲染烧录）', () => {
+    const field = section('export').fields.find((f) => f.key === 'export.ai_label');
+    expect(field?.type).toBe('switch');
+    expect(field?.label).toBe('AI 生成标注');
   });
 });
 

@@ -51,7 +51,7 @@ def extract_cover(
     """
     lines = _wrap_title(title) if title is not None else None
     if lines is not None:
-        face = _bundled_font_face()
+        face = bundled_font_face()
         if face is None:
             _LOGGER.warning("随包字体不可用，封面标题字层降级为无字层截帧：%r", title)
         else:
@@ -131,8 +131,11 @@ def _fontsize_for(lines: list[str]) -> int:
     return max(20, min(64, int(_COVER_WIDTH * 0.9 / longest)))
 
 
-def _bundled_font_face() -> Path | None:
-    """随包字体文件（drawtext 要 fontfile= 具体文件，CaptionFont 只给 files_dir）。"""
+def bundled_font_face() -> Path | None:
+    """随包字体文件（drawtext 要 fontfile= 具体文件，CaptionFont 只给 files_dir）。
+
+    公开入口：封面标题字层与成片 AI 标注（engines/exporter/ai_label.py）共用。
+    """
     # 惰性导入：infra→engines 仅此一处，且只在真的要烧字层时才付出导入成本
     from dramaclip.engines.subtitle import caption_font as caption_font_mod
 
@@ -148,7 +151,7 @@ def _bundled_font_face() -> Path | None:
     return faces[0] if faces else None
 
 
-def _filter_path(path: Path) -> str:
+def filter_path(path: Path) -> str:
     """滤镜串内路径转义：同 fontsdir_option 的真机验证形状（单引号 + 盘符 \\:）。"""
     return "'" + path.as_posix().replace(":", "\\:") + "'"
 
@@ -157,8 +160,8 @@ def _drawtext_vf(
     font_face: Path, textfile: Path, lines: list[str], composition_vf: str | None = None
 ) -> str:
     opts = [
-        f"fontfile={_filter_path(font_face)}",
-        f"textfile={_filter_path(textfile)}",
+        f"fontfile={filter_path(font_face)}",
+        f"textfile={filter_path(textfile)}",
         f"fontsize={_fontsize_for(lines)}",
         "fontcolor=white",
         "borderw=3",

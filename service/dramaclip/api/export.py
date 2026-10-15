@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from dramaclip.api.context import AppContext
 from dramaclip.engines.analysis.models import OcrSegment, SpeechZone
-from dramaclip.engines.exporter import encoder, loudness, selfcheck
+from dramaclip.engines.exporter import ai_label, encoder, loudness, selfcheck
 from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle import presets as subtitle_presets
@@ -1194,6 +1194,8 @@ def render_export(
         subtitle_erase_windows=subtitle_erase_windows,
         out_size=out_size,
         loudness_target=loudness.LoudnessTarget.from_settings(context.settings),
+        # AI 生成标注（业主裁决 2026-10-15：用户开关、默认关闭；键名由 ai_label 模块单持）
+        burn_ai_label=ai_label.enabled(context.settings),
     )
     _log_clock_audit(context, clock_stats)
     exports_repo.mark_completed(context.conn, export_id, str(out_path))

@@ -7,7 +7,7 @@
 AI 替你把全剧看完、稿写好、角色原声克隆成解说嗓、画面剪口对齐镜头、响度混到发布标准——
 媒体处理全部在你这台机器上跑完，素材不出本机，中断了随时接着跑。
 
-![version](https://img.shields.io/badge/version-0.2.1-7C9CFF)
+![version](https://img.shields.io/badge/version-0.2.2-7C9CFF)
 ![platform](https://img.shields.io/badge/platform-Windows-4A5568)
 ![python](https://img.shields.io/badge/Python-3.12%2B-3776AB)
 ![node](https://img.shields.io/badge/Node.js-24%2B-339933)
@@ -300,4 +300,4 @@ refactor: 重构      test: 测试相关      chore: 构建/工具相关
 
 素材授权责任由使用者承担；本软件不代为取得或证明素材授权，亦不提供规避原创性检测的功能。媒体处理全部在本机完成，素材不上传。
 
-成片含 AI 合成语音与 AI 生成文案，发布到具体平台时请按当地法规与平台规则自行标注 AI 生成内容。
+成片含 AI 合成语音与 AI 生成文案。是否在成片上标注「AI 生成」由使用者自行决定：「设置 → 出片 → AI 生成标注」开关默认关闭，开启后成片右上角自动烧制「AI 生成」字样；发布到具体平台时，请按当地法规与平台规则自行标注 AI 生成内容。

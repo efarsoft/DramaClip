@@ -7,8 +7,8 @@ from collections.abc import Callable
 from typing import Any
 
 from dramaclip.infra import device_profile, gpu, machine
-from dramaclip.infra.model_manager import cuda_runtime
 from dramaclip.infra.ffmpeg import binaries
+from dramaclip.infra.model_manager import cuda_runtime
 from dramaclip.transport.rpc import Router
 
 _STARTED_AT = time.monotonic()

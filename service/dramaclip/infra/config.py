@@ -79,6 +79,10 @@ DEFAULTS: dict[str, str] = {
     "export.encoder": "auto",
     "export.width": str(EXPORT_WIDTH),
     "export.height": str(EXPORT_HEIGHT),
+    # AI 生成标注（业主裁决 2026-10-15）：默认关闭；开启后成片右上角烧「AI 生成」
+    # 字样（engines/exporter/ai_label.py，loudness 之后的独立 drawtext 遍）。
+    # 平台标注要求因平台而异，是否标注由使用者按发布平台自行决定——不强制、不代决。
+    "export.ai_label": "false",
     "hardware.max_parallel_jobs": "2",
     # Agent 网关（本机 127.0.0.1 HTTP 工具面：外部 agent 调用审查/出稿；api/agent_gateway.py）
     "agent_gateway.enabled": "false",

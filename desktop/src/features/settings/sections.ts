@@ -148,6 +148,14 @@ const EXPORT_SECTION: SectionSpec = {
       help: '成片画幅跟随源视频（横屏源出 16:9、竖屏源出 9:16），这里只定大小上限',
     },
     { key: 'export.height', label: '画布高上限 (px)', type: 'number', min: 480, max: 2160 },
+    // AI 生成标注（业主裁决 2026-10-15）：用户开关、默认关闭——平台标注要求因平台
+    // 而异，是否标注由使用者按发布平台自行决定。开启后成片右上角烧「AI 生成」。
+    {
+      key: 'export.ai_label',
+      label: 'AI 生成标注',
+      type: 'switch',
+      help: '开启后成片右上角烧制「AI 生成」字样；部分平台对 AI 合成内容有标注要求。默认关闭，由你按发布平台自行决定',
+    },
   ],
 };
 

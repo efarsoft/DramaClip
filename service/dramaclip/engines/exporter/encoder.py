@@ -22,7 +22,7 @@ from typing import Any
 from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.dedup import jitter
 from dramaclip.engines.dedup import params as dedup_params
-from dramaclip.engines.exporter import loudness
+from dramaclip.engines.exporter import ai_label, loudness
 from dramaclip.engines.narration.models import PlanData, TimelineSegment
 from dramaclip.engines.subtitle import caption_font
 from dramaclip.infra import config
@@ -835,11 +835,16 @@ def export_plan(
     subtitle_bands: dict[str, tuple[float, float]] | None = None,
     subtitle_erase_rects: dict[str, list[tuple[float, float]]] | None = None,
     subtitle_erase_windows: dict[str, list[tuple[float, float]]] | None = None,
+    burn_ai_label: bool = False,
 ) -> Path:
     """执行两阶段导出，返回成片路径。
 
     A4-2 统一收口：请求硬编而中途发生段级回退时，整片换 libx264 再跑一次
     （见 _UniformCodecRetry 注释）——已回退段凭签名复用，只有硬编成功的段重编。
+
+    `burn_ai_label`（settings `export.ai_label`，默认关闭）：loudness 之后在成片
+    右上角烧「AI 生成」标注的独立 drawtext 遍（见 `ai_label` 模块）；开启时烧制
+    失败硬失败——用户明示要的标注不能静默缺席。
     """
     try:
         return _export_plan_once(
@@ -857,6 +862,7 @@ def export_plan(
             subtitle_bands=subtitle_bands,
             subtitle_erase_rects=subtitle_erase_rects,
             subtitle_erase_windows=subtitle_erase_windows,
+            burn_ai_label=burn_ai_label,
             _allow_uniform_retry=True,
         )
     except _UniformCodecRetry:
@@ -880,6 +886,7 @@ def export_plan(
             subtitle_bands=subtitle_bands,
             subtitle_erase_rects=subtitle_erase_rects,
             subtitle_erase_windows=subtitle_erase_windows,
+            burn_ai_label=burn_ai_label,
             _allow_uniform_retry=False,
         )
 
@@ -903,6 +910,7 @@ def _export_plan_once(
     subtitle_bands: dict[str, tuple[float, float]] | None = None,
     subtitle_erase_rects: dict[str, list[tuple[float, float]]] | None = None,
     subtitle_erase_windows: dict[str, list[tuple[float, float]]] | None = None,
+    burn_ai_label: bool = False,
     _allow_uniform_retry: bool = True,
 ) -> Path:
     """单次导出尝试（统一重跑的循环体，见 export_plan）。
@@ -1226,6 +1234,12 @@ def _export_plan_once(
         loudness.normalize_in_place(
             out_path, target=loudness_target, work_dir=work_dir / "loudnorm"
         )
+    if burn_ai_label:
+        # AI 生成标注（settings export.ai_label，默认关闭）：loudness 之后的独立
+        # drawtext 遍，-c:a copy 保住响度归一成果；失败硬失败（ai_label 模块 docstring）
+        if on_progress is not None:
+            on_progress(97.0, "烧制 AI 标注")
+        ai_label.apply(out_path, work_dir, out_size)
     if on_progress is not None:
         on_progress(100.0, "导出完成")
     return out_path
