@@ -1354,9 +1354,19 @@ def _video_signature(path: Path) -> tuple[str, str, int, str, int, int, str] | N
             check=False,
         )
         if result.returncode != 0:
+            _LOGGER.warning(
+                "视频流签名探测失败（ffprobe 返回 %d：%s）：拼片按几何不齐处理，"
+                "走全量重编码而非流复制",
+                result.returncode,
+                (result.stderr or "")[:120],
+            )
             return None
         streams = json.loads(result.stdout).get("streams") or []
         if not streams:
+            _LOGGER.warning(
+                "视频流签名探测失败（ffprobe 无视频流输出）：拼片按几何不齐处理，"
+                "走全量重编码而非流复制"
+            )
             return None
         stream = streams[0]
         return (
@@ -1369,7 +1379,11 @@ def _video_signature(path: Path) -> tuple[str, str, int, str, int, int, str] | N
             # ffprobe 对方形像素报 "1:1"，个别容器/编码流不带该字段 → ""（同值即同几何）
             str(stream.get("sample_aspect_ratio") or ""),
         )
-    except Exception:  # noqa: BLE001 - 签名探测失败按不齐处理，绝不挡已成功的段编码
+    except Exception as exc:  # noqa: BLE001 - 签名探测失败按不齐处理，绝不挡已成功的段编码
+        _LOGGER.warning(
+            "视频流签名探测失败（%s）：拼片按几何不齐处理，走全量重编码而非流复制",
+            str(exc)[:120],
+        )
         return None
 
 

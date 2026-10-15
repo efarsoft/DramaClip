@@ -437,7 +437,10 @@ def _run_plan_variants(
         if not cancel_event.is_set():
             _score_batch(context, job_id, project_id, settings)
     except Exception as exc:  # noqa: BLE001 - 逐变体守卫之外的抛出没人接就是一行永停 running
-        _settle_failed(context, job_id, f"规划任务异常终止: {type(exc).__name__}: {exc}")
+        reason = f"规划任务异常终止: {type(exc).__name__}: {exc}"
+        # 落库之外必须上日志面板：只写 jobs 行的异常，用户在日志里翻不到痕迹
+        context.notifier.log("error", reason)
+        _settle_failed(context, job_id, reason)
     finally:
         context.cancel_events.pop(job_id, None)
 

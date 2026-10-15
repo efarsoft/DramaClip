@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import Any
 
@@ -17,6 +18,8 @@ from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnava
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
+
+_LOGGER = logging.getLogger(__name__)
 
 _RECOMMEND_COUNT = 3
 _CACHE_KEY = "mode_recommendation"
@@ -90,7 +93,12 @@ def _ask_llm(settings: dict[str, str], genre: str, reasons: list[str]) -> list[d
     except LlmUnavailable as exc:
         return _fallback([], f"LLM 不可用（{exc}）")
     except Exception as exc:  # noqa: BLE001 - 返回不合法也是回退，不是异常
-        return _fallback([], f"返回不合法（{type(exc).__name__}）")
+        # 异常类名不许进用户文案（「补位（返回不合法（ValidationError））」是内部话术），
+        # 但回退本身必须落日志：静默换静态三件套等于推荐结果凭空变了却无人负责。
+        _LOGGER.warning(
+            "AI 模式推荐返回不合法，改用静态三件套：%s: %s", type(exc).__name__, str(exc)[:200]
+        )
+        return _fallback([], "AI 返回格式不合法")
     picked = _validate(raw)
     if not picked:
         return _fallback([], "AI 推荐结果不在模式菜单内，已换为通用推荐")

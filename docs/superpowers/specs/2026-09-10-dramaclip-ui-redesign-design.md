@@ -136,6 +136,9 @@
 | 成片实测时长偏离**计划声明**超容差 → 放行 | `api/export._audit_duration` | **允许，但必须留痕（warn）** | 与上一行是两条不同的审计，不许合并：这条的分母里合法混着切点抖动与台词保护区外扩（`protect_slack`），拦不动；`docs/research/2026-09-22-competitor-teardown.md` B2 的「差值超阈值只警告不伪造」指的就是它 |
 | 时长审计自身测量失败 → 静默当合格 | `encoder._audit_film_duration`（原 `contextlib.suppress(Exception)`） | **允许，但必须留痕** | 量不出既不改变成片内容也不该挡已拼好的片，但"没量到"≠"合格"：改 warn 明账，缺段那一半已由清单对账兜住 |
 | 口味层 LLM 选题失败 → 题材静态映射 | `script_driver`（现）/ `resolve_run_style`（后） | **允许，但必须留痕** | 兜底值仍是人写的风格指令，不是假文案 |
+| 渲染尾部增强项断供 → 界面照常"成功" | `api/export`：元信息回填、四项自检、封面截帧、`_ensure_titles`、方案回读、封面字层 | **允许，但必须留痕** | 这六处原先一律 `contextlib.suppress(Exception)`/`pass`。灰徽章、无字层封面、库里缺实测时长，与"做过了且没问题"在界面上长得一模一样；留痕统一走 `_note_degraded`，通知面投递失败时兜进程日志，且留痕自身不许把已成功的导出拖成失败 |
+| 拼片几何签名探测失败 → 走全量重编码 | `encoder._video_signature` | **允许，但必须留痕** | 保守方向是对的（宁可重编码也不流复制几何不齐的段），但这条把耗时翻倍；"这次没走上流复制"必须能从日志查出来。抛错与 ffprobe 非零退出两种形状同口径 |
+| AI 模式推荐返回不合法 → 静态三件套 | `mode_recommend._ask_llm` | **允许，但必须留痕；异常类名不进用户文案** | 静默换组合等于推荐结果凭空变了却无人负责；原先写的是「补位（返回不合法（ValidationError））」——内部话术当推荐理由上了界面。类名与原因进进程日志，文案只说"AI 返回格式不合法" |
 | 分析层 LLM → 关键词打分 | `semantic/conflict.py`、`genre.py` | **允许，界面必须可见** | 影响选段而非文案；可见性归 §3.3，界面在 P-3 |
 | CUDA → CPU | `analysis/transcriber.py` | **允许** | 同结果，只慢 |
 | 下载多源降级 | `model_manager/downloader.py` | **允许** | 同一个文件 |

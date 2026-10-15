@@ -283,6 +283,55 @@ def test_assembly_failure_lands_in_jobs_table(
     assert job_id not in harness.context.cancel_events, "cancel_events 未释放"
 
 
+def test_outer_handler_failure_also_lands_in_the_log_panel(
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """逐变体守卫之外的抛出（此处用 `_effective_settings` 代指）：jobs 行要落 failed，
+    日志面板也要有同一条。
+
+    上一条测的是内侧的装配 try（它自带一句 `任务上下文装配失败` 日志）；这条测的是
+    最外层。原先它只写 jobs 行就收工——`executor.submit` 不挂 done-callback，抛出到
+    这里已经离开 RPC 调用栈，用户界面只在队列里看到一行红，日志面板翻不到任何痕迹，
+    事后无从判断是哪种异常。留痕与落库是两条独立的账面，缺一都算没兜住。
+
+    `_effective_settings` 入口（:283）与 worker（:352）各读一次，这里让第二次读炸：
+    对应「RPC 时配置还在、跑起来读挂了」的真实形状，也是最外层最常见的入口。
+    """
+    project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
+    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
+
+    real = narration_api._effective_settings
+    calls = {"n": 0}
+
+    def flaky(_ctx: Any, _pid: str) -> dict[str, str]:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return real(harness.context, _pid)  # type: ignore[arg-type]
+        raise RuntimeError("项目配置读坏了")
+
+    monkeypatch.setattr(narration_api, "_effective_settings", flaky)
+    job_id = str(harness.rpc(
+        "narration.plan_variants",
+        {"project_id": project_id, "modes": ["raw_clip"], "k": 1},
+    )["job_id"])
+
+    status = _wait_terminal(harness, job_id)
+    assert status["status"] == "failed", f"任务停在 {status['status']}，外层异常没人兜底"
+    assert status["error"].startswith("规划任务异常终止: RuntimeError")
+    logged = [
+        str(m["params"]["message"])
+        for m in harness.sent
+        if m["method"] == "log.append" and m["params"]["level"] == "error"
+    ]
+    assert any("规划任务异常终止" in line for line in logged), (
+        f"异常只进了 jobs 表，日志面板零痕迹：{logged}"
+    )
+    assert job_id not in harness.context.cancel_events, "cancel_events 未释放"
+
+
 # `_variant_plan` 只有一条 0→1.25s 的段，120s 是一档真集长度。回填的越界判据按
 # 这份表算（不查库），所以直接调 `_voice` 的用例不必为 ep1 种集行。
 _PLAN_SOURCE_S = {"ep1": 120.0}

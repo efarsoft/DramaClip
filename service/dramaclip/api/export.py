@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
+import logging
 import shutil
 import threading
 from collections.abc import Callable
@@ -45,6 +45,36 @@ _ERR_EXPORT_NOT_FOUND = -32404
 _ERR_EXPORT_NOT_RETRYABLE = -32405  # 导出域 -32400~-32499（见 common.json x-error-codes）
 _ERR_TRASH_FENCE = -32408  # 产物不在数据目录内，拒绝搬移（models.delete 围栏的同款规矩）
 _ERR_TRASH_MOVE = -32409  # 移入回收失败（OSError）：宁留记录，不产无法追溯的孤儿文件
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _emit_note(context: AppContext, level: str, message: str) -> None:
+    """把一条账面写到**能落的地方**：通知面投递失败就兜进程日志。
+
+    通知面是渲染层的管道，它死了不改变"片已经拼好、账已经算完"这个事实——所以
+    事后体检与增强项的留痕一律不许让投递失败反过来改动片的成败。
+    """
+    try:
+        context.notifier.log(level, message)
+    except Exception:  # noqa: BLE001 - 通知面故障不是导出失败的理由，日志文件才是底账
+        _LOGGER.log(
+            logging.INFO if level == "info" else logging.WARNING,
+            "%s（通知面投递失败，改记进程日志）", message,
+        )
+
+
+def _note_degraded(
+    context: AppContext, subject: str, outcome: str, exc: BaseException | None = None
+) -> None:
+    """增强项/事后体检没做成时的统一留痕：绝不挡导出，但必须写明丢了什么。
+
+    这些分支原先一律 `contextlib.suppress(Exception)` 或 `pass`——账面干净得像一切
+    正常，而「没做成」和「做出来没问题」是两回事（§3.3.1「允许，但必须留痕」）。
+    """
+    detail = "" if exc is None else f"：{type(exc).__name__}: {str(exc)[:120]}"
+    _emit_note(context, "warn", f"{subject}未落地{detail}——{outcome}")
+
 
 def _safe_filename(name: str) -> str:
     """项目名 → 安全文件名段（去除路径/非法字符）。"""
@@ -268,7 +298,8 @@ def _cover_title(context: AppContext, plan_row: dict[str, Any]) -> str | None:
             titles = (row or {}).get("titles") or []
         first = str(titles[0]).strip() if titles else ""
         return first or None
-    except Exception:  # noqa: BLE001 - 增强项失败退回无字层截帧
+    except Exception as exc:  # noqa: BLE001 - 增强项失败退回无字层截帧
+        _note_degraded(context, "封面字层标题", "封面出无字层", exc)
         return None
 
 
@@ -329,7 +360,8 @@ def _extract_cover(
     if plan_data is not None and episode_paths is not None and out_size is not None:
         try:
             source_frame = _cover_source_frame(plan_data, episode_paths, out_size)
-        except Exception:  # noqa: BLE001 - 增强项自诊断失败也退回成片截
+        except Exception as exc:  # noqa: BLE001 - 增强项自诊断失败也退回成片截
+            _note_degraded(context, "源素材截帧", "封面改从成片截（画面带烧录字幕）", exc)
             source_frame = None
     if source_frame is not None:
         source, seek_s, composition = source_frame
@@ -751,28 +783,34 @@ def _log_clock_audit(context: AppContext, stats: list[tuple[int, int, int]]) -> 
 
     判据与不拦片的理由见 `_clock_audit`。三个数一起报，是因为多集拼片可能一部分集有驻留窗、
     一部分没有——只报「烧了几行、几行零重叠」会把没对照的集算进分母（第二处口径）。
-    与 `_audit_duration` 同规矩：事后体检，自身任何异常都静默吞掉，绝不反过来挡已成功的导出。"""
+    与 `_audit_duration` 同规矩：事后体检失败绝不反过来挡已成功的导出——但**留痕本身不许被吞**，
+    算不出来也要把"这条没核过"写出来。"""
     if not any(row_count for row_count, _c, _s in stats):
         return
-    with contextlib.suppress(Exception):
+    try:
         rows = sum(row_count for row_count, _c, _s in stats)
         checked = sum(c for _r, c, _s in stats)
         stray = sum(s for _r, _c, s in stats)
-        context.notifier.log(
-            "info",
+        message = (
             f"台词时钟对账：烧录台词 {rows} 行，可对照 {checked} 行，"
             f"其中 {stray} 行与字幕驻留窗零重叠"
             "——零重叠不等于缺陷（画外音/纯增字幕本无屏上对应物）；可对照 0 行＝该剧无驻留窗"
-            "（擦除整段挂），比例升高请核对分析链路",
+            "（擦除整段挂），比例升高请核对分析链路"
         )
+    except Exception as exc:  # noqa: BLE001 - 对账是事后体检，不许拖垮已成功的导出
+        _note_degraded(context, "台词时钟对账", "本条成片的驻留窗重叠没有账面", exc)
+        return
+    _emit_note(context, "info", message)
 
 
 def _audit_duration(context: AppContext, plan_data: PlanData, actual_s: float) -> None:
     """实测时长 vs 时间轴声明总时长（sum(end-start)）：超阈值只写 warn 明账。
 
-    审计自身任何异常都静默吞掉——它是事后体检，绝不反过来挡已成功的导出。
+    审计自身失败不挡导出（它是事后体检），但**不许静默**：测不出来就得写明"这条没核过"
+    ——与 `encoder._audit_film_duration` 同规矩。别把两条混为一谈：那条量"成片 vs
+    各段实测和"，超线是缺段/拼重，已改判抛错；本条的分母里合法混着保护区外扩，只 warn。
     """
-    with contextlib.suppress(Exception):
+    try:
         declared = sum(max(seg.end - seg.start, 0.0) for seg in plan_data.timeline)
         if declared <= 0:
             return
@@ -786,11 +824,14 @@ def _audit_duration(context: AppContext, plan_data: PlanData, actual_s: float) -
         )
         if abs(diff) <= tolerance:
             return
-        context.notifier.log(
-            "warn",
+        message = (
             f"成片时长审计：实测 {actual_s:.1f}s vs 声明 {declared:.1f}s"
-            f"（差 {diff:+.1f}s，超出阈值 ±{tolerance:.1f}s）——成片可能缺段/重复，请人工核对",
+            f"（差 {diff:+.1f}s，超出阈值 ±{tolerance:.1f}s）——成片可能缺段/重复，请人工核对"
         )
+    except Exception as exc:  # noqa: BLE001 - 事后体检失败绝不挡已成功的导出
+        _note_degraded(context, "成片时长审计", "本条成片的事后核对没有做", exc)
+        return
+    _emit_note(context, "warn", message)
 
 
 def _declared_duration_s(plan_data: PlanData) -> float | None:
@@ -811,9 +852,11 @@ def _load_plan_data(context: AppContext, plan_id: Any) -> PlanData | None:
     row = plans_repo.get(context.conn, str(plan_id))
     if row is None:
         return None
-    with contextlib.suppress(Exception):
+    try:
         return PlanData.model_validate(row["plan_data"])
-    return None
+    except Exception as exc:  # noqa: BLE001 - 坏数据不该把整页列表打成 500，但断链必须记账
+        _note_degraded(context, "编排方案回读", "自检基准（预算/段数/字幕带）按未知处理", exc)
+        return None
 
 
 def _selfcheck_one(context: AppContext, export_id: str) -> bool:
@@ -897,9 +940,14 @@ def _run_selfcheck_batch(context: AppContext, job_id: str, export_ids: list[str]
             context.job_store.set_progress(
                 job_id, round((index - 1) / total * 100, 1), f"成片自检 {index}/{total}"
             )
-            with contextlib.suppress(Exception):
+            try:
                 if _selfcheck_one(context, export_id):
                     checked += 1
+            except Exception as exc:  # noqa: BLE001 - 单条量不了不断整批，但要点名是哪条
+                _note_degraded(
+                    context, f"成片自检（第 {index}/{total} 条 {export_id}）",
+                    "该行成绩单留 NULL（徽章灰）", exc,
+                )
         context.job_store.mark_completed(job_id)
         context.notifier.log("info", f"成片自检完成：{checked}/{total} 条拿到成绩单")
     except Exception as exc:
@@ -1155,12 +1203,15 @@ def render_export(
             context.conn, export_id, duration_s=media.duration_s, size_bytes=out_path.stat().st_size
         )
         _audit_duration(context, plan_data, media.duration_s)
-    except (ValueError, OSError):
-        pass  # 元信息回填/时长审计失败不影响导出成功
-    # 四项自检（09-10 #29：导出期产出字段）：增强项绝不挡导出，任何异常都留 NULL
-    with contextlib.suppress(Exception):
+    except (ValueError, OSError) as exc:
+        # 元信息回填/时长审计失败不影响导出成功——但"没回填、没核对"必须写进账面
+        _note_degraded(context, "成片元信息回填与时长审计", "库里没有实测时长，事后核对也没做", exc)
+    # 四项自检（09-10 #29：导出期产出字段）：增强项绝不挡导出，留 NULL 也要留痕
+    try:
         _selfcheck_one(context, export_id)
-    with contextlib.suppress(OSError, ValueError):
+    except Exception as exc:  # noqa: BLE001 - 自检失败不许把已拼好的片拖成失败
+        _note_degraded(context, "导出期四项自检", "成绩单留 NULL，可在成片列表重测", exc)
+    try:
         _extract_cover(
             context,
             export_id,
@@ -1170,6 +1221,8 @@ def render_export(
             episode_paths=episode_paths,
             out_size=out_size,
         )  # 封面失败不影响导出成功（源截帧→成片截帧的降级链在 _extract_cover 内）
+    except (OSError, ValueError) as exc:
+        _note_degraded(context, "封面截帧", "本条成片没有封面（列表用占位图）", exc)
     return out_path
 
 
@@ -1277,13 +1330,15 @@ def _ensure_clone_voice(
 
 
 def _ensure_titles(context: AppContext, plan_row: dict[str, Any]) -> None:
-    """成片落库时带 8 条标题；已有标题或 LLM 不可用都不挡导出。"""
+    """成片落库时带 8 条标题；已有标题或 LLM 不可用都不挡导出——但断供必须留痕。"""
     if plan_row.get("titles"):
         return
     from dramaclip.api import narration as narration_api
 
-    with contextlib.suppress(Exception):
+    try:
         narration_api.generate_titles(context, {"plan_id": str(plan_row["id"])})
+    except Exception as exc:  # noqa: BLE001 - 标题是增强项，不许把已渲染的片子拖成失败
+        _note_degraded(context, "候选标题生成", "封面没有字层标题、列表也无候选可选", exc)
 
 
 def _run_export(context: AppContext, job_id: str, run: ExportRun) -> None:

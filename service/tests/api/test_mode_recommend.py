@@ -157,6 +157,30 @@ def test_llm_unavailable_falls_back(
     assert "LLM 不可用" in result["modes"][0]["reason"]
 
 
+def test_invalid_llm_reply_falls_back_with_named_copy_and_trace(
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    fake_llm: type[_FakeLlm],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """LLM 抛（返回形状坏了）：回退照旧，但异常类名不许上界面。
+
+    原先写的是 `f"返回不合法（{type(exc).__name__}）"`，用户看到的是
+    「补位（返回不合法（ValidationError））」——内部话术当推荐理由；同时这条
+    回退一行日志都没有，推荐结果凭空换了来源无人负责。两头都要钉住。
+    """
+    project_id = _project_with_analysis(memory_db, tmp_path)
+    fake_llm.reply = ValueError("mode 必须是字符串")
+
+    with caplog.at_level("WARNING", logger="dramaclip.engines.narration.mode_recommend"):
+        result = mode_recommend.recommend(memory_db, project_id, {}, refresh=False)
+
+    reasons = " ".join(str(m["reason"]) for m in result["modes"])
+    assert "ValueError" not in reasons, f"异常类名漏进用户文案：{reasons}"
+    assert "不合法" in reasons, reasons
+    assert "mode 必须是字符串" in caplog.text, f"回退没落日志：{caplog.text}"
+
+
 def test_unconfigured_llm_never_constructed(
     memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
