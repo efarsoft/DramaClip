@@ -198,13 +198,33 @@ def test_tts_text_prefix_by_generation() -> None:
     assert _tts_text("A<|endofprompt|>B", "zh", True) == "A<|endofprompt|>B", "已有前缀不二次包"
 
 
-def test_engine_requires_files_declared_in_bridge(tmp_path: Path) -> None:
-    """桥的判据文件表与 registry._REQUIREMENTS 同口径：任一侧单独漂移都会红。"""
+def test_availability_reads_the_registry_requirement_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """就绪判据只认 registry.requirements(engine) 那一份——桥里再抄一份 v1 清单，
+    装得再全的 v3 也会被判成「缺模型」（两代的 yaml 名与 tokenizer 代际不同）。
+    """
     from dramaclip.infra.model_manager import registry
 
-    spec = next(s for s in builtin_specs() if s.engine == "cosyvoice")
-    assert set(mod._REQUIRED_FILES) == set(registry._REQUIREMENTS["cosyvoice"])  # noqa: SLF001
-    assert spec.placement.endswith("cosyvoice300m"), "目录名跟随清单 placement"
+    monkeypatch.setattr(mod, "runtime_ready", lambda: True)
+    for engine in ("cosyvoice", "cosyvoice3"):
+        root = tmp_path / engine
+        for name in registry.requirements(engine):
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_bytes(b"x")
+        ok, reason = CosyVoiceEngine(root, engine).is_available()
+        assert ok is True, f"{engine} 按 registry 判据装全了却说缺：{reason}"
+        (root / registry.requirements(engine)[0]).unlink()
+        ok, reason = CosyVoiceEngine(root, engine).is_available()
+        assert ok is False and "缺模型" in reason
+
+
+def test_factory_passes_the_generation_to_the_engine(tmp_path: Path) -> None:
+    """代际必须进实例：name 与判据都跟着它走，否则 v3 装完报的还是 v1 的文件名。"""
+    engine = tts_factory.create("cosyvoice3", tmp_path)
+    assert engine.name == "cosyvoice3"
+    _ok, reason = engine.is_available()
+    assert "cosyvoice3.yaml" in reason, f"缺项按 v3 清单报：{reason}"
 
 
 def test_capabilities_declare_cloning_without_emotion(tmp_path: Path) -> None:

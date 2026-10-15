@@ -34,6 +34,9 @@ DEFAULTS: dict[str, str] = {
     # P1 云端引擎凭据（按量计费；空 = 云端引擎不可用，本地引擎不受影响）
     "asr.api_key": "",
     "tts.api_key": "",
+    # 云端 TTS 模型名：tts_cloud 域启用即由 engine_configs 镜像写入（同 llm.model）。
+    # 不登记在这里，读它的地方就只能靠猜——工厂的 "cosyvoice-v2" 默认值会替业主选模型。
+    "tts.model": "",
     # 说话人分离（仅 paraformer 生效）：聚类自动判人数（1~15），num_speakers>0
     # 则经 preset_spk_num 指定。分离模型未下载时 funasr 按别名自行拉取（cam++/
     # fsmn-vad 共约 30MB），资产库登记项可管理下载。

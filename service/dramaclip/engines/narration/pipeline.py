@@ -303,12 +303,18 @@ def _synthesize_into(
     # uuid 插进主干、保留最终扩展名：soundfile/edge 都靠扩展名推断音频格式，
     # 以 .part 结尾会让 sf.write 直接抛 TypeError。
     staging = final_path.with_name(f"{final_path.stem}.{uuid.uuid4().hex}{final_path.suffix}")
+    produced = staging
     try:
-        engine.synthesize(text, voice, staging)
-        _store_in_cache(staging, cache_dir, text, engine_name, voice, speed)
-        os.replace(staging, final_path)
+        # 以引擎返回的路径为准：云端引擎按 out_path 的扩展名决定落盘格式，
+        # 要 .mp3 它就在旁边写一个 .wav 并返回那条——只认 staging 会让每段
+        # 配音都在缓存/落位那一步扑空（出片必败）。
+        produced = engine.synthesize(text, voice, staging)
+        _store_in_cache(produced, cache_dir, text, engine_name, voice, speed)
+        os.replace(produced, final_path)
     finally:
         staging.unlink(missing_ok=True)
+        if produced != staging:
+            produced.unlink(missing_ok=True)  # 成功时已被搬走，这里只收失败残留
 
 
 def _usable(path: Path) -> bool:

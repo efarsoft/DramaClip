@@ -220,7 +220,10 @@ def tts(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     out_root.mkdir(parents=True, exist_ok=True)
     key = _content_key(engine, voice, text)
     api_key = str(context.settings.get("tts.api_key", ""))
-    path = _synthesize(engine, voice, text, models_dir, out_root, key, api_key=api_key)
+    model = str(context.settings.get("tts.model", ""))
+    path = _synthesize(
+        engine, voice, text, models_dir, out_root, key, api_key=api_key, model=model
+    )
     return {"path": str(path), "engine": engine, "voice": voice, "chars": len(text)}
 
 
@@ -244,10 +247,13 @@ def _synthesize(
     key: str,
     *,
     api_key: str,
+    model: str = "",
 ) -> Path:
     from dramaclip.api import tts as tts_api
 
-    return tts_api._synthesize(engine, voice, text, models_dir, out_dir, key, api_key=api_key)
+    return tts_api._synthesize(
+        engine, voice, text, models_dir, out_dir, key, api_key=api_key, model=model
+    )
 
 
 def _content_key(engine: str, voice: str, text: str) -> str:

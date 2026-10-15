@@ -62,7 +62,9 @@ def create(
     if engine in ("cosyvoice", "cosyvoice3"):
         from dramaclip.engines.tts.engines.cosyvoice import CosyVoiceEngine
 
-        return CosyVoiceEngine(_local_dir(engine, models_dir))
+        # 引擎代际传进实例：300M 与 v3 的必需文件名不同（yaml/tokenizer 代际），
+        # 判据只认 registry 那一份，实例自己不再猜
+        return CosyVoiceEngine(_local_dir(engine, models_dir), engine)
     available = " / ".join(sorted(supported()))
     raise ValueError(f"未知 TTS 引擎: {engine}（可用: {available}）")
 

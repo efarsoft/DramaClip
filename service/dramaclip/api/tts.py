@@ -220,7 +220,10 @@ def _preview_audio(
     if cached is not None:
         return cached
     api_key = str(context.settings.get("tts.api_key", ""))
-    return _synthesize(engine, voice, text, models_dir, root, key, api_key=api_key)
+    # 模型名同样取自设置（云端配置启用时由 engine_configs 镜像写入）：漏了它
+    # 等于让工厂的默认值替业主选模型——选的是 v3、试听的却是 v2
+    model = str(context.settings.get("tts.model", ""))
+    return _synthesize(engine, voice, text, models_dir, root, key, api_key=api_key, model=model)
 
 
 def _content_key(engine: str, voice: str, text: str) -> str:
@@ -249,21 +252,32 @@ def _synthesize(
     root: Path,
     key: str,
     api_key: str = "",
+    model: str = "",
 ) -> Path:
-    """先写临时名、成功后按真实容器原子搬正：半途失败的残留不能被下次当成缓存播出去。"""
+    """先写临时名、成功后按真实容器原子搬正：半途失败的残留不能被下次当成缓存播出去。
+
+    产物以引擎**返回的路径**为准，不是临时名：云端引擎按 out_path 的扩展名决定落盘
+    格式（要 .mp3 它就在旁边写一个 .wav 并返回那条），只认临时名会判「空文件」而
+    每次试听都失败，还在缓存目录里留下一堆孤儿。
+    """
     staging = root / f"{key}.{uuid.uuid4().hex}.mp3"
+    produced = staging
     try:
-        create_tts(engine, models_dir, api_key=api_key).synthesize(text, voice, staging)
-        if not _has_audio(staging):
+        produced = create_tts(engine, models_dir, api_key=api_key, model=model).synthesize(
+            text, voice, staging
+        )
+        if not _has_audio(produced):
             raise RuntimeError("引擎返回了空文件（0 字节），没有任何声音可播")
-        path = root / f"{key}.{_extension_of(staging)}"
-        os.replace(staging, path)
+        path = root / f"{key}.{_extension_of(produced)}"
+        os.replace(produced, path)
     except Exception as exc:  # noqa: BLE001 - 失败原因必须原样带出，且不换个引擎重试
         raise RpcDomainError(
             _ERR_TTS_SYNTH, f"试听合成失败（引擎={engine}）：{type(exc).__name__}: {exc}"
         ) from exc
     finally:
         staging.unlink(missing_ok=True)
+        if produced != staging:
+            produced.unlink(missing_ok=True)  # 成功时已被搬走，这里只收失败残留
     return path
 
 

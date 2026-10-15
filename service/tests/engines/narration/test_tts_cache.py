@@ -200,6 +200,36 @@ def test_eviction_shrinks_cache_to_limit(
     assert any(p.stem == newest for p in files), "最新写入的缓存条目必须保留"
 
 
+def test_cloud_artifact_written_at_a_sibling_path_still_lands(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """云端引擎拿 .mp3 却落一个 .wav 并**返回那条**（dashscope 的形态）：只认临时名，
+    每段配音都会在写缓存那一步扑空——出片必败，还在产物目录留下一堆孤儿。
+    """
+
+    class _SuffixSwap:
+        name = "cosyvoice_cloud"
+
+        def synthesize(self, text: str, voice: Any, out_path: Path) -> Path:
+            produced = out_path.with_suffix(".wav")
+            produced.parent.mkdir(parents=True, exist_ok=True)
+            produced.write_bytes(text.encode("utf-8"))
+            return produced
+
+    _stub(monkeypatch, _SuffixSwap())
+    tts_dir = tmp_path / "tts"
+
+    plan = _run(_plan("云端一段"), tts_dir, {"tts.engine": "cosyvoice_cloud"})
+
+    audio = plan.narration_texts[0]
+    assert audio.audio_path is not None
+    assert Path(audio.audio_path).read_text(encoding="utf-8") == "云端一段"
+    assert len(_cache_files(tts_dir)) == 1, "引擎返回的产物必须进缓存"
+    assert [p for p in tts_dir.iterdir() if p.is_file()] == [Path(audio.audio_path)], (
+        "产物目录只留正主：临时名与引擎那条都不能剩成孤儿"
+    )
+
+
 def test_eviction_failures_never_raise(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

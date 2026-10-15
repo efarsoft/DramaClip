@@ -36,9 +36,7 @@ class FakeEngine:
 @pytest.fixture(autouse=True)
 def fake_engine(monkeypatch: pytest.MonkeyPatch) -> FakeEngine:
     stub = FakeEngine()
-    monkeypatch.setattr(
-        tts_api, "create_tts", lambda name, models_dir=None, api_key="": stub  # noqa: ARG005
-    )
+    monkeypatch.setattr(tts_api, "create_tts", lambda *_a, **_k: stub)
     monkeypatch.setattr(tts_api, "audio_duration_s", lambda _path: 2.5)
     monkeypatch.setattr(tts_api, "audio_container", lambda _path: "mp3")
     monkeypatch.setattr(reference_qc, "_CACHE", {})

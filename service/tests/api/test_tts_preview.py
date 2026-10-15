@@ -19,19 +19,35 @@ from dramaclip.infra import config
 
 
 class FakeEngine:
-    """替身引擎：记下每次调用与 create 收到的引擎名，并按 `payload` 写产物。"""
+    """替身引擎：记下每次调用、create 收到的引擎名与凭据参数，并按 `payload` 写产物。"""
 
     def __init__(self, payload: bytes = b"audio-bytes") -> None:
         self.name = "fake"
         self.payload = payload
         self.calls: list[tuple[str, str, Path]] = []
         self.created: list[str] = []
+        self.auth: list[tuple[str, str]] = []
 
     def synthesize(self, text: str, voice: str, out_path: Path) -> Path:
         self.calls.append((text, voice, out_path))
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(self.payload)
         return out_path
+
+
+class SuffixSwappingEngine(FakeEngine):
+    """云端引擎的形态：扩展名不合口味就在旁边另写一个文件并**返回那条路径**。
+
+    dashscope 拿 `.mp3` 会落 `.wav`（见 engines/tts/engines/dashscope.py），
+    调用方只认自己给的临时名就会判「空文件」——替身必须真换个路径。
+    """
+
+    def synthesize(self, text: str, voice: str, out_path: Path) -> Path:
+        self.calls.append((text, voice, out_path))
+        produced = out_path.with_suffix(".wav")
+        produced.parent.mkdir(parents=True, exist_ok=True)
+        produced.write_bytes(self.payload)
+        return produced
 
 
 class ExplodingEngine(FakeEngine):
@@ -57,15 +73,28 @@ def _install_kokoro_voice(models_dir: Path, voice: str) -> None:
 @pytest.fixture
 def fake_engine(monkeypatch: pytest.MonkeyPatch) -> FakeEngine:
     """替身工厂：create 返回同一个替身，被要求的引擎名记在 `created`。"""
-    stub = FakeEngine()
+    return _install(monkeypatch, FakeEngine())
 
-    def _create(name: str, models_dir: Path | None = None, *, api_key: str = "") -> FakeEngine:
+
+def _install(monkeypatch: pytest.MonkeyPatch, stub: FakeEngine) -> FakeEngine:
+    def _create(
+        name: str, models_dir: Path | None = None, *, api_key: str = "", model: str = ""
+    ) -> FakeEngine:
         stub.created.append(name)
+        stub.auth.append((api_key, model))
         return stub
 
     monkeypatch.setattr(tts_api, "create_tts", _create)
     monkeypatch.setattr(tts_api, "audio_duration_s", lambda _path: 2.5)
     monkeypatch.setattr(tts_api, "audio_container", lambda _path: "mp3")
+    return stub
+
+
+@pytest.fixture
+def swapping_engine(monkeypatch: pytest.MonkeyPatch) -> SuffixSwappingEngine:
+    stub = SuffixSwappingEngine()
+    _install(monkeypatch, stub)
+    monkeypatch.setattr(tts_api, "audio_container", lambda _path: "wav")
     return stub
 
 
@@ -172,7 +201,9 @@ def test_preview_reports_engine_failure_instead_of_swapping_engine(
     stub = ExplodingEngine()
     created: list[str] = []
 
-    def _create(name: str, models_dir: Path | None = None, *, api_key: str = "") -> ExplodingEngine:
+    def _create(
+        name: str, models_dir: Path | None = None, *, api_key: str = "", model: str = ""
+    ) -> ExplodingEngine:
         created.append(name)
         return stub
 
@@ -247,6 +278,51 @@ def test_preview_reuses_the_cached_file_whatever_its_container(
 
     assert first["path"] == second["path"]
     assert len(fake_engine.calls) == 1
+
+
+def test_preview_honors_the_artifact_the_cloud_engine_returns(
+    tmp_path: Path, swapping_engine: SuffixSwappingEngine
+) -> None:
+    """云端引擎拿 .mp3 却落 .wav 并返回那条：只认临时名会判「空文件」，试听永远不出声。
+
+    钉的不只是「能出声」，还有缓存目录里只剩正主——临时名和引擎产物都不能留成孤儿。
+    """
+    context = _context(tmp_path)
+
+    result = tts_api.preview(context, {"engine": "cosyvoice_cloud", "voice": "longxiaochun_v2"})
+
+    path = Path(result["path"])
+    assert path.is_file() and path.suffix == ".wav"
+    assert Path(result["path"]).parent == context.work_dir / "tts-preview"
+    assert list((context.work_dir / "tts-preview").iterdir()) == [path]
+
+
+def test_preview_reuses_a_cloud_artifact_by_its_real_container(
+    tmp_path: Path, swapping_engine: SuffixSwappingEngine
+) -> None:
+    """第二次试听必须命中第一次那条：按 staging 名找缓存的话，每次都重新付费。"""
+    context = _context(tmp_path)
+    params = {"engine": "cosyvoice_cloud", "voice": "longxiaochun_v2"}
+
+    first = tts_api.preview(context, params)
+    second = tts_api.preview(context, params)
+
+    assert first["path"] == second["path"]
+    assert len(swapping_engine.calls) == 1
+    assert list((context.work_dir / "tts-preview").iterdir()) == [Path(first["path"])]
+
+
+def test_preview_passes_the_cloud_key_and_model_from_settings(
+    tmp_path: Path, fake_engine: FakeEngine
+) -> None:
+    """tts.model 漏传就等于让工厂的默认值替业主选模型——选 v3、听的却是 v2。"""
+    context = _context(tmp_path)
+    context.settings["tts.api_key"] = "sk-cloud"
+    context.settings["tts.model"] = "cosyvoice-v3-flash"
+
+    tts_api.preview(context, {"engine": "cosyvoice_cloud", "voice": "longxiaochun_v2"})
+
+    assert fake_engine.auth == [("sk-cloud", "cosyvoice-v3-flash")]
 
 
 def test_preview_refuses_a_container_name_that_is_not_a_filename(

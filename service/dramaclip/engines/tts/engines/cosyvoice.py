@@ -41,10 +41,6 @@ _CLONE_MAX_CHARS = 150
 #: 的统一口径；worker 就绪行回带同值，两处不会各漂各的）。
 _SAMPLE_RATE = 24_000
 
-#: 模型加载判据（registry._REQUIREMENTS 同口径的轻探测副本）：三件套权重 +
-#: zero-shot 必需的语音 tokenizer（cross_lingual 也要它提语义 token）。
-_REQUIRED_FILES = ("cosyvoice.yaml", "llm.pt", "flow.pt", "hift.pt", "speech_tokenizer_v1.onnx")
-
 _LOCK = threading.Lock()
 # 共享 worker 的 stdin/stdout 一问一答整段持锁：试听（RPC 执行池）与出片任务的
 # 合成并发打同一进程时，无锁的 write/readline 会应答错配拿到别人的音频。
@@ -129,12 +125,13 @@ def _ensure_worker(models_dir: Path | None) -> subprocess.Popen[str]:
 
 
 class CosyVoiceEngine:
-    def __init__(self, model_dir: Path | None = None) -> None:
+    def __init__(self, model_dir: Path | None = None, engine: str = "cosyvoice") -> None:
         self._model_dir = model_dir
+        self._engine = engine
 
     @property
     def name(self) -> str:
-        return "cosyvoice"
+        return self._engine
 
     def capabilities(self) -> EngineCaps:
         available, reason = self.is_available()
@@ -150,12 +147,17 @@ class CosyVoiceEngine:
         )
 
     def is_available(self) -> tuple[bool, str]:
+        """模型就绪判据取自 registry.requirements(self._engine) 那一份表。
+
+        300M 与 CosyVoice3 的 yaml 名和 speech_tokenizer 代际都不同，引擎侧再抄
+        一份 v1 清单，装得再全的 v3 也会被判成「缺模型」。
+        """
         if self._model_dir is not None:
-            missing = [
-                name
-                for name in _REQUIRED_FILES
-                if not (self._model_dir / name).is_file()
-            ]
+            from dramaclip.infra.model_manager import registry
+
+            missing = registry.missing_requirements(
+                self._model_dir, registry.requirements(self._engine)
+            )
             if missing:
                 return False, f"缺模型：{self._model_dir} 下没有 {', '.join(missing)}"
         if not runtime_ready():
