@@ -6,18 +6,30 @@
  */
 import type { DefaultOptionType } from 'antd/es/select';
 
-export type TtsEngineName = 'kokoro' | 'edge' | 'indextts2' | 'cosyvoice_cloud';
+export type TtsEngineName = 'kokoro' | 'edge' | 'indextts2' | 'cosyvoice_cloud' | 'volc_tts';
 
-export const TTS_ENGINES: readonly TtsEngineName[] = ['kokoro', 'edge', 'indextts2', 'cosyvoice_cloud'];
+export const TTS_ENGINES: readonly TtsEngineName[] = [
+  'kokoro',
+  'edge',
+  'indextts2',
+  'cosyvoice_cloud',
+  'volc_tts',
+];
 
-/** 不需要本地模型的引擎：Edge 走云端，故它没有「缺模型」这一态。其余引擎一律以资产为准。 */
-export const TTS_MODEL_FREE_ENGINES: readonly TtsEngineName[] = ['edge'];
+/** 不需要本地模型的引擎：云端引擎没有「缺模型」这一态。其余引擎一律以资产为准。 */
+export const TTS_MODEL_FREE_ENGINES: readonly TtsEngineName[] = [
+  'edge',
+  'cosyvoice_cloud',
+  'volc_tts',
+];
 
 /** 引擎短名 → 展示名（设置值只有短名，UI 上说短名等于让人猜）。 */
 export const TTS_ENGINE_LABEL: Record<TtsEngineName, string> = {
   kokoro: 'Kokoro 82M',
   edge: 'Edge',
   indextts2: 'IndexTTS-2.5',
+  cosyvoice_cloud: 'CosyVoice 云端（百炼）',
+  volc_tts: '火山引擎（豆包语音）',
 };
 
 /** 设置值 → 展示名；未登记引擎原样回显（不编名字）。 */
@@ -88,6 +100,19 @@ const COSYVOICE_CLOUD = [
   ...male(['longcheng_v2', 'longhua_v2', 'longxiang_v2', 'longfei_v2', 'longqiang_v2']),
 ];
 
+// 火山引擎大模型音色（V1 HTTP 接口可用音色域；2.0 代音色需 V3 流式接口，不在名单）。
+// 克隆音色在火山控制台创建后，id 填进「自定义」同样可用。
+const VOLC_VOICES = [
+  ...female([
+    'zh_female_cancan_mars_bigtts',
+    'zh_female_shuangkuai_mars_bigtts',
+  ]),
+  ...male([
+    'zh_male_beijingxiaoye_mars_bigtts',
+    'zh_male_wennuanahu_mars_bigtts',
+  ]),
+];
+
 export const TTS_VOICE_OPTIONS: Record<TtsEngineName, DefaultOptionType[]> = {
   kokoro: [
     { label: '女声', options: female(KOKORO_FEMALE_IDS) },
@@ -96,4 +121,5 @@ export const TTS_VOICE_OPTIONS: Record<TtsEngineName, DefaultOptionType[]> = {
   edge: EDGE_VOICES,
   indextts2: [], // 音色=参考音频文件（零样本克隆），不走下拉，见 RefVoiceRow
   cosyvoice_cloud: COSYVOICE_CLOUD,
+  volc_tts: VOLC_VOICES,
 };

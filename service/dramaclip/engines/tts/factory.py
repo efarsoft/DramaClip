@@ -17,6 +17,7 @@ from dramaclip.engines.tts.base import EngineCaps, TtsEngine
 _MODEL_DIRS: dict[str, Path | None] = {
     "edge": None,
     "cosyvoice_cloud": None,
+    "volc_tts": None,
     "kokoro": Path("tts") / "kokoro" / "Kokoro-82M-v1.1-zh",
     "indextts2": Path("tts") / "indextts2",
     "cosyvoice": Path("tts") / "cosyvoice300m",
@@ -51,6 +52,10 @@ def create(
         from dramaclip.engines.tts.engines.dashscope import DashscopeCosyVoiceEngine
 
         return DashscopeCosyVoiceEngine(api_key=api_key, model=model or "cosyvoice-v2")
+    if engine == "volc_tts":
+        from dramaclip.engines.tts.engines.volc import VolcTtsEngine
+
+        return VolcTtsEngine(api_key=api_key, model=model)
     if engine == "kokoro":
         from dramaclip.engines.tts.engines.kokoro import KokoroEngine
 

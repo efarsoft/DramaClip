@@ -16,6 +16,7 @@ from dramaclip.engines.analysis.transcriber import (
     FasterWhisperEngine,
     ParaformerEngine,
     SenseVoiceEngine,
+    VolcFileAsrEngine,
 )
 from dramaclip.infra import config
 from dramaclip.infra.model_manager import registry
@@ -27,6 +28,7 @@ _BUILDS: dict[str, type] = {
     "sensevoice": SenseVoiceEngine,
     "paraformer": ParaformerEngine,
     "dashscope_paraformer": DashscopeParaformerEngine,
+    "volc_file_asr": VolcFileAsrEngine,
 }
 
 

@@ -10,6 +10,7 @@ from dramaclip.engines.analysis.transcriber import (
     FasterWhisperEngine,
     ParaformerEngine,
     SenseVoiceEngine,
+    VolcFileAsrEngine,
 )
 from dramaclip.infra import config
 
@@ -35,7 +36,13 @@ def supported() -> frozenset[str]:
     AED 无原生时间戳且单次推理上限 60s（整集 wav 必须先过 VAD 分窗）——清单不再挂
     「永远装不上」的死资产。
     """
-    return frozenset({"faster_whisper", "sensevoice", "paraformer", "dashscope_paraformer"})
+    return frozenset({
+        "faster_whisper",
+        "sensevoice",
+        "paraformer",
+        "dashscope_paraformer",
+        "volc_file_asr",
+    })
 
 
 def _build_transcriber(settings: config.Settings, models_dir: Path) -> AsrEngine:
@@ -49,6 +56,11 @@ def _build_transcriber(settings: config.Settings, models_dir: Path) -> AsrEngine
         return DashscopeParaformerEngine(
             api_key=settings.get("asr.api_key", ""),
             model=settings.get("asr.model", "paraformer-v2") or "paraformer-v2",
+        )
+    if engine == "volc_file_asr":
+        return VolcFileAsrEngine(
+            api_key=settings.get("asr.api_key", ""),
+            model=settings.get("asr.model", ""),
         )
     if engine == "paraformer":
         diarize = config.get_bool(settings, "asr.diarization")

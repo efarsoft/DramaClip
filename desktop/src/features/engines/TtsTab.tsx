@@ -29,6 +29,7 @@ import {
   CloudTestButton,
   MixedEnginePicker,
   activeCloudConfig,
+  cloudTtsEngineOf,
 } from './CloudDomainUI';
 import { IndexttsRuntimeSlot } from './IndexttsRuntimeSlot';
 import { AutoVoiceButton } from './AutoVoiceButton';
@@ -52,6 +53,7 @@ const ENGINE_KIND_LABEL: Record<string, string> = {
   edge: '云端 · 免费无需 API Key',
   indextts2: '本地 · 音色克隆（N 卡实时 / CPU 预生成）',
   cosyvoice_cloud: '云端 · 百炼按量计费',
+  volc_tts: '云端 · 火山引擎按量计费',
 };
 
 const VOICE_HINT: Record<string, string> = {
@@ -59,6 +61,7 @@ const VOICE_HINT: Record<string, string> = {
   edge: '微软官方中文音色，覆盖普通话 / 东北 / 陕西 / 粤语 / 台湾',
   indextts2: '零样本克隆：选一段 3~10 秒干净人声做音色（如剧集主角台词）；截自剧集的参考带 BGM，先点「人声分离」',
   cosyvoice_cloud: '百炼预置音色，下拉可换；克隆音色在百炼控制台创建后把 id 填进自定义',
+  volc_tts: '火山预置大模型音色，下拉可换；克隆音色在火山控制台创建后把 id 填进自定义',
 };
 
 export function TtsTab({
@@ -170,7 +173,7 @@ function CloudActiveCard({
   onPickLocalEngine: (name: string) => void;
   onPickCloud: (config: EngineConfig) => void;
 }): ReactElement {
-  const engine = 'cosyvoice_cloud';
+  const engine = cloudTtsEngineOf(config);
   const voice = settings[voiceSettingKey(engine)] ?? '';
   const card: ActiveCardProps = {
     domain: '配音 TTS',
