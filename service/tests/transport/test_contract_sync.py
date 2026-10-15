@@ -33,7 +33,8 @@ def test_router_matches_schemas(repo_root: Path) -> None:
     assert schema_dir.is_dir(), f"schema 目录不存在: {schema_dir}"
     from types import SimpleNamespace
 
-    context = SimpleNamespace()  # 注册阶段不触碰上下文，空壳即可
+    # 注册阶段不触碰上下文：data_dir 仅被 system.health 惰性读取，空壳给个占位
+    context = SimpleNamespace(data_dir=None)
     router = build_router(context, shutdown=lambda: None)  # type: ignore[arg-type]
     assert set(router.method_names) == _schema_methods(schema_dir)
 

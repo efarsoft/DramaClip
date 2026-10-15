@@ -51,6 +51,39 @@ export interface GpuInfo {
   readonly name: string;
   readonly driver_version: string;
   readonly max_cuda_version: string;
+  /** 总显存 MiB（未检出为 0）。 */
+  readonly memory_total_mb: number;
+  /** 算力档 compute capability（如 "5.2"；老驱动查不到为空串）。 */
+  readonly compute_cap: string;
+}
+
+/** 单项 GPU 能力结论：ok=硬件够；ready=连运行时也装好即开即用。 */
+export interface DeviceCap {
+  readonly ok: boolean;
+  readonly ready: boolean;
+  readonly hint: string;
+}
+
+/** 驱动引导：needed=true 时前端展示下载入口与原因。 */
+export interface DriverGuidance {
+  readonly needed: boolean;
+  readonly url: string;
+  readonly min_driver: string;
+  readonly reason: string;
+}
+
+/** 设备档位与各引擎能力结论（system.health.device_profile，现算纯函数）。 */
+export interface DeviceProfile {
+  readonly tier: 'none' | 'low' | 'entry' | 'mid' | 'high';
+  readonly tier_label: string;
+  readonly vendor: string;
+  readonly gpu_name: string;
+  readonly memory_total_mb: number;
+  readonly max_cuda_version: string;
+  readonly cuda_runtime_installed: boolean;
+  readonly caps: Record<string, DeviceCap>;
+  readonly driver_guidance: DriverGuidance;
+  readonly recommendation: string;
 }
 
 /** system.health 返回体（扩展字段按需出现） */
@@ -61,6 +94,7 @@ export interface HealthResult {
   readonly ffmpeg_version: string;
   readonly gpu?: string;
   readonly gpu_info?: GpuInfo;
+  readonly device_profile?: DeviceProfile;
   readonly vram_free_mb?: number;
   readonly disk_free_gb?: number;
   readonly ram_total_gb?: number;

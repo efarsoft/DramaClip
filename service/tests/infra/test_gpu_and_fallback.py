@@ -163,3 +163,62 @@ def test_explicit_compute_type_is_respected_on_gpu(monkeypatch) -> None:
     _ComputeRecorder.created.clear()
     FasterWhisperEngine("base", device="cuda", compute_type="float16")._ensure_model()
     assert _ComputeRecorder.created == [("cuda", "float16")]
+
+
+# ── 设备分档与能力结论（device_profile 纯函数） ──
+
+from dramaclip.infra import device_profile  # noqa: E402
+
+
+def test_tier_of_vram_thresholds() -> None:
+    assert device_profile.tier_of("none", 8192) == "none"
+    assert device_profile.tier_of("nvidia", 4096) == "low"
+    assert device_profile.tier_of("nvidia", 8192) == "entry"
+    assert device_profile.tier_of("nvidia", 16384) == "mid"
+    assert device_profile.tier_of("nvidia", 24576) == "high"
+    assert device_profile.tier_of("nvidia", 0) == "low"
+
+
+def test_profile_caps_and_runtime_layering() -> None:
+    snap = {
+        "vendor": "nvidia",
+        "name": "Quadro M4000",
+        "memory_total_mb": 8192,
+        "max_cuda_version": "13.0",
+    }
+    prof = device_profile.profile(snap, cuda_runtime_installed=False)
+    assert prof["tier"] == "entry"
+    assert prof["caps"]["faster_whisper_gpu"]["ok"] is True
+    assert prof["caps"]["faster_whisper_gpu"]["ready"] is False  # 运行库未装
+    ready = device_profile.profile(snap, cuda_runtime_installed=True)
+    assert ready["caps"]["faster_whisper_gpu"]["ready"] is True
+    # 8GB 显存够 4B 档、不够 8B 档
+    assert prof["caps"]["local_visual_4b"]["ok"] is True
+    assert prof["caps"]["local_visual_8b"]["ok"] is False
+    # torch 系运行时（P2）一律 ready=False 并带说明
+    assert prof["caps"]["demucs_gpu"]["ready"] is False
+    assert "torch" in prof["caps"]["demucs_gpu"]["hint"]
+
+
+def test_profile_driver_guidance_when_cuda_too_old() -> None:
+    snap = {
+        "vendor": "nvidia",
+        "name": "Quadro K2200",
+        "memory_total_mb": 4096,
+        "max_cuda_version": "11.0",
+    }
+    prof = device_profile.profile(snap, cuda_runtime_installed=False)
+    assert prof["driver_guidance"]["needed"] is True
+    assert prof["driver_guidance"]["url"].startswith("https://")
+    assert prof["caps"]["faster_whisper_gpu"]["ok"] is False
+    assert prof["tier"] == "low"
+
+
+def test_profile_none_vendor_recommends_cloud() -> None:
+    prof = device_profile.profile(
+        {"vendor": "none", "name": "", "memory_total_mb": 0, "max_cuda_version": ""},
+        cuda_runtime_installed=False,
+    )
+    assert prof["tier"] == "none"
+    assert "云端" in prof["recommendation"]
+    assert prof["driver_guidance"]["needed"] is False

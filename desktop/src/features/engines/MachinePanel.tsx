@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'antd';
-import type { HealthResult, ModelInfo } from '@dramaclip/protocol';
+import type { DeviceProfile, HealthResult, ModelInfo } from '@dramaclip/protocol';
 import { indexttsApi, runtimeApi, systemApi } from '../../services/client';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
@@ -60,6 +60,7 @@ export function MachinePanel({ models }: { models: readonly ModelInfo[] }): Reac
           void navigate('/engines/tts');
         }}
       />
+      {health?.device_profile !== undefined && <TierLine profile={health.device_profile} />}
       {verdict.verdict !== 'unknown' && <VerdictLine verdict={verdict} maxSizeGb={maxSizeGb} />}
       <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
         本卡回答硬件「装得下 / 跑得动」与两个运行环境在不在；修复动作各有其家：CUDA
@@ -194,7 +195,7 @@ function specCellsOf(health: HealthResult | null): { label: string; value: strin
     {
       label: '显卡',
       value: gpu?.ready
-        ? `${gpu.name}${gpu.max_cuda_version !== '' ? ` · CUDA ${gpu.max_cuda_version}` : ''}`
+        ? `${gpu.name}${gpu.memory_total_mb > 0 ? ` · ${Math.round(gpu.memory_total_mb / 1024)}GB` : ''}${gpu.max_cuda_version !== '' ? ` · CUDA ${gpu.max_cuda_version}` : ''}`
         : '未检测到 NVIDIA · 走 CPU',
     },
     {
@@ -273,6 +274,67 @@ function VerdictLine({
     </div>
   );
 }
+
+/** 设备档位行：显存分档 + GPU 引擎能力结论 + 驱动引导（needed 才给下载入口）。 */
+function TierLine({ profile }: { profile: DeviceProfile }): ReactElement {
+  const vram =
+    profile.memory_total_mb > 0 ? `${String(Math.round(profile.memory_total_mb / 1024))}GB 显存` : '';
+  const caps = profile.caps;
+  const readyList = Object.entries(caps)
+    .filter(([, cap]) => cap.ready)
+    .map(([key]) => CAP_LABEL[key]);
+  const okList = Object.entries(caps)
+    .filter(([, cap]) => cap.ok && !cap.ready)
+    .map(([key]) => CAP_LABEL[key]);
+  const tail =
+    readyList.length > 0
+      ? `GPU 加速已生效：${readyList.join('、')}`
+      : okList.length > 0
+        ? `硬件满足但待运行时：${okList.join('、')}`
+        : '';
+  const dot = readyList.length > 0 ? tokens.colorSuccess : okList.length > 0 ? tokens.colorWarning : tokens.textTertiary;
+  return (
+    <div
+      style={{
+        marginTop: tokens.spaceMd,
+        paddingTop: tokens.spaceMd,
+        borderTop: `1px solid ${tokens.borderSecondary}`,
+        display: 'flex',
+        alignItems: 'center',
+        gap: tokens.spaceSm,
+        flexWrap: 'wrap',
+        fontSize: tokens.text.meta.size,
+        lineHeight: tokens.text.meta.leading,
+      }}
+    >
+      <span style={{ width: 7, height: 7, borderRadius: tokens.radiusThumb, background: dot, flexShrink: 0 }} />
+      <span style={{ color: tokens.textSecondary }}>
+        {`${profile.tier_label}${vram !== '' ? ` · ${vram}` : ''} · ${profile.recommendation}${tail !== '' ? ` · ${tail}` : ''}`}
+      </span>
+      {profile.driver_guidance.needed && (
+        <Button
+          size="small"
+          type="link"
+          style={{ padding: 0, height: 'auto' }}
+          onClick={() => {
+            void window.open(profile.driver_guidance.url, '_blank');
+          }}
+        >
+          更新驱动（需 {profile.driver_guidance.min_driver}+）
+        </Button>
+      )}
+    </div>
+  );
+}
+
+const CAP_LABEL: Record<string, string> = {
+  faster_whisper_gpu: '转写加速',
+  indextts2_gpu: '音色克隆',
+  demucs_gpu: '人声分离',
+  local_visual_2b: '视觉 2B',
+  local_visual_4b: '视觉 4B',
+  local_visual_8b: '视觉 8B',
+};
 
 /** registry 全部本地模型中的最大体积（GB）。 */
 function maxLocalModelSizeGb(models: readonly ModelInfo[]): number | undefined {

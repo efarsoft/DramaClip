@@ -34,6 +34,7 @@ def build_router(context: AppContext, shutdown: Callable[[], None]) -> Router:
         service_version=__version__,
         protocol_version=PROTOCOL_VERSION,
         shutdown=shutdown,
+        data_dir=context.data_dir,
     )
     project.register(router, context)
     prompts.register(router, context)

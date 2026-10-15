@@ -6,7 +6,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from dramaclip.infra import gpu, machine
+from dramaclip.infra import device_profile, gpu, machine
+from dramaclip.infra.model_manager import cuda_runtime
 from dramaclip.infra.ffmpeg import binaries
 from dramaclip.transport.rpc import Router
 
@@ -19,18 +20,24 @@ def register(
     service_version: str,
     protocol_version: int,
     shutdown: Callable[[], None],
+    data_dir: Any = None,
 ) -> None:
-    """注册 system.* 方法。"""
+    """注册 system.* 方法。data_dir 供设备档位读 CUDA 运行库安装态。"""
 
     def ping(_params: dict[str, Any]) -> dict[str, Any]:
         return {"service_version": service_version, "protocol_version": protocol_version}
 
     def health(params: dict[str, Any]) -> dict[str, Any]:
         force_refresh = bool(params.get("refresh"))
+        gpu_snapshot = gpu.snapshot(force=force_refresh)
         return {
             "status": "ok",
             "uptime_s": round(time.monotonic() - _STARTED_AT, 1),
-            "gpu_info": gpu.snapshot(force=force_refresh),
+            "gpu_info": gpu_snapshot,
+            "device_profile": device_profile.profile(
+                gpu_snapshot,
+                cuda_runtime.status(data_dir)["installed"] if data_dir is not None else False,
+            ),
             "ram_total_gb": machine.specs(force=force_refresh).get("ram_total_gb"),
             "ram_free_gb": machine.specs().get("ram_free_gb"),
             "disk_free_gb": machine.specs().get("disk_free_gb"),

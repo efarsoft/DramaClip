@@ -53,6 +53,7 @@ export function gpuSummary(info: GpuInfo | null): string {
   if (info.vendor !== 'nvidia') return '未检测到 NVIDIA 显卡，转写将以 CPU 运行';
   const short = info.name.replace(/^NVIDIA\s+/i, '');
   const parts = [short !== '' ? short : 'NVIDIA'];
+  if (info.memory_total_mb > 0) parts.push(`${String(Math.round(info.memory_total_mb / 1024))}GB`);
   if (info.driver_version !== '') parts.push(`驱动 ${info.driver_version}`);
   if (info.max_cuda_version !== '') parts.push(`CUDA 上限 ${info.max_cuda_version}`);
   return parts.join(' · ');

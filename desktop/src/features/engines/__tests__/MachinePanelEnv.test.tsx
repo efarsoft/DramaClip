@@ -44,10 +44,27 @@ const NVIDIA_HEALTH: HealthResult = {
     name: 'RTX 4060',
     driver_version: '572.10',
     max_cuda_version: '12.8',
+    memory_total_mb: 8188,
+    compute_cap: '8.9',
   },
   ram_total_gb: 32,
   ram_free_gb: 16,
   disk_free_gb: 200,
+  device_profile: {
+    tier: 'entry',
+    tier_label: '标准（6-11GB 显存）',
+    vendor: 'nvidia',
+    gpu_name: 'RTX 4060',
+    memory_total_mb: 8188,
+    max_cuda_version: '12.8',
+    cuda_runtime_installed: false,
+    caps: {
+      faster_whisper_gpu: { ok: true, ready: false, hint: '' },
+      demucs_gpu: { ok: true, ready: false, hint: 'torch CUDA 运行时接入后生效' },
+    },
+    driver_guidance: { needed: false, url: 'https://x', min_driver: '551', reason: '' },
+    recommendation: '本地 GPU 引擎可启用（安装 CUDA 运行库后生效）',
+  },
 };
 
 const NO_GPU_HEALTH: HealthResult = { ...NVIDIA_HEALTH, gpu_info: undefined };
@@ -63,6 +80,35 @@ function renderPanel(health: HealthResult = NVIDIA_HEALTH): void {
     </MemoryRouter>,
   );
 }
+
+describe('总览页 · 设备档位行', () => {
+  afterEach(cleanup);
+
+  it('health 带 device_profile → 档位标签+推荐文案常驻', async () => {
+    renderPanel();
+    expect(await screen.findByText(/标准（6-11GB 显存）/)).toBeTruthy();
+    expect(await screen.findByText(/本地 GPU 引擎可启用/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /更新驱动/ })).toBeNull();
+  });
+
+  it('驱动过老 → 给更新驱动入口', async () => {
+    renderPanel({
+      ...NVIDIA_HEALTH,
+      device_profile: {
+        ...NVIDIA_HEALTH.device_profile!,
+        tier: 'low',
+        tier_label: '入门（<6GB 显存）',
+        driver_guidance: {
+          needed: true,
+          url: 'https://nvidia.cn/drivers',
+          min_driver: '551',
+          reason: '驱动支持的 CUDA 上限低于 12',
+        },
+      },
+    });
+    expect(await screen.findByRole('button', { name: /更新驱动（需 551\+）/ })).toBeTruthy();
+  });
+});
 
 describe('总览页 · 运行环境状态行', () => {
   afterEach(cleanup);

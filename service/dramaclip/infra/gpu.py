@@ -52,14 +52,36 @@ def parse_max_cuda(output: str) -> str:
     return match.group(1) if match else ""
 
 
+_PENDING_FIELDS: dict[str, object] = {
+    "ready": False,
+    "vendor": "unknown",
+    "name": "",
+    "driver_version": "",
+    "max_cuda_version": "",
+    "memory_total_mb": 0,
+    "compute_cap": "",
+}
+
+
 def detect() -> dict[str, object]:
     """同步探测（阻塞，最长 ~20s）：仅由 prefetch 后台线程调用。"""
-    name = driver = max_cuda = ""
+    name = driver = max_cuda = compute_cap = ""
+    memory_total_mb = 0
     for smi in _smi_paths():
         try:
-            query = ["--query-gpu=name,driver_version", "--format=csv,noheader,nounits"]
-            name, driver = parse_query_output(_run(smi, query, 10.0))
+            # compute_cap 老驱动可能不支持该字段——与常规查询分开跑，缺了不影响其余
+            query = [
+                "--query-gpu=name,driver_version,memory.total",
+                "--format=csv,noheader,nounits",
+            ]
+            head = _run(smi, query, 10.0).strip().splitlines()
+            fields = [part.strip() for part in head[0].split(",")] if head else []
+            name = fields[0] if len(fields) > 0 else ""
+            driver = fields[1] if len(fields) > 1 else ""
+            memory_total_mb = _to_int_mb(fields[2] if len(fields) > 2 else "")
             max_cuda = parse_max_cuda(_run(smi, [], 10.0))
+            cap_out = _run(smi, ["--query-gpu=compute_cap", "--format=csv,noheader"], 10.0)
+            compute_cap = cap_out.strip().splitlines()[0].strip() if cap_out.strip() else ""
             break
         except (OSError, subprocess.SubprocessError):
             continue
@@ -70,7 +92,14 @@ def detect() -> dict[str, object]:
         "name": name,
         "driver_version": driver,
         "max_cuda_version": max_cuda,
+        "memory_total_mb": memory_total_mb,
+        "compute_cap": compute_cap,
     }
+
+
+def _to_int_mb(raw: str) -> int:
+    digits = re.sub(r"[^0-9]", "", raw)
+    return int(digits) if digits else 0
 
 
 def snapshot(force: bool = False) -> dict[str, object]:
@@ -82,13 +111,7 @@ def snapshot(force: bool = False) -> dict[str, object]:
         if _CACHE is not None:
             return dict(_CACHE)
     prefetch()
-    return {
-        "ready": False,
-        "vendor": "unknown",
-        "name": "",
-        "driver_version": "",
-        "max_cuda_version": "",
-    }
+    return dict(_PENDING_FIELDS)
 
 
 def prefetch() -> None:
