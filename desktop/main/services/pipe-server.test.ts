@@ -112,4 +112,75 @@ describe('createPipeServer', () => {
     await closed;
     client.close();
   });
+
+  it('第二条连接顶不掉在用的认证连接', async () => {
+    // 回归钉：旧实现在 destroy 后来者后继续执行，把 this.socket 换成了这条已销毁的
+    // 假连接——真服务的响应再也收不到，pending 全判超时，还顺带误报一次断连。
+    const disconnected = vi.fn();
+    const server = createPipeServer({
+      token: TOKEN,
+      appVersion: '2.0.0-test',
+      onClientReady: vi.fn(),
+      onClientDisconnect: disconnected,
+      onNotification: vi.fn(),
+    });
+    servers.push(server);
+    await server.listening;
+
+    const first = new TestClient(server.address);
+    first.send({ type: 'hello', token: TOKEN, service_version: '2.0.0', protocol_version: 1 });
+    await first.waitForLine((message) => message.type === 'hello-ack');
+
+    const second = new TestClient(server.address);
+    const rejected = new Promise<void>((resolve) => {
+      second.socket.on('close', () => { resolve(); });
+    });
+    second.socket.on('error', () => undefined); // 立刻被拒时客户端可能吃到 ECONNRESET
+    second.send({ type: 'hello', token: TOKEN, service_version: '2.0.0', protocol_version: 1 });
+    await rejected;
+
+    const ping = server.call('system.ping', {}, 3_000);
+    const request = await first.waitForLine((message) => message.method === 'system.ping');
+    first.send({ jsonrpc: '2.0', id: request.id, result: { pong: 1 } });
+    await expect(ping).resolves.toEqual({ pong: 1 });
+    expect(disconnected).not.toHaveBeenCalled();
+
+    first.close();
+    second.close();
+  });
+
+  it('上一条连接的残帧不混进新连接的请求', async () => {
+    // 回归钉：分帧器曾是服务端实例级共享——A 没收完的半行会接到 B 的字节上，
+    // 拼出一条 B 从未发过的请求（伪造通知/串号响应都从这里来）。
+    const notifications: string[] = [];
+    const server = createPipeServer({
+      token: TOKEN,
+      appVersion: '2.0.0-test',
+      onClientReady: vi.fn(),
+      onClientDisconnect: vi.fn(),
+      onNotification: (method) => { notifications.push(method); },
+    });
+    servers.push(server);
+    await server.listening;
+
+    const first = new TestClient(server.address);
+    first.send({ type: 'hello', token: TOKEN, service_version: '2.0.0', protocol_version: 1 });
+    await first.waitForLine((message) => message.type === 'hello-ack');
+    first.socket.write('{"jsonrpc":"2.0","method":"log.append"'); // 故意不写完一行
+    const firstClosed = new Promise<void>((resolve) => {
+      first.socket.on('close', () => { resolve(); });
+    });
+    first.socket.on('error', () => undefined);
+    first.close();
+    await firstClosed;
+
+    const second = new TestClient(server.address);
+    second.send({ type: 'hello', token: TOKEN, service_version: '2.0.0', protocol_version: 1 });
+    await second.waitForLine((message) => message.type === 'hello-ack');
+    second.socket.write(',"params":{"message":"forged"}}\n'); // 续上 A 的半行
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    expect(notifications).toEqual([]);
+    second.close();
+  });
 });

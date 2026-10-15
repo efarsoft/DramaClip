@@ -45,7 +45,6 @@ class PipeServerImpl implements PipeServer {
   private addressValue = '';
   private readonly options: PipeServerOptions;
   private readonly pending = new Map<string, PendingCall>();
-  private readonly decode = createLineDecoder();
   private readonly server: net.Server;
   private socket: net.Socket | null = null;
   private authed = false;
@@ -76,38 +75,45 @@ class PipeServerImpl implements PipeServer {
   }
 
   private acceptClient(client: net.Socket): void {
-    if (this.socket !== null && !this.socket.destroyed) client.destroy(); // 单连接
+    if (this.socket !== null && !this.socket.destroyed) {
+      // 单连接：后来者拒接，且绝不顶掉在用的那条——否则真服务的响应会被写进
+      // 这条已销毁的假连接，pending 全数错判成超时（劫持只需一次重连尝试）。
+      client.destroy();
+      return;
+    }
     this.socket = client;
     this.authed = false;
+    // 分帧器跟着连接走：上一条连接的残帧不许混进新连接的第一个请求
+    const decode = createLineDecoder();
     client.setEncoding('utf8');
     this.helloTimer = setTimeout(() => client.destroy(), HELLO_TIMEOUT_MS);
     client.on('data', (chunk: string) => {
-      for (const line of this.decode(chunk)) this.handleLine(line);
+      for (const line of decode(chunk)) this.handleLine(line, client);
     });
     client.on('error', () => client.destroy());
     client.on('close', () => {
-      this.handleDisconnect();
+      this.handleDisconnect(client);
     });
   }
 
-  private handleLine(line: string): void {
+  private handleLine(line: string, client: net.Socket): void {
     if (line.length > MAX_LINE_BYTES) {
-      this.socket?.destroy();
+      client.destroy();
       return;
     }
     let message: Record<string, unknown>;
     try {
       message = JSON.parse(line) as Record<string, unknown>;
     } catch {
-      this.socket?.destroy();
+      client.destroy();
       return;
     }
     if (message.type === 'hello') {
-      this.handleHello(message);
+      this.handleHello(message, client);
       return;
     }
     if (!this.authed) {
-      this.socket?.destroy(); // 认证前只接受 hello
+      client.destroy(); // 认证前只接受 hello
       return;
     }
     if (typeof message.method === 'string') {
@@ -121,7 +127,7 @@ class PipeServerImpl implements PipeServer {
     this.settlePending(message);
   }
 
-  private handleHello(message: Record<string, unknown>): void {
+  private handleHello(message: Record<string, unknown>, client: net.Socket): void {
     const serviceVersion = message.service_version;
     const protocolVersion = message.protocol_version;
     const valid =
@@ -129,7 +135,7 @@ class PipeServerImpl implements PipeServer {
       typeof serviceVersion === 'string' &&
       typeof protocolVersion === 'number';
     if (!valid) {
-      this.socket?.destroy();
+      client.destroy();
       return;
     }
     this.authed = true;
@@ -166,7 +172,10 @@ class PipeServerImpl implements PipeServer {
     return true;
   }
 
-  private handleDisconnect(): void {
+  private handleDisconnect(client: net.Socket): void {
+    // 迟到的 close 事件来自已被替换/拒接的连接：当前连接还活着，不许清状态
+    //（否则 pending 全被拒、onClientDisconnect 误报，正在跑的任务当场判死）
+    if (this.socket !== client) return;
     if (this.helloTimer !== null) {
       clearTimeout(this.helloTimer);
       this.helloTimer = null;
