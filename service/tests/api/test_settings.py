@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 from dramaclip.api import settings as settings_api
+from dramaclip.infra import config
 from dramaclip.infra.storage.repos import settings as settings_repo
 from dramaclip.transport.rpc import Router, RpcRequest
 
@@ -83,3 +86,62 @@ def test_update_treats_the_sentinel_as_keep_current(
     assert result == {"ok": True, "updated": 1}
     assert settings_repo.get_all(memory_db)["llm.api_key"] == "sk-real-secret"
     assert harness.context.settings["llm.api_key"] == "sk-real-secret"  # type: ignore[attr-defined]
+
+
+# ── 设置键治理：登记的键才有人能设，密钥类一律不得明文出仓 ──────────────
+
+# `tts.voice` 是引擎分键（tts.voice.kokoro / .edge）之前的全局旧键，代码里留着只为
+# 读升级前的旧库。它**故意不登记**：登记等于在界面上复活一个没人听的开关。
+_LEGACY_READ_ONLY_KEYS = frozenset({"tts.voice"})
+_KEY_READ = re.compile(
+    r"(?:settings|_settings|context_settings|ctx_settings)"
+    r"""\s*(?:\.get\(|\[)\s*["']([a-z0-9_]+\.[a-z0-9_.]+)["']"""
+)
+
+
+def _package_root() -> Path:
+    """`dramaclip/` 包根（config.py 在 infra 下，往上两层）。"""
+    return Path(config.__file__).resolve().parent.parent
+
+
+def test_every_settings_key_read_in_code_is_registered() -> None:
+    """代码里读的键必须能在 DEFAULTS 里找到名字（`docs/service/03` 第 2 节的字面化）。
+
+    没登记的键有三重后果，每一条本仓都真中过：`settings.update` 按未知键拒绝，
+    界面上永远写不进（`llm.timeout_s` 2026-10-06 起就是死的）；出参脱敏的判据按登记
+    面走，`vision.cloud_api_key` 因此明文回显过；读它的代码只能靠猜默认值
+    （`tts.model` 当年的注释就写了这句）。这条把「键表是真相源」从注释升级成门禁。
+    """
+    offenders: list[str] = []
+    root = _package_root()
+    for source in sorted(root.rglob("*.py")):
+        for lineno, line in enumerate(
+            source.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            for match in _KEY_READ.finditer(line):
+                key = match.group(1)
+                if key in config.DEFAULTS or key in _LEGACY_READ_ONLY_KEYS:
+                    continue
+                offenders.append(f"{source.relative_to(root)}:{lineno} {key}")
+    assert offenders == [], (
+        "读到未登记的设置键（界面上设不了、脱敏也罩不住）：" + "; ".join(offenders)
+    )
+
+
+def test_no_registered_secret_key_escapes_the_mask(memory_db: sqlite3.Connection) -> None:
+    """按**登记面**穷举密钥类键，逐个验脱敏——逐个点名写死就是漏键的成因。
+
+    上一条 `test_get_replaces_secret_values_with_the_sentinel` 手工列了三个键，
+    第四个（`vision.cloud_api_key`，image 域启用即镜像写入）就这么漏过去了。
+    """
+    secrets = [key for key in config.DEFAULTS if settings_api._is_secret(key)]
+    assert "vision.cloud_api_key" in secrets, (
+        "vision.cloud_api_key 必须仍被认作密钥（它就在 DEFAULTS 里，判据却按尾段认）"
+    )
+    harness = Harness(memory_db, {key: "sk-real-secret" for key in secrets})
+
+    projected = harness.rpc("settings.get", {})
+
+    leaked = [key for key in secrets if projected[key] != settings_api.MASK_SENTINEL]
+    assert leaked == [], f"这些密钥类键原样出仓了：{leaked}"
+    assert "sk-real-secret" not in json.dumps(projected)

@@ -21,8 +21,16 @@ _ERR_BAD_VALUE = -32002
 MASK_SENTINEL = "••••••••"
 
 
+#: 密钥类键的后缀判据。按**尾段**认，不按「点分层级」认——
+#: `vision.cloud_api_key`（engine_configs 的 image 域镜像写入）尾段是
+#: `cloud_api_key`，旧判据 `.api_key` 匹配不到它，实测 settings.get 对它原样回显明文
+#: （同期 `llm.api_key` 出掩码）。键名风格混用是既成事实，脱敏判据必须跟着事实走。
+_SECRET_SUFFIXES = ("api_key", "token")
+
+
 def _is_secret(key: str) -> bool:
-    return key.endswith((".api_key", ".token"))
+    tail = key.rsplit(".", 1)[-1]
+    return tail.endswith(_SECRET_SUFFIXES)
 
 
 def register(router: Router, context: AppContext) -> None:

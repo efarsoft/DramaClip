@@ -50,10 +50,24 @@ DEFAULTS: dict[str, str] = {
     "llm.base_url": "",
     "llm.api_key": "",
     "llm.model": "",
+    # 空 = 各调用点自带默认（chat 60s / 文案与金句更长）。不登记就没人能设：
+    # settings.update 拒未知键，实测本仓 2026-10-06 之后一直是「代码能读、界面上写不进」。
+    "llm.timeout_s": "",
+    # 视觉云端会话（OpenAI 兼容端点）：tts/image 域之外由 engine_configs 的 image
+    # 域启用即镜像写入（见 api/engine_configs._MIRROR）。原先这四个键只存在于库里、
+    # DEFAULTS 里没有——`vision.cloud_api_key` 因而不是「已登记的设置键」，
+    # settings.get 的脱敏判据也就没覆盖到它（实测明文回显，本次修）。
+    "vision.cloud": "",
+    "vision.cloud_base_url": "",
+    "vision.cloud_api_key": "",
+    "vision.cloud_model": "",
     "tts.engine": "edge",
     # 音色按引擎独立成键：两引擎音色体系互不相通（Kokoro 音色名 / 微软官方名）
     "tts.voice.kokoro": "zf_001",
     "tts.voice.edge": "zh-CN-XiaoxiaoNeural",
+    # 语速（"1.1" 这类倍率字符串）：空 = 引擎默认。同 tts.model 的口径——
+    # 读它的代码存在，键就必须在这里有名字。
+    "tts.speed": "",
     "narration.style_id": "auto",
     # 每模式的方案数 K（规格 §4.3「方案数 K 」的全局默认；项目级覆盖走 projects.settings）
     "narration.variants_per_mode": "1",
