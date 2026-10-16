@@ -158,7 +158,7 @@ def test_retries_once_then_raises(llm: Any) -> None:
 def test_unconfigured_llm_raises_before_prompt(llm: Any) -> None:
     settings = dict(_SETTINGS)
     settings["llm.model"] = ""
-    with pytest.raises(LlmUnavailable, match="文案必须由编剧模型产出"):
+    with pytest.raises(LlmUnavailable, match="解说文案由模型产出"):
         copywriter.write_plan_copy(
             _plan(), _MATERIAL, settings, mode_label=_MODE_LABEL, angle_block=""
         )

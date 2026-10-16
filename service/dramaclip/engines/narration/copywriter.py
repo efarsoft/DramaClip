@@ -180,13 +180,7 @@ def write_plan_copy(
     if not plan.narration_texts:
         return plan
     # 顺序要紧：未配置必须先于「缺少项目名」抛出，否则报错指向错的门。
-    llm = client_for(
-        settings,
-        min_timeout_s=COPY_LLM_TIMEOUT_S,
-        unconfigured_message=(
-            "LLM 未配置：解说文案必须由编剧模型产出（已取消模板兜底），请在「引擎」页配置文本模型"
-        ),
-    )
+    llm = client_for(settings, min_timeout_s=COPY_LLM_TIMEOUT_S, site="解说文案")
     project_name = str(settings.get("_project_name") or "").strip()
     if not project_name:
         raise ValueError("缺少项目名：编剧需要剧名作为称谓")

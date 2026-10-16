@@ -156,9 +156,7 @@ def score_variants(
         format_variant(index, row) for index, row in enumerate(rows, start=1)
     )
     client = client_for(
-        settings,
-        min_timeout_s=SCORING_LLM_TIMEOUT_S,
-        unconfigured_message="LLM 未配置：文案评分由模型产出，请先在「引擎」页配置文本模型",
+        settings, min_timeout_s=SCORING_LLM_TIMEOUT_S, site="文案评分"
     )
     system = (
         llm_prompts.system_override(settings, "prompt.variant_scoring_system")

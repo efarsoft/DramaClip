@@ -180,11 +180,7 @@ def rewrite(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     style = str(params.get("style") or "paraphrase")
     if style not in _REWRITE_PROMPTS:
         raise RpcDomainError(_ERR_BAD_PARAM, f"未知改写风格: {style}")
-    llm = client_for(
-        context.settings,
-        min_timeout_s=_REWRITE_TIMEOUT_S,
-        unconfigured_message="LLM 未配置：文案改写由模型完成，请先在「引擎」页配置文本模型",
-    )
+    llm = client_for(context.settings, min_timeout_s=_REWRITE_TIMEOUT_S, site="文案改写")
     system = "你是影视解说文案改写助手。只改写，不创作新剧情；只输出 JSON。"
     user = (
         _REWRITE_PROMPTS[style]

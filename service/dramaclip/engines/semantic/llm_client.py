@@ -40,6 +40,8 @@ class LlmConfig:
 
 
 UNCONFIGURED_HINT = "LLM 未配置（需要 base_url 与 model）"
+# 指引句只有一个家：各调用点自带文案时，六句话有六种句式，改一处漏五处。
+_UNCONFIGURED_COPY = "LLM 未配置：{site}由模型产出，请先在「引擎」页配置文本模型"
 
 
 def is_configured(settings: dict[str, str]) -> bool:
@@ -51,9 +53,12 @@ def client_for(
     settings: dict[str, str],
     *,
     min_timeout_s: float = _REQUEST_TIMEOUT_S,
-    unconfigured_message: str | None = None,
+    site: str | None = None,
 ) -> LlmClient:
-    """文本 LLM 客户端的唯一构造入口，未配置即抛 `LlmUnavailable`（文案由调用点给）。
+    """文本 LLM 客户端的唯一构造入口，未配置即抛 `LlmUnavailable`。
+
+    `site` 是这件产物的名字（如「取材角度」），报给用户时说明少了它什么产出不了；
+    上游已用 `is_configured` 拦住的防御性调用可以不填。
 
     超时 = `max(llm.timeout_s, min_timeout_s)`：界面那个键是端点慢容忍，`min_timeout_s`
     是本调用点自量的最短读完时间，两边只能抬高、谁也不许压低别人。`llm.timeout_s`
@@ -61,7 +66,9 @@ def client_for(
     """
     config = LlmConfig.from_settings(settings)
     if not config.configured:
-        raise LlmUnavailable(unconfigured_message or UNCONFIGURED_HINT)
+        raise LlmUnavailable(
+            _UNCONFIGURED_COPY.format(site=site) if site else UNCONFIGURED_HINT
+        )
     raw = str(settings.get("llm.timeout_s") or "").strip()
     try:
         # 0/负数这类误填也按下限：造一个立刻超时的客户端比不造更难查。

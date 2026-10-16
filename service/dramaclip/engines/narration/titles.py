@@ -43,11 +43,7 @@ def generate(
 
     `min_timeout_s` 是下限：界面设的 `llm.timeout_s` 只能把它抬高。
     """
-    client = client_for(
-        settings,
-        min_timeout_s=min_timeout_s,
-        unconfigured_message="LLM 未配置：候选标题由模型生成，请先在「引擎」页配置文本模型",
-    )
+    client = client_for(settings, min_timeout_s=min_timeout_s, site="候选标题")
     texts = [str(t.get("text", "")) for t in plan_data.get("narration_texts", []) if t.get("text")]
     if not texts:
         raise ValueError("该方案没有解说文案，无需生成标题")

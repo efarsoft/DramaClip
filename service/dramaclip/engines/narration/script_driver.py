@@ -91,11 +91,7 @@ def script_dialogue_plan(
     strategy = StrategySpec(platform="douyin")
 
     # 基本功层内置于编剧 system prompt；口味层 directives 注入 user prompt
-    llm = client_for(
-        settings,
-        min_timeout_s=SCRIPT_LLM_TIMEOUT_S,
-        unconfigured_message="LLM 未配置：剧情解说由编剧模型成稿，请先在「引擎」页配置文本模型",
-    )
+    llm = client_for(settings, min_timeout_s=SCRIPT_LLM_TIMEOUT_S, site="剧情解说")
     if min_segments is None:
         min_segments = _resolve_min_segments(settings)
     trace_path = None

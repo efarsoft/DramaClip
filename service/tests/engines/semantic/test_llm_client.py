@@ -49,19 +49,25 @@ def test_client_for_falls_back_when_timeout_setting_unusable() -> None:
 def test_client_for_accepts_local_endpoint_without_api_key() -> None:
     """Ollama / LM Studio 没有密钥也算配置齐全——工厂不得偷偷替 `configured` 加 key 条件。"""
     settings = {"llm.base_url": "http://127.0.0.1:11434/v1", "llm.model": "qwen3"}
-    client = llm_client.client_for(settings, unconfigured_message="不该抛")
+    client = llm_client.client_for(settings, site="取材角度")
     assert client._config.configured  # noqa: SLF001
 
 
-def test_client_for_raises_the_callers_message_when_unconfigured() -> None:
-    """未配置的文案由各点自己给（界面「引擎」页指引是用户看得懂的那句），工厂原样抛出。"""
+def test_site_names_the_product_that_is_missing() -> None:
+    """未配置文案由工厂按 `site` 拼：六处各写一句是六份句式，改一处漏五处。"""
     from dramaclip.engines.semantic.llm_client import LlmUnavailable
 
-    with pytest.raises(LlmUnavailable, match="取材角度由模型选定"):
-        llm_client.client_for(
-            {"llm.base_url": "", "llm.model": ""},
-            unconfigured_message="LLM 未配置：取材角度由模型选定，请先在「引擎」页配置文本模型",
-        )
+    with pytest.raises(LlmUnavailable, match=r"取材角度由模型产出.*「引擎」页配置文本模型"):
+        llm_client.client_for({"llm.base_url": "", "llm.model": ""}, site="取材角度")
+
+
+def test_a_real_site_names_its_own_product() -> None:
+    """真站点报的是自己那件产物：标题没配模型时，用户看到的不该是通用提示。"""
+    from dramaclip.engines.narration import titles
+    from dramaclip.engines.semantic.llm_client import LlmUnavailable
+
+    with pytest.raises(LlmUnavailable, match="候选标题由模型产出"):
+        titles.generate({"narration_texts": [{"id": "n1", "text": "台词"}]}, {})
 
 
 def test_llm_timeout_setting_has_a_single_reader() -> None:
@@ -76,6 +82,13 @@ def test_llm_client_constructed_only_by_the_factory() -> None:
     pattern = re.compile(r"\bLlmClient\(")
     offenders = _scan(pattern, set())
     assert offenders == [], "工厂之外还有 LlmClient 构造点：" + "; ".join(offenders)
+
+
+def test_unconfigured_copy_has_a_single_home() -> None:
+    """「请先在「引擎」页配置文本模型」只许写在工厂里：各点自带文案必然句式漂移。"""
+    pattern = re.compile(r"unconfigured_message|配置文本模型")
+    offenders = _scan(pattern, set())
+    assert offenders == [], "工厂之外还有未配置文案：" + "; ".join(offenders)
 
 
 def test_client_or_none_degrades_instead_of_raising() -> None:

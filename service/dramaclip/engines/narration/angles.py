@@ -141,14 +141,7 @@ def select_angles(
         f"{excluded_block}\n"
         f"台词转写：\n{transcript}"
     )
-    llm = client_for(
-        settings,
-        min_timeout_s=ANGLE_LLM_TIMEOUT_S,
-        unconfigured_message=(
-            "LLM 未配置：取材角度由模型选定（规格 §4.3 角度归模型），"
-            "请先在「引擎」页配置文本模型"
-        ),
-    )
+    llm = client_for(settings, min_timeout_s=ANGLE_LLM_TIMEOUT_S, site="取材角度")
     attempts: list[dict[str, Any]] = []
     briefs: list[AngleBrief] | None = None
     for _ in range(_ATTEMPTS):
