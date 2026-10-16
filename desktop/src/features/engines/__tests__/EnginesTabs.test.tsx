@@ -2,8 +2,8 @@
  * 两段式骨架：卡上每句状态都由传入的 models/reports 折算，不得是组件里写死的常量。
  * 把装好的模型改成未落盘，卡片必须从「就绪」翻成「缺模型」，行内也不给「选为生效」。
  */
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ModelInfo, SelftestResults, VerifyReport } from '@dramaclip/protocol';
 import { TtsTab } from '../TtsTab';
 import { AsrTab } from '../AsrTab';
@@ -63,6 +63,37 @@ const cloudConfig = {
 const noop = (): void => {
   // 渲染测试只验状态，不验写回
 };
+
+/**
+ * jsdom 缺两件真浏览器都有的东西：matchMedia（antd 断点用）与 ResizeObserver（浮层定位用）。
+ * 都是环境假象，不是被测判据——不补就一律炸在挂载上，看不见组件说了什么。
+ */
+beforeAll(() => {
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    dispatchEvent: () => false,
+  }));
+  class NoResizeObserver {
+    observe(): void {
+      // 尺寸变化由真浏览器管，这里什么都不必做
+    }
+
+    unobserve(): void {
+      // 同上
+    }
+
+    disconnect(): void {
+      // 同上
+    }
+  }
+  globalThis.ResizeObserver = NoResizeObserver;
+});
 
 function tts(
   models: readonly ModelInfo[],
@@ -202,6 +233,49 @@ describe('语音识别 ASR · 同构骨架', () => {
     expect(screen.getByText('资产库')).toBeTruthy();
     expect(screen.getAllByText('Whisper Small').length).toBeGreaterThan(0);
     expect(screen.getAllByText('就绪').length).toBeGreaterThan(0);
+  });
+});
+
+describe('语音识别 ASR · 说话人分离三态就地可改', () => {
+  afterEach(() => {
+    cleanup();
+    engineConfigsSeed = [];
+  });
+
+  function local(settings: Record<string, string>, onSave: (patch: Record<string, string>) => void): void {
+    render(
+      <AsrTab
+        models={[]}
+        imported={[]}
+        importError=""
+        machine={specsFromHealth(null)}
+        reports={new Map()}
+        settings={settings}
+        onSave={onSave}
+        onChanged={noop}
+        onVerify={noop}
+        onForget={noop}
+        onImport={noop}
+      />,
+    );
+  }
+
+  it('生效卡给「说话人分离」下拉并回显当前值（登记了却界面上写不进＝死键）', async () => {
+    const onSave = vi.fn();
+    local({ 'asr.engine': 'paraformer', 'asr.diarization': 'auto' }, onSave);
+    const row = screen.getByText('说话人分离').parentElement;
+    if (row === null) throw new Error('「说话人分离」没落在参数行里');
+    expect(within(row).getByText('自动（按引擎能力）')).toBeTruthy();
+    fireEvent.mouseDown(within(row).getByRole('combobox'));
+    fireEvent.click(await screen.findByText('强制开启', {}, { timeout: 5000 }));
+    expect(onSave).toHaveBeenCalledWith({ 'asr.diarization': 'true' });
+  });
+
+  it('云端生效卡同样给这一项（qwen-audio-3.1 系做得到）', async () => {
+    engineConfigsSeed = [cloudConfig];
+    local({ 'asr.engine': 'dashscope_cloud', 'asr.diarization': 'auto' }, noop);
+    await screen.findByText(/云端转写 · 按量计费/, {}, { timeout: 5000 });
+    expect(screen.getByText('说话人分离')).toBeTruthy();
   });
 });
 

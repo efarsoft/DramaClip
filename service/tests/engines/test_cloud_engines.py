@@ -278,3 +278,24 @@ def test_dashscope_asr_diarization_off_and_wordless_model(
     assert segments[0].speaker is None
     assert segments[0].words[0].word == "整句无字级"
     assert segments[0].words[0].start == 0.0 and segments[0].words[0].end == 1.0
+
+
+def test_dashscope_asr_carries_the_key_per_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Key 跟着请求走：`dashscope.api_key` 是进程全局，并发批任务各写一次会互相顶着用。"""
+    import dashscope
+
+    captured: dict[str, Any] = {}
+    _stub_sync_asr(
+        monkeypatch, captured, [[{"begin_time": 0, "end_time": 1000, "text": "一句"}]]
+    )
+    other_job_key = "sk-别的任务"
+    monkeypatch.setattr(dashscope, "api_key", other_job_key)
+    wav = tmp_path / "ep.wav"
+    _write_wav(wav)
+
+    DashscopeCloudAsrEngine(api_key="sk-mine").transcribe(wav)
+
+    assert [call.get("api_key") for call in captured["calls"]] == ["sk-mine", "sk-mine"]
+    assert dashscope.api_key == other_job_key, "全局 Key 被覆写：另一条任务的转写会用错凭据"

@@ -52,6 +52,15 @@ const PARAMS: readonly { key: string; label: string; options: DefaultOptionType[
       { label: '英文', value: 'en' },
     ],
   },
+  {
+    key: 'asr.diarization',
+    label: '说话人分离',
+    options: [
+      { label: '自动（按引擎能力）', value: 'auto' },
+      { label: '强制开启', value: 'true' },
+      { label: '关闭', value: 'false' },
+    ],
+  },
 ];
 
 const CLOUD_NOTE =
@@ -116,7 +125,7 @@ export function AsrTab({
           }
           actions={<CloudTestButton config={activeCloud} domain="asr_cloud" />}
           props={[
-            ...paramProps(settings, onSave, ['asr.language']),
+            ...paramProps(settings, onSave, ['asr.language', 'asr.diarization']),
             { label: '接口地址', value: activeCloud.base_url === '' ? '服务商标准端点' : activeCloud.base_url },
             { label: '密钥', value: activeCloud.api_key_masked },
             { label: '生效时机', value: '保存后下次分析' },
@@ -220,7 +229,7 @@ function ActiveCard({
         </Button>
       ),
     props: [
-      ...paramProps(settings, onSave, ['asr.device', 'asr.language']),
+      ...paramProps(settings, onSave, ['asr.device', 'asr.language', 'asr.diarization']),
       { label: '磁盘实占', value: active === undefined ? '—' : formatBytes(active.size_bytes ?? 0) },
       { label: '生效时机', value: '保存后下次分析' },
     ],

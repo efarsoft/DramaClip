@@ -80,3 +80,56 @@ def test_compute_type_setting_reaches_the_engine(tmp_path: Path) -> None:
     default = runtime._build_transcriber(_settings(), tmp_path)
     assert isinstance(default, FasterWhisperEngine)
     assert default._compute_type == config.DEFAULTS["asr.compute_type"]
+
+
+def test_every_asr_engine_declares_diarization_support(tmp_path: Path) -> None:
+    """每个引擎都要能回答「你能不能做说话人分离」：没有声明位，asr.diarization 就没人认领。"""
+    for engine in _BUILDS:
+        built = runtime._build_transcriber(_settings(**{"asr.engine": engine}), tmp_path)
+        assert isinstance(built.supports_diarization, bool), engine
+
+
+def test_diarization_defaults_to_auto_not_true() -> None:
+    """默认值不能是 true：默认引擎 faster_whisper 做不到的事，登记成真等于许一个假。"""
+    assert config.DEFAULTS["asr.diarization"] == "auto"
+
+
+def test_diarization_auto_follows_the_engine(tmp_path: Path) -> None:
+    """auto = 引擎能做就做：paraformer 挂分离模型，云端按模型族判定。"""
+    paraformer = runtime._build_transcriber(
+        _settings(**{"asr.engine": "paraformer", "asr.diarization": "auto"}), tmp_path
+    )
+    assert paraformer.diarization is True, "paraformer 做得到，auto 就该给它挂上"
+    cloud = runtime._build_transcriber(
+        _settings(
+            **{"asr.engine": "dashscope_cloud", "asr.model": "fun-asr-flash",
+               "asr.diarization": "auto"}
+        ),
+        tmp_path,
+    )
+    assert cloud.supports_diarization is False, "fun-asr 系没有分离字段"
+    assert cloud._diarization is False  # noqa: SLF001 - 同包测试边界
+
+    whisper = runtime._build_transcriber(
+        _settings(**{"asr.engine": "faster_whisper", "asr.diarization": "auto"}), tmp_path
+    )
+    assert whisper.supports_diarization is False
+
+
+def test_diarization_true_on_an_unsupported_engine_fails_loud(tmp_path: Path) -> None:
+    """显式 true 是用户下的命令：引擎做不到必须报错，静默少说话人＝改观众所见所闻。
+
+    少说话人标签会让编剧台词本丢掉「谁在说」，并让自动音色挑选找不到主角。
+    """
+    with pytest.raises(ValueError, match="faster_whisper 不支持说话人分离"):
+        runtime._build_transcriber(
+            _settings(**{"asr.engine": "faster_whisper", "asr.diarization": "true"}), tmp_path
+        )
+
+
+def test_diarization_false_switches_off_a_capable_engine(tmp_path: Path) -> None:
+    """false 是关掉，不是「按默认」：做得到也得听设置。"""
+    paraformer = runtime._build_transcriber(
+        _settings(**{"asr.engine": "paraformer", "asr.diarization": "false"}), tmp_path
+    )
+    assert paraformer.diarization is False

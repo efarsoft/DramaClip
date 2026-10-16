@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from dramaclip.engines.analysis.transcriber import (
@@ -12,6 +13,10 @@ from dramaclip.engines.analysis.transcriber import (
     SenseVoiceEngine,
 )
 from dramaclip.infra import config
+
+_LOGGER = logging.getLogger(__name__)
+
+_CLOUD_ASR_MODEL = "qwen-audio-3.1-asr-flash"
 
 
 class AnalysisRuntime:
@@ -38,30 +43,58 @@ def supported() -> frozenset[str]:
     return frozenset({"faster_whisper", "sensevoice", "paraformer", "dashscope_cloud"})
 
 
+def _resolve_diarization(
+    settings: config.Settings, *, engine: str, supports: bool
+) -> bool:
+    """`asr.diarization` 三态：auto 按引擎能力，true 强制，其余关闭。
+
+    说话人标签决定编剧台词本里的「谁在说」和自动音色挑选找的主角，所以显式 true
+    遇上做不到的引擎必须炸——静默少一层信息就是改观众所见所闻。真值集仍归
+    `config.get_bool` 管，这里只多认一个 auto。
+    """
+    mode = str(settings.get("asr.diarization") or "auto").strip().lower()
+    if mode == "auto":
+        if not supports:
+            _LOGGER.info("asr.diarization=auto：%s 不支持说话人分离，本轮段不带说话人", engine)
+        return supports
+    wanted = config.get_bool(settings, "asr.diarization")
+    if wanted and not supports:
+        raise ValueError(
+            f"{engine} 不支持说话人分离：请把 asr.diarization 改成 auto 或关闭"
+        )
+    return wanted
+
+
 def _build_transcriber(settings: config.Settings, models_dir: Path) -> AsrEngine:
     engine = settings.get("asr.engine", "faster_whisper")
     if engine not in supported():
         available = " / ".join(sorted(supported()))
         raise ValueError(f"未知 ASR 引擎: {engine}（可用: {available}）")
-    if engine == "sensevoice":
-        return SenseVoiceEngine(
-            models_dir=models_dir,
-            device=settings.get("asr.device", "auto"),
-        )
     if engine == "dashscope_cloud":
+        model = settings.get("asr.model", _CLOUD_ASR_MODEL) or _CLOUD_ASR_MODEL
         return DashscopeCloudAsrEngine(
             api_key=settings.get("asr.api_key", ""),
-            model=settings.get("asr.model", "qwen-audio-3.1-asr-flash")
-            or "qwen-audio-3.1-asr-flash",
-            diarization=config.get_bool(settings, "asr.diarization"),
+            model=model,
+            diarization=_resolve_diarization(
+                settings, engine=engine, supports=DashscopeCloudAsrEngine.supports_model(model)
+            ),
         )
     if engine == "paraformer":
-        diarize = config.get_bool(settings, "asr.diarization")
+        diarize = _resolve_diarization(
+            settings, engine=engine, supports=ParaformerEngine.supports_diarization
+        )
         return ParaformerEngine(
             models_dir=models_dir,
             vad_model_dir=models_dir / "asr" / "fsmn-vad" if diarize else None,
             spk_model_dir=models_dir / "asr" / "campplus" if diarize else None,
             num_speakers=config.get_int(settings, "asr.num_speakers"),
+            device=settings.get("asr.device", "auto"),
+        )
+    # 剩下两个引擎没有说话人通道：auto 关、false 关，显式 true 在核验里炸
+    _resolve_diarization(settings, engine=engine, supports=False)
+    if engine == "sensevoice":
+        return SenseVoiceEngine(
+            models_dir=models_dir,
             device=settings.get("asr.device", "auto"),
         )
     model_size = settings.get("asr.model", "base")

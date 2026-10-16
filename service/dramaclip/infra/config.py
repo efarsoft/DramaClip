@@ -42,10 +42,11 @@ DEFAULTS: dict[str, str] = {
     # 云端 TTS 模型名：tts_cloud 域启用即由 engine_configs 镜像写入（同 llm.model）。
     # 不登记在这里，读它的地方就只能靠猜——工厂的 "cosyvoice-v2" 默认值会替业主选模型。
     "tts.model": "",
-    # 说话人分离（仅 paraformer 生效）：聚类自动判人数（1~15），num_speakers>0
-    # 则经 preset_spk_num 指定。分离模型未下载时 funasr 按别名自行拉取（cam++/
-    # fsmn-vad 共约 30MB），资产库登记项可管理下载。
-    "asr.diarization": "true",
+    # 说话人分离三态：auto=有通道的引擎才做（paraformer、云端 qwen-audio-3.1 系），
+    # true=强制（做不到的引擎直接失败，不静默丢标签），其余=关。默认不能写 true：
+    # 默认引擎 faster_whisper 没有说话人通道，写成真是许一个必然落空的效果。
+    # num_speakers>0 经 preset_spk_num 指定人数，0 交给聚类自动估（1~15 人）。
+    "asr.diarization": "auto",
     "asr.num_speakers": "0",
     "subtitle.default_preset": "conflict-impact",
     "subtitle.smart_match": "true",

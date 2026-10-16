@@ -56,6 +56,11 @@ class AsrEngine(Protocol):
     @property
     def name(self) -> str: ...
 
+    @property
+    def supports_diarization(self) -> bool:
+        """能否给转写段打说话人标签——`asr.diarization` 的认领方，做不到必须如实说。"""
+        ...
+
     def transcribe(
         self, wav_path: Path, language: str = "zh", *, hotwords: str = ""
     ) -> list[AsrSegment]: ...
@@ -63,6 +68,8 @@ class AsrEngine(Protocol):
 
 class FasterWhisperEngine:
     """faster-whisper（CTranslate2，CPU 可用，模型自动下载到 models_dir）。"""
+
+    supports_diarization = False  # 该引擎无说话人通道
 
     def __init__(
         self,
@@ -170,6 +177,8 @@ class FasterWhisperEngine:
 class SenseVoiceEngine:
     """SenseVoice（funasr，含 VAD 与情绪标签）。依赖较重（torch），按需安装。"""
 
+    supports_diarization = False  # 情绪有通道，说话人没有：接了分离模型再改声明
+
     def __init__(
         self, model_dir: Path | None = None, *, models_dir: Path | None = None,
         device: str = "auto",
@@ -259,6 +268,7 @@ class ParaformerEngine:
     # （那是另两笔下载），靠间隙本身就是可靠的句边界。
     _SENTENCE_GAP_S = 0.6
 
+    supports_diarization = True  # CAM++ 聚类通道已接线（见类 docstring）
     # CAM++ 权重的仓库实名（registry 同名判据；funasr 本地加载默认找 model.pt）
     _CAMPP_WEIGHT = "campplus_cn_common.bin"
 
@@ -561,6 +571,9 @@ class DashscopeCloudAsrEngine:
     # 单片上限：官方 5 分钟/次，切 4 分钟留合并与边界余量
     _CHUNK_S = 240.0
 
+    # 只有这一族实测回传字级 speaker_id；fun-asr 系没有分离字段，要了也不会给
+    _DIARIZED_MODEL_PREFIX = "qwen-audio-3.1"
+
     def __init__(
         self,
         api_key: str,
@@ -577,13 +590,21 @@ class DashscopeCloudAsrEngine:
     def name(self) -> str:
         return f"dashscope_cloud:{self._model}"
 
+    @classmethod
+    def supports_model(cls, model: str) -> bool:
+        """按模型族判定分离能力——`asr.model` 能在工厂里换，声明就得跟着换。"""
+        return model.startswith(cls._DIARIZED_MODEL_PREFIX)
+
+    @property
+    def supports_diarization(self) -> bool:
+        return self.supports_model(self._model)
+
     def transcribe(
         self, wav_path: Path, language: str = "zh", *, hotwords: str = ""
     ) -> list[AsrSegment]:
         import tempfile
         import wave
 
-        import dashscope
         from dashscope import MultiModalConversation
 
         if self._api_key == "":
@@ -592,7 +613,6 @@ class DashscopeCloudAsrEngine:
             )
         # language/hotwords 同步端点参数名未在官方示例中给出，如实不透传
         # （语种自动检测；热词待文档确认后接）
-        dashscope.api_key = self._api_key
         with wave.open(str(wav_path), "rb") as wf:
             sample_rate = wf.getframerate()
         chunks = self._chunks(wav_path)
@@ -648,6 +668,7 @@ class DashscopeCloudAsrEngine:
             messages=[{"role": "user", "content": [{"audio": f"file://{clip_path}"}]}],
             format="wav",
             sample_rate=str(sample_rate),
+            api_key=self._api_key,  # 逐请求带：SDK 的模块级 api_key 会被并发任务互覆
             **kwargs,
         )
         if rsp.status_code != 200:
