@@ -10,19 +10,21 @@ import type { EngineConfig } from '@dramaclip/protocol';
 import { engineConfigsApi } from '../../services/client';
 import { tokens } from '../../styles/theme';
 import { ConfigModal, type CloudPreset, type FormState } from './CloudConfigModal';
+import { usesSdkEndpoint } from './cloudDomains';
 import type { EngineConfigActions } from './useEngineConfigs';
 
-/** 按域的服务商预设：选中即填接口地址与默认模型；自定义=手填。 */
+/** 按域的服务商预设：选中即填默认模型（消费端点的域还填地址）；自定义=手填。
+ * asr/tts 两域不带地址：转写与配音由服务商 SDK 固定端点发起，地址没有生效路径。 */
 export const CLOUD_PRESETS: Record<string, readonly CloudPreset[]> = {
   asr_cloud: [
-    { label: '阿里百炼 Qwen-Audio 3.1 ASR（默认·说话人分离）', base_url: 'https://dashscope.aliyuncs.com', model: 'qwen-audio-3.1-asr-flash' },
-    { label: '阿里百炼 Fun-ASR Flash（方言强）', base_url: 'https://dashscope.aliyuncs.com', model: 'fun-asr-flash-2026-06-15' },
+    { label: '阿里百炼 Qwen-Audio 3.1 ASR（默认·说话人分离）', base_url: '', model: 'qwen-audio-3.1-asr-flash' },
+    { label: '阿里百炼 Fun-ASR Flash（方言强）', base_url: '', model: 'fun-asr-flash-2026-06-15' },
     { label: '自定义', base_url: '', model: '' },
   ],
   tts_cloud: [
-    { label: '阿里百炼 CosyVoice v3 Flash（新代·情感与方言）', base_url: 'https://dashscope.aliyuncs.com', model: 'cosyvoice-v3-flash' },
-    { label: '阿里百炼 CosyVoice v2（稳定）', base_url: 'https://dashscope.aliyuncs.com', model: 'cosyvoice-v2' },
-    { label: '阿里百炼 Qwen-Audio TTS Flash（新代）', base_url: 'https://dashscope.aliyuncs.com', model: 'qwen-audio-3.0-tts-flash' },
+    { label: '阿里百炼 CosyVoice v3 Flash（新代·情感与方言）', base_url: '', model: 'cosyvoice-v3-flash' },
+    { label: '阿里百炼 CosyVoice v2（稳定）', base_url: '', model: 'cosyvoice-v2' },
+    { label: '阿里百炼 Qwen-Audio TTS Flash（新代）', base_url: '', model: 'qwen-audio-3.0-tts-flash' },
     { label: '自定义', base_url: '', model: '' },
   ],
   image: [
@@ -216,7 +218,7 @@ export function CloudConfigsPane({
         onClick={actions.openAdd}
         style={{ marginTop: tokens.spaceSm }}
       >
-        添加配置（服务商 / 接口地址 / 密钥 / 模型）
+        {`添加配置（${usesSdkEndpoint(domain) ? '服务商 / 密钥 / 模型' : '服务商 / 接口地址 / 密钥 / 模型'}）`}
       </Button>
       <Alert
         type="info"

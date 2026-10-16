@@ -1,9 +1,10 @@
 /** 端点配置弹窗：新增/编辑表单 + 保存前连通性测试；失败原文进内联横幅，不闪一次就消失。
- * 传 presets（按域的服务商预设）时表单顶部出预设下拉——选中即填地址与默认模型。 */
+ * 传 presets（按域的服务商预设）时表单顶部出预设下拉——选中即填默认模型（消费端点的域还填地址）。 */
 import { App as AntdApp, Alert, Button, Input, Modal, Select } from 'antd';
 import { useState, type ChangeEvent, type ReactElement } from 'react';
 import { engineConfigsApi } from '../../services/client';
 import { tokens } from '../../styles/theme';
+import { usesSdkEndpoint } from './cloudDomains';
 
 export interface FormState {
   readonly name: string;
@@ -91,7 +92,10 @@ export function ConfigModal({
   onClose: () => void;
 }): ReactElement {
   const [draft, setDraft] = useState<FormState>(initial);
-  const { testing, testError, test } = useConnectionTest(draft, domain, editingId);
+  // SDK 固定端点的域：地址框不给，旧行里存过的地址也不往外送（送即保存失败）
+  const sdkEndpoint = usesSdkEndpoint(domain);
+  const form: FormState = sdkEndpoint ? { ...draft, base_url: '' } : draft;
+  const { testing, testError, test } = useConnectionTest(form, domain, editingId);
   const field = (key: keyof FormState) => ({
     value: draft[key],
     onChange: (event: ChangeEvent<HTMLInputElement>) => {
@@ -100,7 +104,7 @@ export function ConfigModal({
   });
   return (
     <Modal
-      title="端点配置（OpenAI 兼容）"
+      title={sdkEndpoint ? '云端配置（服务商固定端点）' : '端点配置（OpenAI 兼容）'}
       open
       onCancel={onClose}
       footer={[
@@ -110,7 +114,7 @@ export function ConfigModal({
         <Button key="cancel" onClick={onClose}>
           取消
         </Button>,
-        <Button key="save" type="primary" loading={saving} onClick={() => { onSave(draft); }}>
+        <Button key="save" type="primary" loading={saving} onClick={() => { onSave(form); }}>
           保存
         </Button>,
       ]}
@@ -125,7 +129,7 @@ export function ConfigModal({
             <Select
               size="small"
               style={{ flex: 1 }}
-              placeholder="选预设自动填地址与默认模型"
+              placeholder={sdkEndpoint ? '选预设自动填默认模型' : '选预设自动填地址与默认模型'}
               options={presets.map((preset) => ({ label: preset.label, value: preset.label }))}
               onChange={(label: string) => {
                 const preset = presets.find((item) => item.label === label);
@@ -133,14 +137,14 @@ export function ConfigModal({
                 setDraft({
                   ...draft,
                   name: draft.name === '' ? preset.label : draft.name,
-                  base_url: preset.base_url,
+                  base_url: sdkEndpoint ? '' : preset.base_url,
                   model: preset.model,
                 });
               }}
             />
           </label>
         )}
-        {FIELDS.map((spec) => (
+        {FIELDS.filter((spec) => spec.key !== 'base_url' || !sdkEndpoint).map((spec) => (
           <LabeledInput
             key={spec.key}
             label={spec.label}

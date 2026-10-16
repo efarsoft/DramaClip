@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import inspect
 import json
+import re
 import sqlite3
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -163,6 +165,72 @@ def test_unknown_domain_rejected(memory_db: sqlite3.Connection) -> None:
     assert harness.error_code("engine_configs.list", {"domain": "nope"}) == -32310
 
 
+def test_video_domain_is_gone(memory_db: sqlite3.Connection) -> None:
+    """video 从来没有消费方：镜像表里没它、界面上没它，却能建档能「启用」——启用写完空表。
+
+    留着它等于给业主一个点了没反应的按钮；视觉走的域是 image。
+    """
+    harness = Harness(memory_db, {})
+    for method, params in {
+        "engine_configs.create": {"domain": "video", "name": "x", "api_key": "k", "model": "m"},
+        "engine_configs.list": {"domain": "video"},
+        "engine_configs.test": {"domain": "video", "base_url": "https://x", "model": "m"},
+    }.items():
+        assert harness.error_code(method, params) == -32310, method
+
+
+def test_enabling_a_retired_domain_row_fails_loudly(memory_db: sqlite3.Connection) -> None:
+    """老库里若留着 video 行（这域从前能建档），启用要说清「域不支持」，不许抛 KeyError。"""
+    legacy = configs_repo.create(memory_db, "video", "旧行", "", "sk-x", "m")
+    harness = Harness(memory_db, {})
+    assert harness.error_code("engine_configs.enable", {"id": legacy["id"]}) == -32310
+
+
+def test_domain_without_an_endpoint_rejects_a_base_url(memory_db: sqlite3.Connection) -> None:
+    """asr_cloud/tts_cloud 由服务商 SDK 写死端点：收下地址字段就是「界面能填、后端不认」的死键。
+
+    拒收而不是静默丢弃——业主填了地址却按 SDK 默认端点跑，失败时没人知道为什么。
+    """
+    harness = Harness(memory_db, {})
+    assert harness.error_code(
+        "engine_configs.create",
+        {
+            "domain": "asr_cloud",
+            "name": "x",
+            "base_url": "https://x",
+            "api_key": "k",
+            "model": "m",
+        },
+    ) == -32310
+    created = _create(harness, domain="asr_cloud", base_url="", model="qwen-audio-3.1-asr-flash")
+    assert harness.error_code(
+        "engine_configs.update",
+        {
+            "id": created["id"],
+            "name": "x",
+            "base_url": "https://x",
+            "api_key": "",
+            "model": "m",
+        },
+    ) == -32310
+    # 空地址照旧能建能改：域不是不要这个字段，是这个域不消费它
+    changed = harness.rpc(
+        "engine_configs.update",
+        {"id": created["id"], "name": "改名", "base_url": "", "api_key": "", "model": "m"},
+    )
+    assert changed["name"] == "改名"
+
+
+def test_llm_key_names_have_a_single_home() -> None:
+    """llm.* 三键的写法只许出现在镜像表里：自检构造与镜像写入读同一份，否则改一处漏一处。"""
+    source = inspect.getsource(engine_configs_api)
+    assert sorted(re.findall(r'"(llm\.[a-z_]+)"', source)) == [
+        "llm.api_key",
+        "llm.base_url",
+        "llm.model",
+    ]
+
+
 class _FakeOpenAI(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - http.server 命名约定
         self.rfile.read(int(self.headers.get("Content-Length", "0")))
@@ -220,7 +288,7 @@ def test_test_reports_unreachable_endpoint_without_raising(
 def test_enable_asr_cloud_mirrors_three_keys(memory_db: sqlite3.Connection) -> None:
     settings: dict[str, str] = {}
     harness = Harness(memory_db, settings)
-    config = _create(harness, domain="asr_cloud", model="qwen-audio-3.1-asr-flash")
+    config = _create(harness, domain="asr_cloud", base_url="", model="qwen-audio-3.1-asr-flash")
     harness.rpc("engine_configs.enable", {"id": config["id"]})
     mirrored = settings_repo.get_all(memory_db)
     assert mirrored["asr.engine"] == "dashscope_cloud"
@@ -231,7 +299,7 @@ def test_enable_asr_cloud_mirrors_three_keys(memory_db: sqlite3.Connection) -> N
 def test_enable_tts_cloud_mirrors_three_keys(memory_db: sqlite3.Connection) -> None:
     settings: dict[str, str] = {}
     harness = Harness(memory_db, settings)
-    config = _create(harness, domain="tts_cloud", model="cosyvoice-v2")
+    config = _create(harness, domain="tts_cloud", base_url="", model="cosyvoice-v2")
     harness.rpc("engine_configs.enable", {"id": config["id"]})
     mirrored = settings_repo.get_all(memory_db)
     assert mirrored["tts.engine"] == "cosyvoice_cloud"
