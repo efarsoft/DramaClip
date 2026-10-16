@@ -157,13 +157,32 @@ def cosyvoice_src_dir(data_dir: Path) -> Path:
     return data_dir / "runtimes" / "cosyvoice-src"
 
 
+def _variant_marker(data_dir: Path) -> Path:
+    return venv_dir(data_dir).parent / "tts-venv.torch-variant"
+
+
+def torch_variant(data_dir: Path) -> str:
+    """venv 里 torch 的变体：cuda / cpu / unknown（未装或旧版安装无标记）。
+
+    安装完成时写标记文件（零探针成本——status 是 health 高频端点，不能跑子进程）；
+    判定不允许只看文件在不在：torch 装了但 CUDA 初始化失败的情形由合成 worker
+    的运行时探针诚实回退，这里的变体只是「装的时候选了哪条轮子」。
+    """
+    marker = _variant_marker(data_dir)
+    try:
+        raw = marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        return "unknown"
+    return raw if raw in ("cuda", "cpu") else "unknown"
+
+
 def status(data_dir: Path) -> dict[str, Any]:
     """installed = venv 存在且双栈 import 自检通过（目录在但坏=未装完，可重装修复）。"""
 
     venv = venv_dir(data_dir)
     py = venv / "Scripts" / "python.exe"
     if not py.is_file():
-        return {"installed": False, "dir": str(venv)}
+        return {"installed": False, "dir": str(venv), "torch_variant": "unknown"}
     src = data_dir / "runtimes" / "indextts-src"
     probe_code = (
         f"import sys; sys.path.insert(0, r'{src}'); import indextts, torch"
@@ -173,9 +192,13 @@ def status(data_dir: Path) -> dict[str, Any]:
             [str(py), "-c", probe_code],
             capture_output=True, timeout=90, creationflags=_NO_WINDOW, check=False,
         )
-        return {"installed": probe.returncode == 0, "dir": str(venv)}
+        return {
+            "installed": probe.returncode == 0,
+            "dir": str(venv),
+            "torch_variant": torch_variant(data_dir),
+        }
     except (OSError, subprocess.TimeoutExpired):
-        return {"installed": False, "dir": str(venv)}
+        return {"installed": False, "dir": str(venv), "torch_variant": "unknown"}
 
 
 def install(
@@ -317,6 +340,9 @@ def install(
     )
     if cv_check.returncode != 0:
         raise RuntimeError("自检失败：cosyvoice 导入异常，可重试修复")
+    _variant_marker(data_dir).write_text(
+        "cuda" if gpu_ok else "cpu", encoding="utf-8"
+    )
     _pct(100, "完成")
 
 

@@ -78,17 +78,19 @@ def profile(snapshot: dict[str, Any], cuda_runtime_installed: bool) -> dict[str,
             "ready": cuda_ok and vram_gb >= 4.0 and cuda_runtime_installed,
             "hint": "" if cuda_ok and vram_gb >= 4.0 else "需 4GB+ 显存且驱动支持 CUDA 12+",
         },
-        # IndexTTS-2.5 音色克隆（registry notes：4GB+ 显存）
+        # IndexTTS-2.5 音色克隆（registry notes：4GB+ 显存；tts-venv 按
+        # _gpu_variant 装 cu128/CPU 轮——ready 由前端组合 tts 运行时状态）
         "indextts2_gpu": {
             "ok": cuda_ok and vram_gb >= 4.0,
             "ready": False,
-            "hint": "torch CUDA 运行时接入后生效",
+            "hint": "配音 TTS 页安装运行环境后生效（N 卡自动装 CUDA 轮）",
         },
-        # demucs 人声分离（torch 系，同上；GPU 版实测 RTF 0.22x）
-        "demucs_gpu": {
+        # 人声分离：交付栈是 audio-separator/MDX-Net（onnxruntime CPU，tts-venv）；
+        # demucs GPU 路线（CPU 实测 RTF 1.95x / GPU 0.22x）是未接线的能力储备
+        "vocal_separation_gpu": {
             "ok": cuda_ok and vram_gb >= 4.0,
             "ready": False,
-            "hint": "torch CUDA 运行时接入后生效",
+            "hint": "当前走 CPU（MDX-Net）；GPU 路线待接线",
         },
         # 本地视觉轨三档（显存为 fp16 权重估算，首跑以 verify 为准）
         "local_visual_2b": {

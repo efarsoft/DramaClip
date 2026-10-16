@@ -195,9 +195,9 @@ def test_profile_caps_and_runtime_layering() -> None:
     # 8GB 显存够 4B 档、不够 8B 档
     assert prof["caps"]["local_visual_4b"]["ok"] is True
     assert prof["caps"]["local_visual_8b"]["ok"] is False
-    # torch 系运行时（P2）一律 ready=False 并带说明
-    assert prof["caps"]["demucs_gpu"]["ready"] is False
-    assert "torch" in prof["caps"]["demucs_gpu"]["hint"]
+    # 运行时组合层（tts-venv 安装态）不在 profile 硬件判定里：一律 ready=False
+    assert prof["caps"]["vocal_separation_gpu"]["ready"] is False
+    assert "MDX-Net" in prof["caps"]["vocal_separation_gpu"]["hint"]
 
 
 def test_profile_driver_guidance_when_cuda_too_old() -> None:
@@ -222,3 +222,24 @@ def test_profile_none_vendor_recommends_cloud() -> None:
     assert prof["tier"] == "none"
     assert "云端" in prof["recommendation"]
     assert prof["driver_guidance"]["needed"] is False
+
+
+def test_torch_variant_marker_roundtrip(tmp_path: Path) -> None:
+    from dramaclip.infra.model_manager import tts_runtime
+
+    data = tmp_path / "data"
+    # 未安装：unknown（不抛）
+    assert tts_runtime.torch_variant(data) == "unknown"
+    # 坏标记：unknown
+    marker = tts_runtime._variant_marker(data)
+    marker.parent.mkdir(parents=True)
+    marker.write_text("bogus", encoding="utf-8")
+    assert tts_runtime.torch_variant(data) == "unknown"
+    # 安装完成写入的合法标记：原样读回
+    marker.write_text("cuda", encoding="utf-8")
+    assert tts_runtime.torch_variant(data) == "cuda"
+    # status 的透传只在 venv 真实存在时发生（无 python.exe = 未安装分支，恒 unknown）
+    py = tts_runtime.venv_dir(data) / "Scripts" / "python.exe"
+    py.parent.mkdir(parents=True)
+    py.write_bytes(b"")
+    assert tts_runtime.status(data)["torch_variant"] == "unknown"  # 探针跑不动假解释器 → 未装完

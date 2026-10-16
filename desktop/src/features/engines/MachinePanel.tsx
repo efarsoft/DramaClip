@@ -60,7 +60,9 @@ export function MachinePanel({ models }: { models: readonly ModelInfo[] }): Reac
           void navigate('/engines/tts');
         }}
       />
-      {health?.device_profile !== undefined && <TierLine profile={health.device_profile} />}
+      {health?.device_profile !== undefined && (
+        <TierLine profile={health.device_profile} ttsReady={indextts === 'installed'} />
+      )}
       {verdict.verdict !== 'unknown' && <VerdictLine verdict={verdict} maxSizeGb={maxSizeGb} />}
       <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
         本卡回答硬件「装得下 / 跑得动」与两个运行环境在不在；修复动作各有其家：CUDA
@@ -195,7 +197,7 @@ function specCellsOf(health: HealthResult | null): { label: string; value: strin
     {
       label: '显卡',
       value: gpu?.ready
-        ? `${gpu.name}${gpu.memory_total_mb > 0 ? ` · ${Math.round(gpu.memory_total_mb / 1024)}GB` : ''}${gpu.max_cuda_version !== '' ? ` · CUDA ${gpu.max_cuda_version}` : ''}`
+        ? `${gpu.name}${gpu.memory_total_mb > 0 ? ` · ${String(Math.round(gpu.memory_total_mb / 1024))}GB` : ''}${gpu.max_cuda_version !== '' ? ` · CUDA ${gpu.max_cuda_version}` : ''}`
         : '未检测到 NVIDIA · 走 CPU',
     },
     {
@@ -276,15 +278,24 @@ function VerdictLine({
 }
 
 /** 设备档位行：显存分档 + GPU 引擎能力结论 + 驱动引导（needed 才给下载入口）。 */
-function TierLine({ profile }: { profile: DeviceProfile }): ReactElement {
+function TierLine({
+  profile,
+  ttsReady,
+}: {
+  profile: DeviceProfile;
+  ttsReady: boolean;
+}): ReactElement {
   const vram =
     profile.memory_total_mb > 0 ? `${String(Math.round(profile.memory_total_mb / 1024))}GB 显存` : '';
   const caps = profile.caps;
+  // indextts2 的运行时态由前端组合：tts-venv 装好且 torch 变体为 cuda（后端探针只到安装态）
+  const readyOf = (key: string): boolean =>
+    key === 'indextts2_gpu' ? caps[key].ok && ttsReady : caps[key].ready;
   const readyList = Object.entries(caps)
-    .filter(([, cap]) => cap.ready)
+    .filter(([key]) => readyOf(key))
     .map(([key]) => CAP_LABEL[key]);
   const okList = Object.entries(caps)
-    .filter(([, cap]) => cap.ok && !cap.ready)
+    .filter(([key, cap]) => cap.ok && !readyOf(key))
     .map(([key]) => CAP_LABEL[key]);
   const tail =
     readyList.length > 0
@@ -330,7 +341,7 @@ function TierLine({ profile }: { profile: DeviceProfile }): ReactElement {
 const CAP_LABEL: Record<string, string> = {
   faster_whisper_gpu: '转写加速',
   indextts2_gpu: '音色克隆',
-  demucs_gpu: '人声分离',
+  vocal_separation_gpu: '人声分离',
   local_visual_2b: '视觉 2B',
   local_visual_4b: '视觉 4B',
   local_visual_8b: '视觉 8B',

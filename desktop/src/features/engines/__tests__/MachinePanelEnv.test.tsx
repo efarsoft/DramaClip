@@ -95,7 +95,7 @@ describe('总览页 · 设备档位行', () => {
     renderPanel({
       ...NVIDIA_HEALTH,
       device_profile: {
-        ...NVIDIA_HEALTH.device_profile!,
+        ...NVIDIA_HEALTH.device_profile,
         tier: 'low',
         tier_label: '入门（<6GB 显存）',
         driver_guidance: {
