@@ -92,21 +92,22 @@ def profile(snapshot: dict[str, Any], cuda_runtime_installed: bool) -> dict[str,
             "ready": False,
             "hint": "当前走 CPU（MDX-Net）；GPU 路线待接线",
         },
-        # 本地视觉轨三档（显存为 fp16 权重估算，首跑以 verify 为准）
+        # 本地视觉轨三档（llama.cpp llama-server，非 torch 体系——GPU 取决于
+        # llama-server 是否 CUDA 构建，属资产层；显存为 fp16 权重估算）
         "local_visual_2b": {
-            "ok": cuda_ok and vram_gb >= 6.0,
+            "ok": is_nvidia and vram_gb >= 6.0,
             "ready": False,
-            "hint": "torch CUDA 运行时接入后生效",
+            "hint": "需 llama.cpp CUDA 构建资产（资产库提供后生效）",
         },
         "local_visual_4b": {
-            "ok": cuda_ok and vram_gb >= 8.0,
+            "ok": is_nvidia and vram_gb >= 8.0,
             "ready": False,
-            "hint": "torch CUDA 运行时接入后生效",
+            "hint": "需 llama.cpp CUDA 构建资产（资产库提供后生效）",
         },
         "local_visual_8b": {
-            "ok": cuda_ok and vram_gb >= 16.0,
+            "ok": is_nvidia and vram_gb >= 16.0,
             "ready": False,
-            "hint": "torch CUDA 运行时接入后生效",
+            "hint": "需 llama.cpp CUDA 构建资产（资产库提供后生效）",
         },
     }
     runtime_tail = "（安装 CUDA 运行库后生效）" if is_nvidia and not cuda_runtime_installed else ""

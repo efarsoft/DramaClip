@@ -23,6 +23,8 @@ DEFAULTS: dict[str, str] = {
     "analysis.ocr_enabled": "1",
     "asr.engine": "faster_whisper",
     "asr.model": "small",  # paraformer 用户曾切；默认档见引擎页推荐卡
+    # 设备选择：faster-whisper（auto=ctranslate2 按设备挑精度档）与 funasr 双引擎
+    # （auto=torch.cuda 探测，CUDA 初始化失败自动回退 CPU）共用这一个键
     "asr.device": "auto",
     # auto = 把精度决定权交给 ctranslate2 按实际设备挑最快可用档（CPU→int8，
     # CUDA→float16/float32），与 faster-whisper 上游默认一致。存量库已落 int8 的

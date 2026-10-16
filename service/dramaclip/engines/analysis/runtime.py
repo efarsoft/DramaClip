@@ -44,7 +44,10 @@ def _build_transcriber(settings: config.Settings, models_dir: Path) -> AsrEngine
         available = " / ".join(sorted(supported()))
         raise ValueError(f"未知 ASR 引擎: {engine}（可用: {available}）")
     if engine == "sensevoice":
-        return SenseVoiceEngine(models_dir=models_dir)
+        return SenseVoiceEngine(
+            models_dir=models_dir,
+            device=settings.get("asr.device", "auto"),
+        )
     if engine == "dashscope_cloud":
         return DashscopeCloudAsrEngine(
             api_key=settings.get("asr.api_key", ""),
@@ -59,6 +62,7 @@ def _build_transcriber(settings: config.Settings, models_dir: Path) -> AsrEngine
             vad_model_dir=models_dir / "asr" / "fsmn-vad" if diarize else None,
             spk_model_dir=models_dir / "asr" / "campplus" if diarize else None,
             num_speakers=config.get_int(settings, "asr.num_speakers"),
+            device=settings.get("asr.device", "auto"),
         )
     model_size = settings.get("asr.model", "base")
     device = settings.get("asr.device", "cpu")

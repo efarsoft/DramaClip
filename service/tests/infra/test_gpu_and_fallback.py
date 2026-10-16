@@ -6,6 +6,7 @@ import sys
 import types
 from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 
 from dramaclip.engines.analysis.transcriber import FasterWhisperEngine
 from dramaclip.infra import gpu
@@ -303,3 +304,65 @@ def test_install_torch_falls_back_to_mirror(monkeypatch, tmp_path: Path) -> None
     tts_runtime._install_torch(Path("uv"), venv_dir, "cpu")
     assert len(calls) == 1 and "--index-url" in calls[0]
     assert tts_runtime._PYPI_MIRROR in calls[0]
+
+
+# ── funasr 双引擎 device 支持 ──
+
+def test_resolve_torch_device(monkeypatch) -> None:
+    from dramaclip.engines.analysis.transcriber import _resolve_torch_device
+
+    class _FakeTorch:
+        class cuda:
+            is_available = staticmethod(lambda: _avail)
+
+    monkeypatch.setitem(__import__("sys").modules, "torch", _FakeTorch)
+    _avail = True
+    assert _resolve_torch_device("auto") == "cuda:0"
+    _avail = False
+    assert _resolve_torch_device("auto") == "cpu"
+    # 显式 cuda 是用户明确要求 GPU：探针只管 auto，加载失败由引擎回退兜底
+    assert _resolve_torch_device("cuda") == "cuda:0"
+    assert _resolve_torch_device("cuda:1") == "cuda:1"  # 显式卡号原样透传
+    assert _resolve_torch_device("cpu") == "cpu"
+
+
+def test_sensevoice_passes_device_to_automodel(monkeypatch, tmp_path: Path) -> None:
+    import dramaclip.engines.analysis.transcriber as mod
+
+    captured: dict[str, Any] = {}
+
+    class _FakeAuto:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(mod, "_resolve_torch_device", lambda _d: "cuda:0")
+    import types
+
+    fake_mod = types.ModuleType("funasr")
+    fake_mod.AutoModel = _FakeAuto  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "funasr", fake_mod)
+    engine = mod.SenseVoiceEngine(models_dir=tmp_path, device="cuda")
+    engine._ensure_model()
+    assert captured["device"] == "cuda:0"
+
+
+def test_sensevoice_falls_back_to_cpu_on_cuda_failure(monkeypatch, tmp_path: Path) -> None:
+    import dramaclip.engines.analysis.transcriber as mod
+
+    devices: list[str] = []
+
+    class _FakeAuto:
+        def __init__(self, **kwargs: Any) -> None:
+            devices.append(kwargs["device"])
+            if kwargs["device"] != "cpu":
+                raise RuntimeError("CUDA error: cublas64_12.dll missing")
+
+    monkeypatch.setattr(mod, "_resolve_torch_device", lambda _d: "cuda:0")
+    import types
+
+    fake_mod = types.ModuleType("funasr")
+    fake_mod.AutoModel = _FakeAuto  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "funasr", fake_mod)
+    engine = mod.SenseVoiceEngine(models_dir=tmp_path, device="cuda")
+    engine._ensure_model()
+    assert devices == ["cuda:0", "cpu"]

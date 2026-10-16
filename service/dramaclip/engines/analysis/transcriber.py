@@ -18,6 +18,24 @@ _LOGGER = logging.getLogger(__name__)
 _CUDA_PROBLEM = re.compile(r"cublas|cudnn|cudart|cuda|gpu|int8 compute type", re.I)
 
 
+def _resolve_torch_device(device: str) -> str:
+    """asr.device 设置值 → funasr AutoModel 的 device 实参。
+
+    auto = 交给 torch 探测（有可用 CUDA 即 cuda:0）；显式 cuda 同样解析成
+    cuda:0；解析结果仍可能初始化失败（驱动/显存），由引擎的加载回退兜底。
+    """
+    if device in ("", "auto"):
+        try:
+            import torch
+
+            return "cuda:0" if torch.cuda.is_available() else "cpu"
+        except Exception:  # noqa: BLE001 - torch 缺失/坏装一律 CPU（funasr 基线路径）
+            return "cpu"
+    if device == "cuda":
+        return "cuda:0"
+    return device
+
+
 def simplify(text: str) -> str:
     """繁→简归一（opencc，ml extras 懒加载；whisper 中文输出混繁体是已知行为）。"""
     try:
@@ -152,11 +170,15 @@ class FasterWhisperEngine:
 class SenseVoiceEngine:
     """SenseVoice（funasr，含 VAD 与情绪标签）。依赖较重（torch），按需安装。"""
 
-    def __init__(self, model_dir: Path | None = None, *, models_dir: Path | None = None) -> None:
+    def __init__(
+        self, model_dir: Path | None = None, *, models_dir: Path | None = None,
+        device: str = "auto",
+    ) -> None:
         resolved = model_dir if model_dir is not None else (
             models_dir / "asr" / "iic" / "SenseVoiceSmall" if models_dir is not None else None
         )
         self._model_dir = resolved
+        self._device = device
         self._model: AutoModel | None = None
 
     @property
@@ -179,10 +201,19 @@ class SenseVoiceEngine:
         if self._model is None:
             from funasr import AutoModel  # ml extras 懒加载
 
-            if self._model_dir is not None and self._model_dir.is_dir():
-                self._model = AutoModel(model=str(self._model_dir))
-            else:
-                self._model = AutoModel(model="iic/SenseVoiceSmall")
+            device = _resolve_torch_device(self._device)
+            kwargs: dict[str, Any] = {"model": str(self._model_dir) if (
+                self._model_dir is not None and self._model_dir.is_dir()
+            ) else "iic/SenseVoiceSmall", "device": device}
+            try:
+                self._model = AutoModel(**kwargs)
+            except Exception as exc:  # noqa: BLE001 - CUDA 类失败回退 CPU 重试一次
+                if device != "cpu" and _CUDA_PROBLEM.search(str(exc)):
+                    _LOGGER.warning("SenseVoice CUDA 加载失败回退 CPU：%s", str(exc)[:160])
+                    kwargs["device"] = "cpu"
+                    self._model = AutoModel(**kwargs)
+                else:
+                    raise
         return self._model
 
 
@@ -239,6 +270,7 @@ class ParaformerEngine:
         vad_model_dir: Path | None = None,
         spk_model_dir: Path | None = None,
         num_speakers: int = 0,
+        device: str = "auto",
     ) -> None:
         resolved = model_dir if model_dir is not None else (
             models_dir / "asr" / "paraformer" if models_dir is not None else None
@@ -247,6 +279,7 @@ class ParaformerEngine:
         self._vad_model_dir = vad_model_dir
         self._spk_model_dir = spk_model_dir
         self._num_speakers = num_speakers
+        self._device = device
         self._model: AutoModel | None = None
 
     @property
@@ -342,16 +375,25 @@ class ParaformerEngine:
                 else:
                     spk_kwargs["spk_model"] = "cam++"
                 spk_kwargs["spk_mode"] = "vad_segment"
-            if self._model_dir is not None and self._model_dir.is_dir():
-                self._model = AutoModel(
-                    model=str(self._model_dir), disable_update=True, **spk_kwargs
-                )
-            else:
-                self._model = AutoModel(
-                    model="iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
-                    disable_update=True,  # 启动期联网检查版本：桌面应用不联网也能转写
-                    **spk_kwargs,
-                )
+            device = _resolve_torch_device(self._device)
+            model_id = str(self._model_dir) if (
+                self._model_dir is not None and self._model_dir.is_dir()
+            ) else "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
+            kwargs: dict[str, Any] = {
+                "model": model_id,
+                "disable_update": True,  # 启动期联网检查版本：桌面应用不联网也能转写
+                "device": device,
+                **spk_kwargs,
+            }
+            try:
+                self._model = AutoModel(**kwargs)
+            except Exception as exc:  # noqa: BLE001 - CUDA 类失败回退 CPU 重试一次
+                if device != "cpu" and _CUDA_PROBLEM.search(str(exc)):
+                    _LOGGER.warning("Paraformer CUDA 加载失败回退 CPU：%s", str(exc)[:160])
+                    kwargs["device"] = "cpu"
+                    self._model = AutoModel(**kwargs)
+                else:
+                    raise
         return self._model
 
 
