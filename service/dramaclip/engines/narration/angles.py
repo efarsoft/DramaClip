@@ -12,7 +12,7 @@ from pydantic import BaseModel, ValidationError
 from dramaclip.engines import llm_prompts
 from dramaclip.engines.llm_trace import dump_trace, trace_path
 from dramaclip.engines.narration import scriptwriter
-from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
+from dramaclip.engines.semantic.llm_client import LlmUnavailable, client_for
 
 ANGLE_LLM_TIMEOUT_S = 240.0  # 与成稿同量级：要读完整剧摘录再给 K 条角度
 _ATTEMPTS = 2
@@ -123,12 +123,6 @@ def select_angles(
     """
     if k < 1:
         raise ValueError(f"方案数 k 必须 ≥ 1，实得 {k}")
-    config = LlmConfig.from_settings(settings)
-    if not config.configured:
-        raise LlmUnavailable(
-            "LLM 未配置：取材角度由模型选定（规格 §4.3 角度归模型），"
-            "请先在「引擎」页配置文本模型"
-        )
     if not episode_inputs:
         raise ValueError("没有带转写的已完成集，无从选题")
     transcript = scriptwriter.format_transcript_episodes(episode_inputs)
@@ -147,7 +141,14 @@ def select_angles(
         f"{excluded_block}\n"
         f"台词转写：\n{transcript}"
     )
-    llm = LlmClient(config, timeout_s=ANGLE_LLM_TIMEOUT_S)
+    llm = client_for(
+        settings,
+        min_timeout_s=ANGLE_LLM_TIMEOUT_S,
+        unconfigured_message=(
+            "LLM 未配置：取材角度由模型选定（规格 §4.3 角度归模型），"
+            "请先在「引擎」页配置文本模型"
+        ),
+    )
     attempts: list[dict[str, Any]] = []
     briefs: list[AngleBrief] | None = None
     for _ in range(_ATTEMPTS):

@@ -13,7 +13,7 @@ from dramaclip.engines.llm_trace import dump_trace, trace_path
 from dramaclip.engines.narration import casting, conversion, scriptwriter
 from dramaclip.engines.narration.models import NarrationText, PlanData, TimelineSegment
 from dramaclip.engines.narration.numerals import to_chinese_numerals
-from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
+from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable, client_for
 
 logger = logging.getLogger(__name__)
 
@@ -179,11 +179,14 @@ def write_plan_copy(
     """
     if not plan.narration_texts:
         return plan
-    config = LlmConfig.from_settings(settings)
-    if not config.configured:
-        raise LlmUnavailable(
+    # 顺序要紧：未配置必须先于「缺少项目名」抛出，否则报错指向错的门。
+    llm = client_for(
+        settings,
+        min_timeout_s=COPY_LLM_TIMEOUT_S,
+        unconfigured_message=(
             "LLM 未配置：解说文案必须由编剧模型产出（已取消模板兜底），请在「引擎」页配置文本模型"
-        )
+        ),
+    )
     project_name = str(settings.get("_project_name") or "").strip()
     if not project_name:
         raise ValueError("缺少项目名：编剧需要剧名作为称谓")
@@ -191,9 +194,6 @@ def write_plan_copy(
     # 行长上限按模式：超短的全部文案就这一两条，60 字/段的分段阅读规则套在它身上
     # 会逼出 6 秒残件（首版实测）——给它 4 倍空间，密度由 brief 的效果要求保证。
     line_cap = _ULTRA_SHORT_LINE_CHARS if plan.mode == "ultra_short_hook" else _MAX_LINE_CHARS
-    llm = LlmClient(
-        config, timeout_s=float(settings.get("llm.timeout_s") or COPY_LLM_TIMEOUT_S)
-    )
     system, user_prompt = build_copy_request(
         plan, material, settings, mode_label=mode_label, angle_block=angle_block
     )

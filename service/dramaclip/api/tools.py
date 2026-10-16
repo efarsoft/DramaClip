@@ -153,6 +153,7 @@ def get_result(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
 
 _REWRITE_STYLES = ("paraphrase", "card")
 
+_REWRITE_TIMEOUT_S = 180.0  # 整段文案改写：比标题/金句宽一档，比成稿紧一档
 _REWRITE_PROMPTS = {
     # 原文复述：换说法不换事实——洗稿场景，忠实优先
     "paraphrase": (
@@ -171,7 +172,7 @@ _REWRITE_PROMPTS = {
 
 def rewrite(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     """文案改写：原文复述 / 按文风卡重写两种风格，产出附通用审查标注。"""
-    from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
+    from dramaclip.engines.semantic.llm_client import client_for
 
     text = str(params.get("text", "")).strip()
     if text == "":
@@ -179,10 +180,11 @@ def rewrite(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     style = str(params.get("style") or "paraphrase")
     if style not in _REWRITE_PROMPTS:
         raise RpcDomainError(_ERR_BAD_PARAM, f"未知改写风格: {style}")
-    settings = LlmConfig.from_settings(context.settings)
-    if not settings.configured:
-        raise LlmUnavailable("LLM 未配置：文案改写由模型完成，请先在「引擎」页配置文本模型")
-    llm = LlmClient(settings, timeout_s=180.0)
+    llm = client_for(
+        context.settings,
+        min_timeout_s=_REWRITE_TIMEOUT_S,
+        unconfigured_message="LLM 未配置：文案改写由模型完成，请先在「引擎」页配置文本模型",
+    )
     system = "你是影视解说文案改写助手。只改写，不创作新剧情；只输出 JSON。"
     user = (
         _REWRITE_PROMPTS[style]

@@ -63,9 +63,9 @@ def handle_retell_check(
     if not text:
         raise ValueError("body.text 必须是非空解说稿纯文本")
     from dramaclip.engines.narration.retell import retell_check
-    from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig
+    from dramaclip.engines.semantic.llm_client import client_for
 
-    report = retell_check(text, LlmClient(LlmConfig.from_settings(settings)))
+    report = retell_check(text, client_for(settings))
     return report.to_json()
 
 
@@ -84,7 +84,8 @@ def handle_draft_titles(
     return titles_engine.generate(
         plan_data,
         settings,
-        timeout_s=float(body.get("timeout_s") or 120.0),
+        # body.timeout_s 是协议字段名，进来后当下限用（工厂取 max），不改协议
+        min_timeout_s=float(body.get("timeout_s") or titles_engine.TITLES_LLM_TIMEOUT_S),
         trace_path=llm_trace.trace_path(trace_dir, f"llm_titles_agent_{stamp}.json"),
     )
 

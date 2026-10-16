@@ -16,6 +16,7 @@ import pytest
 
 from dramaclip.engines.narration import angles
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
+from tests.llm_stub import patch_client_for
 
 _SETTINGS = {
     "llm.base_url": "http://llm.test/v1",
@@ -61,7 +62,7 @@ class FakeLlm:
 def llm(monkeypatch: pytest.MonkeyPatch) -> Any:
     FakeLlm.calls = []
     FakeLlm.queue = []
-    monkeypatch.setattr(angles, "LlmClient", FakeLlm)
+    patch_client_for(monkeypatch, angles, FakeLlm)
     return FakeLlm
 
 

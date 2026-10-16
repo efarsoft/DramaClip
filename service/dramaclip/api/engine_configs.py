@@ -16,12 +16,14 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext
-from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
+from dramaclip.engines.semantic.llm_client import LlmUnavailable, client_for
 from dramaclip.infra.storage.repos import engine_configs as configs_repo
 from dramaclip.transport.rpc import Router, RpcDomainError
 
 _ERR_BAD = -32310
 _ERR_NOT_FOUND = -32311
+# 自检走同一条构造路径，所以 30s 只是下限：界面把超时填大，这里跟着大
+_SELFTEST_TIMEOUT_S = 30.0
 
 _DOMAINS = ("llm", "tts_cloud", "asr_cloud", "image", "video")
 
@@ -159,9 +161,13 @@ def _test_llm(base_url: str, api_key: str, model: str) -> dict[str, Any]:
     if base_url == "" or model == "":
         raise RpcDomainError(_ERR_BAD, "base_url 与 model 不能为空")
     try:
-        client = LlmClient(
-            LlmConfig(base_url=base_url, api_key=api_key, model=model),
-            timeout_s=30.0,
+        client = client_for(
+            {
+                "llm.base_url": base_url,
+                "llm.api_key": api_key,
+                "llm.model": model,
+            },
+            min_timeout_s=_SELFTEST_TIMEOUT_S,
         )
         latency = client.ping()
     except LlmUnavailable as exc:

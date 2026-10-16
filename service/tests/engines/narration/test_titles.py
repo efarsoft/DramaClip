@@ -9,6 +9,7 @@ import pytest
 
 from dramaclip.engines.narration import titles
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
+from tests.llm_stub import patch_client_for
 
 _PLAN = {"narration_texts": [{"id": "n0", "text": "她被全家逼着嫁给残废将军。"}]}
 
@@ -27,7 +28,7 @@ def _generate(
     monkeypatch, payload: Any, **settings: str
 ) -> tuple[dict[str, Any], FakeClient]:
     client = FakeClient(payload)
-    monkeypatch.setattr(titles, "LlmClient", lambda *a, **k: client)
+    patch_client_for(monkeypatch, titles, lambda *a, **k: client)
     base = {"llm.base_url": "https://x/v1", "llm.model": "m", "llm.api_key": "k"}
     return titles.generate(_PLAN, {**base, **settings}), client
 
@@ -118,7 +119,7 @@ _BASE = {"llm.base_url": "https://x/v1", "llm.model": "m", "llm.api_key": "k"}
 def _trace(monkeypatch, payload: Any, tmp_path):
     """跑一次带留痕的生成；生成抛不抛都要把留痕读回来——留痕正是复核证据。"""
     client = FakeClient(payload)
-    monkeypatch.setattr(titles, "LlmClient", lambda *a, **k: client)
+    patch_client_for(monkeypatch, titles, lambda *a, **k: client)
     trace = tmp_path / "titles_plan1.json"
     outcome = "ok"
     try:

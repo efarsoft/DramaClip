@@ -28,7 +28,7 @@ from dramaclip.engines.narration import styles as styles_lib
 from dramaclip.engines.narration.casting import EpisodeScene, MaterialByEpisode
 from dramaclip.engines.narration.conversion import defects, grade
 from dramaclip.engines.narration.models import PlanData
-from dramaclip.engines.semantic.llm_client import LlmConfig, LlmUnavailable
+from dramaclip.engines.semantic.llm_client import LlmUnavailable, is_configured
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from dramaclip.infra import config
 from dramaclip.infra.storage.repos import analysis as analysis_repo
@@ -454,7 +454,7 @@ def _score_batch(
     绝不让规划 job 因它变红——job 的成败只由方案生成本身决定。
     grade/defects 在此零触碰：`set_scores` 只写 score_* 与 suggestion 三列。
     """
-    if not LlmConfig.from_settings(settings).configured:
+    if not is_configured(settings):
         return  # 没配 LLM 的项目：静默跳过，不发请求不留错误
     rows = plans_repo.list_by_batch(context.conn, project_id, job_id)
     if not rows:
@@ -603,7 +603,7 @@ def _retell_gate(
     重写循环（优先删和拆）待观测数据积累后另批接入。
     """
     from dramaclip.engines.narration.retell import retell_check
-    from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig
+    from dramaclip.engines.semantic.llm_client import client_for
 
     if settings.get("narration.retell_check", "1") != "1":
         return  # 关闭（如测试桩环境）：retell 走真实 LLM 客户端，桩覆盖不到就别让它等
@@ -611,7 +611,7 @@ def _retell_gate(
     if not text.strip():
         return
     try:
-        client = LlmClient(LlmConfig.from_settings(settings))
+        client = client_for(settings)
         report = retell_check(text, client)
     except Exception as exc:  # noqa: BLE001 - 软质检任何失败都降级跳过
         notifier.log("warning", f"复述测试跳过：{str(exc)[:120]}")

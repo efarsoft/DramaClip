@@ -11,6 +11,7 @@ import pytest
 from dramaclip.engines.narration import angles
 from dramaclip.infra.storage.repos import plans as plans_repo
 from tests.api.test_plan_variants import _LLM_SETTINGS, Harness, _seed_project_with_analysis
+from tests.llm_stub import patch_client_for
 
 _SERVICE_ROOT = Path(__file__).resolve().parents[2] / "dramaclip"
 
@@ -36,7 +37,7 @@ def _stub_llm(monkeypatch: pytest.MonkeyPatch) -> None:
                 }
             return {}
 
-    monkeypatch.setattr(angles, "LlmClient", _Llm)
+    patch_client_for(monkeypatch, angles, _Llm)
 
 
 def test_export_output_lands_under_data_dir(

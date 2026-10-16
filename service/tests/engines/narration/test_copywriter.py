@@ -14,6 +14,7 @@ from dramaclip.engines.narration.models import StrategySpec
 from dramaclip.engines.narration.modes_w8 import build_full
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
 from dramaclip.engines.semantic.models import ConflictScore
+from tests.llm_stub import patch_client_for
 
 _SETTINGS = {
     "llm.base_url": "http://llm.test/v1",
@@ -87,7 +88,7 @@ def llm(monkeypatch: pytest.MonkeyPatch) -> Any:
     FakeLlm.calls = []
     FakeLlm.systems = []
     FakeLlm.queue = []
-    monkeypatch.setattr(copywriter, "LlmClient", FakeLlm)
+    patch_client_for(monkeypatch, copywriter, FakeLlm)
     monkeypatch.setattr(copywriter, "_COPY_RETRY_BACKOFF_S", (0.0, 0.0))
     return FakeLlm
 

@@ -23,7 +23,7 @@ from pathlib import Path
 from dramaclip.engines.narration import audit as A
 from dramaclip.engines.narration import copywriter as CW
 from dramaclip.engines.narration import scriptwriter as SW
-from dramaclip.engines.semantic.llm_client import LlmClient, from_settings
+from dramaclip.engines.semantic.llm_client import client_or_none
 
 # ---------------------------------------------------------------------------
 # 样例
@@ -130,13 +130,6 @@ def _load_settings(args) -> dict:
     return {}
 
 
-def _client_or_none(settings: dict) -> LlmClient | None:
-    cfg = from_settings(settings)._config
-    if cfg.configured:
-        return from_settings(settings)
-    return None
-
-
 def cmd_fixture(args) -> int:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -148,7 +141,7 @@ def cmd_fixture(args) -> int:
 
 def cmd_run(args) -> int:
     settings = _load_settings(args)
-    client = _client_or_none(settings)
+    client = client_or_none(settings)
     mode = args.mode
     project = args.project or "苏府风云"
     angle = args.angle or "切入角度：嫡女替嫁的生死局，钩子立在『婚书』上。"

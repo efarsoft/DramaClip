@@ -11,6 +11,7 @@ import pytest
 from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import golden_lines
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
+from tests.llm_stub import patch_client_for
 
 
 class _FakeLlm:
@@ -62,7 +63,7 @@ def test_llm_unavailable_raises_with_reason_at_batch_entry(
         def chat_json(self, _system: str, _user: str, temperature: float = 0.3):
             raise LlmUnavailable("端点挂了")
 
-    monkeypatch.setattr(golden_lines, "LlmClient", lambda *_a, **_k: _FailLlm())
+    patch_client_for(monkeypatch, golden_lines, lambda *_a, **_k: _FailLlm())
     with pytest.raises(ValueError, match="金句提取失败.*端点挂了"):
         golden_lines.pick_for_material(
             {"llm.base_url": "https://x/v1", "llm.model": "m"},

@@ -39,13 +39,46 @@ class LlmConfig:
         return bool(self.base_url) and bool(self.model)
 
 
-def from_settings(settings: dict[str, str]) -> LlmClient:
+UNCONFIGURED_HINT = "LLM 未配置（需要 base_url 与 model）"
+
+
+def is_configured(settings: dict[str, str]) -> bool:
+    """降级调用点用的判定：它们返回兜底值而不是抛，所以判定必须留在自己手里。"""
+    return LlmConfig.from_settings(settings).configured
+
+
+def client_for(
+    settings: dict[str, str],
+    *,
+    min_timeout_s: float = _REQUEST_TIMEOUT_S,
+    unconfigured_message: str | None = None,
+) -> LlmClient:
+    """文本 LLM 客户端的唯一构造入口，未配置即抛 `LlmUnavailable`（文案由调用点给）。
+
+    超时 = `max(llm.timeout_s, min_timeout_s)`：界面那个键是端点慢容忍，`min_timeout_s`
+    是本调用点自量的最短读完时间，两边只能抬高、谁也不许压低别人。`llm.timeout_s`
+    **只在本函数读**，第二处读点就是第二处真相。
+    """
     config = LlmConfig.from_settings(settings)
-    # llm.timeout_s：字节间停顿容忍（socket 超时=不活动上限，不是总时长上限）。
-    # 官方端点 60s 足够；中转端点偶发分钟级停顿，调大免得整条方案被读超时判死
-    # （2026-10-06 真机：内心独白变体连续两次读超时整条报废）。
-    timeout = float(settings.get("llm.timeout_s") or _REQUEST_TIMEOUT_S)
-    return LlmClient(config, timeout_s=timeout)
+    if not config.configured:
+        raise LlmUnavailable(unconfigured_message or UNCONFIGURED_HINT)
+    raw = str(settings.get("llm.timeout_s") or "").strip()
+    try:
+        # 0/负数这类误填也按下限：造一个立刻超时的客户端比不造更难查。
+        configured_timeout = float(raw) if raw else min_timeout_s
+    except ValueError:
+        logger.warning("llm.timeout_s=%r 不是数字，按本点下限 %ss", raw, min_timeout_s)
+        configured_timeout = min_timeout_s
+    return LlmClient(config, timeout_s=max(min_timeout_s, configured_timeout))
+
+
+def client_or_none(
+    settings: dict[str, str], *, min_timeout_s: float = _REQUEST_TIMEOUT_S
+) -> LlmClient | None:
+    """降级调用点的构造入口：未配置返回 None，而不是抛（它们有兜底产物）。"""
+    if not is_configured(settings):
+        return None
+    return client_for(settings, min_timeout_s=min_timeout_s)
 
 
 class LlmClient:
@@ -61,7 +94,7 @@ class LlmClient:
         self, system: str, user: str, temperature: float | None = None
     ) -> dict[str, Any] | list[Any]:
         if not self._config.configured:
-            raise LlmUnavailable("LLM 未配置（需要 base_url 与 model）")
+            raise LlmUnavailable(UNCONFIGURED_HINT)
         payload = {
             "model": self._config.model,
             "messages": [

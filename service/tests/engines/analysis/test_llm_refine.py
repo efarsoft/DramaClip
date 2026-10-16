@@ -53,7 +53,7 @@ def _run(
 ) -> RefineOutcome:
     _FakeClient.reply = reply
     monkeypatch.setattr(
-        "dramaclip.engines.analysis.llm_refine.llm_from_settings",
+        "dramaclip.engines.analysis.llm_refine.client_for",
         lambda _s: _FakeClient(),
     )
     return refine_segments(
@@ -129,7 +129,7 @@ def test_refine_repairs_unbacked_insertion(monkeypatch: pytest.MonkeyPatch) -> N
 def test_refine_llm_unconfigured_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     raw = [_seg("甲乙丙丁", start=0.0)]
     monkeypatch.setattr(
-        "dramaclip.engines.analysis.llm_refine.llm_from_settings",
+        "dramaclip.engines.analysis.llm_refine.client_for",
         lambda _s: _FakeClient(),
     )
     outcome = refine_segments(
@@ -147,7 +147,7 @@ def test_refine_llm_failure_falls_back_with_detail(monkeypatch: pytest.MonkeyPat
             raise ValueError("boom")
 
     monkeypatch.setattr(
-        "dramaclip.engines.analysis.llm_refine.llm_from_settings", lambda _s: _BrokenClient()
+        "dramaclip.engines.analysis.llm_refine.client_for", lambda _s: _BrokenClient()
     )
     raw = [_seg("甲乙丙丁", start=0.0)]
     outcome = refine_segments(
@@ -174,7 +174,7 @@ def test_refine_retries_once_on_bad_shape(monkeypatch: pytest.MonkeyPatch) -> No
             return {"sentences": ["甲乙丙丁"]}
 
     monkeypatch.setattr(
-        "dramaclip.engines.analysis.llm_refine.llm_from_settings", lambda _s: _ShapedClient()
+        "dramaclip.engines.analysis.llm_refine.client_for", lambda _s: _ShapedClient()
     )
     outcome = refine_segments(
         [_seg("甲乙丙丁", start=0.0)],

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.llm_stub import patch_client_for
 from tools import agent_server
 
 _TOKEN = "test-token"
@@ -27,9 +28,7 @@ class _FakeClient:
 
 @pytest.fixture()
 def server_url(monkeypatch: pytest.MonkeyPatch) -> str:
-    monkeypatch.setattr(
-        agent_server.titles_engine, "LlmClient", lambda *a, **k: _FakeClient(None)
-    )
+    patch_client_for(monkeypatch, agent_server.titles_engine, lambda *a, **k: _FakeClient(None))
     # 形似配置即可过 configured 门；真调用走上面的假客户端
     settings = {"llm.base_url": "https://x/v1", "llm.model": "m", "llm.api_key": "k"}
     server = ThreadingHTTPServer(

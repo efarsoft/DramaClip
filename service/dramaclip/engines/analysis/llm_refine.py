@@ -20,12 +20,7 @@ from dataclasses import dataclass
 from pypinyin import lazy_pinyin
 
 from dramaclip.engines.analysis.models import AsrSegment, OcrSegment, WordSpan
-from dramaclip.engines.semantic.llm_client import (
-    LlmConfig,
-)
-from dramaclip.engines.semantic.llm_client import (
-    from_settings as llm_from_settings,
-)
+from dramaclip.engines.semantic.llm_client import client_for, is_configured
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -212,10 +207,9 @@ def refine_segments(
             len(segments),
         )
         return RefineOutcome(segments=segments, applied=False, detail="字流校验失败")
-    config = LlmConfig.from_settings(settings)
-    if not config.configured:
+    if not is_configured(settings):
         return RefineOutcome(segments=segments, applied=False, detail="LLM 未配置")
-    client = llm_from_settings(settings)
+    client = client_for(settings)
 
     raw_text = "".join(c.char for c in stream)
     prompt_user = _user_prompt(raw_text, windows, project_name, hotwords)

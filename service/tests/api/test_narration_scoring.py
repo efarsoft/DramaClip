@@ -25,6 +25,7 @@ from tests.api.test_plan_variants import (
     _stub_language_and_tts,
     _wait_terminal,
 )
+from tests.llm_stub import patch_client_for
 
 
 def _wait_until(predicate: Any, timeout_s: float = 10.0) -> None:
@@ -400,7 +401,7 @@ def test_scoring_leaves_a_trace_file(
                 ]
             }
 
-    monkeypatch.setattr(variant_scoring, "LlmClient", _ScoringLlm)
+    patch_client_for(monkeypatch, variant_scoring, _ScoringLlm)
 
     result = harness.rpc(
         "narration.plan_variants",

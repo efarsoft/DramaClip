@@ -7,7 +7,9 @@ from typing import Any
 
 from dramaclip.engines import llm_prompts
 from dramaclip.engines.llm_trace import dump_trace
-from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
+from dramaclip.engines.semantic.llm_client import client_for
+
+TITLES_LLM_TIMEOUT_S = 120.0  # 一条方案解说全文进、8 条标题出：与选题/金句同量级
 
 _SYSTEM_PROMPT = (
     "你是短剧推广视频标题专家，负责成片的发布包装。根据解说文案产出三样发布物料。"
@@ -33,18 +35,22 @@ def generate(
     plan_data: dict[str, Any],
     settings: dict[str, str],
     *,
-    timeout_s: float = 120.0,
+    min_timeout_s: float = TITLES_LLM_TIMEOUT_S,
     trace_path: Path | None = None,
 ) -> dict[str, Any]:
     """返回 {titles: [{text, selected}], caption, tags}；LLM 未配置或标题为空时抛异常，
-    由调用方转译。caption/tags 是同一往返顺带产出的发布物料，缺了不挡标题。"""
-    config = LlmConfig.from_settings(settings)
-    if not config.configured:
-        raise LlmUnavailable("LLM 未配置：候选标题由模型生成，请先在「引擎」页配置文本模型")
+    由调用方转译。caption/tags 是同一往返顺带产出的发布物料，缺了不挡标题。
+
+    `min_timeout_s` 是下限：界面设的 `llm.timeout_s` 只能把它抬高。
+    """
+    client = client_for(
+        settings,
+        min_timeout_s=min_timeout_s,
+        unconfigured_message="LLM 未配置：候选标题由模型生成，请先在「引擎」页配置文本模型",
+    )
     texts = [str(t.get("text", "")) for t in plan_data.get("narration_texts", []) if t.get("text")]
     if not texts:
         raise ValueError("该方案没有解说文案，无需生成标题")
-    client = LlmClient(config, timeout_s=timeout_s)
     system = llm_prompts.system_override(settings, "prompt.titles_system") or _SYSTEM_PROMPT
     user = "解说文案：\n" + "\n".join(texts)
     data = client.chat_json(system, user, temperature=0.75)

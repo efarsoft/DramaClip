@@ -18,7 +18,7 @@ from typing import Any
 
 from dramaclip.engines import llm_prompts
 from dramaclip.engines.llm_trace import dump_trace, trace_path
-from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
+from dramaclip.engines.semantic.llm_client import LlmUnavailable, client_for
 
 SCORING_LLM_TIMEOUT_S = 240.0  # 与选题/成稿同量级：一次读整批方案的解说全文
 _ATTEMPTS = 2
@@ -152,15 +152,14 @@ def score_variants(
     """
     if not rows:
         return {}
-    config = LlmConfig.from_settings(settings)
-    if not config.configured:
-        raise LlmUnavailable(
-            "LLM 未配置：文案评分由模型产出，请先在「引擎」页配置文本模型"
-        )
     user_prompt = "\n\n".join(
         format_variant(index, row) for index, row in enumerate(rows, start=1)
     )
-    client = LlmClient(config, timeout_s=SCORING_LLM_TIMEOUT_S)
+    client = client_for(
+        settings,
+        min_timeout_s=SCORING_LLM_TIMEOUT_S,
+        unconfigured_message="LLM 未配置：文案评分由模型产出，请先在「引擎」页配置文本模型",
+    )
     system = (
         llm_prompts.system_override(settings, "prompt.variant_scoring_system")
         or _SYSTEM_PROMPT

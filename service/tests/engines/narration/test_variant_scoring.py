@@ -15,6 +15,7 @@ import pytest
 from dramaclip.engines import llm_prompts
 from dramaclip.engines.narration import variant_scoring
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
+from tests.llm_stub import patch_client_for
 
 _SETTINGS = {"llm.base_url": "https://x/v1", "llm.model": "m", "llm.api_key": "k"}
 
@@ -68,7 +69,7 @@ def _score(
     **settings: str,
 ) -> tuple[dict[str, dict[str, Any]], FakeClient]:
     client = FakeClient(queue)
-    monkeypatch.setattr(variant_scoring, "LlmClient", lambda *a, **k: client)
+    patch_client_for(monkeypatch, variant_scoring, lambda *a, **k: client)
     out = variant_scoring.score_variants(rows, {**_SETTINGS, **settings})
     return out, client
 
@@ -132,7 +133,7 @@ def test_one_batch_is_scored_in_a_single_call(monkeypatch) -> None:
 
 def test_unconfigured_llm_raises(monkeypatch) -> None:
     client = FakeClient([_payload([(1, _FULL_DIMS, "建议")])])
-    monkeypatch.setattr(variant_scoring, "LlmClient", lambda *a, **k: client)
+    patch_client_for(monkeypatch, variant_scoring, lambda *a, **k: client)
     with pytest.raises(LlmUnavailable, match="引擎"):
         variant_scoring.score_variants([_row("p1")], {})
     assert client.calls == 0, "未配置就该在发请求之前停下"
@@ -209,7 +210,7 @@ def test_llm_failure_leaves_a_trace_and_raises(
 ) -> None:
     """两次尝试全败：抛给调用方降级（api 层 catch），但往返必须留痕可复盘。"""
     client = FakeClient([LlmUnavailable("网关 502")])
-    monkeypatch.setattr(variant_scoring, "LlmClient", lambda *a, **k: client)
+    patch_client_for(monkeypatch, variant_scoring, lambda *a, **k: client)
     with pytest.raises(ValueError, match="文案评分"):
         variant_scoring.score_variants([_row("p1")], _SETTINGS, trace_dir=tmp_path)
     assert client.calls == variant_scoring._ATTEMPTS

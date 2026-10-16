@@ -11,9 +11,16 @@ from __future__ import annotations
 
 import logging
 
-from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
+from dramaclip.engines.semantic.llm_client import (
+    LlmClient,
+    LlmUnavailable,
+    client_for,
+    is_configured,
+)
 
 logger = logging.getLogger(__name__)
+
+GOLDEN_LLM_TIMEOUT_S = 120.0  # 整集台词进、金句编号出：与选题同量级
 
 _PROMPT = (
     "你是短剧金句编辑。下面是同一部剧的台词，已编号。"
@@ -73,12 +80,10 @@ def pick_for_material(
     失败即抛（业主裁决「不需要兜底策略」）：LLM 未配置/不可用/某集提取失败
     都原样上抛带原因的 ValueError——静默降级成规则打分，选出的句子质量
     不可预期，用户还以为 LLM 挑的。"""
-    config = LlmConfig.from_settings(context_settings)
-    if not config.configured:
-        raise ValueError(
-            "金句提取需要文本模型：请在引擎中心配置 LLM 端点后重试"
-        )
-    llm = LlmClient(config, timeout_s=float(context_settings.get("llm.timeout_s") or 120))
+    if not is_configured(context_settings):
+        # 判定留在调用点：本模块对外契约是带原因的 ValueError，不是工厂的 LlmUnavailable。
+        raise ValueError("金句提取需要文本模型：请在引擎中心配置 LLM 端点后重试")
+    llm = client_for(context_settings, min_timeout_s=GOLDEN_LLM_TIMEOUT_S)
     result: dict[str, list[tuple[float, float]]] = {}
     for episode_id, asr_lines in dialogue_by_episode.items():
         try:

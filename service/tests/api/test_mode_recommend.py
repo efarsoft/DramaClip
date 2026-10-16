@@ -21,6 +21,11 @@ from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
 from dramaclip.transport.rpc import RpcDomainError
+from tests.llm_stub import patch_client_for
+
+# 走 fake_llm 的用例都要过工厂的 configured 判定：给一条形似的端点配置，
+# 未配置那条用例单独留着 `{}`。
+_LLM_SETTINGS = {"llm.base_url": "http://llm.test/v1", "llm.model": "m"}
 
 
 class _FakeLlm:
@@ -43,15 +48,7 @@ def fake_llm(monkeypatch: pytest.MonkeyPatch) -> type[_FakeLlm]:
     _FakeLlm.instances = []
     _FakeLlm.reply = {"modes": []}
 
-    class _FakeConfig:
-        configured = True
-
-        @staticmethod
-        def from_settings(_settings: dict) -> _FakeConfig:
-            return _FakeConfig()
-
-    monkeypatch.setattr(mode_recommend, "LlmConfig", _FakeConfig)
-    monkeypatch.setattr(mode_recommend, "LlmClient", _FakeLlm)
+    patch_client_for(monkeypatch, mode_recommend, _FakeLlm)
     return _FakeLlm
 
 
@@ -96,7 +93,7 @@ def test_llm_recommendation_cached_until_refresh(
         ]
     }
 
-    first = mode_recommend.recommend(memory_db, project_id, {}, refresh=False)
+    first = mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
     assert [m["mode"] for m in first["modes"]] == [
         "dialogue_narration",
         "cross_narration",
@@ -107,11 +104,11 @@ def test_llm_recommendation_cached_until_refresh(
     cached = projects_repo.get_settings(memory_db, project_id)["mode_recommendation"]
     assert cached == first, "推荐必须随项目落缓存"
 
-    second = mode_recommend.recommend(memory_db, project_id, {}, refresh=False)
+    second = mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
     assert second == first
     assert len(fake_llm.instances) == 1, "缓存命中不再调 LLM"
 
-    mode_recommend.recommend(memory_db, project_id, {}, refresh=True)
+    mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=True)
     assert len(fake_llm.instances) == 2, "refresh 显式重算"
 
 
@@ -120,7 +117,7 @@ def test_prompt_carries_genre_and_highlight_reasons(
 ) -> None:
     project_id = _project_with_analysis(memory_db, tmp_path)
     fake_llm.reply = {"modes": []}
-    mode_recommend.recommend(memory_db, project_id, {}, refresh=False)
+    mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
     user = fake_llm.instances[0].last_user
     assert "逆袭" in user and "顶罪受辱" in user, "推荐依据必须真喂给 LLM"
 
@@ -137,7 +134,7 @@ def test_invalid_modes_filtered_and_padded(
         ]
     }
 
-    result = mode_recommend.recommend(memory_db, project_id, {}, refresh=False)
+    result = mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
 
     modes = [m["mode"] for m in result["modes"]]
     assert len(modes) == 3
@@ -151,7 +148,7 @@ def test_llm_unavailable_falls_back(
     project_id = _project_with_analysis(memory_db, tmp_path)
     fake_llm.reply = LlmUnavailable("读超时")
 
-    result = mode_recommend.recommend(memory_db, project_id, {}, refresh=False)
+    result = mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
 
     assert [m["mode"] for m in result["modes"]] == mode_recommend._FALLBACK_ORDER
     assert "LLM 不可用" in result["modes"][0]["reason"]
@@ -173,7 +170,7 @@ def test_invalid_llm_reply_falls_back_with_named_copy_and_trace(
     fake_llm.reply = ValueError("mode 必须是字符串")
 
     with caplog.at_level("WARNING", logger="dramaclip.engines.narration.mode_recommend"):
-        result = mode_recommend.recommend(memory_db, project_id, {}, refresh=False)
+        result = mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
 
     reasons = " ".join(str(m["reason"]) for m in result["modes"])
     assert "ValueError" not in reasons, f"异常类名漏进用户文案：{reasons}"

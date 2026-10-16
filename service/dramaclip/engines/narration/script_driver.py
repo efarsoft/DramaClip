@@ -13,7 +13,7 @@ from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration import scriptwriter, styles
 from dramaclip.engines.narration.models import PlanData, StrategySpec
-from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
+from dramaclip.engines.semantic.llm_client import client_for, is_configured
 
 # 剧本生成实测可达 100s+（qwen3.7-plus），远超 LLM 客户端默认 60s 超时；
 # 2026-09-29 十集跨集剧本 3×240s 全读超时（prompt 7.7k 字符不大，是**产出**
@@ -56,9 +56,9 @@ def resolve_run_style(
     if (
         preferred in (styles.AUTO_STYLE_ID, None, "")
         and episode_inputs
-        and LlmConfig.from_settings(settings).configured
+        and is_configured(settings)
     ):
-        selector = LlmClient(LlmConfig.from_settings(settings), timeout_s=_SELECT_TIMEOUT_S)
+        selector = client_for(settings, min_timeout_s=_SELECT_TIMEOUT_S)
         stamp = time.strftime("%m%d_%H%M%S")
         try:
             selection = styles.select_style_with_reason(
@@ -88,15 +88,14 @@ def script_dialogue_plan(
 ) -> tuple[PlanData, list[str]]:
     """跨集剧本驱动的对话解说。LLM 未配置或剧本不合格一律抛（降级已禁止）。
     """
-    config = LlmConfig.from_settings(settings)
-    if not config.configured:
-        raise LlmUnavailable(
-            "LLM 未配置：剧情解说由编剧模型成稿，请先在「引擎」页配置文本模型"
-        )
     strategy = StrategySpec(platform="douyin")
 
     # 基本功层内置于编剧 system prompt；口味层 directives 注入 user prompt
-    llm = LlmClient(config, timeout_s=SCRIPT_LLM_TIMEOUT_S)
+    llm = client_for(
+        settings,
+        min_timeout_s=SCRIPT_LLM_TIMEOUT_S,
+        unconfigured_message="LLM 未配置：剧情解说由编剧模型成稿，请先在「引擎」页配置文本模型",
+    )
     if min_segments is None:
         min_segments = _resolve_min_segments(settings)
     trace_path = None

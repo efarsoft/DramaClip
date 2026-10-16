@@ -7,14 +7,8 @@ from pathlib import Path
 from dramaclip.engines import llm_prompts, llm_trace
 from dramaclip.engines.analysis.models import EpisodeRawAnalysis
 from dramaclip.engines.semantic import conflict, genre, ranker
-from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable, from_settings
+from dramaclip.engines.semantic.llm_client import LlmUnavailable, client_or_none
 from dramaclip.engines.semantic.models import SemanticResult
-
-
-def build_client(settings: dict[str, str]) -> LlmClient | None:
-    """配置齐全返回客户端（调用时才发请求）；未配置返回 None（直接降级）。"""
-    config_client = from_settings(settings)
-    return config_client if config_client._config.configured else None  # noqa: SLF001 - 同包边界
 
 
 def enhance(
@@ -29,7 +23,7 @@ def enhance(
 
     留痕按 `trace_tag`（集 id）定名覆盖写：逐集调用会持续累积，只保留最近一轮往返。
     """
-    client = build_client(settings)
+    client = client_or_none(settings)
     conflict_trace = llm_trace.trace_path(trace_dir, f"llm_conflict_{trace_tag}.json")
     genre_trace = llm_trace.trace_path(trace_dir, f"llm_genre_{trace_tag}.json")
     try:

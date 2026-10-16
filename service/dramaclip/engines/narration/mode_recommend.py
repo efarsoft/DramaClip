@@ -14,7 +14,7 @@ import time
 from typing import Any
 
 from dramaclip.engines.narration.pipeline import MODE_LABELS
-from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig, LlmUnavailable
+from dramaclip.engines.semantic.llm_client import LlmUnavailable, client_for, is_configured
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
@@ -23,7 +23,7 @@ _LOGGER = logging.getLogger(__name__)
 
 _RECOMMEND_COUNT = 3
 _CACHE_KEY = "mode_recommendation"
-_TIMEOUT_S = 60.0
+_RECOMMEND_TIMEOUT_S = 60.0
 #: LLM 缺位时的静态组合与补位顺序：叙事强 → 节奏快 → 门槛最低，通用可用的次序。
 _FALLBACK_ORDER = ["dialogue_narration", "cross_narration", "raw_clip"]
 
@@ -80,14 +80,13 @@ def _content_facts(conn: Any, episode_ids: list[str]) -> tuple[str, list[str]]:
 
 
 def _ask_llm(settings: dict[str, str], genre: str, reasons: list[str]) -> list[dict[str, str]]:
-    config = LlmConfig.from_settings(settings)
-    if not config.configured:
+    if not is_configured(settings):
         return _fallback([], "LLM 未配置")
     facts = [f"题材：{genre}"] if genre else []
     facts.extend(f"- {reason}" for reason in reasons)
     if len(facts) <= 1:
         facts.append("-（高光理由缺失，仅凭题材判断）")
-    client = LlmClient(config, timeout_s=_TIMEOUT_S)
+    client = client_for(settings, min_timeout_s=_RECOMMEND_TIMEOUT_S)
     try:
         raw = client.chat_json(_SYSTEM, "\n".join(facts))
     except LlmUnavailable as exc:

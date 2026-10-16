@@ -39,6 +39,7 @@ from dramaclip.infra.storage.repos import plans as plans_repo
 from dramaclip.transport.notify import Notifier
 from dramaclip.transport.rpc import Router, RpcRequest
 from tests.conftest import register_job_executor
+from tests.llm_stub import patch_client_for
 
 
 class Harness:
@@ -225,7 +226,7 @@ def test_pinned_style_survives_a_project_without_transcripts(
     context = harness.context
     context.settings["narration.style_id"] = _PLANTED_STYLE_ID
     _FakeLlm.calls = []
-    monkeypatch.setattr(script_driver, "LlmClient", _FakeLlm)
+    patch_client_for(monkeypatch, script_driver, _FakeLlm)
     monkeypatch.setattr(
         styles,
         "_load_builtin",
@@ -565,9 +566,9 @@ def _stub_language_and_tts(
 
             return {"lines": [_line(slot) for slot, _block in slot_blocks]}
 
-    monkeypatch.setattr(angles, "LlmClient", _Llm)
-    monkeypatch.setattr(copywriter, "LlmClient", _Llm)
-    monkeypatch.setattr(script_driver, "LlmClient", _Llm)
+    patch_client_for(monkeypatch, angles, _Llm)
+    patch_client_for(monkeypatch, copywriter, _Llm)
+    patch_client_for(monkeypatch, script_driver, _Llm)
     monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: _StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: 1.25)
 

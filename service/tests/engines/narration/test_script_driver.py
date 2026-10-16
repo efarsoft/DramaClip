@@ -9,6 +9,7 @@ import pytest
 
 from dramaclip.engines.narration import script_driver
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
+from tests.llm_stub import patch_client_for
 
 
 def _noop_log(_level: str, _message: str) -> None:
@@ -82,7 +83,7 @@ def driver(monkeypatch: pytest.MonkeyPatch) -> Any:
     FakeLlmClient.queue = []
     FakeLlmClient.calls = []
     FakeLlmClient.systems = []
-    monkeypatch.setattr(script_driver, "LlmClient", FakeLlmClient)
+    patch_client_for(monkeypatch, script_driver, FakeLlmClient)
     return script_driver
 
 
@@ -98,7 +99,7 @@ def test_unconfigured_llm_raises_not_none() -> None:
 
 
 def test_no_script_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(script_driver, "LlmClient", FakeLlmClient)
+    patch_client_for(monkeypatch, script_driver, FakeLlmClient)
     FakeLlmClient.queue = [{"hook": "", "segments": []}]
     with pytest.raises(ValueError, match="剧本"):
         script_driver.script_dialogue_plan(_EPISODES, dict(_SETTINGS), angle_block="",
@@ -164,7 +165,7 @@ def test_angle_block_is_forwarded_to_the_script_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """跨集链的角度注入：与单集链共用 angles.prompt_block 的措辞，不得各写一份。"""
-    monkeypatch.setattr(script_driver, "LlmClient", FakeLlmClient)
+    patch_client_for(monkeypatch, script_driver, FakeLlmClient)
     FakeLlmClient.queue = [dict(_VALID_PAYLOAD)]
     script_driver.script_dialogue_plan(
         _EPISODES, dict(_SETTINGS), angle_block="\n本条片的取材角度：复仇线",
