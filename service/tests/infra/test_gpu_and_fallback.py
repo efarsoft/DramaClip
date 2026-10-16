@@ -243,3 +243,38 @@ def test_torch_variant_marker_roundtrip(tmp_path: Path) -> None:
     py.parent.mkdir(parents=True)
     py.write_bytes(b"")
     assert tts_runtime.status(data)["torch_variant"] == "unknown"  # 探针跑不动假解释器 → 未装完
+
+
+def test_gpu_variant_three_tiers(monkeypatch) -> None:
+    """算力三档：≥7.0 cu128 / 5.0-6.9 cu126（老卡兼容）/ <5.0 或无卡 CPU。"""
+    from dramaclip.infra.model_manager import tts_runtime
+
+    monkeypatch.setattr(tts_runtime.shutil, "which", lambda _n: r"C:\fake\nvidia-smi.exe")
+
+    class _Probe:
+        def __init__(self, out: str) -> None:
+            self.stdout = out
+            self.returncode = 0
+
+    cases = {
+        "7.5": "cuda",
+        "8.9": "cuda",
+        "5.2": "cuda126",
+        "6.1": "cuda126",
+        "4.5": "cpu",
+        "": "cuda",  # 探测失败按有卡处理（保守装 CUDA 轮，合成探针诚实回退）
+    }
+    for cap, expected in cases.items():
+        monkeypatch.setattr(
+            tts_runtime.subprocess,
+            "run",
+            lambda *a, _c=cap, **k: _Probe(f"{_c}\n"),
+        )
+        assert tts_runtime._gpu_variant() == expected, f"compute_cap={cap!r}"
+
+
+def test_gpu_variant_cpu_when_no_smi(monkeypatch) -> None:
+    from dramaclip.infra.model_manager import tts_runtime
+
+    monkeypatch.setattr(tts_runtime.shutil, "which", lambda _n: None)
+    assert tts_runtime._gpu_variant() == "cpu"

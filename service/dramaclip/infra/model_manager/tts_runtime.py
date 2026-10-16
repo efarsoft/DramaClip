@@ -43,6 +43,7 @@ _UV_ENV = {
 _PYPI_MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
 _GH_PROXY = "https://gh-proxy.com/https://github.com"
 _TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
+_TORCH_INDEX_CU126 = "https://download.pytorch.org/whl/cu126"
 _TORCH_CPU = ["torch==2.8.0", "torchaudio==2.8.0"]
 # 以下尺寸全部为**实测精确字节数**（2026-09-24 逐件下载量得）：download_file 的
 # expected_size 是精确匹配校验（防代理截断/半包），估一个"大概 18MB"只会把完好
@@ -131,22 +132,35 @@ _COSYVOICE_SOURCES = [
 
 
 def _gpu_variant() -> str:
-    """cuda / cpu：N 卡在场且算力 ≥7.0 才值得装 cu128 轮。"""
+    """cuda / cuda126 / cpu：按算力选 CUDA 轮。
+
+    ≥7.0 走 cu128（主线）；5.0-6.9（Maxwell/Pascal）cu128 没有内核，但
+    cu126 轮实测可用（Quadro M4000 sm_52 上 torch CUDA matmul 与 demucs GPU
+    全链跑通，2026-10-15）——torch 同为 2.8.0 只是 CUDA 变体不同，双栈依赖
+    不受影响；<5.0 或无 N 卡装 CPU 轮。
+    """
     if shutil.which("nvidia-smi") is None:
         return "cpu"
     probe = subprocess.run(  # noqa: S603 - 固定二进制受控参数
         ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
         capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW, check=False,
     )
-    raw = probe.stdout.strip().splitlines()[0].strip() if probe.returncode == 0 else ""
+    lines = probe.stdout.strip().splitlines() if probe.returncode == 0 else []
+    raw = lines[0].strip() if lines else ""
     cap = raw if raw else ""
     try:
-        if cap and float(cap.split()[0]) < 7.0:
-            print(f"[tts-runtime] N 卡算力 {cap} 低于 cu128 支持线（7.0）：装 CPU 轮")
-            return "cpu"
-        return "cuda"
+        major = float(cap.split()[0]) if cap else -1.0
     except ValueError:
-        return "cuda"
+        return "cuda"  # 算力读不出来：保守装 CUDA 轮，合成探针诚实回退
+    if major < 0.0:
+        return "cuda"  # nvidia-smi 空输出同理：信息缺失不等于没有 CUDA
+    if major < 5.0:
+        print(f"[tts-runtime] N 卡算力 {cap} 低于 CUDA 轮支持线（5.0）：装 CPU 轮")
+        return "cpu"
+    if major < 7.0:
+        print(f"[tts-runtime] N 卡算力 {cap} 落在 cu126 兼容区间（5.0-6.9）：装 cu126 轮")
+        return "cuda126"
+    return "cuda"
 
 
 def venv_dir(data_dir: Path) -> Path:
@@ -173,7 +187,11 @@ def torch_variant(data_dir: Path) -> str:
         raw = marker.read_text(encoding="utf-8").strip()
     except OSError:
         return "unknown"
-    return raw if raw in ("cuda", "cpu") else "unknown"
+    # cuda128/cuda126 等细分变体归一为 cuda：消费方（设备档位/前端）只关心 CUDA 可用。
+    # 认不得的值（磁盘损坏/手改）如实 unknown，不冒充 cpu。
+    if raw.startswith("cuda"):
+        return "cuda"
+    return "cpu" if raw == "cpu" else "unknown"
 
 
 def status(data_dir: Path) -> dict[str, Any]:
@@ -245,10 +263,15 @@ def install(
     # 判据不能是 venv 里的 import torch——此时 torch 还没装，探针永远假阴性；
     # 也不能只看 nvidia-smi 在场——老卡（如 Pascal 5.2）在 cu128 里没有内核，
     # 装 GPU 轮是白下 2.5GB，CUDA 是否真能用再由 worker 合成时的探针诚实回退。
-    gpu_ok = _gpu_variant() == "cuda"
-    _pct(18, f"安装 torch（{'CUDA 12.8 变体' if gpu_ok else 'CPU 变体'}，约 0.2-2.5GB）")
-    if gpu_ok:
+    variant = _gpu_variant()
+    variant_label = {"cuda": "CUDA 12.8", "cuda126": "CUDA 12.6（老卡兼容）"}.get(
+        variant, "CPU"
+    )
+    _pct(18, f"安装 torch（{variant_label} 变体，约 0.2-2.5GB）")
+    if variant == "cuda":
         _run_uv(uv, venv, "pip", "install", *_TORCH_CPU, "--index-url", _TORCH_INDEX)
+    elif variant == "cuda126":
+        _run_uv(uv, venv, "pip", "install", *_TORCH_CPU, "--index-url", _TORCH_INDEX_CU126)
     else:
         _run_uv(uv, venv, "pip", "install", *_TORCH_CPU, "--index-url", _PYPI_MIRROR)
     _check_cancel()
@@ -341,7 +364,7 @@ def install(
     if cv_check.returncode != 0:
         raise RuntimeError("自检失败：cosyvoice 导入异常，可重试修复")
     _variant_marker(data_dir).write_text(
-        "cuda" if gpu_ok else "cpu", encoding="utf-8"
+        variant if variant in ("cuda", "cuda126") else "cpu", encoding="utf-8"
     )
     _pct(100, "完成")
 
