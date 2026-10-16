@@ -33,7 +33,6 @@ def base_canvas() -> Image.Image:
 
 def draw_mark(img: Image.Image) -> None:
     """播放三角（蓝青渐变）+ 上方橙色剪辑标记条。"""
-    draw = ImageDraw.Draw(img)
 
     # 剪辑标记条：顶部斜置圆角条（场记板意象）
     bar = Image.new("RGBA", (150, 34), (0, 0, 0, 0))

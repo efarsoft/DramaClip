@@ -28,12 +28,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "service"))
 
-from dramaclip.infra import paths  # noqa: E402
-from dramaclip.infra.storage import db  # noqa: E402
-from dramaclip.infra.storage.repos import episodes as episodes_repo  # noqa: E402
-from dramaclip.infra.storage.repos import exports as exports_repo  # noqa: E402
-from dramaclip.infra.storage.repos import plans as plans_repo  # noqa: E402
-from dramaclip.infra.storage.repos import projects as projects_repo  # noqa: E402
+from dramaclip.infra import paths
+from dramaclip.infra.storage import db
+from dramaclip.infra.storage.repos import episodes as episodes_repo
+from dramaclip.infra.storage.repos import exports as exports_repo
+from dramaclip.infra.storage.repos import plans as plans_repo
+from dramaclip.infra.storage.repos import projects as projects_repo
 
 MODES = (
     "intro_narration",

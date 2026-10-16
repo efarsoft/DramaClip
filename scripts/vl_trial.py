@@ -50,7 +50,7 @@ def start_server(model: Path, mmproj: Path) -> subprocess.Popen[str]:
         "-c", "12288",
         "--threads", "8",
     ]
-    proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603
+    proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     deadline = time.monotonic() + LOAD_TIMEOUT_S
     while time.monotonic() < deadline:
         if proc.poll() is not None:

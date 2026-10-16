@@ -16,13 +16,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "service"))
 
-from dramaclip.api import analysis as analysis_api  # noqa: E402
-from dramaclip.api.context import AppContext  # noqa: E402
-from dramaclip.engines.analysis.runtime import AnalysisRuntime  # noqa: E402
-from dramaclip.engines.vision import runtime as vision_engine  # noqa: E402
-from dramaclip.infra import config, jobs, paths  # noqa: E402
-from dramaclip.infra.storage import db  # noqa: E402
-from dramaclip.infra.storage.repos import episodes as episodes_repo  # noqa: E402
+from dramaclip.api import analysis as analysis_api
+from dramaclip.api.context import AppContext
+from dramaclip.engines.analysis.runtime import AnalysisRuntime
+from dramaclip.engines.vision import runtime as vision_engine
+from dramaclip.infra import config, jobs, paths
+from dramaclip.infra.storage import db
+from dramaclip.infra.storage.repos import episodes as episodes_repo
 
 
 class _PrintNotifier:
