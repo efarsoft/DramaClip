@@ -246,8 +246,8 @@ def test_torch_variant_marker_roundtrip(tmp_path: Path) -> None:
     assert tts_runtime.status(data)["torch_variant"] == "unknown"  # 探针跑不动假解释器 → 未装完
 
 
-def test_gpu_variant_three_tiers(monkeypatch) -> None:
-    """算力三档：≥7.0 cu128 / 5.0-6.9 cu126（老卡兼容）/ <5.0 或无卡 CPU。"""
+def test_gpu_variant_two_tiers(monkeypatch) -> None:
+    """算力两档：≥7.0 cu128 / <7.0 或无卡 CPU（cu126 老卡轮 2.8.0 实测无 sm_50 内核，否决）。"""
     from dramaclip.infra.model_manager import tts_runtime
 
     monkeypatch.setattr(tts_runtime.shutil, "which", lambda _n: r"C:\fake\nvidia-smi.exe")
@@ -260,8 +260,8 @@ def test_gpu_variant_three_tiers(monkeypatch) -> None:
     cases = {
         "7.5": "cuda",
         "8.9": "cuda",
-        "5.2": "cuda126",
-        "6.1": "cuda126",
+        "5.2": "cpu",  # M4000 实测：2.8.0+cu126 装得上但算子无内核
+        "6.1": "cpu",
         "4.5": "cpu",
         "": "cuda",  # 探测失败按有卡处理（保守装 CUDA 轮，合成探针诚实回退）
     }
@@ -294,10 +294,10 @@ def test_install_torch_falls_back_to_mirror(monkeypatch, tmp_path: Path) -> None
             raise RuntimeError("SSL 握手失败")
 
     monkeypatch.setattr(tts_runtime, "_run_uv", _fake_run)
-    tts_runtime._install_torch(Path("uv"), venv_dir := tmp_path / "venv", "cuda126")
+    tts_runtime._install_torch(Path("uv"), venv_dir := tmp_path / "venv", "cuda")
     assert len(calls) == 2
     joined = " ".join(calls[1])
-    assert "--find-links" in joined and "cu126" in joined
+    assert "--find-links" in joined and "cu128" in joined
     # cpu 变体只走清华单次
     calls.clear()
     state["fail_first"] = False
