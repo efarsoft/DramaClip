@@ -499,4 +499,4 @@ def find(spec: ModelSpec, models_dir: Path) -> Path | None:
 
 # 数据层外置后的兼容 re-export：downloader/importer/models/test_runtime 的
 # `from registry import builtin_specs` 引用面原样保留（2026-10-16 拆分）。
-from dramaclip.infra.model_manager.builtin_specs import builtin_specs  # noqa: E402
+from dramaclip.infra.model_manager.builtin_specs import builtin_specs as builtin_specs  # noqa: E402
