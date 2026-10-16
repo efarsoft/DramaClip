@@ -36,6 +36,7 @@ HIDDEN_IMPORTS = [
     "misaki",
     "edge_tts",
     "funasr",
+    "kaldiio",  # funasr 动态 import（load_utils 等三处），静态分析不收
 ]
 
 # funasr 的 register 机制按路径动态加载 models/ 子模块，静态分析收不全——
