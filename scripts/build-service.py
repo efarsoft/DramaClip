@@ -73,7 +73,27 @@ def main() -> int:
         action="store_true",
         help="收集 NVIDIA CUDA 运行库（nvidia-cublas-cu12 / nvidia-cudnn-cu12，需先在 venv 安装；体积 +~700MB）",
     )
+    parser.add_argument(
+        "--allow-gpu-torch",
+        action="store_true",
+        help="构建 venv 里装的是 CUDA 变体 torch 时仍继续（默认 fail-fast："
+        "torch 的 CUDA 轮会带 2.5GB+ 进包，发布包必须用 CPU 轮构建）",
+    )
     args = parser.parse_args()
+
+    # 构建护栏：HIDDEN_IMPORTS 显式收 torch，构建 venv 是什么变体就进什么变体——
+    # 2026-10-16 实测：构建机 venv 残留 cu126 轮时产物直冲 4.8GB（正常 CPU 轮 ~2.3GB）。
+    import importlib.metadata
+
+    torch_version = importlib.metadata.version("torch")
+    if "+cu" in torch_version and not args.allow_gpu_torch:
+        print(
+            f"[build-service] 拒绝构建：venv torch 为 {torch_version}（CUDA 变体会带 "
+            "2.5GB+ 进发布包）。请先切回 CPU 轮：uv pip install torch==<ver> "
+            "（PyPI 默认 CPU），或加 --allow-gpu-torch 强行继续。"
+        )
+        return 2
+    print(f"[build-service] torch 变体: {torch_version}")
 
     entry = BUILD_DIR / "sidecar_entry.py"
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
