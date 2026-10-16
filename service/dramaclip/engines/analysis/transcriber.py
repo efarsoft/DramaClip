@@ -264,8 +264,14 @@ class ParaformerEngine:
         model = self._ensure_model()
         try:
             clips = pause_split.speech_clips(wav_path)
-        except (OSError, ValueError):
-            # 停顿分析失败（文件不可读/过短）→ 退回整条直喂（分档：老路径仍可用）
+        except (OSError, pause_split.PauseAnalysisUnavailable) as exc:
+            # 停顿分析量不出来（文件不可读/过短）→ 退回整条直喂（分档：老路径仍可用）。
+            # 只认这一类型：编程错误往这儿抛就是真失败，让它出去。
+            _LOGGER.warning(
+                "停顿切分退回整条直喂（%s: %s）：字级时间戳失去片段起点锚，跨停顿并句可能复现",
+                type(exc).__name__,
+                exc,
+            )
             clips = []
         with _punc_false_alarm_silenced():
             if len(clips) <= 1:
@@ -564,9 +570,15 @@ class DashscopeCloudAsrEngine:
 
         try:
             clips = pause_split.speech_clips(wav_path, max_clip_s=self._CHUNK_S)
-        except (OSError, ValueError):
+        except (OSError, pause_split.PauseAnalysisUnavailable) as exc:
             with wave.open(str(wav_path), "rb") as wf:
                 duration = wf.getnframes() / wf.getframerate()
+            _LOGGER.warning(
+                "停顿切分退回整条后按 %ss 硬等分（%s: %s）：切点不再落在真实停顿上",
+                self._CHUNK_S,
+                type(exc).__name__,
+                exc,
+            )
             clips = [pause_split.Clip(0.0, duration)]
         chunks: list[pause_split.Clip] = []
         for clip in clips:

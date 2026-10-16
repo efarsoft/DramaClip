@@ -60,6 +60,24 @@ def test_speech_clips_pure_silence_falls_back_whole(tmp_path: Path) -> None:
     assert clips and clips[0].end - clips[0].start >= 1.0
 
 
+def test_speech_clips_splits_oversized_region(tmp_path: Path) -> None:
+    """单个区段长过 `_MAX_CLIP_S` → 在内部能量谷二次切分，片段不得越过上限。
+
+    这是停顿切分的常态而非边角：整集音频里 BGM 把句间填满，语音区段轻松超 12s。
+    构造 13s 语音 / 4s 停顿 / 13s 语音（静音占满 20% 帧，底噪估计才不会被语音污染），
+    两个区段都落进超长分支 → 每段各切两刀。
+    """
+    wav = tmp_path / "long.wav"
+    _write_wav(wav, [13.0, 4.0, 13.0])
+    clips = pause_split.speech_clips(wav)
+
+    assert len(clips) == 4, "两个 13s 区段各应切成 2 个片段"
+    assert clips[0].start == pytest.approx(0.0, abs=0.2)
+    assert clips[-1].end == pytest.approx(30.0, abs=0.2)
+    for clip in clips:
+        assert 1.0 <= clip.end - clip.start <= pause_split._MAX_CLIP_S + 0.1
+
+
 def test_split_wav_cuts_at_clip_bounds(tmp_path: Path) -> None:
     wav = tmp_path / "burst.wav"
     _write_wav(wav, [1.2, 0.6, 1.2])

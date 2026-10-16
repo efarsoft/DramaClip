@@ -195,6 +195,31 @@ def test_dashscope_asr_chunks_offsets_and_call_shape(
     assert first["messages"][0]["content"][0]["audio"].startswith("file://")
 
 
+def test_dashscope_asr_chunk_fallback_is_traced(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """停顿分析量不出来 → 整条一片兜底，但这次退回要在日志里留痕。
+
+    与本地 paraformer 同一条判据：退回整条是**改变观众所见字幕**的降级，
+    静默退回等于「界面说切了、产物没切」。
+    """
+    from dramaclip.engines.analysis import pause_split
+
+    def unavailable(_wav: Path, **_kw: Any) -> list[Any]:
+        raise pause_split.PauseAnalysisUnavailable("音频过短，无法分析")
+
+    monkeypatch.setattr(pause_split, "speech_clips", unavailable)
+    wav = tmp_path / "ep.wav"
+    _write_wav(wav, seconds=2.0)
+
+    chunks = DashscopeCloudAsrEngine(api_key="sk-test")._chunks(wav)
+
+    assert [(c.start, c.end) for c in chunks] == [(0.0, 2.0)]
+    assert "停顿切分" in caplog.text
+
+
 def test_dashscope_asr_speaker_labels_from_word_level(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

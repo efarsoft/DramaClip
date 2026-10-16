@@ -105,6 +105,47 @@ def test_timestamp_shortfall_keeps_all_text(
     assert (segments[0].start, segments[0].end) == (0.0, 0.6)
 
 
+def test_unexpected_pause_analysis_error_propagates(
+    tmp_path: Path,
+    fake_funasr: type[_FakeAutoModel],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """停顿分析里的意外 ValueError 必须抛出，不许被当成「素材不可用」退回整条直喂。
+
+    `strict=True` 的 zip 必抛 ValueError 被吞了这么久，根因就是这层宽判据：
+    真失败与「这段素材量不出来」共用一个异常类型，于是功能静默关闭、日志无痕。
+    """
+    from dramaclip.engines.analysis import pause_split
+
+    def boom(_wav: Path, **_kw: Any) -> list[Any]:
+        raise ValueError("不该被吞的编程错误")
+
+    monkeypatch.setattr(pause_split, "speech_clips", boom)
+    engine = ParaformerEngine(models_dir=tmp_path / "nope")
+
+    with pytest.raises(ValueError, match="不该被吞的编程错误"):
+        engine.transcribe(Path("a.wav"))
+
+
+def test_pause_analysis_unavailable_falls_back_and_logs(
+    tmp_path: Path,
+    fake_funasr: type[_FakeAutoModel],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """如实的量不出来（格式不合/过短）→ 退回整条直喂，但必须留痕。"""
+    from dramaclip.engines.analysis import pause_split
+
+    def unavailable(_wav: Path, **_kw: Any) -> list[Any]:
+        raise pause_split.PauseAnalysisUnavailable("音频过短，无法分析")
+
+    monkeypatch.setattr(pause_split, "speech_clips", unavailable)
+    engine = ParaformerEngine(models_dir=tmp_path / "nope")
+
+    assert engine.transcribe(Path("a.wav")) == []
+    assert "停顿切分" in caplog.text, "退回整条是一次降级，翻日志要看得见"
+
+
 def test_bad_shapes_yield_empty_not_crash() -> None:
     assert _parse_paraformer([{"text": "", "timestamp": [[0, 1]]}], 0.6) == []
     assert _parse_paraformer([{"text": "字", "timestamp": []}], 0.6) == []

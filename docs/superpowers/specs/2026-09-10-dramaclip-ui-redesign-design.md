@@ -141,6 +141,7 @@
 | AI 模式推荐返回不合法 → 静态三件套 | `mode_recommend._ask_llm` | **允许，但必须留痕；异常类名不进用户文案** | 静默换组合等于推荐结果凭空变了却无人负责；原先写的是「补位（返回不合法（ValidationError））」——内部话术当推荐理由上了界面。类名与原因进进程日志，文案只说"AI 返回格式不合法" |
 | 分析层 LLM → 关键词打分 | `semantic/conflict.py`、`genre.py` | **允许，界面必须可见** | 影响选段而非文案；可见性归 §3.3，界面在 P-3 |
 | CUDA → CPU | `analysis/transcriber.py` | **允许** | 同结果，只慢 |
+| 停顿切分量不出来 → 整条直喂 | `ParaformerEngine.transcribe`、`DashscopeCloudAsrEngine._chunks` | **允许，但必须留痕；编程错误不在此列** | 退回的是老路径，代价是字级时间戳失去片段起点锚（跨停顿并句可能复现）。原先两处 `except (OSError, ValueError)` 把「这段素材量不出停顿」和「代码写错了」混判：`pause_split` 超长分支 `zip(bounds, bounds[1:], strict=True)` 两侧长度恒差 1、必抛 ValueError，于是**素材里只要有一个超 12s 语音区段，整条分析就退回直喂**（该分支 2026-10-12 `7ae66e5` 落地起从未生效）。现类型收窄为 `PauseAnalysisUnavailable`：如实量不出来才退回并 warn 留痕，真失败照抛 |
 | 下载多源降级 | `model_manager/downloader.py` | **允许** | 同一个文件 |
 | 同名 `.srt` 缺失 → 库内 ASR 保护区 | `encoder.export_plan` | **允许** | 两个都是保护区来源，等价 |
 | `raw_clip` 冲突分不足 → 放宽取全部场景 | `modes.build_raw_clip` | **允许** | 素材可得性问题，不改变观众听到的内容 |

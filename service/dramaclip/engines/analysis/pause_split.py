@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import wave
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 
 _FRAME_S = 0.03  # 帧长 30ms：短剧旁白语速下足够分辨停顿
@@ -29,6 +30,16 @@ class Clip:
 
     start: float
     end: float
+
+
+class PauseAnalysisUnavailable(ValueError):
+    """这份素材量不出停顿（格式不合、过短）——调用方据此退回整条直喂。
+
+    单独成类是为了和**代码写错**分的开：早先调用方 `except (OSError, ValueError)`
+    把两类混为一谈，`strict=True` 的 zip 必抛的 ValueError 被当成「素材不可用」
+    静默吞掉——于是一个超 12s 的语音区段就能让整条分析退回直喂，而这在整集素材
+    上是常态。编程错误要继续往外抛。
+    """
 
 
 def _frame_energies(pcm: bytes, frame_bytes: int) -> list[float]:
@@ -63,14 +74,14 @@ def speech_clips(
         width = wf.getsampwidth()
         if width != 2 or wf.getnchannels() != 1:
             actual = f"{width * 8}bit/{wf.getnchannels()}ch"
-            raise ValueError(f"仅支持 16k 单声道 16bit wav，实际 {actual}")
+            raise PauseAnalysisUnavailable(f"仅支持 16k 单声道 16bit wav，实际 {actual}")
         rate = wf.getframerate()
         pcm = wf.readframes(wf.getnframes())
     duration = len(pcm) / (2 * rate)
     frame_bytes = int(rate * _FRAME_S) * 2
     energies = _frame_energies(pcm, frame_bytes)
     if not energies:
-        raise ValueError("音频过短，无法分析")
+        raise PauseAnalysisUnavailable("音频过短，无法分析")
     del pcm
 
     floor = _noise_floor(energies)
@@ -114,14 +125,14 @@ def speech_clips(
         cuts = [s_frame + k * part_frames for k in range(1, parts)]
         cuts = [_weakest(cut, part_frames // 4, energies) for cut in cuts]
         bounds = [s_frame, *cuts, e_frame]
-        for a, b in zip(bounds, bounds[1:], strict=True):
+        for a, b in pairwise(bounds):
             a_s, b_e = a * _FRAME_S, b * _FRAME_S
             if b_e - a_s < min_clip_s:
                 continue
-            if clips and a_s - clips[-1].end < min_pause_s:
-                clips[-1] = Clip(clips[-1].start, b_e)
-            else:
-                clips.append(Clip(a_s, b_e))
+            # 区段内的人工切点两侧本就相连，不参与「短停顿并回」判定——那条只对
+            # 区段之间成立（区段生成时已并过 ≤min_pause_s 的停顿），照套会把刚
+            # 切开的两半并回一整段，二次切分等于没切。
+            clips.append(Clip(a_s, b_e))
     if not clips:
         clips = [Clip(0.0, duration)]
     return clips
