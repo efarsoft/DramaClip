@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from dramaclip.api import export as export_api
+from dramaclip.api import export_covers as export_covers
 from dramaclip.api import narration as narration_api
 from dramaclip.engines.exporter import encoder
 from dramaclip.engines.narration.models import PlanData, TimelineSegment
@@ -221,7 +222,7 @@ def test_cover_source_frame_failure_records_the_subtitle_burn_fallback(
     def _boom(*_a: Any, **_k: Any) -> None:
         raise ValueError("源输入形状不对")
 
-    monkeypatch.setattr(export_api, "_cover_source_frame", _boom)
+    monkeypatch.setattr(export_covers, "_cover_source_frame", _boom)
     monkeypatch.setattr(
         export_api.ffmpeg_cover,
         "extract_cover",
@@ -255,12 +256,12 @@ def test_degradation_note_survives_a_dead_notification_channel(
             raise OSError("管道已关闭")
 
     context.notifier = _Dead()
-    with caplog.at_level("WARNING", logger="dramaclip.api.export"):
+    with caplog.at_level("WARNING", logger="dramaclip.api.export_audit"):
         export_api._note_degraded(context, "台词时钟对账", "本条成片没有账面", ValueError("x"))
     assert "台词时钟对账" in caplog.text, "通知面死了也不能把留痕一起带走"
 
     caplog.clear()
-    with caplog.at_level("INFO", logger="dramaclip.api.export"):
+    with caplog.at_level("INFO", logger="dramaclip.api.export_audit"):
         export_api._log_clock_audit(context, [(3, 2, 1)])  # 正常算得出，只是投不出去
     assert "台词时钟对账：烧录台词 3 行" in caplog.text, "正常账面也走同一条兜底"
 

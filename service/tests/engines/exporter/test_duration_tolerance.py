@@ -1,6 +1,6 @@
 """时长审计容差只有一个真相源：`encoder.AUDIT_DURATION_*`。
 
-三处判据（`api/export._audit_duration` 渲染后 warn、`encoder._audit_film_duration`
+三处判据（`api/export_audit._audit_duration` 渲染后 warn、`encoder._audit_film_duration`
 段和超容差抛错、`selfcheck.check_duration` 成品库红绿门禁）过去各写一份 0.08 / 3.0，
 靠三段注释互相指认"同判据"。注释不改代码：改一处就出现「界面绿、日志 warn」。
 本文件把「它们是同一个数」从注释升级成门禁。
@@ -11,10 +11,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from dramaclip.api import export as export_api
+from dramaclip.api import export_audit as export_audit
 from dramaclip.engines.exporter import encoder, selfcheck
 
-_SITES = (Path(encoder.__file__), Path(export_api.__file__), Path(selfcheck.__file__))
+_SITES = (Path(encoder.__file__), Path(export_audit.__file__), Path(selfcheck.__file__))
 # `某容差 = 数字`：字面量落地处（import 进来的引用不会命中，等号左边没有 TOLERANCE）
 _INLINE_DEFINITION = re.compile(r"^(\w*TOLERANCE\w*)\s*=\s*[-\d]", re.MULTILINE)
 
@@ -33,7 +33,7 @@ def test_only_encoder_hands_out_the_tolerance_numbers() -> None:
 
 def test_the_other_two_sites_read_encoders_constant() -> None:
     """另两处必须点名引用 encoder 的常量（不引用就是自己算了一套）。"""
-    for site in (Path(export_api.__file__), Path(selfcheck.__file__)):
+    for site in (Path(export_audit.__file__), Path(selfcheck.__file__)):
         body = site.read_text(encoding="utf-8")
         assert "AUDIT_DURATION_REL_TOLERANCE" in body, f"{site.name} 没引用共享相对容差"
         assert "AUDIT_DURATION_ABS_TOLERANCE_S" in body, f"{site.name} 没引用共享绝对容差"
