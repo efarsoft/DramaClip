@@ -253,8 +253,16 @@ def test_cancel_restores_unprocessed_episodes(
         instance.rpc("analysis.cancel", {"job_id": result["job_id"]})
         status = instance.wait_done(str(result["job_id"]))
         assert status["status"] == "cancelled"
-        after = episodes_repo.list_by_project(memory_db, project_id)
-        by_id = {str(ep["id"]): ep["status"] for ep in after}
+        # 回滚落库与 cancelled 状态写库不同步（flaky 三轮两现）：短轮询等回滚到位，
+        # 超时仍不到位才是真失败——固定 sleep 抢跑会在 Windows 调度下随机失败
+        deadline = time.monotonic() + 2.0
+        by_id: dict[str, str] = {}
+        while time.monotonic() < deadline:
+            after = episodes_repo.list_by_project(memory_db, project_id)
+            by_id = {str(ep["id"]): ep["status"] for ep in after}
+            if by_id[third_id] == "failed" and "analyzing" not in by_id.values():
+                break
+            time.sleep(0.05)
         assert by_id[third_id] == "failed", "未处理集应回滚为入队前状态"
         assert "analyzing" not in by_id.values(), "取消后不得有集滞留 analyzing"
     finally:

@@ -506,6 +506,22 @@ def _retire(target: Path, *, whole_dir: bool) -> None:
         path.rename(path.parent / f"{path.name}_backup_{stamp}")
 
 
+def _replace_with_retry(src: Path, dst: Path, attempts: int = 4) -> None:
+    """os.replace 的 Windows 加固：目标被杀毒/索引器短暂握住时退避重试。
+
+    WinError 5（拒绝访问）是秒级瞬态，立刻放弃会把整份已复制完的资产
+    当失败清掉；重试耗尽仍失败才按真冲突抛出。
+    """
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.2 * (attempt + 1))
+
+
 def _land(unit: Path, placement: Path, contents: bool, on_progress: Progress | None) -> int:
     """先复制进同盘的临时目录，再整体换到位：半途失败不会留下半份资产。"""
     staging = placement / f".import-{uuid4().hex[:8]}"
@@ -515,7 +531,7 @@ def _land(unit: Path, placement: Path, contents: bool, on_progress: Progress | N
             unit, staging, contents=contents, skip_existing=False, on_progress=on_progress
         )
         for child in sorted(staging.iterdir()):
-            os.replace(child, placement / child.name)
+            _replace_with_retry(child, placement / child.name)
         staging.rmdir()
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)

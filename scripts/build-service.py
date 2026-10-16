@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SERVICE_DIR = REPO_ROOT / "service"
 BUILD_DIR = REPO_ROOT / "build" / "service"
@@ -33,7 +35,13 @@ HIDDEN_IMPORTS = [
     "kokoro",
     "misaki",
     "edge_tts",
+    "funasr",
 ]
+
+# funasr 的 register 机制按路径动态加载 models/ 子模块，静态分析收不全——
+# 整包子模块收集补齐。⚠️ 待真机包验证（构建后跑 verify_sidecar 确认
+# SenseVoice/Paraformer 引擎可选到），此项从 debt 清单除名才算闭环。
+HIDDEN_IMPORTS += collect_submodules("funasr")
 
 # 体积排除表（docs/00 ADR：Python 打包体积→排除表）
 # 注：pip/setuptools/wheel 不可排除——与 PyInstaller 运行时钩子冲突（ValueError already imported）
