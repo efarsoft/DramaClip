@@ -278,3 +278,28 @@ def test_gpu_variant_cpu_when_no_smi(monkeypatch) -> None:
 
     monkeypatch.setattr(tts_runtime.shutil, "which", lambda _n: None)
     assert tts_runtime._gpu_variant() == "cpu"
+
+
+def test_install_torch_falls_back_to_mirror(monkeypatch, tmp_path: Path) -> None:
+    """官方 cu 源失败 → 阿里 flat 镜像重试（--find-links + 清华 index）；cpu 直走清华。"""
+    from dramaclip.infra.model_manager import tts_runtime
+
+    calls: list[list[str]] = []
+    state = {"fail_first": True}
+
+    def _fake_run(uv: Path, venv: Path, *args: str) -> None:
+        calls.append(list(args))
+        if state["fail_first"] and "--find-links" not in args:
+            raise RuntimeError("SSL 握手失败")
+
+    monkeypatch.setattr(tts_runtime, "_run_uv", _fake_run)
+    tts_runtime._install_torch(Path("uv"), venv_dir := tmp_path / "venv", "cuda126")
+    assert len(calls) == 2
+    joined = " ".join(calls[1])
+    assert "--find-links" in joined and "cu126" in joined
+    # cpu 变体只走清华单次
+    calls.clear()
+    state["fail_first"] = False
+    tts_runtime._install_torch(Path("uv"), venv_dir, "cpu")
+    assert len(calls) == 1 and "--index-url" in calls[0]
+    assert tts_runtime._PYPI_MIRROR in calls[0]

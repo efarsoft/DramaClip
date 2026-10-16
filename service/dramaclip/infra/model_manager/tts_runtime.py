@@ -268,12 +268,7 @@ def install(
         variant, "CPU"
     )
     _pct(18, f"安装 torch（{variant_label} 变体，约 0.2-2.5GB）")
-    if variant == "cuda":
-        _run_uv(uv, venv, "pip", "install", *_TORCH_CPU, "--index-url", _TORCH_INDEX)
-    elif variant == "cuda126":
-        _run_uv(uv, venv, "pip", "install", *_TORCH_CPU, "--index-url", _TORCH_INDEX_CU126)
-    else:
-        _run_uv(uv, venv, "pip", "install", *_TORCH_CPU, "--index-url", _PYPI_MIRROR)
+    _install_torch(uv, venv, variant)
     _check_cancel()
 
     # ④ 双栈其余依赖（清华镜像；transformers 定 4.52.1 = IndexTTS 硬需要 +
@@ -431,6 +426,45 @@ def _extract_tar_stripped(archive: Path, dest: Path) -> None:
                 raise RuntimeError(
                     f"归档里有非常规成员（{member.type!r}），拒绝解包：{member.name}"
                 )
+
+
+def _install_torch(uv: Path, venv: Path, variant: str) -> None:
+    """torch 按变体安装：官方 cu 源优先，失败回落阿里 pytorch-wheels flat 镜像。
+
+    download.pytorch.org 在部分国内网络直连握手失败（2026-10-15 本机实测 SSL
+    握手失败），GPU 轮 2.5GB 没有二次机会就是安装流程最大的单点。阿里镜像
+    的 flat 目录做 --find-links（torch==2.8.0 匹配 +cuNNN local version，
+    pip/uv 语义），其余传递依赖仍走清华。
+    """
+    if variant == "cpu":
+        _run_uv(uv, venv, "pip", "install", *_TORCH_CPU, "--index-url", _PYPI_MIRROR)
+        return
+    index = _TORCH_INDEX if variant == "cuda" else _TORCH_INDEX_CU126
+    # 变体名 ≠ 镜像目录名：cuda→cu128、cuda126→cu126（目录 200 实测，cuda* 拼法 404）
+    mirror_dir = (
+        "https://mirrors.aliyun.com/pytorch-wheels/cu128/"
+        if variant == "cuda"
+        else "https://mirrors.aliyun.com/pytorch-wheels/cu126/"
+    )
+    attempts: list[tuple[str, list[str]]] = [
+        ("官方 cu 源", ["pip", "install", *_TORCH_CPU, "--index-url", index]),
+        (
+            "阿里镜像",
+            [
+                "pip", "install", *_TORCH_CPU,
+                "--find-links", mirror_dir, "--index-url", _PYPI_MIRROR,
+            ],
+        ),
+    ]
+    last: Exception | None = None
+    for label, args in attempts:
+        try:
+            _run_uv(uv, venv, *args)
+            return
+        except RuntimeError as exc:
+            last = exc
+            print(f"[tts-runtime] torch {variant} 轮 {label} 失败，尝试下一来源")
+    raise RuntimeError(f"torch {variant} 轮全部来源失败: {last}")
 
 
 def _run_uv(uv: Path, venv: Path, *args: str) -> None:
