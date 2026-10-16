@@ -587,8 +587,45 @@ def _plan_one(
             angle_block=variant.angle_block,
             trace_dir=trace_dir,
         )
+        _retell_gate(plan, settings, trace_dir, context.notifier)
     used_ids = sorted({segment.episode_id for segment in plan.timeline})
     return plan, used_ids
+
+
+def _retell_gate(
+    plan: PlanData,
+    settings: dict[str, str],
+    trace_dir: Path | None,
+    notifier: Any,
+) -> None:
+    """复述测试（软质检）：无上下文观众闭卷复述，结论进 trace 供审计；失败不阻塞出片。
+
+    重写循环（优先删和拆）待观测数据积累后另批接入。
+    """
+    from dramaclip.engines.narration.retell import retell_check
+    from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig
+
+    if settings.get("narration.retell_check", "1") != "1":
+        return  # 关闭（如测试桩环境）：retell 走真实 LLM 客户端，桩覆盖不到就别让它等
+    text = "\n".join(item.text for item in plan.narration_texts)
+    if not text.strip():
+        return
+    try:
+        client = LlmClient(LlmConfig.from_settings(settings))
+        report = retell_check(text, client)
+    except Exception as exc:  # noqa: BLE001 - 软质检任何失败都降级跳过
+        notifier.log("warning", f"复述测试跳过：{str(exc)[:120]}")
+        return
+    if trace_dir is not None:
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        (trace_dir / "retell.json").write_text(
+            json.dumps(report.to_json(), ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+    notifier.log(
+        "info" if report.passed else "warning",
+        f"复述测试：{report.summary_line()}"
+        + (f"（首条卡点：{report.confusions[0]['note']}）" if report.confusions else ""),
+    )
 
 
 def _casting_for(

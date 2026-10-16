@@ -56,6 +56,19 @@ def handle_audit_copy(body: dict[str, Any]) -> dict[str, Any]:
     return _report_json(A.review_copy(lines, slots, mode=str(body.get("mode", ""))))
 
 
+def handle_retell_check(
+    body: dict[str, Any], settings: dict[str, str]
+) -> dict[str, Any]:
+    text = str(body.get("text") or "").strip()
+    if not text:
+        raise ValueError("body.text 必须是非空解说稿纯文本")
+    from dramaclip.engines.narration.retell import retell_check
+    from dramaclip.engines.semantic.llm_client import LlmClient, LlmConfig
+
+    report = retell_check(text, LlmClient(LlmConfig.from_settings(settings)))
+    return report.to_json()
+
+
 def handle_draft_titles(
     body: dict[str, Any], settings: dict[str, str], trace_dir: Path | None = None
 ) -> dict[str, Any]:
@@ -108,6 +121,9 @@ def make_handler(
                 "/tools/audit_copy": handle_audit_copy,
                 "/tools/draft_titles": lambda b: handle_draft_titles(
                     b, settings_provider(), trace_dir
+                ),
+                "/tools/retell_check": lambda b: handle_retell_check(
+                    b, settings_provider()
                 ),
             }
             handler = routes.get(path)

@@ -573,6 +573,7 @@ def _stub_language_and_tts(
 
 
 _LLM_SETTINGS = {
+    "narration.retell_check": "0",  # 桩只覆盖 script_driver 的 LlmClient；retell 走真客户端必须关
     "llm.base_url": "http://llm.test/v1",
     "llm.api_key": "sk-test",
     "llm.model": "test-model",

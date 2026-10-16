@@ -71,6 +71,8 @@ DEFAULTS: dict[str, str] = {
     "narration.style_id": "auto",
     # 每模式的方案数 K（规格 §4.3「方案数 K 」的全局默认；项目级覆盖走 projects.settings）
     "narration.variants_per_mode": "1",
+    # 复述测试（软质检）：无上下文观众闭卷复述度量可懂度，结论进 trace；"0"=关闭
+    "narration.retell_check": "1",
     "download.hf_mirror": "https://hf-mirror.com",
     "download.ms_base": "https://modelscope.cn",
     # 成片响度目标（EBU R128）：Phase C 整片两遍 loudnorm 收口，见 engines/exporter/loudness.py

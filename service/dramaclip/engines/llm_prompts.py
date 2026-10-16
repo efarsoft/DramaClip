@@ -94,6 +94,12 @@ SPECS: list[PromptSpec] = [
         _default("dramaclip.engines.narration.titles", "_SYSTEM_PROMPT"),
     ),
     PromptSpec(
+        "prompt.retell_system",
+        "复述测试",
+        "文案质检：无上下文观众闭卷复述 + 感受流卡点，度量「听懂了没」",
+        _default("dramaclip.engines.narration.retell", "_SYSTEM_PROMPT"),
+    ),
+    PromptSpec(
         "prompt.variant_scoring_system",
         "方案评分",
         "六维行为锚点评分 + 一句具体改进建议（软信号：只排序，不参与门禁）",
