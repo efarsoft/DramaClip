@@ -34,13 +34,27 @@ class AnalysisRuntime:
 
 
 def supported() -> frozenset[str]:
-    """真能构建出来的转写引擎名——``registry.engine_ready`` 读这里，两边不各存一份名单。
+    """真能构建出来的转写引擎名——``registry.engine_ready`` 读这里，两边不各存一份。
 
     ``firedred`` 曾在清单里登记、2026-09-24 裁决移除：官方无 pip 包（接入需要隔离桥）、
     AED 无原生时间戳且单次推理上限 60s（整集 wav 必须先过 VAD 分窗）——清单不再挂
     「永远装不上」的死资产。
+
+    funasr 系（sensevoice/paraformer）E-2 起依赖本地运行环境：主 venv 装了 ml 组
+    （dev/测试态）或本地智能运行环境带了 funasr 组（打包态按需装）二者其一才上清单。
     """
-    return frozenset({"faster_whisper", "sensevoice", "paraformer", "dashscope_cloud"})
+    names = {"faster_whisper", "dashscope_cloud"}
+    try:
+        import funasr  # noqa: F401
+
+        names |= {"sensevoice", "paraformer"}
+    except ImportError:
+        from dramaclip.infra.model_manager import tts_runtime
+        from dramaclip.infra.paths import resolve_data_dir
+
+        if tts_runtime.analysis_ready(resolve_data_dir()):
+            names |= {"sensevoice", "paraformer"}
+    return frozenset(names)
 
 
 def _resolve_diarization(

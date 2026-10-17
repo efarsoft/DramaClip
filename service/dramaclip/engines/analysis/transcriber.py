@@ -4,9 +4,13 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import re
 import shutil
+import subprocess
+import threading
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -19,7 +23,7 @@ _CUDA_PROBLEM = re.compile(r"cublas|cudnn|cudart|cuda|gpu|int8 compute type", re
 
 
 def _resolve_torch_device(device: str) -> str:
-    """asr.device 设置值 → funasr AutoModel 的 device 实参。
+    """asr.device 设置值 → funasr AutoModel 的 device 实参（进程内路径专用）。
 
     auto = 交给 torch 探测（有可用 CUDA 即 cuda:0）；显式 cuda 同样解析成
     cuda:0；解析结果仍可能初始化失败（驱动/显存），由引擎的加载回退兜底。
@@ -44,10 +48,125 @@ def simplify(text: str) -> str:
         return text
     return str(OpenCC("t2s").convert(text))
 
+
 if TYPE_CHECKING:
     # 仅类型检查期导入（运行时懒加载；缺依赖时经 ignore_missing_imports 兜底）
     from faster_whisper import WhisperModel
-    from funasr import AutoModel
+
+
+# ---- funasr 双路径装配（E-2）：进程内优先（dev/测试），冻结态走 tts-venv worker ----
+# 打包态主包不含 torch/funasr（build-service excludes），此时 funasr 从本地智能
+# 运行环境（tts-venv）的 worker 进程获得；dev 装了 ml 组或测试桩在 sys.modules
+# 里放了 funasr 时走进程内真 import——两个分支对引擎只暴露同一个 .generate() 形状。
+
+
+class _FunasrWorker:
+    """venv 内 funasr AutoModel 的进程代理：``.generate(**kwargs)`` 与真模型同形。
+
+    生命周期跟引擎实例（AnalysisRuntime 缓存单例 → 全应用一个 worker），进程
+    统一在 service_app 退出时由 `shutdown_funasr_workers` 回收——不收会在
+    Windows 上留占着模型内存的孤儿进程（indextts2 同款教训）。
+    """
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        self._config = config
+        self._proc: subprocess.Popen[str] | None = None
+        self.device = "cpu"
+
+    def start(self) -> None:
+        from dramaclip.engines.tts.workers import funasr_worker
+        from dramaclip.infra.model_manager import tts_runtime
+        from dramaclip.infra.paths import resolve_data_dir
+
+        py = tts_runtime.venv_python(resolve_data_dir())
+        worker_src = Path(funasr_worker.__file__)
+        if not py.is_file():
+            raise RuntimeError(
+                "未装运行环境：本地 ASR 需要本地智能运行环境（引擎页「安装运行环境」）"
+            )
+        try:
+            self._proc = subprocess.Popen(  # noqa: S603 - 固定解释器固定脚本
+                [str(py), str(worker_src), json.dumps(self._config, ensure_ascii=False)],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                text=True, encoding="utf-8",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except OSError as exc:
+            raise RuntimeError(f"运行环境 worker 启动失败（可重装修复）: {exc}") from exc
+        ready = self._readline()
+        if ready is None or not ready.get("ready"):
+            self.close()
+            raise RuntimeError("funasr worker 启动失败（venv 依赖不完整可重装修复）")
+        self.device = str(ready.get("device") or "cpu")
+
+    def _readline(self) -> dict[str, Any] | None:
+        assert self._proc is not None and self._proc.stdout is not None
+        line = self._proc.stdout.readline()
+        if not line:
+            return None
+        try:
+            return dict(json.loads(line))
+        except ValueError:
+            return None
+
+    def generate(self, **kwargs: Any) -> list:  # type: ignore[type-arg]
+        assert self._proc is not None and self._proc.stdin is not None
+        req_id = uuid.uuid4().hex
+        payload = {**kwargs, "input": str(kwargs.get("input", ""))}
+        self._proc.stdin.write(
+            json.dumps({"id": req_id, "kwargs": payload}, ensure_ascii=False) + "\n"
+        )
+        self._proc.stdin.flush()
+        while True:
+            msg = self._readline()
+            if msg is None:
+                raise RuntimeError("funasr worker 意外退出（可重装修复运行环境）")
+            if msg.get("id") != req_id:
+                continue  # 应答严格按 id 配对；异 id 只可能是残留，跳过
+            if not msg.get("ok"):
+                raise RuntimeError(f"funasr 转写失败: {msg.get('error')}")
+            return list(msg.get("raw") or [])
+
+    def close(self) -> None:
+        proc, self._proc = self._proc, None
+        if proc is None:
+            return
+        try:
+            if proc.stdin is not None:
+                proc.stdin.close()
+            proc.wait(timeout=10)
+        except Exception:  # noqa: BLE001 - 收尾尽力而为，等不到就强杀
+            proc.kill()
+
+
+_FUNASR_WORKERS: list[_FunasrWorker] = []
+_FUNASR_WORKERS_LOCK = threading.Lock()
+
+
+def shutdown_funasr_workers() -> None:
+    """service_app 退出钩子：回收全部 funasr worker 进程（防孤儿占模型内存）。"""
+    with _FUNASR_WORKERS_LOCK:
+        workers = _FUNASR_WORKERS[:]
+        _FUNASR_WORKERS.clear()
+    for worker in workers:
+        worker.close()
+
+
+def _spawn_funasr_worker(config: dict[str, Any]) -> _FunasrWorker:
+    worker = _FunasrWorker(config)
+    worker.start()
+    with _FUNASR_WORKERS_LOCK:
+        _FUNASR_WORKERS.append(worker)
+    return worker
+
+
+def _inproc_funasr() -> Any:
+    """进程内 funasr.AutoModel；不可用返回 None（调用方走 venv worker 并给引导文案）。"""
+    try:
+        from funasr import AutoModel  # ml extras 懒加载/测试桩
+    except ImportError:
+        return None
+    return AutoModel
 
 
 class AsrEngine(Protocol):
@@ -188,7 +307,7 @@ class SenseVoiceEngine:
         )
         self._model_dir = resolved
         self._device = device
-        self._model: AutoModel | None = None
+        self._model: Any = None
 
     @property
     def name(self) -> str:
@@ -206,24 +325,41 @@ class SenseVoiceEngine:
         )
         return _parse_sensevoice(raw)
 
-    def _ensure_model(self) -> AutoModel:
+    def _ensure_model(self) -> Any:
         if self._model is None:
-            from funasr import AutoModel  # ml extras 懒加载
-
+            auto_model = _inproc_funasr()
+            if auto_model is None:
+                self._model = self._venv_model()
+                return self._model
             device = _resolve_torch_device(self._device)
             kwargs: dict[str, Any] = {"model": str(self._model_dir) if (
                 self._model_dir is not None and self._model_dir.is_dir()
             ) else "iic/SenseVoiceSmall", "device": device}
             try:
-                self._model = AutoModel(**kwargs)
+                self._model = auto_model(**kwargs)
             except Exception as exc:  # noqa: BLE001 - CUDA 类失败回退 CPU 重试一次
                 if device != "cpu" and _CUDA_PROBLEM.search(str(exc)):
                     _LOGGER.warning("SenseVoice CUDA 加载失败回退 CPU：%s", str(exc)[:160])
                     kwargs["device"] = "cpu"
-                    self._model = AutoModel(**kwargs)
+                    self._model = auto_model(**kwargs)
                 else:
                     raise
         return self._model
+
+    def _venv_model(self) -> _FunasrWorker:
+        """冻结/无 ml 态：本地智能运行环境里的 funasr worker（构造语义 worker 端镜像）。"""
+        model_id = (
+            str(self._model_dir)
+            if self._model_dir is not None and self._model_dir.is_dir()
+            else "iic/SenseVoiceSmall"
+        )
+        worker = _spawn_funasr_worker({
+            "engine": "sensevoice",
+            "model": model_id,
+            "device": self._device,
+        })
+        _LOGGER.info("SenseVoice 走本地运行环境 worker（device=%s）", worker.device)
+        return worker
 
 
 def _parse_sensevoice(raw: list) -> list[AsrSegment]:  # type: ignore[type-arg]
@@ -290,7 +426,7 @@ class ParaformerEngine:
         self._spk_model_dir = spk_model_dir
         self._num_speakers = num_speakers
         self._device = device
-        self._model: AutoModel | None = None
+        self._model: Any = None
 
     @property
     def name(self) -> str:
@@ -341,7 +477,7 @@ class ParaformerEngine:
             return segments
 
     def _transcribe_one(
-        self, model: AutoModel, wav_path: Path, language: str, hotwords: str
+        self, model: Any, wav_path: Path, language: str, hotwords: str
     ) -> list[AsrSegment]:
         with _punc_false_alarm_silenced():
             raw = model.generate(
@@ -361,10 +497,12 @@ class ParaformerEngine:
         spans = _spk_spans(raw)
         return _assign_speakers(segments, spans) if spans else segments
 
-    def _ensure_model(self) -> AutoModel:
+    def _ensure_model(self) -> Any:
         if self._model is None:
-            from funasr import AutoModel  # ml extras 懒加载
-
+            auto_model = _inproc_funasr()
+            if auto_model is None:
+                self._model = self._venv_model()
+                return self._model
             spk_kwargs: dict[str, Any] = {}
             if self.diarization:
                 spk_dir = self._spk_model_dir
@@ -396,15 +534,33 @@ class ParaformerEngine:
                 **spk_kwargs,
             }
             try:
-                self._model = AutoModel(**kwargs)
+                self._model = auto_model(**kwargs)
             except Exception as exc:  # noqa: BLE001 - CUDA 类失败回退 CPU 重试一次
                 if device != "cpu" and _CUDA_PROBLEM.search(str(exc)):
                     _LOGGER.warning("Paraformer CUDA 加载失败回退 CPU：%s", str(exc)[:160])
                     kwargs["device"] = "cpu"
-                    self._model = AutoModel(**kwargs)
+                    self._model = auto_model(**kwargs)
                 else:
                     raise
         return self._model
+
+    def _venv_model(self) -> _FunasrWorker:
+        """冻结/无 ml 态：本地智能运行环境里的 funasr worker（构造语义 worker 端镜像）。"""
+        model_id = str(self._model_dir) if (
+            self._model_dir is not None and self._model_dir.is_dir()
+        ) else "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
+        worker = _spawn_funasr_worker({
+            "engine": "paraformer",
+            "model": model_id,
+            "device": self._device,
+            "vad_model_dir": str(self._vad_model_dir) if self._vad_model_dir else None,
+            "spk_model_dir": str(self._spk_model_dir) if self._spk_model_dir else None,
+        })
+        _LOGGER.info(
+            "Paraformer 走本地运行环境 worker（device=%s diarization=%s）",
+            worker.device, self.diarization,
+        )
+        return worker
 
 
 def _parse_paraformer(raw: list, gap_s: float) -> list[AsrSegment]:  # type: ignore[type-arg]

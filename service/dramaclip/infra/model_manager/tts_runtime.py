@@ -190,6 +190,22 @@ def venv_dir(data_dir: Path) -> Path:
     return data_dir / "runtimes" / "tts-venv"
 
 
+def venv_python(data_dir: Path) -> Path:
+    return venv_dir(data_dir) / "Scripts" / "python.exe"
+
+
+def analysis_ready(data_dir: Path) -> bool:
+    """funasr 组的零探针安装判据：venv 解释器 + funasr 包目录在场（纯文件检查）。
+
+    status() 的分组探针要跑子进程，models.list / 引擎清单是高频端点用不起；与
+    变体标记同一哲学——文件在场≈装好，真坏了由 worker 启动失败如实报错引导重装。
+    """
+    venv = venv_dir(data_dir)
+    if not venv_python(data_dir).is_file():
+        return False
+    return (venv / "Lib" / "site-packages" / "funasr" / "__init__.py").is_file()
+
+
 def cosyvoice_src_dir(data_dir: Path) -> Path:
     return data_dir / "runtimes" / "cosyvoice-src"
 
