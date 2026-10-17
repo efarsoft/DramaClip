@@ -25,12 +25,10 @@ _CTA_FALLBACK_S = 2.0
 _HIGHLIGHT_CLIP_S = 5.0   # 高光混剪的单条时长（真机参考：13×5s ≈ 65s 预告）
 _HIGHLIGHT_MAX_CLIPS = 15  # 条数上限：时长让位≠无限堆料，预告形态 75s 内最猛
 _ADJACENT_GAP_S = 1.5  # 邻接合并阈值：同集间隙 ≤1.5s（基本贴合）才合并；间隙大的各自成段保留节奏
-_HIGHLIGHT_CLIP_S = 5.0   # 高光混剪的单条时长（真机参考：13×5s ≈ 65s 预告）
-_HIGHLIGHT_MAX_CLIPS = 15  # 条数上限：时长让位≠无限堆料，预告形态 75s 内最猛
 
 
 def _merge_adjacent(ordered: list[EpisodeScene]) -> list[EpisodeScene]:
-    """邻接合并：同集且首尾间隙 ≤8s 的选中场景合成一个连续块。
+    """邻接合并：同集且首尾间隙 ≤`_ADJACENT_GAP_S` 的选中场景合成一个连续块。
 
     纯冲突分排序会让时间轴在高分场景之间反复横跳（真机 raw_clip 20 段 11 跳场、
     高光混剪 6 处）——相邻的高分场景本就是连续剧情，合并成块播放，块内不再

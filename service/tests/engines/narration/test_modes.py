@@ -161,3 +161,24 @@ def test_highlight_cut_skips_degenerate_scenes() -> None:
         {},
     )
     assert plan.timeline == []
+
+
+def test_raw_clip_merges_adjacent_high_scores_into_one_block() -> None:
+    """邻接合并：间隙 ≤1.5s 的相邻高分场景成连续块播放，块内不再跳场。
+
+    跳场根源（真机 raw_clip 20 段 11 跳场）是纯冲突分排序让时间轴在相邻高分
+    场景间横跳；合并后选中集不变、块边界只在真间隙处。
+    """
+    from dramaclip.engines.semantic.models import ConflictScore
+
+    scenes = [
+        ConflictScore(scene_index=0, start=0.0, end=6.0, score=85),   # ┐ 间隙 0：合并
+        ConflictScore(scene_index=1, start=6.0, end=12.0, score=90),  # ┘
+        ConflictScore(scene_index=2, start=20.0, end=26.0, score=88),  # 间隙 8s：独立成段
+    ]
+    plan = build_raw_clip(stamp([(1, "ep1", scenes)]), [], _STRATEGY)
+    assert [(seg.start, seg.end) for seg in plan.timeline] == [
+        (0.0, 12.0),  # 相邻两场景合成的连续块（含最高冲突，作开场）
+        (20.0, 26.0),
+    ], "相邻高分合并成块，块内零跳场；真间隙处保留分段节奏"
+    assert len(plan.timeline) == 2, "三条候选合并为两块，选中集一秒不少"
