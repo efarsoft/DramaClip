@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from dramaclip.api import narration as narration_api
 from dramaclip.api import narration_plans as narration_plans
 from dramaclip.engines.analysis.models import AudioFeatures
 from dramaclip.infra.storage.repos import analysis as analysis_repo
