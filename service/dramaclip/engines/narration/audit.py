@@ -110,35 +110,13 @@ def _has_chinese_num(text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def review_script(
-    script: dict[str, Any],
-    transcript: list[dict[str, Any]] | None = None,
-) -> ReviewReport:
-    """审查 _STRUCTURE_PROMPT + 基本功层（full）约束。
-
-    transcript: 清洗后的带时间戳台词，字段 episode/start/end/speaker/text。
-    用于时间上界、互不重叠、声纹换名、编造外事件等可验证项。
-    """
+def _script_shape_findings(segs: list[dict[str, Any]]) -> list[Finding]:
+    """结构组一：JSON 只输出（尾句）+ 每片段带 episode（首条）。"""
     findings: list[Finding] = []
-    transcript = transcript or []
-
-    # 时间上界表：episode -> 该集最大 end
-    ep_bounds: dict[int, float] = {}
-    for seg in transcript:
-        ep = int(seg.get("episode", 1))
-        ep_bounds[ep] = max(ep_bounds.get(ep, 0.0), float(seg.get("end", 0.0)))
-
-    # —— JSON 只输出（结构硬约束尾句）——
     findings.append(Finding(
         "STRUCT_JSON_ONLY", "structure", "hard", True,
         "输出为合法 JSON（解析通过）", prompt_quote="只输出 JSON，不要多余文字。",
     ))
-
-    segs = script.get("segments", []) if isinstance(script, dict) else []
-    hook = (script.get("hook", "") if isinstance(script, dict) else "") or ""
-    cta = (script.get("cta", "") if isinstance(script, dict) else "") or ""
-
-    # —— 每片段带 episode（结构硬约束首条）——
     missing_ep = [i for i, s in enumerate(segs) if "episode" not in s or s.get("episode") is None]
     findings.append(Finding(
         "STRUCT_EPISODE_REQUIRED", "structure", "hard",
@@ -147,8 +125,13 @@ def review_script(
         location="segments" if missing_ep else "",
         prompt_quote="每个片段都必须带 episode，一个都不能漏；",
     ))
+    return findings
 
-    # —— 时间上界 + 同集递增互不重叠 ——
+
+def _script_time_findings(
+    segs: list[dict[str, Any]], ep_bounds: dict[int, float]
+) -> list[Finding]:
+    """结构组二：时间上界 + 同集递增互不重叠。"""
     bound_viol, overlap_viol = [], []
     last_end_per_ep: dict[int, float] = {}
     for i, s in enumerate(segs):
@@ -161,22 +144,27 @@ def review_script(
         if prev is not None and start < prev - 1e-6:
             overlap_viol.append(i)
         last_end_per_ep[ep] = max(prev if prev is not None else 0.0, end)
-    findings.append(Finding(
-        "STRUCT_TIME_BOUNDS", "structure", "hard",
-        not bound_viol,
-        "start/end 均未超过所在集上界" if not bound_viol else f"超界片段下标：{bound_viol}",
-        location="segments" if bound_viol else "",
-        prompt_quote="start/end 取自转写台词的时间区间，不得超过该集上界；",
-    ))
-    findings.append(Finding(
-        "STRUCT_NON_OVERLAP", "structure", "hard",
-        not overlap_viol,
-        "同集内按时间递增且互不重叠" if not overlap_viol else f"重叠/倒序片段下标：{overlap_viol}",
-        location="segments" if overlap_viol else "",
-        prompt_quote="同集内按时间递增且互不重叠；",
-    ))
+    return [
+        Finding(
+            "STRUCT_TIME_BOUNDS", "structure", "hard",
+            not bound_viol,
+            "start/end 均未超过所在集上界" if not bound_viol else f"超界片段下标：{bound_viol}",
+            location="segments" if bound_viol else "",
+            prompt_quote="start/end 取自转写台词的时间区间，不得超过该集上界；",
+        ),
+        Finding(
+            "STRUCT_NON_OVERLAP", "structure", "hard",
+            not overlap_viol,
+            "同集内按时间递增且互不重叠"
+            if not overlap_viol else f"重叠/倒序片段下标：{overlap_viol}",
+            location="segments" if overlap_viol else "",
+            prompt_quote="同集内按时间递增且互不重叠；",
+        ),
+    ]
 
-    # —— hook：空泛悬念（硬，零容忍目标） vs 无具体锚点（软，启发式不可全判）——
+
+def _hook_findings(hook: str) -> list[Finding]:
+    """结构组三：空泛悬念（硬，零容忍目标） vs 无具体锚点（软，启发式不可全判）。"""
     hook_empty = bool(_SUSPECT_EMPTY_RE.search(hook))
     hook_has_anchor = bool(
         _has_chinese_num(hook)
@@ -185,49 +173,61 @@ def review_script(
         or _CONCRETE_OBJECT_RE.search(hook)
         or len(hook) >= 12  # 够长的 hook 通常已带具体内容，不再误杀
     )
-    findings.append(Finding(
-        "STRUCT_HOOK_FACT", "structure", "hard",
-        not hook_empty,
-        "hook 非「他竟然…」式空泛悬念" if not hook_empty else "hook 为空泛悬念（'他竟然'式）",
-        location="hook" if hook_empty else "",
-        prompt_quote="hook 必须含一个具体反差事实（身份/生死/数字），禁「他竟然…」式空泛悬念；",
-    ))
-    findings.append(Finding(
-        "STRUCT_HOOK_ANCHOR", "structure", "soft",
-        hook_has_anchor,
-        "hook 含具体反差锚点（数字/身份/生死/物件）" if hook_has_anchor
-        else "hook 未检出具体反差锚点（可能偏虚，需人工复核）",
-        location="hook" if not hook_has_anchor else "",
-        prompt_quote="hook 必须含一个具体反差事实（身份/生死/数字）",
-        needs_human=True,
-    ))
+    return [
+        Finding(
+            "STRUCT_HOOK_FACT", "structure", "hard",
+            not hook_empty,
+            "hook 非「他竟然…」式空泛悬念" if not hook_empty else "hook 为空泛悬念（'他竟然'式）",
+            location="hook" if hook_empty else "",
+            prompt_quote="hook 必须含一个具体反差事实（身份/生死/数字），禁「他竟然…」式空泛悬念；",
+        ),
+        Finding(
+            "STRUCT_HOOK_ANCHOR", "structure", "soft",
+            hook_has_anchor,
+            "hook 含具体反差锚点（数字/身份/生死/物件）" if hook_has_anchor
+            else "hook 未检出具体反差锚点（可能偏虚，需人工复核）",
+            location="hook" if not hook_has_anchor else "",
+            prompt_quote="hook 必须含一个具体反差事实（身份/生死/数字）",
+            needs_human=True,
+        ),
+    ]
 
-    # —— cta 三段式 + 禁空喊 ——
+
+def _cta_findings(cta: str) -> list[Finding]:
+    """结构组四：cta 三段式 + 禁空喊。"""
     cta_forbidden = bool(_FORBIDDEN_CTA_RE.search(cta))
     cta_has_click = bool(_CLICK_RE.search(cta))
     cta_has_watch = bool(_WATCH_ALL_RE.search(cta))
-    findings.append(Finding(
-        "STRUCT_CTA_FORBIDDEN", "structure", "hard",
-        not cta_forbidden,
-        "cta 未空喊关注/点赞/收藏/二维码"
-        if not cta_forbidden
-        else "cta 出现禁用引导词（关注/点赞/收藏/二维码）",
-        location="cta" if cta_forbidden else "",
-        prompt_quote="禁剧透最大反转、禁空喊关注/点赞/收藏/二维码；",
-    ))
-    findings.append(Finding(
-        "STRUCT_CTA_THREE_PART", "structure", "soft",
-        cta_has_click and cta_has_watch,
-        "cta 含『点击引导 + 看全集』三段式要素" if (cta_has_click and cta_has_watch)
-        else f"cta 三段式不全（点击={cta_has_click} 看全集={cta_has_watch}）",
-        location="cta" if not (cta_has_click and cta_has_watch) else "",
-        prompt_quote=(
-            "cta 必须是三段式转化引导（悬念半句+「点击左下角」+「免费/立即观看全集」，可带剧名）"
+    return [
+        Finding(
+            "STRUCT_CTA_FORBIDDEN", "structure", "hard",
+            not cta_forbidden,
+            "cta 未空喊关注/点赞/收藏/二维码"
+            if not cta_forbidden
+            else "cta 出现禁用引导词（关注/点赞/收藏/二维码）",
+            location="cta" if cta_forbidden else "",
+            prompt_quote="禁剧透最大反转、禁空喊关注/点赞/收藏/二维码；",
         ),
-        needs_human=True,
-    ))
+        Finding(
+            "STRUCT_CTA_THREE_PART", "structure", "soft",
+            cta_has_click and cta_has_watch,
+            "cta 含『点击引导 + 看全集』三段式要素" if (cta_has_click and cta_has_watch)
+            else f"cta 三段式不全（点击={cta_has_click} 看全集={cta_has_watch}）",
+            location="cta" if not (cta_has_click and cta_has_watch) else "",
+            prompt_quote=(
+                "cta 必须是三段式转化引导"
+                "（悬念半句+「点击左下角」+「免费/立即观看全集」，可带剧名）"
+            ),
+            needs_human=True,
+        ),
+    ]
 
-    # —— 声纹标签 [角色X] 应换真名 ——
+
+def _speaker_and_meta_findings(
+    segs: list[dict[str, Any]], hook: str, cta: str
+) -> list[Finding]:
+    """基本功组一：声纹标签 [角色X] 应换真名 + 禁元叙述（零容忍）。"""
+    findings: list[Finding] = []
     unresolved = []
     for i, s in enumerate(segs):
         t = s.get("text", "") or ""
@@ -242,8 +242,6 @@ def review_script(
         prompt_quote="台词前的[角色X]是声纹聚类标签…写文案时换成你从称呼与剧情推断出的真名，推断不出再保留原标签；",
         needs_human=True,
     ))
-
-    # —— 禁元叙述（零容忍）——
     meta_hits = []
     for key, txt in (("hook", hook), ("cta", cta)):
         if _METANARRATIVE_RE.search(txt):
@@ -260,8 +258,14 @@ def review_script(
         location=";".join(meta_hits) if meta_hits else "",
         prompt_quote="禁元叙述（零容忍）：…「第X集」「画面里」「镜头」「素材」这类字眼一个不许有…",
     ))
+    return findings
 
-    # —— 数字写中文（软）——
+
+def _numerals_and_person_findings(
+    segs: list[dict[str, Any]], hook: str, cta: str
+) -> list[Finding]:
+    """基本功组二：数字写中文（软）+ 人称二选一（软，启发式）。"""
+    findings: list[Finding] = []
     arabic_in_text = []
     for i, s in enumerate(segs):
         t = s.get("text", "") or ""
@@ -276,10 +280,9 @@ def review_script(
         prompt_quote="数字一律写中文（两千斤/八年/四十七块）…",
         needs_human=True,
     ))
-
-    # —— 人称二选一（软，启发式）——
-    fp = _count(hook + cta + " ".join(s.get("text", "") for s in segs), _PERSON_FIRST)
-    sp = _count(hook + cta + " ".join(s.get("text", "") for s in segs), _PERSON_SECOND)
+    joined = hook + cta + " ".join(s.get("text", "") for s in segs)
+    fp = _count(joined, _PERSON_FIRST)
+    sp = _count(joined, _PERSON_SECOND)
     findings.append(Finding(
         "FUND_PERSON_CONSISTENT", "fund_base", "soft",
         not (fp > 0 and sp > 0),
@@ -288,27 +291,35 @@ def review_script(
         prompt_quote="人称二选一并全篇统一，禁止中途切换。",
         needs_human=True,
     ))
+    return findings
 
-    # —— 编造转写外事件（软，靠 transcript 粗查「姓氏+称谓」式专名）——
-    if transcript:
-        transcript_text = "".join(seg.get("text", "") for seg in transcript)
-        fabricated = []
-        for i, s in enumerate(segs):
-            novel = [
-                m.group(0) for m in _FABRIC_RE.finditer(s.get("text", "") or "")
-                if m.group(0) not in transcript_text
-            ]
-            if novel:
-                fabricated.append((i, novel[:3]))
-        findings.append(Finding(
+
+def _fabrication_findings(
+    segs: list[dict[str, Any]], transcript: list[dict[str, Any]]
+) -> list[Finding]:
+    """基本功组三：编造转写外事件（软，靠 transcript 粗查「姓氏+称谓」式专名）。"""
+    transcript_text = "".join(seg.get("text", "") for seg in transcript)
+    fabricated = []
+    for i, s in enumerate(segs):
+        novel = [
+            m.group(0) for m in _FABRIC_RE.finditer(s.get("text", "") or "")
+            if m.group(0) not in transcript_text
+        ]
+        if novel:
+            fabricated.append((i, novel[:3]))
+    return [
+        Finding(
             "FUND_NO_FABRICATION", "fund_base", "soft",
             not fabricated,
             "未检出明显转写外专名" if not fabricated else f"疑似编造专名：{fabricated[:3]}",
             prompt_quote="所有情节、细节、台词必须来自给定转写，禁止编造转写外的事件或设定；",
             needs_human=True,
-        ))
+        )
+    ]
 
-    # —— 可疑数量/称号锚点（软+需人工）：转写外「八千两/九千岁」式硬锚点，需对照核实 ——
+
+def _invented_anchor_findings(segs: list[dict[str, Any]]) -> list[Finding]:
+    """基本功组四：可疑数量/称号锚点（软+需人工）：转写外「八千两/九千岁」式硬锚点。"""
     invent_hits = []
     for i, s in enumerate(segs):
         t = s.get("text", "") or ""
@@ -316,21 +327,25 @@ def review_script(
         title = _TITLE_CLAIM_RE.search(t)
         if q or title:
             invent_hits.append((i, (q.group(0) if q else "") or (title.group(0) if title else "")))
-    findings.append(Finding(
-        "FUND_NO_INVENTED_ANCHOR", "fund_base", "soft",
-        not invent_hits,
-        "未检出可疑转写外数量/称号锚点"
-        if not invent_hits
-        else f"疑似转写外硬锚点：{invent_hits[:3]}（须原样出自转写，禁止为凑锚点发明）",
-        location=";".join(f"segment[{i}]" for i, _ in invent_hits) if invent_hits else "",
-        prompt_quote="真实锚点（年份/金额/物件/称呼）只能原样摘自转写，转写里没有就少写，禁止为凑数发明；",
-        needs_human=True,
-    ))
+    return [
+        Finding(
+            "FUND_NO_INVENTED_ANCHOR", "fund_base", "soft",
+            not invent_hits,
+            "未检出可疑转写外数量/称号锚点"
+            if not invent_hits
+            else f"疑似转写外硬锚点：{invent_hits[:3]}（须原样出自转写，禁止为凑锚点发明）",
+            location=";".join(f"segment[{i}]" for i, _ in invent_hits) if invent_hits else "",
+            prompt_quote="真实锚点（年份/金额/物件/称呼）只能原样摘自转写，转写里没有就少写，禁止为凑数发明；",
+            needs_human=True,
+        )
+    ]
 
-    # —— 跨集因果桥接（软+需人工）：涉及多集时必须人工确认前集段尾已说破因果 ——
+
+def _cross_episode_finding(segs: list[dict[str, Any]]) -> Finding:
+    """跨集因果桥接（软+需人工）：涉及多集时必须人工确认前集段尾已说破因果。"""
     eps_present = sorted({int(s.get("episode", 1)) for s in segs})
     cross = len(eps_present) > 1
-    findings.append(Finding(
+    return Finding(
         "FUND_CROSS_EPISODE_BRIDGE", "fund_full", "soft",
         not cross,
         "本稿未跨集（无需桥接）"
@@ -339,7 +354,42 @@ def review_script(
         location="segments" if cross else "",
         prompt_quote="换集优先取相邻集，大跨度跳集只许跳往确有关键爆点的集，且前集段尾必须把跨集因果说破；",
         needs_human=cross,
-    ))
+    )
+
+
+def review_script(
+    script: dict[str, Any],
+    transcript: list[dict[str, Any]] | None = None,
+) -> ReviewReport:
+    """审查 _STRUCTURE_PROMPT + 基本功层（full）约束。
+
+    transcript: 清洗后的带时间戳台词，字段 episode/start/end/speaker/text。
+    用于时间上界、互不重叠、声纹换名、编造外事件等可验证项。
+    规则按组拆在 _*_findings 子函数里，这里只做装配；产出顺序与拆分前逐条一致。
+    """
+    transcript = transcript or []
+
+    # 时间上界表：episode -> 该集最大 end
+    ep_bounds: dict[int, float] = {}
+    for seg in transcript:
+        ep = int(seg.get("episode", 1))
+        ep_bounds[ep] = max(ep_bounds.get(ep, 0.0), float(seg.get("end", 0.0)))
+
+    segs = script.get("segments", []) if isinstance(script, dict) else []
+    hook = (script.get("hook", "") if isinstance(script, dict) else "") or ""
+    cta = (script.get("cta", "") if isinstance(script, dict) else "") or ""
+
+    findings: list[Finding] = []
+    findings.extend(_script_shape_findings(segs))
+    findings.extend(_script_time_findings(segs, ep_bounds))
+    findings.extend(_hook_findings(hook))
+    findings.extend(_cta_findings(cta))
+    findings.extend(_speaker_and_meta_findings(segs, hook, cta))
+    findings.extend(_numerals_and_person_findings(segs, hook, cta))
+    if transcript:
+        findings.extend(_fabrication_findings(segs, transcript))
+    findings.extend(_invented_anchor_findings(segs))
+    findings.append(_cross_episode_finding(segs))
 
     return ReviewReport(target="script", findings=findings,
                         meta={"n_segments": len(segs), "ep_bounds": ep_bounds})
