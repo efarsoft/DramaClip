@@ -11,6 +11,7 @@ import { tokens } from '../../styles/theme';
 import { PageSection } from '../../components/layout/PageKit';
 import type { DomainTabProps } from './EnginesPage';
 import type { Reports } from './assetState';
+import { localDomainModels } from './assetState';
 import {
   activateSettings,
   activeAsset,
@@ -85,7 +86,7 @@ export function AsrTab({
   const cloud = useEngineConfigs('asr_cloud', onChanged);
   const [pane, setPane] = useState<'local' | 'cloud'>('local');
   const activeCloud = activeCloudConfig(cloud.configs);
-  const domainModels = models.filter((model) => model.kind === 'asr');
+  const domainModels = localDomainModels(models, 'asr');
   const active = activeAsset(models, 'asr', settings);
   const segment = <CloudSegment value={pane} onChange={setPane} />;
   const pickCloud = (config: EngineConfig): void => {

@@ -276,6 +276,15 @@ function findAsset(
  * 「当前生效」的那件资产：设置里存的只有引擎短名与档位短名，回到资产库里查。
  * faster-whisper 一档一项（按 asr.model 定位），其余引擎一个引擎一件（按引擎名定位）。
  */
+/** 域内**本地**模型：云端引擎（E-2 起 registry 如实标 cloud）不走本地资产库，
+ * 它们的接入入口在「云端配置」域（engine_configs enable → 镜像生效设置键）。 */
+export function localDomainModels(
+  models: readonly ModelInfo[],
+  kind: 'asr' | 'tts',
+): ModelInfo[] {
+  return models.filter((model) => model.kind === kind && model.cloud !== true);
+}
+
 export function activeAsset(
   models: readonly ModelInfo[],
   kind: 'asr' | 'tts',

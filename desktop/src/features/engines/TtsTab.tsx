@@ -11,7 +11,7 @@ import { tokens } from '../../styles/theme';
 import { PageSection } from '../../components/layout/PageKit';
 import type { DomainTabProps } from './EnginesPage';
 import type { AssetState, Reports } from './assetState';
-import {
+import { localDomainModels,
   activateSettings,
   activeAsset,
   activeStateNote,
@@ -79,7 +79,7 @@ export function TtsTab({
   const [pane, setPane] = useState<'local' | 'cloud'>('local');
   const activeCloud = activeCloudConfig(cloud.configs);
   const engine = settings['tts.engine'] ?? '';
-  const domainModels = models.filter((model) => model.kind === 'tts');
+  const domainModels = localDomainModels(models, 'tts');
   const active = isModelFreeEngine(engine) ? undefined : activeAsset(models, 'tts', settings);
   const segment = <CloudSegment value={pane} onChange={setPane} />;
   const pickCloud = (config: EngineConfig): void => {

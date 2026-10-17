@@ -485,6 +485,8 @@ export interface ModelInfo {
   readonly sources?: ReadonlyArray<ModelSource>;
   /** 引擎是否真接进了工厂：false = 储备资产，UI 不得当作可用能力展示。 */
   readonly engine_ready: boolean;
+  /** 云端引擎（无本地资产，Key 直出）：本地模型资产库不得展示，走云端配置域接入。 */
+  readonly cloud?: boolean;
   /** 本地导入的登记项；null = 这份资产不是导入进来的（应用下载或手动放置）。 */
   readonly imported?: ImportRecord | null;
 }

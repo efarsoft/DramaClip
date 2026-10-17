@@ -21,6 +21,7 @@ import {
   warnCount,
   warnNote,
   warnSummary,
+  localDomainModels,
 } from '../assetState';
 import { externalRecord, importRecord, model, report, selftestOk } from './fixtures';
 
@@ -262,5 +263,25 @@ describe('domainStats', () => {
     });
     expect(domainStats(withAsr, reportsOf([broken]), 'asr')).toEqual({ wired: 2, incomplete: 1 });
     expect(domainStats(withAsr, reportsOf([broken]), 'tts')).toEqual({ wired: 1, incomplete: 0 });
+  });
+});
+
+
+describe('localDomainModels（E-2 云端不再混入本地资产库）', () => {
+  it('cloud 标记的条目不进本地域清单，其余原序保留', () => {
+    const rows = [
+      model({ model_id: 'kokoro', kind: 'tts', name: 'Kokoro' }),
+      model({
+        model_id: 'cosyvoice-cloud', kind: 'tts', engine: 'cosyvoice_cloud',
+        name: '百炼语音合成（云端）', cloud: true,
+      }),
+      model({ model_id: 'paraformer', kind: 'asr', name: 'Paraformer' }),
+      model({
+        model_id: 'dashscope-cloud-asr', kind: 'asr', engine: 'dashscope_cloud',
+        name: '百炼语音识别（云端）', cloud: true,
+      }),
+    ];
+    expect(localDomainModels(rows, 'tts').map((m) => m.model_id)).toEqual(['kokoro']);
+    expect(localDomainModels(rows, 'asr').map((m) => m.model_id)).toEqual(['paraformer']);
   });
 });

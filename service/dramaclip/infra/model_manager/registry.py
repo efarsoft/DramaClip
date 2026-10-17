@@ -84,6 +84,7 @@ def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
             "path": None,
             "size_bytes": 0,
             "engine_ready": engine_ready(spec),
+            "cloud": True,
         }
     base = models_dir / spec.placement
     installed = False
@@ -129,6 +130,7 @@ def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
         # 不是清单里的标称大小，也不把同 placement 的邻居档位算进来。
         "size_bytes": _dir_bytes(asset) if asset is not None else 0,
         "engine_ready": engine_ready(spec),
+        "cloud": False,
     }
 
 
