@@ -1,23 +1,29 @@
-"""TTS 共享运行时引导：uv 拉起独立 venv（Python 3.11 + torch + IndexTTS/CosyVoice 双栈）。
+"""本地智能运行时引导：uv 拉起独立 venv（Python 3.11 + torch + 双栈 TTS + funasr + kokoro）。
 
-主服务（Python 3.13）与两个上游的约束不可调和——运行时是数据目录下的独立
+主服务（Python 3.13）与各上游的约束不可调和——运行时是数据目录下的独立
 venv，由 uv 引导创建（uv 自动下载独立 CPython，用户机器零 Python 依赖）。
-IndexTTS 与 CosyVoice **共用这一个 venv**：两边都能吃 Python 3.11 + torch
-2.8.0；transformers 定 4.52.1（IndexTTS 的 vendored 内部 API 硬需要；CosyVoice
+四族能力**共用这一个 venv**（E-2 裁决：torch 单份不重复下载，存量已装机
+零迁移）：IndexTTS/CosyVoice（双栈 TTS）、funasr（本地 ASR）、kokoro（本地
+TTS）。transformers 定 4.52.1（IndexTTS 的 vendored 内部 API 硬需要；CosyVoice
 上游@074ca6dc 自己 pin 的 4.51.3 与之同代，跑在近原生版本上，cosyvoice_worker
-的 transformers-5 适配补丁在该版本下自动跳过）。产物路径：
-  - engens/tts/engines/indextts2.py 探测 runtimes/tts-venv
+的 transformers-5 适配补丁在该版本下自动跳过；kokoro 只用 AlbertConfig 稳定
+API，4.x 可用——自检兜底）。产物路径：
+  - engines/tts/engines/indextts2.py 探测 runtimes/tts-venv
   - engines/tts/engines/cosyvoice.py 探测同一路径
+  - engines/analysis/transcriber.py 的 funasr worker 探测同一路径（E2-2）
+  - engines/tts/engines/kokoro.py 的 kokoro worker 探测同一路径（E2-3）
   - CosyVoice 上游源码落 runtimes/cosyvoice-src（sys.path 引入，非 pip 包）
 
 流程（阶段→进度）：uv.exe 下载(0-5) → venv 创建含独立 Python(5-15) →
-torch(15-50, GPU 探测定 cu128/CPU 变体) → 双栈依赖(50-75) → 源码 zip
-（IndexTTS + CosyVoice + Matcha-TTS + PyWorld）(75-95) → import 自检
-（两栈各一遍）(95-100)。全程多镜像容错，可取消，可重入（已存在阶段跳过）。
+torch(15-45, GPU 探测定 cu128/CPU 变体) → 双栈依赖(45-60) → 分析依赖组
+funasr(60-66) → kokoro 依赖组(66-72) → 源码 zip（IndexTTS + CosyVoice +
+Matcha-TTS + PyWorld）(72-95) → import 自检（四族各一遍）(95-100)。全程
+多镜像容错，可取消，可重入（已存在阶段跳过；新增依赖组按 import 探针补装）。
 """
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -91,6 +97,26 @@ _SEPARATION_EXTRAS = [
     "rotary-embedding-torch==0.6.5",
     "samplerate==0.1.0",
     "scipy==1.13.1",
+]
+# 本地 ASR（funasr，E-2 并入）：pin 与 dev 主 venv 实装一致（1.4.16 实测）。
+# fbank 后端用 kaldi-native-fbank（funasr 1.4 缺 fbank 实现时报 "torchaudio is
+# not installed"——torchaudio 与 torch 强耦合难装，knf 是无 torch 依赖的独立
+# C++ 实现，同 pyproject ml 组的既定取舍）。其余推理期依赖（librosa/soundfile/
+# scipy/pyyaml/modelscope/jieba）已被双栈组覆盖，不重复 pin。
+_ANALYSIS_EXTRAS = [
+    "funasr==1.4.16",
+    "kaldi-native-fbank==1.22.3",
+    "kaldiio==2.18.1",
+    "jaconv==0.5.0",
+    "opencc-python-reimplemented==0.1.7",
+]
+# 本地 TTS（kokoro，E-2 并入）：kokoro 包顶层 import torch+transformers，只能
+# 在本 venv 执行。misaki 取 [zh] extra（中文 g2p：jieba+pypinyin+num2words，
+# 解析器自取）；espeak-ng 不需要（zh 路径不走 espeak）。transformers 沿用双栈
+# 组的 4.52.1 pin——kokoro 只用 AlbertConfig 稳定 API，兼容性由尾部自检把守。
+_KOKORO_EXTRAS = [
+    "kokoro==0.9.4",
+    "misaki[zh]==0.9.4",
 ]
 # openai-whisper 20231117 在构建期需要 pkg_resources（已废）：20250625 是
 # Windows 实测可构建版（CosyVoice 只用它的 mel 前端）。
@@ -189,28 +215,77 @@ def torch_variant(data_dir: Path) -> str:
 
 
 def status(data_dir: Path) -> dict[str, Any]:
-    """installed = venv 存在且双栈 import 自检通过（目录在但坏=未装完，可重装修复）。"""
+    """venv 安装态：installed = 双栈 TTS 基线（indextts+torch）通过；groups 按能力分族。
+
+    目录在但坏=未装完，可重装修复。groups 是 E-2 扩容后的按族探针（一次子进程
+    逐个 __import__ 记成败）：indextts 需源码路径引入，funasr/kokoro 是纯 pip 组。
+    installed 维持旧口径（双栈 TTS）——前端既有判据零改动，新消费者读 groups。
+    """
 
     venv = venv_dir(data_dir)
     py = venv / "Scripts" / "python.exe"
     if not py.is_file():
-        return {"installed": False, "dir": str(venv), "torch_variant": "unknown"}
+        return {
+            "installed": False,
+            "dir": str(venv),
+            "torch_variant": "unknown",
+            "groups": {},
+        }
     src = data_dir / "runtimes" / "indextts-src"
     probe_code = (
-        f"import sys; sys.path.insert(0, r'{src}'); import indextts, torch"
+        "import json, sys\n"
+        f"sys.path.insert(0, r'{src}')\n"
+        "groups = {}\n"
+        "for name in ('indextts', 'funasr', 'kokoro'):\n"
+        "    try:\n"
+        "        __import__(name)\n"
+        "        groups[name] = True\n"
+        "    except Exception:\n"
+        "        groups[name] = False\n"
+        "try:\n"
+        "    import torch\n"
+        "    groups['torch'] = True\n"
+        "except Exception:\n"
+        "    groups['torch'] = False\n"
+        "print(json.dumps(groups))"
     )
     try:
         probe = subprocess.run(  # noqa: S603 - 固定解释器固定参数
             [str(py), "-c", probe_code],
-            capture_output=True, timeout=90, creationflags=_NO_WINDOW, check=False,
+            capture_output=True, text=True, timeout=120, creationflags=_NO_WINDOW, check=False,
         )
+        groups: dict[str, bool] = {}
+        if probe.returncode == 0:
+            try:
+                groups = {k: bool(v) for k, v in json.loads(probe.stdout).items()}
+            except ValueError:
+                groups = {}
         return {
-            "installed": probe.returncode == 0,
+            "installed": bool(groups.get("indextts") and groups.get("torch")),
             "dir": str(venv),
             "torch_variant": torch_variant(data_dir),
+            "groups": groups,
         }
     except (OSError, subprocess.TimeoutExpired):
-        return {"installed": False, "dir": str(venv), "torch_variant": "unknown"}
+        return {
+            "installed": False,
+            "dir": str(venv),
+            "torch_variant": "unknown",
+            "groups": {},
+        }
+
+
+def _venv_imports_ok(py: Path, modules: tuple[str, ...]) -> bool:
+    """venv 解释器内逐个 import 全过才真：依赖组的可重入跳过判据。
+
+    不能用标记文件——存量已装 venv 没有新依赖组，标记会说谎；import 是唯一真相。
+    只在 install 流程里调用（单次秒到十秒级），不进 status 高频端点。
+    """
+    probe = subprocess.run(  # noqa: S603 - 固定解释器固定参数
+        [str(py), "-c", "; ".join(f"import {m}" for m in modules)],
+        capture_output=True, timeout=120, creationflags=_NO_WINDOW, check=False,
+    )
+    return probe.returncode == 0
 
 
 def install(
@@ -264,8 +339,9 @@ def install(
     _check_cancel()
 
     # ④ 双栈其余依赖（清华镜像；transformers 定 4.52.1 = IndexTTS 硬需要 +
-    #    CosyVoice 上游同代版本，见模块头）
-    _pct(50, "安装双栈推理依赖（transformers 4.52 等 58 项）")
+    #    CosyVoice 上游同代版本，见模块头）。无条件重跑：pin 收敛即修复语义，
+    #    解析器对已满足的 pin 是快速空转。
+    _pct(45, "安装双栈推理依赖（transformers 4.52 等 58 项）")
     # descript-audiotools 的教训（2026-09-29 真机实证）：它不是「上游搭车依赖」——
     # indextts/s2mel/dac 有 4 处真实 import，剔除后 IndexTTS worker 必死在
     # ModuleNotFoundError。但它的 protobuf<3.20 陈年 pin 与 onnx>=4.25 死锁是真，
@@ -284,11 +360,23 @@ def install(
             "--index-url", _PYPI_MIRROR)
     _check_cancel()
 
+    # ④b/④c 分析与 kokoro 依赖组（E-2 并入：与双栈共用本 venv 的 torch，单份不重复
+    # 下载）。跳过判据是 import 探针不是标记——存量已装 venv 没有新组，标记会说谎；
+    # 探针只在 install 流程跑（秒到十秒级），不进 status 高频端点。
+    if not _venv_imports_ok(py, ("funasr",)):
+        _pct(60, "安装分析依赖组（funasr，本地 ASR）")
+        _run_uv(uv, venv, "pip", "install", *_ANALYSIS_EXTRAS, "--index-url", _PYPI_MIRROR)
+    _check_cancel()
+    if not _venv_imports_ok(py, ("kokoro",)):
+        _pct(66, "安装 kokoro 依赖组（本地 TTS）")
+        _run_uv(uv, venv, "pip", "install", *_KOKORO_EXTRAS, "--index-url", _PYPI_MIRROR)
+    _check_cancel()
+
     # ⑤ 源码：IndexTTS zip（--no-deps 可编辑装）+ CosyVoice/Matcha/PyWorld
     # （CosyVoice 非 pip 包：解包落位，由 worker 经 sys.path + 环境变量引入）
     src_root = runtimes / "indextts-src"
     if not (src_root / "pyproject.toml").is_file():
-        _pct(72, "获取 IndexTTS 源码")
+        _pct(75, "获取 IndexTTS 源码")
         _fetch_first(_INDEXTTS_SOURCES, runtimes / "indextts-src.zip", _INDEXTTS_ZIP_SIZE, cancel)
         # 与 CosyVoice 同一条解包路：裸 extractall 不校验成员名，归档里一个 ../ 就写到
         # runtimes 外面；剥一层前缀的做法也顺手替掉 move + rmtree 的临时目录
@@ -335,7 +423,7 @@ def install(
     _run_uv(uv, venv, "pip", "install", "--no-deps", str(pyworld))
     _check_cancel()
 
-    # ⑥ 自检：两栈各一遍（CosyVoice 走 worker --check，含 sys.path 引导）
+    # ⑥ 自检：四族各一遍（CosyVoice 走 worker --check，含 sys.path 引导）
     _pct(96, "自检（首次 import 较慢）")
     if not status(data_dir)["installed"]:
         raise RuntimeError("自检失败：venv 已建但 indextts 导入异常，可重试修复")
@@ -350,6 +438,10 @@ def install(
     )
     if cv_check.returncode != 0:
         raise RuntimeError("自检失败：cosyvoice 导入异常，可重试修复")
+    if not _venv_imports_ok(py, ("funasr",)):
+        raise RuntimeError("自检失败：funasr 导入异常（本地 ASR），可重试修复")
+    if not _venv_imports_ok(py, ("kokoro",)):
+        raise RuntimeError("自检失败：kokoro 导入异常（本地 TTS），可重试修复")
     _variant_marker(data_dir).write_text(variant, encoding="utf-8")
     _pct(100, "完成")
 

@@ -49,6 +49,12 @@ def register(router: Router, context: AppContext) -> None:
     router.register("models.install_runtime", lambda params: install_runtime(context, params))
     router.register("models.indextts_status", lambda params: indextts_status(context, params))
     router.register("models.install_indextts", lambda params: install_indextts(context, params))
+    router.register(
+        "models.local_runtime_status", lambda params: local_runtime_status(context, params)
+    )
+    router.register(
+        "models.install_local_runtime", lambda params: install_local_runtime(context, params)
+    )
     router.register("models.delete", lambda params: delete(context, params))
 
 
@@ -593,12 +599,36 @@ def indextts_status(context: AppContext, _params: dict[str, Any]) -> dict[str, A
     return tts_runtime.status(context.data_dir)
 
 
-def install_indextts(context: AppContext, _params: dict[str, Any]) -> dict[str, Any]:
-    """引导 IndexTTS 运行环境（作业模式：uv → venv → torch → 依赖 → 源码 → 自检）。"""
+def local_runtime_status(context: AppContext, _params: dict[str, Any]) -> dict[str, Any]:
+    """本地智能运行环境安装态（按能力分组：indextts/funasr/kokoro/torch）。"""
     from dramaclip.infra.model_manager import tts_runtime
 
-    if tts_runtime.status(context.data_dir)["installed"]:
-        raise RpcDomainError(_ERR_MODEL_STATE, "IndexTTS 运行环境已就绪")
+    return tts_runtime.status(context.data_dir)
+
+
+def install_local_runtime(context: AppContext, _params: dict[str, Any]) -> dict[str, Any]:
+    """引导本地智能运行环境安装（诚实命名的入口，与 install_indextts 同一实现）。"""
+    return _install_local_runtime(context, ready_label="本地智能运行环境已就绪")
+
+
+def install_indextts(context: AppContext, _params: dict[str, Any]) -> dict[str, Any]:
+    """引导运行环境安装（作业模式：uv → venv → torch → 依赖 → 源码 → 自检）。
+
+    旧入口名保留：E-2 后 venv 承载的不止 IndexTTS（funasr/kokoro 并入），
+    前端逐步切到 install_local_runtime。
+    """
+    return _install_local_runtime(context, ready_label="IndexTTS 运行环境已就绪")
+
+
+def _install_local_runtime(context: AppContext, *, ready_label: str) -> dict[str, Any]:
+    from dramaclip.infra.model_manager import tts_runtime
+
+    state = tts_runtime.status(context.data_dir)
+    groups = state.get("groups") or {}
+    # 拒装判据 = 全能力组齐备：存量已装用户（双栈 ok 但缺 E-2 新组）必须能触发
+    # 补装，不能被旧的「双栈即 installed」口径挡在门外。
+    if state["installed"] and groups.get("funasr") and groups.get("kokoro"):
+        raise RpcDomainError(_ERR_MODEL_STATE, ready_label)
     _active = [
         j for j in context.job_store.list_recent(limit=50, active_only=True)
         if j["type"] == "indextts_runtime"
@@ -620,7 +650,7 @@ def install_indextts(context: AppContext, _params: dict[str, Any]) -> dict[str, 
                     job_id, float(percent), stage
                 ),
             )
-            context.notifier.log("info", "IndexTTS 运行环境安装完成")
+            context.notifier.log("info", "本地智能运行环境安装完成")
         except Exception as exc:  # noqa: BLE001 - 作业失败原样落 error
             context.job_store.mark_failed(job_id, str(exc))
         finally:
