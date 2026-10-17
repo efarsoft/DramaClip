@@ -270,3 +270,43 @@ def test_joint_on_shot_cut_prefers_cut_over_fade() -> None:
     )
 
     assert plan.timeline[2].transition == "cut", "接缝在换镜头处应硬切而不是 fade"
+
+
+class _SeqLLM:
+    """按序返回多稿的假客户端：审内联重掷链路用。"""
+
+    def __init__(self, payloads: list[Any]) -> None:
+        self.payloads = list(payloads)
+        self.prompts: list[str] = []
+
+    def chat_json(self, _system: str, user: str, temperature: float = 0.3) -> Any:
+        self.prompts.append(user)
+        return self.payloads.pop(0)
+
+
+def test_audit_hard_reroll_carries_prompt_quotes() -> None:
+    """硬规则未过 → 带 prompt 原句重掷；次稿过审即收（audit_hard 生效路径）。
+
+    首稿 hook 是「他竟然」式空泛悬念（STRUCT_HOOK_FACT 硬零容忍）；重掷问句必须
+    锚定该规则的 prompt 原句，而不是让模型猜哪条没过。soft 不拦：HOOK_ANCHOR
+    等软项只进 trace。
+    """
+    segments = [
+        {"episode": 1, "start": 1.0, "end": 10.0, "text": "铺垫与反转"},
+        {"episode": 2, "start": 5.0, "end": 15.0, "text": "后续展开"},
+    ]
+    bad = {"hook": "他竟然做出了这个决定", "segments": segments, "cta": ""}
+    good = {"hook": "三千两黄金失踪那夜，账房死在了库房门口", "segments": segments, "cta": ""}
+    fake = _SeqLLM([bad, good])
+    script = scriptwriter.write_script_episodes(
+        fake,
+        _EPISODE_INPUTS,
+        angle_block="",
+        project_name="剧",
+        min_segments=1,
+        audit_hard=True,
+    )
+    assert script.hook == good["hook"], "次稿过审即收"
+    assert len(fake.prompts) == 2, "重掷恰好一次，不做无谓的第三次尝试"
+    assert "上一稿违反了这些硬规则" in fake.prompts[1], "重掷问句点名违规"
+    assert "禁「他竟然…」式空泛悬念" in fake.prompts[1], "注入的是 prompt 原句（规则锚定）"

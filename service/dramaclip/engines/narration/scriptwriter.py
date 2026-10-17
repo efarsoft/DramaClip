@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from dramaclip.engines.llm_trace import dump_trace
+from dramaclip.engines.narration import audit as A
 from dramaclip.engines.narration.numerals import to_chinese_numerals
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable
 
@@ -440,6 +441,7 @@ def write_script_episodes(
     trace_path: Path | None = None,
     prompts: dict[str, str] | None = None,
     min_segments: int | None = None,
+    audit_hard: bool = False,
 ) -> Script:
     """跨集剧本：读多集转写（每集一个「【第N集】」分组），产出带集号的跨集故事剧本。
     """
@@ -460,10 +462,26 @@ def write_script_episodes(
     floor = min_segments if min_segments is not None else _MIN_BODY_SEGMENTS
     attempts: list[dict[str, Any]] = []
     script: Script | None = None
+    # 审查用转写（时间上界/互不重叠/编造专名的可验证基准）：直接取自输入摘录
+    transcript = [
+        {
+            "episode": int(episode["number"]),
+            "start": float(seg["start"]),
+            "end": float(seg["end"]),
+            "text": str(seg.get("text") or ""),
+        }
+        for episode in episode_inputs
+        for seg in episode.get("segments") or []
+    ]
     for attempt in range(_MAX_ATTEMPTS):
         # 重试注入格式强化：原样重问等于期待模型原样再犯
         ask = user_prompt + _FORMAT_REINFORCEMENT if attempt > 0 else user_prompt
-        if attempts and attempts[-1].get("rejected"):
+        if attempts and attempts[-1].get("audit_quotes"):
+            ask += (
+                "\n\n上一稿违反了这些硬规则，重写时逐条避免：\n"
+                + "\n".join(f"- {q}" for q in attempts[-1]["audit_quotes"])
+            )
+        elif attempts and attempts[-1].get("rejected"):
             tail_note = (
                 f"上一次你只写了 {attempts[-1]['rejected']}。"
                 "每段只讲一个信息点：宁可段数少，也不要复述或编造凑数；"
@@ -503,6 +521,18 @@ def write_script_episodes(
             kept = len(script.segments)
             attempts[-1]["rejected"] = f"正文仅 {kept} 段（要求至少 {floor} 段）"
             script = None
+        if script is not None and audit_hard:
+            report = A.audit_script(script, transcript)
+            hard_fails = [f for f in report.findings if f.severity == "hard" and not f.passed]
+            soft_ids = [f.rule_id for f in report.findings if f.severity == "soft" and not f.passed]
+            attempts[-1]["audit"] = {
+                "hard": [f.rule_id for f in hard_fails],
+                "soft": soft_ids,
+            }
+            if hard_fails:
+                # 规则锚定重掷：把 prompt 原句喂回去，而不是让模型猜哪条没过
+                attempts[-1]["audit_quotes"] = [f.prompt_quote for f in hard_fails if f.prompt_quote]
+                script = None
         if script is not None:
             break
     dump_trace(
@@ -510,7 +540,17 @@ def write_script_episodes(
         {"system": system, "user": user_prompt, "attempts": attempts},
     )
     if script is None:
-        detail = "；".join(str(item.get("error", "清洗后片段不足")) for item in attempts)
+        detail = "；".join(
+            str(
+                item.get("error")
+                or (
+                    f"硬规则未过：{'、'.join(item['audit']['hard'])}"
+                    if item.get("audit", {}).get("hard")
+                    else "清洗后片段不足"
+                )
+            )
+            for item in attempts
+        )
         raise ValueError(
             f"编剧未产出合法剧本（{len(attempts)} 次尝试）：{detail}"
             + (f"；完整往返见 {trace_path}" if trace_path else "")

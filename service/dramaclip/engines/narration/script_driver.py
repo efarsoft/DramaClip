@@ -98,9 +98,12 @@ def script_dialogue_plan(
     if trace_dir is not None:
         trace_dir = Path(trace_dir)
         trace_path = trace_dir / f"llm_script_{time.strftime('%m%d_%H%M%S')}.json"
+    # 硬规则内联审查（默认开）：生成→审查→带规则原句重掷；soft 只进 trace 不拦
+    audit_hard = str(settings.get("narration.script_audit", "1")).strip() == "1"
     script = scriptwriter.write_script_episodes(
         llm,
         episode_inputs,
+        audit_hard=audit_hard,
         project_name=str(settings.get("_project_name") or "这部剧"),
         angle_block=angle_block,
         style_directives=str(settings.get("_style_directives") or ""),

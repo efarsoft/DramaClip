@@ -40,7 +40,10 @@ _EPISODES: list[dict[str, Any]] = [
         "number": 1,
         "episode_id": "ep-1",
         "duration": 100.0,
-        "segments": [{"start": 1.0, "end": 10.0, "text": "第一集台词"}],
+        "segments": [
+            {"start": 1.0, "end": 10.0, "text": "第一集台词"},
+            {"start": 10.0, "end": 20.0, "text": "第一集台词续"},
+        ],
     },
     {
         "number": 2,

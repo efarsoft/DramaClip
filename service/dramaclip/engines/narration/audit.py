@@ -395,6 +395,16 @@ def review_script(
                         meta={"n_segments": len(segs), "ep_bounds": ep_bounds})
 
 
+def audit_script(script: Any, transcript: list[dict[str, Any]] | None = None) -> ReviewReport:
+    """编剧链内联审查封装：`Script` 模型（或同形 dict）→ 规则审查报告。
+
+    write_script_episodes 的 attempts 循环逐稿调用；hard 未过条目带 prompt_quote
+    重掷（规则锚定原句），soft 只记账不拦。
+    """
+    payload = script.model_dump() if hasattr(script, "model_dump") else script
+    return review_script(payload, transcript)
+
+
 # ---------------------------------------------------------------------------
 # 逐槽文案（copywriter 链路）审查
 # ---------------------------------------------------------------------------
