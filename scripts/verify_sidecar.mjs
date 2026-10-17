@@ -7,7 +7,7 @@
  */
 import net from 'node:net';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -127,6 +127,14 @@ async function main() {
 
   const models = await rpc('models.list');
   check('models.list', Array.isArray(models) && models.length > 0, `${models.length} 个模型项`);
+
+  // E-2 瘦身断言（fs 层）：主包零 torch 系目录；PYZ 层由 build-service.py 的
+  // ZlibArchiveReader 断言守（本脚本只做便宜的目录级复核）。
+  const internalDir = path.join(repoRoot, 'resources', 'dramaclip-service', '_internal');
+  const torchLeftovers = ['torch', 'transformers', 'funasr', 'kokoro', 'misaki']
+    .filter((name) => existsSync(path.join(internalDir, name)));
+  check('主包零 torch 系（E-2）', torchLeftovers.length === 0,
+    torchLeftovers.length ? `仍存在: ${torchLeftovers.join(', ')}` : '_internal 无 torch 系目录');
 
   const video = makeSampleVideo(work);
   const project = await rpc('project.create', { name: 'sidecar-smoke', source_path: work });

@@ -25,28 +25,21 @@ dev = [
   "ruff>=0.6",
   "mypy>=1.11",
 ]
-# ML 运行时（分析/解说/TTS 全功能；torch 默认 CPU 轮子，GPU 见 build-service --cuda）
+# ML 运行时（E-2 后主 venv 零 torch：funasr/kokoro 的 torch 系在本地智能运行
+# 环境 tts-venv 的 worker 进程执行，依赖清单见 infra/model_manager/tts_runtime.py；
+# 本组只剩主进程自身跑的：whisper/检测/音频/OCR）
 ml = [
   "numpy>=2.0",
   "faster-whisper>=1.2",
   # av 上界：faster-whisper 1.2 的 decode_audio 依赖 av.open(metadata_errors=)，
   # av 14 起移除该参数导致转写开场即崩（2026-10-13 真机：分析任务卡 analyzing）
   "av<14",
-  # funasr 的 fbank 后端：funasr 1.4 自身缺 fbank 实现时会报
-  # "torchaudio is not installed"——torchaudio 与 torch 版本强耦合难装，
-  # knf 是无 torch 依赖的独立 C++ 实现（2026-10-14 真机：环境重建后 ASR 全挂）
-  "kaldi-native-fbank>=1.20",
   "ctranslate2>=4.5",
   "scenedetect>=0.7",
   "librosa>=0.10",
   "soundfile>=0.13",
-  "torch>=2.2",
-  "transformers>=4.40",
-  "kokoro>=0.7",
-  "misaki>=0.7",
   "rapidocr>=3.10",
   "onnxruntime>=1.18",
-  "funasr>=1.1",
   "opencc-python-reimplemented>=0.1.7",
 ]
 
