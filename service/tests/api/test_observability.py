@@ -20,6 +20,7 @@ from dramaclip.api import analysis as analysis_api
 from dramaclip.api import analysis_job as analysis_job
 from dramaclip.api import export as export_api
 from dramaclip.api import narration as narration_api
+from dramaclip.api import narration_plans as narration_plans
 from dramaclip.engines.analysis import pipeline
 from dramaclip.engines.analysis.models import EpisodeRawAnalysis
 from dramaclip.engines.semantic.llm_client import LlmClient
@@ -283,7 +284,7 @@ def test_style_selection_leaves_a_trace(
     settings: dict[str, str] = dict(_LLM_SETTINGS)
     settings["narration.style_id"] = "auto"
 
-    narration_api._inject_run_settings(harness.context, settings, episodes, ["full_narration"])
+    narration_plans._inject_run_settings(harness.context, settings, episodes, ["full_narration"])
     blobs = _traces(tmp_path)
     names = [name for name in blobs if name.startswith("llm_style_select_")]
     assert len(names) == 1, f"口味层选题未留痕：{sorted(blobs)}"

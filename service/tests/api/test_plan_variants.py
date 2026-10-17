@@ -17,6 +17,7 @@ import pytest
 from dramaclip.api import analysis as analysis_api
 from dramaclip.api import export as export_api
 from dramaclip.api import narration as narration_api
+from dramaclip.api import narration_plans as narration_plans
 from dramaclip.api import project as project_api
 from dramaclip.engines.analysis.models import AudioFeatures
 from dramaclip.engines.narration import (
@@ -243,7 +244,7 @@ def test_pinned_style_survives_a_project_without_transcripts(
 
     settings = dict(context.settings)
     episodes = _done_episodes(memory_db, project_id)
-    episode_inputs = narration_api._inject_run_settings(
+    episode_inputs = narration_plans._inject_run_settings(
         context, settings, episodes, ["dialogue_narration"]
     )
     assert episode_inputs == [], "本用例要的就是没有转写，种子被改则什么都没验"
@@ -273,7 +274,7 @@ def test_assembly_failure_lands_in_jobs_table(
     def boom(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
         raise ValueError("项目不存在: 装配期已被删除")
 
-    monkeypatch.setattr(narration_api, "_inject_run_settings", boom)
+    monkeypatch.setattr(narration_plans, "_inject_run_settings", boom)
     job_id = str(harness.rpc(
         "narration.plan_variants",
         {"project_id": project_id, "modes": ["raw_clip"], "k": 1},
@@ -1130,7 +1131,7 @@ def test_plan_variants_cancel_releases_the_event(
     calls: list[tuple[str, str]] = []
     _stub_language_and_tts(monkeypatch, calls)
 
-    real_plan = narration_api._plan_one
+    real_plan = narration_plans._plan_one
 
     def plan_then_cancel(*args: Any, **kwargs: Any) -> Any:
         """编完第一条就取消：规划阶段不再走配音。"""
@@ -1139,7 +1140,7 @@ def test_plan_variants_cancel_releases_the_event(
             event.set()
         return planned
 
-    monkeypatch.setattr(narration_api, "_plan_one", plan_then_cancel)
+    monkeypatch.setattr(narration_plans, "_plan_one", plan_then_cancel)
     result = harness.rpc(
         "narration.plan_variants",
         {"project_id": project_id, "modes": ["full_narration"], "k": 3},
