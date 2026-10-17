@@ -16,6 +16,8 @@ from types import SimpleNamespace
 import pytest
 
 from dramaclip.api import analysis as analysis_api
+from dramaclip.api import analysis_job as analysis_job
+from dramaclip.engines.analysis import pipeline
 from dramaclip.engines.analysis.models import AsrSegment, AudioFeatures
 from dramaclip.engines.analysis.pipeline import EpisodeRawAnalysis
 from dramaclip.engines.semantic.models import SemanticResult
@@ -81,9 +83,9 @@ def _run_analyze(
             raise RuntimeError("LLM 403")
         return SemanticResult()
 
-    monkeypatch.setattr(analysis_api.pipeline, "analyze_episode", fake_pipeline)
+    monkeypatch.setattr(pipeline, "analyze_episode", fake_pipeline)
     monkeypatch.setattr(analysis_api.semantic_pipeline, "enhance", fake_enhance)
-    monkeypatch.setattr(analysis_api, "_current_signature", lambda _ctx, _ep: _SIG)
+    monkeypatch.setattr(analysis_job, "_current_signature", lambda _ctx, _ep: _SIG)
     ok = analysis_api._analyze_one(
         context, "job1", episode, 0, 1, "zh", threading.Event()
     )

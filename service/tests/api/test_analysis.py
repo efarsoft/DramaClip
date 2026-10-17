@@ -15,8 +15,9 @@ from typing import Any
 import pytest
 
 from dramaclip.api import analysis as analysis_api
+from dramaclip.api import analysis_job as analysis_job
 from dramaclip.api import project as project_api
-from dramaclip.engines.analysis import pipeline
+from dramaclip.engines.analysis import pipeline, subtitle_ocr
 from dramaclip.engines.analysis.models import AsrSegment, AudioFeatures, OcrSegment
 from dramaclip.infra import jobs
 from dramaclip.infra.storage.repos import analysis as analysis_repo
@@ -137,7 +138,7 @@ def harness(
 ) -> Iterator[Harness]:
     # OCR 全局桩：analysis 单元测试只验落库与进度语义，不跑真识别
     # （v6 引擎模型加载+推理把任务拖过 wait_done 窗口；OCR 语义有自己的测试文件）。
-    monkeypatch.setattr(analysis_api.subtitle_ocr, "extract_subtitles", _no_ocr_extract)
+    monkeypatch.setattr(subtitle_ocr, "extract_subtitles", _no_ocr_extract)
     instance = Harness(memory_db, tmp_path / "work", FakeTranscriber(), data_dir=tmp_path)
     yield instance
     instance.close()
@@ -219,7 +220,7 @@ def test_start_marks_targets_analyzing_immediately(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """受理即标 analyzing：前置挖掘阶段集状态不得冻结旧值（用户可见「点了没反应」）。"""
-    monkeypatch.setattr(analysis_api.subtitle_ocr, "extract_subtitles", _no_ocr_extract)
+    monkeypatch.setattr(subtitle_ocr, "extract_subtitles", _no_ocr_extract)
     instance = Harness(
         memory_db, tmp_path / "work", FakeTranscriber(delay_s=1.0), data_dir=tmp_path
     )
@@ -549,7 +550,7 @@ def _force_mtime(path: Path, seconds: int = 1_800_000_000) -> None:
 
 def _expected_signature(harness: Harness, source: Path) -> str | None:
     return pipeline.source_signature(
-        source, ocr_channel=analysis_api._ocr_channel_available(harness.context)
+        source, ocr_channel=analysis_job._ocr_channel_available(harness.context)
     )
 
 
@@ -629,7 +630,7 @@ def test_ocr_capability_change_invalidates_done_episode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """降级路径：OCR 通道不可用 → 纯 ASR 产物打降级留痕；依赖就绪后签名失配强制重算。"""
-    monkeypatch.setattr(analysis_api, "_ocr_channel_available", lambda _context: False)
+    monkeypatch.setattr(analysis_job, "_ocr_channel_available", lambda _context: False)
     project_id = _make_project(harness, tmp_path, sample_video, copies=1)
     first = harness.rpc("analysis.start", {"project_id": project_id})
     assert harness.wait_done(str(first["job_id"]))["status"] == "completed"
@@ -640,7 +641,7 @@ def test_ocr_capability_change_invalidates_done_episode(
     assert any("降级" in message for message in logs), "降级产物必须打标留痕"
     calls_before = harness.transcriber.calls
 
-    monkeypatch.setattr(analysis_api, "_ocr_channel_available", lambda _context: True)
+    monkeypatch.setattr(analysis_job, "_ocr_channel_available", lambda _context: True)
     second = harness.rpc("analysis.start", {"project_id": project_id})
     assert harness.wait_done(str(second["job_id"]))["status"] == "completed"
     assert harness.transcriber.calls > calls_before, "OCR 就绪后纯 ASR 降级产物必须重算"
@@ -698,7 +699,7 @@ def test_detected_subtitle_band_is_persisted(
     def fake_extract(*_a: Any, **_k: Any) -> Any:
         return ([], (0.76, 0.9), [(0.76, 0.82)])
 
-    monkeypatch.setattr(analysis_api.subtitle_ocr, "extract_subtitles", fake_extract)
+    monkeypatch.setattr(subtitle_ocr, "extract_subtitles", fake_extract)
     project_id = _make_project(harness, tmp_path, sample_video, copies=1)
     first = harness.rpc("analysis.start", {"project_id": project_id})
     assert harness.wait_done(str(first["job_id"]))["status"] == "completed"
@@ -722,7 +723,7 @@ def test_ocr_import_error_leaves_band_null_and_does_not_crash(
     def fake_extract(*_a: Any, **_k: Any) -> Any:
         raise ImportError("rapidocr")
 
-    monkeypatch.setattr(analysis_api.subtitle_ocr, "extract_subtitles", fake_extract)
+    monkeypatch.setattr(subtitle_ocr, "extract_subtitles", fake_extract)
     project_id = _make_project(harness, tmp_path, sample_video, copies=1)
     first = harness.rpc("analysis.start", {"project_id": project_id})
     assert harness.wait_done(str(first["job_id"]))["status"] == "completed"
@@ -756,7 +757,7 @@ def test_ocr_cache_invalidated_when_engine_generation_changes(
     """存量条目缺 engine 标记（旧代际产物）→ 跨轮缓存不复用，重挖打上新代际。"""
     calls: list[int] = []
     monkeypatch.setattr(
-        analysis_api.subtitle_ocr, "extract_subtitles", _fake_extract(None, calls)
+        subtitle_ocr, "extract_subtitles", _fake_extract(None, calls)
     )
     project_id = _make_project(harness, tmp_path, sample_video, copies=1)
     first = harness.rpc("analysis.start", {"project_id": project_id})
@@ -766,15 +767,15 @@ def test_ocr_cache_invalidated_when_engine_generation_changes(
     assert all("engine" not in bar or bar["engine"] is None for bar in stored)
 
     monkeypatch.setattr(
-        analysis_api.subtitle_ocr,
+        subtitle_ocr,
         "extract_subtitles",
-        _fake_extract(analysis_api.subtitle_ocr.ENGINE_TAG, calls),
+        _fake_extract(subtitle_ocr.ENGINE_TAG, calls),
     )
     second = harness.rpc("analysis.start", {"project_id": project_id, "episode_ids": [episode_id]})
     assert harness.wait_done(str(second["job_id"]))["status"] == "completed"
     assert len(calls) == 2, "旧代际缓存必须失效重挖"
     stored = json.loads(str(analysis_repo.get(memory_db, episode_id)["ocr_segments"]))
-    assert all(bar["engine"] == analysis_api.subtitle_ocr.ENGINE_TAG for bar in stored)
+    assert all(bar["engine"] == subtitle_ocr.ENGINE_TAG for bar in stored)
 
     third = harness.rpc("analysis.start", {"project_id": project_id, "episode_ids": [episode_id]})
     assert harness.wait_done(str(third["job_id"]))["status"] == "completed"

@@ -17,8 +17,10 @@ from typing import Any
 import pytest
 
 from dramaclip.api import analysis as analysis_api
+from dramaclip.api import analysis_job as analysis_job
 from dramaclip.api import export as export_api
 from dramaclip.api import narration as narration_api
+from dramaclip.engines.analysis import pipeline
 from dramaclip.engines.analysis.models import EpisodeRawAnalysis
 from dramaclip.engines.semantic.llm_client import LlmClient
 from dramaclip.infra import jobs as jobs_mod
@@ -257,12 +259,12 @@ def test_start_job_leaves_conflict_and_genre_traces(
         scenes=[{"scene_index": 0, "start": 0.0, "end": 2.0, "score": 60}],
         audio={},
     )
-    monkeypatch.setattr(analysis_api.pipeline, "analyze_episode", lambda **_kw: raw)
-    monkeypatch.setattr(analysis_api, "_mine_hotwords", lambda *_a, **_k: ({}, {}, {}, ""))
+    monkeypatch.setattr(pipeline, "analyze_episode", lambda **_kw: raw)
+    monkeypatch.setattr(analysis_job, "_mine_hotwords", lambda *_a, **_k: ({}, {}, {}, ""))
     # 融合桩 = 原样透传：`fusion.fuse` 的每一条回落分支都返回入参段列表，非空转写
     # 不可能被掏空；桩成 [] 会造出「库里空、语义非空」这个生产里不存在的双真相。
     monkeypatch.setattr(
-        analysis_api, "_fuse_ocr", lambda _c, _e, asr, *_a, **_k: (asr, None, None, None)
+        analysis_job, "_fuse_ocr", lambda _c, _e, asr, *_a, **_k: (asr, None, None, None)
     )
 
     _rpc(harness, "analysis.start", {"project_id": project_id})

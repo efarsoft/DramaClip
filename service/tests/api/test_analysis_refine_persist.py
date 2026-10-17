@@ -19,7 +19,8 @@ from typing import Any
 import pytest
 
 from dramaclip.api import analysis as analysis_api
-from dramaclip.engines.analysis import llm_refine
+from dramaclip.api import analysis_job as analysis_job
+from dramaclip.engines.analysis import llm_refine, pipeline
 from dramaclip.engines.analysis.models import AsrSegment, AudioFeatures, EpisodeRawAnalysis
 from dramaclip.infra import jobs
 from dramaclip.infra.storage.repos import analysis as analysis_repo
@@ -61,7 +62,7 @@ def env(
     )
     # 转写管线：产出融合前的整段
     monkeypatch.setattr(
-        analysis_api.pipeline,
+        pipeline,
         "analyze_episode",
         lambda **_kw: EpisodeRawAnalysis(
             asr_segments=[_seg(PRE_FUSION)], audio=AudioFeatures()
@@ -69,10 +70,10 @@ def env(
     )
     # 融合：返回新列表（真实实现就是不改 raw，语义层的坑正在这）
     monkeypatch.setattr(
-        analysis_api, "_fuse_ocr", lambda *_a, **_k: ([_seg(FUSED)], None, None, None)
+        analysis_job, "_fuse_ocr", lambda *_a, **_k: ([_seg(FUSED)], None, None, None)
     )
-    monkeypatch.setattr(analysis_api, "_contact_sheet", lambda *_a: None)
-    monkeypatch.setattr(analysis_api, "_describe_frames", lambda *_a, **_k: [])
+    monkeypatch.setattr(analysis_job, "_contact_sheet", lambda *_a: None)
+    monkeypatch.setattr(analysis_job, "_describe_frames", lambda *_a, **_k: [])
     # 语义层：记录它真正吃到了哪份转写
     seen: dict[str, list[str]] = {}
 
@@ -109,7 +110,7 @@ def _stored(env: SimpleNamespace) -> list[str]:
 def test_refined_segments_reach_the_database(env: SimpleNamespace) -> None:
     """精炼生效却不落库 = 下游全线读到精炼前文本；库里必须见 REFINED。"""
     env.monkeypatch.setattr(
-        analysis_api.llm_refine,
+        llm_refine,
         "refine_segments",
         lambda *_a, **_k: llm_refine.RefineOutcome(
             segments=[_seg(REFINED)], applied=True, detail="测试"
@@ -123,7 +124,7 @@ def test_refined_segments_reach_the_database(env: SimpleNamespace) -> None:
 def test_refined_segments_are_what_the_semantic_layer_eats(env: SimpleNamespace) -> None:
     """语义层与库内同一份：吃融合前文本会随「上轮是否死在语义层」给出不同高光。"""
     env.monkeypatch.setattr(
-        analysis_api.llm_refine,
+        llm_refine,
         "refine_segments",
         lambda *_a, **_k: llm_refine.RefineOutcome(
             segments=[_seg(REFINED)], applied=True, detail="测试"
@@ -136,7 +137,7 @@ def test_refined_segments_are_what_the_semantic_layer_eats(env: SimpleNamespace)
 def test_refine_rejected_still_keeps_one_truth(env: SimpleNamespace) -> None:
     """护栏拒绝→回退融合产物：库里与语义层都得是 FUSED，不许一个是融合前。"""
     env.monkeypatch.setattr(
-        analysis_api.llm_refine,
+        llm_refine,
         "refine_segments",
         lambda *_a, **_k: llm_refine.RefineOutcome(
             segments=[_seg(FUSED)], applied=False, detail="对齐护栏拒绝"
