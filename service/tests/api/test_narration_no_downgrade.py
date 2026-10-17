@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from dramaclip.engines.narration import pipeline
+from dramaclip.engines.narration import synthesis as synthesis
 from dramaclip.engines.narration.casting import stamp
 from dramaclip.engines.narration.models import PlanData, StrategySpec, TimelineSegment
 from dramaclip.engines.narration.modes_w8 import build_full
@@ -54,7 +55,7 @@ def _plan_with_copy() -> PlanData:
 def _synth(monkeypatch, plan, engine, work_dir: Path, duration: float = 1.25) -> PlanData:
     """`work_dir` 必须由调用方给 `tmp_path`——替身会真的 mkdir+落文件，
     传相对路径就是把测试产物写进共享工作树（`git status` 里凭空多一个 tts/）。"""
-    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: engine)
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: engine)
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: duration)
     return pipeline.synthesize_narration_texts(
         plan, {"tts.engine": "edge"}, work_dir / "tts", source_durations=_LONG_SOURCE
@@ -120,7 +121,7 @@ def test_plan_without_narration_segments_skips_tts(monkeypatch, tmp_path: Path) 
     def no_engine(*_args: Any, **_kwargs: Any) -> Any:
         raise AssertionError("没有旁白段的方案不该构造 TTS 引擎")
 
-    monkeypatch.setattr(pipeline, "create_tts", no_engine)
+    monkeypatch.setattr(synthesis, "create_tts", no_engine)
     assert (
         pipeline.synthesize_narration_texts(
             silent, {}, tmp_path / "tts", source_durations=_LONG_SOURCE

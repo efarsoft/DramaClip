@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from dramaclip.engines.narration import modes, pipeline
+from dramaclip.engines.narration import synthesis as synthesis
 from dramaclip.engines.narration.models import (
     NarrationText,
     PlanData,
@@ -71,9 +72,9 @@ def _install(
         return measured_s
 
     recorder = _RunRecorder(fail=fail)
-    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
-    monkeypatch.setattr(pipeline.ffmpeg_runner, "run", recorder)
+    monkeypatch.setattr(synthesis.ffmpeg_runner, "run", recorder)
     return recorder
 
 

@@ -15,6 +15,7 @@ import pytest
 
 from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import pipeline, scriptwriter
+from dramaclip.engines.narration import synthesis as synthesis
 from dramaclip.engines.narration.models import (
     NarrationText,
     PlanData,
@@ -51,7 +52,7 @@ def _voice(
     def probe(path: Path) -> float:
         return durations[str(Path(path).stem.split("-")[0])]
 
-    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
     if source_durations is None:
         source_durations = {

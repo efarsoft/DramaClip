@@ -23,6 +23,7 @@ import pytest
 from dramaclip.api import export as export_api
 from dramaclip.engines.exporter import encoder
 from dramaclip.engines.narration import pipeline
+from dramaclip.engines.narration import synthesis as synthesis
 from dramaclip.engines.narration.casting import stamp
 from dramaclip.engines.narration.models import PlanData, StrategySpec
 from dramaclip.engines.narration.modes_w8 import build_full
@@ -81,7 +82,7 @@ def _full_plan(episode_id: str, tts_dir: Path) -> PlanData:
 
 
 def _stub_tts(monkeypatch: pytest.MonkeyPatch, engine: Any) -> None:
-    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: engine)
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: engine)
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: _TTS_DURATION_S)
 
 
@@ -260,7 +261,7 @@ def test_monologue_edge_voice_falls_back_to_clone_reference(
             out_path.write_bytes(b"x")
             return out_path
 
-    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: _RecordingTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _RecordingTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: _TTS_DURATION_S)
 
     plan = build_monologue(stamp([(1, "ep1", _scenes())]), StrategySpec())

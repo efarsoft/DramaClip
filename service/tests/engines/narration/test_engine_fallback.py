@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from dramaclip.engines.narration import pipeline
+from dramaclip.engines.narration import synthesis as synthesis
 from dramaclip.engines.narration.models import (
     NarrationText,
     PlanData,
@@ -70,7 +71,7 @@ def _install(
             raise ValueError(f"未知 TTS 引擎: {engine}")
         return registry[engine]
 
-    monkeypatch.setattr(pipeline, "create_tts", fake_create)
+    monkeypatch.setattr(synthesis, "create_tts", fake_create)
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: _DURATION_S)
 
 

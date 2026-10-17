@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from dramaclip.engines.narration import pipeline
+from dramaclip.engines.narration import synthesis as synthesis
 from dramaclip.engines.narration.models import (
     NarrationText,
     PlanData,
@@ -52,7 +53,7 @@ def _plan(*texts: str) -> PlanData:
 
 
 def _stub(monkeypatch: pytest.MonkeyPatch, engine: Any) -> None:
-    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: engine)
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: engine)
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: _DURATION_S)
 
 

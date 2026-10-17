@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from dramaclip.engines.narration import pipeline
+from dramaclip.engines.narration import synthesis as synthesis
 from dramaclip.engines.narration.casting import stamp
 from dramaclip.engines.narration.models import (
     NarrationText,
@@ -73,12 +74,12 @@ def _plan(roles: list[str]) -> PlanData:
 
 def _stub_tts(monkeypatch: pytest.MonkeyPatch, duration: float | None) -> None:
     """桩的两个落点以 pipeline 顶部 import 行为准：模块级 create_tts、tts_base 探测。"""
-    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: duration)
 
 
 def _broken_tts(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: _BrokenTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _BrokenTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: None)
 
 

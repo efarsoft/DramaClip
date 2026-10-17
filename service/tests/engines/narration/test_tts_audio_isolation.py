@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from dramaclip.engines.narration import pipeline
+from dramaclip.engines.narration import synthesis as synthesis
 from dramaclip.engines.narration.models import (
     NarrationText,
     PlanData,
@@ -55,7 +56,7 @@ class _PartialFailTts:
 
 
 def _stub(monkeypatch: pytest.MonkeyPatch, engine: Any) -> None:
-    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: engine)
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: engine)
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: _TTS_DURATION_S)
 
 
@@ -197,7 +198,7 @@ def test_zero_byte_squatter_at_final_path_is_not_a_cache_hit(
     tts_dir = tmp_path / "tts"
     plan = _plan("占位文案")
     for item in plan.narration_texts:
-        squatter = pipeline._content_addressed_audio(
+        squatter = synthesis._content_addressed_audio(
             tts_dir, item.id, item.text, "", "edge"
         )
         squatter.parent.mkdir(parents=True, exist_ok=True)

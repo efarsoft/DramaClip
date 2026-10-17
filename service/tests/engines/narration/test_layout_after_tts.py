@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from dramaclip.engines.narration import pipeline
+from dramaclip.engines.narration import synthesis as synthesis
 from dramaclip.engines.narration.models import (
     NarrationText,
     PlanData,
@@ -39,7 +40,7 @@ def _voice_slots(
     def probe(path: Path) -> float:
         return durations[str(Path(path).stem.split("-")[0])]
 
-    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
     return pipeline.synthesize_narration_texts(
         plan, {"tts.engine": "edge"}, tmp_path, source_durations=source_durations

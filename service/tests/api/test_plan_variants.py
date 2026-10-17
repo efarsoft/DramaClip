@@ -27,6 +27,7 @@ from dramaclip.engines.narration import (
     script_driver,
     styles,
 )
+from dramaclip.engines.narration import synthesis as synthesis
 from dramaclip.engines.narration.models import (
     NarrationText,
     PlanData,
@@ -381,7 +382,7 @@ def test_voice_gives_each_variant_its_own_audio(
     """
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     engine = _TextWritingTts()
-    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: engine)
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: engine)
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: 1.25)
     settings = dict(harness.context.settings)
 
@@ -419,7 +420,7 @@ def test_voice_keeps_the_cross_call_cache(
     """
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
     engine = _TextWritingTts()
-    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: engine)
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: engine)
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: 1.25)
     settings = dict(harness.context.settings)
 
@@ -569,7 +570,7 @@ def _stub_language_and_tts(
     patch_client_for(monkeypatch, angles, _Llm)
     patch_client_for(monkeypatch, copywriter, _Llm)
     patch_client_for(monkeypatch, script_driver, _Llm)
-    monkeypatch.setattr(pipeline, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: 1.25)
 
 
