@@ -4,19 +4,16 @@
 from __future__ import annotations
 
 import contextlib
-import json
 import logging
 import re
 import shutil
-import subprocess
-import threading
-import uuid
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from dramaclip.engines.analysis import pause_split
 from dramaclip.engines.analysis.models import AsrSegment, WordSpan
+from dramaclip.infra.model_manager import worker_bridge
 
 _LOGGER = logging.getLogger(__name__)
 _CUDA_PROBLEM = re.compile(r"cublas|cudnn|cudart|cuda|gpu|int8 compute type", re.I)
@@ -64,99 +61,41 @@ class _FunasrWorker:
     """venv 内 funasr AutoModel 的进程代理：``.generate(**kwargs)`` 与真模型同形。
 
     生命周期跟引擎实例（AnalysisRuntime 缓存单例 → 全应用一个 worker），进程
-    统一在 service_app 退出时由 `shutdown_funasr_workers` 回收——不收会在
-    Windows 上留占着模型内存的孤儿进程（indextts2 同款教训）。
+    统一在 service_app 退出时由桥的 shutdown 回收——不收会在 Windows 上留占着
+    模型内存的孤儿进程（indextts2 同款教训）。
     """
 
     def __init__(self, config: dict[str, Any]) -> None:
-        self._config = config
-        self._proc: subprocess.Popen[str] | None = None
+        from dramaclip.engines.tts.workers import funasr_worker
+
+        self._inner = worker_bridge.VenvWorker(Path(funasr_worker.__file__), config)
         self.device = "cpu"
 
     def start(self) -> None:
-        from dramaclip.engines.tts.workers import funasr_worker
-        from dramaclip.infra.model_manager import tts_runtime
-        from dramaclip.infra.paths import resolve_data_dir
-
-        py = tts_runtime.venv_python(resolve_data_dir())
-        worker_src = Path(funasr_worker.__file__)
-        if not py.is_file():
-            raise RuntimeError(
-                "未装运行环境：本地 ASR 需要本地智能运行环境（引擎页「安装运行环境」）"
-            )
-        try:
-            self._proc = subprocess.Popen(  # noqa: S603 - 固定解释器固定脚本
-                [str(py), str(worker_src), json.dumps(self._config, ensure_ascii=False)],
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                text=True, encoding="utf-8",
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except OSError as exc:
-            raise RuntimeError(f"运行环境 worker 启动失败（可重装修复）: {exc}") from exc
-        ready = self._readline()
-        if ready is None or not ready.get("ready"):
-            self.close()
-            raise RuntimeError("funasr worker 启动失败（venv 依赖不完整可重装修复）")
+        ready = self._inner.start()
         self.device = str(ready.get("device") or "cpu")
 
-    def _readline(self) -> dict[str, Any] | None:
-        assert self._proc is not None and self._proc.stdout is not None
-        line = self._proc.stdout.readline()
-        if not line:
-            return None
-        try:
-            return dict(json.loads(line))
-        except ValueError:
-            return None
-
     def generate(self, **kwargs: Any) -> list:  # type: ignore[type-arg]
-        assert self._proc is not None and self._proc.stdin is not None
-        req_id = uuid.uuid4().hex
         payload = {**kwargs, "input": str(kwargs.get("input", ""))}
-        self._proc.stdin.write(
-            json.dumps({"id": req_id, "kwargs": payload}, ensure_ascii=False) + "\n"
-        )
-        self._proc.stdin.flush()
-        while True:
-            msg = self._readline()
-            if msg is None:
-                raise RuntimeError("funasr worker 意外退出（可重装修复运行环境）")
-            if msg.get("id") != req_id:
-                continue  # 应答严格按 id 配对；异 id 只可能是残留，跳过
-            if not msg.get("ok"):
-                raise RuntimeError(f"funasr 转写失败: {msg.get('error')}")
-            return list(msg.get("raw") or [])
+        msg = self._inner.request({"kwargs": payload})
+        if not msg.get("ok"):
+            raise RuntimeError(f"funasr 转写失败: {msg.get('error')}")
+        return list(msg.get("raw") or [])
 
-    def close(self) -> None:
-        proc, self._proc = self._proc, None
-        if proc is None:
-            return
-        try:
-            if proc.stdin is not None:
-                proc.stdin.close()
-            proc.wait(timeout=10)
-        except Exception:  # noqa: BLE001 - 收尾尽力而为，等不到就强杀
-            proc.kill()
-
-
-_FUNASR_WORKERS: list[_FunasrWorker] = []
-_FUNASR_WORKERS_LOCK = threading.Lock()
+    @property
+    def _proc(self) -> Any:
+        return self._inner.proc  # 测试断言用：shutdown 后为 None
 
 
 def shutdown_funasr_workers() -> None:
-    """service_app 退出钩子：回收全部 funasr worker 进程（防孤儿占模型内存）。"""
-    with _FUNASR_WORKERS_LOCK:
-        workers = _FUNASR_WORKERS[:]
-        _FUNASR_WORKERS.clear()
-    for worker in workers:
-        worker.close()
+    """service_app 退出钩子（薄别名）：回收 funasr/kokoro 等全部 venv worker。"""
+    worker_bridge.shutdown_venv_workers()
 
 
 def _spawn_funasr_worker(config: dict[str, Any]) -> _FunasrWorker:
     worker = _FunasrWorker(config)
+    worker_bridge.register_venv_worker(worker._inner)
     worker.start()
-    with _FUNASR_WORKERS_LOCK:
-        _FUNASR_WORKERS.append(worker)
     return worker
 
 

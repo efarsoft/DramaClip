@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from dramaclip.engines.analysis import transcriber
 from dramaclip.engines.analysis.models import AsrSegment
-from dramaclip.infra.model_manager import tts_runtime
+from dramaclip.infra.model_manager import tts_runtime, worker_bridge
 
 # 桩 worker：按协议应答，raw 固定为一条两字词的 funasr 形状输出（ndarray 之外的
 # 最小形状）；"boom" 入参命中错误路径。
@@ -107,5 +105,5 @@ def test_worker_shutdown_registry_drains(stub_runtime: None) -> None:
     second = transcriber._spawn_funasr_worker({"engine": "sensevoice"})
     transcriber.shutdown_funasr_workers()
     assert first._proc is None and second._proc is None
-    assert transcriber._FUNASR_WORKERS == [], "注册表排空：二次 shutdown 空操作不炸"
+    assert worker_bridge._ACTIVE_WORKERS == [], "注册表排空：二次 shutdown 空操作不炸"
     transcriber.shutdown_funasr_workers()

@@ -199,3 +199,38 @@ def test_indextts2_short_text_single_job_to_out_path(
     assert len(fake_worker.jobs) == 1
     assert fake_worker.jobs[0]["out"] == str(out), "单块直接写目标路径（旧路径）"
     assert out.is_file()
+
+
+def test_kokoro_worker_branch_synthesizes_via_venv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """无进程内 kokoro 时走 venv worker：切块列表一次请求，产物落 out_path。"""
+    from dramaclip.engines.tts.engines import kokoro as kokoro_mod
+    from dramaclip.engines.tts.workers import kokoro_worker as kokoro_worker_mod
+    from dramaclip.infra.model_manager import tts_runtime, worker_bridge
+
+    stub = tmp_path / "stub_kokoro_worker.py"
+    stub.write_text(
+        "import json, sys\n"
+        "cfg = json.loads(sys.argv[1])\n"
+        "print(json.dumps({'ready': True}), flush=True)\n"
+        "for line in sys.stdin:\n"
+        "    line = line.strip()\n"
+        "    if not line:\n"
+        "        continue\n"
+        "    req = json.loads(line)\n"
+        "    out = req['kwargs']['out']\n"
+        "    open(out, 'wb').write(b'wav')\n"
+        "    print(json.dumps({'id': req['id'], 'ok': True}), flush=True)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(tts_runtime, "venv_python", lambda _d: Path(sys.executable))
+    monkeypatch.setattr(kokoro_worker_mod, "__file__", str(stub))
+    monkeypatch.setattr(kokoro_mod, "_kokoro_importable", lambda: False)
+
+    model_dir = tmp_path / "model"
+    engine = kokoro_mod.KokoroEngine(model_dir)
+    out = tmp_path / "out.wav"
+    engine.synthesize("第一块。第二块足够长触发切分。" * 8, "zf_001", out)
+    assert out.read_bytes() == b"wav"
+    worker_bridge.shutdown_venv_workers()

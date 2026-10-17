@@ -107,9 +107,9 @@ class ServiceApp:
             # 先等作业收尾再收 worker：合成中的段先落完，避免最后一问没有应答；
             # 常驻 worker 不收会在 Windows 上留占着模型内存的孤儿进程
             indextts2.shutdown_worker()
-            from dramaclip.engines.analysis import transcriber
+            from dramaclip.infra.model_manager import worker_bridge
 
-            transcriber.shutdown_funasr_workers()
+            worker_bridge.shutdown_venv_workers()
             gateway.stop()
             if self._connection is not None:
                 self._connection.close()
