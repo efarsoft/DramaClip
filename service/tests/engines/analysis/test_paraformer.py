@@ -276,3 +276,65 @@ def test_spk_spans_skip_malformed_entries() -> None:
         {"start": 500, "end": 500, "spk": 0},   # 零长区间
         {"start": 600, "spk": 1},               # 缺 end
     ]}]) == [(0.0, 0.5, 0)]
+
+
+def test_pause_split_shifts_word_timestamps_with_clip_anchor(
+    tmp_path: Path,
+    fake_funasr: type[_FakeAutoModel],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """多 clip 锚定必须连词级时间戳一起平移：只移 start/end 会让 refine 字流坍缩。
+
+    真机第1集实锤：46 段全挤 0-11.58s、起点乱序、微负边界——词锚留在 clip 内，
+    refine 字流按词取时间，整份时间轴塌成首 clip 跨度。
+    """
+    from dramaclip.engines.analysis import pause_split
+
+    clips = [
+        pause_split.Clip(start=0.0, end=2.0),
+        pause_split.Clip(start=10.0, end=12.0),
+    ]
+    monkeypatch.setattr(pause_split, "speech_clips", lambda _wav, **_kw: clips)
+    monkeypatch.setattr(
+        pause_split,
+        "split_wav",
+        lambda _wav, _clips, _work: [
+            (clip, tmp_path / f"clip-{index}.wav")
+            for index, clip in enumerate(_clips)
+        ],
+    )
+
+    class _ClipModel:
+        """每次 generate 返回相对 clip 的原生时间戳（首 clip 从 0 起、次 clip 也从 0 起）。"""
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate(self, **_kw: Any) -> list[dict[str, Any]]:
+            self.calls += 1
+            base = 0.0 if self.calls == 1 else 10.0 - 10.0  # 两 clip 的词戳都从各自 0 起
+            return [{
+                "text": "你好再见",
+                "timestamp": [
+                    [int(base * 1000), int((base + 0.3) * 1000)],
+                    [int((base + 0.3) * 1000), int((base + 0.6) * 1000)],
+                    [int((base + 1.0) * 1000), int((base + 1.4) * 1000)],
+                    [int((base + 1.4) * 1000), int((base + 1.8) * 1000)],
+                ],
+            }]
+
+    engine = ParaformerEngine(models_dir=tmp_path / "nope")
+    engine._model = _ClipModel()  # noqa: SLF001 - 直注入，绕过 funasr 构造
+
+    segments = engine.transcribe(Path("a.wav"))
+
+    assert len(segments) == 2
+    first, second = segments
+    assert (first.start, first.end) == (0.0, 1.8)
+    assert (second.start, second.end) == (10.0, 11.8), "第二 clip 的段必须平移 clip 起点 10s"
+    assert [(w.start, w.end) for w in second.words] == [
+        (10.0, 10.3), (10.3, 10.6), (11.0, 11.4), (11.4, 11.8),
+    ], "词级时间戳必须随 clip 锚定整体平移：留在 clip 相对值会让 refine 字流整份坍缩"
+    assert [(w.start, w.end) for w in first.words] == [
+        (0.0, 0.3), (0.3, 0.6), (1.0, 1.4), (1.4, 1.8),
+    ]

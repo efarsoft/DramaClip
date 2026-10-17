@@ -402,11 +402,24 @@ class ParaformerEngine:
             try:
                 for clip, clip_path in pause_split.split_wav(wav_path, clips, work):
                     for seg in self._transcribe_one(model, clip_path, language, hotwords):
+                        # 词级时间戳同样是 clip 相对值：只平移 start/end 会把词锚留在
+                        # 片段内——refine 字流按词取时间，整份时间轴就会坍缩到首个
+                        # clip 的跨度（真机第1集实锤：46 段全挤 0-11.58s）。
+                        shifted_words = [
+                            w.model_copy(
+                                update={
+                                    "start": round(w.start + clip.start, 3),
+                                    "end": round(w.end + clip.start, 3),
+                                }
+                            )
+                            for w in (seg.words or [])
+                        ]
                         segments.append(
                             seg.model_copy(
                                 update={
                                     "start": round(seg.start + clip.start, 3),
                                     "end": round(seg.end + clip.start, 3),
+                                    "words": shifted_words,
                                 }
                             )
                         )
