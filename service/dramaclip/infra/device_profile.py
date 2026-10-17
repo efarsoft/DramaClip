@@ -51,6 +51,14 @@ def _driver_version_at_least(driver_version: str, major: int) -> bool:
     return bool(digits) and int(digits[0]) >= major
 
 
+def _torch_variant_is_cuda() -> bool:
+    """tts-venv 变体标记 == cuda（funasr_gpu.ready 的零探针判据）。"""
+    from dramaclip.infra.model_manager import tts_runtime
+    from dramaclip.infra.paths import resolve_data_dir
+
+    return tts_runtime.torch_variant(resolve_data_dir()) == "cuda"
+
+
 def profile(snapshot: dict[str, Any], cuda_runtime_installed: bool) -> dict[str, Any]:
     """探测快照 + CUDA 运行库安装态 → 设备档位与各引擎能力结论。"""
     vendor = str(snapshot.get("vendor") or "none")
@@ -84,6 +92,13 @@ def profile(snapshot: dict[str, Any], cuda_runtime_installed: bool) -> dict[str,
             "ok": cuda_ok and vram_gb >= 4.0,
             "ready": False,
             "hint": "配音 TTS 页安装运行环境后生效（N 卡自动装 CUDA 轮）",
+        },
+        # funasr 本地 ASR（E-2：与双栈 TTS 共用 tts-venv，torch 变体一缸装——
+        # ready 读安装完成时落盘的变体标记，零探针，同 status 的高频端点纪律）
+        "funasr_gpu": {
+            "ok": cuda_ok and vram_gb >= 4.0,
+            "ready": cuda_ok and vram_gb >= 4.0 and _torch_variant_is_cuda(),
+            "hint": "ASR 页安装运行环境后生效（N 卡自动装 CUDA 轮）",
         },
         # 人声分离：交付栈是 audio-separator/MDX-Net（onnxruntime CPU，tts-venv）；
         # demucs GPU 路线（CPU 实测 RTF 1.95x / GPU 0.22x）是未接线的能力储备

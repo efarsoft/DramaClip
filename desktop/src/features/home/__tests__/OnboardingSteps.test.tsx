@@ -6,6 +6,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { OnboardingSteps } from '../OnboardingSteps';
 
+vi.mock('../../../services/client', () => ({
+  localRuntimeApi: {
+    status: vi.fn(() =>
+      Promise.resolve({
+        installed: true, dir: '', torch_variant: 'cuda',
+        groups: { indextts: true, funasr: true, kokoro: true, torch: true },
+      }),
+    ),
+    install: vi.fn(() => Promise.resolve({ job_id: 'j' })),
+  },
+}));
+
 afterEach(cleanup);
 
 function asrModel(status: string): ModelInfo {

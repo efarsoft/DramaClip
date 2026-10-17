@@ -3,8 +3,10 @@ import type { ReactElement, ReactNode } from 'react';
 import { Card } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { BookOutlined, EditOutlined, RightOutlined } from '@ant-design/icons';
+import { useEffect, useState } from 'react';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { layout, tokens } from '../../styles/theme';
+import { localRuntimeApi } from '../../services/client';
 
 interface EnvRow {
   readonly name: string;
@@ -25,6 +27,28 @@ export function EnvPanel({
   const navigate = useNavigate();
   const asr = (models ?? []).find((m) => m.required);
   const kokoro = (models ?? []).find((m) => m.model_id.includes('kokoro'));
+  // 本地智能运行环境（E-2）：本地识别/克隆/kokoro 的共同地基，缺组=待更新
+  const [runtime, setRuntime] = useState<{ ok: boolean | null; ready: boolean }>({
+    ok: null,
+    ready: false,
+  });
+  useEffect(() => {
+    // 测试态 bridge 未装配时 rpc 同步抛错——同步异常一并兜成「未知」
+    try {
+      localRuntimeApi
+        .status()
+        .then((s) => {
+          const groups = s.groups;
+          const ready = s.installed && groups.funasr && groups.kokoro;
+          setRuntime({ ok: ready, ready });
+        })
+        .catch(() => {
+          setRuntime({ ok: null, ready: false });
+        });
+    } catch {
+      setRuntime({ ok: null, ready: false });
+    }
+  }, []);
   const rows: EnvRow[] = [
     llmBaseUrl === ''
       ? { name: 'LLM 文案引擎', ok: false, status: '未配置', action: { label: '去配置', path: '/engines/llm' } }
@@ -39,6 +63,16 @@ export function EnvPanel({
         ? { name: 'TTS 配音', ok: true, status: 'Kokoro 本地 · 已就绪' }
         : { name: 'TTS 配音', ok: false, status: 'Kokoro 缺模型', action: { label: '去下载', path: '/engines/tts' } }
       : { name: 'TTS 配音', ok: true, status: 'Edge 云端 · 已就绪' },
+    runtime.ok === null
+      ? { name: '本地运行环境', ok: null, status: '…' }
+      : runtime.ready
+        ? { name: '本地运行环境', ok: true, status: '已就绪 · 识别/克隆/Kokoro' }
+        : {
+            name: '本地运行环境',
+            ok: false,
+            status: !runtime.ok ? '未安装' : '待更新（缺依赖组）',
+            action: { label: '去安装', path: '/engines/tts' },
+          },
     { name: 'FFmpeg 编码', ok: true, status: '内置 · 就绪' },
   ];
   return (

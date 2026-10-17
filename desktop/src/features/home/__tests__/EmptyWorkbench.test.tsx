@@ -6,6 +6,18 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EmptyWorkbench } from '../EmptyWorkbench';
 
+vi.mock('../../../services/client', () => ({
+  localRuntimeApi: {
+    status: vi.fn(() =>
+      Promise.resolve({
+        installed: true, dir: '', torch_variant: 'cuda',
+        groups: { indextts: true, funasr: true, kokoro: true, torch: true },
+      }),
+    ),
+    install: vi.fn(() => Promise.resolve({ job_id: 'j' })),
+  },
+}));
+
 afterEach(cleanup);
 
 function renderEmpty(models: Parameters<typeof EmptyWorkbench>[0]['models'] = null, llmBaseUrl = '') {

@@ -234,6 +234,18 @@ export const indexttsApi = {
     rpc<{ job_id: string }>('models.install_indextts', {}),
 } as const;
 
+/** 本地智能运行环境（E-2：tts-venv 承载 funasr/kokoro）：分组状态/一键安装。 */
+export const localRuntimeApi = {
+  status: (): Promise<{
+    installed: boolean;
+    dir: string;
+    torch_variant: string;
+    groups: Record<string, boolean>;
+  }> => rpc('models.local_runtime_status', {}),
+  install: (): Promise<{ job_id: string }> =>
+    rpc<{ job_id: string }>('models.install_local_runtime', {}),
+} as const;
+
 /** models.import_records 的返回：登记本 + 读坏了的原因原文——坏了不等于空。 */
 export interface ImportRecordsResult {
   readonly records: ImportRecord[];

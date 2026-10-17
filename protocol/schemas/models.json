@@ -829,6 +829,70 @@
           }
         }
       }
+    },
+    {
+      "name": "models.local_runtime_status",
+      "summary": "本地智能运行环境安装态（E-2：双栈 TTS + funasr/kokoro 分组探针）",
+      "params": {
+        "type": "object",
+        "properties": {}
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "installed",
+          "dir",
+          "torch_variant",
+          "groups"
+        ],
+        "properties": {
+          "installed": {
+            "type": "boolean"
+          },
+          "dir": {
+            "type": "string"
+          },
+          "torch_variant": {
+            "type": "string"
+          },
+          "groups": {
+            "type": "object",
+            "properties": {
+              "indextts": {
+                "type": "boolean"
+              },
+              "funasr": {
+                "type": "boolean"
+              },
+              "kokoro": {
+                "type": "boolean"
+              },
+              "torch": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "models.install_local_runtime",
+      "summary": "引导本地智能运行环境安装（诚实命名入口，与 install_indextts 同一实现）",
+      "params": {
+        "type": "object",
+        "properties": {}
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        }
+      }
     }
   ]
 }

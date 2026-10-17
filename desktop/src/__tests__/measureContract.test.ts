@@ -64,7 +64,7 @@ const MEASURE_DEBT: Readonly<Record<string, number>> = {
   'features/engines/CloudConfigSection.tsx': 2,
   'features/engines/ActiveEngineCard.tsx': 1,
   'features/engines/AssetRow.tsx': 1,
-  'features/engines/IndexttsRuntimeSlot.tsx': 1,
+  'features/engines/LocalRuntimeSlot.tsx': 1,
   'features/engines/LlmTab.tsx': 1,
   'features/engines/MachinePanel.tsx': 1,
   'features/engines/ReadinessCard.tsx': 1,

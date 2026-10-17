@@ -7,9 +7,10 @@
 import { CheckCircleFilled } from '@ant-design/icons';
 import { Button } from 'antd';
 import { useNavigate } from 'react-router-dom';
-import type { ReactElement } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { layout, tokens } from '../../styles/theme';
+import { localRuntimeApi } from '../../services/client';
 
 interface Step {
   readonly done: boolean;
@@ -28,7 +29,37 @@ export function OnboardingSteps({
   const navigate = useNavigate();
   const asrInstalled = (models ?? []).some((m) => m.required && m.status === 'installed');
   const llmReady = llmBaseUrl !== '';
+  // E-2：本地识别跑在 tts-venv 的 worker 里——模型之前先有环境（funasr 组）；
+  // 探测未归零（null）时不进步骤表，避免闪一步假答案。Whisper 用户可跳过（免装）。
+  const [runtimeReady, setRuntimeReady] = useState<boolean | null>(null);
+  useEffect(() => {
+    // 测试态 bridge 未装配时 rpc 是同步抛错——effect 里必须连同步异常一起兜
+    try {
+      localRuntimeApi
+        .status()
+        .then((s) => {
+          setRuntimeReady(s.groups.funasr);
+        })
+        .catch(() => {
+          setRuntimeReady(false);
+        });
+    } catch {
+      setRuntimeReady(false);
+    }
+  }, []);
   const steps: readonly Step[] = [
+    // 只在未就绪时出现：这一步的存在意义就是催安装，装完留着只是噪音（模型步不
+    // 同——「已装 Whisper」是对选择史的如实勾选，保留）。
+    ...(runtimeReady === false
+      ? [
+          {
+            done: false,
+            label: '安装本地运行环境',
+            hint: '本地识别/配音共用的 torch 运行时（约 2~6GB 按需下载）；Whisper 免装可跳过',
+            action: { label: '去安装', path: '/engines/asr' } satisfies Step['action'],
+          },
+        ]
+      : []),
     {
       done: asrInstalled,
       label: '装一个 ASR 模型',
@@ -51,7 +82,7 @@ export function OnboardingSteps({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs, width: '100%', maxWidth: 440 }}>
       {steps.map((step, index) => (
-        <StepRow key={step.label} step={step} index={index + 1} current={index === 2} onGo={(path) => void navigate(path)} />
+        <StepRow key={step.label} step={step} index={index + 1} current={index === steps.length - 1} onGo={(path) => void navigate(path)} />
       ))}
     </div>
   );

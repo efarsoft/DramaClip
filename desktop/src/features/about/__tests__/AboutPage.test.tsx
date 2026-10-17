@@ -4,6 +4,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App as AntdApp } from 'antd';
 
 vi.mock('../../../services/client', () => ({
+  localRuntimeApi: {
+    status: vi.fn().mockResolvedValue({
+      installed: true, dir: '', torch_variant: 'cuda',
+      groups: { indextts: true, funasr: true, kokoro: true, torch: true },
+    }),
+    install: vi.fn().mockResolvedValue({ job_id: 'j-local' }),
+  },
   appVersion: vi.fn().mockResolvedValue('2.0.0'),
   appPaths: vi.fn().mockResolvedValue({
     root: 'D:/data', outputs: 'D:/data/outputs', models: 'D:/data/models', logs: 'D:/data/logs',

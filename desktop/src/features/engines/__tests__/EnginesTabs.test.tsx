@@ -32,6 +32,15 @@ vi.mock('../../../services/client', () => ({
     cleanOrphan: vi.fn(() => Promise.resolve({ ok: true, removed: '', freed_bytes: 0 })),
     relayout: vi.fn(() => Promise.resolve({ path: '', migrated: false })),
   },
+  localRuntimeApi: {
+    status: vi.fn(() =>
+      Promise.resolve({
+        installed: true, dir: '', torch_variant: 'cuda',
+        groups: { indextts: true, funasr: true, kokoro: true, torch: true },
+      }),
+    ),
+    install: vi.fn(() => Promise.resolve({ job_id: 'j-local' })),
+  },
   enginesApi: {
     selftest: vi.fn(() => Promise.resolve({ ok: true })),
     selftestResults: vi.fn(() => Promise.resolve({})),

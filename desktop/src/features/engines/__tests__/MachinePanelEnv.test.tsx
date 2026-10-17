@@ -9,7 +9,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { HealthResult } from '@dramaclip/protocol';
-import { indexttsApi, runtimeApi, systemApi } from '../../../services/client';
+import { indexttsApi, localRuntimeApi, runtimeApi, systemApi } from '../../../services/client';
 import { MachinePanel } from '../MachinePanel';
 
 vi.mock('../../../services/client', () => ({
@@ -30,6 +30,15 @@ vi.mock('../../../services/client', () => ({
   },
   indexttsApi: {
     status: vi.fn(() => Promise.resolve({ installed: true, dir: 'C:/rt' })),
+    install: vi.fn(() => Promise.resolve({ job_id: 'j' })),
+  },
+  localRuntimeApi: {
+    status: vi.fn(() =>
+      Promise.resolve({
+        installed: true, dir: 'C:/rt', torch_variant: 'cuda',
+        groups: { indextts: true, funasr: true, kokoro: true, torch: true },
+      }),
+    ),
     install: vi.fn(() => Promise.resolve({ job_id: 'j' })),
   },
 }));
@@ -116,14 +125,17 @@ describe('总览页 · 运行环境状态行', () => {
   it('两个环境都装好 → 两行常驻绿账，不给多余动作', async () => {
     renderPanel();
     expect(await screen.findByText(/CUDA 运行库：已安装/)).toBeTruthy();
-    expect(await screen.findByText(/IndexTTS 运行环境：已安装/)).toBeTruthy();
+    expect(await screen.findByText(/本地智能运行环境：已安装/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: '去安装' })).toBeNull();
   });
 
   it('缺 IndexTTS 环境 → 如实报缺 + 「去安装」落到配音 TTS 页', async () => {
     vi.mocked(indexttsApi.status).mockResolvedValue({ installed: false, dir: '' });
+    vi.mocked(localRuntimeApi.status).mockResolvedValue({
+      installed: false, dir: '', torch_variant: 'unknown', groups: {},
+    });
     renderPanel();
-    expect(await screen.findByText(/IndexTTS 运行环境：未安装/)).toBeTruthy();
+    expect(await screen.findByText(/本地智能运行环境：未装齐/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '去安装' }));
     expect(await screen.findByText('TTS 页已到')).toBeTruthy();
   });
@@ -143,9 +155,10 @@ describe('总览页 · 运行环境状态行', () => {
   it('探测失败 → 「状态未知」，取不到 ≠ 不存在，不冒充未安装', async () => {
     vi.mocked(runtimeApi.status).mockRejectedValue(new Error('pipe broken'));
     vi.mocked(indexttsApi.status).mockRejectedValue(new Error('pipe broken'));
+    vi.mocked(localRuntimeApi.status).mockRejectedValue(new Error('pipe broken'));
     renderPanel();
     expect(await screen.findByText(/CUDA 运行库：状态未知/)).toBeTruthy();
-    expect(await screen.findByText(/IndexTTS 运行环境：状态未知/)).toBeTruthy();
+    expect(await screen.findByText(/本地智能运行环境：状态未知/)).toBeTruthy();
     expect(screen.queryByText(/未安装/)).toBeNull();
   });
 });

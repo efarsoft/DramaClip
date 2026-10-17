@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'antd';
 import type { DeviceProfile, HealthResult, ModelInfo } from '@dramaclip/protocol';
-import { indexttsApi, runtimeApi, systemApi } from '../../services/client';
+import { localRuntimeApi, runtimeApi, systemApi } from '../../services/client';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 import { FIT_VERDICT_COLOR, FIT_VERDICT_LABEL, judgeMachine, parseSizeGb, specsFromHealth } from './machineFit';
@@ -34,9 +34,9 @@ export function MachinePanel({ models }: { models: readonly ModelInfo[] }): Reac
       .catch(() => undefined);
   }, []);
   const probeCuda = useCallback(() => runtimeApi.status(), []);
-  const probeIndextts = useCallback(() => indexttsApi.status(), []);
+  const probeLocal = useCallback(() => localRuntimeApi.status(), []);
   const cuda = useEnvStatus(probeCuda);
-  const indextts = useEnvStatus(probeIndextts);
+  const localRuntime = useEnvStatus(probeLocal);
   const gpu = health?.gpu_info;
   const specs = specsFromHealth(health);
   const maxSizeGb = maxLocalModelSizeGb(models);
@@ -54,19 +54,19 @@ export function MachinePanel({ models }: { models: readonly ModelInfo[] }): Reac
       </div>
       <EnvSection
         cuda={cuda}
-        indextts={indextts}
+        localRuntime={localRuntime}
         gpuIsNvidia={gpu?.ready === true && gpu.vendor === 'nvidia'}
         onGoTts={() => {
           void navigate('/engines/tts');
         }}
       />
       {health?.device_profile !== undefined && (
-        <TierLine profile={health.device_profile} ttsReady={indextts === 'installed'} />
+        <TierLine profile={health.device_profile} ttsReady={localRuntime === 'installed'} />
       )}
       {verdict.verdict !== 'unknown' && <VerdictLine verdict={verdict} maxSizeGb={maxSizeGb} />}
       <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
         本卡回答硬件「装得下 / 跑得动」与两个运行环境在不在；修复动作各有其家：CUDA
-        运行库在本页「转写加速（GPU）」卡，IndexTTS 运行环境在配音 TTS 页。某次转写实际走了哪张卡，看语音识别域内的转写加速卡。
+        运行库在本页「转写加速（GPU）」卡，本地智能运行环境在 ASR / 配音 TTS 页。某次转写实际走了哪张卡，看语音识别域内的转写加速卡。
       </div>
     </SectionCard>
   );
@@ -100,17 +100,17 @@ const ENV_DOT: Record<EnvStatus, string> = {
   unknown: tokens.textTertiary,
 };
 
-/** 运行环境两行：CUDA 运行库（转写加速）+ IndexTTS 运行环境（音色克隆）。
- * 总览只给结论与落点（本页口径）：CUDA 的下载按钮在隔壁 GPU 卡，IndexTTS 的一键
- * 安装在配音 TTS 页——这里不重复放动作，缺了就给落点。 */
+/** 运行环境两行：CUDA 运行库（转写加速）+ 本地智能运行环境（本地识别/克隆/kokoro）。
+ * 总览只给结论与落点（本页口径）：CUDA 的下载按钮在隔壁 GPU 卡，运行环境的一键
+ * 安装在 ASR / 配音 TTS 页——这里不重复放动作，缺了就给落点。 */
 function EnvSection({
   cuda,
-  indextts,
+  localRuntime,
   gpuIsNvidia,
   onGoTts,
 }: {
   cuda: EnvStatus;
-  indextts: EnvStatus;
+  localRuntime: EnvStatus;
   gpuIsNvidia: boolean;
   onGoTts: () => void;
 }): ReactElement {
@@ -130,11 +130,11 @@ function EnvSection({
       </span>
       <EnvRow label="CUDA 运行库" status={cuda} text={cudaText(cuda, gpuIsNvidia)} />
       <EnvRow
-        label="IndexTTS 运行环境"
-        status={indextts}
-        text={indexttsText(indextts)}
+        label="本地智能运行环境"
+        status={localRuntime}
+        text={localRuntimeText(localRuntime)}
         action={
-          indextts === 'missing' ? (
+          localRuntime !== 'installed' && localRuntime !== 'loading' ? (
             <Button size="small" type="link" style={{ padding: 0, height: 'auto' }} onClick={onGoTts}>
               去安装
             </Button>
@@ -154,11 +154,11 @@ function cudaText(status: EnvStatus, gpuIsNvidia: boolean): string {
     : '未安装 · 本机无 NVIDIA 显卡，无需安装，转写走 CPU';
 }
 
-function indexttsText(status: EnvStatus): string {
+function localRuntimeText(status: EnvStatus): string {
   if (status === 'loading') return '检测中…';
   if (status === 'unknown') return '状态未知 · 探测失败，稍后刷新页面重试';
-  if (status === 'installed') return '已安装 · 音色克隆配音可用';
-  return '未安装 · IndexTTS 音色克隆不可用（约 2~6GB，独立 Python + torch）';
+  if (status === 'installed') return '已安装 · 本地识别 / 音色克隆 / Kokoro 可用';
+  return '未装齐 · 本地识别与克隆配音不可用（约 2~6GB，独立 Python + torch）';
 }
 
 function EnvRow({
@@ -341,6 +341,7 @@ function TierLine({
 const CAP_LABEL: Record<string, string> = {
   faster_whisper_gpu: '转写加速',
   indextts2_gpu: '音色克隆',
+  funasr_gpu: '本地 ASR',
   vocal_separation_gpu: '人声分离',
   local_visual_2b: '视觉 2B',
   local_visual_4b: '视觉 4B',

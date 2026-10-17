@@ -1,21 +1,35 @@
-/** IndexTTS 运行环境状态/安装/进度（UI 解耦）。 */
+/** 本地智能运行环境：分组状态/安装/进度（E-2；ASR 与配音两页槽位共用）。 */
 import { App as AntdApp } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
-import type { RuntimeState } from './runtimeState';
-import { indexttsApi, jobsApi } from '../../services/client';
+import { jobsApi, localRuntimeApi } from '../../services/client';
 import { useUiStore } from '../../stores/ui';
 
-export function useIndexttsRuntime(): RuntimeState {
+export interface LocalRuntimeState {
+  /** 双栈 TTS 基线（indextts+torch）——旧口径，前端既有判据零改动。 */
+  readonly installed: boolean | null;
+  /** 按能力分组探针：indextts/funasr/kokoro/torch（升级补装按组判缺）。 */
+  readonly groups: Record<string, boolean>;
+  readonly jobId: string;
+  readonly progress: number;
+  readonly stage: string;
+  readonly busy: boolean;
+  readonly install: () => void;
+}
+
+export function useLocalRuntime(): LocalRuntimeState {
   const { message } = AntdApp.useApp();
   const serviceState = useUiStore((state) => state.serviceState);
   const [installed, setInstalled] = useState<boolean | null>(null);
+  const [groups, setGroups] = useState<Record<string, boolean>>({});
   const [jobId, setJobId] = useState('');
   const [progress, setProgress] = useState(0);
   const [stage, setStage] = useState('');
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async (): Promise<void> => {
-    setInstalled((await indexttsApi.status()).installed);
+    const state = await localRuntimeApi.status();
+    setInstalled(state.installed);
+    setGroups(state.groups);
   }, []);
 
   useEffect(() => {
@@ -33,13 +47,11 @@ export function useIndexttsRuntime(): RuntimeState {
         .get(jobId)
         .then(({ job }) => {
           setProgress(job.progress);
-          // 线上字段叫 label（infra/jobs.py 原样出库）；旧代码读 job.stage 恒为空，
-          // 进度文案永远停在「准备中…」——协议类型已同步改真。
           setStage(job.label ?? '');
           if (job.status === 'completed') {
             setJobId('');
-            setInstalled(true);
-            message.success('IndexTTS 运行环境就绪');
+            message.success('本地智能运行环境就绪');
+            void refresh();
           } else if (job.status === 'failed') {
             setJobId('');
             message.error(`安装失败：${job.error ?? '未知原因'}`);
@@ -50,11 +62,11 @@ export function useIndexttsRuntime(): RuntimeState {
     return () => {
       clearInterval(timer);
     };
-  }, [jobId, message]);
+  }, [jobId, message, refresh]);
 
   const install = (): void => {
     setBusy(true);
-    indexttsApi
+    localRuntimeApi
       .install()
       .then(({ job_id }) => {
         setJobId(job_id);
@@ -67,5 +79,5 @@ export function useIndexttsRuntime(): RuntimeState {
       });
   };
 
-  return { installed, jobId, progress, stage, busy, install };
+  return { installed, groups, jobId, progress, stage, busy, install };
 }

@@ -30,7 +30,7 @@ import {
   MixedEnginePicker,
   activeCloudConfig,
 } from './CloudDomainUI';
-import { IndexttsRuntimeSlot } from './IndexttsRuntimeSlot';
+import { LocalRuntimeSlot } from './LocalRuntimeSlot';
 import { AutoVoiceButton } from './AutoVoiceButton';
 import { RefCleanButton } from './RefCleanButton';
 import { RefVoiceSelect } from './RefVoiceSelect';
@@ -123,7 +123,7 @@ export function TtsTab({
           判据仍是 models.indextts_status：装好后槽自己消失，不是常驻横幅。
           2~6GB 的独立 Python + torch 不悄悄装——「选为生效」不代装，给显式一键引导，
           试听/自检/导出的失败文案指的就是这扇门（曾经只有文案没有门）。 */}
-      <IndexttsRuntimeSlot />
+      <LocalRuntimeSlot scope="tts" />
       {pane === 'local' ? (
         <AssetLibrary
           models={domainModels}

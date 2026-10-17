@@ -28,6 +28,15 @@ vi.mock('../../../services/client', () => ({
     remove: vi.fn(() => Promise.resolve({ ok: true })),
     download: vi.fn(() => Promise.resolve({ job_id: 'j' })),
   },
+  localRuntimeApi: {
+    status: vi.fn(() =>
+      Promise.resolve({
+        installed: true, dir: '', torch_variant: 'cuda',
+        groups: { indextts: true, funasr: true, kokoro: true, torch: true },
+      }),
+    ),
+    install: vi.fn(() => Promise.resolve({ job_id: 'j-local' })),
+  },
   jobsApi: { get: vi.fn() },
   enginesApi: {
     selftest: vi.fn(() => Promise.resolve({ ok: true })),

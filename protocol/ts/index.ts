@@ -837,6 +837,8 @@ export const METHOD_NAMES = [
   'models.runtime_status',
   'models.install_runtime',
   'models.indextts_status',
+  'models.local_runtime_status',
+  'models.install_local_runtime',
   'models.install_indextts',
   'narration.generate_titles',
   'narration.update_titles',

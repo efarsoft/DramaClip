@@ -22,6 +22,7 @@ import {
   reportFor,
 } from './assetState';
 import { type ActiveCardProps, ActiveEngineCard } from './ActiveEngineCard';
+import { LocalRuntimeSlot } from './LocalRuntimeSlot';
 import { AssetLibrary } from './AssetLibrary';
 import {
   CloudConfigsPane,
@@ -100,6 +101,7 @@ export function AsrTab({
   };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
+      <LocalRuntimeSlot scope="asr" />
       {activeCloud !== undefined ? (
         <ActiveEngineCard
           domain="语音识别 ASR"

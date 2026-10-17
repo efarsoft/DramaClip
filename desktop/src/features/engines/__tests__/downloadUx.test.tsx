@@ -27,6 +27,15 @@ vi.mock('../../../services/client', () => ({
   },
 
   modelsApi: { download: (id: string, source?: string) => download(id, source) },
+  localRuntimeApi: {
+    status: vi.fn(() =>
+      Promise.resolve({
+        installed: true, dir: '', torch_variant: 'cuda',
+        groups: { indextts: true, funasr: true, kokoro: true, torch: true },
+      }),
+    ),
+    install: vi.fn(() => Promise.resolve({ job_id: 'j-local' })),
+  },
   onServiceEvent: (cb: (event: ServiceEvent) => void) => {
     captured = cb;
     return () => undefined;
