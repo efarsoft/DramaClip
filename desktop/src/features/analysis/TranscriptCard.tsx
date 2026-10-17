@@ -132,8 +132,10 @@ function SegmentRow({
 }
 
 function formatClock(seconds: number): string {
-  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(
-    Math.floor(seconds % 60),
+  // 负值钳 0：funasr 的 VAD 边界偶发 -0.09s 级微负，格式化成 "-1:-1" 纯属吓人
+  const clamped = Math.max(0, seconds);
+  return `${String(Math.floor(clamped / 60)).padStart(2, '0')}:${String(
+    Math.floor(clamped % 60),
   ).padStart(2, '0')}`;
 }
 
