@@ -21,8 +21,18 @@ from dramaclip.transport.rpc import RpcDomainError
 _SENSEVOICE = "sensevoice-small"
 
 
+class _RecordingNotifier:
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    def sizes_ready(self) -> None:
+        self.events.append("sizes_ready")
+
+
 def _context(tmp_path: Path) -> SimpleNamespace:
-    return SimpleNamespace(data_dir=tmp_path, settings=dict(config.DEFAULTS))
+    return SimpleNamespace(
+        data_dir=tmp_path, settings=dict(config.DEFAULTS), notifier=_RecordingNotifier()
+    )
 
 
 def _install_sensevoice(models_dir: Path) -> None:
@@ -100,3 +110,31 @@ def test_list_models_exposes_engine_ready(tmp_path: Path) -> None:
         "已移除的引擎（官方无 pip 包/无时间戳）不许回潮进清单 = 资产库死资产"
     )
     assert all(isinstance(v, bool) for v in flags.values())
+
+
+def test_list_sizes_async_fill_and_notify(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """列表页体积异步化：首拉立返（None）→ 后台补算 → sizes_ready → 重拉有值且不再触发。
+
+    12 秒级的全库磁盘统计曾把引擎中心首屏整个押住（真机 2026-10-19）——体积必须
+    走后台，通知恰好一次（多了是通知风暴，少了体积永远出不来）。
+    """
+    registry._SIZE_CACHE.clear()
+    context = _context(tmp_path)
+    _install_sensevoice(context.data_dir / "models")
+
+    def _sync_prefetch(models_dir, on_done=None):
+        registry.fill_size_cache(models_dir)
+        if on_done is not None:
+            on_done()
+
+    monkeypatch.setattr(registry, "prefetch_sizes", _sync_prefetch)
+
+    first = models_api.list_models(context)
+    row = next(item for item in first if item["model_id"] == _SENSEVOICE)
+    assert row["size_bytes"] is None, "首拉不等磁盘统计（None=统计中）"
+    assert context.notifier.events == ["sizes_ready"]
+
+    second = models_api.list_models(context)
+    row2 = next(item for item in second if item["model_id"] == _SENSEVOICE)
+    assert row2["size_bytes"] == 64
+    assert context.notifier.events == ["sizes_ready"], "补齐后再拉不得再次补算/通知（防风暴）"

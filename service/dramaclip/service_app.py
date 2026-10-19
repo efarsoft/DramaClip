@@ -16,7 +16,7 @@ from dramaclip.engines.analysis.runtime import AnalysisRuntime
 from dramaclip.engines.tts.engines import indextts2
 from dramaclip.infra import config, gpu, jobs, paths
 from dramaclip.infra import logging as logging_setup
-from dramaclip.infra.model_manager import cuda_runtime
+from dramaclip.infra.model_manager import cuda_runtime, registry
 from dramaclip.infra.storage import backup, db
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import exports as exports_repo
@@ -64,6 +64,14 @@ class ServiceApp:
                 f"分析中集 {stale_episodes} 个，未完成导出 {stale_exports} 个"
             )
         gpu.prefetch()  # GPU 探测慢（nvidia-smi），启动即后台预热，health 不阻塞
+        # 模型库状态/体积缓存预热（同 gpu.prefetch 模式）：placement 树首触扫描在冷盘
+        # 环境是十秒级（真机 2026-10-19），不预热则引擎中心首开必等一次
+        threading.Thread(
+            target=registry.warm_caches,
+            args=(data_dir / "models",),
+            name="model-warm",
+            daemon=True,
+        ).start()
 
         log_file = logging_setup.setup_file_logging(data_dir / "logs")
         if log_file is not None:

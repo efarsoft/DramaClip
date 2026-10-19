@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { App as AntdApp } from 'antd';
 import type { ImportRecord, ModelInfo, SelftestResults } from '@dramaclip/protocol';
-import { enginesApi, modelsApi, rpc, systemApi } from '../../services/client';
+import { enginesApi, modelsApi, onServiceEvent, rpc, systemApi } from '../../services/client';
 import { type Reports, reportsOf } from './assetState';
 import { type MachineSpecs, specsFromHealth } from './machineFit';
 import type { SettingsMap } from './EnginesPage';
@@ -61,6 +61,17 @@ export function useEnginesData(): EnginesDataHub {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(
+    () =>
+      // 磁盘实占是后台补算的（首屏不等统计）：补完服务端推 sizes_ready，这里重拉补上体积列。
+      onServiceEvent((event) => {
+        if (event.type === 'notification' && event.method === 'models.sizes_ready') {
+          void load();
+        }
+      }),
+    [load],
+  );
 
   const saveSettings = useCallback(
     (values: SettingsMap): Promise<void> =>

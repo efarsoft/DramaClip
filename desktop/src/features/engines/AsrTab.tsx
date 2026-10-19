@@ -233,7 +233,7 @@ function ActiveCard({
       ),
     props: [
       ...paramProps(settings, onSave, ['asr.device', 'asr.language', 'asr.diarization']),
-      { label: '磁盘实占', value: active === undefined ? '—' : formatBytes(active.size_bytes ?? 0) },
+      { label: '磁盘实占', value: active === undefined ? '—' : active.size_bytes === undefined || active.size_bytes === null ? '统计中…' : formatBytes(active.size_bytes) },
       { label: '生效时机', value: '保存后下次分析' },
     ],
     footnote: '「自动」＝检测到可用 GPU 即启用，否则回退 CPU；显卡与运行库的实际情况见「环境」段的转写加速卡。',

@@ -209,7 +209,7 @@ function ActiveCard({
         </Button>
       ),
     props: [
-      { label: '磁盘实占', value: active === undefined ? '—' : formatBytes(active.size_bytes ?? 0) },
+      { label: '磁盘实占', value: active === undefined ? '—' : active.size_bytes === undefined || active.size_bytes === null ? '统计中…' : formatBytes(active.size_bytes) },
       { label: '生效时机', value: '保存后下次分析' },
     ],
     footnote:

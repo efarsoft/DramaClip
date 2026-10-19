@@ -289,8 +289,11 @@ function TierLine({
     profile.memory_total_mb > 0 ? `${String(Math.round(profile.memory_total_mb / 1024))}GB 显存` : '';
   const caps = profile.caps;
   // indextts2 的运行时态由前端组合：tts-venv 装好且 torch 变体为 cuda（后端探针只到安装态）
-  const readyOf = (key: string): boolean =>
-    key === 'indextts2_gpu' ? caps[key].ok && ttsReady : caps[key].ready;
+  const readyOf = (key: string): boolean => {
+    const cap = caps[key];
+    if (cap === undefined) return false;
+    return key === 'indextts2_gpu' ? cap.ok && ttsReady : cap.ready;
+  };
   const readyList = Object.entries(caps)
     .filter(([key]) => readyOf(key))
     .map(([key]) => CAP_LABEL[key]);

@@ -67,13 +67,21 @@ def list_models(context: AppContext) -> list[dict[str, Any]]:
     """
     models_dir = context.data_dir / "models"
     eps = endpoints(context)
-    items = registry.list_models(models_dir)
+    # size="cached"：列表页不等磁盘统计——冷缓存时全量实算是十几秒级的阻塞，
+    # 这里立刻返回（未命中的行 size_bytes=None），后台补算完成经 sizes_ready 通知刷新。
+    items = registry.list_models(models_dir, size="cached")
     for item in items:
         item["sources"] = [
             {**source, "web_url": downloader.web_url(str(source["kind"]), str(source["repo"]), eps)}
             for source in item["sources"]
         ]
-    return _attach_imports(items, importer.records(models_dir))
+    items = _attach_imports(items, importer.records(models_dir))
+    if any(
+        item["status"] == "installed" and item.get("size_bytes") is None
+        for item in items
+    ):
+        registry.prefetch_sizes(models_dir, on_done=context.notifier.sizes_ready)
+    return items
 
 
 def verify(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:
@@ -118,6 +126,7 @@ def relayout(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         raise RpcDomainError(_ERR_MODEL_STATE, str(exc)) from exc
     if result["migrated"]:
         context.notifier.log("info", f"{spec.name}：缓存布局已就地迁移到 {result['path']}")
+    registry.invalidate_model_caches(context.data_dir / "models")
     return result
 
 
@@ -177,6 +186,7 @@ def download(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
             else:
                 context.job_store.mark_completed(job_id)
                 _auto_verify(context, models_dir, spec)
+            registry.invalidate_model_caches(models_dir)
         context.cancel_events.pop(job_id, None)
 
     downloader.download_in_background(
@@ -288,6 +298,7 @@ def clean_residue(context: AppContext, params: dict[str, Any]) -> dict[str, Any]
     context.notifier.log(
         "info", f"{spec.name}：清理中断残留 {removed} 个，释放 {importer.human_bytes(freed)}"
     )
+    registry.invalidate_model_caches(context.data_dir / "models")
     return {"removed": removed, "freed_bytes": freed}
 
 
@@ -331,6 +342,7 @@ def clean_orphan(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     context.notifier.log(
         "info", f"{spec.name}：已删除多余副本 {target}（释放 {importer.human_bytes(freed)}）"
     )
+    registry.invalidate_model_caches(context.data_dir / "models")
     return {"ok": True, "removed": str(target), "freed_bytes": freed}
 
 
@@ -422,6 +434,7 @@ def delete(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         shutil.rmtree(target, ignore_errors=True)
         removed.append(str(target))
         importer.forget(models_dir, resolved)
+    registry.invalidate_model_caches(models_dir)
     return {"ok": True, "removed": removed}
 
 
@@ -500,6 +513,7 @@ def import_commit(context: AppContext, params: dict[str, Any]) -> dict[str, Any]
         job = context.job_store.get(job_id)
         if job is not None and job["status"] == STATUS_RUNNING:
             context.job_store.mark_completed(job_id)
+        registry.invalidate_model_caches(context.data_dir / "models")
 
     threading.Thread(target=_run, daemon=True, name=f"import-{source.name}").start()
     threading.Thread(target=_watch, daemon=True, name=f"import-watch-{job_id[:8]}").start()
@@ -535,6 +549,7 @@ def import_forget(context: AppContext, params: dict[str, Any]) -> dict[str, Any]
             _ERR_MODEL_STATE, f"{stored} 在模型库内，是已落位的资产；请用「移除」处置而不是撤销登记"
         )
     importer.forget(models_dir, Path(stored))
+    registry.invalidate_model_caches(models_dir)
     return {"ok": True, "path": stored}
 
 

@@ -39,7 +39,7 @@ export function EnvPanel({
         .status()
         .then((s) => {
           const groups = s.groups;
-          const ready = s.installed && groups.funasr && groups.kokoro;
+          const ready = Boolean(s.installed && groups.funasr && groups.kokoro);
           setRuntime({ ok: ready, ready });
         })
         .catch(() => {

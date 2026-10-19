@@ -199,7 +199,11 @@ function StateCell({
 function SizeCell({ model }: { model: ModelInfo }): ReactElement {
   return (
     <span style={mixins.chip()} title="实占为磁盘真实字节，未下载时显示标称体积">
-      {model.status === 'installed' ? formatBytes(model.size_bytes ?? 0) : (model.size_label ?? '—')}
+      {model.status === 'installed'
+        ? model.size_bytes === undefined || model.size_bytes === null
+          ? '统计中…'
+          : formatBytes(model.size_bytes)
+        : (model.size_label ?? '—')}
     </span>
   );
 }

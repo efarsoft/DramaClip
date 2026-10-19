@@ -38,7 +38,7 @@ export function OnboardingSteps({
       localRuntimeApi
         .status()
         .then((s) => {
-          setRuntimeReady(s.groups.funasr);
+          setRuntimeReady(Boolean(s.groups.funasr));
         })
         .catch(() => {
           setRuntimeReady(false);

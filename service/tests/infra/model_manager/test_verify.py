@@ -15,6 +15,8 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import pytest
+
 from dramaclip.infra.model_manager import registry
 from dramaclip.infra.model_manager.registry import ModelSpec, builtin_specs
 
@@ -80,6 +82,85 @@ def test_detect_status_whisper_size_covers_its_own_cache_only(tmp_path: Path) ->
 
     # 本缓存实占 = snapshots 4×16 + refs/main 40 + trees/<rev>.json 2 + blobs 4096
     assert status["size_bytes"] == 64 + 40 + 2 + 4096
+
+
+# ---------------------------------------------------------------- cached 档（列表页异步体积）
+
+
+def test_cached_size_misses_then_fills(tmp_path: Path) -> None:
+    """cached 档：缓存未命中返回 None（统计中，不是 0），fill 后与 full 档一致。"""
+    registry._SIZE_CACHE.clear()
+    spec = _spec("sensevoice-small")
+    base = tmp_path / "models" / spec.placement
+    base.mkdir(parents=True)
+    (base / "model.pt").write_bytes(bytes(2048))
+
+    cached = registry.detect_status(tmp_path / "models", spec, size="cached")
+    assert cached["size_bytes"] is None, "未命中是「统计中」（None），0 是「没占地方」，不能混"
+
+    registry.fill_size_cache(tmp_path / "models")
+    filled = registry.detect_status(tmp_path / "models", spec, size="cached")
+    full = registry.detect_status(tmp_path / "models", spec)
+    assert filled["size_bytes"] == full["size_bytes"] == 2048
+
+
+def test_cached_size_not_installed_is_zero(tmp_path: Path) -> None:
+    """未安装没有目录可统计：cached 档同样报 0，与 full 档同口径。"""
+    registry._SIZE_CACHE.clear()
+    status = registry.detect_status(tmp_path / "models", _spec("kokoro-82m"), size="cached")
+    assert status["size_bytes"] == 0
+
+
+def test_status_cache_ttl_and_invalidation(tmp_path: Path) -> None:
+    """cached 档走状态缓存：TTL 内不重扫（首触税不重复付）；失效后立即可见新状态。"""
+    registry._STATUS_CACHE.clear()
+    registry._SIZE_CACHE.clear()
+    models = tmp_path / "models"
+    spec = _spec("sensevoice-small")
+    base = models / spec.placement
+    base.mkdir(parents=True)
+
+    first = registry.list_models(models, size="cached")
+    assert next(s for s in first if s["model_id"] == spec.model_id)["status"] == "not_installed"
+
+    (base / "model.pt").write_bytes(b"\x00" * 16)
+    stale = registry.list_models(models, size="cached")
+    assert next(s for s in stale if s["model_id"] == spec.model_id)["status"] == "not_installed", (
+        "TTL 内暂回旧状态是缓存的代价，靠变更点失效与 TTL 兜底"
+    )
+
+    registry.invalidate_model_caches(models)
+    fresh = registry.list_models(models, size="cached")
+    assert next(s for s in fresh if s["model_id"] == spec.model_id)["status"] == "installed", (
+        "写操作失效后必须立即可见，否则下载完成界面对着旧状态说没装"
+    )
+
+
+def test_prefetch_sizes_skips_while_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """幂等护栏：补算进行中再触发不得重复开线程（列表页会连环触发）。"""
+    import threading
+    import time
+
+    registry._SIZE_PREFETCHING.clear()
+    calls: list[str] = []
+    gate = threading.Event()
+
+    def _slow_fill(_dir: Path) -> None:
+        calls.append("fill")
+        gate.wait(5)  # 挂住工作线程，制造「进行中」窗口
+
+    monkeypatch.setattr(registry, "fill_size_cache", _slow_fill, raising=True)
+    registry.prefetch_sizes(tmp_path)
+    while not calls:  # 等工作线程真正开跑
+        time.sleep(0.005)
+    registry.prefetch_sizes(tmp_path)  # 进行中：必须被吞掉
+    gate.set()
+    deadline = time.monotonic() + 5
+    while registry._SIZE_PREFETCHING and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert calls == ["fill"], f"补算体应只跑一次，实得 {len(calls)} 次"
 
 
 # ---------------------------------------------------------------- 引擎接入态

@@ -8,7 +8,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { HealthResult } from '@dramaclip/protocol';
+import type { DeviceProfile, HealthResult } from '@dramaclip/protocol';
 import { indexttsApi, localRuntimeApi, runtimeApi, systemApi } from '../../../services/client';
 import { MachinePanel } from '../MachinePanel';
 
@@ -43,6 +43,24 @@ vi.mock('../../../services/client', () => ({
   },
 }));
 
+// 单独成常量：HealthResult.device_profile 是可选字段，spread 它会让覆盖对象的
+// 属性全变可选、对不上 DeviceProfile 的必填面（tsc 既有红，2026-10-19 顺手修）。
+const NVIDIA_PROFILE: DeviceProfile = {
+  tier: 'entry',
+  tier_label: '标准（6-11GB 显存）',
+  vendor: 'nvidia',
+  gpu_name: 'RTX 4060',
+  memory_total_mb: 8188,
+  max_cuda_version: '12.8',
+  cuda_runtime_installed: false,
+  caps: {
+    faster_whisper_gpu: { ok: true, ready: false, hint: '' },
+    demucs_gpu: { ok: true, ready: false, hint: 'torch CUDA 运行时接入后生效' },
+  },
+  driver_guidance: { needed: false, url: 'https://x', min_driver: '551', reason: '' },
+  recommendation: '本地 GPU 引擎可启用（安装 CUDA 运行库后生效）',
+};
+
 const NVIDIA_HEALTH: HealthResult = {
   status: 'ok',
   uptime_s: 1,
@@ -59,21 +77,7 @@ const NVIDIA_HEALTH: HealthResult = {
   ram_total_gb: 32,
   ram_free_gb: 16,
   disk_free_gb: 200,
-  device_profile: {
-    tier: 'entry',
-    tier_label: '标准（6-11GB 显存）',
-    vendor: 'nvidia',
-    gpu_name: 'RTX 4060',
-    memory_total_mb: 8188,
-    max_cuda_version: '12.8',
-    cuda_runtime_installed: false,
-    caps: {
-      faster_whisper_gpu: { ok: true, ready: false, hint: '' },
-      demucs_gpu: { ok: true, ready: false, hint: 'torch CUDA 运行时接入后生效' },
-    },
-    driver_guidance: { needed: false, url: 'https://x', min_driver: '551', reason: '' },
-    recommendation: '本地 GPU 引擎可启用（安装 CUDA 运行库后生效）',
-  },
+  device_profile: NVIDIA_PROFILE,
 };
 
 const NO_GPU_HEALTH: HealthResult = { ...NVIDIA_HEALTH, gpu_info: undefined };
@@ -104,7 +108,7 @@ describe('总览页 · 设备档位行', () => {
     renderPanel({
       ...NVIDIA_HEALTH,
       device_profile: {
-        ...NVIDIA_HEALTH.device_profile,
+        ...NVIDIA_PROFILE,
         tier: 'low',
         tier_label: '入门（<6GB 显存）',
         driver_guidance: {

@@ -68,5 +68,9 @@ class Notifier:
     def model_download(self, model_id: str, percent: float, **extra: Any) -> None:
         self._emit("models.download_progress", {"model_id": model_id, "percent": percent, **extra})
 
+    def sizes_ready(self) -> None:
+        """模型磁盘实占后台补算完成：资产列表页据此重拉 models.list 补上体积列。"""
+        self._emit("models.sizes_ready", {})
+
     def _emit(self, method: str, params: dict[str, Any]) -> None:
         self._send(RpcNotification(method=method, params=params).model_dump())

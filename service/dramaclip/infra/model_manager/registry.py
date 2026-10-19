@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -59,11 +62,18 @@ def whisper_cache(base: Path, spec: ModelSpec) -> Path | None:
     return _whisper_cache(base, spec)
 
 
-def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
+def detect_status(
+    models_dir: Path, spec: ModelSpec, *, size: str = "full"
+) -> dict[str, Any]:
     """探测单个模型的安装状态：placement 目录下有实质文件即视为已安装。
 
     云端引擎（_is_cloud）没有本地资产：引擎接线（engine_ready）即视为已安装——
     真可用性（API Key/网络）由运行时在调用期判，缺失会按分档语义报错留痕。
+
+    ``size`` 两档：``"full"``（默认）同步实算磁盘实占——多 GB 模型逐文件求和，
+    冷缓存 + 杀软首触时是秒级到分钟级的阻塞；``"cached"`` 只读进程内缓存，
+    没命中返回 None 并由调用方触发 ``prefetch_sizes`` 后台补算——资产列表页
+    用它把首屏从「等统计」里解放出来，size 到位后经 models.sizes_ready 通知刷新。
     """
     if _is_cloud(spec):
         return {
@@ -110,6 +120,10 @@ def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
                 if hit is not None:
                     installed, resolved, asset = True, base, base
                     break
+    if size == "cached" and asset is not None:
+        disk = _SIZE_CACHE.get(str(asset))
+    else:
+        disk = _dir_bytes(asset) if asset is not None else 0
     return {
         "model_id": spec.model_id,
         "kind": spec.kind,
@@ -128,10 +142,120 @@ def detect_status(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
         "path": str(resolved) if resolved is not None else None,
         # 磁盘实占：按「这份资产自己的目录」统计（whisper 是缓存根，权重实体在 blobs/ 下），
         # 不是清单里的标称大小，也不把同 placement 的邻居档位算进来。
-        "size_bytes": _dir_bytes(asset) if asset is not None else 0,
+        # cached 档未命中时是 None（统计中），不是 0——0 是「没占地方」。
+        "size_bytes": disk,
         "engine_ready": engine_ready(spec),
         "cloud": False,
     }
+
+
+# 磁盘实占缓存：键 = 资产目录绝对路径。已安装模型的目录内容只在下载/导入时变，
+# 进程内缓存常驻即可；未命中的路径由 prefetch_sizes 后台补算，请求路径零目录遍历。
+_SIZE_CACHE: dict[str, int] = {}
+_SIZE_LOCK = threading.Lock()
+_SIZE_PREFETCHING: set[str] = set()
+
+# 安装状态缓存（仅 cached 档消费）：placement 树的首触扫描在冷盘/杀软环境下是
+# 秒级到十秒级的税（真机 whisper placement 单 spec 9.2s，2026-10-19），列表页
+# 不该每次都付。TTL 兜住「手动放目录进 models/」这类无变更点的改动；有变更点
+# 的操作（下载完成/删除/导入/清扫/迁移）走 invalidate_model_caches 即时失效。
+_STATUS_TTL_S = 60.0
+_STATUS_CACHE: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+_STATUS_LOCK = threading.Lock()
+
+
+def _cached_detect(models_dir: Path, spec: ModelSpec) -> dict[str, Any]:
+    """带缓存的探测（cached 档专用）：TTL 内直接回缓存副本，过期重扫。"""
+    key = (str(models_dir), spec.model_id)
+    now = time.monotonic()
+    with _STATUS_LOCK:
+        hit = _STATUS_CACHE.get(key)
+        if hit is not None and now - hit[0] <= _STATUS_TTL_S:
+            return dict(hit[1])
+    fresh = detect_status(models_dir, spec, size="cached")
+    with _STATUS_LOCK:
+        _STATUS_CACHE[key] = (now, fresh)
+    return dict(fresh)
+
+
+def invalidate_model_caches(models_dir: Path) -> None:
+    """模型库发生写操作（下载完成/删除/导入/清扫/迁移）后调用：状态与体积缓存全失效。"""
+    prefix = str(models_dir)
+    with _STATUS_LOCK:
+        for key in [k for k in _STATUS_CACHE if k[0] == prefix]:
+            del _STATUS_CACHE[key]
+    with _SIZE_LOCK:
+        for path in [p for p in _SIZE_CACHE if p.startswith(prefix)]:
+            del _SIZE_CACHE[path]
+
+
+def warm_caches(models_dir: Path) -> None:
+    """启动预热：状态扫一遍 + 体积补算一遍，此后列表页全程零磁盘遍历（后台线程调）。"""
+    try:
+        list_models(models_dir, size="cached")
+        fill_size_cache(models_dir)
+    except Exception:  # noqa: BLE001 - 预热失败不致命，下次列表页照常现算
+        pass
+
+
+def fill_size_cache(models_dir: Path) -> None:
+    """同步补算全部已装模型的磁盘实占缓存（prefetch_sizes 的工作体，测试可直接调）。
+
+    顺手刷新状态缓存里同批条目：TTL 内的条目带着「统计中」的 None——体积补出来
+    不刷新，重拉列表永远是 None（真测踩中，2026-10-19）。
+    """
+    for spec in builtin_specs():
+        if _is_cloud(spec):
+            continue
+        base = models_dir / spec.placement
+        if not base.is_dir():
+            continue
+        asset = None
+        if spec.engine == "faster_whisper":
+            short = spec.model_id.removeprefix("faster-whisper-")
+            for cache_dir in sorted(base.glob(f"models--*faster-whisper-{short}")):
+                for snapshot in _snapshot_candidates(cache_dir):
+                    if (snapshot / "model.bin").is_file():
+                        asset = cache_dir
+                        break
+                if asset is not None:
+                    break
+        else:
+            for pattern in ("*.pth", "*.pt", "*.bin", "*.onnx", "*.safetensors"):
+                if next(base.rglob(pattern), None) is not None:
+                    asset = base
+                    break
+        if asset is not None:
+            _SIZE_CACHE[str(asset)] = _dir_bytes(asset)
+        key = (str(models_dir), spec.model_id)
+        with _STATUS_LOCK:
+            if key in _STATUS_CACHE:
+                _STATUS_CACHE[key] = (
+                    time.monotonic(),
+                    detect_status(models_dir, spec, size="cached"),
+                )
+
+
+def prefetch_sizes(models_dir: Path, on_done: Callable[[], None] | None = None) -> None:
+    """后台补算磁盘实占缓存（幂等，进行中不重复开线程）；完成后回调 on_done。"""
+    key = str(models_dir)
+    with _SIZE_LOCK:
+        if key in _SIZE_PREFETCHING:
+            return
+        _SIZE_PREFETCHING.add(key)
+
+    def _work() -> None:
+        try:
+            fill_size_cache(models_dir)
+            if on_done is not None:
+                on_done()
+        except Exception:  # noqa: BLE001 - 统计失败不致命，下次列表页再补
+            pass
+        finally:
+            with _SIZE_LOCK:
+                _SIZE_PREFETCHING.discard(key)
+
+    threading.Thread(target=_work, name="model-sizes", daemon=True).start()
 
 
 def _dir_bytes(root: Path) -> int:
@@ -489,8 +613,10 @@ def orphan_copies(models_dir: Path, spec: ModelSpec) -> list[Path]:
     ]
 
 
-def list_models(models_dir: Path) -> list[dict[str, Any]]:
-    return [detect_status(models_dir, spec) for spec in builtin_specs()]
+def list_models(models_dir: Path, *, size: str = "full") -> list[dict[str, Any]]:
+    if size == "cached":
+        return [_cached_detect(models_dir, spec) for spec in builtin_specs()]
+    return [detect_status(models_dir, spec, size=size) for spec in builtin_specs()]
 
 
 def find(spec: ModelSpec, models_dir: Path) -> Path | None:

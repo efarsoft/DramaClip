@@ -478,8 +478,8 @@ export interface ModelInfo {
   readonly status: string;
   readonly path?: string;
   readonly size_label?: string;
-  /** 磁盘实占字节（未安装为 0）；与标称 size_label 不是一回事。 */
-  readonly size_bytes?: number;
+  /** 磁盘实占字节；未安装为 0；null = 已安装但后台还在统计（models.sizes_ready 通知后重拉）。 */
+  readonly size_bytes?: number | null;
   readonly tier?: string;
   readonly speed?: number;
   readonly quality?: number;
@@ -887,7 +887,12 @@ export const METHOD_NAMES = [
   'tools.tts',
 ] as const;
 
-export const NOTIFICATION_NAMES = ['progress.update', 'log.append', 'models.download_progress'] as const;
+export const NOTIFICATION_NAMES = [
+  'progress.update',
+  'log.append',
+  'models.download_progress',
+  'models.sizes_ready',
+] as const;
 
 export const PROTOCOL_VERSION = 1;
 
