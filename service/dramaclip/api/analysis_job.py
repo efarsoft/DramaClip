@@ -274,7 +274,12 @@ def _mine_hotwords(
     bands_by_episode: dict[str, tuple[float, float]] = {}
     lines_by_episode: dict[str, list[tuple[float, float]]] = {}
     if context.settings.get("analysis.ocr_enabled", "1") != "1":
-        return bars_by_episode, bands_by_episode, lines_by_episode, ""
+        return (
+            bars_by_episode,
+            bands_by_episode,
+            lines_by_episode,
+            hotwords_engine.merge_extra("", str(context.settings.get("asr.hotwords_extra") or "")),
+        )
     for index, episode in enumerate(targets):
         if cancel_event.is_set():
             break
@@ -294,7 +299,12 @@ def _mine_hotwords(
         analysis_repo.update_ocr_segments(
             context.conn, episode_id, json.dumps([b.model_dump() for b in bars])
         )
-    hotwords = hotwords_engine.mine([b for bars in bars_by_episode.values() for b in bars])
+    # 人工热词在最前：挖掘表是 OCR 派生的，会漏生僻人名也会把 OCR 错字当热词——
+    # 业主点名（asr.hotwords_extra）是最强信号。
+    hotwords = hotwords_engine.merge_extra(
+        hotwords_engine.mine([b for bars in bars_by_episode.values() for b in bars]),
+        str(context.settings.get("asr.hotwords_extra") or ""),
+    )
     if hotwords:
         context.notifier.log("info", f"全剧热词表：{hotwords}")
     return bars_by_episode, bands_by_episode, lines_by_episode, hotwords

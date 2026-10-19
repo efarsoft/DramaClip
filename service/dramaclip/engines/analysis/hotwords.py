@@ -58,3 +58,19 @@ def mine(bars: list[OcrSegment], *, top_n: int = _HOTWORD_TOP_N) -> str:
         logger.info("热词表 %d 个：%s", len(hotwords), "、".join(hotwords))
     # 空格分隔：全角逗号分隔会作为 prompt 条件诱导模型高频输出逗号（真机实证 135 个）
     return " ".join(hotwords)
+
+
+def merge_extra(mined: str, extra_raw: str) -> str:
+    """人工热词并入挖掘表：extra 在前（人工点名优先于统计挖掘），去重保序。
+
+    ``extra_raw`` 收 顿号/全角逗号/半角逗号/空格 四种分隔；挖掘表是 OCR 派生的，
+    会漏生僻人名也会把 OCR 错字当热词——业主点名是最强信号，永远排最前。
+    """
+    extras: list[str] = []
+    for token in extra_raw.replace("，", " ").replace("、", " ").replace(",", " ").split():
+        token = token.strip()
+        if token and token not in extras:
+            extras.append(token)
+    if not extras:
+        return mined
+    return " ".join(extras + [w for w in mined.split() if w not in extras])

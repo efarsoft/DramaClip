@@ -48,6 +48,30 @@ describe('resolvePythonTarget', () => {
     expect(target.args).toEqual(['-m', 'dramaclip']);
   });
 
+  it('开发模式 service/.venv 存在时优先于仓库根 .venv（依赖真相源）', () => {
+    const repoRoot = mkdtempSync(path.join(tmpdir(), 'dc-sm-'));
+    const rel = process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python';
+    for (const dir of [path.join(repoRoot, '.venv'), path.join(repoRoot, 'service', '.venv')]) {
+      const venvPython = path.join(dir, rel);
+      mkdirSync(path.dirname(venvPython), { recursive: true });
+      closeSync(openSync(venvPython, 'w'));
+    }
+    const target = resolvePythonTarget(makeOptions({ repoRoot }));
+    expect(target.command).toContain(path.join('service', '.venv'));
+    expect(target.args).toEqual(['-m', 'dramaclip']);
+  });
+
+  it('开发模式仅根 .venv 存在时回退使用它', () => {
+    const repoRoot = mkdtempSync(path.join(tmpdir(), 'dc-sm-'));
+    const rel = process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python';
+    const venvPython = path.join(repoRoot, '.venv', rel);
+    mkdirSync(path.dirname(venvPython), { recursive: true });
+    closeSync(openSync(venvPython, 'w'));
+    const target = resolvePythonTarget(makeOptions({ repoRoot }));
+    expect(target.command).not.toContain(path.join('service', '.venv'));
+    expect(target.command).toContain(path.join('.venv', rel));
+  });
+
   it('开发模式无 venv 时回退 PATH 中的 python', () => {
     const target = resolvePythonTarget(makeOptions({ repoRoot: 'D:/no-such-repo' }));
     expect(target.command).toBe('python');

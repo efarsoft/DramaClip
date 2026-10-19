@@ -45,11 +45,16 @@ export function resolvePythonTarget(options: ServiceManagerOptions): PythonTarge
       args: [],
     };
   }
-  const venvPython = path.join(
-    options.repoRoot,
-    '.venv',
-    process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
-  );
+  const pyDir = process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python';
+  // 开发态优先 service/.venv（uv 管理、与 pyproject/uv.lock 同源的依赖真相；
+  // rapidocr 3.x 等新依赖只装在这里）。仓库根 .venv 是历史遗留环境，缺失新包
+  // 会让分析静默降级（真机 2026-10-19：OCR 通道不可用即源于此）——service venv
+  // 不存在才回退它，裸 python 兜底。
+  const serviceVenvPython = path.join(options.repoRoot, 'service', '.venv', pyDir);
+  if (existsSync(serviceVenvPython)) {
+    return { command: serviceVenvPython, args: ['-m', 'dramaclip'] };
+  }
+  const venvPython = path.join(options.repoRoot, '.venv', pyDir);
   return { command: existsSync(venvPython) ? venvPython : 'python', args: ['-m', 'dramaclip'] };
 }
 
