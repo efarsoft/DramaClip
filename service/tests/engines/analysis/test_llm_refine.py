@@ -227,3 +227,35 @@ def test_refined_segments_preserve_word_stamps(
         stream = "".join(w.word for w in refined.words)
         content = "".join(ch for ch in refined.text if ch not in "，。！？、；：")
         assert stream == content, f"字戳流与文本内容字不一致: {stream!r} vs {content!r}"
+
+
+def test_refine_carries_speaker_through_rebuild(monkeypatch: pytest.MonkeyPatch) -> None:
+    """说话人透传（E2-5 追加修复）：refine 重建段不得丢 speaker——自动音色提取靠它。
+
+    两段各带说话人、LLM 按原边界切两句 → 各自保留来源说话人；
+    LLM 跨说话人并句 → 句内同源不成立，speaker 留 None（不编造归属）。
+    """
+    seg_a = AsrSegment(
+        start=0.0,
+        end=0.4,
+        text="你好",
+        speaker="角色A",
+        words=[WordSpan(start=0.0, end=0.2, word="你"), WordSpan(start=0.2, end=0.4, word="好")],
+    )
+    seg_b = AsrSegment(
+        start=1.0,
+        end=1.4,
+        text="再见",
+        speaker="角色B",
+        words=[WordSpan(start=1.0, end=1.2, word="再"), WordSpan(start=1.2, end=1.4, word="见")],
+    )
+    outcome = _run(monkeypatch, ["你好，", "再见"], [seg_a, seg_b])
+    assert outcome.applied is True
+    assert [(s.text, s.speaker) for s in outcome.segments] == [
+        ("你好，", "角色A"),
+        ("再见", "角色B"),
+    ], "句边界不跨说话人：各自保留来源标签"
+
+    # 跨说话人并句：同源不成立 → speaker=None，不编造归属
+    outcome = _run(monkeypatch, ["你好再见"], [seg_a, seg_b])
+    assert outcome.segments[0].speaker is None, "跨说话人并句不编造归属"

@@ -40,21 +40,23 @@ class RefineOutcome:
 
 @dataclass
 class _Char:
-    """字流单元：内容字符 + 时间戳（秒）。"""
+    """字流单元：内容字符 + 时间戳（秒）+ 来源说话人。"""
 
     char: str
     start: float = 0.0
     end: float = 0.0
+    speaker: str | None = None
 
 
 @dataclass
 class _Entry:
-    """修复后的内容字：字、句序、时间戳（None = 无原字对应，取相邻有据字）。"""
+    """修复后的内容字：字、句序、时间戳（None = 无原字对应，取相邻有据字）、来源说话人。"""
 
     char: str
     sent: int
     start: float | None
     end: float | None
+    speaker: str | None = None
 
 
 def _pinyin(char: str) -> str:
@@ -106,7 +108,7 @@ def stream_of(segments: list[AsrSegment]) -> list[_Char] | None:
                 start, end = last
             else:
                 start, end = 0.0, 0.0
-            stream.append(_Char(char=ch, start=start, end=end))
+            stream.append(_Char(char=ch, start=start, end=end, speaker=seg.speaker))
     return stream
 
 
@@ -143,14 +145,16 @@ def _repair(
             for k in range(j2 - j1):
                 char, sent = tagged[j1 + k]
                 rc = raw_content[i1 + k]
-                repaired[sent].append(_Entry(char, sent, rc.start, rc.end))
+                repaired[sent].append(_Entry(char, sent, rc.start, rc.end, rc.speaker))
         elif tag == "delete":
             fallback_sent = (
                 tagged[j1][1] if j1 < len(tagged) else len(sentences) - 1
             )
             for k in range(i1, i2):
                 rc = raw_content[k]
-                repaired[fallback_sent].append(_Entry(rc.char, fallback_sent, rc.start, rc.end))
+                repaired[fallback_sent].append(
+                    _Entry(rc.char, fallback_sent, rc.start, rc.end, rc.speaker)
+                )
             issues += i2 - i1
         elif tag == "insert":
             for k in range(j1, j2):
@@ -166,20 +170,21 @@ def _repair(
                 if t is None:
                     if r is not None:
                         repaired[len(sentences) - 1].append(
-                            _Entry(r.char, len(sentences) - 1, r.start, r.end)
+                            _Entry(r.char, len(sentences) - 1, r.start, r.end, r.speaker)
                         )
                         issues += 1
                     continue
                 if r is None:
                     if t[0] in ocr_text:
-                        repaired[t[1]].append(_Entry(t[0], t[1], None, None))
+                        # 无原字对应的插字（OCR 有据）：来源说话人未知，留 None
+                        repaired[t[1]].append(_Entry(t[0], t[1], None, None, None))
                     else:
                         issues += 1
                     continue
                 if _pinyin_compatible(r.char, t[0]):
-                    repaired[t[1]].append(_Entry(t[0], t[1], r.start, r.end))
+                    repaired[t[1]].append(_Entry(t[0], t[1], r.start, r.end, r.speaker))
                 else:
-                    repaired[t[1]].append(_Entry(r.char, t[1], r.start, r.end))
+                    repaired[t[1]].append(_Entry(r.char, t[1], r.start, r.end, r.speaker))
                     issues += 1
     return repaired, issues
 
@@ -301,6 +306,9 @@ def _to_segments(
             lo = index * w // n
             hi = min(max((index + 1) * w // n, lo + 1), w)
             start_f, end_f = windows[lo][0], windows[hi - 1][1]
+        # 说话人归属：句内全部内容字同源才认领；跨说话人的句子留 None（不编造归属）
+        distinct_speakers = {e.speaker for e in contents if e.speaker is not None}
+        speaker = distinct_speakers.pop() if len(distinct_speakers) == 1 else None
         # 字戳随段重建：有据字取实测时间；LLM 无据插字取相邻有据字线性插值
         # （段边缘钳到段边界）。没有这一步，精炼后段全丢字戳，下游 OCR×ASR
         # 融合永远回落纯 ASR——字幕窗对齐名存实亡（真机 EP1 实测）。
@@ -310,6 +318,7 @@ def _to_segments(
                 start=round(start_f, 3),
                 end=round(end_f, 3),
                 text=text,
+                speaker=speaker,
                 source="llm_refined",
                 words=words,
             )
