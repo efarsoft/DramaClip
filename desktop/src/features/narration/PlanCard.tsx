@@ -52,6 +52,17 @@ export function PlanCard({
   const card = planCardView(plan);
   const [copyOpen, setCopyOpen] = useState(false);
   const sourceEpisode = episodeCovers[plan.plan_data.timeline[0]?.episode_id ?? ''];
+  // 取材集如实展示全集分布：首段集号只是封面参考源，不是取材范围（真机误读）
+  const materialNumbers = plan.episode_ids
+    .map((id) => episodeCovers[id]?.number)
+    .filter((n): n is number => typeof n === 'number')
+    .sort((a, b) => a - b);
+  const materialsLabel =
+    materialNumbers.length === 0
+      ? card.episodes
+      : materialNumbers.length <= 3
+        ? `取材 第${materialNumbers.map(String).join('/')}集`
+        : `取材 ${String(materialNumbers.length)} 集`;
   return (
     <Card
       size="small"
@@ -77,7 +88,7 @@ export function PlanCard({
         {card.gate !== '' && (
           <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.colorWarning }}>{card.gate}</span>
         )}
-        <CardFooter card={card} plan={plan} sourceEpisode={sourceEpisode} />
+        <CardFooter card={card} plan={plan} materialsLabel={materialsLabel} />
       </div>
       <PlanCopyModal plan={plan} open={copyOpen} onClose={() => { setCopyOpen(false); }} />
     </Card>
@@ -132,18 +143,16 @@ function CardHeader({
 function CardFooter({
   card,
   plan,
-  sourceEpisode,
+  materialsLabel,
 }: {
   card: PlanCardView;
   plan: NarrationPlan;
-  sourceEpisode: SourceEpisode | undefined;
+  materialsLabel: string;
 }): ReactElement {
   return (
     <span style={{ display: 'flex', gap: tokens.spaceMd, marginTop: 'auto', fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
       <span>{modeLabel(card.mode)}</span>
-      <span>
-        {sourceEpisode ? `取材 第${String(sourceEpisode.number)}集` : card.episodes}
-      </span>
+      <span>{materialsLabel}</span>
       <span>预计 {formatDuration(estimatedDurationS(plan))}</span>
       <span>{card.overlap}</span>
       {card.dropped !== '' && (
