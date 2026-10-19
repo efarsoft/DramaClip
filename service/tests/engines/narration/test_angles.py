@@ -287,6 +287,49 @@ def test_prompt_block_skips_unknown_arc(llm: Any) -> None:
     assert "叙事母题" not in block and "角度" in block
 
 
+def _with_analysis(episode: dict[str, Any]) -> dict[str, Any]:
+    return dict(
+        episode,
+        conflict_scores=[
+            {"start": 60.0, "end": 64.0, "score": 41, "reason": "口角升级"},
+            {"start": 100.0, "end": 108.0, "score": 96, "reason": "当众动手"},
+        ],
+        highlights=[
+            {"start": 117.0, "end": 121.0, "score": 76.5, "reason": "生死一线"},
+        ],
+    )
+
+
+def test_profiles_rank_by_score_and_carry_reasons() -> None:
+    """档案按评分降序、带时间窗与理由：选题模型靠它定位关键拍在哪些集。"""
+    block = angles.episode_profiles_block([_with_analysis(dict(_EPISODES[0]))])
+    assert "第 1 集" in block and "台词 2 段" in block
+    conflict_line = next(line for line in block.splitlines() if "冲突高峰" in line)
+    assert conflict_line.index("当众动手") < conflict_line.index("口角升级"), (
+        "冲突高峰必须按评分降序（96 分在前），不是按出场顺序"
+    )
+    assert "100-108s" in block and "生死一线" in block
+
+
+def test_profiles_absent_when_no_analysis() -> None:
+    """没有分析数据的集不占行；全部缺席时整块为空串。"""
+    assert angles.episode_profiles_block(list(_EPISODES)) == ""
+    assert angles.episode_profiles_block([]) == ""
+
+
+def test_prompt_carries_episode_profiles(llm: Any) -> None:
+    """有分析数据时档案进选题 prompt，且与转写同场；无数据时整块缺席。"""
+    llm.queue = [_payload()]
+    _select(episode_inputs=[_with_analysis(dict(ep)) for ep in _EPISODES])
+    assert "各集档案" in FakeLlm.calls[0]
+    assert "当众动手" in FakeLlm.calls[0]
+    assert "台词转写" in FakeLlm.calls[0], "档案是转写的补充，不能顶掉转写"
+
+    llm.queue = [_payload()]
+    _select()
+    assert "各集档案" not in FakeLlm.calls[1], "旧库无分析数据时不放空块占位"
+
+
 def test_non_object_item_raises(llm: Any) -> None:
     llm.queue = [{"angles": ["一条字符串", _angle(2, 2), _angle(3, 3)]}, {"angles": []}]
     with pytest.raises(ValueError, match="非对象项"):

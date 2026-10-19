@@ -137,6 +137,55 @@ def _sanitize(
     return briefs
 
 
+def episode_profiles_block(episode_inputs: list[dict[str, Any]]) -> str:
+    """每集档案：冲突高峰与高光（带时间窗、评分、理由），供绑集与定母题。
+
+    档案说的是「这部剧的关键拍都落在哪些集」——转写摘录给的是台词的滋味，
+    档案给的是密度地图，两者互补。没有分析数据的集（旧库/桩环境）不占行；
+    全部缺席时返回空串，prompt 里整块不出现。
+    """
+    blocks: list[str] = []
+    for episode in episode_inputs:
+        conflicts = _top_windows(episode.get("conflict_scores"), 5)
+        highlights = _top_windows(episode.get("highlights"), 5)
+        if not conflicts and not highlights:
+            continue
+        number = episode.get("number")
+        duration = float(episode.get("duration") or 0.0)
+        segments = episode.get("segments")
+        line_count = len(segments) if isinstance(segments, list) else 0
+        parts = [f"第 {number} 集（时长 {duration:.0f}s，台词 {line_count} 段）"]
+        if conflicts:
+            parts.append(
+                "  冲突高峰："
+                + "；".join(
+                    f"{window['start']:.0f}-{window['end']:.0f}s"
+                    f"（{window['score']:.0f} 分）{window['reason']}"
+                    for window in conflicts
+                )
+            )
+        if highlights:
+            parts.append(
+                "  高光片段："
+                + "；".join(
+                    f"{window['start']:.0f}-{window['end']:.0f}s"
+                    f"（{window['score']:.0f} 分）{window['reason']}"
+                    for window in highlights
+                )
+            )
+        blocks.append("\n".join(parts))
+    return "\n".join(blocks)
+
+
+def _top_windows(raw: Any, limit: int) -> list[dict[str, Any]]:
+    """按评分取前 limit 个窗口；形状不对/缺失回空表（档案缺席不报错）。"""
+    items = raw if isinstance(raw, list) else []
+    windows = [item for item in items if isinstance(item, dict) and "start" in item]
+    return sorted(windows, key=lambda w: float(w.get("score") or 0.0), reverse=True)[
+        :limit
+    ]
+
+
 def select_angles(
     mode: str,
     *,
@@ -157,6 +206,13 @@ def select_angles(
     if not transcript:
         raise ValueError("选题无米下锅：所有集都没有台词转写")
     known_numbers = {int(episode["number"]) for episode in episode_inputs}
+    profiles = episode_profiles_block(episode_inputs)
+    profiles_block = (
+        f"\n各集档案（冲突高峰与高光的时间窗——母题关键拍落在哪些集，看这里定，"
+        f"别凭台词猜）：\n{profiles}\n"
+        if profiles
+        else ""
+    )
     excluded_block = (
         f"\n已存在、不得重复的角度：{'、'.join(excluded)}" if excluded else ""
     )
@@ -166,6 +222,7 @@ def select_angles(
         f"需要 {k} 条卖点互异的取材角度。\n"
         "每条角度的 episode_numbers 给出这条片要用到的全部集号（至少一个，可多个）："
         "一条方案可以从多集取画面拼在同一条时间轴上。\n"
+        f"{profiles_block}"
         f"{excluded_block}\n"
         f"台词转写：\n{transcript}"
     )

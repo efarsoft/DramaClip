@@ -604,9 +604,39 @@ def _collect_episode_inputs(
                 "scene_cuts": _scene_cuts_of(record.get("scene_data")),
                 # 画面轨（P2c·文画咬合）：逐帧画面实据；未跑视觉轨的集空表（分档语义）
                 "visual_track": _visual_frames_of(record.get("visual_track")),
+                # 冲突高峰与高光（带评分与理由）：选题模型据此绑集与定母题——
+                # 关键拍在哪些集，看档案不看猜。旧库缺列时空表，档案块整体缺席。
+                "conflict_scores": _scored_windows_of(record.get("conflict_scores")),
+                "highlights": _scored_windows_of(record.get("highlights")),
             }
         )
     return inputs
+
+
+def _scored_windows_of(raw: Any) -> list[dict[str, Any]]:
+    """[{"start","end","score","reason"}] 形状窗口的宽容解析；坏数据逐条跳过。"""
+    try:
+        items = json.loads(str(raw)) if raw else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(items, list):
+        return []
+    windows: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            windows.append(
+                {
+                    "start": float(item["start"]),
+                    "end": float(item["end"]),
+                    "score": float(item.get("score") or 0.0),
+                    "reason": str(item.get("reason") or "").strip(),
+                }
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return windows
 
 
 def _visual_frames_of(raw: Any) -> list[dict[str, Any]]:
