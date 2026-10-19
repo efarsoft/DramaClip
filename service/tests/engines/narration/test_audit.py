@@ -5,7 +5,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from dramaclip.engines.narration import audit as A
+from dramaclip.engines.narration.audit import review_script  # noqa: F401 - 追加用例经 review_script 直呼
 
 _TRANSCRIPT = [
     {
@@ -141,3 +144,46 @@ def test_real_fanfiction_sample_surfaces_soft_risks() -> None:
     assert rep.passed
     assert rep.soft_flags  # 至少要有风险提示，禁止吞掉
 
+
+
+def _seg_text(text: str) -> dict[str, Any]:
+    return {"episode": 1, "start": 0.0, "end": 2.0, "text": text}
+
+
+def test_narrative_texture_flags_suspense_and_imagery() -> None:
+    """悬问连发 + 意象超配额 → 软标记（needs_human），不拦片。"""
+    script = {
+        "hook": "他背着一口锅",
+        "segments": [
+            _seg_text("三千两黄金说没就没？"),
+            _seg_text("两千斤铁锅挡下名剑？"),
+            _seg_text("三千两借据烧成灰？"),
+            _seg_text("两千斤铁锅裂了纹？"),
+            _seg_text("三千两银票成了废纸？"),
+        ],
+        "cta": "点击左下角看全集",
+    }
+    report = A.review_script(script, [])
+    by_id = {f.rule_id: f for f in report.findings}
+    assert by_id["NARR_SUSPENSE_QUOTA"].passed is False
+    assert by_id["NARR_SUSPENSE_QUOTA"].needs_human is True
+    assert by_id["NARR_IMAGE_QUOTA"].passed is False, "三千两出现三段，超配额"
+
+
+def test_narrative_texture_healthy_passes() -> None:
+    """配额内 + 有情绪落点 → 不标记。"""
+    script = {
+        "hook": "他背着一口锅下了山",
+        "segments": [
+            _seg_text("他攥紧了指节，把炖软的肉端上桌"),
+            _seg_text("师傅们连干了三碗，谁也没说话"),
+            _seg_text("山下的集市比想象里吵得多"),
+            _seg_text("他愣在原地，钱袋子还攥在手里"),
+            _seg_text("一条街之外，有人锁了大门"),
+        ],
+        "cta": "点击左下角看全集",
+    }
+    report = A.review_script(script, [])
+    for f in report.findings:
+        if f.rule_id in ("NARR_SUSPENSE_QUOTA", "NARR_IMAGE_QUOTA", "NARR_EMOTION_BEAT"):
+            assert f.passed is True, f.rule_id

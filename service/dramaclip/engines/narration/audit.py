@@ -110,6 +110,73 @@ def _has_chinese_num(text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+_EMOTION_BEAT_RE = re.compile(
+    r"发烫|凉透|发凉|攥紧|指节|眼眶|鼻酸|哽咽|发抖|深吸|咬牙|咬着|僵在|红着眼|心[一-龥]"
+)
+_IMAGE_PHRASE_RE = re.compile(
+    r"[一二两三四五六七八九十百千万零]{1,4}[斤吨年个月天夜尺丈里步块两]{1}"
+)
+
+
+def _narrative_texture_findings(segs: list[dict[str, Any]]) -> list[Finding]:
+    """叙事质地组（全为软+需人工）：句式/意象/情绪落点的密度与去重。
+
+    判据锚定 FUND_FULL_ONLY「叙事质地」段原句；纯启发式，宁可漏报不误伤——
+    soft+needs_human 的语义是「人耳复核」，不是不合格。
+    """
+    texts = [
+        str(s.get("text") or "")
+        for s in segs
+        if isinstance(s, dict) and str(s.get("text") or "").strip()
+    ]
+    findings: list[Finding] = []
+
+    # 只剥收尾引号/括号，问号本体保留在串尾参与判定
+    suspensive = [i for i, text in enumerate(texts) if text.rstrip("”’」』\"')").endswith("？")]
+    findings.append(Finding(
+        "NARR_SUSPENSE_QUOTA", "fund_full", "soft",
+        len(suspensive) <= 2,
+        "问号收尾配额内" if len(suspensive) <= 2
+        else f"以问号收尾的段 {len(suspensive)} 个（下标 {suspensive}）——悬问连发节拍单一",
+        location="segments" if suspensive else "",
+        prompt_quote="全稿以问号收尾的段至多两个，相邻段禁止同款收尾；",
+        needs_human=True,
+    ))
+
+    phrase_locations: dict[str, list[int]] = {}
+    for i, text in enumerate(texts):
+        for match in _IMAGE_PHRASE_RE.finditer(text):
+            phrase_locations.setdefault(match.group(0), []).append(i)
+    over = {phrase: locs for phrase, locs in phrase_locations.items() if len(locs) > 2}
+    findings.append(Finding(
+        "NARR_IMAGE_QUOTA", "fund_full", "soft",
+        not over,
+        "核心意象点名在配额内" if not over
+        else f"同一「数字+量词」意象点名超两次：{over}——再提用代称或只讲新后果",
+        location=";".join(sorted(over)) if over else "",
+        prompt_quote="核心意象（数字+物件，如两千斤玄铁锅）全稿至多完整点名两次，再提只讲它带来的新后果。",
+        needs_human=True,
+    ))
+
+    window = 6
+    beatless = [
+        start
+        for start in range(0, max(len(texts) - window + 1, 0))
+        if not any(_EMOTION_BEAT_RE.search(texts[start + k]) for k in range(window))
+    ]
+    findings.append(Finding(
+        "NARR_EMOTION_BEAT", "fund_full", "soft",
+        not beatless,
+        "情绪落点分布健康" if not beatless
+        else f"连续 {window} 段无体感/心理落点的窗口：{beatless[:3]}"
+        "——事件复述连排，情绪共鸣偏薄",
+        location=";".join(f"segments[{i}]" for i in beatless[:3]) if beatless else "",
+        prompt_quote="每三到四段落一个人物的体感或心理瞬间（「脸上发烫」「攥紧了指节」式——用身体写内心，禁直呼「愤怒/悲伤」这类情绪名词）",
+        needs_human=True,
+    ))
+    return findings
+
+
 def _script_shape_findings(segs: list[dict[str, Any]]) -> list[Finding]:
     """结构组一：JSON 只输出（尾句）+ 每片段带 episode（首条）。"""
     findings: list[Finding] = []
@@ -389,6 +456,7 @@ def review_script(
     if transcript:
         findings.extend(_fabrication_findings(segs, transcript))
     findings.extend(_invented_anchor_findings(segs))
+    findings.extend(_narrative_texture_findings(segs))
     findings.append(_cross_episode_finding(segs))
 
     return ReviewReport(target="script", findings=findings,
