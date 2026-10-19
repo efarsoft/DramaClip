@@ -16,9 +16,9 @@ const SENTENCE_ENDS = /[。！？!?…]/;
  * 这里只抄名字，加卡改卡时同步这一张表（名字错了只是徽标难看，不伤逻辑）。
  */
 const ARC_NAMES: Readonly<Record<string, string>> = {
-  glory_first: '大人物历史',
-  underdog: '小人物逆袭',
-  folk_tale: '民间故事',
+  glory_first: '先扬后揭',
+  underdog: '蓄力爆发',
+  folk_tale: '顺叙反转',
   cold_open_loop: '爆点回环',
   revenge_ledger: '复仇清算',
   masked_identity: '马甲揭晓',

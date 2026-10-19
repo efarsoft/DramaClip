@@ -14,7 +14,7 @@ def test_nine_cards_with_unique_ids_and_names() -> None:
 
 
 def test_owner_defined_three_arcs_present() -> None:
-    """业主定义的三张卡按原意保留：大人物历史/小人物逆袭/民间故事。"""
+    """业主定义的三张卡在库：id 不变，卡名随九卡统一为手法式四字。"""
     assert story_arc.card_of(story_arc.GLORY_FIRST) is not None
     assert story_arc.card_of(story_arc.UNDERDOG) is not None
     assert story_arc.card_of(story_arc.FOLK_TALE) is not None

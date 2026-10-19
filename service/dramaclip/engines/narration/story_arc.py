@@ -15,9 +15,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-GLORY_FIRST = "glory_first"  # 大人物历史：先扬后揭
-UNDERDOG = "underdog"  # 小人物逆袭：压抑→爆发
-FOLK_TALE = "folk_tale"  # 民间故事：顺叙+反转
+GLORY_FIRST = "glory_first"  # 先扬后揭（业主原称「大人物历史」）
+UNDERDOG = "underdog"  # 蓄力爆发（业主原称「小人物逆袭」，龙王套路）
+FOLK_TALE = "folk_tale"  # 顺叙反转（业主原称「民间故事」）
 COLD_OPEN_LOOP = "cold_open_loop"  # 爆点回环：高潮前置→顺叙→接回
 REVENGE_LEDGER = "revenge_ledger"  # 复仇清算：欠账清单逐笔还
 MASKED_IDENTITY = "masked_identity"  # 马甲揭晓：知情差打脸
@@ -39,7 +39,7 @@ class ArcCard:
 _ARCS: dict[str, ArcCard] = {
     GLORY_FIRST: ArcCard(
         arc_id=GLORY_FIRST,
-        name="大人物历史",
+        name="先扬后揭",
         essence="先让他站得多高，再揭他摔得多惨——辉煌与辛酸的反差就是看点（人物中心）",
         structure=(
             "开场：巅峰。把最风光的一幕放开头（头衔、战绩、旁人敬畏，都要有画面实据），"
@@ -51,7 +51,7 @@ _ARCS: dict[str, ArcCard] = {
     ),
     UNDERDOG: ArcCard(
         arc_id=UNDERDOG,
-        name="小人物逆袭",
+        name="蓄力爆发",
         essence="压抑攒得越足，爆发越响——每一次羞辱都在为最后一拳蓄力",
         structure=(
             "开场：被踩。当众最惨的那一幕放开头（谁踩的、当着谁、说了什么，都要具体）；"
@@ -61,7 +61,7 @@ _ARCS: dict[str, ArcCard] = {
     ),
     FOLK_TALE: ArcCard(
         arc_id=FOLK_TALE,
-        name="民间故事",
+        name="顺叙反转",
         essence="小事讲出大波澜——靠接连反转勾人，不靠身份碾压（事件中心）",
         structure=(
             "开场：小事。一件小事或一个反常现象开头，越小越好，让观众以为是日常；"

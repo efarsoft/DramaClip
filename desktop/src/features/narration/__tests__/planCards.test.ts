@@ -63,9 +63,9 @@ describe('取材集区间', () => {
 describe('叙事母题徽标', () => {
   it('九卡 id 逐一映射人读名', () => {
     const names: Record<string, string> = {
-      glory_first: '大人物历史',
-      underdog: '小人物逆袭',
-      folk_tale: '民间故事',
+      glory_first: '先扬后揭',
+      underdog: '蓄力爆发',
+      folk_tale: '顺叙反转',
       cold_open_loop: '爆点回环',
       revenge_ledger: '复仇清算',
       masked_identity: '马甲揭晓',
