@@ -131,6 +131,7 @@ function CardHeader({
           <Tag color="gold" style={{ marginRight: 0 }}>
             {card.angle}
           </Tag>
+          {card.arc !== '' && <Tag color="purple" style={{ marginRight: 0 }}>{card.arc}</Tag>}
           <strong style={{ color: tokens.textPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading }}>{modeLabel(card.mode)}</strong>
         </>
       )}

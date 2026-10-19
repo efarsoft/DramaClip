@@ -60,6 +60,40 @@ describe('取材集区间', () => {
   });
 });
 
+describe('叙事母题徽标', () => {
+  it('九卡 id 逐一映射人读名', () => {
+    const names: Record<string, string> = {
+      glory_first: '大人物历史',
+      underdog: '小人物逆袭',
+      folk_tale: '民间故事',
+      cold_open_loop: '爆点回环',
+      revenge_ledger: '复仇清算',
+      masked_identity: '马甲揭晓',
+      ticking_clock: '逼近死线',
+      debt_of_love: '情感亏欠',
+      onion_truth: '层层揭皮',
+    };
+    for (const [arc, name] of Object.entries(names)) {
+      const withArc = plan({
+        plan_data: { mode: 'cross_narration', timeline: [], narration_texts: [], arc },
+      });
+      expect(planCardView(withArc).arc).toBe(name);
+    }
+  });
+
+  it('没带母题（缺字段/空串/未知 id）不渲染徽标', () => {
+    expect(planCardView(plan({})).arc).toBe('');
+    const emptyArc = plan({
+      plan_data: { mode: 'cross_narration', timeline: [], narration_texts: [], arc: '' },
+    });
+    expect(planCardView(emptyArc).arc).toBe('');
+    const unknownArc = plan({
+      plan_data: { mode: 'cross_narration', timeline: [], narration_texts: [], arc: 'nope' },
+    });
+    expect(planCardView(unknownArc).arc).toBe('');
+  });
+});
+
 describe('重叠率', () => {
   it('null = 组内首条，没有兄弟可比，说清楚而不是显示空白', () => {
     expect(planCardView(plan({ overlap_max: null })).overlap).toBe('组内首条');

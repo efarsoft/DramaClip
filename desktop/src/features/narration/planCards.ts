@@ -11,6 +11,27 @@ import type { NarrationPlan } from '@dramaclip/protocol';
 export const HOOK_MAX = 40;
 const SENTENCE_ENDS = /[。！？!?…]/;
 
+/**
+ * 叙事母题 id → 人读名（徽标用）。真源在 service 的 story_arc.py 九张卡；
+ * 这里只抄名字，加卡改卡时同步这一张表（名字错了只是徽标难看，不伤逻辑）。
+ */
+const ARC_NAMES: Readonly<Record<string, string>> = {
+  glory_first: '大人物历史',
+  underdog: '小人物逆袭',
+  folk_tale: '民间故事',
+  cold_open_loop: '爆点回环',
+  revenge_ledger: '复仇清算',
+  masked_identity: '马甲揭晓',
+  ticking_clock: '逼近死线',
+  debt_of_love: '情感亏欠',
+  onion_truth: '层层揭皮',
+};
+
+/** 母题徽标文案；角度没带母题（旧库行/桩环境）为空串，界面不渲染徽标。 */
+export function arcName(plan: NarrationPlan): string {
+  return ARC_NAMES[plan.plan_data.arc ?? ''] ?? '';
+}
+
 export interface PlanCardView {
   readonly planId: string;
   readonly mode: string;
@@ -18,6 +39,8 @@ export interface PlanCardView {
   readonly angle: string;
   /** 模型自选这条角度的理由。 */
   readonly reason: string;
+  /** 叙事母题人读名（徽标）；角度没带母题为空串，界面不渲染。 */
+  readonly arc: string;
   /** 「取材 N 集」。 */
   readonly episodes: string;
   /** 钩子首句；原声模式为空串，界面据此不渲染这一行。 */
@@ -38,6 +61,7 @@ export function planCardView(plan: NarrationPlan): PlanCardView {
     mode: plan.narration_mode,
     angle: plan.angle ?? '',
     reason: plan.angle_reason ?? '',
+    arc: arcName(plan),
     episodes: `取材 ${String(plan.episode_ids.length)} 集`,
     hook: hookLine(plan),
     overlap: overlapText(plan.overlap_max),

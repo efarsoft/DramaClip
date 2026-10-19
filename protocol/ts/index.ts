@@ -314,6 +314,8 @@ export interface PlanData {
   readonly narration_texts: ReadonlyArray<{ id: string; text: string; voice?: string; audio_path?: string; duration?: number }>;
   /** 剧本清洗层丢掉的段数（未知集号/越界/重叠/空文案）；仅编剧链会写，其余模式为 0。 */
   readonly dropped_segments?: number;
+  /** 叙事母题 id（story_arc 九卡之一）；空串/缺省 = 角度没带母题（旧库行），卡面跳过。 */
+  readonly arc?: string;
 }
 
 export interface NarrationPlan {
