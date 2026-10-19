@@ -12,7 +12,7 @@ export const HOOK_MAX = 40;
 const SENTENCE_ENDS = /[。！？!?…]/;
 
 /**
- * 叙事母题 id → 人读名（徽标用）。真源在 service 的 story_arc.py 九张卡；
+ * 叙事母题 id → 人读名（徽标用）。真源在 service 的 story_arc.py 十二张卡；
  * 这里只抄名字，加卡改卡时同步这一张表（名字错了只是徽标难看，不伤逻辑）。
  */
 const ARC_NAMES: Readonly<Record<string, string>> = {
@@ -25,6 +25,9 @@ const ARC_NAMES: Readonly<Record<string, string>> = {
   ticking_clock: '逼近死线',
   debt_of_love: '情感亏欠',
   onion_truth: '层层揭皮',
+  rebirth_foreknowledge: '重生先知',
+  fake_turns_real: '假戏成真',
+  regret_hell: '追悔莫及',
 };
 
 /** 母题徽标文案；角度没带母题（旧库行/桩环境）为空串，界面不渲染徽标。 */

@@ -1,20 +1,20 @@
-"""story_arc：九张叙事母题卡——id 唯一、菜单可渲染、结构卡三段骨架齐全。"""
+"""story_arc：十二张叙事母题卡——id 唯一、菜单可渲染、结构卡三段骨架齐全。"""
 
 from __future__ import annotations
 
 from dramaclip.engines.narration import story_arc
 
 
-def test_nine_cards_with_unique_ids_and_names() -> None:
+def test_twelve_cards_with_unique_ids_and_names() -> None:
     cards = [story_arc.card_of(arc_id) for arc_id in story_arc.ids()]
-    assert len(cards) == 9
+    assert len(cards) == 12
     assert all(card is not None for card in cards)
     names = [card.name for card in cards if card is not None]
-    assert len(set(names)) == 9, "母题人读名重复：方案卡徽标会分不清"
+    assert len(set(names)) == 12, "母题人读名重复：方案卡徽标会分不清"
 
 
 def test_owner_defined_three_arcs_present() -> None:
-    """业主定义的三张卡在库：id 不变，卡名随九卡统一为手法式四字。"""
+    """业主定义的三张卡在库：id 不变，卡名随全库统一为手法式四字。"""
     assert story_arc.card_of(story_arc.GLORY_FIRST) is not None
     assert story_arc.card_of(story_arc.UNDERDOG) is not None
     assert story_arc.card_of(story_arc.FOLK_TALE) is not None

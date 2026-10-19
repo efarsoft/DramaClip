@@ -256,7 +256,7 @@ def test_empty_arc_rejects(llm: Any) -> None:
 
 
 def test_prompt_carries_arc_menu(llm: Any) -> None:
-    """九张母题卡进选题 system prompt：模型才知道 arc 能填什么、各是什么骨架。"""
+    """十二张母题卡进选题 system prompt：模型才知道 arc 能填什么、各是什么骨架。"""
     llm.queue = [_payload()]
     _select()
     system = FakeLlm.systems[0]

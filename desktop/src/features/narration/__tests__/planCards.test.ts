@@ -61,7 +61,7 @@ describe('取材集区间', () => {
 });
 
 describe('叙事母题徽标', () => {
-  it('九卡 id 逐一映射人读名', () => {
+  it('十二卡 id 逐一映射人读名', () => {
     const names: Record<string, string> = {
       glory_first: '先扬后揭',
       underdog: '蓄力爆发',
@@ -72,6 +72,9 @@ describe('叙事母题徽标', () => {
       ticking_clock: '逼近死线',
       debt_of_love: '情感亏欠',
       onion_truth: '层层揭皮',
+      rebirth_foreknowledge: '重生先知',
+      fake_turns_real: '假戏成真',
+      regret_hell: '追悔莫及',
     };
     for (const [arc, name] of Object.entries(names)) {
       const withArc = plan({

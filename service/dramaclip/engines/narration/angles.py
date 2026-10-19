@@ -107,7 +107,7 @@ def _sanitize(
             raise ValueError("角度名、理由、钩子首句都不得为空")
         if arc not in story_arc.ids():
             raise ValueError(
-                f"角度「{name}」的母题不认识：{arc!r}（必须在九张母题卡里选）"
+                f"角度「{name}」的母题不认识：{arc!r}（必须从母题菜单里选）"
             )
         if len(name) > _MAX_NAME_CHARS:
             raise ValueError(f"角度名超出长度上限（{_MAX_NAME_CHARS} 字）：{name}")
