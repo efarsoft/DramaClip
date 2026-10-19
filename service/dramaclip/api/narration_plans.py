@@ -375,9 +375,64 @@ def _plan_one(
             angle_block=variant.angle_block,
             trace_dir=trace_dir,
         )
-        _retell_gate(plan, settings, trace_dir, context.notifier)
+        plan = _rewrite_copy_until_retellable(
+            context,
+            plan,
+            material,
+            settings,
+            mode_label=narration_pipeline.MODE_LABELS.get(mode, mode),
+            angle_block=variant.angle_block,
+            trace_dir=trace_dir,
+        )
     used_ids = sorted({segment.episode_id for segment in plan.timeline})
     return plan, used_ids
+
+
+def _rewrite_copy_until_retellable(
+    context: AppContext,
+    plan: PlanData,
+    material: casting.MaterialByEpisode,
+    settings: dict[str, str],
+    mode_label: str,
+    angle_block: str,
+    trace_dir: Path | None,
+) -> PlanData:
+    """复述驱动的重写循环：初稿不达标 → 带卡点重写一次 → 择优保留（批 ① 下半）。
+
+    择优判据：重写稿复述达标才换血，否则保原稿（重写是有成本的，不靠新鲜感换血）。
+    重写走同一 copywriter 链，feedback 只喂复述卡点与缺失项——让模型知道哪里
+    听不懂，而不是让它自由发挥。
+    """
+    first_report = _retell_gate(plan, settings, trace_dir, context.notifier)
+    if first_report is None or first_report.passed:
+        return plan
+    if settings.get("narration.rewrite_loop", "1") != "1":
+        return plan
+
+    notes = [f"复述卡点：{c.get('note', '')}" for c in first_report.confusions[:4]]
+    notes.extend(first_report.reasons)
+    feedback = "；".join(notes)
+    context.notifier.log("info", f"复述不达标，带卡点重写一轮（{feedback[:80]}）")
+    try:
+        rewritten = copywriter.write_plan_copy(
+            plan,
+            material,
+            settings,
+            mode_label=mode_label,
+            angle_block=angle_block,
+            trace_dir=trace_dir,
+            rewrite_notes=feedback,
+        )
+    except Exception as exc:  # noqa: BLE001 - 重写失败保留原稿，不阻塞出片
+        context.notifier.log("warning", f"重写失败保留原稿：{str(exc)[:120]}")
+        return plan
+
+    second_report = _retell_gate(rewritten, settings, trace_dir, context.notifier)
+    if second_report is not None and second_report.passed:
+        context.notifier.log("info", "重写稿复述达标，采用重写稿")
+        return rewritten
+    context.notifier.log("warning", "重写稿复述仍未达标，保留原稿")
+    return plan
 
 
 def _retell_gate(
@@ -385,25 +440,26 @@ def _retell_gate(
     settings: dict[str, str],
     trace_dir: Path | None,
     notifier: Any,
-) -> None:
+) -> Any | None:
     """复述测试（软质检）：无上下文观众闭卷复述，结论进 trace 供审计；失败不阻塞出片。
 
-    重写循环（优先删和拆）待观测数据积累后另批接入。
+    返回 RetellReport 供重写循环取卡点；关闭/跳过/失败返回 None——retell 走
+    真实 LLM 客户端，桩覆盖不到就别让它等（如测试桩环境）。
     """
     from dramaclip.engines.narration.retell import retell_check
     from dramaclip.engines.semantic.llm_client import client_for
 
     if settings.get("narration.retell_check", "1") != "1":
-        return  # 关闭（如测试桩环境）：retell 走真实 LLM 客户端，桩覆盖不到就别让它等
+        return None
     text = "\n".join(item.text for item in plan.narration_texts)
     if not text.strip():
-        return
+        return None
     try:
         client = client_for(settings)
         report = retell_check(text, client)
     except Exception as exc:  # noqa: BLE001 - 软质检任何失败都降级跳过
         notifier.log("warning", f"复述测试跳过：{str(exc)[:120]}")
-        return
+        return None
     if trace_dir is not None:
         trace_dir.mkdir(parents=True, exist_ok=True)
         (trace_dir / "retell.json").write_text(
@@ -414,6 +470,7 @@ def _retell_gate(
         f"复述测试：{report.summary_line()}"
         + (f"（首条卡点：{report.confusions[0]['note']}）" if report.confusions else ""),
     )
+    return report
 
 
 def _casting_for(

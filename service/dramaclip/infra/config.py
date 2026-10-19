@@ -76,6 +76,8 @@ DEFAULTS: dict[str, str] = {
     "narration.variants_per_mode": "1",
     # 复述测试（软质检）：无上下文观众闭卷复述度量可懂度，结论进 trace；"0"=关闭
     "narration.retell_check": "1",
+    # 复述驱动重写：初稿不达标带卡点重写一轮，重写稿达标才换血；"0"=关闭（只测不重写）
+    "narration.rewrite_loop": "1",
     # 剧本硬规则内联审查：生成→audit→带 prompt 原句重掷，soft 只进 trace；"0"=关闭
     "narration.script_audit": "1",
     "download.hf_mirror": "https://hf-mirror.com",

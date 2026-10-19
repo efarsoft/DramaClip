@@ -144,6 +144,7 @@ def build_copy_request(
     *,
     mode_label: str,
     angle_block: str,
+    rewrite_notes: str = "",
 ) -> tuple[str, str]:
     """纯函数：组装逐槽文案链路的 (system, user) 提示词，不调用 LLM。
 
@@ -163,6 +164,13 @@ def build_copy_request(
         + "\n文案槽位：\n"
         + _slot_block(plan.narration_texts, plan.timeline, material)
         + (f"\n\n解说风格要求：{directives}" if directives else "")
+        + (
+            f"\n\n【文案重写反馈】上一稿闭卷复述不达标：{rewrite_notes}。"
+            "这一稿针对卡点重写——优先删和拆：把并在一起的动作拆成短句、"
+            "删掉不影响理解的细节；不要加新信息，不要换故事。"
+            if rewrite_notes
+            else ""
+        )
     )
     system = system_prompt(settings, mode=plan.mode)
     return system, user_prompt
@@ -176,6 +184,7 @@ def write_plan_copy(
     mode_label: str,
     angle_block: str,
     trace_dir: Path | None = None,
+    rewrite_notes: str = "",
 ) -> PlanData:
     """填满 plan 的全部旁白槽位并置 planner=llm_script；任何不合格都抛异常。
     """
@@ -191,7 +200,12 @@ def write_plan_copy(
     # 会逼出 6 秒残件（首版实测）——给它 4 倍空间，密度由 brief 的效果要求保证。
     line_cap = _ULTRA_SHORT_LINE_CHARS if plan.mode == "ultra_short_hook" else _MAX_LINE_CHARS
     system, user_prompt = build_copy_request(
-        plan, material, settings, mode_label=mode_label, angle_block=angle_block
+        plan,
+        material,
+        settings,
+        mode_label=mode_label,
+        angle_block=angle_block,
+        rewrite_notes=rewrite_notes,
     )
     attempts: list[dict[str, Any]] = []
     filled: dict[str, str] | None = None
