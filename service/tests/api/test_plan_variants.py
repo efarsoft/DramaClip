@@ -26,6 +26,7 @@ from dramaclip.engines.narration import (
     overlap,
     pipeline,
     script_driver,
+    story_arc,
     styles,
 )
 from dramaclip.engines.narration import synthesis as synthesis
@@ -42,6 +43,9 @@ from dramaclip.transport.notify import Notifier
 from dramaclip.transport.rpc import Router, RpcRequest
 from tests.conftest import register_job_executor
 from tests.llm_stub import patch_client_for
+
+# 角度桩轮换的合法母题：sanitize 对每条角度都校验 arc，桩必须像真模型一样按卡选
+_ARC_IDS = story_arc.ids()
 
 
 class Harness:
@@ -547,6 +551,8 @@ def _stub_language_and_tts(
                             "name": name,
                             "reason": f"第 {2 * idx - 1}、{2 * idx} 集这条线最狠",
                             "hook": f"第 {2 * idx - 1} 集的开场钩子",
+                            # 轮换合法母题：sanitize 逐条校验，桩必须像真模型一样按卡选
+                            "arc": _ARC_IDS[(idx - 1) % len(_ARC_IDS)],
                             "episode_numbers": [2 * idx - 1, 2 * idx],
                         }
                         for idx, name in enumerate(names, start=1)

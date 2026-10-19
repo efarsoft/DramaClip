@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from dramaclip.engines.narration import angles
+from dramaclip.engines.narration import angles, story_arc
 from dramaclip.infra.storage.repos import plans as plans_repo
 from tests.api.test_plan_variants import _LLM_SETTINGS, Harness, _seed_project_with_analysis
 from tests.llm_stub import patch_client_for
@@ -31,6 +31,7 @@ def _stub_llm(monkeypatch: pytest.MonkeyPatch) -> None:
                             "name": "单集角度",
                             "reason": "全剧仅此一集",
                             "hook": "开场钩子",
+                            "arc": story_arc.FOLK_TALE,
                             "episode_numbers": [1],
                         }
                     ]

@@ -11,7 +11,7 @@ from pydantic import BaseModel, ValidationError
 
 from dramaclip.engines import llm_prompts
 from dramaclip.engines.llm_trace import dump_trace, trace_path
-from dramaclip.engines.narration import scriptwriter
+from dramaclip.engines.narration import scriptwriter, story_arc
 from dramaclip.engines.semantic.llm_client import LlmUnavailable, client_for
 
 ANGLE_LLM_TIMEOUT_S = 240.0  # 与成稿同量级：要读完整剧摘录再给 K 条角度
@@ -25,11 +25,19 @@ _SYSTEM_PROMPT = (
     "为这个模式选出若干条**卖点互异**的取材角度：每条切进这部剧的不同一条线"
     "（不同的人物关系、不同的反转、不同的爽点类型），而不是把同一段剧情换个说法。"
     "每条角度都要能撑起一条「看完还想点全集」的推广片，禁止只够十五秒空钩的碎切片。\n"
+    "每条角度还要指定一条叙事母题（arc 字段）——这段故事按哪种骨架讲：\n"
+    f"{story_arc.menu_line()}。\n"
+    "母题按角度最吃哪个引擎来挑（人物反差选大人物历史、憋屈蓄力选小人物逆袭、"
+    "死局解谜选层层揭皮…），同一批角度的母题尽量不重复。\n"
     '只输出 JSON：{"angles": [{"name": "角度名", "reason": "为什么这条角度值得单出一条片",'
-    ' "hook": "这条片的开场钩子首句", "episode_numbers": [集号整数]}]}，不要其他文字。\n'
+    ' "hook": "这条片的开场钩子首句", "arc": "母题id", "episode_numbers": [集号整数]}]}，'
+    "不要其他文字。\n"
     f"硬性要求：角度名互不相同且各不超过 {_MAX_NAME_CHARS} 字；"
     f"reason 不超过 {_MAX_REASON_CHARS} 字、hook 不超过 {_MAX_HOOK_CHARS} 字；"
+    "arc 必须是上面列出的母题 id 之一；"
     "hook 必须含具体反差事实（身份/生死/数字/当众打脸），禁止「他竟然…」式空钩；"
+    "hook 的下笔角度要服合所选母题的开场（先扬后揭的钩子抛的是风光、被踩开场的"
+    "钩子抛的是当众羞辱、爆点回环的钩子抛的是最炸一瞬）；"
     "各条角度的取材集尽量不重叠——共用素材越多，两条片就越像同一部片；"
     "每个角度必须绑定具体的人物关系与一个明确的反转/爽点事件，禁止「逆袭人生」这类空泛概括；"
     "优先挖掘跨集因果链（前集埋线→后集爆发），单集内讲不完的爽点最值得单出一条片；"
@@ -39,22 +47,31 @@ _SYSTEM_PROMPT = (
 
 
 class AngleBrief(BaseModel):
-    """一条取材角度：界面卡片四要素里的三项（角度名/理由/钩子）+ 取材集。
+    """一条取材角度：界面卡片四要素里的三项（角度名/理由/钩子）+ 取材集 + 叙事母题。
     """
 
     name: str
     reason: str
     hook: str
+    arc: str = ""
     episode_numbers: list[int]
 
 
 def prompt_block(brief: AngleBrief) -> str:
-    """卖点角度进成稿 prompt 的措辞。
+    """卖点角度进成稿 prompt 的措辞；母题结构卡随行（剧本链与逐槽链共用此通道）。
     """
+    arc_block = ""
+    card = story_arc.card_of(brief.arc)
+    if card is not None:
+        arc_block = (
+            f"\n叙事母题：{card.name}——{card.essence}"
+            f"\n母题结构（全部段落按这个骨架推进，画面锚点随骨架走）：{card.structure}"
+        )
     return (
         f"\n本条片的取材角度：{brief.name}"
         f"\n这条角度为什么成立：{brief.reason}"
         f"\n开场钩子首句（第一个槽位据此下笔，可改写措辞但不得换卖点）：{brief.hook}"
+        + arc_block
     )
 
 
@@ -84,9 +101,14 @@ def _sanitize(
         name = candidate.name.strip()
         reason = candidate.reason.strip()
         hook = candidate.hook.strip()
+        arc = candidate.arc.strip()
         numbers = sorted(set(candidate.episode_numbers))
         if not name or not reason or not hook:
             raise ValueError("角度名、理由、钩子首句都不得为空")
+        if arc not in story_arc.ids():
+            raise ValueError(
+                f"角度「{name}」的母题不认识：{arc!r}（必须在九张母题卡里选）"
+            )
         if len(name) > _MAX_NAME_CHARS:
             raise ValueError(f"角度名超出长度上限（{_MAX_NAME_CHARS} 字）：{name}")
         if len(reason) > _MAX_REASON_CHARS:
@@ -104,7 +126,9 @@ def _sanitize(
             raise ValueError(f"角度「{name}」取材集不存在：{unknown}")
         seen.add(name)
         briefs.append(
-            AngleBrief(name=name, reason=reason, hook=hook, episode_numbers=numbers)
+            AngleBrief(
+                name=name, reason=reason, hook=hook, arc=arc, episode_numbers=numbers
+            )
         )
     return briefs
 

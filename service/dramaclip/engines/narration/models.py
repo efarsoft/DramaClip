@@ -72,6 +72,9 @@ class PlanData(BaseModel):
     # 剧本清洗层丢掉的段数（未知集号/越界/重叠/空文案）：仅 llm_script 链会写，
     # 其余模式恒为 0。方案卡据此显示「剧本丢弃 N 段」，把悄悄变短讲成明账。
     dropped_segments: int = 0
+    # 叙事母题（story_arc 九卡之一）：选题时定、随方案落库，方案卡据此显示母题徽标。
+    # 空串 = 旧库行 / 桩环境（角度没带母题），卡面跳过即可。
+    arc: str = ""
     # 候选冲突窗（分值序）：超短钩子出片时按实测旁白时长二次选景用。
     # 旧库行缺该键 → 空表，布局退回时间轴里的冲突窗原位放置。
     scene_pool: list[SceneCandidate] = Field(default_factory=list)

@@ -69,13 +69,14 @@ _SCRIPT_DRIVEN_MODES = frozenset({"dialogue_narration"})
 
 @dataclass(frozen=True)
 class _Variant:
-    """一条待产出的方案：取材意图（名字/理由/集号）+ 成稿时注入的角度块。
+    """一条待产出的方案：取材意图（名字/理由/集号/母题）+ 成稿时注入的角度块。
     """
 
     name: str
     reason: str
     episode_numbers: list[int]
     angle_block: str
+    arc: str = ""
 
 
 def _slot_label(variant: _Variant, index: int) -> str:
@@ -299,6 +300,7 @@ def _angle_variants(
             reason=brief.reason,
             episode_numbers=brief.episode_numbers,
             angle_block=angles.prompt_block(brief),
+            arc=brief.arc,
         )
         for brief in briefs
     ]
@@ -326,9 +328,10 @@ def _plan_one(
             f"跨集输入：{len(scoped)} 集 → "
             f"每集约 {scriptwriter.transcript_sampling_quota(len(scoped))} 段摘录",
         )
-        return script_driver.script_dialogue_plan(
+        plan, used_ids = script_driver.script_dialogue_plan(
             scoped, settings, angle_block=variant.angle_block, trace_dir=trace_dir
         )
+        return plan.model_copy(update={"arc": variant.arc}), used_ids
 
     scenes, highlights, material = _casting_for(context, episodes, variant)
     # 字幕金句流的金句判定交给 LLM（2026-10-08 业主裁决「规则打分不可靠，
@@ -385,7 +388,7 @@ def _plan_one(
             trace_dir=trace_dir,
         )
     used_ids = sorted({segment.episode_id for segment in plan.timeline})
-    return plan, used_ids
+    return plan.model_copy(update={"arc": variant.arc}), used_ids
 
 
 def _rewrite_copy_until_retellable(

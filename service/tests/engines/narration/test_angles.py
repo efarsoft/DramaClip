@@ -14,9 +14,12 @@ from typing import Any
 
 import pytest
 
-from dramaclip.engines.narration import angles
+from dramaclip.engines.narration import angles, story_arc
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
 from tests.llm_stub import patch_client_for
+
+# 桩角度轮换合法母题：sanitize 的 arc 校验对每条都生效，不是只查第一条
+_ARC_IDS = story_arc.ids()
 
 _SETTINGS = {
     "llm.base_url": "http://llm.test/v1",
@@ -42,16 +45,18 @@ _EPISODES: list[dict[str, Any]] = [
 
 
 class FakeLlm:
-    """按队列应答 chat_json，记录每次 user prompt 供断言。"""
+    """按队列应答 chat_json，记录每次 system/user prompt 供断言。"""
 
     calls: list[str] = []
+    systems: list[str] = []
     queue: list[Any] = []
 
     def __init__(self, _config: Any, timeout_s: float = 60.0) -> None:
         self.timeout_s = timeout_s
 
-    def chat_json(self, _system: str, user: str, temperature: float = 0.3) -> Any:
+    def chat_json(self, system: str, user: str, temperature: float = 0.3) -> Any:
         FakeLlm.calls.append(user)
+        FakeLlm.systems.append(system)
         item = FakeLlm.queue.pop(0) if len(FakeLlm.queue) > 1 else FakeLlm.queue[0]
         if isinstance(item, Exception):
             raise item
@@ -61,6 +66,7 @@ class FakeLlm:
 @pytest.fixture()
 def llm(monkeypatch: pytest.MonkeyPatch) -> Any:
     FakeLlm.calls = []
+    FakeLlm.systems = []
     FakeLlm.queue = []
     patch_client_for(monkeypatch, angles, FakeLlm)
     return FakeLlm
@@ -71,6 +77,7 @@ def _angle(index: int, episode: int) -> dict[str, Any]:
         "name": f"角度{index}",
         "reason": f"第 {episode} 集这条线最狠",
         "hook": f"第 {episode} 集的开场钩子",
+        "arc": _ARC_IDS[(index - 1) % len(_ARC_IDS)],
         "episode_numbers": [episode],
     }
 
@@ -227,6 +234,57 @@ def test_missing_angles_array_raises(llm: Any) -> None:
     llm.queue = [{"nope": 1}, {"angles": []}]
     with pytest.raises(ValueError, match="未返回 angles 数组"):
         _select()
+
+
+def test_unknown_arc_rejects(llm: Any) -> None:
+    """母题不认识就整批不合格（重试或抛）：母题是结构骨架，错值进 prompt 比缺字段更毒。"""
+    llm.queue = [
+        {"angles": [dict(_angle(1, 1), arc="hero_journey"), _angle(2, 2), _angle(3, 3)]},
+        {"angles": []},
+    ]
+    with pytest.raises(ValueError, match="母题不认识"):
+        _select()
+
+
+def test_empty_arc_rejects(llm: Any) -> None:
+    llm.queue = [
+        {"angles": [dict(_angle(1, 1), arc=""), _angle(2, 2), _angle(3, 3)]},
+        {"angles": []},
+    ]
+    with pytest.raises(ValueError, match="母题不认识"):
+        _select()
+
+
+def test_prompt_carries_arc_menu(llm: Any) -> None:
+    """九张母题卡进选题 system prompt：模型才知道 arc 能填什么、各是什么骨架。"""
+    llm.queue = [_payload()]
+    _select()
+    system = FakeLlm.systems[0]
+    assert "叙事母题" in system
+    for card_id in story_arc.ids():
+        card = story_arc.card_of(card_id)
+        assert card is not None and card.name in system
+
+
+def test_briefs_carry_arc_and_prompt_block_injects_card(llm: Any) -> None:
+    """角度带母题出站；prompt_block 把母题结构卡注入成稿（两链共用的通道）。"""
+    llm.queue = [_payload()]
+    briefs = _select()
+    assert [brief.arc for brief in briefs] == list(story_arc.ids())[:3]
+    block = angles.prompt_block(briefs[0])
+    card = story_arc.card_of(briefs[0].arc)
+    assert card is not None
+    assert f"叙事母题：{card.name}" in block
+    assert "开场：" in block and "结尾：" in block, "结构卡的三段骨架没进成稿 prompt"
+
+
+def test_prompt_block_skips_unknown_arc(llm: Any) -> None:
+    """旧库/桩环境角度没带母题（空串）：prompt_block 优雅跳过，不炸不注入。"""
+    brief = angles.AngleBrief(
+        name="角度", reason="成立", hook="钩子", arc="", episode_numbers=[1]
+    )
+    block = angles.prompt_block(brief)
+    assert "叙事母题" not in block and "角度" in block
 
 
 def test_non_object_item_raises(llm: Any) -> None:
