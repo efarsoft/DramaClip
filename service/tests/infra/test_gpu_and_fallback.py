@@ -10,8 +10,9 @@ from typing import Any
 
 import pytest
 
+import dramaclip.engines.analysis.transcriber as transcriber_mod
 from dramaclip.engines.analysis.transcriber import FasterWhisperEngine
-from dramaclip.infra import gpu
+from dramaclip.infra import compute, gpu
 
 
 def test_parse_query_output() -> None:
@@ -49,14 +50,28 @@ class _FakeWhisper:
         self.device = device
 
 
-def test_cuda_failure_falls_back_to_cpu(monkeypatch) -> None:
+def test_auto_cuda_failure_falls_back_and_reports(monkeypatch) -> None:
+    fake = types.SimpleNamespace(WhisperModel=_FakeWhisper)
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake)
+    monkeypatch.setattr(transcriber_mod, "_ct2_cuda_available", lambda: True)
+    _FakeWhisper.created.clear()
+    engine = FasterWhisperEngine("base", device="auto")
+    model = engine._ensure_model()
+    assert model.device == "cpu"  # type: ignore[attr-defined]
+    report = engine.compute()
+    assert report is not None
+    assert (report.resolved, report.actual, report.fallback) == ("cuda", "cpu", True)
+    assert "cublas" in report.reason
+
+
+def test_explicit_cuda_construction_failure_raises(monkeypatch) -> None:
     fake = types.SimpleNamespace(WhisperModel=_FakeWhisper)
     monkeypatch.setitem(sys.modules, "faster_whisper", fake)
     _FakeWhisper.created.clear()
     engine = FasterWhisperEngine("base", device="cuda")
-    model = engine._ensure_model()
-    assert model.device == "cpu"  # type: ignore[attr-defined]
-    assert _FakeWhisper.created == ["cuda", "cpu"]
+    with pytest.raises(compute.ComputeUnavailableError):
+        engine._ensure_model()
+    assert _FakeWhisper.created == ["cuda"], "不得再构造 CPU 模型"
 
 
 def test_cpu_errors_are_not_swallowed(monkeypatch) -> None:
@@ -100,17 +115,30 @@ class _FakeLazyWhisper:
         return iter([seg]), None
 
 
-def test_cuda_failure_during_inference_falls_back(monkeypatch) -> None:
+def test_auto_cuda_failure_during_inference_falls_back(monkeypatch) -> None:
+    fake = types.SimpleNamespace(WhisperModel=_FakeLazyWhisper)
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake)
+    monkeypatch.setattr(transcriber_mod, "_ct2_cuda_available", lambda: True)
+    _FakeLazyWhisper.created.clear()
+    engine = FasterWhisperEngine("base", device="auto")
+    segments = engine.transcribe(Path("x.wav"))
+    assert [s.text for s in segments] == ["你好"]
+    assert _FakeLazyWhisper.created == ["cuda", "cpu"]
+    report = engine.compute()
+    assert report is not None and report.fallback is True
+    # CPU 模型已缓存：第二集直接复用，不再重复走失败的 CUDA 路径
+    engine.transcribe(Path("x.wav"))
+    assert _FakeLazyWhisper.created == ["cuda", "cpu"]
+
+
+def test_explicit_cuda_inference_failure_does_not_fallback(monkeypatch) -> None:
     fake = types.SimpleNamespace(WhisperModel=_FakeLazyWhisper)
     monkeypatch.setitem(sys.modules, "faster_whisper", fake)
     _FakeLazyWhisper.created.clear()
     engine = FasterWhisperEngine("base", device="cuda")
-    segments = engine.transcribe(Path("x.wav"))
-    assert [s.text for s in segments] == ["你好"]
-    assert _FakeLazyWhisper.created == ["cuda", "cpu"]
-    # CPU 模型已缓存：第二集直接复用，不再重复走失败的 CUDA 路径
-    engine.transcribe(Path("x.wav"))
-    assert _FakeLazyWhisper.created == ["cuda", "cpu"]
+    with pytest.raises(compute.ComputeUnavailableError):
+        engine.transcribe(Path("x.wav"))
+    assert _FakeLazyWhisper.created == ["cuda"]
 
 
 class _ComputeRecorder:
@@ -126,19 +154,25 @@ class _ComputeRecorder:
         self.device = device
 
 
-def test_default_auto_goes_to_every_device_untouched(monkeypatch) -> None:
-    """默认档 auto 原样直达各设备：精度由 ctranslate2 按实际解析到的卡挑。
+def test_auto_resolves_probe_target_and_cpu_never_probes(monkeypatch) -> None:
+    """auto 先探 CT2 的 CUDA 设备数再落到具体设备；显式 cpu 不碰探测。
 
-    写死的 CPU 档（int8）硬塞 CUDA 会被拒→注定回退 CPU，GPU 在场却永远用不上；
-    auto 在 CPU 上也挑 int8——CPU 用户零回退。
+    不再把字面量 auto 交给 CT2：回执要写实际解析结果，探针与构造共用同一个答案。
     """
     fake = types.SimpleNamespace(WhisperModel=_ComputeRecorder)
     monkeypatch.setitem(sys.modules, "faster_whisper", fake)
     _ComputeRecorder.created.clear()
-    FasterWhisperEngine("base", device="cuda")._ensure_model()
-    assert _ComputeRecorder.created[-1] == ("cuda", "auto")
+    monkeypatch.setattr(transcriber_mod, "_ct2_cuda_available", lambda: True)
     FasterWhisperEngine("base", device="auto")._ensure_model()
-    assert _ComputeRecorder.created[-1] == ("auto", "auto")
+    assert _ComputeRecorder.created[-1] == ("cuda", "auto")
+    monkeypatch.setattr(transcriber_mod, "_ct2_cuda_available", lambda: False)
+    FasterWhisperEngine("base", device="auto")._ensure_model()
+    assert _ComputeRecorder.created[-1] == ("cpu", "auto")
+
+    def _must_not_probe() -> bool:
+        raise AssertionError("显式 cpu 不得探 CUDA")
+
+    monkeypatch.setattr(transcriber_mod, "_ct2_cuda_available", _must_not_probe)
     FasterWhisperEngine("base", device="cpu")._ensure_model()
     assert _ComputeRecorder.created[-1] == ("cpu", "auto")
 
@@ -153,8 +187,9 @@ def test_legacy_int8_is_never_sent_to_a_gpu(monkeypatch) -> None:
     _ComputeRecorder.created.clear()
     FasterWhisperEngine("base", device="cuda", compute_type="int8")._ensure_model()
     assert _ComputeRecorder.created[-1] == ("cuda", "auto")
+    monkeypatch.setattr(transcriber_mod, "_ct2_cuda_available", lambda: True)
     FasterWhisperEngine("base", device="auto", compute_type="int8")._ensure_model()
-    assert _ComputeRecorder.created[-1] == ("auto", "auto")
+    assert _ComputeRecorder.created[-1] == ("cuda", "auto")
     FasterWhisperEngine("base", device="cpu", compute_type="int8")._ensure_model()
     assert _ComputeRecorder.created[-1] == ("cpu", "int8")
 
@@ -188,6 +223,7 @@ def test_profile_caps_and_runtime_layering() -> None:
         "name": "Quadro M4000",
         "memory_total_mb": 8192,
         "max_cuda_version": "13.0",
+        "compute_cap": "7.5",  # 钉算力：真机探针缓存（5.2）不得泄进硬件分层用例
     }
     prof = device_profile.profile(snap, cuda_runtime_installed=False)
     assert prof["tier"] == "entry"
@@ -198,9 +234,45 @@ def test_profile_caps_and_runtime_layering() -> None:
     # 8GB 显存够 4B 档、不够 8B 档
     assert prof["caps"]["local_visual_4b"]["ok"] is True
     assert prof["caps"]["local_visual_8b"]["ok"] is False
-    # 运行时组合层（tts-venv 安装态）不在 profile 硬件判定里：一律 ready=False
+    # 人声分离：硬件/运行库够只是 ok；ready 还要装好 ORT GPU 探测标记
     assert prof["caps"]["vocal_separation_gpu"]["ready"] is False
-    assert "MDX-Net" in prof["caps"]["vocal_separation_gpu"]["hint"]
+    assert "CUDA 运行库" in prof["caps"]["vocal_separation_gpu"]["hint"]
+    assert ready["caps"]["vocal_separation_gpu"]["ready"] is False
+    assert "ONNX Runtime" in ready["caps"]["vocal_separation_gpu"]["hint"]
+
+
+def test_profile_separation_gpu_needs_ort_probe_marker() -> None:
+    snap = {
+        "vendor": "nvidia",
+        "name": "Quadro M4000",
+        "memory_total_mb": 8192,
+        "max_cuda_version": "13.0",
+    }
+    ready = device_profile.profile(
+        snap, cuda_runtime_installed=True,
+        separation_ort={"variant": "gpu", "gpu": True},
+    )
+    cap = ready["caps"]["vocal_separation_gpu"]
+    assert cap["ok"] is True and cap["ready"] is True and cap["hint"] == ""
+
+    cpu = device_profile.profile(
+        snap, cuda_runtime_installed=True,
+        separation_ort={
+            "variant": "cpu", "gpu": False,
+            "reason": "分离 GPU 不可用：LoadLibrary failed: 126",
+        },
+    )
+    cap_cpu = cpu["caps"]["vocal_separation_gpu"]
+    assert cap_cpu["ready"] is False
+    assert "LoadLibrary failed: 126" in cap_cpu["hint"], "CPU 版要把探测原因带出来"
+
+    no_runtime = device_profile.profile(
+        snap, cuda_runtime_installed=False,
+        separation_ort={"variant": "gpu", "gpu": True},
+    )
+    cap_runtime = no_runtime["caps"]["vocal_separation_gpu"]
+    assert cap_runtime["ready"] is False
+    assert "CUDA 运行库" in cap_runtime["hint"]
 
 
 def test_profile_sm52_blocks_whisper_but_not_funasr(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -222,12 +294,16 @@ def test_profile_sm52_blocks_whisper_but_not_funasr(monkeypatch: pytest.MonkeyPa
     assert "无 ctranslate2 计算内核" in whisper["hint"]
     assert "funasr" in whisper["hint"], "不支持的原因要指向可用的替代（funasr）"
 
-    # funasr：dev 主进程 torch 在 GPU（实况优先于 tts-venv 标记）
-    monkeypatch.setattr(device_profile, "_SERVICE_TORCH_CUDA", True)
+    # funasr：dev 主进程 torch 执行级可用（真算通过）→ ready True
+    monkeypatch.setattr(
+        device_profile, "_SERVICE_TORCH_STATE", (True, True, "5.2"), raising=True
+    )
     prof_gpu = device_profile.profile(snap, cuda_runtime_installed=True)
     assert prof_gpu["caps"]["funasr_gpu"]["ready"] is True
-    # torch 不在 GPU 且标记=cpu：ready 如实 False
-    monkeypatch.setattr(device_profile, "_SERVICE_TORCH_CUDA", False)
+    # torch 检测过但内核不可执行（sm_52 真机实锤）：ready 如实 False
+    monkeypatch.setattr(
+        device_profile, "_SERVICE_TORCH_STATE", (False, True, "5.2"), raising=True
+    )
     prof_cpu = device_profile.profile(snap, cuda_runtime_installed=True)
     assert prof_cpu["caps"]["funasr_gpu"]["ready"] is False
 
@@ -366,7 +442,7 @@ def test_resolve_torch_device(monkeypatch) -> None:
     assert _resolve_torch_device("auto") == "cuda:0"
     _avail = False
     assert _resolve_torch_device("auto") == "cpu"
-    # 显式 cuda 是用户明确要求 GPU：探针只管 auto，加载失败由引擎回退兜底
+    # 显式 cuda 是用户明确要求 GPU：探针只管 auto；加载失败按承诺违约上抛，不回退
     assert _resolve_torch_device("cuda") == "cuda:0"
     assert _resolve_torch_device("cuda:1") == "cuda:1"  # 显式卡号原样透传
     assert _resolve_torch_device("cpu") == "cpu"
@@ -379,9 +455,12 @@ def test_sensevoice_passes_device_to_automodel(monkeypatch, tmp_path: Path) -> N
 
     class _FakeAuto:
         def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs  # funasr 落点证据之一
             captured.update(kwargs)
 
     monkeypatch.setattr(mod, "_resolve_torch_device", lambda _d: "cuda:0")
+    # 真算探针是另一道闸（test_funasr_device_truth.py 专测）：这里只验 device 接线
+    monkeypatch.setattr(mod, "_probe_cuda_op", lambda _d: "")
     import types
 
     fake_mod = types.ModuleType("funasr")
@@ -399,16 +478,41 @@ def test_sensevoice_falls_back_to_cpu_on_cuda_failure(monkeypatch, tmp_path: Pat
 
     class _FakeAuto:
         def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
             devices.append(kwargs["device"])
             if kwargs["device"] != "cpu":
                 raise RuntimeError("CUDA error: cublas64_12.dll missing")
 
     monkeypatch.setattr(mod, "_resolve_torch_device", lambda _d: "cuda:0")
+    monkeypatch.setattr(mod, "_probe_cuda_op", lambda _d: "")
+    import types
+
+    fake_mod = types.ModuleType("funasr")
+    fake_mod.AutoModel = _FakeAuto  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "funasr", fake_mod)
+    engine = mod.SenseVoiceEngine(models_dir=tmp_path, device="auto")
+    engine._ensure_model()
+    assert devices == ["cuda:0", "cpu"]
+    report = engine.compute()
+    assert report is not None and report.fallback is True
+    assert "cublas" in report.reason
+
+
+def test_sensevoice_explicit_cuda_failure_raises(monkeypatch, tmp_path: Path) -> None:
+    import dramaclip.engines.analysis.transcriber as mod
+
+    class _FakeAuto:
+        def __init__(self, **_kwargs: Any) -> None:
+            raise RuntimeError("CUDA error: cublas64_12.dll missing")
+
+    monkeypatch.setattr(mod, "_resolve_torch_device", lambda _d: "cuda:0")
+    # 不让探针的异常顶替 AutoModel 的异常：本用例要的是加载失败上抛这条路径
+    monkeypatch.setattr(mod, "_probe_cuda_op", lambda _d: "")
     import types
 
     fake_mod = types.ModuleType("funasr")
     fake_mod.AutoModel = _FakeAuto  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "funasr", fake_mod)
     engine = mod.SenseVoiceEngine(models_dir=tmp_path, device="cuda")
-    engine._ensure_model()
-    assert devices == ["cuda:0", "cpu"]
+    with pytest.raises(compute.ComputeUnavailableError):
+        engine._ensure_model()

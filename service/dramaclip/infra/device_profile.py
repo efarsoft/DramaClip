@@ -60,21 +60,37 @@ def _torch_variant_is_cuda() -> bool:
 
 
 # dev 态服务进程自带 torch（service/.venv GPU 轮）——funasr 在主进程内跑，
-# ready 判据必须看它的实况而不是 tts-venv 标记（真机 2026-10-20：标记=cpu
-# 的灰灯掩盖了「转写已在 GPU」的实情）。进程内缓存：torch 导入秒级，只付一次。
-_SERVICE_TORCH_CUDA: bool | None = None
+# ready 判据必须看它的**执行级实况**：is_available 只是设备级检测，sm_52 这类
+# 无内核的卡它照样 True，第一次真算就崩（真机 2026-10-20 实锤：M4000 cu126
+# is_available=True 但 kernel 全不可执行——「已在 GPU」一度是假话）。
+# 进程内缓存：torch 导入秒级，只付一次。
+_SERVICE_TORCH_STATE: tuple[bool, bool, str] | None = None
 
 
-def _service_torch_is_cuda() -> bool:
-    global _SERVICE_TORCH_CUDA
-    if _SERVICE_TORCH_CUDA is None:
+def _service_torch_state() -> tuple[bool, bool, str]:
+    """（torch_cuda 可真算, torch 在场, 算力标签）。探针一次定案，进程内缓存。"""
+    global _SERVICE_TORCH_STATE
+    if _SERVICE_TORCH_STATE is None:
         try:
             import torch
 
-            _SERVICE_TORCH_CUDA = bool(torch.cuda.is_available())
+            if not torch.cuda.is_available():
+                _SERVICE_TORCH_STATE = (False, True, "")
+            else:
+                cc = ".".join(map(str, torch.cuda.get_device_capability(0)))
+                try:
+                    x = torch.randn(8, 8, device="cuda")
+                    _ = bool((x @ x.T).sum())
+                    _SERVICE_TORCH_STATE = (True, True, cc)
+                except Exception:  # noqa: BLE001 - 无内核卡：检测过、执行必崩
+                    _SERVICE_TORCH_STATE = (False, True, cc)
         except Exception:  # noqa: BLE001 - 打包态主进程零 torch：判据回落 tts-venv 标记
-            _SERVICE_TORCH_CUDA = False
-    return _SERVICE_TORCH_CUDA
+            _SERVICE_TORCH_STATE = (False, False, "")
+    return _SERVICE_TORCH_STATE
+
+
+def _service_torch_is_cuda() -> bool:
+    return _service_torch_state()[0]
 
 
 # ctranslate2 的 GPU 内核下界：低于此算力（如 Maxwell sm_52）没有可执行 kernel，
@@ -90,8 +106,17 @@ def _parse_cc(raw: str) -> tuple[int, int] | None:
         return None
 
 
-def profile(snapshot: dict[str, Any], cuda_runtime_installed: bool) -> dict[str, Any]:
-    """探测快照 + CUDA 运行库安装态 → 设备档位与各引擎能力结论。"""
+def profile(
+    snapshot: dict[str, Any],
+    cuda_runtime_installed: bool,
+    *,
+    separation_ort: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """探测快照 + CUDA 运行库/ORT 安装态 → 设备档位与各引擎能力结论。
+
+    ``separation_ort`` 是 tts_runtime.ort_state：安装期真实 CUDA session 探测的
+    marker。安装态与可用态分开——GPU 轮装上了但 session 落 CPU 时必须如实不 ready。
+    """
     vendor = str(snapshot.get("vendor") or "none")
     name = str(snapshot.get("name") or "")
     memory_total_mb = int(snapshot.get("memory_total_mb") or 0)
@@ -110,10 +135,28 @@ def profile(snapshot: dict[str, Any], cuda_runtime_installed: bool) -> dict[str,
     }
 
     vram_gb = memory_total_mb / 1024.0
-    # ctranslate2 对这张卡是否可用：快照里的 compute_cap（nvidia-smi 采）与内核下界比
-    cc_raw = str(snapshot.get("compute_cap") or "")
+    separation_ready = bool(
+        cuda_ok and vram_gb >= 4.0 and cuda_runtime_installed
+        and separation_ort is not None and separation_ort.get("gpu")
+    )
+    if not (cuda_ok and vram_gb >= 4.0):
+        separation_hint = "需 4GB+ 显存且驱动支持 CUDA 12+"
+    elif not cuda_runtime_installed:
+        separation_hint = "CUDA 运行库未安装（安装后可重跑本地运行环境以启用 GPU 分离）"
+    elif separation_ort is None or separation_ort.get("variant") in (None, "unknown"):
+        separation_hint = "ONNX Runtime 运行后端未探测：重跑本地运行环境以启用 GPU 分离"
+    elif not separation_ready:
+        separation_hint = str(
+            separation_ort.get("reason") or "ONNX Runtime 为 CPU 版，分离走 CPU"
+        )
+    else:
+        separation_hint = ""
+    # ctranslate2 对这张卡是否可用：快照里的 compute_cap（nvidia-smi 采）与内核下界比；
+    # 快照缺该字段时回落 torch 执行级探针的算力标签
+    cc_raw = str(snapshot.get("compute_cap") or "") or _service_torch_state()[2]
     cc = _parse_cc(cc_raw)
     whisper_blocked = cc is not None and cc < _CTRANSLATE2_MIN_CC
+    torch_usable, _torch_present, _ = _service_torch_state()
     caps = {
         # faster-whisper（ctranslate2 CUDA + cuda_runtime DLL，已实装）。
         # 算力低于 ctranslate2 内核下界（如 Maxwell sm_52）时如实标「不支持」，
@@ -135,7 +178,7 @@ def profile(snapshot: dict[str, Any], cuda_runtime_installed: bool) -> dict[str,
         "indextts2_gpu": {
             "ok": cuda_ok and vram_gb >= 4.0,
             "ready": False,
-            "hint": "配音 TTS 页安装运行环境后生效（N 卡自动装 CUDA 轮）",
+            "hint": "安装后由运行时回执确认实际设备（安装态不等于已启用 GPU）",
         },
         # funasr 本地 ASR：打包态与双栈 TTS 共用 tts-venv（变体标记判据）；
         # dev 态 funasr 在主进程内跑（service/.venv GPU 轮），torch 实况优先于标记
@@ -148,12 +191,13 @@ def profile(snapshot: dict[str, Any], cuda_runtime_installed: bool) -> dict[str,
             ),
             "hint": "ASR 页安装运行环境后生效（N 卡自动装 CUDA 轮）",
         },
-        # 人声分离：交付栈是 audio-separator/MDX-Net（onnxruntime CPU，tts-venv）；
-        # demucs GPU 路线（CPU 实测 RTF 1.95x / GPU 0.22x）是未接线的能力储备
+        # 人声分离：audio-separator/MDX-Net 走 onnxruntime，GPU 需要 CUDA EP +
+        # cuda_runtime 的 cublas/cudnn/cudart/cufft。ready 以安装期真实 session
+        # 探测的 marker 为准；实际任务仍由 worker 回执二次确认。
         "vocal_separation_gpu": {
             "ok": cuda_ok and vram_gb >= 4.0,
-            "ready": False,
-            "hint": "当前走 CPU（MDX-Net）；GPU 路线待接线",
+            "ready": separation_ready,
+            "hint": separation_hint,
         },
         # 本地视觉轨三档（llama.cpp llama-server，非 torch 体系——GPU 取决于
         # llama-server 是否 CUDA 构建，属资产层；显存为 fp16 权重估算）
