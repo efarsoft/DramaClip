@@ -126,6 +126,23 @@ def test_refine_repairs_unbacked_insertion(monkeypatch: pytest.MonkeyPatch) -> N
     assert outcome.segments[0].text == "甲乙丙丁。"
 
 
+def test_refine_keeps_ocr_backed_insertion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """补漏字：ASR 漏听（BGM 盖住）而字幕有据 → 保留补字，不按无据插入丢弃。
+
+    真机 2026-10-20：字流「一件事」、字幕「干的第一件事」——提示词曾禁止增字，
+    护栏的 OCR 有据通道形同虚设，吞字补不回来（业主实锤）。
+    """
+    raw = [_seg("一件事就是杀了大明两大蛀虫", start=1.5)]
+    outcome = _run(
+        monkeypatch,
+        ["干的第一件事，就是杀了大明两大蛀虫。"],
+        raw,
+        ocr_text="我穿成崇祯皇帝干的第一件事就是杀了大明两大蛀虫",
+    )
+    assert outcome.applied
+    assert outcome.segments[0].text == "干的第一件事，就是杀了大明两大蛀虫。"
+
+
 def test_refine_llm_unconfigured_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     raw = [_seg("甲乙丙丁", start=0.0)]
     monkeypatch.setattr(
