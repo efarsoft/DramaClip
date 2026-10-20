@@ -54,6 +54,7 @@ def build_cross(
 
     segments: list[TimelineSegment] = []
     texts: list[NarrationText] = []
+    cursor: dict[str, float] = {}  # 每集已排到的源时间（镜像 _layout_cross 的空隙口径）
     for index, scene in enumerate(picked):
         # A3：原声窗长跟随该场景最强金句的台词 span（+呼吸尾垫，收进 [2,8]，
         # 不超场景边界；无台词保持 8s 满窗）。**吸附排在收缩之后**——见 casting.fit_scene_window。
@@ -78,22 +79,33 @@ def build_cross(
                 audio="original",
             )
         )
+        cursor[scene.episode_id] = end
         # 场景间插入旁白段（画面锚**当前场景尾部**——旁白压在刚看过画面的延续帧上，
         # 下一场景原声出场时是全新画面。旧实现锚下一场景开头：旁白预览+原声重播
         # 同一段画面连放两遍，业主实测=重复/闪烁）
         narration_seconds = _HOOK_TTS_FALLBACK_S
         slot_id = f"cross-{index + 1}"
-        texts.append(
-            NarrationText(
-                id=slot_id,
-                # 一句内反差：串联句的实证强句式（「用最甜的《爱》，打最狠的架」）
-                brief="原声片段之间的串联：承接上一幕，可用一句内反差点透两幕落差，"
-                "给下一幕留半句钩"
-                if index + 1 < len(picked)
-                else "收尾：留缺口（可加退出代价——暗示不看完的损失，禁止编造情节），"
-                "一句指向看全集，禁止关注/点赞",
+        bridge = "原声片段之间的串联：承接上一幕，可用一句内反差点透两幕落差，给下一幕留半句钩"
+        if index + 1 < len(picked):
+            # 空隙预算（真机 2026-10-20：cross-2 文案 48 字实测 10.74s > 9.70s
+            # 空隙整条判死）：导出时桥段旁白收尾锚下场景开头、向前伸进空隙——
+            # 空隙在这里可算出，写进职责让编剧按预算下笔，而不是让导出门禁随机处决。
+            nxt = picked[index + 1]
+            floor = cursor.get(nxt.episode_id, 0.0)
+            gap = max(0.0, float(nxt.start) - floor)
+            char_cap = max(20, min(60, int(gap * 4.0)))  # indextts2 实测 ≈4.5 字/秒，留 12% 裕量
+            if char_cap < 60:
+                bridge += (
+                    f"（本段旁白的空隙约 {gap:.0f} 秒，"
+                    f"文案控制在 {char_cap} 字内，超了出不了片）"
+                )
+            brief = bridge
+        else:
+            brief = (
+                "收尾：留缺口（可加退出代价——暗示不看完的损失，禁止编造情节），"
+                "一句指向看全集，禁止关注/点赞"
             )
-        )
+        texts.append(NarrationText(id=slot_id, brief=brief))
         # 旁白画面：当前场景尾部（收尾旁白=末场景自己的尾巴）
         tail_start = round(max(scene.start, scene.end - narration_seconds), 3)
         segments.append(
