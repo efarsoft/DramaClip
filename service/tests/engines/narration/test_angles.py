@@ -278,6 +278,21 @@ def test_briefs_carry_arc_and_prompt_block_injects_card(llm: Any) -> None:
     assert "开场：" in block and "结尾：" in block, "结构卡的三段骨架没进成稿 prompt"
 
 
+def test_zero_copy_reel_sanitize_allows_missing_hook_arc(llm: Any) -> None:
+    """零文案选线（raw_clip 等）：hook/arc 不做要求——没有旁白槽位，无处落地。"""
+    llm.queue = [
+        {
+            "angles": [
+                {"name": "查抄线", "reason": "跨集因果链最完整", "episode_numbers": [1, 2]},
+                {"name": "对决线", "reason": "生死擂收束", "episode_numbers": [3]},
+            ]
+        }
+    ]
+    briefs = _select(mode="raw_clip", mode_label="纯原片剪辑", k=2, zero_copy=True)
+    assert [b.name for b in briefs] == ["查抄线", "对决线"]
+    assert all(b.hook == "" and b.arc == "" for b in briefs)
+
+
 def test_prompt_block_skips_unknown_arc(llm: Any) -> None:
     """旧库/桩环境角度没带母题（空串）：prompt_block 优雅跳过，不炸不注入。"""
     brief = angles.AngleBrief(

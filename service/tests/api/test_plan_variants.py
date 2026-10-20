@@ -1315,6 +1315,8 @@ def test_zero_copy_modes_deterministically_anchor_episodes(
     angle_calls: list[str] = []
 
     class _RecordingAngles:
+        """选线替身恒回空 → 断言回落链；同时记录 system 供层级断言。"""
+
         def __init__(self, _config: Any, timeout_s: float = 60.0) -> None:
             pass
 
@@ -1322,6 +1324,7 @@ def test_zero_copy_modes_deterministically_anchor_episodes(
             angle_calls.append(system)
             return {"angles": []}
 
+    harness.context.settings.update(_LLM_SETTINGS)
     patch_client_for(monkeypatch, angles, _RecordingAngles)
 
     result = harness.rpc(
@@ -1330,7 +1333,11 @@ def test_zero_copy_modes_deterministically_anchor_episodes(
     )
     status = _wait_terminal(harness, str(result["job_id"]))
     assert status["status"] == "completed", status.get("error")
-    assert angle_calls == [], "零文案模式不得再付选题往返（真机核对：付钱不收货）"
+    assert angle_calls, "零文案模式仍要选线（跨集冲突链），只是提示词瘦身"
+    assert any("跨集冲突链" in s for s in angle_calls), "选线提示词应为零文案专用版"
+    assert not any("叙事母题" in s for s in angle_calls), (
+        "母题菜单不进零文案选题——结构卡无处落地，付了也不收货"
+    )
 
     plans = plans_repo.list_by_batch(memory_db, project_id, str(result["batch_id"]))
     names = [row["angle"] for row in plans]

@@ -52,8 +52,10 @@ SUPPORTED_MODES = (
 
 # 与 TTS 合成并行的两组：剧情解说已由 LLM 剧本驱动，每段都要配音，不再属"无 TTS"。
 _NO_TTS_MODES = frozenset({"raw_clip", "subtitle_flow", "highlight_cut"})
-# 零文案模式（=_NO_TTS_MODES）：没有旁白槽位，角度/母题/钩子对成片零影响——
-# 跳过 LLM 选题（付钱不收货，2026-10-20 核对），取材走确定性锚定（_deterministic_variants）。
+# 零文案模式（=_NO_TTS_MODES）：没有旁白槽位，母题/钩子/句式约束无处落地——
+# 选题换零文案专用提示词（只挑跨集冲突链并命名，_REEL_SYSTEM_PROMPT），失败回落
+# 单集锚定（_deterministic_variants）。2026-10-20 业主裁决：单集锚定当主路线不
+# 合适——吸引力在跨集因果链。
 _ZERO_COPY_MODES = _NO_TTS_MODES
 
 # 会产出旁白槽位、因而读 `settings["_style_directives"]` 的模式（copywriter /
@@ -158,9 +160,25 @@ def _run_plan_variants(
             label = narration_pipeline.MODE_LABELS.get(mode, mode)
             try:
                 if mode in _ZERO_COPY_MODES:
-                    variants = _deterministic_variants(
-                        context, mode, label, episode_inputs, k, excluded_angles
-                    )
+                    try:
+                        variants = _angle_variants(
+                            context,
+                            mode,
+                            label,
+                            episode_inputs,
+                            settings,
+                            k,
+                            excluded_angles,
+                            zero_copy=True,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - 选线失败回落单集锚定
+                        context.notifier.log(
+                            "warning",
+                            f"{label} 跨集选线失败，回落单集锚定：{str(exc)[:80]}",
+                        )
+                        variants = _deterministic_variants(
+                            context, mode, label, episode_inputs, k, excluded_angles
+                        )
                 else:
                     variants = _angle_variants(
                         context, mode, label, episode_inputs, settings, k, excluded_angles
@@ -290,12 +308,11 @@ def _deterministic_variants(
     k: int,
     excluded_angles: list[str],
 ) -> list[_Variant]:
-    """零文案模式的确定性取材：按集冲突峰锚定，不跑选题模型。
+    """零文案模式的兜底取材：按集冲突峰锚定（跨集选线失败时回落，可用性优先）。
 
-    raw_clip/高光混剪/字幕金句流没有文案面，角度/母题/钩子对成片零影响——为它们
-    付选题往返是「付钱不收货」（2026-10-20 逐一核对）。互异轴=锚定集：每条方案锚定
-    一个冲突峰最高的集，取材集天然互异、天然满足重叠闸门；K 自动封顶于集数，不硬凑。
-    无冲突数据的集排最后（按集号），保证从未跑语义层的集也能锚定。
+    2026-10-20 曾作为主路线，业主否掉——吸引力在跨集因果链，单集锚定出不了。
+    现仅当选线 LLM 不可用/不合格时兜底：互异轴=锚定集，天然满足重叠闸门；
+    K 封顶于集数；无冲突数据的集排最后（按集号）。
     """
     ranked: list[tuple[int, int]] = []
     for episode in episode_inputs:
@@ -336,12 +353,15 @@ def _angle_variants(
     mode: str,
     label: str,
     episode_inputs: list[dict[str, Any]],
-
     settings: dict[str, str],
     k: int,
     excluded_angles: list[str],
+    zero_copy: bool = False,
 ) -> list[_Variant]:
     """解说类：一次选题调用 → K 条卖点互异的角度（《定案二》）。
+
+    ``zero_copy``：换零文案选线提示词（只挑跨集冲突链+命名），且不组装
+    angle_block——没有旁白槽位，结构卡无人可读。
     """
     briefs = angles.select_angles(
         mode,
@@ -351,13 +371,14 @@ def _angle_variants(
         settings=settings,
         excluded=excluded_angles,
         trace_dir=llm_trace_dir(context),
+        zero_copy=zero_copy,
     )
     return [
         _Variant(
             name=brief.name,
             reason=brief.reason,
             episode_numbers=brief.episode_numbers,
-            angle_block=angles.prompt_block(brief),
+            angle_block="" if zero_copy else angles.prompt_block(brief),
             arc=brief.arc,
         )
         for brief in briefs

@@ -49,6 +49,23 @@ _SYSTEM_PROMPT = (
     "角度、理由与钩子只能来自给定转写，禁止编造转写之外的事件。"
 )
 
+# 零文案模式（raw_clip/高光混剪/字幕金句流）专用：没有旁白槽位，母题/钩子/
+# 句式规则无处落地——选题只干一件不可替代的事：挑跨集冲突链并命名（2026-10-20，
+# 业主否掉单集锚定：吸引力在跨集因果链）。提示词不付母题菜单与文案约束的成本。
+_REEL_SYSTEM_PROMPT = (
+    "你是短剧切片分销的选题操盘手。下面给出一部剧的跨集台词转写、每集冲突档案"
+    "与一个零解说出片模式，为它选出若干条**卖点互异**的跨集冲突链取材方案："
+    "每条绑定一条完整故事线（前集埋线→后集爆发的因果链），而不是把同一段剧情"
+    "换个说法。\n"
+    '只输出 JSON：{"angles": [{"name": "方案名", "reason": "为什么值得单出一条片",'
+    ' "episode_numbers": [集号整数]}]}，不要其他文字。\n'
+    "硬性要求：方案名互不相同且各不超过 12 字；reason 不超过 60 字；"
+    "每条方案的 episode_numbers 必须覆盖该故事线的全部关键集（从埋线到反转），"
+    "鼓励跨集组合——单集出片讲不完一条因果链；"
+    "各条方案的取材集尽量不重叠；"
+    "方案名与理由只能来自给定转写，禁止编造。"
+)
+
 
 class AngleBrief(BaseModel):
     """一条取材角度：界面卡片四要素里的三项（角度名/理由/钩子）+ 取材集 + 叙事母题。
@@ -56,7 +73,7 @@ class AngleBrief(BaseModel):
 
     name: str
     reason: str
-    hook: str
+    hook: str = ""  # 零文案选线（zero_copy）无钩子：没有旁白去念它
     arc: str = ""
     episode_numbers: list[int]
 
@@ -85,6 +102,7 @@ def _sanitize(
     k: int,
     known_numbers: set[int],
     excluded: list[str],
+    zero_copy: bool = False,
 ) -> list[AngleBrief]:
     """逐条验收；任何一条不合格即整批不合格（重试或抛），绝不拿残缺的凑够 K 条。
     """
@@ -107,9 +125,11 @@ def _sanitize(
         hook = candidate.hook.strip()
         arc = candidate.arc.strip()
         numbers = sorted(set(candidate.episode_numbers))
-        if not name or not reason or not hook:
+        if not name or not reason:
+            raise ValueError("角度名、理由都不得为空")
+        if not zero_copy and not hook:
             raise ValueError("角度名、理由、钩子首句都不得为空")
-        if arc not in story_arc.ids():
+        if not zero_copy and arc not in story_arc.ids():
             raise ValueError(
                 f"角度「{name}」的母题不认识：{arc!r}（必须从母题菜单里选）"
             )
@@ -131,7 +151,11 @@ def _sanitize(
         seen.add(name)
         briefs.append(
             AngleBrief(
-                name=name, reason=reason, hook=hook, arc=arc, episode_numbers=numbers
+                name=name,
+                reason=reason,
+                hook=hook,
+                arc="" if zero_copy else arc,
+                episode_numbers=numbers,
             )
         )
     return briefs
@@ -195,8 +219,13 @@ def select_angles(
     settings: dict[str, str],
     excluded: list[str],
     trace_dir: Path | None = None,
+    zero_copy: bool = False,
 ) -> list[AngleBrief]:
     """为一个模式选出 K 条互异角度；答不出互异就抛，不凑数。
+
+    ``zero_copy``（raw_clip/高光混剪/字幕金句流）：换零文案专用提示词——只挑
+    跨集冲突链并命名，不付母题菜单/钩子/句式约束的成本（那些无处落地）；
+    验收同步放宽 hook/arc（见 _sanitize）。
     """
     if k < 1:
         raise ValueError(f"方案数 k 必须 ≥ 1，实得 {k}")
@@ -208,8 +237,9 @@ def select_angles(
     known_numbers = {int(episode["number"]) for episode in episode_inputs}
     profiles = episode_profiles_block(episode_inputs)
     profiles_block = (
-        f"\n各集档案（冲突高峰与高光的时间窗——母题关键拍落在哪些集，看这里定，"
-        f"别凭台词猜）：\n{profiles}\n"
+        f"\n各集档案（冲突高峰与高光的时间窗——"
+        f"{'故事线关键集落在哪些集' if zero_copy else '母题关键拍落在哪些集'}，"
+        f"看这里定，别凭台词猜）：\n{profiles}\n"
         if profiles
         else ""
     )
@@ -231,9 +261,8 @@ def select_angles(
     briefs: list[AngleBrief] | None = None
     for _ in range(_ATTEMPTS):
         try:
-            system = (
-                llm_prompts.system_override(settings, "prompt.angles_system")
-                or _SYSTEM_PROMPT
+            system = llm_prompts.system_override(settings, "prompt.angles_system") or (
+                _REEL_SYSTEM_PROMPT if zero_copy else _SYSTEM_PROMPT
             )
             raw = llm.chat_json(system, user_prompt)
             briefs = _sanitize(
@@ -241,6 +270,7 @@ def select_angles(
                 k=k,
                 known_numbers=known_numbers,
                 excluded=excluded,
+                zero_copy=zero_copy,
             )
         except (LlmUnavailable, ValueError, TypeError, KeyError) as exc:
             attempts.append({"error": f"{type(exc).__name__}: {exc}"})
