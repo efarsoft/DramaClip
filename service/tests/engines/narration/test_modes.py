@@ -26,14 +26,45 @@ def _scenes() -> list[ConflictScore]:
     ]
 
 
-def test_raw_clip_opens_with_highest_conflict() -> None:
+def test_raw_clip_follows_episode_order() -> None:
+    """真机 2026-10-20 业主否掉预告式前置：无解说模式里异集孤插开场=莫名其妙。
+
+    纯时间序连播（邻接合并后），不再把最高冲突场景挪到最前——预告式开场需要
+    旁白兜底（片头解说有），本模式卖点是「原声台词高光合集」。
+    """
     plan = build_raw_clip(stamp([(1, "ep1", _scenes())]), [], _STRATEGY)
     assert plan.mode == "raw_clip"
-    assert plan.timeline[0].start == 24 and plan.timeline[0].end == 30, "开场应为冲突最高场景"
-    starts = [seg.start for seg in plan.timeline[1:]]
-    assert starts == sorted(starts), "开场预告式前置，其余按原片时间线"
+    starts = [seg.start for seg in plan.timeline]
+    assert starts == sorted(starts), "纯原片按原片时间线连播，无前置孤插"
     total = sum(seg.end - seg.start for seg in plan.timeline)
     assert total >= 24, "冲突够的场景要讲完，不再按 30s 预算腰斩"
+
+
+def test_raw_clip_prefers_voiced_scenes_when_material_given() -> None:
+    """「原声台词高光合集」不得选进哑段：material 可注入时过滤无台词场景。
+
+    真机 2026-10-20：开场被排进 EP6 一段 3.6s 无台词动作戏（全剧最高分 78）。
+    过滤后 voiced ≥3 才生效；不足三条回退全候选（可用性优先）。
+    """
+    from dramaclip.engines.analysis.models import AsrSegment
+    from dramaclip.engines.narration.casting import EpisodeMaterial
+
+    scenes = [
+        ConflictScore(scene_index=0, start=0.0, end=6.0, score=95),   # 哑段：应被过滤
+        ConflictScore(scene_index=1, start=6.0, end=12.0, score=80),
+        ConflictScore(scene_index=2, start=12.0, end=18.0, score=75),
+        ConflictScore(scene_index=3, start=18.0, end=24.0, score=70),
+    ]
+    material = {
+        "ep1": EpisodeMaterial(
+            number=1,
+            asr=[AsrSegment(start=6.0, end=24.0, text="有台词的段落")],
+        )
+    }
+    plan = build_raw_clip(stamp([(1, "ep1", scenes)]), [], _STRATEGY, material)
+    spans = [(seg.start, seg.end) for seg in plan.timeline]
+    assert (0.0, 6.0) not in spans, "无台词的 95 分哑段不得入选"
+    assert spans == [(6.0, 24.0)], "三条有声场景邻接合并成一个连续块"
 
 
 def test_raw_clip_all_original_audio() -> None:
@@ -178,7 +209,7 @@ def test_raw_clip_merges_adjacent_high_scores_into_one_block() -> None:
     ]
     plan = build_raw_clip(stamp([(1, "ep1", scenes)]), [], _STRATEGY)
     assert [(seg.start, seg.end) for seg in plan.timeline] == [
-        (0.0, 12.0),  # 相邻两场景合成的连续块（含最高冲突，作开场）
+        (0.0, 12.0),  # 相邻两场景合成的连续块
         (20.0, 26.0),
     ], "相邻高分合并成块，块内零跳场；真间隙处保留分段节奏"
     assert len(plan.timeline) == 2, "三条候选合并为两块，选中集一秒不少"

@@ -68,7 +68,7 @@ def build_plan(
     """
     strategy = StrategySpec(platform="douyin")
     if mode == "raw_clip":
-        return apply_transitions(modes.build_raw_clip(scenes, highlights, strategy))
+        return apply_transitions(modes.build_raw_clip(scenes, highlights, strategy, material))
     if mode == "highlight_cut":
         return apply_transitions(modes.build_highlight_cut(scenes, strategy))
     if mode == "intro_narration":
@@ -327,6 +327,7 @@ def synthesize_narration_texts(
         log,
         api_key=settings.get("tts.api_key", ""),
         model=settings.get("tts.model", ""),
+        device=str(settings.get("tts.device") or "auto"),
     )
     # 音色按引擎独立成键；兼容升级前仅存全局 tts.voice 的旧库。
     # auto 链下每段可能落在不同引擎上，段级 voice 缺省时逐引擎取键。
@@ -381,7 +382,12 @@ def synthesize_narration_texts(
     ]
     # timeline 是裸 dict，必须过 model_validate 才是模型实例，导出层按属性读段
     laid = PlanData.model_validate(
-        {**plan.model_dump(), "narration_texts": updated, "timeline": timeline}
+        {
+            **plan.model_dump(),
+            "narration_texts": updated,
+            "timeline": timeline,
+            "compute": [report.to_dict() for report in pool.compute_reports()],
+        }
     )
     if plan.mode in ("ultra_short_hook", "cross_narration"):
         # 重铺改变了相邻关系，规划期的转场判定过期：按新窗口重算 fade/cut

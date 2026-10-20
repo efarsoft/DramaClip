@@ -174,11 +174,12 @@ def test_intro_keeps_its_slot_when_the_first_scene_alone_exceeds_the_budget() ->
     assert_slots_paired(plan, "intro_narration")
 
 
-def test_raw_clip_best_first_swap_survives_a_scene_index_collision() -> None:
-    """`scene_index` 只在一集内唯一：跨集时按 index 判"开场是不是最高分"会认错场景。
+def test_raw_clip_keeps_cross_episode_order_despite_scene_index_collision() -> None:
+    """`scene_index` 只在一集内唯一：跨集排序不能拿它当序。
 
-    夹具让两集都有一个 `scene_index=1` 的场景，且最高分那个在 ep2：
-    按 index 比较的实现会认定"开场已经是最高分"而不前置，按身份比较才会换。
+    夹具让两集都有一个 `scene_index=1` 的场景；按 index 排会把两集的场景混在
+    一起，按集序+起点排才是 ep1 两段在前、ep2 在后（raw_clip 自 2026-10-20 起
+    纯时间序连播，不再前置最高冲突）。
     """
     scenes = stamp(
         [
@@ -187,10 +188,11 @@ def test_raw_clip_best_first_swap_survives_a_scene_index_collision() -> None:
         ]
     )
     plan = build_raw_clip(scenes, [], _STRATEGY)
-    first = plan.timeline[0]
-    assert first.episode_id == "ep2" and first.start == 0.0, (
-        f"开场应为全剧最高冲突（ep2@0.0，99 分），实得 {first.episode_id}@{first.start}"
-    )
+    assert [(seg.episode_id, seg.start) for seg in plan.timeline] == [
+        ("ep1", 0.0),
+        ("ep1", 10.0),
+        ("ep2", 0.0),
+    ], "跨集场景按集序连播，scene_index 相同不得混淆顺序"
 
 
 def test_cross_narration_segment_carries_the_anchor_episode() -> None:

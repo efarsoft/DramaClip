@@ -3,7 +3,12 @@
 
 from __future__ import annotations
 
-from dramaclip.engines.narration.casting import EpisodeScene, episode_order, score_order
+from dramaclip.engines.narration.casting import (
+    EpisodeScene,
+    MaterialByEpisode,
+    episode_order,
+    score_order,
+)
 from dramaclip.engines.narration.models import (
     NarrationText,
     PlanData,
@@ -100,8 +105,16 @@ def build_raw_clip(
     scenes: list[EpisodeScene],
     highlights: list[HighlightSegment],
     strategy: StrategySpec,
+    material: MaterialByEpisode | None = None,
 ) -> PlanData:
-    """纯原片剪辑编排（原案 6.7）：开场最高冲突 → 时间线 → 截断。零加工（不遮罩）。"""
+    """纯原片剪辑编排：有台词在场的高冲突场景，纯时间序连播。零加工（不遮罩）。
+
+    预告式开场（最高冲突前置）曾是设计，真机 2026-10-20 被业主否掉：无解说模式
+    里一段 3.6 秒的异集无台词动作孤插当开场，观众只会莫名其妙——预告式开场
+    需要旁白兜底（片头解说有），本模式的卖点是「原声台词高光合集」，要的是连贯。
+    因此：①不前置；②候选必须有台词在场（material 可注入时过滤哑段，过滤后
+    不足三条或缺该集原料时回退，可用性优先）。
+    """
     if not scenes:
         return PlanData(mode="raw_clip", strategy=strategy)
     candidates = [
@@ -110,6 +123,10 @@ def build_raw_clip(
         if scene.score >= RAW_CLIP_MIN_SCORE
         and _RAW_CLIP_MIN_S <= scene.end - scene.start <= _RAW_CLIP_MAX_S
     ]
+    if material is not None:
+        voiced = [scene for scene in candidates if _has_dialogue(material, scene)]
+        if len(voiced) >= 3:
+            candidates = voiced
     # 分数不足时放宽到全部场景（按冲突分取头部，保证可用性）
     if len(candidates) < 3:
         ranked = sorted(scenes, key=score_order)[: max(3, len(highlights))]
@@ -118,16 +135,18 @@ def build_raw_clip(
     ordered = sorted(candidates, key=episode_order)
     # 邻接合并：相邻高分场景合成连续块播放，减少时间轴反复横跳
     ordered = _merge_adjacent(ordered)
-    best = max(ordered, key=lambda s: s.score)
-    # 身份比较用 `is`，不用 `scene_index`：scene_index 只在**一集内**唯一，
-    # 第 1 集的第 4 个场景与第 5 集的第 4 个场景 index 相同，跨集时按 index 判
-    # 会认定"开场已经是最高冲突"而不前置。
-    if ordered[0] is not best:
-        ordered.remove(best)
-        ordered.insert(0, best)
-
     timeline = _fit_duration(ordered, strategy)
     return PlanData(mode="raw_clip", timeline=timeline, strategy=strategy)
+
+
+def _has_dialogue(material: MaterialByEpisode, scene: EpisodeScene) -> bool:
+    """场景窗口与该集任一台词段相交才算「有声可放」；缺该集原料不误杀。"""
+    entry = material.get(scene.episode_id)
+    if entry is None:
+        return True
+    return any(
+        seg.end > scene.start and seg.start < scene.end for seg in entry.asr
+    )
 
 
 def build_intro(
@@ -136,11 +155,12 @@ def build_intro(
 ) -> PlanData:
     """片头解说编排（原案 6.4）：引子旁白段（画面为**最高冲突镜**）+ 正片高光（原声）。
 
-    首帧选镜与 `build_raw_clip` 同构：信息流里用户先看到画面，片头旁白讲「最大冲突」
-    而画面却是时间序的平淡开场就是音画各说各话（B 项）。故把冲突最高镜前置做首帧，
-    其余按 `episode_order` 时间序——这是「预告式开场」（先闪高潮、再回叙事），与
-    raw_clip 同款。前置用 `is` 身份比较不用 `scene_index`：scene_index 只在一集内
-    唯一，跨集时按 index 判会误认「开场已是最高冲突」而不前置（见 build_raw_clip 注释）。
+    首帧选镜：信息流里用户先看到画面，片头旁白讲「最大冲突」而画面却是时间序的
+    平淡开场就是音画各说各话（B 项）。故把冲突最高镜前置做首帧，其余按
+    `episode_order` 时间序——这是「预告式开场」（先闪高潮、再回叙事），旁白兜底
+    使其成立（raw_clip 无解说已取消前置，2026-10-20）。前置用 `is` 身份比较不用
+    `scene_index`：scene_index 只在一集内唯一，跨集时按 index 判会误认「开场已是
+    最高冲突」而不前置。
     全等分（max 取首个）时不前置，保持原时间序。
     """
     ordered = sorted(body_scenes, key=episode_order)
