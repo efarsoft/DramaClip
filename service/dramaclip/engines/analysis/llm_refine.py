@@ -299,6 +299,13 @@ def _to_segments(
         text = "".join(parts).strip()
         if not text or not _content(text):
             continue
+        # 句末标点兜底：LLM 偶发整句裸奔（真机 EP1 开场独白 13 句只带顿号，
+        # 2026-10-19）——提示词要求之外的确定性保险，TTS 与字幕都以句读为准。
+        # 逗号/顿号收尾替换成句号（「你好，。」是错的），冒号收尾是引语前奏不动。
+        if text[-1] in "，、":
+            text = text[:-1] + "。"
+        elif text[-1] not in "。！？…；：":
+            text += "。"
         start_f = contents[0].start if contents and contents[0].start is not None else 0.0
         end_last = contents[-1] if contents else None
         end_f = (end_last.end if end_last.end is not None else start_f) if end_last else start_f
@@ -426,8 +433,11 @@ _SYSTEM_PROMPT = (
     "硬性规则：\n"
     "- 所有句子拼接后必须与输入字流逐字一致（同音/近音字替换除外），"
     "禁止增删语句内容、禁止改写句式、禁止总结概括\n"
-    "- 可以为句子添加合适的标点\n"
-    "- 字幕参考是画面叠加的硬字幕，仅供纠错参考；其中转写字流里没有的内容不得搬入\n"
+    "- 每一句都必须带完整标点：句末用句号/问号/叹号，句内停顿用逗号、顿号，"
+    "称呼后用冒号——按口语语气标，这不是可选项\n"
+    "- 字幕参考是画面叠加的硬字幕，仅供纠错参考；它常无标点且分行碎，"
+    "标点与断句以口语语义为准，不要模仿字幕的无标点风格；"
+    "其中转写字流里没有的内容不得搬入\n"
     "- 只输出 JSON，不要多余文字"
 )
 

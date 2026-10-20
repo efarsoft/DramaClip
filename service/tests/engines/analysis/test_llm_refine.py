@@ -77,7 +77,7 @@ def test_refine_splits_and_fixes_homophones(monkeypatch: pytest.MonkeyPatch) -> 
         windows=[_win(0.0, 1.5, "我穿成崇祯皇帝"), _win(2.0, 3.5, "干的第一件事")],
     )
     assert outcome.applied
-    assert [s.text for s in outcome.segments] == ["我穿成崇祯皇帝", "干的第一件事"]
+    assert [s.text for s in outcome.segments] == ["我穿成崇祯皇帝。", "干的第一件事。"]
     assert all(s.source == "llm_refined" for s in outcome.segments), "精炼段必须带身份标记"
     assert outcome.segments[0].start == pytest.approx(0.0), "窗锚定：行时间=窗起点"
     assert outcome.segments[0].end == pytest.approx(1.5), "窗锚定：行时间=窗终点"
@@ -96,7 +96,7 @@ def test_refine_near_pinyin_with_ocr_evidence_passes(monkeypatch: pytest.MonkeyP
         windows=[_win(3.5, 5.0, "就是杀了大明两大蛀虫"), _win(6.0, 8.0, "一个是权势滔天")],
     )
     assert outcome.applied
-    assert outcome.segments[0].text == "就是杀了大明两大蛀虫"
+    assert outcome.segments[0].text == "就是杀了大明两大蛀虫。"
 
 
 def test_refine_repairs_content_deletion(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,7 +114,7 @@ def test_refine_repairs_unrelated_substitution(monkeypatch: pytest.MonkeyPatch) 
     outcome = _run(monkeypatch, ["甲乙丙戊"], raw, ocr_text="")
     assert outcome.applied
     assert "自动修复 1 处" in outcome.detail
-    assert outcome.segments[0].text == "甲乙丙丁", "非法替换回退原字"
+    assert outcome.segments[0].text == "甲乙丙丁。", "非法替换回退原字"
 
 
 def test_refine_repairs_unbacked_insertion(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -123,7 +123,7 @@ def test_refine_repairs_unbacked_insertion(monkeypatch: pytest.MonkeyPatch) -> N
     outcome = _run(monkeypatch, ["甲乙丙丁戊"], raw, ocr_text="")
     assert outcome.applied
     assert "自动修复 1 处" in outcome.detail
-    assert outcome.segments[0].text == "甲乙丙丁"
+    assert outcome.segments[0].text == "甲乙丙丁。"
 
 
 def test_refine_llm_unconfigured_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -252,9 +252,9 @@ def test_refine_carries_speaker_through_rebuild(monkeypatch: pytest.MonkeyPatch)
     outcome = _run(monkeypatch, ["你好，", "再见"], [seg_a, seg_b])
     assert outcome.applied is True
     assert [(s.text, s.speaker) for s in outcome.segments] == [
-        ("你好，", "角色A"),
-        ("再见", "角色B"),
-    ], "句边界不跨说话人：各自保留来源标签"
+        ("你好。", "角色A"),
+        ("再见。", "角色B"),
+    ], "句边界不跨说话人：各自保留来源标签；逗号收尾兜底替换为句号"
 
     # 跨说话人并句：同源不成立 → speaker=None，不编造归属
     outcome = _run(monkeypatch, ["你好再见"], [seg_a, seg_b])
