@@ -15,12 +15,17 @@ LLM 的自由度被数学约束在「移动边界 + 同音替换 + 有据补字�
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 from pypinyin import lazy_pinyin
 
 from dramaclip.engines.analysis.models import AsrSegment, OcrSegment, WordSpan
 from dramaclip.engines.semantic.llm_client import client_for, is_configured
+
+# 句子 bigram 与窗文本的亲和下限：低于即「这窗不是这句台词的画面」——
+# 字据特写/花字/道具字的 OCR 条目不得锚走台词（真机 2026-10-20 EP6 实锤）
+_WINDOW_AFFINITY_MIN = 0.25
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -276,6 +281,31 @@ def _to_segments(
     """
     result: list[AsrSegment] = []
     n, w = len(sentences), len(windows)
+    # 窗口文字亲和（真机 2026-10-20 EP6）：开头「字据特写+画外音」的 OCR 条目
+    # （含「二A10」垃圾条）被当成字幕窗后，比例分配把前 7 句全塞进 1.5 秒窗——
+    # 时间戳坍缩、台词被吞。句子必须锚「文字亲和」的窗：念字据的画外音锚字据窗
+    # （语义正确），无关台词退回字流实测时间。
+    window_texts = [re.sub(r"\s", "", win[2]) for win in windows]
+
+    def _affinity(sentence: str, window_text: str) -> float:
+        text = _content(sentence)
+        if len(text) < 2 or not window_text:
+            return 1.0
+        grams = [text[i : i + 2] for i in range(len(text) - 1)]
+        return sum(1 for gram in grams if gram in window_text) / len(grams)
+
+    def _best_window(index: int, sentence: str) -> int | None:
+        """按序贪心找文字亲和的窗：从句序对应位置起环形探测，亲和达标记用；
+        全部窗都不亲和则 None（该句退回字流实测时间，不硬塞假窗）。"""
+        start = index * w // n if n else 0
+        for offset in range(w):
+            candidate = (start + offset) % w
+            if _affinity(sentence, window_texts[candidate]) >= _WINDOW_AFFINITY_MIN:
+                return candidate
+        return None
+
+    prev_end = 0.0  # 时序守卫：窗口锚定不得早于前段结束（真机 2026-10-20 复刻：
+    # 「皇后/首饰」bigram 让中段句锚到后窗，时间倒跳——亲和必要不充分，单调也必须）
     for index, sentence in enumerate(sentences):
         contents = repaired[index] if index < len(repaired) else []
         template: list[tuple[str, int | None]] = []
@@ -309,10 +339,22 @@ def _to_segments(
         start_f = contents[0].start if contents and contents[0].start is not None else 0.0
         end_last = contents[-1] if contents else None
         end_f = (end_last.end if end_last.end is not None else start_f) if end_last else start_f
-        if w > 0:
-            lo = index * w // n
-            hi = min(max((index + 1) * w // n, lo + 1), w)
-            start_f, end_f = windows[lo][0], windows[hi - 1][1]
+        window_index = _best_window(index, sentence) if w > 0 else None
+        if window_index is not None:
+            # 带内锚定（2026-10-20 复审修订）：窗必须落在「前段结束 → 下一句实测
+            # 起点」的时间带内。越带 = 劫持前后句的时间位置（EP6 复刻：中段句被
+            # 「皇后/首饰」bigram 亲和吸到后窗，时序倒跳）。窗与本句字流实测**允许
+            # 完全不重叠**——ASR 字戳插值漂移中位 1.98s（07 报告实测），窗才是
+            # 金标准；能信的时序边界只有前后句的实测锚点。
+            prev_gate = prev_end - 0.3
+            nxt = repaired[index + 1] if index + 1 < len(repaired) else []
+            next_starts = [e.start for e in nxt if e.start is not None]
+            next_gate = (min(next_starts) + 0.3) if next_starts else None
+            w_start = windows[window_index][0]
+            if w_start < prev_gate or (next_gate is not None and w_start >= next_gate):
+                window_index = None  # 越带：退字流实测，宁可漂不可劫持
+        if window_index is not None:
+            start_f, end_f = windows[window_index][0], windows[window_index][1]
         # 说话人归属：句内全部内容字同源才认领；跨说话人的句子留 None（不编造归属）
         distinct_speakers = {e.speaker for e in contents if e.speaker is not None}
         speaker = distinct_speakers.pop() if len(distinct_speakers) == 1 else None
@@ -320,6 +362,7 @@ def _to_segments(
         # （段边缘钳到段边界）。没有这一步，精炼后段全丢字戳，下游 OCR×ASR
         # 融合永远回落纯 ASR——字幕窗对齐名存实亡（真机 EP1 实测）。
         words = _rebuild_words(contents, start_f, end_f)
+        prev_end = max(prev_end, end_f)
         result.append(
             AsrSegment(
                 start=round(start_f, 3),

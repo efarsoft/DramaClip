@@ -86,6 +86,31 @@ def test_refine_splits_and_fixes_homophones(monkeypatch: pytest.MonkeyPatch) -> 
     assert "字幕窗" in _FakeClient.last_user, "字幕窗列表进提示词"
 
 
+def test_refine_band_anchor_rejects_document_window_hijack(monkeypatch: pytest.MonkeyPatch) -> None:
+    """带内锚定（EP6 真机 2026-10-20）：字据特写的 OCR 条目不得劫持画外音台词。
+
+    场景：开头是字据特写+画外音——OCR 产出「二A10」垃圾窗与字据翻页窗；
+    中段句的「皇后/首饰」bigram 与字据文本部分亲和，盲目比例分配曾把前 7 句
+    全塞进 1.5 秒窗（时间戳坍缩=台词被吞）。修复后：亲和不达标的窗不锚；
+    亲和达标但越出「前段结束→下一句实测起点」时间带的窗也不锚——两套节拍
+    永不劫持彼此的时间位置。
+    """
+    windows = [
+        OcrSegment(start=2.5, end=4.0, text="二A10"),
+        OcrSegment(start=8.5, end=9.5,
+                   text="此银雨整伍万两以解燃眉之急今有周皇后将私有首饰一批"),
+    ]
+    raw = [_seg("有些疑问陛下请讲老臣定当如实禀报好皇后变卖首饰", start=2.5)]
+    sentences = ["有些疑问。", "陛下，请讲。", "老臣定当如实禀报。", "好，皇后变卖首饰。"]
+    outcome = _run(monkeypatch, sentences, raw, windows=windows)
+    starts = [seg.start for seg in outcome.segments]
+    assert starts == sorted(starts), "时序单调：假窗不得造成倒跳"
+    assert all(seg.end <= 9.5 + 0.31 for seg in outcome.segments if seg.start < 8.0), (
+        "开头台词不得被字据翻页窗劫持到 8.5s 之后"
+    )
+
+
+
 def test_refine_near_pinyin_with_ocr_evidence_passes(monkeypatch: pytest.MonkeyPatch) -> None:
     """蛀虫修正：蛀/诸同音过；虫/传近音（同声母）+ 字幕有据 → 通过。"""
     raw = [_seg("就是杀了大明两大诸传", start=3.5)]
