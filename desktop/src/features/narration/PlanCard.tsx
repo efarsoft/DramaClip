@@ -51,8 +51,8 @@ export function PlanCard({
 }) {
   const card = planCardView(plan);
   const [copyOpen, setCopyOpen] = useState(false);
-  const sourceEpisode = episodeCovers[plan.plan_data.timeline[0]?.episode_id ?? ''];
-  // 取材集如实展示全集分布：首段集号只是封面参考源，不是取材范围（真机误读）
+  // 取材集如实展示全集分布（真机误读修正）；封面缩略图已移除——业主裁决：
+  // 单张首集画面+集号角标传达不了取材范围，反而误导（2026-10-20）
   const materialNumbers = plan.episode_ids
     .map((id) => episodeCovers[id]?.number)
     .filter((n): n is number => typeof n === 'number')
@@ -80,7 +80,6 @@ export function PlanCard({
         cursor: card.pickable ? 'pointer' : 'not-allowed',
       }}
     >
-      {sourceEpisode?.cover ? <SourceCover source={sourceEpisode} /> : null}
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm, minHeight: 130, flex: 1, minWidth: 0 }}>
         <CardHeader card={card} recommended={recommended} checked={checked} />
         {card.hook !== '' && <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textPrimary }}>{card.hook}</span>}
@@ -92,23 +91,6 @@ export function PlanCard({
       </div>
       <PlanCopyModal plan={plan} open={copyOpen} onClose={() => { setCopyOpen(false); }} />
     </Card>
-  );
-}
-
-/** 封面缩略图（54×96 竖图）。 */
-function SourceCover({ source }: { source: SourceEpisode }): ReactElement {
-  return (
-    <img
-      src={source.cover ?? ''}
-      alt={`第${String(source.number)}集`}
-      style={{
-        width: 54,
-        height: 96,
-        objectFit: 'cover',
-        borderRadius: tokens.radiusControl,
-        flexShrink: 0,
-      }}
-    />
   );
 }
 
