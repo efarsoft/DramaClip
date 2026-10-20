@@ -145,7 +145,7 @@ const SURFACES: readonly Surface[] = [
     label: '工程文档',
     files: walkMarkdown,
     base: ROOT_DIR,
-    probe: '01-技术方案-原案.md',
+    probe: '02-总体架构与文档地图.md', // 原案已退役删除（2026-10-20），探针换现存权威文档
     minFiles: 15,
     minPhrases: 9,
     banned: PURPOSE_BANNED,
