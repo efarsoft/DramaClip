@@ -190,6 +190,26 @@ def score_variants(
     return {str(rows[index - 1]["id"]): entry for index, entry in scored.items()}
 
 
+def score_one(
+    plan_data: dict[str, Any],
+    angle: str,
+    settings: dict[str, str],
+    *,
+    trace_dir: Path | None = None,
+) -> dict[str, Any] | None:
+    """单稿评分（重写循环用）：返回 {dims, total, suggestion}；失败 None 不挡重写。
+
+    成稿时方案尚未落库，拿不到行 id——构造单元素 rows 走同一条批路径
+    （format/解析/system 全复用），假 id 只做返回键。
+    """
+    row = {"id": "rewrite", "angle": angle, "plan_data": plan_data}
+    try:
+        scored = score_variants([row], settings, trace_dir=trace_dir)
+    except Exception:  # noqa: BLE001 - 诊断是增益不是依赖：失败只缺建议，复述卡点仍在
+        return None
+    return scored.get("rewrite")
+
+
 def rank_variants(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """软排序（纯函数）：有分在前按 total 降序，平局按 variant_index 升序确定性兜底。
 

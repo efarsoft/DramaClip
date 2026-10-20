@@ -465,6 +465,7 @@ def _plan_one(
             mode_label=narration_pipeline.MODE_LABELS.get(mode, mode),
             angle_block=variant.angle_block,
             trace_dir=trace_dir,
+            angle_name=variant.name,
         )
     used_ids = sorted({segment.episode_id for segment in plan.timeline})
     return plan.model_copy(update={"arc": variant.arc}), used_ids
@@ -478,6 +479,7 @@ def _rewrite_copy_until_retellable(
     mode_label: str,
     angle_block: str,
     trace_dir: Path | None,
+    angle_name: str = "",
 ) -> PlanData:
     """复述驱动的重写循环：初稿不达标 → 带卡点重写一次 → 择优保留（批 ① 下半）。
 
@@ -493,6 +495,17 @@ def _rewrite_copy_until_retellable(
 
     notes = [f"复述卡点：{c.get('note', '')}" for c in first_report.confusions[:4]]
     notes.extend(first_report.reasons)
+    # 评分器六维诊断并流（2026-10-20 审计①）：两个 LLM 各看一半——复述抓
+    # 「听不懂」，评分抓「不吸引」（节奏/钩子/CTA）；只喂复述卡点会把可读但
+    # 平的稿放行。单稿调用只在本分支发生（初稿不达标才评），不是每条方案付费。
+    try:
+        score_note = variant_scoring.score_one(
+            plan.model_dump(), angle_name, settings, trace_dir=trace_dir
+        )
+    except Exception:  # noqa: BLE001 - 诊断是增益不是依赖：任何失败只缺建议
+        score_note = None
+    if score_note is not None and str(score_note.get("suggestion") or "").strip():
+        notes.append(f"评分建议：{str(score_note['suggestion']).strip()}")
     feedback = "；".join(notes)
     context.notifier.log("info", f"复述不达标，带卡点重写一轮（{feedback[:80]}）")
     try:

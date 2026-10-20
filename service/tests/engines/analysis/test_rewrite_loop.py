@@ -89,6 +89,75 @@ def test_rewrite_loop_adopts_passing_rewrite(tmp_path, monkeypatch):
     assert out.narration_texts[0].text == "重写稿文本"
 
 
+def test_rewrite_loop_injects_scoring_suggestion(tmp_path, monkeypatch):
+    """①审计落地：重写反馈并流评分器六维诊断——复述抓听不懂，评分抓不吸引。"""
+    from dramaclip.api import narration_plans
+    from dramaclip.engines.narration import variant_scoring as vs
+
+    plan = _plan("初稿文本")
+    reports = iter([_report(4), _report(1, passed=True)])
+    copies = iter(["重写稿文本"])
+
+    def fake_gate(_plan, _settings, _trace, _notifier):
+        return next(reports)
+
+    def fake_write(_plan, _material, _settings, *, mode_label, angle_block,
+                   trace_dir, rewrite_notes=""):
+        assert "评分建议：钩子再具体一点" in rewrite_notes, "评分诊断必须随卡点入重写"
+        return _plan.model_copy(update={
+            "narration_texts": [NarrationText(id="n0", text=next(copies), brief="")]
+        })
+
+    def fake_score_one(plan_data, angle, settings, *, trace_dir=None):
+        assert angle == "角度名"
+        return {"dims": {"hook_power": 6.0}, "total": 6.0, "suggestion": "钩子再具体一点"}
+
+    monkeypatch.setattr(narration_plans, "_retell_gate", fake_gate)
+    monkeypatch.setattr(narration_plans.copywriter, "write_plan_copy", fake_write)
+    monkeypatch.setattr(vs, "score_one", fake_score_one)
+    out = narration_plans._rewrite_copy_until_retellable(
+        SimpleNamespace(notifier=_FakeNotifier()),
+        plan, {}, {}, mode_label="交叉解说", angle_block="", trace_dir=None,
+        angle_name="角度名",
+    )
+    assert out.narration_texts[0].text == "重写稿文本"
+
+
+def test_rewrite_loop_survives_scoring_failure(tmp_path, monkeypatch):
+    """评分诊断是增益不是依赖：score_one 抛异常时只缺建议，重写照常进行。"""
+    from dramaclip.api import narration_plans
+    from dramaclip.engines.narration import variant_scoring as vs
+
+    plan = _plan("初稿文本")
+    reports = iter([_report(4), _report(1, passed=True)])
+    copies = iter(["重写稿文本"])
+    seen_notes: list[str] = []
+
+    def fake_gate(_plan, _settings, _trace, _notifier):
+        return next(reports)
+
+    def fake_write(_plan, _material, _settings, *, mode_label, angle_block,
+                   trace_dir, rewrite_notes=""):
+        seen_notes.append(rewrite_notes)
+        return _plan.model_copy(update={
+            "narration_texts": [NarrationText(id="n0", text=next(copies), brief="")]
+        })
+
+    monkeypatch.setattr(narration_plans, "_retell_gate", fake_gate)
+    monkeypatch.setattr(narration_plans.copywriter, "write_plan_copy", fake_write)
+    def _boom(*_a, **_k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(vs, "score_one", _boom)
+    out = narration_plans._rewrite_copy_until_retellable(
+        SimpleNamespace(notifier=_FakeNotifier()),
+        plan, {}, {}, mode_label="交叉解说", angle_block="", trace_dir=None,
+        angle_name="角度名",
+    )
+    assert out.narration_texts[0].text == "重写稿文本"
+    assert seen_notes and "评分建议" not in seen_notes[0], "诊断失败不挡重写"
+
+
 def test_rewrite_loop_keeps_original_when_rewrite_worse(tmp_path, monkeypatch):
     """重写稿复述仍未达标 → 择优保留原稿，不盲采。"""
     from dramaclip.api import narration_plans
