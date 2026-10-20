@@ -1273,3 +1273,80 @@ def test_list_plans_can_filter_by_batch(
         )
     ) == 2
 
+
+def test_zero_copy_modes_deterministically_anchor_episodes(
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """零文案模式（raw_clip 等）不付选题往返：按集冲突峰确定性锚定，互异且无母题。
+
+    2026-10-20 逐一核对：raw_clip/高光混剪/字幕金句流没有文案面，角度/母题/钩子
+    对成片零影响——为它们付 LLM 选题往返是「付钱不收货」。互异轴=锚定集（峰值
+    降序），K 封顶于集数；母题恒空（方案卡不出紫标，不再许空头承诺）。
+    """
+    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
+    project = harness.rpc("project.create", {"name": "锚定取材", "source_path": str(tmp_path)})
+    for n in (1, 2, 3):
+        shutil.copy(sample_video, tmp_path / f"ep{n}.mp4")
+    harness.rpc("project.scan_episodes", {"project_id": project["id"]})
+    project_id = str(project["id"])
+    peaks = {1: 70, 2: 95, 3: 55}
+    for episode in episodes_repo.list_by_project(memory_db, project_id):
+        number = int(episode["episode_number"])
+        scenes = [
+            {"scene_index": i, "start": float(i), "end": float(i + 0.8),
+             "score": min(100, peaks[number] - i * 10)}
+            for i in range(3)
+        ]
+        analysis_repo.upsert(
+            memory_db,
+            str(episode["id"]),
+            asr_segments=json.dumps(
+                [{"start": 0.2, "end": 0.8, "text": f"第{number}集台词"}]
+            ),
+            scene_data="[]",
+            audio_features=AudioFeatures().model_dump_json(),
+            conflict_scores=json.dumps(scenes),
+        )
+        episodes_repo.set_status(memory_db, str(episode["id"]), "done")
+
+    angle_calls: list[str] = []
+
+    class _RecordingAngles:
+        def __init__(self, _config: Any, timeout_s: float = 60.0) -> None:
+            pass
+
+        def chat_json(self, system: str, _user: str, temperature: float = 0.3) -> dict[str, Any]:
+            angle_calls.append(system)
+            return {"angles": []}
+
+    patch_client_for(monkeypatch, angles, _RecordingAngles)
+
+    result = harness.rpc(
+        "narration.plan_variants",
+        {"project_id": project_id, "modes": ["raw_clip"], "k": 2},
+    )
+    status = _wait_terminal(harness, str(result["job_id"]))
+    assert status["status"] == "completed", status.get("error")
+    assert angle_calls == [], "零文案模式不得再付选题往返（真机核对：付钱不收货）"
+
+    plans = plans_repo.list_by_batch(memory_db, project_id, str(result["batch_id"]))
+    names = [row["angle"] for row in plans]
+    assert names == ["纯原片剪辑·锚定第2集", "纯原片剪辑·锚定第1集"], (
+        f"按集冲突峰降序锚定（EP2=95 分最前），实得 {names}"
+    )
+    id_by_number = {
+        int(e["episode_number"]): str(e["id"])
+        for e in episodes_repo.list_by_project(memory_db, project_id)
+    }
+    for row in plans:
+        plan = PlanData.model_validate(row["plan_data"])
+        assert plan.arc == "", "零文案模式不出母题紫标（无叙事可标注）"
+        assert row["status"] == "ready", "确定性取材的方案应可直接出片"
+        anchor = int(row["angle"].rsplit("第", 1)[1].rstrip("集"))
+        assert plan.timeline, "锚定集的冲突窗应产出非空时间轴"
+        assert {seg.episode_id for seg in plan.timeline} == {id_by_number[anchor]}, (
+            f"时间轴全部落在锚定集（EP{anchor}）内"
+        )

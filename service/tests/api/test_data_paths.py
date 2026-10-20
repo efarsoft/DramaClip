@@ -49,7 +49,7 @@ def test_export_output_lands_under_data_dir(
 ) -> None:
     project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
-    # 统一选题后 raw_clip 产出同样要求 LLM（57ac5a1）；替身给单集合法角度
+    # raw_clip 已改确定性锚定不跑选题（2026-10-20）；此替身仅兜其它 LLM 面
     harness.context.settings.update(_LLM_SETTINGS)
     _stub_llm(monkeypatch)
     produce = harness.rpc(

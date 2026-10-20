@@ -52,6 +52,9 @@ SUPPORTED_MODES = (
 
 # 与 TTS 合成并行的两组：剧情解说已由 LLM 剧本驱动，每段都要配音，不再属"无 TTS"。
 _NO_TTS_MODES = frozenset({"raw_clip", "subtitle_flow", "highlight_cut"})
+# 零文案模式（=_NO_TTS_MODES）：没有旁白槽位，角度/母题/钩子对成片零影响——
+# 跳过 LLM 选题（付钱不收货，2026-10-20 核对），取材走确定性锚定（_deterministic_variants）。
+_ZERO_COPY_MODES = _NO_TTS_MODES
 
 # 会产出旁白槽位、因而读 `settings["_style_directives"]` 的模式（copywriter /
 # scriptwriter 两侧都只往解说槽位里塞风格指令）。派生自上面两个集合，绝不另立
@@ -154,9 +157,14 @@ def _run_plan_variants(
                 break
             label = narration_pipeline.MODE_LABELS.get(mode, mode)
             try:
-                variants = _angle_variants(
-                    context, mode, label, episode_inputs, settings, k, excluded_angles
-                )
+                if mode in _ZERO_COPY_MODES:
+                    variants = _deterministic_variants(
+                        context, mode, label, episode_inputs, k, excluded_angles
+                    )
+                else:
+                    variants = _angle_variants(
+                        context, mode, label, episode_inputs, settings, k, excluded_angles
+                    )
             except Exception as exc:  # noqa: BLE001 - 取意图失败 = 这个模式的 K 条全没了
                 # 按 K 条记账：界面才不会把「这个模式一条都没出」显示成「这个模式本来就没有方案」
                 for i in range(1, k + 1):
@@ -274,11 +282,61 @@ def _score_batch(
     context.notifier.log("info", f"方案评分完成：{len(scored)}/{len(rows)} 条")
 
 
+def _deterministic_variants(
+    context: AppContext,
+    mode: str,
+    label: str,
+    episode_inputs: list[dict[str, Any]],
+    k: int,
+    excluded_angles: list[str],
+) -> list[_Variant]:
+    """零文案模式的确定性取材：按集冲突峰锚定，不跑选题模型。
+
+    raw_clip/高光混剪/字幕金句流没有文案面，角度/母题/钩子对成片零影响——为它们
+    付选题往返是「付钱不收货」（2026-10-20 逐一核对）。互异轴=锚定集：每条方案锚定
+    一个冲突峰最高的集，取材集天然互异、天然满足重叠闸门；K 自动封顶于集数，不硬凑。
+    无冲突数据的集排最后（按集号），保证从未跑语义层的集也能锚定。
+    """
+    ranked: list[tuple[int, int]] = []
+    for episode in episode_inputs:
+        peak = 0
+        record = analysis_repo.get(context.conn, str(episode["episode_id"]))
+        if record is not None and record.get("conflict_scores"):
+            try:
+                scores = json.loads(str(record["conflict_scores"]))
+                peak = max(
+                    (int(s.get("score") or 0) for s in scores if isinstance(s, dict)),
+                    default=0,
+                )
+            except (json.JSONDecodeError, TypeError):
+                peak = 0
+        ranked.append((peak, int(episode["number"])))
+    ranked.sort(key=lambda t: (-t[0], t[1]))
+    variants: list[_Variant] = []
+    for _peak, number in ranked:
+        if len(variants) >= max(1, k):
+            break
+        name = f"{label}·锚定第{number}集"
+        if name in excluded_angles:
+            continue
+        variants.append(
+            _Variant(
+                name=name,
+                reason=f"以第 {number} 集冲突峰为锚的确定性取材（零文案模式不跑选题模型）",
+                episode_numbers=[number],
+                angle_block="",
+                arc="",
+            )
+        )
+    return variants
+
+
 def _angle_variants(
     context: AppContext,
     mode: str,
     label: str,
     episode_inputs: list[dict[str, Any]],
+
     settings: dict[str, str],
     k: int,
     excluded_angles: list[str],
