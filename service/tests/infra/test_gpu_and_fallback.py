@@ -8,6 +8,8 @@ from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from dramaclip.engines.analysis.transcriber import FasterWhisperEngine
 from dramaclip.infra import gpu
 
@@ -199,6 +201,50 @@ def test_profile_caps_and_runtime_layering() -> None:
     # 运行时组合层（tts-venv 安装态）不在 profile 硬件判定里：一律 ready=False
     assert prof["caps"]["vocal_separation_gpu"]["ready"] is False
     assert "MDX-Net" in prof["caps"]["vocal_separation_gpu"]["hint"]
+
+
+def test_profile_sm52_blocks_whisper_but_not_funasr(monkeypatch: pytest.MonkeyPatch) -> None:
+    """M4000 形态（sm_52）：whisper GPU 加速如实标「不支持」，funasr 看服务 torch 实况。
+
+    真机 2026-10-20：tts-venv 变体标记=cpu 的灰灯让人以为 GPU 整体不可用，
+    实际 funasr 在 dev 主进程的 GPU 轮 torch 上跑——分能力表述是文案也是判据。
+    """
+    snap = {
+        "vendor": "nvidia",
+        "name": "Quadro M4000",
+        "memory_total_mb": 8192,
+        "max_cuda_version": "13.0",
+        "compute_cap": "5.2",
+    }
+    prof = device_profile.profile(snap, cuda_runtime_installed=True)
+    whisper = prof["caps"]["faster_whisper_gpu"]
+    assert whisper["ok"] is False and whisper["ready"] is False
+    assert "无 ctranslate2 计算内核" in whisper["hint"]
+    assert "funasr" in whisper["hint"], "不支持的原因要指向可用的替代（funasr）"
+
+    # funasr：dev 主进程 torch 在 GPU（实况优先于 tts-venv 标记）
+    monkeypatch.setattr(device_profile, "_SERVICE_TORCH_CUDA", True)
+    prof_gpu = device_profile.profile(snap, cuda_runtime_installed=True)
+    assert prof_gpu["caps"]["funasr_gpu"]["ready"] is True
+    # torch 不在 GPU 且标记=cpu：ready 如实 False
+    monkeypatch.setattr(device_profile, "_SERVICE_TORCH_CUDA", False)
+    prof_cpu = device_profile.profile(snap, cuda_runtime_installed=True)
+    assert prof_cpu["caps"]["funasr_gpu"]["ready"] is False
+
+
+def test_profile_newer_cc_keeps_whisper_available() -> None:
+    """算力达下界（如 sm_75）：whisper GPU 判据不因 cc 字段出现而回退。"""
+    snap = {
+        "vendor": "nvidia",
+        "name": "RTX 2060",
+        "memory_total_mb": 6144,
+        "max_cuda_version": "12.8",
+        "compute_cap": "7.5",
+    }
+    prof = device_profile.profile(snap, cuda_runtime_installed=True)
+    assert prof["caps"]["faster_whisper_gpu"]["ok"] is True
+    assert prof["caps"]["faster_whisper_gpu"]["ready"] is True
+    assert prof["caps"]["faster_whisper_gpu"]["hint"] == ""
 
 
 def test_profile_driver_guidance_when_cuda_too_old() -> None:

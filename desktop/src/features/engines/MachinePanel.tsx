@@ -300,6 +300,17 @@ function TierLine({
   const okList = Object.entries(caps)
     .filter(([key, cap]) => cap.ok && !readyOf(key))
     .map(([key]) => CAP_LABEL[key]);
+  // 硬件/算力层面就不支持的项（hint 带原因）：不渲染就是灰灯误导——
+  // 真机 2026-10-20：M4000 的「转写加速」灰灯让人以为 GPU 整体不可用，
+  // 实际 funasr 正跑在 GPU 上、只有 whisper 加速永久不支持
+  const blocked = Object.entries(caps).filter(([key, cap]) => {
+    if (cap.ok || cap.hint === '') return false;
+    return key !== 'indextts2_gpu' && key !== 'funasr_gpu';
+  });
+  const blockedList = blocked.map(([key]) => CAP_LABEL[key] ?? key);
+  const blockedHint = blocked
+    .map(([key, cap]) => `${CAP_LABEL[key] ?? key}：${cap.hint}`)
+    .join('\n');
   const tail =
     readyList.length > 0
       ? `GPU 加速已生效：${readyList.join('、')}`
@@ -324,6 +335,17 @@ function TierLine({
       <span style={{ width: 7, height: 7, borderRadius: tokens.radiusThumb, background: dot, flexShrink: 0 }} />
       <span style={{ color: tokens.textSecondary }}>
         {`${profile.tier_label}${vram !== '' ? ` · ${vram}` : ''} · ${profile.recommendation}${tail !== '' ? ` · ${tail}` : ''}`}
+        {blocked.length > 0 && (
+          <>
+            {' · '}
+            <span
+              title={blockedHint}
+              style={{ textDecoration: 'underline dotted', textUnderlineOffset: 3 }}
+            >
+              {`此卡不支持：${blockedList.join('、')}`}
+            </span>
+          </>
+        )}
       </span>
       {profile.driver_guidance.needed && (
         <Button
