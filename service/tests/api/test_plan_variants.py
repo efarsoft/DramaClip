@@ -1357,3 +1357,57 @@ def test_zero_copy_modes_deterministically_anchor_episodes(
         assert {seg.episode_id for seg in plan.timeline} == {id_by_number[anchor]}, (
             f"时间轴全部落在锚定集（EP{anchor}）内"
         )
+
+
+def test_motif_formula_and_genre_directives_never_coexist(
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """复审补的优先级规则（2026-10-20）：auto+母题 → 题材节拍指令清空、配方独占
+    文风；人工显式选风格 → directives 保留、配方让位——两套节拍永不同场，
+    且任务级设置在方案结束后必须恢复。"""
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
+    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
+    harness.context.settings.update(_LLM_SETTINGS)
+    calls: list[tuple[str, str]] = []
+    _stub_language_and_tts(monkeypatch, calls)
+
+    captured: list[str] = []
+    real_write = copywriter.write_plan_copy
+
+    def _capture_write(plan, material, settings, **kwargs):
+        captured.append(settings.get("_style_directives") or "")
+        return real_write(plan, material, settings, **kwargs)
+
+    monkeypatch.setattr(copywriter, "write_plan_copy", _capture_write)
+
+    # auto：母题配方独占文风
+    result = harness.rpc(
+        "narration.plan_variants",
+        {"project_id": project_id, "modes": ["full_narration"], "k": 1},
+    )
+    status = _wait_terminal(harness, str(result["job_id"]))
+    assert status["status"] == "completed", status.get("error")
+    assert captured == [""], "auto+母题：题材节拍指令必须清空（配方独占文风）"
+    copy_users = [user for _system, user in calls if "槽位" in user or "情绪配方" in user]
+    assert any("情绪配方" in user for user in copy_users), "配方应随角度块注入"
+    assert not any("解说风格要求" in user for user in copy_users), (
+        "auto 下题材节拍指令不得与配方同场"
+    )
+
+    # 人工显式选风格：directives 保留（人工优先），配方让位
+    harness.context.settings["narration.style_id"] = "suspense"
+    result = harness.rpc(
+        "narration.plan_variants",
+        {"project_id": project_id, "modes": ["full_narration"], "k": 1},
+    )
+    status = _wait_terminal(harness, str(result["job_id"]))
+    assert status["status"] == "completed", status.get("error")
+    assert "悬疑" in captured[-1], "人工风格指令必须保留"
+    manual_users = [user for _system, user in calls if "解说风格要求" in user]
+    assert manual_users and not any("情绪配方" in user for user in manual_users), (
+        "人工风格在场时母题情绪配方必须让位（结构卡保留）"
+    )
+    assert "母题结构" in manual_users[-1], "结构卡不受人工风格影响"

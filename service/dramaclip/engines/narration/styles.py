@@ -60,6 +60,17 @@ def get_style(style_id: str | None) -> dict[str, Any]:
     )
 
 
+def is_manual_style(settings: dict[str, str]) -> bool:
+    """业主显式选了风格（非空且非 auto）：人工意图优先于母题情绪配方。
+
+    母题配方与任务级 _style_directives（题材静态映射产）不同场出现——
+    auto 时配方接管文风、directives 清空；手动时 directives 保留、配方让位。
+    两套节拍永不同场（2026-10-20 复审补的优先级规则）。
+    """
+    preferred = (settings.get("narration.style_id") or "").strip()
+    return preferred not in ("", AUTO_STYLE_ID)
+
+
 def resolve_style_id(preferred: str | None, genre: str | None = None) -> str:
     """解析最终风格 id。
     """

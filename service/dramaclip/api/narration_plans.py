@@ -24,6 +24,7 @@ from dramaclip.engines.narration import (
     overlap,
     script_driver,
     scriptwriter,
+    story_arc,
     variant_scoring,
 )
 from dramaclip.engines.narration import pipeline as narration_pipeline
@@ -203,9 +204,26 @@ def _run_plan_variants(
                 tag = f"{label}·{_slot_label(variant, index)}"
                 try:
                     _reject_same_episode_sibling(mode, variant, accepted)
-                    plan, used_ids = _plan_one(
-                        context, mode, episodes, episode_inputs, settings, variant
+                    # auto+母题配方：清任务级 _style_directives（题材静态映射的
+                    # 节拍指令），让母题情绪配方独占文风——两套节拍永不同场；
+                    # 人工显式选了风格则保留 directives、配方让位。
+                    suppress_directives = (
+                        not styles_lib.is_manual_style(settings)
+                        and bool(story_arc.card_of(variant.arc))
                     )
+                    saved_directives = settings.get("_style_directives")
+                    if suppress_directives:
+                        settings["_style_directives"] = ""
+                    try:
+                        plan, used_ids = _plan_one(
+                            context, mode, episodes, episode_inputs, settings, variant
+                        )
+                    finally:
+                        if suppress_directives:
+                            if saved_directives is None:
+                                settings.pop("_style_directives", None)
+                            else:
+                                settings["_style_directives"] = saved_directives
                     worst = _worst_overlap(plan, accepted)
                     if worst is not None and worst.ratio > overlap.OVERLAP_LIMIT:
                         raise ValueError(
@@ -373,12 +391,17 @@ def _angle_variants(
         trace_dir=llm_trace_dir(context),
         zero_copy=zero_copy,
     )
+    # 人工显式选了风格：情绪配方让位（两套节拍永不同场，styles.is_manual_style）
+    include_style = not styles_lib.is_manual_style(settings)
     return [
         _Variant(
             name=brief.name,
             reason=brief.reason,
             episode_numbers=brief.episode_numbers,
-            angle_block="" if zero_copy else angles.prompt_block(brief),
+            angle_block=(
+                "" if zero_copy
+                else angles.prompt_block(brief, include_style=include_style)
+            ),
             arc=brief.arc,
         )
         for brief in briefs
