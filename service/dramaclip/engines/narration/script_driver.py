@@ -8,18 +8,17 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from dramaclip.engines import llm_prompts, llm_trace
+from dramaclip.engines import llm_prompts
 from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration import scriptwriter, styles
 from dramaclip.engines.narration.models import PlanData, StrategySpec
-from dramaclip.engines.semantic.llm_client import client_for, is_configured
+from dramaclip.engines.semantic.llm_client import client_for
 
 # 剧本生成实测可达 100s+（qwen3.7-plus），远超 LLM 客户端默认 60s 超时；
 # 2026-09-29 十集跨集剧本 3×240s 全读超时（prompt 7.7k 字符不大，是**产出**
 # 的完整剧本 JSON 太长）——提到 600s。端点 600s 都吐不完就该换端点了。
 SCRIPT_LLM_TIMEOUT_S = 600.0
-_SELECT_TIMEOUT_S = 60.0
 
 LogFn = Callable[[str, str], None]
 
@@ -47,34 +46,20 @@ def resolve_run_style(
     log: LogFn,
     trace_dir: Path | None = None,
 ) -> dict[str, Any]:
-    """口味层解析，每个任务只跑一次（原状是每模式一次，produce 白付 6 次 LLM 往返）。
+    """口味层解析，每个任务只跑一次。
+
+    AUTO 不再跑 LLM 风格选题（2026-10-20 裁决：风格是母题的从属维度）——
+    情绪配方随母题卡自动落定（angles.prompt_block 注入，两链共用），逐任务
+    一次的独立风格匹配退役：根除「风格节拍×母题节拍」两个主人打架（真机
+    实锤：层层揭皮×爽文向），且少付一次 LLM 往返、砍掉选题失败的降级路径。
+    业主手动选风格仍最高优先（人工 > 母题配方 > 题材静态映射底）——默认
+    auto 全自动，无人需要碰任何开关。
     """
     preferred = settings.get("narration.style_id")
     genre = settings.get("_genre")
     style_id = styles.resolve_style_id(preferred, genre)
-    reason = ""
-    if (
-        preferred in (styles.AUTO_STYLE_ID, None, "")
-        and episode_inputs
-        and is_configured(settings)
-    ):
-        selector = client_for(settings, min_timeout_s=_SELECT_TIMEOUT_S)
-        stamp = time.strftime("%m%d_%H%M%S")
-        try:
-            selection = styles.select_style_with_reason(
-                selector,
-                _excerpt(episode_inputs),
-                system_prompt=llm_prompts.system_override(settings, "prompt.style_select_system"),
-                trace_path=llm_trace.trace_path(trace_dir, f"llm_style_select_{stamp}.json"),
-            )
-        except Exception:  # noqa: BLE001 - 选题失败必须降级而非中断出片
-            selection = None
-        if selection is None:
-            log("warn", "AI 风格选题失败，按题材静态映射兜底")
-        else:
-            style_id, reason = selection
     style = styles.get_style(style_id)
-    log("info", _style_log_line(preferred, style, genre, reason))
+    log("info", _style_log_line(preferred, style, genre, ""))
     return style
 
 
@@ -133,16 +118,6 @@ def script_dialogue_plan(
     used_ids = sorted({seg.episode_id for seg in plan.timeline})
     return plan, used_ids
 
-
-def _excerpt(episode_inputs: list[dict[str, Any]], max_lines: int = 40) -> list[dict[str, Any]]:
-    """跨集选题节选：每集轮流取前几行，保证各集在菜单选择时都被看见。"""
-    pool = [list(ep["segments"]) for ep in episode_inputs]
-    excerpt: list[dict[str, Any]] = []
-    while len(excerpt) < max_lines and any(pool):
-        for segments in pool:
-            if segments and len(excerpt) < max_lines:
-                excerpt.append(segments.pop(0))
-    return excerpt
 
 
 def _style_log_line(

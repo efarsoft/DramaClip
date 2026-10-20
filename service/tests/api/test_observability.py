@@ -274,9 +274,11 @@ def test_start_job_leaves_conflict_and_genre_traces(
     assert f"llm_genre_{episode_id}.json" in traces, sorted(traces)
 
 
-def test_style_selection_leaves_a_trace(
+def test_style_resolution_leaves_no_llm_trace(
     memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """口味层 AUTO 已退役 LLM 选题（2026-10-20 裁决）：情绪配方随母题卡自动
+    落定，口味层零 LLM 往返也零留痕——观测面断言「不再出现 style_select 痕」。"""
     harness = _harness(memory_db, tmp_path, narration_api)
     _stub_chat_json(monkeypatch)
     project_id, episode_id = _seed(memory_db, tmp_path, status="done", analyzed=True)
@@ -287,11 +289,7 @@ def test_style_selection_leaves_a_trace(
     narration_plans._inject_run_settings(harness.context, settings, episodes, ["full_narration"])
     blobs = _traces(tmp_path)
     names = [name for name in blobs if name.startswith("llm_style_select_")]
-    assert len(names) == 1, f"口味层选题未留痕：{sorted(blobs)}"
-    blob = blobs[names[0]]
-    assert blob["engine"] == "style_select" and blob["accepted"] is True
-    assert blob["style_id"] == "shuanggan"
-    assert settings["_style_directives"], "选中的风格没有进入口味层"
+    assert names == [], f"风格选题已退役却仍有留痕：{sorted(names)}"
 
 
 def test_generate_titles_leaves_a_trace(

@@ -111,12 +111,13 @@ def test_no_script_raises(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 
-def test_resolve_run_style_uses_llm_choice(driver: Any) -> None:
-    """auto 且已配置 LLM：口味层让模型选题，选中的风格才是本次的答案。"""
+def test_resolve_run_style_auto_never_calls_llm(driver: Any) -> None:
+    """auto 不再跑 LLM 风格选题（2026-10-20 裁决）：情绪配方随母题卡自动落定
+    （angles.prompt_block 注入），口味层零 LLM 往返；题材静态映射只作通用底。"""
     FakeLlmClient.queue = [{"style_id": "sweet", "reason": "甜宠互动密集"}]
     style = driver.resolve_run_style(dict(_SETTINGS), _EPISODES, log=_noop_log)
-    assert style["style_id"] == "sweet", "模型选中的风格未被采纳（逆袭→shuanggan 是兜底答案）"
-    assert len(FakeLlmClient.calls) == 1, "选题应只付一次 LLM 往返"
+    assert FakeLlmClient.calls == [], "auto 风格选题已退役，一个请求都不该发"
+    assert style["style_id"] == "shuanggan", "_genre=逆袭 的静态映射底仍在"
 
 
 def test_resolve_run_style_manual_skips_llm(driver: Any) -> None:
@@ -128,14 +129,10 @@ def test_resolve_run_style_manual_skips_llm(driver: Any) -> None:
     assert FakeLlmClient.calls == [], "手动指定风格不该发选题请求"
 
 
-def test_resolve_run_style_falls_back_to_genre_mapping(driver: Any) -> None:
-    FakeLlmClient.queue = [RuntimeError("选题服务不可用")]
-    logs: list[tuple[str, str]] = []
-    style = driver.resolve_run_style(
-        dict(_SETTINGS), _EPISODES, log=lambda lv, msg: logs.append((lv, msg))
-    )
+def test_resolve_run_style_genre_mapping_is_the_floor(driver: Any) -> None:
+    """未选风格时的通用底：题材静态映射（LLM 选题路径已退役，无降级可言）。"""
+    style = driver.resolve_run_style(dict(_SETTINGS), _EPISODES, log=_noop_log)
     assert style["style_id"] == "shuanggan", "_SETTINGS 的 _genre=逆袭 应映射爽感"
-    assert any("题材静态映射" in msg for _lv, msg in logs)
 
 
 def test_resolve_run_style_unconfigured_skips_llm(driver: Any) -> None:
@@ -192,29 +189,6 @@ def _blobs(tmp_path: Any) -> list[dict[str, Any]]:
     ]
 
 
-def test_resolve_run_style_traces_the_selection(driver: Any, tmp_path: Any) -> None:
-    FakeLlmClient.queue = [{"style_id": "sweet", "reason": "甜宠互动密集"}]
-    driver.resolve_run_style(
-        dict(_SETTINGS), _EPISODES, log=_noop_log, trace_dir=tmp_path
-    )
-    blobs = _blobs(tmp_path)
-    assert len(blobs) == 1, "选题一次往返该且只该留一份痕"
-    assert blobs[0]["raw"] == {"style_id": "sweet", "reason": "甜宠互动密集"}
-    assert blobs[0]["accepted"] is True
-
-
-def test_style_outside_the_library_is_traced_as_rejected(
-    driver: Any, tmp_path: Any
-) -> None:
-    """模型报了个库外风格 id：界面拿到的"按题材匹配"其实是兜底，留痕要说明为什么。"""
-    FakeLlmClient.queue = [{"style_id": "不存在的风格", "reason": "自认为合适"}]
-    style = driver.resolve_run_style(
-        dict(_SETTINGS), _EPISODES, log=_noop_log, trace_dir=tmp_path
-    )
-    assert style["style_id"] == "shuanggan"
-    blob = _blobs(tmp_path)[0]
-    assert blob["accepted"] is False
-    assert "不存在的风格" in json.dumps(blob, ensure_ascii=False)
 
 
 def test_manual_style_writes_no_trace(driver: Any, tmp_path: Any) -> None:

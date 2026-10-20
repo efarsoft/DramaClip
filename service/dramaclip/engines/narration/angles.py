@@ -79,7 +79,11 @@ class AngleBrief(BaseModel):
 
 
 def prompt_block(brief: AngleBrief) -> str:
-    """卖点角度进成稿 prompt 的措辞；母题结构卡随行（剧本链与逐槽链共用此通道）。
+    """卖点角度进成稿 prompt 的措辞；母题结构卡+情绪配方随行（两链共用此通道）。
+
+    情绪配方是母题的从属维度（2026-10-20 裁决）：讲法定了文风跟着讲法走，
+    全自动随选题落定——不再逐任务跑独立风格选题（根除风格×母题两个主人
+    打架；真机实锤：层层揭皮×爽文向）。
     """
     arc_block = ""
     card = story_arc.card_of(brief.arc)
@@ -87,6 +91,7 @@ def prompt_block(brief: AngleBrief) -> str:
         arc_block = (
             f"\n叙事母题：{card.name}——{card.essence}"
             f"\n母题结构（全部段落按这个骨架推进，画面锚点随骨架走）：{card.structure}"
+            f"\n{card.style}"
         )
     return (
         f"\n本条片的取材角度：{brief.name}"
