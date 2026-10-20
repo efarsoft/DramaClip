@@ -44,6 +44,13 @@ class _Band:
     top: float
     bottom: float
 
+    def __post_init__(self) -> None:
+        # OCR 框坐标来自 numpy（rapidocr 3.x 返回 float32），max/min 复合运算后
+        # 依旧是 np.float32——落库走裸 dict 的 json.dumps 不认识它（真机 2026-10-20
+        # 十集连挂）。在唯一构造点统一收成 python float。
+        object.__setattr__(self, "top", float(self.top))
+        object.__setattr__(self, "bottom", float(self.bottom))
+
 
 @dataclass
 class _Cluster:
@@ -79,7 +86,7 @@ def detect_band(
     band = _pick_band([boxes for _t, boxes in probes])
     if band is None:
         return None
-    return (band.top, band.bottom)
+    return (float(band.top), float(band.bottom))
 
 
 def extract_subtitles(
@@ -126,11 +133,11 @@ def extract_subtitles(
             results.append((t0, boxes))
             frame.unlink(missing_ok=True)
     line_rects = (
-        [(b.top, b.bottom) for b in lines] if lines is not None else None
+        [(float(b.top), float(b.bottom)) for b in lines] if lines is not None else None
     )
     return (
         _merge_runs(results),
-        (picked_band.top, picked_band.bottom),
+        (float(picked_band.top), float(picked_band.bottom)),
         line_rects,
     )
 

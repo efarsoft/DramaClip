@@ -41,6 +41,27 @@ from dramaclip.infra.storage.repos import projects as projects_repo
 # ── B8 源失效判据：签名 = md5(path|size|mtime_ns|ocr_channel)，见 pipeline.source_signature ──
 
 
+def _jsonable(value: Any) -> Any:
+    """json.dumps(default=…) 的 numpy 兜底：标量 .item() 转 python 原生类型。
+
+    分析链路里混进 numpy 值的口子不止一个（rapidocr 框坐标、funasr 时间戳、
+    librosa 特征……且随引擎版本漂移）——任何一层漏转，落库 json.dumps 就是
+    「Object of type float32 is not JSON serializable」（真机 2026-10-20 十集连挂）。
+    鸭子类型取 .item()，不 import numpy（非 ml 环境也能导入本模块）。
+    """
+    item = getattr(value, "item", None)
+    if callable(item) and not isinstance(value, (str, bytes)):
+        try:
+            return item()
+        except Exception:  # noqa: BLE001 - .item() 语义不合就按不可序列化报
+            pass
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def _dumps(payload: Any) -> str:
+    return json.dumps(payload, default=_jsonable)
+
+
 def _ocr_channel_available(context: AppContext) -> bool:
     """OCR 字幕通道是否可用：设置开关开启 + rapidocr（ml extras）已安装。
 
@@ -297,7 +318,7 @@ def _mine_hotwords(
             continue
         bars_by_episode[episode_id] = bars
         analysis_repo.update_ocr_segments(
-            context.conn, episode_id, json.dumps([b.model_dump() for b in bars])
+            context.conn, episode_id, _dumps([b.model_dump() for b in bars])
         )
     # 人工热词在最前：挖掘表是 OCR 派生的，会漏生僻人名也会把 OCR 错字当热词——
     # 业主点名（asr.hotwords_extra）是最强信号。
@@ -467,7 +488,7 @@ def _analyze_one(
                 context, episode, raw.asr_segments, ocr_bars, ocr_band, ocr_lines
             )  # noqa: F841 - band_lines 落库见下方 subtitle_band
             ocr_json = (
-                json.dumps([o.model_dump() for o in ocr_segments]) if ocr_segments else None
+                _dumps([o.model_dump() for o in ocr_segments]) if ocr_segments else None
             )
             sheet = _contact_sheet(context, episode)
             frames = _describe_frames(context, vision, episode, episode_id, report)
@@ -480,15 +501,15 @@ def _analyze_one(
             analysis_repo.upsert(
                 context.conn,
                 episode_id,
-                asr_segments=json.dumps([seg.model_dump() for seg in asr_segments]),
-                scene_data=json.dumps([scene.model_dump() for scene in raw.scenes]),
+                asr_segments=_dumps([seg.model_dump() for seg in asr_segments]),
+                scene_data=_dumps([scene.model_dump() for scene in raw.scenes]),
                 audio_features=raw.audio.model_dump_json(),
                 ocr_segments=ocr_json,
-                visual_track=json.dumps(track) if track else None,
+                visual_track=_dumps(track) if track else None,
                 # 覆盖数据链落库：{"band": [t,b], "lines": [[t,b],...]}（旧库为纯 list，
                 # 读取端两种都认）。NULL=无硬字幕带/未探测/OCR 未装，消费端回退现状
                 subtitle_band=(
-                    json.dumps(
+                    _dumps(
                         {"band": [band[0], band[1]], "lines": band_lines or []}
                         if band is not None
                         else None
@@ -518,7 +539,7 @@ def _analyze_one(
                 analysis_repo.update_asr_segments(
                     context.conn,
                     episode_id,
-                    json.dumps([seg.model_dump() for seg in asr_segments]),
+                    _dumps([seg.model_dump() for seg in asr_segments]),
                 )
                 context.notifier.log(
                     "info",
@@ -544,8 +565,8 @@ def _analyze_one(
         analysis_repo.update_semantic(
             context.conn,
             episode_id,
-            conflict_scores=json.dumps([s.model_dump() for s in semantic_result.conflict_scores]),
-            highlights=json.dumps([h.model_dump() for h in semantic_result.highlights]),
+            conflict_scores=_dumps([s.model_dump() for s in semantic_result.conflict_scores]),
+            highlights=_dumps([h.model_dump() for h in semantic_result.highlights]),
             genre=semantic_result.genre or None,
         )
         episodes_repo.mark_done(context.conn, episode_id)
