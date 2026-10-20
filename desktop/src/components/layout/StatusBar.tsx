@@ -97,11 +97,11 @@ function JobsSegment(): ReactElement {
         setDrawerOpen(true);
       }}
     >
-      <span style={{ color: tokens.colorInfo }}>在跑 {String(summary.active)}</span>
+      <span style={{ color: tokens.colorInfo }}>在跑 {String(summary.active)} 项</span>
       {summary.runningPercent !== null && (
-        <span style={{ color: tokens.textSecondary }}>{String(summary.runningPercent)}%</span>
+        <span style={{ color: tokens.textSecondary }}>进度 {String(summary.runningPercent)}%</span>
       )}
-      {summary.failed > 0 && <span style={{ color: tokens.colorError }}> · 失败 {String(summary.failed)}</span>}
+      {summary.failed > 0 && <span style={{ color: tokens.colorError }}>· 失败 {String(summary.failed)}</span>}
     </button>
   );
 }
@@ -115,4 +115,6 @@ const JOBS_BUTTON: CSSProperties = {
   color: tokens.textSecondary,
   display: 'flex',
   alignItems: 'center',
+  // 段间必须有缝：「在跑 1」+「15%」无缝拼读成「在跑 115%」（真机 2026-10-20）
+  gap: tokens.spaceSm,
 };
