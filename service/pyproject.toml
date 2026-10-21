@@ -41,6 +41,9 @@ ml = [
   "rapidocr>=3.10",
   "onnxruntime>=1.18",
   "opencc-python-reimplemented>=0.1.7",
+  # 云端 ASR 适配器（dashscope_cloud）的运行时依赖：此前只在本机 ad-hoc 安装，
+  # CI 打的安装包没带上它（v0.2.2 首次 CI 打包实证）——真机 1.27.7 验收版
+  "dashscope>=1.27.7",
 ]
 
 [project.scripts]
