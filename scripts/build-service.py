@@ -15,6 +15,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+# CI/异常终端的代码页不一定是 UTF-8（GitHub Windows runner 是 cp1252）：中文进度行
+# 不许把构建打挂（真机 2026-10-21 首次 CI 打包实证）。stdout/stderr 可能缺席（pythonw）。
+for _stream in (sys.stdout, sys.stderr):
+    if _stream is not None and hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8")
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SERVICE_DIR = REPO_ROOT / "service"
 BUILD_DIR = REPO_ROOT / "build" / "service"
