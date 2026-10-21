@@ -37,13 +37,14 @@ jobs:
             exit 1
           fi
 
-      # dist:service 硬编码 .venv/Scripts/python.exe，此处先建同名 venv
+      # dist:service 硬编码 .venv\Scripts\python.exe，此处先建同名 venv；
+      # PyInstaller 与本机开发环境钉同版（6.22.2）——PYZ 断言方法论绑它的归档形状
       - name: 建 Python venv 并安装 ML 依赖
         shell: bash
         run: |
           python -m venv .venv
           .venv/Scripts/python.exe -m pip install --upgrade pip
-          .venv/Scripts/pip.exe install -e 'service[ml]'
+          .venv/Scripts/pip.exe install -e 'service[ml]' 'pyinstaller==6.22.2'
 
       - name: 安装前端依赖
         run: npm ci --no-audit --no-fund
