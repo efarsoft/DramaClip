@@ -81,7 +81,11 @@ export function AsrTab({
   const cloud = useEngineConfigs('asr_cloud', onChanged);
   const [pane, setPane] = useState<'local' | 'cloud'>('local');
   const activeCloud = activeCloudConfig(cloud.configs);
-  const recommendation = cloudRecommendation(machine.gpu, cloud.configs);
+  const recommendation = cloudRecommendation(
+    machine.gpu,
+    cloud.configs,
+    machine.caps?.faster_whisper_gpu?.ready === true || machine.caps?.funasr_gpu?.ready === true,
+  );
   const domainModels = localDomainModels(models, 'asr');
   const active = activeAsset(models, 'asr', settings);
   const segment = <CloudSegment value={pane} onChange={setPane} />;

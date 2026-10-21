@@ -83,7 +83,11 @@ export function TtsTab({
   const cloud = useEngineConfigs('tts_cloud', onChanged);
   const [pane, setPane] = useState<'local' | 'cloud'>('local');
   const activeCloud = activeCloudConfig(cloud.configs);
-  const recommendation = cloudRecommendation(machine.gpu, cloud.configs);
+  const recommendation = cloudRecommendation(
+    machine.gpu,
+    cloud.configs,
+    machine.caps?.indextts2_gpu?.ready === true,
+  );
   const engine = settings['tts.engine'] ?? '';
   const domainModels = localDomainModels(models, 'tts');
   const active = isModelFreeEngine(engine) ? undefined : activeAsset(models, 'tts', settings);
