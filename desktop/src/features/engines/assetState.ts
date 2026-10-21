@@ -70,6 +70,7 @@ export function computeLabel(report?: ComputeReport | null): string | undefined 
   if (report.fallback) return `已回退 CPU：${report.reason}`;
   if (report.resolved === 'unsupported') return `此卡不支持（${report.reason}）`;
   if (report.actual === 'cuda') return `本次实际：GPU（${report.device}）`;
+  if (report.actual === 'dml') return '本次实际：GPU（DirectML）';
   if (report.actual === 'cpu') return '本次实际：CPU';
   if (report.actual === 'cloud') return '本次实际：云端';
   return undefined;

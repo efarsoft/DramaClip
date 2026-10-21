@@ -4,7 +4,7 @@
 一条参考音频，跑完即退（模型加载 + 分离在 CPU 上约 30s，用户点击级操作不值得
 常驻占显存/内存）。协议是一行 JSON 到 stdout：
   {"ok": true, "out": "<干声路径>", "requested": "...", "resolved": "...",
-   "actual": "cuda|cpu", "fallback": false, "reason": "", "providers": [...]}
+   "actual": "cuda|dml|cpu", "fallback": false, "reason": "", "providers": [...]}
 或 {"ok": false, "error": "..."}。诊断日志全部走库内 logger→stderr——stdout 是
 协议通道，混进日志就是坏帧。
 
@@ -51,13 +51,14 @@ def main() -> int:
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--cuda-dll-dir", dest="cuda_dll_dir", default="")
     parser.add_argument("--probe", action="store_true")
+    parser.add_argument("--probe-dml", dest="probe_dml", action="store_true")
     args = parser.parse_args()
 
     cuda_root = Path(args.cuda_dll_dir) if args.cuda_dll_dir else None
     _inject_cuda_dlls(cuda_root, torch_lib=_torch_lib())
 
-    if args.probe:
-        payload = probe_cuda()
+    if args.probe or args.probe_dml:
+        payload = probe_dml() if args.probe_dml else probe_cuda()
         _emit(payload)
         return 0 if payload.get("ok") else 1
     if not (args.src and args.out and args.models):
@@ -113,19 +114,26 @@ def _inject_cuda_dlls(cuda_root: Path | None, *, torch_lib: Path | None) -> list
 
 
 def _provider_plan(device: str, available: list[str]) -> tuple[list[str], str]:
-    """requested 与实际 provider 计划：cpu 永不碰 CUDA，显式 cuda 无 EP 直接失败。"""
+    """requested 与实际 provider 计划：cpu 永不碰 GPU；auto 按 CUDA > DML > CPU；
+    显式请求的 EP 不在就如实失败——不拿另一个后端冒充承诺。"""
     requested = device.strip().lower()
-    if requested not in {"auto", "cpu", "cuda"}:
-        raise ValueError(f"未知算力请求: {device!r}（可用: auto / cpu / cuda）")
+    if requested not in {"auto", "cpu", "cuda", "dml"}:
+        raise ValueError(f"未知算力请求: {device!r}（可用: auto / cuda / dml / cpu）")
     if requested == "cpu":
         return ["CPUExecutionProvider"], "cpu"
-    if "CUDAExecutionProvider" not in available:
-        if requested == "cuda":
-            raise RuntimeError(
-                "onnxruntime 没有 CUDAExecutionProvider（装的是 CPU 轮或 CUDA DLL 缺失）"
-            )
-        return ["CPUExecutionProvider"], "cpu"
-    return ["CUDAExecutionProvider"], "cuda"
+    if requested in ("auto", "cuda") and "CUDAExecutionProvider" in available:
+        return ["CUDAExecutionProvider"], "cuda"
+    if requested in ("auto", "dml") and "DmlExecutionProvider" in available:
+        return ["DmlExecutionProvider"], "dml"
+    if requested == "cuda":
+        raise RuntimeError(
+            "onnxruntime 没有 CUDAExecutionProvider（装的是 CPU/DirectML 轮或 CUDA DLL 缺失）"
+        )
+    if requested == "dml":
+        raise RuntimeError(
+            "onnxruntime 没有 DmlExecutionProvider（装的是 CPU/CUDA 轮）"
+        )
+    return ["CPUExecutionProvider"], "cpu"
 
 
 @contextmanager
@@ -184,22 +192,18 @@ def separate(
     device: str = "auto",
     cuda_dll_dir: Path | None = None,
 ) -> dict[str, object]:
-    """按设备请求分离；auto 才允许 CUDA 失败后 CPU 完整重跑一次。"""
+    """按设备请求分离；auto 才允许 GPU（CUDA/DML）失败后 CPU 完整重跑一次。"""
     import onnxruntime as ort
 
     requested = device.strip().lower()
     available = list(ort.get_available_providers())
     providers, resolved = _provider_plan(requested, available)
-    reason = "" if resolved == "cuda" or requested != "auto" else (
-        "onnxruntime 没有 CUDAExecutionProvider（CPU 轮）"
-    )
-    if resolved == "cuda":
+    if resolved in ("cuda", "dml"):
+        ep = "CUDAExecutionProvider" if resolved == "cuda" else "DmlExecutionProvider"
         try:
             actual_providers = _run_attempt(src, out, models_dir, providers)
-            if "CUDAExecutionProvider" not in actual_providers:
-                raise RuntimeError(
-                    f"CUDA session 未启用（实际 provider: {actual_providers}）"
-                )
+            if ep not in actual_providers:
+                raise RuntimeError(f"{ep} session 未启用（实际 provider: {actual_providers}）")
         except Exception as exc:  # noqa: BLE001 - auto 的第二次机会，原因要写进回执
             if requested != "auto":
                 raise
@@ -208,8 +212,9 @@ def separate(
                 out, requested, resolved, "cpu", actual_providers,
                 fallback=True, reason=f"{type(exc).__name__}: {exc}",
             )
-        return _payload(out, requested, resolved, "cuda", actual_providers)
+        return _payload(out, requested, resolved, resolved, actual_providers)
 
+    reason = "" if requested != "auto" else "onnxruntime 是 CPU 轮（无 GPU 执行提供器）"
     actual_providers = _run_attempt(src, out, models_dir, providers)
     return _payload(
         out, requested, resolved, "cpu", actual_providers, reason=reason,
@@ -239,6 +244,14 @@ def _payload(
 
 
 def probe_cuda() -> dict[str, object]:
+    return _probe("CUDAExecutionProvider")
+
+
+def probe_dml() -> dict[str, object]:
+    return _probe("DmlExecutionProvider")
+
+
+def _probe(ep: str) -> dict[str, object]:
     """极小 ONNX Add session 真跑一次：只认 session 的 providers，不看安装态。"""
     try:
         import numpy as np
@@ -246,10 +259,10 @@ def probe_cuda() -> dict[str, object]:
         from onnx import TensorProto, helper
 
         available = list(ort.get_available_providers())
-        if "CUDAExecutionProvider" not in available:
+        if ep not in available:
             return {
                 "ok": False,
-                "error": "onnxruntime 没有 CUDAExecutionProvider（CPU 轮）",
+                "error": f"onnxruntime 没有 {ep}（装的是另一个变体或 CPU 轮）",
                 "available": available,
                 "version": ort.__version__,
             }
@@ -265,14 +278,12 @@ def probe_cuda() -> dict[str, object]:
         model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
         # onnx 1.22 默认 IR 13 超出 ORT 1.18 的上限 10；探针模型显式降到 8。
         model.ir_version = 8
-        session = ort.InferenceSession(
-            model.SerializeToString(), providers=["CUDAExecutionProvider"]
-        )
+        session = ort.InferenceSession(model.SerializeToString(), providers=[ep])
         providers = list(session.get_providers())
-        if "CUDAExecutionProvider" not in providers:
+        if ep not in providers:
             return {
                 "ok": False,
-                "error": f"session 未启用 CUDA（实际: {providers}）",
+                "error": f"session 未启用 {ep}（实际: {providers}）",
                 "available": available,
                 "version": ort.__version__,
             }

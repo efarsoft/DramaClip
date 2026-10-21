@@ -1,0 +1,45 @@
+{
+  "tool": "dml_separation_hardgate",
+  "version": 1,
+  "generated_at": "2026-10-21T13:15:00+08:00",
+  "environment": {
+    "gpu": "AMD Radeon RX 5500 XT（RDNA1，非官方 ROCm 支持面）",
+    "runtime": "tts-venv (Python 3.11.16, torch 2.8.0+cpu)",
+    "ort_package": "onnxruntime-directml 1.18.0",
+    "model": "UVR_MDXNET_KARA_2.onnx",
+    "sample": "data/bgm/default/default_01.mp3（39s）"
+  },
+  "records": [
+    {
+      "item": "DML 探针",
+      "result": "pass",
+      "detail": {"ok": true, "providers": ["DmlExecutionProvider", "CPUExecutionProvider"], "result": 5.0}
+    },
+    {
+      "item": "真分离 device=auto",
+      "result": "pass",
+      "detail": {"resolved": "dml", "actual": "dml", "fallback": false, "wall_s": 44.6, "inference_s": 30}
+    },
+    {
+      "item": "CPU 对照",
+      "result": "pass",
+      "detail": {"resolved": "cpu", "actual": "cpu", "wall_s": 108.8}
+    },
+    {
+      "item": "提速",
+      "result": "pass",
+      "detail": {"ratio": "2.4x（DML 44.6s vs CPU 108.8s）"}
+    },
+    {
+      "item": "数值对拍（DML vs CPU 干声，int16）",
+      "result": "pass",
+      "detail": {"samples": 14572800, "duration_equal": true, "max_abs_diff_lsb": 1, "rms_diff": 0.0}
+    },
+    {
+      "item": "显式 cuda 不被 DML 冒充",
+      "result": "pass",
+      "detail": "worker._provider_plan('cuda', [Dml,Cpu]) 抛 RuntimeError；compute 契约 requested=cuda+actual=dml 判违约（单测覆盖）"
+    }
+  ],
+  "notes": "测试后本机已恢复 CUDA 变体（onnxruntime-gpu 1.18.0，marker backend=cuda）。audio_separator 自身日志的 'running in CPU mode' 是其 torch 探测的干扰信息，实际 session 由 worker 覆盖 provider 并以回执 providers 为准。"
+}

@@ -57,6 +57,40 @@ def test_provider_plan_explicit_cuda_without_provider_fails() -> None:
         separation_worker._provider_plan("cuda", ["CPUExecutionProvider"])
 
 
+# ---- DirectML 通道：auto 的次选、显式 dml 的承诺、cuda 不被 dml 冒充 ----
+def test_provider_plan_auto_picks_dml_when_no_cuda() -> None:
+    providers, resolved = separation_worker._provider_plan(
+        "auto", ["DmlExecutionProvider", "CPUExecutionProvider"]
+    )
+    assert providers == ["DmlExecutionProvider"]
+    assert resolved == "dml"
+
+
+def test_provider_plan_auto_prefers_cuda_over_dml() -> None:
+    _providers, resolved = separation_worker._provider_plan(
+        "auto", ["CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider"]
+    )
+    assert resolved == "cuda"
+
+
+def test_provider_plan_explicit_dml_without_provider_fails() -> None:
+    with pytest.raises(RuntimeError, match="DmlExecutionProvider"):
+        separation_worker._provider_plan("dml", ["CPUExecutionProvider"])
+
+
+def test_provider_plan_explicit_cuda_not_satisfied_by_dml() -> None:
+    with pytest.raises(RuntimeError, match="CUDAExecutionProvider"):
+        separation_worker._provider_plan("cuda", ["DmlExecutionProvider", "CPUExecutionProvider"])
+
+
+def test_provider_plan_explicit_dml_resolves() -> None:
+    providers, resolved = separation_worker._provider_plan(
+        "dml", ["DmlExecutionProvider", "CPUExecutionProvider"]
+    )
+    assert providers == ["DmlExecutionProvider"]
+    assert resolved == "dml"
+
+
 def test_inject_cuda_dll_dirs_only_existing_known_subdirs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -265,6 +265,17 @@ def snapshot(force: bool = False) -> dict[str, object]:
     return dict(_PENDING_FIELDS)
 
 
+def snapshot_sync() -> dict[str, object]:
+    """同步探测并落缓存（阻塞最长 ~20s）：安装器等一次性进程没有后台线程可等，
+    阻塞换事实——非阻塞快照在裸进程里只会拿到「探测中」占位。"""
+    global _CACHE, _PENDING
+    with _LOCK:
+        result = detect()
+        _CACHE = dict(result)
+        _PENDING = False
+        return dict(result)
+
+
 def prefetch() -> None:
     """后台预热/刷新探测缓存（幂等，进行中不重复开线程）。"""
     global _PENDING

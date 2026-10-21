@@ -36,6 +36,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from dramaclip.infra import gpu
 from dramaclip.infra.model_manager import cuda_runtime
 from dramaclip.infra.model_manager.fetch import download_file
 
@@ -247,11 +248,14 @@ def _ort_marker(data_dir: Path) -> Path:
 
 
 def ort_state(data_dir: Path) -> dict[str, Any]:
-    """人声分离 ORT 后端：gpu / cpu / unknown（安装期真实 session 探测的结果）。
+    """人声分离 ORT 后端：variant gpu / cpu / unknown + backend cuda / dml / cpu。
 
     marker 只记录「装的时候探测到了什么」；实际任务以 worker 回执为准。
     """
-    empty = {"variant": "unknown", "gpu": False, "providers": [], "version": "", "reason": ""}
+    empty = {
+        "variant": "unknown", "gpu": False, "backend": "cpu",
+        "providers": [], "version": "", "reason": "",
+    }
     try:
         data = json.loads(_ort_marker(data_dir).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -262,9 +266,12 @@ def ort_state(data_dir: Path) -> dict[str, Any]:
     if variant not in ("gpu", "cpu"):
         return empty
     providers = data.get("providers")
+    # 旧 marker 没有 backend：gpu 一律按当时唯一的 GPU 通道 cuda 读。
+    backend = str(data.get("backend") or ("cuda" if variant == "gpu" else "cpu"))
     return {
         "variant": variant,
         "gpu": variant == "gpu",
+        "backend": backend if backend in ("cuda", "dml", "cpu") else "cpu",
         "providers": [str(p) for p in providers] if isinstance(providers, list) else [],
         "version": str(data.get("version") or ""),
         "reason": str(data.get("reason") or ""),
@@ -281,21 +288,42 @@ def _write_ort_marker(data_dir: Path, **fields: Any) -> None:
     )
 
 
-def _ort_install_plan(*, nvidia_present: bool, cuda_runtime_installed: bool) -> str:
-    """GPU ORT 的条件是硬件 + 运行库，与本 venv 的 torch 变体无关（老卡也能跑 CUDA EP）。"""
-    return "gpu" if nvidia_present and cuda_runtime_installed else "cpu"
+def _ort_install_plan(
+    *,
+    nvidia_present: bool,
+    cuda_runtime_installed: bool,
+    amd_intel_present: bool,
+) -> str:
+    """分离 ORT 变体三选一：NVIDIA（+运行库）=CUDA EP，AMD/Intel=DML EP，其余 CPU。
+
+    GPU 的条件是硬件 + 运行库，与本 venv 的 torch 变体无关（老卡也能跑 CUDA EP）。
+    N 卡且运行库齐装 CUDA 轮；运行库缺而 AMD/Intel 在场，DML 是真可用的次选
+    （回执如实标 dml，冒充红线只在显式 cuda 请求处）。
+    """
+    if nvidia_present and cuda_runtime_installed:
+        return "cuda"
+    if amd_intel_present:
+        return "dml"
+    return "cpu"
 
 
 def _probe_ort_gpu(py: Path, data_dir: Path) -> dict[str, Any]:
     """在 tts-venv 里跑 worker 的最小 CUDA session；只认 session 的 provider。"""
+    args = ["--probe", "--cuda-dll-dir", str(cuda_runtime.runtime_dir(data_dir))]
+    return _run_ort_probe(py, args)
+
+
+def _probe_ort_dml(py: Path) -> dict[str, Any]:
+    """在 tts-venv 里跑 worker 的最小 DirectML session；DML 不需要 CUDA DLL。"""
+    return _run_ort_probe(py, ["--probe-dml"])
+
+
+def _run_ort_probe(py: Path, worker_args: list[str]) -> dict[str, Any]:
     from dramaclip.engines.tts.workers import separation_worker
 
     try:
         result = subprocess.run(  # noqa: S603 - 固定解释器固定参数
-            [
-                str(py), str(Path(separation_worker.__file__)), "--probe",
-                "--cuda-dll-dir", str(cuda_runtime.runtime_dir(data_dir)),
-            ],
+            [str(py), str(Path(separation_worker.__file__)), *worker_args],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=180, creationflags=_NO_WINDOW, check=False,
             env={**os.environ, "PYTHONIOENCODING": "utf-8"},
@@ -320,32 +348,45 @@ def _install_ort(
     check_cancel: Callable[[], None],
     progress: Callable[[float, str], None],
 ) -> None:
-    """按变体安装 ONNX Runtime；GPU 探测失败回装 CPU 轮，绝不把安装态当可用态。"""
+    """按变体安装 ONNX Runtime（cuda / dml / cpu 三选一）；GPU 探测失败回装 CPU 轮，
+    绝不把安装态当可用态。"""
     py = venv / "Scripts" / "python.exe"
-    nvidia_present = shutil.which("nvidia-smi") is not None
+    adapters = gpu.snapshot_sync().get("adapters") or []
+    cards = adapters if isinstance(adapters, list) else []
+    vendors = {str(card.get("vendor") or "") for card in cards}
+    # CIM 适配器枚举拿不到时退 nvidia-smi 在场判定：宁可装 CUDA 轮再探针裁决，
+    # 也不把「探测失败」当成「没有卡」装成 CPU（真机 2026-10-21 实证过这条坑）。
+    nvidia_present = "nvidia" in vendors or shutil.which("nvidia-smi") is not None
+    amd_intel_present = bool(vendors & {"amd", "intel"})
     runtime_installed = cuda_runtime.status(data_dir)["installed"]
     want = _ort_install_plan(
-        nvidia_present=nvidia_present, cuda_runtime_installed=runtime_installed
+        nvidia_present=nvidia_present,
+        cuda_runtime_installed=runtime_installed,
+        amd_intel_present=amd_intel_present,
     )
     current = ort_state(data_dir)
     if want == "cpu" and current["variant"] == "cpu" and _venv_imports_ok(py, ("onnxruntime",)):
         return
-    if want == "gpu" and current["gpu"] and _probe_ort_gpu(py, data_dir).get("ok"):
+    if want == "cuda" and current["backend"] == "cuda" and current["gpu"] \
+            and _probe_ort_gpu(py, data_dir).get("ok"):
+        return
+    if want == "dml" and current["backend"] == "dml" and current["gpu"] \
+            and _probe_ort_dml(py).get("ok"):
         return
 
     check_cancel()
     progress(70, "配置人声分离运行后端（ONNX Runtime）")
-    # CPU 轮与 GPU 轮互斥，不能同时留在 site-packages 里。
-    _run_uv(uv, venv, "pip", "uninstall", "onnxruntime", "onnxruntime-gpu")
+    # 三个变体互斥，不能同时留在 site-packages 里。
+    _run_uv(uv, venv, "pip", "uninstall", "onnxruntime", "onnxruntime-gpu", "onnxruntime-directml")
 
-    if want == "gpu":
+    if want == "cuda":
         try:
             _run_uv(uv, venv, "pip", "install", "--no-deps",
                     f"onnxruntime-gpu=={_ORT_VERSION}", "--index-url", _ORT_GPU_INDEX)
             probe = _probe_ort_gpu(py, data_dir)
             if probe.get("ok"):
                 _write_ort_marker(
-                    data_dir, variant="gpu",
+                    data_dir, variant="gpu", backend="cuda",
                     providers=probe.get("providers") or [],
                     version=str(probe.get("version") or _ORT_VERSION),
                 )
@@ -356,10 +397,28 @@ def _install_ort(
         check_cancel()
         with contextlib.suppress(RuntimeError):
             _run_uv(uv, venv, "pip", "uninstall", "onnxruntime", "onnxruntime-gpu")
+    elif want == "dml":
+        try:
+            _run_uv(uv, venv, "pip", "install", f"onnxruntime-directml=={_ORT_VERSION}",
+                    "--index-url", _PYPI_MIRROR)
+            probe = _probe_ort_dml(py)
+            if probe.get("ok"):
+                _write_ort_marker(
+                    data_dir, variant="gpu", backend="dml",
+                    providers=probe.get("providers") or [],
+                    version=str(probe.get("version") or _ORT_VERSION),
+                )
+                return
+            reason = f"分离 DirectML 不可用：{probe.get('error') or 'DML session 探测失败'}"
+        except RuntimeError as exc:
+            reason = f"分离 DirectML 不可用：{exc}"
+        check_cancel()
+        with contextlib.suppress(RuntimeError):
+            _run_uv(uv, venv, "pip", "uninstall", "onnxruntime", "onnxruntime-directml")
     else:
         reason = (
-            "未检测到 NVIDIA 显卡"
-            if not nvidia_present
+            "未检测到可加速的显卡（分离走 CPU）"
+            if not nvidia_present and not amd_intel_present
             else "CUDA 运行库未安装（安装后可重跑本地运行环境以启用 GPU 分离）"
         )
 

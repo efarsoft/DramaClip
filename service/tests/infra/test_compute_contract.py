@@ -100,3 +100,31 @@ def test_cpu_request_cannot_resolve_cuda() -> None:
         compute.ComputeReport(
             component="asr.funasr", requested="cpu", resolved="cuda", actual="cuda",
         )
+
+
+# ---- DirectML 通道：dml 是解析结果不是请求项，承诺语义与 CUDA 同构 ----
+def test_dml_fallback_reports_like_cuda_fallback() -> None:
+    report = compute.ComputeReport(
+        component="tts.separation", requested="auto", resolved="dml",
+        actual="cpu", fallback=True, reason="DML session 失败",
+    )
+    assert report.device == "cpu"
+    compute.assert_success(report)
+
+
+def test_dml_success_passes_and_explicit_cuda_stays_strict() -> None:
+    dml = compute.ComputeReport(
+        component="tts.separation", requested="auto", resolved="dml", actual="dml",
+    )
+    compute.assert_success(dml)
+    with pytest.raises(compute.ComputeUnavailableError):
+        compute.assert_success(compute.ComputeReport(
+            component="tts.separation", requested="cuda", resolved="dml", actual="dml",
+        ))
+
+
+def test_cpu_request_cannot_resolve_dml() -> None:
+    with pytest.raises(ValueError):
+        compute.ComputeReport(
+            component="tts.separation", requested="cpu", resolved="dml", actual="dml",
+        )

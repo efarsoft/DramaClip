@@ -91,11 +91,15 @@ def test_ort_state_reads_gpu_marker(tmp_path: Path) -> None:
     assert state["providers"] == ["CUDAExecutionProvider"]
 
 
-def test_ort_install_plan_requires_nvidia_and_cuda_runtime() -> None:
+def test_ort_install_plan_three_way_by_vendor() -> None:
     plan = tts_runtime._ort_install_plan  # noqa: SLF001
-    assert plan(nvidia_present=True, cuda_runtime_installed=True) == "gpu"
-    assert plan(nvidia_present=True, cuda_runtime_installed=False) == "cpu"
-    assert plan(nvidia_present=False, cuda_runtime_installed=True) == "cpu"
+    assert plan(nvidia_present=True, cuda_runtime_installed=True, amd_intel_present=False) == "cuda"
+    # 双卡机但 CUDA 运行库缺：DML 用真可用的 AMD 卡是次选而非冒充（回执如实标 dml）
+    assert plan(nvidia_present=True, cuda_runtime_installed=False, amd_intel_present=True) == "dml"
+    assert plan(nvidia_present=False, cuda_runtime_installed=True, amd_intel_present=False) == "cpu"
+    assert plan(nvidia_present=False, cuda_runtime_installed=False, amd_intel_present=True) == "dml"
+    assert plan(nvidia_present=False, cuda_runtime_installed=False,
+                amd_intel_present=False) == "cpu"
 
 
 def test_status_reports_ort_state(tmp_path: Path, monkeypatch: Any) -> None:
@@ -115,7 +119,11 @@ def test_install_ort_gpu_probe_pass_writes_gpu_marker(
 ) -> None:
     _prime_venv(tmp_path)
     calls: list[tuple[str, ...]] = []
-    monkeypatch.setattr(tts_runtime.shutil, "which", lambda _name: "nvidia-smi")
+    monkeypatch.setattr(
+        tts_runtime.gpu, "snapshot_sync",
+        lambda *a, **k: {"adapters": [{"vendor": "nvidia", "name": "x", "driver_version": ""}]},
+    )
+    monkeypatch.setattr(tts_runtime.shutil, "which", lambda _name: None)
     monkeypatch.setattr(
         tts_runtime.cuda_runtime, "status", lambda _d: {"installed": True}
     )
@@ -150,7 +158,11 @@ def test_install_ort_gpu_probe_failure_rolls_back_to_cpu(
     """探测失败必须回装 CPU 轮并留原因：不能把「装上了」当成「能跑」。"""
     _prime_venv(tmp_path)
     calls: list[tuple[str, ...]] = []
-    monkeypatch.setattr(tts_runtime.shutil, "which", lambda _name: "nvidia-smi")
+    monkeypatch.setattr(
+        tts_runtime.gpu, "snapshot_sync",
+        lambda *a, **k: {"adapters": [{"vendor": "nvidia", "name": "x", "driver_version": ""}]},
+    )
+    monkeypatch.setattr(tts_runtime.shutil, "which", lambda _name: None)
     monkeypatch.setattr(
         tts_runtime.cuda_runtime, "status", lambda _d: {"installed": True}
     )
