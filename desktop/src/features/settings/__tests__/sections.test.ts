@@ -99,3 +99,23 @@ describe('键与消费端同源验收', () => {
     ]);
   });
 });
+
+describe('视频编码选项（规格 §4.4：值必须是 ffmpeg 真编码器名，帮助文案承诺同一套）', () => {
+  it('五个选项：自动 → NVENC → AMF → QSV → libx264', () => {
+    const field = section('export').fields.find((f) => f.key === 'export.encoder');
+    expect(field?.options?.({})).toEqual([
+      { label: '自动（推荐）', value: 'auto' },
+      { label: 'NVIDIA GPU（NVENC）', value: 'h264_nvenc' },
+      { label: 'AMD GPU（AMF）', value: 'h264_amf' },
+      { label: 'Intel 核显（QSV）', value: 'h264_qsv' },
+      { label: '纯 CPU（libx264）', value: 'libx264' },
+    ]);
+  });
+
+  it('帮助文案承诺 AMF / QSV，且不出现 DirectML（业主裁决：不做非 CUDA 的 AI 加速）', () => {
+    const field = section('export').fields.find((f) => f.key === 'export.encoder');
+    expect(field?.help).toContain('AMF');
+    expect(field?.help).toContain('QSV');
+    expect(field?.help).not.toContain('DirectML');
+  });
+});

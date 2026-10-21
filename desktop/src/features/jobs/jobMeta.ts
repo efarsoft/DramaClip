@@ -18,6 +18,9 @@ export const JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   model_import: '模型导入',
   cuda_runtime: 'CUDA 环境安装',
   indextts_runtime: '配音环境安装',
+  voice_clean: '参考清洗',
+  tools_extract: '文案提取',
+  tools_asr: '语音转文字',
 };
 
 /** ref_id=project_id 的类型才可路由进项目；export 走成品详情路由；其余给聚合页或不可路由。 */
@@ -27,8 +30,20 @@ const PROJECT_REF_ROUTES: Readonly<Record<string, string>> = {
   narration: 'produce',
 };
 
-/** 环境安装类任务的落点（ref 是固定串，不含项目语境）。 */
-const ENGINE_TYPES: ReadonlySet<string> = new Set(['model_download', 'model_import', 'cuda_runtime', 'indextts_runtime']);
+/** 落点在引擎页的类型：ref 是固定串或产物路径，不含项目语境，因此只能聚合到 /engines。 */
+const ENGINE_TYPES: ReadonlySet<string> = new Set([
+  'model_download',
+  'model_import',
+  'cuda_runtime',
+  'indextts_runtime',
+  'voice_clean',
+]);
+
+/** 工具箱发起的任务：落点回工具箱（ref 是素材路径，同样没有项目语境）。 */
+const TOOL_TYPES: ReadonlySet<string> = new Set(['tools_extract', 'tools_asr']);
+
+/** ref 是文件路径的类型：主体显示末段文件名。 */
+const FILE_REF_TYPES: ReadonlySet<string> = new Set(['voice_clean', 'tools_extract', 'tools_asr']);
 
 export function jobTypeLabel(type: string): string {
   return JOB_TYPE_LABELS[type] ?? type;
@@ -37,6 +52,7 @@ export function jobTypeLabel(type: string): string {
 /** 「去处理」的路由；null = 该类型没有可去的界面（缺席而非假按钮）。 */
 export function jobRoute(job: JobInfo): string | null {
   if (ENGINE_TYPES.has(job.type)) return '/engines';
+  if (TOOL_TYPES.has(job.type)) return '/tools';
   if (job.type === 'export' && job.ref_id !== null && job.ref_id !== '') {
     return `/works/${job.ref_id}`;
   }
@@ -54,12 +70,19 @@ export interface JobSubjectNames {
 
 export const EMPTY_NAMES: JobSubjectNames = { projects: new Map(), models: new Map() };
 
+/** 路径取末段文件名：截 `D:\voices\柯蓉.cleaned.wav` 的前 8 个字符当主体等于给用户看乱码。 */
+function fileNameOf(path: string): string {
+  return path.split(/[/\\]/).filter((part) => part !== '').at(-1) ?? '';
+}
+
 /** 主体文案：翻得出名字用名字，翻不出来用短 id——绝不编造。 */
 export function jobSubject(job: JobInfo, names: JobSubjectNames): string {
   const ref = job.ref_id ?? '';
   if (PROJECT_REF_ROUTES[job.type] !== undefined) {
     return names.projects.get(ref) ?? `项目 ${shortId(ref)}`;
   }
+  // 路径要到产物落盘才写进 ref（提取刚开始时是空的），空主体退回类型词而不是空字符串
+  if (FILE_REF_TYPES.has(job.type)) return fileNameOf(ref) || jobTypeLabel(job.type);
   if (job.type === 'model_download') return names.models.get(ref) ?? `模型 ${shortId(ref)}`;
   if (job.type === 'model_import') return ref === '' ? '本地文件' : `导入 ${ref}`;
   if (job.type === 'cuda_runtime') return 'CUDA 运行环境';

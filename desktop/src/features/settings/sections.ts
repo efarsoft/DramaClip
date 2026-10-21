@@ -130,10 +130,12 @@ const EXPORT_SECTION: SectionSpec = {
       key: 'export.encoder',
       label: '视频编码',
       type: 'select',
-      help: '自动=按平台真试编选择硬编（NVENC / QSV / VideoToolbox），全部不可用才 libx264；选固定编码器时不探测',
+      help: '自动=按平台真试编选择硬编（NVENC / AMF / QSV / VideoToolbox），全不可用才 libx264；固定编码器不探测，失败会按段级回退并在回执中写明',
       options: () => [
         { label: '自动（推荐）', value: 'auto' },
         { label: 'NVIDIA GPU（NVENC）', value: 'h264_nvenc' },
+        { label: 'AMD GPU（AMF）', value: 'h264_amf' },
+        { label: 'Intel 核显（QSV）', value: 'h264_qsv' },
         { label: '纯 CPU（libx264）', value: 'libx264' },
       ],
     },

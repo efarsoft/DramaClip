@@ -6,6 +6,7 @@ import {
   durationLabel,
   EMPTY_NAMES,
   isActiveJob,
+  JOB_TYPE_LABELS,
   jobElapsedMs,
   jobRoute,
   jobSubject,
@@ -33,10 +34,32 @@ const NAMES = {
 };
 
 describe('类型词与路由', () => {
-  it('九种线上类型都有中文词；未知类型原样透出', () => {
+  /** 后端 `context.job_store.create(...)` 的全部实参（grep 全仓 api/*.py 得）：
+   * 这张表漏一项，队列抽屉就把英文类型名透给用户。 */
+  const ONLINE_JOB_TYPES = [
+    'prescreen',
+    'analysis',
+    'semantic',
+    'export',
+    'export_selfcheck',
+    'narration',
+    'model_download',
+    'model_import',
+    'cuda_runtime',
+    'indextts_runtime',
+    'voice_clean',
+    'tools_extract',
+    'tools_asr',
+  ];
+
+  it('十三种线上类型都有中文词；未知类型原样透出', () => {
     expect(jobTypeLabel('prescreen')).toBe('预筛');
     expect(jobTypeLabel('indextts_runtime')).toBe('配音环境安装');
     expect(jobTypeLabel('something_new')).toBe('something_new');
+  });
+
+  it('线上类型逐一在册，表里也不留已退役的项', () => {
+    expect(Object.keys(JOB_TYPE_LABELS).sort()).toEqual([...ONLINE_JOB_TYPES].sort());
   });
 
   it('项目引用型才路由进项目；export 走成品详情；环境类聚合到引擎；semantic 无处可去', () => {
@@ -46,6 +69,12 @@ describe('类型词与路由', () => {
     expect(jobRoute(job({ type: 'model_download', ref_id: 'whisper-small' }))).toBe('/engines');
     expect(jobRoute(job({ type: 'semantic', ref_id: 'ep1' }))).toBeNull();
     expect(jobRoute(job({ ref_id: null }))).toBeNull();
+  });
+
+  it('参考清洗与两个工具任务落回各自的家（ref 是路径，没有项目语境）', () => {
+    expect(jobRoute(job({ type: 'voice_clean', ref_id: 'D:\\voices\\柯蓉.cleaned.wav' }))).toBe('/engines');
+    expect(jobRoute(job({ type: 'tools_extract', ref_id: 'D:\\素材\\EP1.mp4' }))).toBe('/tools');
+    expect(jobRoute(job({ type: 'tools_asr', ref_id: 'D:\\素材\\旁白.mp3' }))).toBe('/tools');
   });
 });
 
@@ -63,6 +92,26 @@ describe('主体文案', () => {
     expect(jobSubject(job({ type: 'export', ref_id: 'export-1234567890' }), EMPTY_NAMES)).toBe(
       'export-1',
     );
+  });
+
+  it('路径型 ref 取末段文件名，不截前缀当短 id', () => {
+    expect(
+      jobSubject(job({ type: 'voice_clean', ref_id: 'D:\\voices\\柯蓉.cleaned.wav' }), EMPTY_NAMES),
+    ).toBe('柯蓉.cleaned.wav');
+    expect(
+      jobSubject(job({ type: 'voice_clean', ref_id: '/data/voices/柯蓉.cleaned.wav' }), EMPTY_NAMES),
+    ).toBe('柯蓉.cleaned.wav');
+    expect(
+      jobSubject(job({ type: 'tools_extract', ref_id: 'D:\\素材\\EP1.mp4' }), EMPTY_NAMES),
+    ).toBe('EP1.mp4');
+    expect(
+      jobSubject(job({ type: 'tools_asr', ref_id: 'D:\\素材\\旁白.mp3' }), EMPTY_NAMES),
+    ).toBe('旁白.mp3');
+  });
+
+  it('路径还没写进 ref（提取刚开始）时退回类型词，不显示空主体', () => {
+    expect(jobSubject(job({ type: 'voice_clean', ref_id: null }), EMPTY_NAMES)).toBe('参考清洗');
+    expect(jobSubject(job({ type: 'tools_extract', ref_id: '' }), EMPTY_NAMES)).toBe('文案提取');
   });
 });
 

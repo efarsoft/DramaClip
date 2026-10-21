@@ -3500,6 +3500,18 @@ git commit -m "feat: GPU 文案按厂商三分支（AMF/QSV 各说各的），�
   });
 ```
 
+> 实落订正（三条，都是本 Task 的题中之义，不是范围扩张）：
+> 1. **数量是十三种，不是十种。** `JOB_TYPE_LABELS` 在册项本来就是 10 个（旧用例名「九种」在本批
+>    之前就已少算一项），加 `voice_clean` 是 11；执行时 grep `context.job_store.create(...)` 的全部
+>    实参又发现两种同样缺词：`tools_extract` / `tools_asr`（`service/dramaclip/api/tools.py:30-31`），
+>    它们的 `ref_id` 也是素材**路径**（`create(_EXTRACT_JOB_TYPE, ref_id=str(media_path))`）——
+>    队列抽屉今天就在给用户看 `tools_extract` + `D:\素材` 这种主体。同一种病同批修。
+> 2. **加一条完整性用例**（`线上类型逐一在册，表里也不留已退役的项`）：`Object.keys(JOB_TYPE_LABELS)`
+>    与后端 create 实参清单等值。缺项靠人记是记不住的，上一条漏两项就是证据。
+> 3. **工具任务落点 `/tools`**（`TOOL_TYPES`，与 `ENGINE_TYPES` 同构）：`/tools` 已在
+>      `routes.ts` 的顶层路由里，说「无处可去」是假话；`fileNameOf` 不内置「参考清洗」兜底
+>      （那是把某个类型的文案焊进通用助手），空路径返回空串、调用处退回 `jobTypeLabel(job.type)`。
+
 - [ ] **Step 2: 跑测试确认失败**
 
 Run: `cd desktop && npm test -- jobMeta`
@@ -3531,18 +3543,26 @@ const ENGINE_TYPES: ReadonlySet<string> = new Set([
 ```ts
 /** 清洗产物是文件路径：取末段文件名展示，截前缀当短 id 等于给用户看乱码。 */
 function fileNameOf(path: string): string {
-  return path.split(/[/\\]/).filter((part) => part !== '').at(-1) ?? '参考清洗';
+  return path.split(/[/\\]/).filter((part) => part !== '').at(-1) ?? '';
 }
 ```
 
 ```ts
-  if (job.type === 'voice_clean') return fileNameOf(ref);
+  if (FILE_REF_TYPES.has(job.type)) return fileNameOf(ref) || jobTypeLabel(job.type);
 ```
+
+> 实落：这一支按订正 1 覆盖三种路径型类型，所以判据用集合
+> `FILE_REF_TYPES = {'voice_clean','tools_extract','tools_asr'}` 而不是单类型 `if`；
+> 空 ref 退回 `jobTypeLabel(job.type)`（提取刚开始时路径还没落盘）。
 
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd desktop && npm test -- jobMeta`
 Expected: PASS（含既有 12 条：`jobRoute` 那条断言了 `semantic` 与 `ref_id: null` 返回 `null`，本步没动这两类语义）。
+
+> 实落：`npm test -- <名称>` 这种过滤在本仓不生效（vitest 把参数当文件路径），用
+> `npx vitest run src/features/jobs/__tests__/jobMeta.test.ts`。用例名按订正 1 改成 **十三种**；
+> 该文件实落 18 条（既有 12 + 新 6），与 `sections.test.ts` 的 4 条同跑 22 passed / EXIT=0。
 
 - [ ] **Step 5: 写失败测试（sections）**
 
@@ -3601,6 +3621,9 @@ Expected: FAIL——选项数组缺 `h264_amf` / `h264_qsv` 两项；`help` 不�
 
 Run: `cd desktop && npm test -- sections && npm run typecheck`
 Expected: PASS，typecheck 无输出。
+
+> 实落：`npx vitest run` 两文件 22 passed；全量 **82 files / 661 tests 全绿**（Task 9 后基线 655），
+> typecheck EXIT=0，lint 仍是 HEAD 既有那 2 条空箭头函数。
 
 - [ ] **Step 9: 提交**
 
