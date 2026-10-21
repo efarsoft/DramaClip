@@ -281,7 +281,7 @@ if video_codec == "h264_amf":
 - 探针形状不变：0.1s 256×256 黑帧 + 正式质量参数 + `-f null -` + 15s 超时。
 - `pick_hw_encoder()` 首个真试编通过者胜出，会话级缓存（全失败缓存哨兵 `""`）。
 - AMF 在 NVIDIA 机器上失败属于预期：继续试下一个候选，不影响最终选中 NVENC；探测自身的任何异常按该候选不可用处理。
-- `_HW_ENCODERS` 增加 `h264_amf`，使段级回退与整片 libx264 统一重跑的判定同样覆盖 AMF（`_is_hw_encoder`）。
+- `_HW_ENCODERS` 增加 `h264_amf`，使段级回退与整片 libx264 统一重跑的判定同样覆盖 AMF（判定即 `_HW_ENCODERS` 成员检查，`_fallback_eligible()` 读 `-c:v` 后的 codec）。
 - 用户显式固定某编码器时行为不变：不探测、直接使用；若该段真编失败，仍走既有「段级回退 + 整片 libx264 重跑 + 回执写明原因」的可见降级链。
 
 ### 4.4 设置与回执
@@ -395,7 +395,7 @@ if video_codec == "h264_amf":
 | `service/tests/infra/test_device_profile_multi_vendor.py`（新增） | amd/intel/other/none/unknown 的标签、推荐、五项 cap 提示；NVIDIA 驱动不可读 vs 驱动过旧的两个分支；显存 0 → tier none；`tier_of` 非 N 卡恒 none；`indextts2_gpu.ok` 的 sm_70 下限与 `ready` 随 torch 变体变化；`funasr_gpu` 不设静态下限（ready 由探测决定）；每个 cap 都有 `reason` 字段 |
 | `service/tests/infra/test_device_resolve.py`（新增） | 组件 → cap 映射完整；`cuda` 在 cap 未 ready 时抛 `ComputeUnavailableError` 且不构造引擎；`cpu` 恒 CPU；`auto` 按 ready 选路并带 reason，`downgraded` 只在 ok≠ready 时为真；待定快照返回 `device="auto"` 而不是 cpu；回执 `actual` 不由 resolve 伪造 |
 | `service/tests/engines/test_device_resolve_wiring.py`（新增） | `_build_transcriber`（三种本地引擎）与 `tts.factory.create`（indextts2/cosyvoice）传下去的是解析后的设备；显式 `cuda` 不可用时在构造前失败 |
-| `service/tests/engines/exporter/test_hw_probe.py` | win32 候选序含 AMF；AMF 参数与正式段编码同形状；NVENC 失败后 AMF 命中；全部失败缓存；`_is_hw_encoder("h264_amf") is True` |
+| `service/tests/engines/exporter/test_hw_probe.py` | win32 候选序含 AMF；AMF 参数与正式段编码同形状；NVENC 失败后 AMF 命中；全部失败缓存；`"h264_amf" in encoder._HW_ENCODERS` 与 `_fallback_eligible(...)`（AMF 段为真，同段换 `libx264` 为假） |
 | `service/tests/test_verify_gpu_coverage.py` | `judge_actual` 接受 AMF；`_select_hw_encoder` 按候选序回落并在全失败时给逐项原因；`_HW_ENCODERS` 含 AMF |
 | `service/tests/infra/test_gpu_and_fallback.py` | `test_detect_reports_cpu_when_smi_missing` 必须同时桩掉 CIM 源（否则 Windows 本机会真的枚举到 N 卡）；`_PENDING_FIELDS` / `detect` 的既有形状断言同步更新；不放宽任何生产断言 |
 | `service/tests/api/test_tts_clean_reference.py` | 设备解耦：`tts.device` 设为 `cuda` / `cpu` 时，分离请求都是 `auto`；成功时建 `voice_clean` 任务行且 `jobs.compute` 非空、component 为 `tts.separation`；`mode=fast` 写 `tts.reference_clean.filter` 且 reason 说明用户选择；失败任务行置 failed 且 error 带原因；不静默换模式 |
@@ -503,6 +503,7 @@ service/.venv/Scripts/python.exe scripts/verify_gpu_coverage.py --require video.
 - `scripts/verify_gpu_coverage.py`（多厂商选择、AMF 判定、host_gpu 记录）
 
 **前端/协议**
+- `protocol/schemas/tts.json`（`tts.clean_reference` / `tts.extract_reference` 结果补 `job_id`，`compute` 描述改为按 mode 分账）
 - `protocol/ts/index.ts`（`GpuVendor` / `GpuAdapter` / `adapters`；`DeviceCaps` 类型）
 - `desktop/src/features/engines/machineFit.ts`（`MachineSpecs.gpu` / `caps`）
 - `desktop/src/features/engines/deviceOptions.ts`（新增，含引擎 → cap 的唯一映射）
