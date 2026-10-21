@@ -20,6 +20,7 @@ import pytest
 from dramaclip.engines.tts import factory
 from dramaclip.engines.tts.base import EngineCaps
 from dramaclip.engines.tts.engines import indextts2 as indextts2_mod
+from dramaclip.engines.tts.engines import kokoro as kokoro_mod
 from dramaclip.engines.tts.engines.edge import EdgeTtsEngine
 from dramaclip.engines.tts.engines.indextts2 import IndexTts2Engine
 from dramaclip.engines.tts.engines.kokoro import KokoroEngine
@@ -88,13 +89,20 @@ def test_kokoro_caps_reflect_model_constants(tmp_path: Path) -> None:
     assert caps.speed_control == "native"  # KPipeline(speed=...) 实测存在
 
 
-def test_kokoro_availability_reports_missing_model(tmp_path: Path) -> None:
+def test_kokoro_availability_reports_missing_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 运行环境门与测试环境解耦（CI 无 tts-venv）：本测试只验过门之后的权重分支
+    monkeypatch.setattr(kokoro_mod, "_venv_kokoro_installed", lambda: True)
     ok, reason = KokoroEngine(tmp_path / "nowhere").is_available()
     assert ok is False
     assert "缺模型" in reason
 
 
-def test_kokoro_availability_passes_with_fake_weights(tmp_path: Path) -> None:
+def test_kokoro_availability_passes_with_fake_weights(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(kokoro_mod, "_venv_kokoro_installed", lambda: True)
     (tmp_path / "config.json").write_text("{}", encoding="utf-8")
     (tmp_path / "kokoro-v1_1-zh.pth").write_bytes(b"\x00")
     ok, reason = KokoroEngine(tmp_path).is_available()
