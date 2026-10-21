@@ -73,8 +73,8 @@ function rpc(method, params = {}, timeoutMs = 120000) {
   });
 }
 
-function makeSampleVideo(dir) {
-  const out = path.join(dir, 'sample.mp4');
+function makeSampleVideo(dir, name) {
+  const out = path.join(dir, name);
   execFileSync(ffmpeg, [
     '-y', '-f', 'lavfi', '-i', 'testsrc2=duration=3:size=320x640:rate=15',
     '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
@@ -141,15 +141,17 @@ async function main() {
   check('主包零 torch 系（E-2）', torchLeftovers.length === 0,
     torchLeftovers.length ? `仍存在: ${torchLeftovers.join(', ')}` : '_internal 无 torch 系目录');
 
-  // 全自动流水线（扫完即开工）时代：把全量阈值顶到上限，让 scan 内部的 autostart
-  // 走预筛分支——预筛只吃 ffmpeg 与引擎导入链，无模型也能完成，正是冒烟要验的链路。
+  // 全自动流水线（扫完即开工）时代：阈值钉 1 + 两段样例 → 集数 2 > 1，scan 内部的
+  // autostart 必走预筛分支（预筛只吃 ffmpeg 与引擎导入链，无模型也能完成，正是
+  // 冒烟要验的链路）。单集时阈值最小也是 1，1≤1 恒走全量分析——无模型环境必失败。
   // 旧「自己再调一次 analysis.prescreen」在 autostart 把集挪出 pending 后必撞
   // 「没有待预筛的集」（CI 首次真跑实证）。
-  await rpc('settings.update', { values: { 'analysis.full_threshold': 999 } });
-  const video = makeSampleVideo(work);
+  await rpc('settings.update', { values: { 'analysis.full_threshold': 1 } });
+  makeSampleVideo(work, 'sample-01.mp4');
+  makeSampleVideo(work, 'sample-02.mp4');
   const project = await rpc('project.create', { name: 'sidecar-smoke', source_path: work });
   await rpc('project.scan_episodes', { project_id: project.id });
-  const job = await waitPrescreenJob(project.id, 120000);
+  const job = await waitPrescreenJob(project.id, 180000);
   check('analysis 预筛链（ffmpeg+引擎导入，autostart）', job.status === 'completed', `status=${job.status}`);
 
   const shutdown = await rpc('system.shutdown');
