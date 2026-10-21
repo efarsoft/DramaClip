@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from dramaclip.engines.tts.engines import indextts2 as indextts2_mod
+from dramaclip.engines.tts.engines import kokoro as kokoro_mod
 from dramaclip.engines.tts.engines.edge import EdgeTtsEngine
 from dramaclip.engines.tts.engines.indextts2 import IndexTts2Engine
 from dramaclip.engines.tts.engines.kokoro import KokoroEngine
@@ -86,14 +87,21 @@ class _FakePipeline:
         return [(None, None, np.ones(len(text) * 10, dtype="float32"))]
 
 
-def _kokoro_with_fake(tmp_path: Path, pipeline: _FakePipeline) -> KokoroEngine:
+def _kokoro_with_fake(
+    tmp_path: Path, pipeline: _FakePipeline, monkeypatch: pytest.MonkeyPatch
+) -> KokoroEngine:
+    # 钉进程内分支：CI 无 kokoro 包时 synthesize 会分流到 venv worker 桥（那里没有
+    # tts-venv 必挂「未装运行环境」）——本组测试验的是切分/拼接，不是分流
+    monkeypatch.setattr(kokoro_mod, "_kokoro_importable", lambda: True)
     engine = KokoroEngine(tmp_path)
     engine._pipeline = pipeline
     engine._loaded = True
     return engine
 
 
-def test_kokoro_long_text_is_split_and_written_as_one_wav(tmp_path: Path) -> None:
+def test_kokoro_long_text_is_split_and_written_as_one_wav(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import soundfile as sf
 
     text = "这一段旁白很长。" * 60  # 480 字符 CJK → 3 块
@@ -102,7 +110,7 @@ def test_kokoro_long_text_is_split_and_written_as_one_wav(tmp_path: Path) -> Non
     pipeline = _FakePipeline()
     out = tmp_path / "n0.wav"
 
-    result = _kokoro_with_fake(tmp_path, pipeline).synthesize(text, "zf_001", out)
+    result = _kokoro_with_fake(tmp_path, pipeline, monkeypatch).synthesize(text, "zf_001", out)
 
     assert result == out and out.is_file()
     assert pipeline.calls == chunks, "逐块喂 pipeline"
@@ -111,10 +119,12 @@ def test_kokoro_long_text_is_split_and_written_as_one_wav(tmp_path: Path) -> Non
     assert len(audio) == sum(len(c) * 10 for c in chunks), "拼接后总帧数=各块之和"
 
 
-def test_kokoro_short_text_single_pipeline_call(tmp_path: Path) -> None:
+def test_kokoro_short_text_single_pipeline_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     pipeline = _FakePipeline()
     out = tmp_path / "n0.wav"
-    _kokoro_with_fake(tmp_path, pipeline).synthesize("短句。", "zf_001", out)
+    _kokoro_with_fake(tmp_path, pipeline, monkeypatch).synthesize("短句。", "zf_001", out)
     assert pipeline.calls == ["短句。"]
 
 
