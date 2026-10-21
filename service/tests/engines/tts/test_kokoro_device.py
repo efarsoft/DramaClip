@@ -42,6 +42,12 @@ def test_kokoro_moves_model_to_cpu(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 def test_kokoro_explicit_cuda_probe_failure_raises(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    # _ensure_pipeline 先 import kokoro 再探针：CI（及任何没装 kokoro 的干净环境）
+    # 必须给假模块，否则探针的承诺异常被 ModuleNotFoundError 抢先（本机残留包掩护实证）
+    fake_kokoro = SimpleNamespace(KPipeline=lambda **_: object())
+    fake_model_mod = SimpleNamespace(KModel=_FakeModel)
+    monkeypatch.setitem(sys.modules, "kokoro", fake_kokoro)
+    monkeypatch.setitem(sys.modules, "kokoro.model", fake_model_mod)
     monkeypatch.setattr(kokoro_mod, "_probe_torch_device", lambda _d: ("cpu", "cuda 不可用"))
     engine = kokoro_mod.KokoroEngine(tmp_path, device="cuda")
     with pytest.raises(compute.ComputeUnavailableError):
