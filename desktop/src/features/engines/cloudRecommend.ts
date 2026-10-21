@@ -12,7 +12,7 @@ export type CloudRecommendation = 'guide' | 'switch' | 'none';
 
 export function cloudRecommendation(
   gpu: GpuInfo | undefined,
-  configs: { readonly enabled: number | boolean }[],
+  configs: readonly { readonly enabled: number | boolean }[],
   localGpuReady: boolean,
 ): CloudRecommendation {
   if (configs.some((config) => Boolean(config.enabled))) return 'none';
