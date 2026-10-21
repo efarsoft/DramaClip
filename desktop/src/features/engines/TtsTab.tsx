@@ -309,7 +309,7 @@ function ActiveCard({
         ),
       },
       ...(engine === 'indextts2'
-        ? [{ label: '人声分离', value: <SeparationBackendNote /> }]
+        ? [{ label: '人声分离', value: <SeparationBackendNote machine={machine} /> }]
         : []),
       // 云端引擎不看本机设备；只有本地引擎才摆这一行，避免「选了 CUDA 却走云端」的假选择。
       ...(engine === 'edge' || engine === 'cosyvoice_cloud'
@@ -336,14 +336,20 @@ function ActiveCard({
 }
 
 /** 分离后端只报安装期探测到的事实；实际任务用哪条路由清洗回执再确认。 */
-function SeparationBackendNote(): ReactElement | null {
+export function SeparationBackendNote({ machine }: { machine: MachineSpecs }): ReactElement | null {
   const { installed, ortGpu, install } = useLocalRuntime();
   if (installed === null) return null;
   const style = { color: tokens.textSecondary, fontSize: tokens.text.meta.size };
   if (!installed) {
     return <span style={style}>运行环境未安装——人声分离暂不可用</span>;
   }
-  const retry = ortGpu === null || (!ortGpu.gpu && !ortGpu.reason.includes('未检测到 NVIDIA'));
+  // 宿主事实决定「重跑安装」有没有意义：非 NVIDIA 主机装了也不会启用 CUDA EP。
+  const hostMayHaveCuda =
+    machine.gpu === undefined ||
+    !machine.gpu.ready ||
+    machine.gpu.vendor === 'nvidia' ||
+    machine.gpu.vendor === 'unknown';
+  const retry = ortGpu === null || (!ortGpu.gpu && hostMayHaveCuda);
   const retryButton = retry ? (
     <Button
       size="small"

@@ -3201,7 +3201,9 @@ git commit -m "feat: 设备选项按后端 cap.ready 生成（CUDA 是承诺，�
 - Modify: `desktop/src/features/engines/MachinePanel.tsx:58`、`:103-155`、`:194-215`、`:245-248`
 - Modify: `desktop/src/features/engines/TtsTab.tsx:320`、`:347-387`
 - Modify: `desktop/src/features/engines/useGpuInfo.ts:49-61`（删 `gpuSummary`）
-- Test: `desktop/src/features/engines/__tests__/MachinePanelEnv.test.tsx`、新增 `GpuCard.test.tsx`
+- Test: `desktop/src/features/engines/__tests__/MachinePanelEnv.test.tsx`、新增 `GpuCard.test.tsx`、
+  新增 `desktop/src/components/layout/__tests__/StatusBar.test.tsx`、
+  新增 `desktop/src/features/engines/__tests__/SeparationBackendNote.test.tsx`（实落补的两件，见 Step 2 订正）
 
 **Interfaces:**
 - Consumes: Task 8 的 `GpuVendor`、`MachineSpecs.gpu`。
@@ -3289,8 +3291,19 @@ it('显卡探测中（gpu_info 缺席）→ 不冒充「未检测到独立显卡
 
 - [ ] **Step 2: 运行确认失败**
 
-Run: `cd desktop && npm test -- GpuCardVendors MachinePanelEnv`
+Run: `cd desktop && npx vitest run src/features/engines/__tests__/GpuCard.test.tsx src/features/engines/__tests__/MachinePanelEnv.test.tsx`
 Expected: FAIL——非 nvidia 主机仍显示「未检测到 NVIDIA 显卡」，AMD/Intel 的编码行缺失。
+
+> 实落订正：
+> 1. **`--reporter=basic` 在本仓 vitest 版本不可用**（直接报 `ESM syntax in a file loaded as CommonJS`），
+>    跑默认 reporter 再 `grep '×'` 取用例名；`npm test -- <名称>` 的过滤姿势同理不成立，用文件路径。
+> 2. 上面这条命令的期望实落 **13 红**（GpuCard 4 + MachinePanelEnv 9），红的全是新用例，既有 6 条不连坐。
+> 3. 计划只点两个测试文件，**实际补到四个**：`StatusBar.tsx` 的 `gpuLabel` 是纯函数但不是纯文案——
+>    「无独立显卡」那句在状态栏常驻，AMD 主机天天看得到，不测等于改了一半。
+>    `SeparationBackendNote` 同因（Step 6 换的是控制流），故新增
+>    `desktop/src/components/layout/__tests__/StatusBar.test.tsx`（4 条）与
+>    `desktop/src/features/engines/__tests__/SeparationBackendNote.test.tsx`（5 条），
+>    后者需要把组件从 `TtsTab.tsx` 导出（只加 `export`，对外面零改动）。
 
 - [ ] **Step 3: `GpuCard.tsx`**
 
@@ -3372,6 +3385,12 @@ function cudaText(status: EnvStatus, vendor: GpuVendor): string {
 > 文案之后：**探测失败仍不许冒充「未安装」**（既有纪律，`EnvStatus` 三态不变）。
 > `status` 的实际取值名以文件现状为准（`:148-155` 附近），按现状对齐分支、不新增状态。
 
+> 实落订正：`EnvStatus` 的现状取值是 `loading | installed | missing | unknown`，
+> 上面片段的 `probing` 这一支在本仓根本不存在——按现状对齐成
+> `loading → '检测中…'`、`unknown → '状态未知 · 探测失败，稍后刷新页面重试'`（两句原样保留，
+> 「探测失败不冒充未安装」的既有测试 `MachinePanelEnv.test.tsx:探测失败` 仍绿），
+> `missing` 落到函数末尾的厂商四支。
+
 显卡格与判定尾句：
 
 ```ts
@@ -3396,6 +3415,21 @@ function cudaText(status: EnvStatus, vendor: GpuVendor): string {
       : `——${verdict.reason}`;
 ```
 
+> 计划外同批（`MachinePanel.tsx:281-296` 的 `TierLine`，不在本 Task 声明的行范围内，但它与本 Task
+> 同一个文件、同一个病）：`readyOf` 原本是 `key === 'indextts2_gpu' ? cap.ok && ttsReady : cap.ready`
+> ——那句注释「后端探针只到安装态」已经过期，Task 2 之后后端 `indextts2_gpu.ready` 就是执行级实况
+> （`indextts_ok and variant == 'cuda'`）。前端再拼一次 `localRuntimeApi.status().installed`
+> 是第二真相源，而且拼的是**安装态**：tts-venv 装上了但 torch 是 CPU 轮时，后端说 `ready=false`、
+> 前端仍点亮「GPU 加速已生效：音色克隆」——绿灯假账，比原来的灰灯误导更糟。
+> 改成 `readyOf = (key) => caps[key]?.ready === true`，`ttsReady` prop 一并删（调用处少一个参数）。
+> 两条用例钉住方向：装好 + `ready=false` → 只进「硬件满足但待运行时」；未装 + `ready=true` → 照后端亮灯。
+>
+> 同处另有一笔**未动、待裁定**：`TierLine` 的 `blocked`（「此卡不支持」那串）仍按
+> `cap.hint === ''` 判有无原因，并硬排除 `indextts2_gpu` / `funasr_gpu`。Task 2 之后 `ok=false`
+> 已经是纯硬件/算力下界结论（M4000 的 `indextts2_gpu` 就是 `ok=false` + sm_70 下界原因），
+> 这两个排除项会把真不支持说成没支持——正是 `:303-305` 注释要防的那类误导，方向还反了。
+> 改它要连 `hint`→`reason` 的取数一起换（`reason` 才是给程序读的那半句），不在本 Task 的文案面里。
+
 - [ ] **Step 6: `SeparationBackendNote` 读宿主事实**
 
 props 加 `machine: MachineSpecs`（渲染处 `:320` 传 `machine={machine}`），删掉文案解析那一行：
@@ -3418,10 +3452,17 @@ props 加 `machine: MachineSpecs`（渲染处 `:320` 传 `machine={machine}`）�
 Run: `cd desktop && npm test && npm run typecheck && npm run lint`
 Expected: 全绿。`typecheck` 是 `GpuVendor` 收紧的受益处：任何漏了 `unknown` 分支的 switch 会在这里红。
 
+> 实落：`npm test` **82 files / 655 tests 全绿**（Task 8 后基线 78/626，本 Task +4 文件 +29 用例），
+> `npm run typecheck` EXIT=0，`npm run lint` 只剩 HEAD 既有的 2 错
+> （`EnginesImport.test.tsx:32`、`enginesDeepLink.test.tsx:22` 两条空箭头函数，两文件与本批无关、
+> 未改动）与 7 条既有 `react-refresh` warning。
+> 顺手修掉 Task 8 遗留的一条：`deviceOptions.ts:39` 的 `args.gpu === undefined || !args.gpu.ready`
+> 被 `prefer-optional-chain` 判冗余——那是上一笔提交只跑 test/typecheck、没跑 lint 漏下的。
+
 - [ ] **Step 9: 提交**
 
 ```bash
-git add desktop/src/features/engines/GpuCard.tsx desktop/src/components/layout/StatusBar.tsx desktop/src/features/engines/MachinePanel.tsx desktop/src/features/engines/TtsTab.tsx desktop/src/features/engines/useGpuInfo.ts desktop/src/features/engines/__tests__/GpuCard.test.tsx desktop/src/features/engines/__tests__/MachinePanelEnv.test.tsx
+git add desktop/src/features/engines/GpuCard.tsx desktop/src/components/layout/StatusBar.tsx desktop/src/features/engines/MachinePanel.tsx desktop/src/features/engines/TtsTab.tsx desktop/src/features/engines/useGpuInfo.ts desktop/src/features/engines/deviceOptions.ts desktop/src/features/engines/__tests__/GpuCard.test.tsx desktop/src/features/engines/__tests__/MachinePanelEnv.test.tsx desktop/src/features/engines/__tests__/SeparationBackendNote.test.tsx desktop/src/components/layout/__tests__/StatusBar.test.tsx docs/superpowers/plans/2026-10-20-windows-multi-vendor-gpu.md
 git commit -m "feat: GPU 文案按厂商三分支（AMF/QSV 各说各的），分离提示改读宿主事实并删除 gpuSummary"
 ```
 

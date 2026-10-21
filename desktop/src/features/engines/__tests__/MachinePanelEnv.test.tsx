@@ -8,7 +8,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { DeviceProfile, HealthResult } from '@dramaclip/protocol';
+import type { DeviceProfile, HealthResult, ModelInfo } from '@dramaclip/protocol';
 import { indexttsApi, localRuntimeApi, runtimeApi, systemApi } from '../../../services/client';
 import { MachinePanel } from '../MachinePanel';
 
@@ -87,12 +87,35 @@ const NVIDIA_HEALTH: HealthResult = {
 
 const NO_GPU_HEALTH: HealthResult = { ...NVIDIA_HEALTH, gpu_info: undefined };
 
-function renderPanel(health: HealthResult = NVIDIA_HEALTH): void {
+const AMD_HEALTH: HealthResult = {
+  ...NVIDIA_HEALTH,
+  gpu_info: {
+    ready: true, vendor: 'amd', name: 'Radeon RX 6600', driver_version: '31.0.21006.1',
+    max_cuda_version: '', memory_total_mb: 8188, compute_cap: '',
+  },
+};
+
+const NONE_HEALTH: HealthResult = {
+  ...NVIDIA_HEALTH,
+  gpu_info: {
+    ready: true, vendor: 'none', name: '', driver_version: '',
+    max_cuda_version: '', memory_total_mb: 0, compute_cap: '',
+  },
+};
+
+/** 判定尾句要有结论可判：给一张 4GB 的本地模型（磁盘/内存都吃得下 → verdict=ok）。 */
+const MODEL_4GB: ModelInfo = {
+  model_id: 'm1', kind: 'asr', engine: 'faster_whisper', repo_id: 'x/y',
+  name: 'Whisper 小模型', required: false, status: 'missing', size_label: '~4GB',
+  engine_ready: true,
+};
+
+function renderPanel(health: HealthResult = NVIDIA_HEALTH, models: readonly ModelInfo[] = []): void {
   vi.mocked(systemApi.health).mockResolvedValue(health);
   render(
     <MemoryRouter initialEntries={['/engines/overview']}>
       <Routes>
-        <Route path="/engines/overview" element={<MachinePanel models={[]} />} />
+        <Route path="/engines/overview" element={<MachinePanel models={models} />} />
         <Route path="/engines/tts" element={<div>TTS 页已到</div>} />
       </Routes>
     </MemoryRouter>,
@@ -155,10 +178,22 @@ describe('总览页 · 运行环境状态行', () => {
     expect(await screen.findByText(/CUDA 运行库：未安装 · 转写走 CPU，可在本页「转写加速（GPU）」卡下载/)).toBeTruthy();
   });
 
-  it('无 N 卡 → 不劝人下没用的运行库（如实说无需安装）', async () => {
+  it('AMD 主机 + 缺 CUDA 运行库 → 说清加速需要 N 卡，当前走 CPU', async () => {
+    vi.mocked(runtimeApi.status).mockResolvedValue({ cublas: false, cudnn: false, installed: false });
+    renderPanel(AMD_HEALTH);
+    expect(await screen.findByText(/CUDA 运行库：未安装 · 转写加速需要 NVIDIA CUDA，无需安装，当前走 CPU/)).toBeTruthy();
+  });
+
+  it('无显卡主机（vendor=none）+ 缺运行库 → 说清没卡所以无需安装', async () => {
+    vi.mocked(runtimeApi.status).mockResolvedValue({ cublas: false, cudnn: false, installed: false });
+    renderPanel(NONE_HEALTH);
+    expect(await screen.findByText(/CUDA 运行库：未安装 · 未检测到独立显卡，无需安装，转写走 CPU/)).toBeTruthy();
+  });
+
+  it('显卡探测中（gpu_info 缺席）→ 不冒充「未检测到独立显卡」', async () => {
     vi.mocked(runtimeApi.status).mockResolvedValue({ cublas: false, cudnn: false, installed: false });
     renderPanel(NO_GPU_HEALTH);
-    expect(await screen.findByText(/CUDA 运行库：未安装 · 本机无 NVIDIA 显卡，无需安装/)).toBeTruthy();
+    expect(await screen.findByText(/CUDA 运行库：未安装 · 显卡状态探测中，暂按 CPU 运行/)).toBeTruthy();
   });
 
   it('探测失败 → 「状态未知」，取不到 ≠ 不存在，不冒充未安装', async () => {
@@ -169,5 +204,56 @@ describe('总览页 · 运行环境状态行', () => {
     expect(await screen.findByText(/CUDA 运行库：状态未知/)).toBeTruthy();
     expect(await screen.findByText(/本地智能运行环境：状态未知/)).toBeTruthy();
     expect(screen.queryByText(/未安装/)).toBeNull();
+  });
+});
+
+describe('总览页 · 显卡格与判定尾句', () => {
+  afterEach(cleanup);
+
+  it('AMD 主机：显卡格报型号与驱动，不再写「未检测到 NVIDIA」', async () => {
+    renderPanel(AMD_HEALTH);
+    expect(await screen.findByText('Radeon RX 6600 · 驱动 31.0.21006.1')).toBeTruthy();
+  });
+
+  it('无显卡主机（vendor=none）：如实说没检测到独立显卡', async () => {
+    renderPanel(NONE_HEALTH);
+    expect(await screen.findByText('未检测到独立显卡 · 走 CPU')).toBeTruthy();
+  });
+
+  it('显卡探测中：不冒充「未检测到」', async () => {
+    renderPanel(NO_GPU_HEALTH);
+    expect(await screen.findByText('显卡待检测…')).toBeTruthy();
+  });
+
+  it('判定尾句：硬编由导出时真试编决定，三厂商都点名', async () => {
+    renderPanel(AMD_HEALTH, [MODEL_4GB]);
+    expect(await screen.findByText(/视频导出会真试编选择硬件编码器（NVENC \/ AMF \/ QSV）/)).toBeTruthy();
+  });
+});
+
+describe('总览页 · 设备档位行的 GPU 加速灯', () => {
+  afterEach(cleanup);
+
+  /** 灯只许读后端 ready：运行环境装没装是另一笔账，不许在这里覆盖算力结论。 */
+  const profileWith = (cap: { ok: boolean; ready: boolean; reason: string }): HealthResult => ({
+    ...NVIDIA_HEALTH,
+    device_profile: { ...NVIDIA_PROFILE, caps: { indextts2_gpu: { hint: '', ...cap } } },
+  });
+
+  it('运行环境已装但后端说 ready=false（torch 是 CPU 轮）→ 灯不亮', async () => {
+    vi.mocked(localRuntimeApi.status).mockResolvedValue({
+      installed: true, dir: 'C:/rt', torch_variant: 'cpu', groups: { indextts: true },
+    });
+    renderPanel(profileWith({ ok: true, ready: false, reason: '本地运行环境的 torch 是 CPU 轮' }));
+    expect(await screen.findByText(/硬件满足但待运行时：音色克隆/)).toBeTruthy();
+    expect(screen.queryByText(/GPU 加速已生效/)).toBeNull();
+  });
+
+  it('后端说 ready=true → 灯亮，即使本机运行环境探测显示未装', async () => {
+    vi.mocked(localRuntimeApi.status).mockResolvedValue({
+      installed: false, dir: '', torch_variant: 'unknown', groups: {},
+    });
+    renderPanel(profileWith({ ok: true, ready: true, reason: '' }));
+    expect(await screen.findByText(/GPU 加速已生效：音色克隆/)).toBeTruthy();
   });
 });

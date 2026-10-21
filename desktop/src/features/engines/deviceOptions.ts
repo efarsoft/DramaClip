@@ -36,7 +36,7 @@ export function deviceOptions(args: {
     { label: '自动（检测 GPU）', value: 'auto' },
     { label: 'CPU', value: 'cpu' },
   ];
-  if (args.gpu === undefined || !args.gpu.ready) {
+  if (!args.gpu?.ready) {
     return [...base, { label: CUDA_LABEL, value: 'cuda' }];
   }
   const cap = args.caps?.[ENGINE_CAP[args.engine] ?? ''];

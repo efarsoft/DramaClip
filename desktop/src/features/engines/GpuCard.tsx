@@ -13,7 +13,10 @@ function statusOf(info: GpuInfo | null, device: string): { text: string; color: 
     return { text: '检测中…', color: tokens.textTertiary };
   }
   if (info.vendor !== 'nvidia') {
-    return { text: '未检测到 NVIDIA 显卡 · 转写将以 CPU 运行', color: tokens.textSecondary };
+    // 只有 none 才是「没有显卡」；amd/intel/other 有卡，只是不满足 CUDA 这一条
+    return info.vendor === 'none'
+      ? { text: '未检测到独立显卡 · 转写将以 CPU 运行', color: tokens.textSecondary }
+      : { text: '未检测到 NVIDIA 显卡 · 转写将以 CPU 运行', color: tokens.textSecondary };
   }
   if (device === 'cpu') {
     return {
@@ -27,9 +30,25 @@ function statusOf(info: GpuInfo | null, device: string): { text: string; color: 
   };
 }
 
+/** 硬编口径按厂商点名：AI 加速仍只认 CUDA，视频导出由导出时真试编决定。 */
+function encodeNote(vendor: GpuInfo['vendor']): string {
+  if (vendor === 'amd') return '视频导出可用 AMD 硬件编码（AMF，导出时真试编）';
+  if (vendor === 'intel') return '视频导出可用 Intel 硬件编码（QSV，导出时真试编）';
+  if (vendor === 'none') return 'ASR/TTS 加速需要 NVIDIA CUDA；视频导出将真试编，全不可用回退 libx264';
+  return '视频导出将真试编可用的硬件编码器';
+}
+
 function metaOf(info: GpuInfo | null): string {
   if (!info?.ready) return '';
-  if (info.vendor !== 'nvidia') return 'GPU 加速当前仅支持 NVIDIA（CUDA）';
+  if (info.vendor !== 'nvidia') {
+    if (info.vendor === 'none') return encodeNote('none');
+    const parts = [
+      info.name,
+      info.driver_version !== '' ? `驱动 ${info.driver_version}` : '',
+      encodeNote(info.vendor),
+    ].filter((part) => part !== '');
+    return parts.join(' · ');
+  }
   const parts: string[] = [];
   if (info.name !== '') parts.push(info.name);
   if (info.driver_version !== '') parts.push(`驱动版本 ${info.driver_version}`);

@@ -16,7 +16,10 @@ const STATE_META: Record<string, { label: string; color: string }> = {
 
 function gpuLabel(info: GpuInfo | undefined): string {
   if (!info?.ready) return '待检测';
-  if (info.vendor !== 'nvidia') return '无独立显卡 · CPU 模式';
+  if (info.vendor === 'none') return '未检测到独立显卡 · CPU 模式';
+  if (info.vendor !== 'nvidia') {
+    return `${info.name !== '' ? info.name : '独立显卡'} · 驱动 ${info.driver_version || '未知'}`;
+  }
   const short = info.name.replace(/^NVIDIA\s+/i, '');
   return `${short !== '' ? short : 'NVIDIA'} · 驱动 ${info.driver_version || '未知'}`;
 }

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'antd';
-import type { DeviceProfile, HealthResult, ModelInfo } from '@dramaclip/protocol';
+import type { DeviceProfile, GpuVendor, HealthResult, ModelInfo } from '@dramaclip/protocol';
 import { localRuntimeApi, runtimeApi, systemApi } from '../../services/client';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
@@ -55,14 +55,12 @@ export function MachinePanel({ models }: { models: readonly ModelInfo[] }): Reac
       <EnvSection
         cuda={cuda}
         localRuntime={localRuntime}
-        gpuIsNvidia={gpu?.ready === true && gpu.vendor === 'nvidia'}
+        gpuVendor={gpu?.ready === true ? gpu.vendor : 'unknown'}
         onGoTts={() => {
           void navigate('/engines/tts');
         }}
       />
-      {health?.device_profile !== undefined && (
-        <TierLine profile={health.device_profile} ttsReady={localRuntime === 'installed'} />
-      )}
+      {health?.device_profile !== undefined && <TierLine profile={health.device_profile} />}
       {verdict.verdict !== 'unknown' && <VerdictLine verdict={verdict} maxSizeGb={maxSizeGb} />}
       <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
         本卡回答硬件「装得下 / 跑得动」与两个运行环境在不在；修复动作各有其家：CUDA
@@ -106,12 +104,12 @@ const ENV_DOT: Record<EnvStatus, string> = {
 function EnvSection({
   cuda,
   localRuntime,
-  gpuIsNvidia,
+  gpuVendor,
   onGoTts,
 }: {
   cuda: EnvStatus;
   localRuntime: EnvStatus;
-  gpuIsNvidia: boolean;
+  gpuVendor: GpuVendor;
   onGoTts: () => void;
 }): ReactElement {
   return (
@@ -128,7 +126,7 @@ function EnvSection({
       <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
         运行环境
       </span>
-      <EnvRow label="CUDA 运行库" status={cuda} text={cudaText(cuda, gpuIsNvidia)} />
+      <EnvRow label="CUDA 运行库" status={cuda} text={cudaText(cuda, gpuVendor)} />
       <EnvRow
         label="本地智能运行环境"
         status={localRuntime}
@@ -145,13 +143,19 @@ function EnvSection({
   );
 }
 
-function cudaText(status: EnvStatus, gpuIsNvidia: boolean): string {
+function cudaText(status: EnvStatus, vendor: GpuVendor): string {
   if (status === 'loading') return '检测中…';
   if (status === 'unknown') return '状态未知 · 探测失败，稍后刷新页面重试';
-  if (status === 'installed') return '已安装 · 转写可走 GPU 加速';
-  return gpuIsNvidia
-    ? '未安装 · 转写走 CPU，可在本页「转写加速（GPU）」卡下载'
-    : '未安装 · 本机无 NVIDIA 显卡，无需安装，转写走 CPU';
+  if (status === 'installed') {
+    if (vendor === 'nvidia') return '已安装 · 转写可走 GPU 加速';
+    if (vendor === 'none') return '已安装 · 未检测到独立显卡，不会启用';
+    if (vendor === 'unknown') return '已安装 · 显卡状态探测中';
+    return '已安装 · 本机无 NVIDIA 显卡，不会启用';
+  }
+  if (vendor === 'nvidia') return '未安装 · 转写走 CPU，可在本页「转写加速（GPU）」卡下载';
+  if (vendor === 'none') return '未安装 · 未检测到独立显卡，无需安装，转写走 CPU';
+  if (vendor === 'unknown') return '未安装 · 显卡状态探测中，暂按 CPU 运行';
+  return '未安装 · 转写加速需要 NVIDIA CUDA，无需安装，当前走 CPU';
 }
 
 function localRuntimeText(status: EnvStatus): string {
@@ -196,9 +200,15 @@ function specCellsOf(health: HealthResult | null): { label: string; value: strin
   return [
     {
       label: '显卡',
-      value: gpu?.ready
-        ? `${gpu.name}${gpu.memory_total_mb > 0 ? ` · ${String(Math.round(gpu.memory_total_mb / 1024))}GB` : ''}${gpu.max_cuda_version !== '' ? ` · CUDA ${gpu.max_cuda_version}` : ''}`
-        : '未检测到 NVIDIA · 走 CPU',
+      value: !gpu?.ready
+        ? '显卡待检测…'
+        : gpu.vendor === 'none'
+          ? '未检测到独立显卡 · 走 CPU'
+          : gpu.vendor === 'nvidia'
+            ? `${gpu.name}${gpu.memory_total_mb > 0 ? ` · ${String(Math.round(gpu.memory_total_mb / 1024))}GB` : ''}${gpu.max_cuda_version !== '' ? ` · CUDA ${gpu.max_cuda_version}` : ''}`
+            : gpu.name !== ''
+              ? `${gpu.name} · 驱动 ${gpu.driver_version}`
+              : '独立显卡 · 驱动未读到',
     },
     {
       label: '内存',
@@ -244,7 +254,7 @@ function VerdictLine({
 }): ReactElement {
   const tail =
     verdict.verdict === 'ok'
-      ? '；本地引擎均为 CPU 可跑，NVIDIA 显卡仅用于转写加速'
+      ? '；本地引擎均为 CPU 可跑，视频导出会真试编选择硬件编码器（NVENC / AMF / QSV）'
       : `——${verdict.reason}`;
   return (
     <div
@@ -278,22 +288,13 @@ function VerdictLine({
 }
 
 /** 设备档位行：显存分档 + GPU 引擎能力结论 + 驱动引导（needed 才给下载入口）。 */
-function TierLine({
-  profile,
-  ttsReady,
-}: {
-  profile: DeviceProfile;
-  ttsReady: boolean;
-}): ReactElement {
+function TierLine({ profile }: { profile: DeviceProfile }): ReactElement {
   const vram =
     profile.memory_total_mb > 0 ? `${String(Math.round(profile.memory_total_mb / 1024))}GB 显存` : '';
   const caps = profile.caps;
-  // indextts2 的运行时态由前端组合：tts-venv 装好且 torch 变体为 cuda（后端探针只到安装态）
-  const readyOf = (key: string): boolean => {
-    const cap = caps[key];
-    if (cap === undefined) return false;
-    return key === 'indextts2_gpu' ? cap.ok && ttsReady : cap.ready;
-  };
+  // ready 只读后端：它已经查过 torch 变体与 session 实况，前端再拼一次「运行环境装没装」
+  // 只会造第二真相源——装上了不等于在 GPU 上算
+  const readyOf = (key: string): boolean => caps[key]?.ready === true;
   const readyList = Object.entries(caps)
     .filter(([key]) => readyOf(key))
     .map(([key]) => CAP_LABEL[key]);
