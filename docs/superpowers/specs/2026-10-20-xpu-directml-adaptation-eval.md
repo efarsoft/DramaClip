@@ -72,6 +72,29 @@
 
 **代价如实**：云端按量计费（成本预估进引导）；本地免费档=CPU。与其做一个横跨 XPU/DirectML/双包互斥/逐引擎对拍的适配专项，不如做「云端优先档产品化 + 分离 DML」两个小批。
 
+## 8. XPU 工作量评估（2026-10-21 业主要求补账单）
+
+### 8.1 任务拆解
+
+| # | 项 | 内容 | 估时 |
+|---|---|---|---|
+| 1 | 安装矩阵第三变体 | tts_runtime torch 组按宿主厂商加 xpu index（官方 xpu 轮自包含，无需 oneAPI 套件）；变体标记/自检/可重入同步 | 1~1.5 天 |
+| 2 | 契约与解析 | requested 词汇维持 auto/cuda/cpu、`resolved/actual` 扩 "xpu"（同 dml 先例）；device_profile caps 措辞按后端感知；自检与真算探针加 `torch.xpu.is_available()` 分支 | 1 天 |
+| 3 | worker/引擎迁移 | 四个 worker（funasr/indextts/cosyvoice/kokoro）设备探测与 `.to(device)` 迁移；排查各引擎内部硬编码 `.cuda()`/`torch.cuda.*` 调用并替换为设备无关写法 | 2~4 天 |
+| 4 | 逐模型算子覆盖验证 | 每个模型在 XPU 上真跑一遍：CosyVoice 流匹配/hift、IndexTTS2 自定义部件、kokoro、SenseVoice——**缺算子即运行期炸，可能要求 CPU 兜底或上游补丁（不设上限的风险项）** | 2~3 天 |
+| 5 | 真机硬门 + 回归 | 复用 DML 同款双轴门（提速 + 产物对拍）；全量回归与文档 | 1~2 天 |
+| 6 | funasr 上游就绪度核查 | `AutoModel(device="xpu")` 的透传与内部 cuda 特判——上游无官方 XPU 支持声明，此步结果可能推翻 3/4 的估时 | 0.5 天（先行） |
+
+**合计：约 1.5~2 周**（若收缩到只做 funasr ASR：3~4 天 + 验证）。
+
+### 8.2 决定性约束：没有验证硬件
+
+开发机现有三块「Intel 相关」硬件全部不能跑 XPU 后端（要求 Arc / Data Center GPU / Meteor Lake+ 核显）：Quadro M4000 是 N 卡、RX 5500XT 是 A 卡、Comet Lake 核显是 Gen9.5（XPU 明确不支持）。**没有 Arc A770/A380 级别的测试卡或 Core Ultra 机器，第 4/5 步无法诚实执行**——DML 批的「提速+位级对拍」硬门就是为此设计的，不能在 XPU 上降级为「应该能跑」。
+
+### 8.3 结论
+
+工作量本身（1.5~2 周）不是拦路虎，**「无验证硬件 + 无已知 Arc 客群」才是**。维持 §6/§7 裁决：XPU 不做；若将来拿到 Arc 测试卡且客群成立，按 §8.1 账单立项，先行做第 6 项（0.5 天）确认 funasr 上游就绪度再决定其余投入。
+
 ## 明确不做
 
 - 不动 0.2.2 发布计划；不改 CUDA-only 定则的对外口径；不引入 torch-directml；不引入 ZLUDA；macOS（CoreML/MPS）另立规格。
