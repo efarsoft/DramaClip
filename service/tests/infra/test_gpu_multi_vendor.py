@@ -218,7 +218,7 @@ def test_detect_non_windows_skips_cim(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.skipif(
     sys.platform != "win32",
-    reason="CIM 枚举是 Windows 专属（Linux 早退空表是设计内行为），命令形状断言只在 Windows 上有意义",
+    reason="CIM 枚举是 Windows 专属 API，Linux 早退空表是设计内行为",
 )
 def test_parse_cim_command_is_fixed_and_utf8(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, Any] = {}
