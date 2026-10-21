@@ -29,7 +29,7 @@ const api = vi.hoisted(() => ({
 
 vi.mock('../../../services/client', () => ({
   // useEnginesData 订阅 sizes_ready 推送：桩给一个立即退订的空订阅
-  onServiceEvent: vi.fn(() => () => {}),
+  onServiceEvent: vi.fn(() => () => undefined),
   modelsApi: {
     list: api.list,
     verify: api.verify,
