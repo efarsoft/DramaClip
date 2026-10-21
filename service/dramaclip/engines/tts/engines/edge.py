@@ -10,6 +10,7 @@ from pathlib import Path
 
 from dramaclip.engines.tts.base import DEFAULT_VOICE, EngineCaps
 from dramaclip.engines.tts.text_split import split_long_text
+from dramaclip.infra import compute
 
 SYNTH_TIMEOUT_S = 45.0
 
@@ -62,6 +63,9 @@ class EdgeTtsEngine:
         if not reachable:
             return False, "云端不可达：连不上 speech.platform.bing.com:443（检查网络）"
         return True, "云端可达"
+
+    def compute(self) -> compute.ComputeReport:
+        return compute.cloud("tts.edge")
 
     def synthesize(self, text: str, voice: str, out_path: Path) -> Path:
         import edge_tts  # 可选依赖懒加载

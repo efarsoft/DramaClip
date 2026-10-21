@@ -25,7 +25,7 @@ def _ct2_cuda_available() -> bool:
     try:
         import ctranslate2
 
-        return ctranslate2.get_cuda_device_count() > 0
+        return bool(ctranslate2.get_cuda_device_count() > 0)
     except Exception:  # noqa: BLE001 - 坏装/未装是常态，不是转写失败
         return False
 

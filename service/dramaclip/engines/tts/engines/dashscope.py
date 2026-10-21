@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from dramaclip.engines.tts.base import EngineCaps
+from dramaclip.infra import compute
 
 _TTS_URL = "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"
 
@@ -55,6 +56,9 @@ class DashscopeCosyVoiceEngine:
     def is_available(self) -> tuple[bool, str]:
         # HTTP 直连只需标准库，Key 在构造期已校验非空
         return True, "云端可达（百炼，按量计费）"
+
+    def compute(self) -> compute.ComputeReport:
+        return compute.cloud("tts.cosyvoice_cloud")
 
     def synthesize(self, text: str, voice: str, out_path: Path) -> Path:
         import json

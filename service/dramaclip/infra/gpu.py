@@ -235,15 +235,15 @@ def detect() -> dict[str, object]:
 
     primary = choose_primary(adapters)
     vendor = primary["vendor"] if primary else "none"
-    has_smi_nvidia = smi is not None and vendor == "nvidia"
+    smi_nvidia = smi if smi is not None and vendor == "nvidia" else None
     return {
         "ready": True,
         "vendor": vendor,
         "name": primary["name"] if primary else "",
         "driver_version": primary["driver_version"] if primary else "",
-        "max_cuda_version": str(smi["max_cuda_version"]) if has_smi_nvidia else "",
-        "memory_total_mb": int(smi["memory_total_mb"]) if has_smi_nvidia else 0,
-        "compute_cap": str(smi["compute_cap"]) if has_smi_nvidia else "",
+        "max_cuda_version": str(smi_nvidia["max_cuda_version"]) if smi_nvidia else "",
+        "memory_total_mb": int(str(smi_nvidia["memory_total_mb"])) if smi_nvidia else 0,
+        "compute_cap": str(smi_nvidia["compute_cap"]) if smi_nvidia else "",
         "adapters": adapters,
     }
 
