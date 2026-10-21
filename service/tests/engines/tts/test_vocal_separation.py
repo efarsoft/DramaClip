@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,10 @@ def test_provider_plan_explicit_dml_resolves() -> None:
     assert resolved == "dml"
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="CUDA DLL 注入是 Windows 专属 API（Linux 早退空表是设计内行为）",
+)
 def test_inject_cuda_dll_dirs_only_existing_known_subdirs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
