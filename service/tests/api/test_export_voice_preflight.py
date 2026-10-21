@@ -192,3 +192,72 @@ def test_ensure_clone_voice_writes_engine_specific_key(
     assert settings_repo.get_all(memory_db).get("tts.voice.indextts2") in (None, ""), (
         "cosyvoice 的参考音色不得写进 indextts2 的 key"
     )
+
+
+def _separation_report() -> dict[str, Any]:
+    return {
+        "component": "tts.separation",
+        "requested": "auto",
+        "resolved": "cpu",
+        "actual": "cpu",
+        "fallback": False,
+        "reason": "",
+        "device": "cpu",
+    }
+
+
+def _stub_extract(monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any]) -> None:
+    """替身只记录调用方传来的关键字：分离用哪条算力路由，由提取自己按 auto 决定。"""
+    from dramaclip.engines.tts import auto_voice
+
+    def fake_extract(
+        conn: Any, data_dir: Path, episodes: list[dict[str, Any]], **kwargs: Any
+    ) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {
+            "path": str(data_dir / "voices" / "auto-ref.wav"),
+            "speaker": "角色A",
+            "seconds": 8.0,
+            "cleaned_with": "separation",
+            "compute": _separation_report(),
+        }
+
+    monkeypatch.setattr(auto_voice, "extract_auto_voice", fake_extract)
+
+
+def _clone_setup(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[SimpleNamespace, str, dict[str, str], dict[str, Any]]:
+    project_id, _ = _seed(memory_db, tmp_path)
+    _seed_done_analysis(memory_db, project_id)
+    captured: dict[str, Any] = {}
+    _stub_extract(monkeypatch, captured)
+    context = SimpleNamespace(conn=memory_db, data_dir=tmp_path, notifier=_log_only_notifier())
+    settings = {**_settings("indextts2"), "tts.device": "cuda"}
+    return context, project_id, settings, captured
+
+
+def test_clone_voice_preflight_does_not_inherit_tts_device(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """tts.device=cuda 是配音引擎的设备，不许顺手替人声分离许愿 CUDA。"""
+    context, project_id, settings, captured = _clone_setup(memory_db, tmp_path, monkeypatch)
+
+    export_api._ensure_clone_voice(
+        context, {}, project_id, episodes_repo, settings, []  # type: ignore[arg-type]
+    )
+    assert "device" not in captured, "分离用哪条算力由提取按 auto 决定，不接受调用方设备"
+
+
+def test_clone_voice_receipt_lands_in_export_ledger(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """渲染前提取音色的算力回执要进导出账（voice_reports 是 export_jobs.compute 的首位）。"""
+    context, project_id, settings, _ = _clone_setup(memory_db, tmp_path, monkeypatch)
+    reports: list[dict[str, Any]] = []
+
+    export_api._ensure_clone_voice(
+        context, {}, project_id, episodes_repo, settings, reports  # type: ignore[arg-type]
+    )
+
+    assert reports == [_separation_report()]

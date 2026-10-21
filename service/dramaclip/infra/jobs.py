@@ -115,6 +115,14 @@ class JobStore:
         )
         self._conn.commit()
 
+    def set_ref_id(self, job_id: str, ref_id: str) -> None:
+        """补写 ref_id：产物路径要到洗完才知道（自动提取的音色文件名带时间戳）。"""
+        self._conn.execute(
+            "UPDATE jobs SET ref_id = ?, updated_at = ? WHERE id = ?",
+            (ref_id, _now_ms(), job_id),
+        )
+        self._conn.commit()
+
     def get(self, job_id: str) -> dict[str, Any] | None:
         row = self._conn.execute(
             "SELECT id, type, ref_id, status, progress, label, error, created_at, updated_at,"

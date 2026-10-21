@@ -77,8 +77,12 @@
       },
       "result": {
         "type": "object",
-        "required": ["path", "quality"],
+        "required": ["job_id", "path", "quality"],
         "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "本次清洗的 voice_clean 任务行 id；失败也留行，回执在库里查"
+          },
           "path": {
             "type": "string",
             "description": "清洗产物绝对路径（<stem>.cleaned.wav，与源同目录）；前端将其接替为当前参考"
@@ -95,7 +99,7 @@
           },
           "compute": {
             "type": ["object", "null"],
-            "description": "人声分离本次实际设备；null = 未记录",
+            "description": "本次清洗用的算力：mode=separate 报 tts.separation，mode=fast 报 tts.reference_clean.filter（滤镜是 CPU 上的确定操作，fallback 恒 false）",
             "required": ["component", "requested", "resolved", "actual", "fallback", "reason", "device"],
             "properties": {
               "component": { "type": "string" },
@@ -116,8 +120,12 @@
       "params": { "type": "object", "properties": {} },
       "result": {
         "type": "object",
-        "required": ["path", "speaker", "seconds", "voice_set"],
+        "required": ["job_id", "path", "speaker", "seconds", "voice_set"],
         "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "本次提取的 voice_clean 任务行 id；失败也留行，算力回执在库里查"
+          },
           "path": { "type": "string" },
           "speaker": { "type": "string", "description": "声纹聚类标签（角色A…），主角=台词字数最多者" },
           "start": { "type": "number" },
@@ -131,7 +139,7 @@
           },
           "compute": {
             "type": ["object", "null"],
-            "description": "人声分离本次实际设备；filter 回退或未记录时为 null"
+            "description": "本次清洗用的算力：分离走 tts.separation，滤镜回退走 tts.reference_clean.filter（降级原因见 clean_reason）"
           },
           "clean_reason": {
             "type": "string",

@@ -57,13 +57,24 @@ def auto_voice(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         {"id": row["id"], "source_path": row["source_path"]}
         for row in episodes_repo.list_by_project(context.conn, str(params.get("project_id", "")))
     ]
-    picked = auto_voice_mod.extract_auto_voice(
-        context.conn, context.data_dir, episode_rows,
-        device=str(context.settings.get("tts.device") or "auto"),
-    )
-    settings_repo.set_value(context.conn, "tts.voice.indextts2", picked["path"])
+    job_id = context.job_store.create("voice_clean")
+    context.job_store.mark_running(job_id)
+    try:
+        picked = auto_voice_mod.extract_auto_voice(context.conn, context.data_dir, episode_rows)
+        settings_repo.set_value(context.conn, "tts.voice.indextts2", picked["path"])
+    except Exception as exc:  # noqa: BLE001 - 失败原因进任务行，界面才有的可看
+        context.job_store.mark_failed(
+            job_id, f"自动提取参考音色失败：{type(exc).__name__}: {exc}"
+        )
+        raise
+    context.job_store.set_ref_id(job_id, str(picked["path"]))
+    compute = picked.get("compute")
+    if compute is not None:
+        context.job_store.set_compute(job_id, [compute])
+    context.job_store.mark_completed(job_id)
     quality = reference_qc.inspect_reference(Path(picked["path"]))
     return {
+        "job_id": job_id,
         "path": picked["path"],
         "speaker": picked["speaker"],
         "start": picked["start"],
@@ -81,6 +92,8 @@ def clean_reference(context: AppContext, params: dict[str, Any]) -> dict[str, An
 
     清洗是「改善参考」不是门禁：产物落 <stem>.cleaned.wav 与源同目录，返回产物
     质检报告由前端展示——用不用清洗产物仍由用户决定（B6 同款：报告不拦路）。
+    本次用了哪种方法、跑在哪块算力上写进 `jobs.compute`（规格 §3.5：账在库，
+    通知流不作真相源），任务行 `ref_id` 指向产物。
     """
     raw = str(params.get("path") or "").strip()
     if raw == "":
@@ -89,27 +102,31 @@ def clean_reference(context: AppContext, params: dict[str, Any]) -> dict[str, An
     if not src.is_file():
         raise RpcDomainError(_ERR_TTS_PARAM, f"参考音频不存在：{raw}")
     mode = str(params.get("mode") or "separate").strip()
-    report: ComputeReport | None = None
+    if mode not in {"fast", "separate"}:
+        raise RpcDomainError(_ERR_TTS_PARAM, f"未知清洗模式「{mode}」（separate | fast）")
+    job_id = context.job_store.create("voice_clean", str(reference_clean.cleaned_path(src)))
+    context.job_store.mark_running(job_id)
     try:
         if mode == "fast":
             out = reference_clean.clean_reference(src)
-        elif mode == "separate":
+            report = reference_clean.filter_report("用户选择快速滤镜清洗")
+        else:
+            # 显式 device="auto"：tts.device 只承诺 torch 那条栈，分离自己按 auto 解析
             separated = vocal_separation.clean_reference(
-                context.data_dir / "models",
-                src,
-                device=str(context.settings.get("tts.device") or "auto"),
+                context.data_dir / "models", src, device="auto"
             )
             out, report = separated.path, separated.compute
-        else:
-            raise RpcDomainError(_ERR_TTS_PARAM, f"未知清洗模式「{mode}」（separate | fast）")
-    except RpcDomainError:
-        raise
     except Exception as exc:  # noqa: BLE001 - 失败原因必须原样带出，不静默换档
-        raise RpcDomainError(_ERR_TTS_CLEAN, f"清洗失败：{type(exc).__name__}: {exc}") from exc
+        message = f"清洗失败：{type(exc).__name__}: {exc}"
+        context.job_store.mark_failed(job_id, message)
+        raise RpcDomainError(_ERR_TTS_CLEAN, message) from exc
+    context.job_store.set_compute(job_id, [report.to_dict()])
+    context.job_store.mark_completed(job_id)
     quality = reference_qc.inspect_reference(out)
     return {
+        "job_id": job_id,
         "path": str(out),
-        "compute": report.to_dict() if report is not None else None,
+        "compute": report.to_dict(),
         "quality": {
             "grade": quality.grade,
             "metrics": quality.metrics,

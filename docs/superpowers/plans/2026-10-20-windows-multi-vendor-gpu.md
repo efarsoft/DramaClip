@@ -2787,17 +2787,23 @@ class ExportRun:
 
 `service/tests/api/test_export_voice_preflight.py`：
 
-- 两个 `fake_extract` 桩的签名已是 `**_kwargs`，删掉 `device=` 传参后仍兼容；给 `fake_extract` 的返回 dict 补 `"compute": {...}`，断言 `_ensure_clone_voice(..., voice_reports)` 调用后列表里就是那条回执。
-- 新增 `test_preflight_report_lands_in_export_compute`：直接对 `render_export` 的账本形状做断言成本过高，改为在 `_run_export` 层断言 `ExportRun.voice_reports` 被 `set_compute` 写进数组首位——用既有 `memory_db` + 假 `exports_repo.set_compute` 记录器（monkeypatch `export_api.exports_repo.set_compute`），检查 `receipt[0]["component"] == "tts.separation"`。
-- 断言 `_ensure_clone_voice` 不再把 `tts.device` 传给提取：`context.settings = {"tts.device": "cuda"}` 时 `fake_extract` 收到的 kwargs 里没有 `device`。
+- 两个 `fake_extract` 桩的签名已是 `**_kwargs`，删掉 `device=` 传参后仍兼容；**不改那两个既有桩**（它们各自断言复用与引擎 key，硬塞 `compute` 是噪音）——新增 `_stub_extract` 替身记录收到的 kwargs，返回体带 `compute`，供下面两条用例用。
+- 新增 `test_clone_voice_receipt_lands_in_export_ledger`：`_ensure_clone_voice(..., voice_reports=[])` 调用后，列表里就是那条 `tts.separation` 回执。
+- 断言 `_ensure_clone_voice` 不再把 `tts.device` 传给提取：`settings` 含 `"tts.device": "cuda"` 时 `fake_extract` 收到的 kwargs 里没有 `device`（`test_clone_voice_preflight_does_not_inherit_tts_device`）。
+- 新增 `test_preflight_report_lands_in_export_compute`（实落名 `test_render_export_ledgers_the_voice_receipt_before_the_encode_one`，写在 `service/tests/api/test_export_compute_persist.py`）：**没有按原计划 monkeypatch `exports_repo.set_compute`**——那个文件已有把 `encoder.export_plan` 换成假件、走 `memory_db` 真写表的现成夹具，直接 `ExportRun(voice_reports=[...])` 然后读 `exports_repo.get(...)["compute"]`，断言数组就是 `["tts.separation", "video.encode"]`。断言落在库里的行上，比断言桩被调用更硬。
 
 - [ ] **Step 8: 运行确认通过**
 
-Run: `cd service && ../.venv/Scripts/python -m pytest tests/engines/tts tests/api/test_tts_clean_reference.py tests/api/test_export_voice_preflight.py tests/infra/test_jobs.py tests/api/test_tts_preview.py -q`
-Expected: PASS。
+Run: `cd service && ../.venv/Scripts/python -m pytest tests/engines/tts tests/api/test_tts_clean_reference.py tests/api/test_export_voice_preflight.py tests/infra/test_jobs.py tests/api/test_tts_preview.py tests/api/test_export_compute_persist.py -q`
+Expected: PASS（实落 151 passed / 0 skipped，EXIT=0）。
 
 Run: `cd service && ../.venv/Scripts/python -m pytest tests -q`
-Expected: 与基线同数量级（新增用例后 passed 数上升，skipped 仍为 1），无失败。
+Expected: 无失败。**「skipped 仍为 1」作废**（Task 4 Step 9 已订正：本树两条条件跳过都不触发，基线 1778 passed / 0 skipped）。
+
+> 执行时发现（不在本任务范围，未动）：`api/tts.py` 的手动提取入口 `auto_voice` 把音色**硬写进 `tts.voice.indextts2`**
+> （`:64`、`:84`，契约 summary 同口径），而本任务的导出预检 `_ensure_clone_voice` 已按 `tts.voice.<engine>` 分键。
+> 后果：引擎设为 cosyvoice 时点「自动提取」，音色落在 indextts2 的 key 上，cosyvoice 仍无参考、导出预检会再提取一次。
+> 这是 §3.5 之外的第二处「引擎各自的 key」漏项，需业主裁定是否单开一笔修。
 
 - [ ] **Step 9: 协议两处跟上新增的 `job_id`**
 

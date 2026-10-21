@@ -704,6 +704,8 @@ export interface PlanTraceResult {
 }
 
 export interface TtsAutoVoiceResult {
+  /** 本次提取的 `voice_clean` 任务行 id：算力回执的真相源在库，不在通知流。 */
+  readonly job_id: string;
   readonly path: string;
   readonly speaker: string;
   readonly start: number;
@@ -726,6 +728,8 @@ export interface ModeRecommendation {
 
 /** tts.clean_reference 返回体：清洗产物 + 产物质检（B6 报告，不是门禁）。 */
 export interface TtsCleanReferenceResult {
+  /** 本次清洗的 `voice_clean` 任务行 id：失败也留行，回执在库里查。 */
+  readonly job_id: string;
   readonly path: string;
   readonly quality: {
     readonly grade: 'good' | 'fair' | 'poor';

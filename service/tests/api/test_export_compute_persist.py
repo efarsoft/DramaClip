@@ -126,3 +126,63 @@ def test_render_export_writes_the_receipt_to_both_tables(
     assert row["compute"] == expected
     assert job_writes == [("job-1", expected)]
     assert codec_calls == [("libx264", "libx264")]
+
+
+def test_render_export_ledgers_the_voice_receipt_before_the_encode_one(
+    monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """渲染前的音色清洗回执排在导出账首位：界面读一条数组就能看到全链算力。"""
+    context, export_id, plan_row, plan_data = _seed(memory_db, tmp_path)
+    context.job_store = SimpleNamespace(set_compute=lambda *_a: None)
+
+    def _fake_plan(*args: Any, **kwargs: Any) -> Path:
+        kwargs["compute_sink"](
+            compute.ComputeReport(
+                component="video.encode",
+                requested="auto",
+                resolved="libx264",
+                actual="libx264",
+            )
+        )
+        out_path = Path(args[2])
+        out_path.write_bytes(b"film")
+        return out_path
+
+    monkeypatch.setattr(encoder, "export_plan", _fake_plan)
+    monkeypatch.setattr(export_api.ffmpeg_cover, "extract_cover", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        export_api.probe,
+        "probe",
+        lambda _path: probe_mod.MediaInfo(
+            duration_s=10.0, width=1080, height=1920, fps=30.0, has_audio=True
+        ),
+    )
+    voice_receipt = {
+        "component": "tts.separation",
+        "requested": "auto",
+        "resolved": "cpu",
+        "actual": "cpu",
+        "fallback": False,
+        "reason": "",
+        "device": "cpu",
+    }
+
+    export_api.render_export(
+        context,  # type: ignore[arg-type]
+        export_api.ExportRun(
+            export_id=export_id,
+            project_id=str(plan_row["project_id"]),
+            plan_row=plan_row,
+            plan_data=plan_data,
+            cancel_event=threading.Event(),
+            voice_reports=[voice_receipt],
+        ),
+        report=lambda _p, _m: None,
+        job_id="job-2",
+    )
+
+    row = exports_repo.get(memory_db, export_id)
+    assert row is not None
+    components = [item["component"] for item in row["compute"]]
+    assert components == ["tts.separation", "video.encode"]
+    assert row["compute"][0] == voice_receipt

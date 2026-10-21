@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.engines.tts import reference_clean, vocal_separation
+from dramaclip.infra.compute import ComputeReport
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 
@@ -111,20 +112,16 @@ def extract_auto_voice(
     conn: Any,
     data_dir: Path,
     episodes: list[dict[str, Any]],
-    *,
-    device: str = "auto",
 ) -> dict[str, Any]:
     """主入口：选段 → ffmpeg 抽音频 → 人声分离 → 落盘。返回给前端展示/直接采用。"""
     with _EXTRACT_LOCK:
-        return _extract_locked(conn, data_dir, episodes, device=device)
+        return _extract_locked(conn, data_dir, episodes)
 
 
 def _extract_locked(
     conn: Any,
     data_dir: Path,
     episodes: list[dict[str, Any]],
-    *,
-    device: str = "auto",
 ) -> dict[str, Any]:
     picked = pick_best_span(conn, episodes)
     if picked is None:
@@ -151,16 +148,22 @@ def _extract_locked(
     )
 
     models_dir = data_dir / "models"
-    compute = None
+    # 分离设备恒 auto：tts.device 只承诺 torch 那条栈（规格 §3.5）。worker 的 auto
+    # 路径自带「CUDA 试跑失败→整段 CPU 重跑并写明原因」，所以降级链是
+    # CUDA 分离 → CPU 分离 → 滤镜，滤镜只留给 CPU 分离也失败的情况。
+    compute: ComputeReport | None = None
     clean_reason = ""
     try:
-        separated = vocal_separation.clean_reference(models_dir, raw_path, device=device)
+        separated = vocal_separation.clean_reference(models_dir, raw_path, device="auto")
         final, compute, cleaned_with = separated.path, separated.compute, "separation"
-    except Exception as exc:  # noqa: BLE001 - MDX 不可用回退滤镜清洗，仍比不洗强
+    except Exception as exc:  # noqa: BLE001 - CPU 分离也失败才落到滤镜
         # 回退本身允许，但必须说破：调用方要能区分「分离完成」与「滤镜凑合」。
         final = reference_clean.clean_reference(raw_path)
         cleaned_with = "filter"
         clean_reason = f"{type(exc).__name__}: {exc}"
+        compute = reference_clean.filter_report(
+            f"人声分离不可用（{clean_reason}），已用 ffmpeg 滤镜链清洗"
+        )
     raw_path.unlink(missing_ok=True)
 
     final_name = voices_dir / f"auto-ref-{stamp}.wav"

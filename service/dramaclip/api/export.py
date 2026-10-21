@@ -6,7 +6,7 @@ import json
 import shutil
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -90,6 +90,9 @@ class ExportRun:
     plan_row: dict[str, Any]
     plan_data: PlanData
     cancel_event: threading.Event
+    #: 渲染前阶段（自动音色提取/清洗）的算力回执：与 `video.encode` 并入同一条
+    #: `export_jobs.compute` 数组，不另建任务行（规格 §3.5）。
+    voice_reports: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _submit_export(
@@ -686,7 +689,8 @@ def render_export(
         compute_sink=reports.append,
         encoder_requested=codec_setting,
     )
-    receipt = [item.to_dict() for item in reports]
+    # 清洗在前、编码在后：读账的人按时间顺序看（规格 §3.5）
+    receipt = [*run.voice_reports, *(item.to_dict() for item in reports)]
     exports_repo.set_compute(context.conn, export_id, receipt)
     if job_id is not None:
         context.job_store.set_compute(job_id, receipt)
@@ -738,13 +742,15 @@ def _ensure_voiced(
     plan_row: dict[str, Any],
     plan_data: PlanData,
     report: Callable[[float, str], None] | None = None,
+    voice_reports: list[dict[str, Any]] | None = None,
 ) -> PlanData:
     """勾选导出时才配音：规划阶段故意不合成。克隆引擎没有参考音色时，
     先**自动从剧集提取**（主角最清晰的 4~10s 台词段，人声分离去 BGM）——
     自动化纪律：音色从哪来不该问用户，剧集本身就是最好的音色库。
 
     `report`：TTS 段进度出口（占导出进度 0~35% 波段）——TTS 是导出耗时大头，
-    恒 0% 会被当成卡死（业主实测反馈）。"""
+    恒 0% 会被当成卡死（业主实测反馈）。
+    `voice_reports`：渲染前那次音色提取的算力回执落点（导出账的首位）。"""
     if not _needs_voice(plan_data):
         return plan_data
     from dramaclip.api import narration as narration_api
@@ -755,7 +761,9 @@ def _ensure_voiced(
         for episode in episodes_repo.list_by_project(context.conn, project_id)
     }
     settings = narration_api._effective_settings(context, project_id)
-    _ensure_clone_voice(context, plan_row, project_id, episodes_repo, settings)
+    _ensure_clone_voice(
+        context, plan_row, project_id, episodes_repo, settings, voice_reports
+    )
 
     def tts_progress(done: int, total: int) -> None:
         if report is not None:
@@ -774,6 +782,7 @@ def _ensure_clone_voice(
     project_id: str,
     episodes_repo: Any,
     settings: dict[str, str],
+    voice_reports: list[dict[str, Any]] | None = None,
 ) -> None:
     """克隆引擎 + 未配参考音色 → 自动从本剧剧集提取主角音色并设为参考。
 
@@ -783,6 +792,7 @@ def _ensure_clone_voice(
 
     一批出片会多条任务并发走到这里：提取全程持锁，且锁内重读 DB——
     手动提取按钮或兄弟任务刚写好的音色直接复用，不重复跑 MDX 分离。
+    这次用哪块算力洗的参考，回执 append 进 `voice_reports`（导出账的首位）。
     """
     from dramaclip.engines.tts import auto_voice
     from dramaclip.infra.storage.repos import settings as settings_repo
@@ -814,8 +824,9 @@ def _ensure_clone_voice(
             context.conn,
             context.data_dir,
             [{"id": row["id"], "source_path": row["source_path"]}],
-            device=str(settings.get("tts.device") or "auto"),
         )
+        if voice_reports is not None and result.get("compute") is not None:
+            voice_reports.append(dict(result["compute"]))
         settings[voice_key] = result["path"]
         settings_repo.set_value(context.conn, voice_key, result["path"])
         clean_note = (
@@ -860,14 +871,18 @@ def _run_export(context: AppContext, job_id: str, run: ExportRun) -> None:
             return
         # 进度波段：需配音时 TTS 占 0~35%、渲染占 35~100；纯剪辑渲染独占 0~100
         tts_needed = _needs_voice(run.plan_data)
+        voice_reports: list[dict[str, Any]] = []
         voiced = ExportRun(
             export_id=run.export_id,
             project_id=run.project_id,
             plan_row=run.plan_row,
             plan_data=_ensure_voiced(
-                context, run.plan_row, run.plan_data, report=report if tts_needed else None
+                context, run.plan_row, run.plan_data,
+                report=report if tts_needed else None,
+                voice_reports=voice_reports,
             ),
             cancel_event=run.cancel_event,
+            voice_reports=voice_reports,
         )
         # 标题先生成再渲染：render_export 尾部的封面字层要用第一条标题，
         # 而 titles 生成不依赖渲染产物（LLM 只吃 plan_data），顺序对调零副作用。

@@ -12,11 +12,27 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from dramaclip.infra.compute import ComputeReport
 from dramaclip.infra.ffmpeg import binaries
 
 _TIMEOUT_S = 300
 #: 人声频带 + FFT 降噪：highpass 去低频隆隆，afftdn 压稳态底噪，lowpass 收高频尖刺。
 _FILTER = "highpass=f=80,afftdn=nf=-25,lowpass=f=9000"
+
+
+def filter_report(reason: str) -> ComputeReport:
+    """滤镜清洗的算力回执：CPU 上的确定性操作，没有「试过 GPU 再落 CPU」可言。
+
+    `fallback` 恒 False 是 `ComputeReport` 的不变量逼出来的写法——滤镜从没碰过 GPU，
+    写 fallback 就成了假账；「为什么用滤镜」全部写在 `reason` 里。
+    """
+    return ComputeReport(
+        component="tts.reference_clean.filter",
+        requested="auto",
+        resolved="cpu",
+        actual="cpu",
+        reason=reason,
+    )
 
 
 def cleaned_path(path: Path) -> Path:

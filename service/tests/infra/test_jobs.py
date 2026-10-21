@@ -105,3 +105,13 @@ def test_sweep_interrupted_marks_running_and_pending_failed(
 
 def test_get_missing_returns_none(memory_db: sqlite3.Connection) -> None:
     assert JobStore(memory_db).get("nope") is None
+
+
+def test_set_ref_id_points_row_at_the_artifact(memory_db: sqlite3.Connection) -> None:
+    """建行时还不知道产物路径（自动提取的音色名带时间戳），洗完补写。"""
+    store = JobStore(memory_db)
+    job_id = store.create("voice_clean")
+    store.set_ref_id(job_id, "C:/data/voices/auto-ref-1020.wav")
+    row = store.get(job_id)
+    assert row is not None
+    assert row["ref_id"] == "C:/data/voices/auto-ref-1020.wav"
