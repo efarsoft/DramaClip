@@ -83,12 +83,17 @@ function makeSampleVideo(dir) {
   return out;
 }
 
-async function waitJob(jobId, timeoutMs) {
+/** 等 scan 内部 autostart 起的预筛作业到终态（全自动流水线时代：扫完即开工）。 */
+async function waitPrescreenJob(projectId, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const status = await rpc('analysis.status', { job_id: jobId });
-    if (['completed', 'failed', 'cancelled'].includes(status.status)) return status;
-    if (Date.now() > deadline) throw new Error('任务超时');
+    const { jobs } = await rpc('jobs.list', { limit: 20 });
+    const hit = jobs.find(
+      (j) => j.ref_id === projectId && j.type === 'prescreen'
+        && ['completed', 'failed', 'cancelled'].includes(j.status),
+    );
+    if (hit) return hit;
+    if (Date.now() > deadline) throw new Error('autostart 预筛作业超时');
     await new Promise((r) => setTimeout(r, 500));
   }
 }
@@ -136,12 +141,16 @@ async function main() {
   check('主包零 torch 系（E-2）', torchLeftovers.length === 0,
     torchLeftovers.length ? `仍存在: ${torchLeftovers.join(', ')}` : '_internal 无 torch 系目录');
 
+  // 全自动流水线（扫完即开工）时代：把全量阈值顶到上限，让 scan 内部的 autostart
+  // 走预筛分支——预筛只吃 ffmpeg 与引擎导入链，无模型也能完成，正是冒烟要验的链路。
+  // 旧「自己再调一次 analysis.prescreen」在 autostart 把集挪出 pending 后必撞
+  // 「没有待预筛的集」（CI 首次真跑实证）。
+  await rpc('settings.update', { values: { 'analysis.full_threshold': 999 } });
   const video = makeSampleVideo(work);
   const project = await rpc('project.create', { name: 'sidecar-smoke', source_path: work });
   await rpc('project.scan_episodes', { project_id: project.id });
-  const prescreen = await rpc('analysis.prescreen', { project_id: project.id });
-  const job = await waitJob(prescreen.job_id, 120000);
-  check('analysis.prescreen（ffmpeg+引擎链）', job.status === 'completed', `status=${job.status}`);
+  const job = await waitPrescreenJob(project.id, 120000);
+  check('analysis 预筛链（ffmpeg+引擎导入，autostart）', job.status === 'completed', `status=${job.status}`);
 
   const shutdown = await rpc('system.shutdown');
   check('system.shutdown', shutdown.ok === true);
