@@ -55,6 +55,14 @@ jobs:
       - name: sidecar 冒烟验证
         run: node scripts/verify_sidecar.mjs
 
+      # electron 包的 postinstall 在 npm 11.19 安装脚本新策略下不保证执行
+      # （electronDist 缺失实证）：显式跑一次 install.js，已就位则幂等跳过
+      - name: 就位 Electron 预编译产物
+        shell: bash
+        run: node node_modules/electron/install.js
+        env:
+          ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
+
       # 仅 electron-builder（sidecar 已在上一步打包完成）
       - name: 打包安装包（NSIS + zip）
         run: npm run dist --workspace @dramaclip/desktop
