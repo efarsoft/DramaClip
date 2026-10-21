@@ -23,6 +23,8 @@ import {
   reportFor,
 } from './assetState';
 import { type ActiveCardProps, ActiveEngineCard } from './ActiveEngineCard';
+import { deviceSelectProps } from './deviceOptions';
+import type { MachineSpecs } from './machineFit';
 import { LocalRuntimeSlot } from './LocalRuntimeSlot';
 import { AssetLibrary } from './AssetLibrary';
 import {
@@ -37,15 +39,6 @@ import { useDownloadProgress } from './useDownloadProgress';
 import { useEngineConfigs } from './useEngineConfigs';
 
 const PARAMS: readonly { key: string; label: string; options: DefaultOptionType[] }[] = [
-  {
-    key: 'asr.device',
-    label: '运行设备',
-    options: [
-      { label: '自动（检测 GPU）', value: 'auto' },
-      { label: 'CPU', value: 'cpu' },
-      { label: 'CUDA（NVIDIA）', value: 'cuda' },
-    ],
-  },
   {
     key: 'asr.language',
     label: '识别语言',
@@ -128,7 +121,7 @@ export function AsrTab({
           }
           actions={<CloudTestButton config={activeCloud} domain="asr_cloud" />}
           props={[
-            ...paramProps(settings, onSave, ['asr.language', 'asr.diarization']),
+            ...paramProps(settings, onSave, ['asr.language', 'asr.diarization'], null),
             { label: '接口地址', value: activeCloud.base_url === '' ? '服务商标准端点' : activeCloud.base_url },
             { label: '密钥', value: activeCloud.api_key_masked },
             { label: '生效时机', value: '保存后下次分析' },
@@ -142,6 +135,7 @@ export function AsrTab({
           settings={settings}
           reports={reports}
           selftests={selftests}
+          machine={machine}
           onSave={onSave}
           onVerify={onVerify}
           configs={cloud.configs}
@@ -179,6 +173,7 @@ function ActiveCard({
   settings,
   reports,
   selftests,
+  machine,
   onSave,
   onVerify,
   configs,
@@ -189,6 +184,7 @@ function ActiveCard({
   settings: DomainTabProps['settings'];
   reports: Reports;
   selftests: DomainTabProps['selftests'];
+  machine: MachineSpecs;
   onSave: DomainTabProps['onSave'];
   onVerify: DomainTabProps['onVerify'];
   configs: readonly EngineConfig[];
@@ -232,7 +228,12 @@ function ActiveCard({
         </Button>
       ),
     props: [
-      ...paramProps(settings, onSave, ['asr.device', 'asr.language', 'asr.diarization']),
+      ...paramProps(
+        settings,
+        onSave,
+        ['asr.device', 'asr.language', 'asr.diarization'],
+        deviceSelectProps({ engine: active?.engine ?? '', saved: settings['asr.device'] ?? 'auto', machine }),
+      ),
       { label: '磁盘实占', value: active === undefined ? '—' : active.size_bytes === undefined || active.size_bytes === null ? '统计中…' : formatBytes(active.size_bytes) },
       { label: '生效时机', value: '保存后下次分析' },
     ],
@@ -245,8 +246,9 @@ function paramProps(
   settings: DomainTabProps['settings'],
   onSave: DomainTabProps['onSave'],
   keys: readonly string[],
+  device: { options: readonly DefaultOptionType[] } | null,
 ): ActiveCardProps['props'] {
-  return PARAMS.filter((param) => keys.includes(param.key)).map((param) => ({
+  const rows = PARAMS.filter((param) => keys.includes(param.key)).map((param) => ({
     label: param.label,
     value: (
       <SettingSelect
@@ -258,4 +260,20 @@ function paramProps(
       />
     ),
   }));
+  if (device === null || !keys.includes('asr.device')) return rows;
+  return [
+    {
+      label: '运行设备',
+      value: (
+        <SettingSelect
+          value={settings['asr.device'] ?? ''}
+          options={device.options}
+          onChange={(value: string) => {
+            onSave({ 'asr.device': value });
+          }}
+        />
+      ),
+    },
+    ...rows,
+  ];
 }

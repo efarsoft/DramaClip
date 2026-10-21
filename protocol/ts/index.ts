@@ -44,10 +44,20 @@ export interface PingResult {
   readonly protocol_version: number;
 }
 
+/** 宿主显卡厂商类别（`infra/gpu.py` classify_vendor 的取值集合）。 */
+export type GpuVendor = 'nvidia' | 'amd' | 'intel' | 'other' | 'none' | 'unknown';
+
+/** 单张物理显卡（虚拟显示适配器已在后端剔除）。 */
+export interface GpuAdapter {
+  readonly name: string;
+  readonly vendor: GpuVendor;
+  readonly driver_version: string;
+}
+
 /** 健康检查扩展：GPU 探测结果（未就绪时 ready=false，服务端后台补测）。 */
 export interface GpuInfo {
   readonly ready: boolean;
-  readonly vendor: string;
+  readonly vendor: GpuVendor;
   readonly name: string;
   readonly driver_version: string;
   readonly max_cuda_version: string;
@@ -55,6 +65,8 @@ export interface GpuInfo {
   readonly memory_total_mb: number;
   /** 算力档 compute capability（如 "5.2"；老驱动查不到为空串）。 */
   readonly compute_cap: string;
+  /** 本机全部物理显卡（旧服务不带此项）。 */
+  readonly adapters?: readonly GpuAdapter[];
 }
 
 /** 单项 GPU 能力结论：ok=硬件够；ready=连运行时也装好即开即用。 */
@@ -62,7 +74,11 @@ export interface DeviceCap {
   readonly ok: boolean;
   readonly ready: boolean;
   readonly hint: string;
+  /** 机器可读的不可用原因（界面只展示，不解析做控制流）。 */
+  readonly reason: string;
 }
+
+export type DeviceCaps = Record<string, DeviceCap>;
 
 /** 驱动引导：needed=true 时前端展示下载入口与原因。 */
 export interface DriverGuidance {
@@ -76,12 +92,12 @@ export interface DriverGuidance {
 export interface DeviceProfile {
   readonly tier: 'none' | 'low' | 'entry' | 'mid' | 'high';
   readonly tier_label: string;
-  readonly vendor: string;
+  readonly vendor: GpuVendor;
   readonly gpu_name: string;
   readonly memory_total_mb: number;
   readonly max_cuda_version: string;
   readonly cuda_runtime_installed: boolean;
-  readonly caps: Record<string, DeviceCap>;
+  readonly caps: DeviceCaps;
   readonly driver_guidance: DriverGuidance;
   readonly recommendation: string;
 }

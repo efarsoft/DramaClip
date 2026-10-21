@@ -54,11 +54,12 @@ const NVIDIA_PROFILE: DeviceProfile = {
   max_cuda_version: '12.8',
   cuda_runtime_installed: false,
   caps: {
-    faster_whisper_gpu: { ok: true, ready: false, hint: '' },
+    faster_whisper_gpu: { ok: true, ready: false, hint: '', reason: '' },
     vocal_separation_gpu: {
       ok: true,
       ready: false,
       hint: '当前走 CPU（MDX-Net）；安装态不等于运行态，实际以后端回执为准',
+      reason: '',
     },
   },
   driver_guidance: { needed: false, url: 'https://x', min_driver: '551', reason: '' },

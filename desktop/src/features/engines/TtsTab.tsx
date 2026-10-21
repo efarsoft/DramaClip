@@ -5,7 +5,6 @@
  */
 import { Button } from 'antd';
 import { useState } from 'react';
-import type { DefaultOptionType } from 'antd/es/select';
 import type { ReactElement } from 'react';
 import type { EngineConfig, ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
@@ -32,6 +31,8 @@ import {
   activeCloudConfig,
 } from './CloudDomainUI';
 import { LocalRuntimeSlot } from './LocalRuntimeSlot';
+import { deviceSelectProps } from './deviceOptions';
+import type { MachineSpecs } from './machineFit';
 import { AutoVoiceButton } from './AutoVoiceButton';
 import { RefCleanButton } from './RefCleanButton';
 import { RefVoiceSelect } from './RefVoiceSelect';
@@ -55,18 +56,6 @@ const ENGINE_KIND_LABEL: Record<string, string> = {
   indextts2: '本地 · 音色克隆（N 卡实时 / CPU 预生成）',
   cosyvoice_cloud: '云端 · 百炼按量计费',
 };
-
-const TTS_PARAMS: readonly { key: string; label: string; options: DefaultOptionType[] }[] = [
-  {
-    key: 'tts.device',
-    label: '运行设备',
-    options: [
-      { label: '自动（检测 GPU）', value: 'auto' },
-      { label: 'CPU', value: 'cpu' },
-      { label: 'CUDA（NVIDIA）', value: 'cuda' },
-    ],
-  },
-];
 
 const VOICE_HINT: Record<string, string> = {
   kokoro: 'Kokoro 提供 100 个中文音色（55 女 + 45 男），下拉可搜索',
@@ -125,6 +114,7 @@ export function TtsTab({
           settings={settings}
           reports={reports}
           selftests={selftests}
+          machine={machine}
           onSave={onSave}
           onChanged={onChanged}
           onVerify={onVerify}
@@ -266,6 +256,7 @@ function ActiveCard({
   settings,
   reports,
   selftests,
+  machine,
   onSave,
   onChanged,
   onVerify,
@@ -277,6 +268,7 @@ function ActiveCard({
   settings: DomainTabProps['settings'];
   reports: Reports;
   selftests: DomainTabProps['selftests'];
+  machine: MachineSpecs;
   onSave: DomainTabProps['onSave'];
   onChanged: () => void;
   onVerify: DomainTabProps['onVerify'];
@@ -322,18 +314,18 @@ function ActiveCard({
       // 云端引擎不看本机设备；只有本地引擎才摆这一行，避免「选了 CUDA 却走云端」的假选择。
       ...(engine === 'edge' || engine === 'cosyvoice_cloud'
         ? []
-        : TTS_PARAMS.map((param) => ({
-            label: param.label,
+        : [{
+            label: '运行设备',
             value: (
               <SettingSelect
-                value={settings[param.key] ?? ''}
-                options={param.options}
+                value={settings['tts.device'] ?? ''}
+                options={deviceSelectProps({ engine, saved: settings['tts.device'] ?? 'auto', machine }).options}
                 onChange={(value: string) => {
-                  onSave({ [param.key]: value });
+                  onSave({ 'tts.device': value });
                 }}
               />
             ),
-          }))),
+          }]),
       { label: '引擎类型', value: ENGINE_KIND_LABEL[engine] ?? '未登记引擎' },
       { label: '磁盘实占', value: active === undefined ? '—' : formatBytes(active.size_bytes ?? 0) },
       { label: '生效时机', value: '保存后下次任务' },

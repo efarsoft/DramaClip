@@ -3,13 +3,17 @@
  * 规则：磁盘按体积×1.25 留解压余量；内存按 int8 CPU 推理×1.5 且不超总量六成；
  * GPU 只影响加速不影响可行性——本地图全部设计为 CPU 可跑。
  */
-import type { HealthResult } from '@dramaclip/protocol';
+import type { DeviceCaps, GpuInfo, HealthResult } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
 
 export interface MachineSpecs {
   readonly ramTotalGb?: number;
   readonly ramFreeGb?: number;
   readonly diskFreeGb?: number;
+  /** 宿主显卡事实：设备选项与人声分离提示读它，不读后端文案。 */
+  readonly gpu?: GpuInfo;
+  /** `health.device_profile.caps` 原样带下：选项可用性只读 ready。 */
+  readonly caps?: DeviceCaps;
 }
 
 export type FitVerdict = 'unknown' | 'ok' | 'tight' | 'disk' | 'ram';
@@ -95,5 +99,7 @@ export function specsFromHealth(health: HealthResult | null | undefined): Machin
     ramTotalGb: health.ram_total_gb,
     ramFreeGb: health.ram_free_gb,
     diskFreeGb: health.disk_free_gb,
+    gpu: health.gpu_info,
+    caps: health.device_profile?.caps,
   };
 }
