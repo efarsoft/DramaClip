@@ -70,19 +70,18 @@ jobs:
           # CI 用 GitHub 官方源下载 Electron 二进制（覆盖 .npmrc 的国内镜像）
           ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
 
-      - name: 发布 GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: DramaClip ${{ github.ref_name }}
-          draft: true
-          files: |
-            desktop/release/*.exe
-            desktop/release/*.zip
-          # 发布说明统一维护在仓库根 upgrade.md；body_path 只吃纯文本——顶部小节
+      # 发布说明统一维护在仓库根 upgrade.md；body_path 只吃纯文本——顶部小节
       # （首个 ^## v 到下一个 ^## v 之前）先提取成独立文件，整文件会带上旧版本
       - name: 提取顶部版本小节作为发布正文
         shell: bash
         run: awk '/^## v/{c++} c==2{exit} c>=1{print}' upgrade.md > release-body.md
 
       - name: 发布 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: DramaClip ${{ github.ref_name }}
+          draft: true
           body_path: release-body.md
+          files: |
+            desktop/release/*.exe
+            desktop/release/*.zip
