@@ -1,0 +1,640 @@
+{
+  "tool": "verify_download_links",
+  "version": 1,
+  "generated_at": "2026-10-21T09:11:27+08:00",
+  "network": "中国家用宽带（开发机实网）",
+  "models": [
+    {
+      "model_id": "faster-whisper-base",
+      "engine": "faster_whisper",
+      "sources": {
+        "hf_mirror": {
+          "repo": "Systran/faster-whisper-base",
+          "host": "https://hf-mirror.com",
+          "files": 4,
+          "total_bytes": 147882941,
+          "tree_ms": 2187,
+          "probe_file": "model.bin",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/145217532",
+            "ms": 5092
+          },
+          "revision": "ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66"
+        },
+        "huggingface": {
+          "repo": "Systran/faster-whisper-base",
+          "host": "https://huggingface.co",
+          "files": 4,
+          "total_bytes": 147882941,
+          "tree_ms": 984,
+          "probe_file": "model.bin",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/145217532",
+            "ms": 2328
+          },
+          "revision": "ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66"
+        }
+      }
+    },
+    {
+      "model_id": "faster-whisper-small",
+      "engine": "faster_whisper",
+      "sources": {
+        "hf_mirror": {
+          "repo": "Systran/faster-whisper-small",
+          "host": "https://hf-mirror.com",
+          "files": 4,
+          "total_bytes": 486212372,
+          "tree_ms": 1891,
+          "probe_file": "model.bin",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/483546902",
+            "ms": 3531
+          },
+          "revision": "536b0662742c02347bc0e980a01041f333bce120"
+        },
+        "huggingface": {
+          "repo": "Systran/faster-whisper-small",
+          "host": "https://huggingface.co",
+          "files": 4,
+          "total_bytes": 486212372,
+          "tree_ms": 827,
+          "probe_file": "model.bin",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/483546902",
+            "ms": 3687
+          },
+          "revision": "536b0662742c02347bc0e980a01041f333bce120"
+        }
+      }
+    },
+    {
+      "model_id": "faster-whisper-medium",
+      "engine": "faster_whisper",
+      "sources": {
+        "hf_mirror": {
+          "repo": "Systran/faster-whisper-medium",
+          "host": "https://hf-mirror.com",
+          "files": 4,
+          "total_bytes": 1530571735,
+          "tree_ms": 1875,
+          "probe_file": "model.bin",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/1527906378",
+            "ms": 3266
+          },
+          "revision": "08e178d48790749d25932bbc082711ddcfdfbc4f"
+        },
+        "huggingface": {
+          "repo": "Systran/faster-whisper-medium",
+          "host": "https://huggingface.co",
+          "files": 4,
+          "total_bytes": 1530571735,
+          "tree_ms": 1047,
+          "probe_file": "model.bin",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/1527906378",
+            "ms": 2530
+          },
+          "revision": "08e178d48790749d25932bbc082711ddcfdfbc4f"
+        }
+      }
+    },
+    {
+      "model_id": "faster-whisper-large-v3",
+      "engine": "faster_whisper",
+      "sources": {
+        "hf_mirror": {
+          "repo": "Systran/faster-whisper-large-v3",
+          "host": "https://hf-mirror.com",
+          "files": 5,
+          "total_bytes": 3090835702,
+          "tree_ms": 3375,
+          "probe_file": "model.bin",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/3087284237",
+            "ms": 3281
+          },
+          "revision": "edaa852ec7e145841d8ffdb056a99866b5f0a478"
+        },
+        "huggingface": {
+          "repo": "Systran/faster-whisper-large-v3",
+          "host": "https://huggingface.co",
+          "files": 5,
+          "total_bytes": 3090835702,
+          "tree_ms": 906,
+          "probe_file": "model.bin",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/3087284237",
+            "ms": 3125
+          },
+          "revision": "edaa852ec7e145841d8ffdb056a99866b5f0a478"
+        }
+      }
+    },
+    {
+      "model_id": "sensevoice-small",
+      "engine": "sensevoice",
+      "sources": {
+        "modelscope": {
+          "repo": "iic/SenseVoiceSmall",
+          "host": "https://modelscope.cn",
+          "files": 6,
+          "total_bytes": 937034228,
+          "tree_ms": 266,
+          "probe_file": "model.pt",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/936291369",
+            "ms": 312
+          }
+        },
+        "hf_mirror": {
+          "repo": "iic/SenseVoiceSmall",
+          "host": "https://hf-mirror.com",
+          "error": "HTTPError: HTTP Error 401: Unauthorized"
+        },
+        "huggingface": {
+          "repo": "iic/SenseVoiceSmall",
+          "host": "https://huggingface.co",
+          "error": "HTTPError: HTTP Error 401: Unauthorized"
+        }
+      }
+    },
+    {
+      "model_id": "kokoro-82m",
+      "engine": "kokoro",
+      "sources": {
+        "hf_mirror": {
+          "repo": "hexgrad/Kokoro-82M-v1.1-zh",
+          "host": "https://hf-mirror.com",
+          "files": 107,
+          "total_bytes": 381160729,
+          "tree_ms": 1827,
+          "probe_file": "kokoro-v1_1-zh.pth",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/327247856",
+            "ms": 5093
+          }
+        },
+        "huggingface": {
+          "repo": "hexgrad/Kokoro-82M-v1.1-zh",
+          "host": "https://huggingface.co",
+          "files": 107,
+          "total_bytes": 381160729,
+          "tree_ms": 1016,
+          "probe_file": "kokoro-v1_1-zh.pth",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/327247856",
+            "ms": 2687
+          }
+        }
+      }
+    },
+    {
+      "model_id": "indextts2",
+      "engine": "indextts2",
+      "sources": {
+        "modelscope": {
+          "repo": "IndexTeam/IndexTTS-2.5",
+          "host": "https://modelscope.cn",
+          "files": 21,
+          "total_bytes": 5491176527,
+          "tree_ms": 280,
+          "probe_file": "gpt.pth",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/3259599833",
+            "ms": 282
+          }
+        },
+        "hf_mirror": {
+          "repo": "IndexTeam/IndexTTS-2.5",
+          "host": "https://hf-mirror.com",
+          "files": 20,
+          "total_bytes": 5491176502,
+          "tree_ms": 2125,
+          "probe_file": "gpt.pth",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/3259599833",
+            "ms": 4842
+          }
+        },
+        "huggingface": {
+          "repo": "IndexTeam/IndexTTS-2.5",
+          "host": "https://huggingface.co",
+          "files": 20,
+          "total_bytes": 5491176502,
+          "tree_ms": 1532,
+          "probe_file": "gpt.pth",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/3259599833",
+            "ms": 2828
+          }
+        }
+      }
+    },
+    {
+      "model_id": "fun-cosyvoice3-0.5b",
+      "engine": "cosyvoice3",
+      "sources": {
+        "modelscope": {
+          "repo": "FunAudioLLM/Fun-CosyVoice3-0.5B-2512",
+          "host": "https://modelscope.cn",
+          "files": 16,
+          "total_bytes": 9747380363,
+          "tree_ms": 375,
+          "probe_file": "llm.rl.pt",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/2024682701",
+            "ms": 358
+          }
+        },
+        "hf_mirror": {
+          "repo": "FunAudioLLM/Fun-CosyVoice3-0.5B-2512",
+          "host": "https://hf-mirror.com",
+          "files": 17,
+          "total_bytes": 9747380365,
+          "tree_ms": 3125,
+          "probe_file": "llm.rl.pt",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/2024682701",
+            "ms": 3625
+          }
+        },
+        "huggingface": {
+          "repo": "FunAudioLLM/Fun-CosyVoice3-0.5B-2512",
+          "host": "https://huggingface.co",
+          "files": 17,
+          "total_bytes": 9747380365,
+          "tree_ms": 1141,
+          "probe_file": "llm.rl.pt",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/2024682701",
+            "ms": 2421
+          }
+        }
+      }
+    },
+    {
+      "model_id": "cosyvoice-300m",
+      "engine": "cosyvoice",
+      "sources": {
+        "modelscope": {
+          "repo": "iic/CosyVoice-300M",
+          "host": "https://modelscope.cn",
+          "files": 8,
+          "total_bytes": 2624354850,
+          "tree_ms": 265,
+          "probe_file": "llm.pt",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/1242994835",
+            "ms": 359
+          }
+        },
+        "hf_mirror": {
+          "repo": "iic/CosyVoice-300M",
+          "host": "https://hf-mirror.com",
+          "error": "HTTPError: HTTP Error 401: Unauthorized"
+        },
+        "huggingface": {
+          "repo": "iic/CosyVoice-300M",
+          "host": "https://huggingface.co",
+          "error": "HTTPError: HTTP Error 401: Unauthorized"
+        }
+      }
+    },
+    {
+      "model_id": "paraformer-large",
+      "engine": "paraformer",
+      "sources": {
+        "modelscope": {
+          "repo": "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+          "host": "https://modelscope.cn",
+          "files": 6,
+          "total_bytes": 888897706,
+          "tree_ms": 297,
+          "probe_file": "model.pt",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/880502012",
+            "ms": 296
+          }
+        },
+        "hf_mirror": {
+          "repo": "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+          "host": "https://hf-mirror.com",
+          "error": "HTTPError: HTTP Error 401: Unauthorized"
+        },
+        "huggingface": {
+          "repo": "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+          "host": "https://huggingface.co",
+          "error": "HTTPError: HTTP Error 401: Unauthorized"
+        }
+      }
+    },
+    {
+      "model_id": "fsmn-vad",
+      "engine": "paraformer",
+      "sources": {
+        "modelscope": {
+          "repo": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+          "host": "https://modelscope.cn",
+          "files": 4,
+          "total_bytes": 1730986,
+          "tree_ms": 297,
+          "probe_file": "model.pt",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/1721366",
+            "ms": 327
+          }
+        },
+        "hf_mirror": {
+          "repo": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+          "host": "https://hf-mirror.com",
+          "error": "HTTPError: HTTP Error 401: Unauthorized"
+        },
+        "huggingface": {
+          "repo": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+          "host": "https://huggingface.co",
+          "error": "HTTPError: HTTP Error 401: Unauthorized"
+        }
+      }
+    },
+    {
+      "model_id": "campplus-sv",
+      "engine": "paraformer",
+      "sources": {
+        "modelscope": {
+          "repo": "iic/speech_campplus_sv_zh-cn_16k-common",
+          "host": "https://modelscope.cn",
+          "files": 4,
+          "total_bytes": 28037472,
+          "tree_ms": 266,
+          "probe_file": "campplus_cn_common.bin",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/28036335",
+            "ms": 265
+          }
+        },
+        "hf_mirror": {
+          "repo": "iic/speech_campplus_sv_zh-cn_16k-common",
+          "host": "https://hf-mirror.com",
+          "error": "HTTPError: HTTP Error 401: Unauthorized"
+        },
+        "huggingface": {
+          "repo": "iic/speech_campplus_sv_zh-cn_16k-common",
+          "host": "https://huggingface.co",
+          "error": "HTTPError: HTTP Error 401: Unauthorized"
+        }
+      }
+    },
+    {
+      "model_id": "qwen3-vl-2b",
+      "engine": "qwen3_vl",
+      "sources": {
+        "modelscope": {
+          "repo": "Qwen/Qwen3-VL-2B-Instruct-GGUF",
+          "host": "https://modelscope.cn",
+          "files": 6,
+          "total_bytes": 7653635773,
+          "tree_ms": 329,
+          "probe_file": "Qwen3VL-2B-Instruct-F16.gguf",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/3447350304",
+            "ms": 686
+          }
+        },
+        "hf_mirror": {
+          "repo": "Qwen/Qwen3-VL-2B-Instruct-GGUF",
+          "host": "https://hf-mirror.com",
+          "files": 5,
+          "total_bytes": 7653635744,
+          "tree_ms": 1891,
+          "probe_file": "Qwen3VL-2B-Instruct-F16.gguf",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/3447350304",
+            "ms": 5092
+          }
+        },
+        "huggingface": {
+          "repo": "Qwen/Qwen3-VL-2B-Instruct-GGUF",
+          "host": "https://huggingface.co",
+          "files": 5,
+          "total_bytes": 7653635744,
+          "tree_ms": 922,
+          "probe_file": "Qwen3VL-2B-Instruct-F16.gguf",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/3447350304",
+            "ms": 2000
+          }
+        }
+      }
+    },
+    {
+      "model_id": "qwen3-vl-4b",
+      "engine": "qwen3_vl",
+      "sources": {
+        "modelscope": {
+          "repo": "Qwen/Qwen3-VL-4B-Instruct-GGUF",
+          "host": "https://modelscope.cn",
+          "files": 6,
+          "total_bytes": 16119128541,
+          "tree_ms": 282,
+          "probe_file": "Qwen3VL-4B-Instruct-F16.gguf",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/8051286144",
+            "ms": 531
+          }
+        },
+        "hf_mirror": {
+          "repo": "Qwen/Qwen3-VL-4B-Instruct-GGUF",
+          "host": "https://hf-mirror.com",
+          "files": 5,
+          "total_bytes": 16119128512,
+          "tree_ms": 2186,
+          "probe_file": "Qwen3VL-4B-Instruct-F16.gguf",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/8051286144",
+            "ms": 4157
+          }
+        },
+        "huggingface": {
+          "repo": "Qwen/Qwen3-VL-4B-Instruct-GGUF",
+          "host": "https://huggingface.co",
+          "files": 5,
+          "total_bytes": 16119128512,
+          "tree_ms": 1061,
+          "probe_file": "Qwen3VL-4B-Instruct-F16.gguf",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/8051286144",
+            "ms": 2516
+          }
+        }
+      }
+    },
+    {
+      "model_id": "qwen3-vl-8b",
+      "engine": "qwen3_vl",
+      "sources": {
+        "modelscope": {
+          "repo": "Qwen/Qwen3-VL-8B-Instruct-GGUF",
+          "host": "https://modelscope.cn",
+          "files": 6,
+          "total_bytes": 32036668733,
+          "tree_ms": 281,
+          "probe_file": "Qwen3VL-8B-Instruct-F16.gguf",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/16388044896",
+            "ms": 452
+          }
+        },
+        "hf_mirror": {
+          "repo": "Qwen/Qwen3-VL-8B-Instruct-GGUF",
+          "host": "https://hf-mirror.com",
+          "files": 5,
+          "total_bytes": 32036668704,
+          "tree_ms": 3813,
+          "probe_file": "Qwen3VL-8B-Instruct-F16.gguf",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/16388044896",
+            "ms": 3842
+          }
+        },
+        "huggingface": {
+          "repo": "Qwen/Qwen3-VL-8B-Instruct-GGUF",
+          "host": "https://huggingface.co",
+          "files": 5,
+          "total_bytes": 32036668704,
+          "tree_ms": 1125,
+          "probe_file": "Qwen3VL-8B-Instruct-F16.gguf",
+          "probe_bytes": {
+            "status": 206,
+            "content_range": "bytes 0-0/16388044896",
+            "ms": 4688
+          }
+        }
+      }
+    }
+  ],
+  "cuda_wheels": [
+    {
+      "pkg": "nvidia-cublas-cu12",
+      "version": "12.4.5.8",
+      "size": 396895858,
+      "sha256_head": "5a796786da89",
+      "mirrors": {
+        "https://pypi.tuna.tsinghua.edu.cn": {
+          "status": 206,
+          "content_range": "bytes 0-0/396895858",
+          "ms": 172
+        },
+        "https://mirrors.aliyun.com/pypi": {
+          "status": 206,
+          "content_range": "bytes 0-0/396895858",
+          "ms": 109
+        },
+        "https://pypi.org": {
+          "status": 206,
+          "content_range": "bytes 0-0/396895858",
+          "ms": 3625
+        }
+      }
+    },
+    {
+      "pkg": "nvidia-cudnn-cu12",
+      "version": "8.9.7.29",
+      "size": 719350766,
+      "sha256_head": "4447321a2bdc",
+      "mirrors": {
+        "https://pypi.tuna.tsinghua.edu.cn": {
+          "status": 206,
+          "content_range": "bytes 0-0/719350766",
+          "ms": 171
+        },
+        "https://mirrors.aliyun.com/pypi": {
+          "status": 206,
+          "content_range": "bytes 0-0/719350766",
+          "ms": 94
+        },
+        "https://pypi.org": {
+          "status": 206,
+          "content_range": "bytes 0-0/719350766",
+          "ms": 2233
+        }
+      }
+    },
+    {
+      "pkg": "nvidia-cuda-runtime-cu12",
+      "version": "12.4.127",
+      "size": 878808,
+      "sha256_head": "09c2e35f4835",
+      "mirrors": {
+        "https://pypi.tuna.tsinghua.edu.cn": {
+          "status": 206,
+          "content_range": "bytes 0-0/878808",
+          "ms": 155
+        },
+        "https://mirrors.aliyun.com/pypi": {
+          "status": 206,
+          "content_range": "bytes 0-0/878808",
+          "ms": 172
+        },
+        "https://pypi.org": {
+          "status": 206,
+          "content_range": "bytes 0-0/878808",
+          "ms": 3781
+        }
+      }
+    },
+    {
+      "pkg": "nvidia-cufft-cu12",
+      "version": "11.2.1.3",
+      "size": 210576476,
+      "sha256_head": "d802f4954291",
+      "mirrors": {
+        "https://pypi.tuna.tsinghua.edu.cn": {
+          "status": 206,
+          "content_range": "bytes 0-0/210576476",
+          "ms": 218
+        },
+        "https://mirrors.aliyun.com/pypi": {
+          "status": 206,
+          "content_range": "bytes 0-0/210576476",
+          "ms": 156
+        },
+        "https://pypi.org": {
+          "status": 206,
+          "content_range": "bytes 0-0/210576476",
+          "ms": 2516
+        }
+      }
+    }
+  ]
+}

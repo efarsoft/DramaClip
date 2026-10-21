@@ -141,6 +141,9 @@ def classify_failure(exc: Exception) -> str:
         or "name or service not known" in lowered
     ):
         return "网络不通/域名解析失败——检查网络或代理后重试，或换个源"
+    if "http error 401" in lowered or "unauthorized" in lowered:
+        # HF 侧部分 iic 系模型设了访问门槛（真机实测匿名 API 即 401）：换源话术要如实
+        return "源站要求授权（模型设了访问门槛）——换 ModelScope 源下载，或手动下载后导入"
     if "http error 4" in lowered:
         return "源站说没有这个文件（404/403）——仓库可能已迁移，换个源或手动下载后导入"
     if "http error 5" in lowered:

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import urllib.error
+from pathlib import Path
 
 import pytest
 
@@ -45,6 +46,43 @@ def test_wheel_meta_surfaces_the_pypi_digest(monkeypatch: pytest.MonkeyPatch) ->
 
     assert meta["sha256"] == "b" * 64, "大小写归一，且必须带上"
     assert meta["size"] == 4096
+
+
+def test_packages_cover_ort_cuda12_runtime() -> None:
+    """ORT CUDA EP 需要 cudart/cufft：只装 cublas+cudnn 的旧组合会静默落 CPU。"""
+    by_name = {pkg["name"]: pkg for pkg in cuda_runtime._PACKAGES}  # noqa: SLF001
+    assert by_name["cudart"]["dll"] == "cudart64_12.dll"
+    assert by_name["cufft"]["dll"] == "cufft64_11.dll"
+
+
+def test_status_requires_every_package(tmp_path: Path) -> None:
+    root = cuda_runtime.runtime_dir(tmp_path)
+    for pkg in cuda_runtime._PACKAGES:  # noqa: SLF001
+        (root / pkg["name"]).mkdir(parents=True)
+        (root / pkg["name"] / pkg["dll"]).write_bytes(b"x")
+    assert cuda_runtime.status(tmp_path)["installed"] is True
+    (root / "cufft" / "cufft64_11.dll").unlink()
+    status = cuda_runtime.status(tmp_path)
+    assert status["installed"] is False and status["cufft"] is False
+
+
+def test_mirror_url_rewrites_both_index_origins() -> None:
+    """清华与 pypi.org 的 packages 前缀都要能换成任意镜像——只认 pypi.org 的话，
+    清华解析出的 URL 在「pypi 兜底」一轮会被原样打回清华，容错名存实亡。"""
+    tsinghua = (
+        "https://pypi.tuna.tsinghua.edu.cn/packages/e2/2a/abc/nvidia_cublas_cu12-12.4.5.8"
+        "-py3-none-win_amd64.whl"
+    )
+    pypi = "https://pypi.org/packages/e2/2a/abc/nvidia_cublas_cu12-12.4.5.8-py3-none-win_amd64.whl"
+    tail = "e2/2a/abc/nvidia_cublas_cu12-12.4.5.8-py3-none-win_amd64.whl"
+    for origin in (tsinghua, pypi):
+        assert cuda_runtime._mirror_url(origin, "https://pypi.org") == (  # noqa: SLF001
+            f"https://pypi.org/packages/{tail}"
+        )
+        assert cuda_runtime._mirror_url(origin, cuda_runtime._MIRRORS[0]) == tsinghua  # noqa: SLF001
+        assert cuda_runtime._mirror_url(origin, cuda_runtime._MIRRORS[1]) == (  # noqa: SLF001
+            f"https://mirrors.aliyun.com/pypi/packages/{tail}"
+        )
 
 
 def test_wheel_meta_without_digest_degrades_to_empty(

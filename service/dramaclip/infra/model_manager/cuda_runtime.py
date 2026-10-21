@@ -1,4 +1,4 @@
-"""CUDA 推理运行库（cuBLAS/cuDNN）：下载、解压落位、DLL 目录注入。
+"""CUDA 推理运行库（cuBLAS/cuDNN/cudart/cuFFT）：下载、解压落位、DLL 目录注入。
 
 刻意不 pip 进 venv：wheel 解压出 DLL 落到 data/models/cuda/<name>/，
 dev 与 PyInstaller 打包两态通用（打包态 venv 冻结，pip 不可用）。
@@ -26,6 +26,12 @@ _PACKAGES = [
      "dll": "cublas64_12.dll"},
     {"name": "cudnn", "pkg": "nvidia-cudnn-cu12", "version": "8.9.7.29",
      "dll": "cudnn64_8.dll"},
+    # onnxruntime-gpu 1.18（CUDA 12 轮）在 cublas/cudnn 之外还硬链接 cudart/cufft：
+    # 缺任一个 CUDA EP 只会加载失败并静默落 CPU。
+    {"name": "cudart", "pkg": "nvidia-cuda-runtime-cu12", "version": "12.4.127",
+     "dll": "cudart64_12.dll"},
+    {"name": "cufft", "pkg": "nvidia-cufft-cu12", "version": "11.2.1.3",
+     "dll": "cufft64_11.dll"},
 ]
 
 _PYPI = "https://pypi.org"
@@ -40,7 +46,7 @@ def runtime_dir(data_dir: Path) -> Path:
 
 
 def status(data_dir: Path) -> dict[str, Any]:
-    """安装态：两个 DLL 齐全才算可用（缺任一即视为未装完）。"""
+    """安装态：各包 DLL 齐全才算可用（缺任一即视为未装完）。"""
     root = runtime_dir(data_dir)
     parts = {p["name"]: (root / p["name"] / p["dll"]).is_file() for p in _PACKAGES}
     return {**parts, "installed": all(parts.values())}
@@ -129,11 +135,15 @@ def _content_length(url: str) -> int:
 
 
 def _mirror_url(url: str, mirror: str) -> str:
-    """pypi.org 的 /packages/ 路径在镜像站同构：清华直接换域，阿里云带 /pypi 前缀。"""
-    marker = "https://pypi.org/packages/"
-    if url.startswith(marker):
-        tail = url[len(marker):]
-        return f"{mirror}/packages/{tail}"
+    """/packages/ 路径三家同构：清华直接换域、阿里云带 /pypi 前缀、pypi.org 本体。
+
+    元数据 URL 常来自清华 simple 索引（清华绝对地址）——只改写 pypi.org 前缀的话，
+    「pypi 兜底」会把清华 URL 原样打回清华，镜像容错名存实亡（真机实测三家的
+    同构路径都回 206，锚点里的 SHA256 不随镜像变）。
+    """
+    for marker in ("https://pypi.org/packages/", "https://pypi.tuna.tsinghua.edu.cn/packages/"):
+        if url.startswith(marker):
+            return f"{mirror}/packages/{url[len(marker):]}"
     return url
 
 
@@ -151,7 +161,7 @@ def install(
     cancel: threading.Event,
     on_progress: Any | None = None,
 ) -> None:
-    """下载两个 wheel（多镜像容错）→ 解压 DLL → 清理。可重入：已存在的包跳过。"""
+    """逐个下载 wheel（多镜像容错）→ 解压 DLL → 清理。可重入：已存在的包跳过。"""
     root = runtime_dir(data_dir)
     total = len(_PACKAGES)
     for idx, pkg in enumerate(_PACKAGES):
@@ -161,7 +171,7 @@ def install(
         meta = _wheel_meta(pkg["pkg"], pkg["version"])
         wheel = Path(meta["filename"])
         last_error: Exception | None = None
-        for mirror in ("https://pypi.tuna.tsinghua.edu.cn", _PYPI):
+        for mirror in (*_MIRRORS, _PYPI):
             if cancel.is_set():
                 raise RuntimeError("已取消")
             try:

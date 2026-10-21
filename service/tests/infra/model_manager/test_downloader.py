@@ -357,6 +357,7 @@ def test_classify_failure_maps_signals_to_actions() -> None:
     assert "网络超时" in classify(TimeoutError("timed out"))
     assert "换个源" in classify(OSError("urlopen error 连接被重置"))
     assert "源站说没有这个文件" in classify(RuntimeError("HTTP Error 404: Not Found"))
+    assert "访问门槛" in classify(RuntimeError("HTTP Error 401: Unauthorized"))
     assert "源站临时故障" in classify(RuntimeError("HTTP Error 503: Unavailable"))
     assert "所有下载源都失败" in classify(RuntimeError("全部来源失败：boom"))
     # 认不出的：异常名 + 原文，不硬套类别

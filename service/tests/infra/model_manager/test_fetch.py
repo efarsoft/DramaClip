@@ -70,6 +70,47 @@ def test_download_then_resume_from_partial(tmp_path: Path, server: str) -> None:
     assert not partial.exists()
 
 
+def test_complete_tmp_validates_and_promotes_without_http(
+    tmp_path: Path, server: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """恰好写满却没落位的半成品：跳过 HTTP 直接对账落位。
+
+    Range bytes=N-（N=全长）会被源站按 RFC 416 拒掉且换源无效——旧实现
+    对这种半成品必发 Range 请求，模型从此永久下载失败。
+    """
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("完整半成品不应再发起任何请求")
+
+    monkeypatch.setattr(fetch.urllib.request, "urlopen", _boom)
+    dest, url = _get(tmp_path, server)
+    payload = _FILES["/model.bin"]
+    dest.with_name(dest.name + fetch.TMP_SUFFIX).write_bytes(payload)
+    fetch.download_file(url, dest, len(payload), cancel=threading.Event())
+    assert dest.read_bytes() == payload
+    assert not dest.with_name(dest.name + fetch.TMP_SUFFIX).exists()
+
+
+def test_complete_tmp_bad_content_deleted_and_redownloaded(tmp_path: Path, server: str) -> None:
+    """写满但内容坏（中途断电写花）：哈希对不上删掉整文件、交调用方重下，
+    不把坏字节落位；随后的整文件重下走常规路径成功。"""
+    dest, url = _get(tmp_path, server)
+    payload = _FILES["/model.bin"]
+    dest.with_name(dest.name + fetch.TMP_SUFFIX).write_bytes(b"X" * len(payload))
+    with pytest.raises(IOError, match="SHA256 校验失败"):
+        fetch.download_file(
+            url,
+            dest,
+            len(payload),
+            expected_sha256=hashlib.sha256(payload).hexdigest(),
+            cancel=threading.Event(),
+        )
+    assert not dest.exists()
+    assert not dest.with_name(dest.name + fetch.TMP_SUFFIX).exists()
+    fetch.download_file(url, dest, len(payload), cancel=threading.Event())
+    assert dest.read_bytes() == payload
+
+
 def test_ignored_range_overwrites_instead_of_append(tmp_path: Path, server: str) -> None:
     global _IGNORE_RANGE
     _IGNORE_RANGE = True

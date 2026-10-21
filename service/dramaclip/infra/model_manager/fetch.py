@@ -74,6 +74,12 @@ def download_file(
     if expected_size > 0 and start > expected_size:
         tmp.unlink()
         start = 0
+    if expected_size > 0 and start == expected_size:
+        # 恰好写满却没落位的半成品（写完最后一块、改名前中断/杀软锁过 rename）：
+        # Range bytes=N- 会被源站按 RFC 416 拒掉且换源无效——不发请求直接对账，
+        # 过了就地落位，不过删掉整文件重下。
+        _validate_and_promote(tmp, dest, expected_size, expected_sha256, expected_blob_id)
+        return
     headers = {"User-Agent": _UA}
     if start > 0:
         headers["Range"] = f"bytes={start}-"
@@ -92,6 +98,17 @@ def download_file(
                 position += len(chunk)
                 if on_progress is not None:
                     on_progress(position)
+    _validate_and_promote(tmp, dest, expected_size, expected_sha256, expected_blob_id)
+
+
+def _validate_and_promote(
+    tmp: Path,
+    dest: Path,
+    expected_size: int,
+    expected_sha256: str | None,
+    expected_blob_id: str,
+) -> None:
+    """下载完成或半成品恰好写满时的统一收口：大小/哈希对账 + 原子改名落位。"""
     actual = tmp.stat().st_size
     if expected_size > 0 and actual != expected_size:
         tmp.unlink(missing_ok=True)
