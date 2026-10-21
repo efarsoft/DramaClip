@@ -41,6 +41,8 @@ import { TtsPreviewButton } from './TtsPreviewButton';
 import { previewNotice } from './ttsPreview';
 import { useDownloadProgress } from './useDownloadProgress';
 import { useEngineConfigs } from './useEngineConfigs';
+import { CloudNudgeCard } from './CloudNudgeCard';
+import { cloudRecommendation } from './cloudRecommend';
 import { useLocalRuntime } from './useLocalRuntime';
 import {
   TTS_ENGINES,
@@ -81,6 +83,7 @@ export function TtsTab({
   const cloud = useEngineConfigs('tts_cloud', onChanged);
   const [pane, setPane] = useState<'local' | 'cloud'>('local');
   const activeCloud = activeCloudConfig(cloud.configs);
+  const recommendation = cloudRecommendation(machine.gpu, cloud.configs);
   const engine = settings['tts.engine'] ?? '';
   const domainModels = localDomainModels(models, 'tts');
   const active = isModelFreeEngine(engine) ? undefined : activeAsset(models, 'tts', settings);
@@ -98,6 +101,9 @@ export function TtsTab({
   };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
+      {recommendation !== 'none' ? (
+        <CloudNudgeCard domain="tts" kind={recommendation} onGoCloud={() => { setPane('cloud'); }} />
+      ) : null}
       {activeCloud !== undefined ? (
         <CloudActiveCard
           config={activeCloud}

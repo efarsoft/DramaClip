@@ -35,6 +35,8 @@ import {
   activeCloudConfig,
 } from './CloudDomainUI';
 import { SettingSelect } from './SettingSelect';
+import { CloudNudgeCard } from './CloudNudgeCard';
+import { cloudRecommendation } from './cloudRecommend';
 import { useDownloadProgress } from './useDownloadProgress';
 import { useEngineConfigs } from './useEngineConfigs';
 
@@ -79,6 +81,7 @@ export function AsrTab({
   const cloud = useEngineConfigs('asr_cloud', onChanged);
   const [pane, setPane] = useState<'local' | 'cloud'>('local');
   const activeCloud = activeCloudConfig(cloud.configs);
+  const recommendation = cloudRecommendation(machine.gpu, cloud.configs);
   const domainModels = localDomainModels(models, 'asr');
   const active = activeAsset(models, 'asr', settings);
   const segment = <CloudSegment value={pane} onChange={setPane} />;
@@ -96,6 +99,9 @@ export function AsrTab({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
       <LocalRuntimeSlot scope="asr" />
+      {recommendation !== 'none' ? (
+        <CloudNudgeCard domain="asr" kind={recommendation} onGoCloud={() => { setPane('cloud'); }} />
+      ) : null}
       {activeCloud !== undefined ? (
         <ActiveEngineCard
           domain="语音识别 ASR"
