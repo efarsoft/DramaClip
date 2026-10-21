@@ -71,11 +71,15 @@ def builtin_specs() -> list[ModelSpec]:
             quality=5,
             desc="精度天花板，建议 GPU",
         ),
+        # iic 系五模型（SenseVoice/Paraformer/VAD/CAM++/CosyVoice-300M）只挂 ModelScope
+        # 单源：它们在 HuggingFace 的仓库已私有/下架（匿名 API 回 401「Invalid username
+        # or password」，真机 2026-10-21 对照实证，公开仓同刻 200）——死链不入册，
+        # 下载气泡不再展示必失败选项。若上游恢复公开，登记回 repo_id 即恢复双源。
         ModelSpec(
             model_id="sensevoice-small",
             kind="asr",
             engine="sensevoice",
-            repo_id="iic/SenseVoiceSmall",
+            repo_id="",
             ms_repo="iic/SenseVoiceSmall",
             placement="asr/iic/SenseVoiceSmall",
             name="SenseVoice Small（含情绪标签）",
@@ -134,7 +138,7 @@ def builtin_specs() -> list[ModelSpec]:
             model_id="cosyvoice-300m",
             kind="tts",
             engine="cosyvoice",
-            repo_id="iic/CosyVoice-300M",
+            repo_id="",
             ms_repo="iic/CosyVoice-300M",
             placement="tts/cosyvoice300m",
             name="CosyVoice 300M（轻量克隆）",
@@ -149,7 +153,7 @@ def builtin_specs() -> list[ModelSpec]:
             model_id="paraformer-large",
             kind="asr",
             engine="paraformer",
-            repo_id="iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+            repo_id="",
             ms_repo="iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
             placement="asr/paraformer",
             name="Paraformer-large（FunASR 旗舰）",
@@ -164,7 +168,7 @@ def builtin_specs() -> list[ModelSpec]:
             model_id="fsmn-vad",
             kind="asr",
             engine="paraformer",
-            repo_id="iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+            repo_id="",
             ms_repo="iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
             placement="asr/fsmn-vad",
             name="FSMN-VAD（语音活动检测）",
@@ -180,7 +184,7 @@ def builtin_specs() -> list[ModelSpec]:
             model_id="campplus-sv",
             kind="asr",
             engine="paraformer",
-            repo_id="iic/speech_campplus_sv_zh-cn_16k-common",
+            repo_id="",
             ms_repo="iic/speech_campplus_sv_zh-cn_16k-common",
             placement="asr/campplus",
             name="CAM++（说话人分离/角色聚类）",

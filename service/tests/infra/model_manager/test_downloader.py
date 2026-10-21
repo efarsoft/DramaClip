@@ -48,13 +48,24 @@ def test_sources_domestic_first() -> None:
 
 
 def test_source_chain_selected_first_then_domestic() -> None:
-    spec = _spec("sensevoice-small")
-    assert downloader.source_chain("auto", spec)[0][0] == "modelscope"
+    spec = _spec("kokoro-82m")
+    assert downloader.source_chain("auto", spec)[0][0] == "hf_mirror"
     chain = downloader.source_chain("huggingface", spec)
-    assert [kind for kind, _ in chain] == ["huggingface", "modelscope", "hf_mirror"]
+    assert [kind for kind, _ in chain] == ["huggingface", "hf_mirror"]
     # 不支持的源请求不影响回退序
     chain = downloader.source_chain("modelscope", _spec("kokoro-82m"))
     assert [kind for kind, _ in chain] == ["hf_mirror", "huggingface"]
+
+
+def test_iic_models_are_modelscope_only() -> None:
+    """iic 系五模型的 HF 仓库已私有/下架（匿名 API 401，真机对照实证）：
+    死链不入册，来源表只剩 ModelScope；上游恢复公开时登记回 repo_id 即恢复双源。"""
+    for model_id in (
+        "sensevoice-small", "paraformer-large", "fsmn-vad", "campplus-sv", "cosyvoice-300m",
+    ):
+        spec = _spec(model_id)
+        assert spec.repo_id == "", model_id
+        assert [kind for kind, _ in spec.sources()] == ["modelscope"], model_id
 
 
 def test_list_tree_hf_filters_junk(monkeypatch) -> None:
