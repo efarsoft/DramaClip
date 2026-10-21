@@ -217,7 +217,8 @@ def test_tier_of_vram_thresholds() -> None:
     assert device_profile.tier_of("nvidia", 8192) == "entry"
     assert device_profile.tier_of("nvidia", 16384) == "mid"
     assert device_profile.tier_of("nvidia", 24576) == "high"
-    assert device_profile.tier_of("nvidia", 0) == "low"
+    # 显存读不到不是「入门档」，是未知：归 none，由驱动/厂商标签各自说清
+    assert device_profile.tier_of("nvidia", 0) == "none"
 
 
 def test_profile_caps_and_runtime_layering() -> None:
