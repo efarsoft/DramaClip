@@ -32,9 +32,12 @@ def test_parse_max_cuda_tolerates_umd_rename() -> None:
 
 def test_detect_reports_cpu_when_smi_missing(monkeypatch) -> None:
     monkeypatch.setattr(gpu, "_smi_paths", lambda: [])
+    # Windows 本机的 CIM 会真枚举到物理卡：不桩掉它，这条用例测的是开发机而不是「无卡宿主」
+    monkeypatch.setattr(gpu, "_query_cim_adapters", lambda: [])
     result = gpu.detect()
     assert result["ready"] is True
     assert result["vendor"] == "none"
+    assert result["adapters"] == []
 
 
 class _FakeWhisper:
