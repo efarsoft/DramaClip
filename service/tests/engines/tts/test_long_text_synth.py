@@ -163,7 +163,7 @@ class _FakeProc:
 def fake_worker(monkeypatch: pytest.MonkeyPatch) -> _FakeProc:
     proc = _FakeProc()
     monkeypatch.setattr(indextts2_mod, "runtime_ready", lambda: True)
-    monkeypatch.setattr(indextts2_mod, "_ensure_worker", lambda _d: proc)
+    monkeypatch.setattr(indextts2_mod, "_ensure_worker", lambda _d, _device="auto": proc)
     return proc
 
 

@@ -14,12 +14,16 @@ mode 参数分发。QC 实测对比（scratch/ref-voice-10s.wav，2026-09-28）�
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from dramaclip.engines.tts.reference_clean import cleaned_path
+from dramaclip.infra import compute
+from dramaclip.infra.compute import ComputeReport
 from dramaclip.infra.model_manager.fetch import download_file
 from dramaclip.infra.paths import resolve_data_dir
 
@@ -39,8 +43,23 @@ def model_path(models_dir: Path) -> Path:
     return models_dir / "tts" / "separation" / _MODEL_FILENAME
 
 
-def clean_reference(models_dir: Path, src: Path) -> Path:
+@dataclass(frozen=True)
+class SeparationResult:
+    """分离产物 + 本次实际算力回执（GPU 是否真的生效以它为准）。"""
+
+    path: Path
+    compute: ComputeReport
+
+
+def clean_reference(
+    models_dir: Path,
+    src: Path,
+    *,
+    device: str = "auto",
+    cuda_dll_dir: Path | None = None,
+) -> SeparationResult:
     """分离出干声，落 <stem>.cleaned.wav（与 fast 档同一命名语义）。"""
+    requested = compute.normalize_requested(device)
     py = _venv_python()
     if not py.is_file():
         raise RuntimeError(
@@ -50,16 +69,22 @@ def clean_reference(models_dir: Path, src: Path) -> Path:
     ensure_model(models_dir)  # worker 不做下载：模型没就位时在这边用多源容错补
     out = cleaned_path(src)
     worker_src = _worker_src()
+    dll_root = cuda_dll_dir if cuda_dll_dir is not None else models_dir / "cuda"
     cmd = [
         str(py), str(worker_src),
         "--in", str(src), "--out", str(out),
         "--models", str(model_path(models_dir).parent),
+        "--device", requested,
+        "--cuda-dll-dir", str(dll_root),
     ]
+    # Windows 默认按 GBK 解子进程输出：参考音频路径带中文时协议行解不开，
+    # 成功也会被读成「没有返回协议应答」。子进程与本侧都钉死 UTF-8。
     result = subprocess.run(  # noqa: S603 - 固定解释器固定 worker 脚本
-        cmd, capture_output=True, text=True, timeout=_TIMEOUT_S,
-        creationflags=_NO_WINDOW, check=False,
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=_TIMEOUT_S, creationflags=_NO_WINDOW, check=False,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
-    return _collect(result, out)
+    return _collect(result, out, requested)
 
 
 def ensure_model(models_dir: Path) -> Path:
@@ -78,7 +103,9 @@ def ensure_model(models_dir: Path) -> Path:
     raise RuntimeError(f"分离模型下载失败: {last}") from last
 
 
-def _collect(result: subprocess.CompletedProcess[str], out: Path) -> Path:
+def _collect(
+    result: subprocess.CompletedProcess[str], out: Path, requested: str
+) -> SeparationResult:
     """worker 的 stdout 只认最后一行 JSON：日志混不进来，退出码不当你撒谎。"""
     line = (result.stdout.strip().splitlines() or [""])[-1]
     try:
@@ -92,7 +119,25 @@ def _collect(result: subprocess.CompletedProcess[str], out: Path) -> Path:
         raise RuntimeError(f"worker 报告成功但产物不存在：{path}")
     if path != out:
         raise RuntimeError(f"worker 产物路径与约定不符：{path}（应为 {out}）")
-    return path
+    if str(payload.get("requested") or "") != requested:
+        raise RuntimeError(
+            f"worker 回执请求不一致：{payload.get('requested')!r}（应为 {requested!r}）"
+        )
+    actual = str(payload.get("actual") or "").strip()
+    resolved = str(payload.get("resolved") or "").strip()
+    if actual == "" or resolved == "":
+        raise RuntimeError("worker 回执缺少实际设备（actual/resolved）")
+    report = ComputeReport(
+        component="tts.separation",
+        requested=requested,
+        resolved=resolved,
+        actual=actual,
+        fallback=bool(payload.get("fallback")),
+        reason=str(payload.get("reason") or "").strip(),
+        device="cuda" if actual == "cuda" else actual,
+    )
+    compute.assert_success(report)
+    return SeparationResult(path=path, compute=report)
 
 
 def _worker_src() -> Path:

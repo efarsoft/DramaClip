@@ -12,6 +12,7 @@ import { tokens } from '../../styles/theme';
 import {
   type AssetState,
   assetState,
+  computeLabel,
   failureNote,
   formatBytes,
   warnNote,
@@ -64,7 +65,7 @@ export function AssetRow({
       >
         <NameCell model={model} state={state} active={active} specs={specs} />
         <WiredCell ok={model.engine_ready} />
-        <StateCell model={model} state={state} report={report} />
+        <StateCell model={model} state={state} report={report} selftest={selftest} />
         <SizeCell model={model} />
         <RatingCell model={model} />
         <RowActions
@@ -152,13 +153,17 @@ function StateCell({
   model,
   state,
   report,
+  selftest,
 }: {
   model: ModelInfo;
   state: AssetState;
   report: VerifyReport | undefined;
+  selftest: SelftestResult | undefined;
 }): ReactElement {
   const download = useDownloadState(model);
   const note = failureNote(report);
+  // 自检回执是运行态，不是安装态：没跑过就不显示，回退用警示色。
+  const runtime = computeLabel(selftest?.compute);
   // warn 上卡（§10.1 降级的另一半：可见 + 有修法）；储备资产的「引擎接入」warn 是分区自带的事实，不重复展示。
   const warns = note === undefined && state !== 'reserve' ? warnSummary(report) : undefined;
   // 失败态上屏（附录 B②）：分类原因写在行里，不只在一次性 toast 里闪一下
@@ -190,6 +195,17 @@ function StateCell({
           style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.colorWarning }}
         >
           {warns}
+        </div>
+      )}
+      {runtime !== undefined && (
+        <div
+          style={{
+            fontSize: tokens.text.badge.size,
+            lineHeight: tokens.text.badge.leading,
+            color: selftest?.compute?.fallback === true ? tokens.colorWarning : tokens.textTertiary,
+          }}
+        >
+          {runtime}
         </div>
       )}
     </span>

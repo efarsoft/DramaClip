@@ -8,9 +8,12 @@ voices/<name>.pt 改用 zf_001）。出片路径保留这份宽容是为了兼�
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import json
 import os
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +21,7 @@ from dramaclip.api.context import AppContext
 from dramaclip.engines.tts import factory, reference_clean, reference_qc, vocal_separation
 from dramaclip.engines.tts.base import DEFAULT_VOICE, audio_container, audio_duration_s
 from dramaclip.engines.tts.factory import create as create_tts
+from dramaclip.infra.compute import ComputeReport
 from dramaclip.transport.rpc import Router, RpcDomainError
 
 _ERR_TTS_PARAM = -32320
@@ -53,7 +57,10 @@ def auto_voice(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         {"id": row["id"], "source_path": row["source_path"]}
         for row in episodes_repo.list_by_project(context.conn, str(params.get("project_id", "")))
     ]
-    picked = auto_voice_mod.extract_auto_voice(context.conn, context.data_dir, episode_rows)
+    picked = auto_voice_mod.extract_auto_voice(
+        context.conn, context.data_dir, episode_rows,
+        device=str(context.settings.get("tts.device") or "auto"),
+    )
     settings_repo.set_value(context.conn, "tts.voice.indextts2", picked["path"])
     quality = reference_qc.inspect_reference(Path(picked["path"]))
     return {
@@ -64,6 +71,9 @@ def auto_voice(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         "seconds": picked["seconds"],
         "quality": quality.grade,
         "voice_set": "tts.voice.indextts2",
+        "cleaned_with": picked.get("cleaned_with"),
+        "compute": picked.get("compute"),
+        "clean_reason": picked.get("clean_reason"),
     }
 
 def clean_reference(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -79,11 +89,17 @@ def clean_reference(context: AppContext, params: dict[str, Any]) -> dict[str, An
     if not src.is_file():
         raise RpcDomainError(_ERR_TTS_PARAM, f"参考音频不存在：{raw}")
     mode = str(params.get("mode") or "separate").strip()
+    report: ComputeReport | None = None
     try:
         if mode == "fast":
             out = reference_clean.clean_reference(src)
         elif mode == "separate":
-            out = vocal_separation.clean_reference(context.data_dir / "models", src)
+            separated = vocal_separation.clean_reference(
+                context.data_dir / "models",
+                src,
+                device=str(context.settings.get("tts.device") or "auto"),
+            )
+            out, report = separated.path, separated.compute
         else:
             raise RpcDomainError(_ERR_TTS_PARAM, f"未知清洗模式「{mode}」（separate | fast）")
     except RpcDomainError:
@@ -93,6 +109,7 @@ def clean_reference(context: AppContext, params: dict[str, Any]) -> dict[str, An
     quality = reference_qc.inspect_reference(out)
     return {
         "path": str(out),
+        "compute": report.to_dict() if report is not None else None,
         "quality": {
             "grade": quality.grade,
             "metrics": quality.metrics,
@@ -125,7 +142,7 @@ def preview(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         )
     models_dir = context.data_dir / "models"
     voice = _resolve_voice(context, engine, params, models_dir)
-    path = _preview_audio(context, engine, voice, text, models_dir)
+    path, report = _preview_audio(context, engine, voice, text, models_dir)
     duration = audio_duration_s(path)
     if duration <= 0:
         raise RpcDomainError(
@@ -137,6 +154,7 @@ def preview(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         "engine": engine,
         "voice": voice,
         "text": text,
+        "compute": report.to_dict() if report is not None else None,
     }
     quality = _reference_quality(engine, voice)
     if quality is not None:
@@ -211,37 +229,81 @@ def _assert_voice_honest(engine: str, voice: str, models_dir: Path) -> None:
 
 def _preview_audio(
     context: AppContext, engine: str, voice: str, text: str, models_dir: Path
-) -> Path:
-    """内容寻址：engine/voice/text 全进哈希，同样的三元组不重复合成。"""
+) -> tuple[Path, ComputeReport | None]:
+    """内容寻址：engine/voice/text/device/model 全进哈希，参数各异不互相冒充缓存。"""
     root = context.work_dir / _PREVIEW_DIR
     root.mkdir(parents=True, exist_ok=True)
-    key = _content_key(engine, voice, text)
-    cached = _find_cached(root, key)
-    if cached is not None:
-        return cached
-    api_key = str(context.settings.get("tts.api_key", ""))
+    device = str(context.settings.get("tts.device") or "auto")
     # 模型名同样取自设置（云端配置启用时由 engine_configs 镜像写入）：漏了它
     # 等于让工厂的默认值替业主选模型——选的是 v3、试听的却是 v2
     model = str(context.settings.get("tts.model", ""))
-    return _synthesize(engine, voice, text, models_dir, root, key, api_key=api_key, model=model)
+    key = _content_key(engine, voice, text, device, model)
+    cached = _find_cached(root, key)
+    if cached is not None:
+        return cached, _cached_compute(cached)
+    api_key = str(context.settings.get("tts.api_key", ""))
+    return _synthesize(
+        engine,
+        voice,
+        text,
+        models_dir,
+        root,
+        key,
+        api_key=api_key,
+        model=model,
+        device=device,
+        data_dir=context.data_dir,
+    )
 
 
-def _content_key(engine: str, voice: str, text: str) -> str:
+def _content_key(engine: str, voice: str, text: str, device: str, model: str) -> str:
     """音色名不进文件名——它是用户可影响的字符串，路径分隔符会借此越出缓存目录。"""
     digest = hashlib.sha1(
-        f"{engine}|{voice}|{text}".encode(), usedforsecurity=False
+        f"{engine}|{voice}|{text}|{device}|{model}".encode(), usedforsecurity=False
     ).hexdigest()[:12]
     return f"preview-{engine}-{digest}"
 
 
+_AUDIO_SUFFIXES = frozenset({".wav", ".mp3", ".flac", ".ogg", ".m4a"})
+
+
 def _find_cached(root: Path, key: str) -> Path | None:
     """扩展名按探到的容器定，所以只能按前缀找；同名多条取字典序首条，保证可复现。"""
-    hits = sorted(path for path in root.glob(f"{key}.*") if _has_audio(path))
+    hits = sorted(
+        path
+        for path in root.glob(f"{key}.*")
+        if path.suffix.lower() in _AUDIO_SUFFIXES and _has_audio(path)
+    )
     return hits[0] if hits else None
 
 
 def _has_audio(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 0
+
+
+def _sidecar_path(audio: Path) -> Path:
+    return audio.with_name(audio.name + ".compute.json")
+
+
+def _write_compute_sidecar(audio: Path, report: ComputeReport | None) -> None:
+    """缓存命中的试听也要能说清“这段是谁在哪算的”：回执与音频同生共死。"""
+    if report is None:
+        return
+    # sidecar 是说明性元数据，写不进去不影响试听
+    with contextlib.suppress(OSError):
+        _sidecar_path(audio).write_text(
+            json.dumps(report.to_dict(), ensure_ascii=False), encoding="utf-8"
+        )
+
+
+def _cached_compute(audio: Path) -> ComputeReport | None:
+    """读 sidecar；缺失/损坏一律返回 None——未知不等于 CPU，不许猜一个填上。"""
+    try:
+        data = json.loads(_sidecar_path(audio).read_text(encoding="utf-8"))
+        report = ComputeReport(**data)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+    return replace(report, reason="缓存命中")
 
 
 def _synthesize(
@@ -253,7 +315,9 @@ def _synthesize(
     key: str,
     api_key: str = "",
     model: str = "",
-) -> Path:
+    device: str = "auto",
+    data_dir: Path | None = None,
+) -> tuple[Path, ComputeReport | None]:
     """先写临时名、成功后按真实容器原子搬正：半途失败的残留不能被下次当成缓存播出去。
 
     产物以引擎**返回的路径**为准，不是临时名：云端引擎按 out_path 的扩展名决定落盘
@@ -263,13 +327,21 @@ def _synthesize(
     staging = root / f"{key}.{uuid.uuid4().hex}.mp3"
     produced = staging
     try:
-        produced = create_tts(engine, models_dir, api_key=api_key, model=model).synthesize(
-            text, voice, staging
+        synthesizer = create_tts(
+            engine,
+            models_dir,
+            api_key=api_key,
+            model=model,
+            device=device,
+            data_dir=data_dir,
         )
+        produced = synthesizer.synthesize(text, voice, staging)
         if not _has_audio(produced):
             raise RuntimeError("引擎返回了空文件（0 字节），没有任何声音可播")
         path = root / f"{key}.{_extension_of(produced)}"
         os.replace(produced, path)
+        report = synthesizer.compute() if hasattr(synthesizer, "compute") else None
+        _write_compute_sidecar(path, report)
     except Exception as exc:  # noqa: BLE001 - 失败原因必须原样带出，且不换个引擎重试
         raise RpcDomainError(
             _ERR_TTS_SYNTH, f"试听合成失败（引擎={engine}）：{type(exc).__name__}: {exc}"
@@ -278,7 +350,7 @@ def _synthesize(
         staging.unlink(missing_ok=True)
         if produced != staging:
             produced.unlink(missing_ok=True)  # 成功时已被搬走，这里只收失败残留
-    return path
+    return path, report
 
 
 def _extension_of(path: Path) -> str:

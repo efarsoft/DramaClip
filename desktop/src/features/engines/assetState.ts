@@ -7,6 +7,7 @@
  * 就绪口径（§10.1）：**校验通过 + 自检通过**，两层缺一不可——文件在 ≠ 能推。
  */
 import type {
+  ComputeReport,
   ImportRecord,
   ModelInfo,
   SelftestResult,
@@ -53,6 +54,25 @@ export function assetState(
 
 export function stateLabel(state: AssetState): string {
   return LABEL[state];
+}
+
+/**
+ * 算力回执的人话：说「实际用了什么」，回退必带原因。
+ * 只有报告过的才显示——unknown 不点绿、不编造。
+ */
+export function computeLabel(report?: ComputeReport | null): string | undefined {
+  if (report === undefined || report === null) return undefined;
+  if (report.component === 'video.encode') {
+    return report.fallback
+      ? `已回退 ${report.actual}：${report.reason}`
+      : `编码：${report.actual}`;
+  }
+  if (report.fallback) return `已回退 CPU：${report.reason}`;
+  if (report.resolved === 'unsupported') return `此卡不支持（${report.reason}）`;
+  if (report.actual === 'cuda') return `本次实际：GPU（${report.device}）`;
+  if (report.actual === 'cpu') return '本次实际：CPU';
+  if (report.actual === 'cloud') return '本次实际：云端';
+  return undefined;
 }
 
 /**

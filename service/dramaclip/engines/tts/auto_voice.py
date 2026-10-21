@@ -107,13 +107,25 @@ def pick_best_span(
     return (row, start, end, speaker)
 
 
-def extract_auto_voice(conn: Any, data_dir: Path, episodes: list[dict[str, Any]]) -> dict[str, Any]:
+def extract_auto_voice(
+    conn: Any,
+    data_dir: Path,
+    episodes: list[dict[str, Any]],
+    *,
+    device: str = "auto",
+) -> dict[str, Any]:
     """主入口：选段 → ffmpeg 抽音频 → 人声分离 → 落盘。返回给前端展示/直接采用。"""
     with _EXTRACT_LOCK:
-        return _extract_locked(conn, data_dir, episodes)
+        return _extract_locked(conn, data_dir, episodes, device=device)
 
 
-def _extract_locked(conn: Any, data_dir: Path, episodes: list[dict[str, Any]]) -> dict[str, Any]:
+def _extract_locked(
+    conn: Any,
+    data_dir: Path,
+    episodes: list[dict[str, Any]],
+    *,
+    device: str = "auto",
+) -> dict[str, Any]:
     picked = pick_best_span(conn, episodes)
     if picked is None:
         raise ValueError(
@@ -139,10 +151,16 @@ def _extract_locked(conn: Any, data_dir: Path, episodes: list[dict[str, Any]]) -
     )
 
     models_dir = data_dir / "models"
+    compute = None
+    clean_reason = ""
     try:
-        final = vocal_separation.clean_reference(models_dir, raw_path)
-    except Exception:  # noqa: BLE001 - MDX 不可用回退滤镜清洗，仍比不洗强
+        separated = vocal_separation.clean_reference(models_dir, raw_path, device=device)
+        final, compute, cleaned_with = separated.path, separated.compute, "separation"
+    except Exception as exc:  # noqa: BLE001 - MDX 不可用回退滤镜清洗，仍比不洗强
+        # 回退本身允许，但必须说破：调用方要能区分「分离完成」与「滤镜凑合」。
         final = reference_clean.clean_reference(raw_path)
+        cleaned_with = "filter"
+        clean_reason = f"{type(exc).__name__}: {exc}"
     raw_path.unlink(missing_ok=True)
 
     final_name = voices_dir / f"auto-ref-{stamp}.wav"
@@ -153,4 +171,7 @@ def _extract_locked(conn: Any, data_dir: Path, episodes: list[dict[str, Any]]) -
         "start": round(start, 2),
         "end": round(end, 2),
         "seconds": round(end - start, 1),
+        "cleaned_with": cleaned_with,
+        "compute": compute.to_dict() if compute is not None else None,
+        "clean_reason": clean_reason,
     }

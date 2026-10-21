@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 
+from dramaclip.infra.compute import ComputeReport
 from dramaclip.infra.ffmpeg.binaries import resolve_ffprobe
 
 DEFAULT_VOICE = "zh-CN-YunxiNeural"
@@ -61,6 +62,10 @@ class TtsEngine(Protocol):
     def is_available(self) -> tuple[bool, str]:
         """(可用, 人话原因)；未实现的引擎默认 (True, '')。"""
         return True, ""
+
+    def compute(self) -> ComputeReport | None:
+        """最近一次真实推理的算力回执；没跑过返回 None，不猜。"""
+        return None
 
 
 def audio_duration_s(path: Path) -> float:

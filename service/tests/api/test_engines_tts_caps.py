@@ -52,7 +52,7 @@ def test_tts_selftest_result_carries_caps(
                 sample_rate=24000, speed_control="native", available=True, reason="模型就绪"
             )
 
-    monkeypatch.setattr(factory, "create", lambda engine, models_dir=None: _Fake())
+    monkeypatch.setattr(factory, "create", lambda engine, models_dir=None, **_kwargs: _Fake())
     context = _context(memory_db, tmp_path)
 
     result = engines_api.run(context, {"model_id": "kokoro-82m"})
@@ -74,7 +74,7 @@ def test_caps_probe_failure_lands_in_reason_not_an_exception(
     monkeypatch: pytest.MonkeyPatch,
     stub_run_tts: None,
 ) -> None:
-    def boom(engine: str, models_dir: Path | None = None) -> Any:
+    def boom(engine: str, models_dir: Path | None = None, **_kwargs: Any) -> Any:
         raise RuntimeError("探测炸了")
 
     monkeypatch.setattr(factory, "create", boom)
@@ -99,7 +99,7 @@ def test_caps_reason_masks_sensitive_paths(
                 reason=f"缺模型: config.json（{tmp_path / 'models' / 'tts'}），用户目录 {home}",
             )
 
-    monkeypatch.setattr(factory, "create", lambda engine, models_dir=None: _Fake())
+    monkeypatch.setattr(factory, "create", lambda engine, models_dir=None, **_kwargs: _Fake())
     result = engines_api.run(_context(memory_db, tmp_path), {"model_id": "kokoro-82m"})
 
     blob = json.dumps(result, ensure_ascii=False)

@@ -19,6 +19,7 @@ from dramaclip.engines.narration import modes
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.tts import base as tts_base
 from dramaclip.engines.tts.factory import create as create_tts
+from dramaclip.infra.compute import ComputeReport
 from dramaclip.infra.ffmpeg import runner as ffmpeg_runner
 
 logger = logging.getLogger(__name__)
@@ -144,7 +145,7 @@ def _synthesize_into(
     speed: str,
     final_path: Path,
     cache_dir: Path,
-) -> None:
+) -> bool:
     """缓存优先 + 暂存落位：命中即复用，未命中先写临时名、成功后原子搬进最终路径。
 
     两层缓存判据：
@@ -152,16 +153,19 @@ def _synthesize_into(
     2. 内容寻址缓存 `cache_dir/sha256(text|engine|voice|speed).<ext>` 命中 →
        copy 落位（改一句只重合成一段，未改的段落不二次付费）；
     3. 都未命中 → 真合成，成功后写入缓存再原子落位。
+
+    返回值只回答一件事：这次有没有真推理。算力回执只能来自真推理——
+    缓存命中时设备根本没碰过，替它编一份就是假账。
     """
     if _usable(final_path):
-        return
+        return False
     cache_entry = _cache_entry_for(cache_dir, text, engine_name, voice, speed)
     if cache_entry is not None:
         tmp = final_path.with_name(f"{final_path.stem}.{uuid.uuid4().hex}{final_path.suffix}")
         try:
             shutil.copyfile(cache_entry, tmp)
             os.replace(tmp, final_path)
-            return
+            return False
         finally:
             tmp.unlink(missing_ok=True)
     # uuid 插进主干、保留最终扩展名：soundfile/edge 都靠扩展名推断音频格式，
@@ -179,6 +183,7 @@ def _synthesize_into(
         staging.unlink(missing_ok=True)
         if produced != staging:
             produced.unlink(missing_ok=True)  # 成功时已被搬走，这里只收失败残留
+    return True
 
 
 # ---- 批次二：hook 槽位对齐策略机 ------------------------------------------
@@ -289,6 +294,8 @@ class _EnginePool:
         log: LogFn | None,
         api_key: str = "",
         model: str = "",
+        device: str = "auto",
+        data_dir: Path | None = None,
     ) -> None:
         self._setting = setting
         self._explicit = not _is_auto(setting)
@@ -300,12 +307,29 @@ class _EnginePool:
         self._log = log
         self._api_key = api_key
         self._model = model
+        self._device = device
+        self._data_dir = data_dir
         self._instances: dict[str, tts_base.TtsEngine] = {}
+        # 只记真实推理过的引擎；同一引擎多段合成去重成一条。
+        self._reports: dict[str, ComputeReport] = {}
         if self._explicit:
             # 显式引擎构造失败必须当场炸（未知引擎名 = 配置错误，不许当 auto 兜走）
             self._instances[self._requested] = create_tts(
-                self._requested, models_dir, api_key=api_key, model=model
+                self._requested,
+                models_dir,
+                api_key=api_key,
+                model=model,
+                device=device,
+                data_dir=data_dir,
             )
+
+    def _remember(self, engine: tts_base.TtsEngine) -> None:
+        report = engine.compute() if hasattr(engine, "compute") else None
+        if report is not None:
+            self._reports[report.component] = report
+
+    def compute_reports(self) -> list[ComputeReport]:
+        return list(self._reports.values())
 
     @property
     def label(self) -> str:
@@ -343,7 +367,12 @@ class _EnginePool:
             if engine is None:
                 try:
                     engine = create_tts(
-                        name, self._models_dir, api_key=self._api_key, model=self._model
+                        name,
+                        self._models_dir,
+                        api_key=self._api_key,
+                        model=self._model,
+                        device=self._device,
+                        data_dir=self._data_dir,
                     )
                 except Exception as exc:  # noqa: BLE001 - auto 链跳过构造不了的引擎
                     reasons.append(f"{name}: 构造失败 {type(exc).__name__}: {exc}")
@@ -351,12 +380,16 @@ class _EnginePool:
                 self._instances[name] = engine
             target = _content_addressed_audio(work_dir, item_id, text, voice, name, speed)
             try:
-                _synthesize_into(engine, name, text, voice, speed, target, cache_dir)
+                synthesized = _synthesize_into(
+                    engine, name, text, voice, speed, target, cache_dir
+                )
             except Exception as exc:
                 if self._explicit:
                     raise  # 显式引擎：原因原样上抛，由调用方带 item_id 包装，绝不换引擎
                 reasons.append(f"{name}: {type(exc).__name__}: {exc}")
                 continue
+            if synthesized:
+                self._remember(engine)
             fallback_used = bool(reasons)
             _emit(
                 self._log,

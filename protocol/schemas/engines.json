@@ -82,6 +82,57 @@
               "type": "string"
             }
           }
+        },
+        "compute": {
+          "oneOf": [
+            {
+              "$ref": "#/x-engines/ComputeReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "本次自检实际使用的算力；缺省 = 该引擎没有可报告设备"
+        }
+      }
+    },
+    "ComputeReport": {
+      "type": "object",
+      "required": [
+        "component",
+        "requested",
+        "resolved",
+        "actual",
+        "fallback",
+        "reason",
+        "device"
+      ],
+      "properties": {
+        "component": {
+          "type": "string"
+        },
+        "requested": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "cuda",
+            "cpu"
+          ]
+        },
+        "resolved": {
+          "type": "string"
+        },
+        "actual": {
+          "type": "string"
+        },
+        "fallback": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "device": {
+          "type": "string"
         }
       }
     }

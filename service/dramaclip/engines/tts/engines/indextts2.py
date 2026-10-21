@@ -15,10 +15,12 @@ import subprocess
 import threading
 import wave
 from pathlib import Path
+from typing import Any
 
 from dramaclip.engines.tts import reference_qc
 from dramaclip.engines.tts.base import EngineCaps
 from dramaclip.engines.tts.text_split import split_long_text
+from dramaclip.infra import compute
 from dramaclip.infra.paths import resolve_data_dir
 
 _WORKER_SRC = Path(__file__).parents[1] / "workers" / "indextts_worker.py"
@@ -42,10 +44,11 @@ _LOCK = threading.Lock()
 # 合成并发打同一进程时，无锁的 write/readline 会应答错配拿到别人的音频。
 _IO_LOCK = threading.Lock()
 _PROC: subprocess.Popen[str] | None = None
-# 就绪行整个 worker 生命周期只发一次，读过没有要记在进程身份上、不能记在引擎实例
-# 上——factory 每次都可能 new 新实例，第二个实例再读就绪行会永远挂在 readline 上。
+_PROC_DEVICE: str | None = None
+# 就绪行整个 worker 生命周期只发一次，内容记在进程身份上、不能记在引擎实例上——
+# factory 每次都可能 new 新实例，第二个实例再读就绪行会永远挂在 readline 上。
 # 按进程对象记账：respawn 出新对象天然重置，不依赖额外的复位分支。
-_HELLOED_FOR: subprocess.Popen[str] | None = None
+_HELLO: dict[subprocess.Popen[str], dict[str, Any]] = {}
 _RUNTIME_OK: bool | None = None
 
 
@@ -99,28 +102,40 @@ def shutdown_worker() -> None:
     → service_app.run 的 finally）上；Electron 强杀（TerminateProcess）到不了
     这里，那类场景进程树随主进程终止，无法善后。
     """
-    global _PROC
+    global _PROC, _PROC_DEVICE
     with _IO_LOCK:
         proc = _PROC
         _PROC = None
+        _PROC_DEVICE = None
+        if proc is not None:
+            _HELLO.pop(proc, None)
     if proc is not None and proc.poll() is None:
         proc.terminate()
 
 
-def _ensure_worker(models_dir: Path | None) -> subprocess.Popen[str]:
-    global _PROC
+def _ensure_worker(models_dir: Path | None, device: str = "auto") -> subprocess.Popen[str]:
+    global _PROC, _PROC_DEVICE
     with _LOCK:
-        if _PROC is not None and _PROC.poll() is None:
-            return _PROC
+        if _PROC is not None:
+            alive = _PROC.poll() is None
+            if alive and device == _PROC_DEVICE:
+                return _PROC
+            # 死进程/设备承诺变了：旧进程的就绪行随进程一起作废
+            _HELLO.pop(_PROC, None)
+            if alive:
+                _PROC.terminate()
+            _PROC = None
         # device 交给 worker 内 torch 自检：探测层不区分 CUDA 代际（M4000 cc5.2 这类
         # 「有 N 卡但新栈不支持」的机器，init 失败进程即退，错误经 stdout 空行带回）。
         # stderr 走继承：worker 的 CUDA 回退/加载诊断（">> CUDA 探针失败"）经服务
         # stderr 落进 Electron 主进程日志——DEVNULL 吞掉等于盲飞。
         _PROC = subprocess.Popen( # noqa: S603 - 固定脚本固定参数
-            [str(_venv_python()), str(_WORKER_SRC), str(models_dir), "auto"],
+            [str(_venv_python()), str(_WORKER_SRC), str(models_dir), device],
             env={
                 **os.environ,
                 "DRAMACLIP_INDEXTTS_SRC": str(_src_dir()),
+                # 协议是 UTF-8；不指定时子进程按系统 ANSI 代码页解码中文。
+                "PYTHONIOENCODING": "utf-8",
             },
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -130,12 +145,14 @@ def _ensure_worker(models_dir: Path | None) -> subprocess.Popen[str]:
             errors="replace",
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
+        _PROC_DEVICE = device
         return _PROC
 
 
 class IndexTts2Engine:
-    def __init__(self, model_dir: Path | None = None) -> None:
+    def __init__(self, model_dir: Path | None = None, device: str = "auto") -> None:
         self._model_dir = model_dir
+        self._device = compute.normalize_requested(device)
 
     @property
     def name(self) -> str:
@@ -170,6 +187,22 @@ class IndexTts2Engine:
                 "（引擎页「安装运行环境」）"
             )
         return True, "运行环境与模型就绪"
+
+    def compute(self) -> compute.ComputeReport | None:
+        proc = _PROC
+        hello = _HELLO.get(proc) if proc is not None else None
+        if hello is None:
+            return None
+        actual = "cuda" if str(hello.get("device") or "").startswith("cuda") else "cpu"
+        fallback = bool(hello.get("fallback"))
+        return compute.ComputeReport(
+            component="tts.indextts2",
+            requested=str(hello.get("requested") or self._device),
+            resolved="cuda" if fallback or actual == "cuda" else "cpu",
+            actual=actual,
+            fallback=fallback,
+            reason=str(hello.get("reason") or ""),
+        )
 
     def synthesize(self, text: str, voice: str, out_path: Path) -> Path:
         if not runtime_ready():
@@ -230,14 +263,20 @@ class IndexTts2Engine:
 
         整段持 _IO_LOCK：一问一答中间不许插队（并发场景见 _IO_LOCK 注释）。
         """
-        global _HELLOED_FOR
         with _IO_LOCK:
-            proc = _ensure_worker(self._model_dir)
+            proc = _ensure_worker(self._model_dir, self._device)
             if proc.stdin is None or proc.stdout is None:
                 raise RuntimeError("worker 进程管道不可用")
-            if _HELLOED_FOR is not proc:
-                json.loads(proc.stdout.readline())  # 就绪行只此一条，按进程身份记（见模块头）
-                _HELLOED_FOR = proc
+            hello = _HELLO.get(proc)
+            if hello is None:
+                line = proc.stdout.readline()
+                try:
+                    hello = json.loads(line)
+                except ValueError as exc:
+                    raise RuntimeError("worker 未返回可解析的就绪行") from exc
+                if not hello.get("ready"):
+                    raise RuntimeError(f"worker 启动失败：{hello.get('error', '未知原因')}")
+                _HELLO[proc] = hello
             job = {"id": "0", "text": text, "voice": ref, "out": str(out_path)}
             proc.stdin.write(json.dumps(job, ensure_ascii=False) + "\n")
             proc.stdin.flush()

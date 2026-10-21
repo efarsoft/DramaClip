@@ -1,7 +1,8 @@
 """CosyVoice 合成 worker：在隔离 venv（Python 3.11，torch 2.7.0 按机型选型）内运行。
 
 协议（stdout 逐行 JSON，stdin 同；与 indextts_worker 逐字同形）：
-  就绪行: {"ready": true, "device": "cuda"|"cpu", "sample_rate": 24000}
+  就绪行: {"ready": true, "requested": ..., "device": "cuda"|"cpu",
+           "fallback": bool, "reason": ..., "sample_rate": 24000}
   请求:   {"id": "段id", "text": "...", "voice": "参考音频路径", "out": "输出wav路径", "lang": "zh"}
   应答:   {"id": "...", "ok": true} 或 {"id": "...", "ok": false, "error": "..."}
 
@@ -70,19 +71,21 @@ def _bootstrap_sys_path() -> None:
             sys.path.insert(0, path)
 
 
-def _probe_cuda() -> str:
+def _probe_device(requested: str) -> tuple[str, str]:
     """真探针而非 is_available：老卡（Pascal cc5.2）会被认出但新 CUDA 栈无内核。"""
+    if requested == "cpu":
+        return "cpu", ""
     import torch  # noqa: PLC0415
 
     if not torch.cuda.is_available():
-        return "cpu"
+        return "cpu", "torch.cuda.is_available() = False"
     try:
         (torch.ones(4, device="cuda") * 2).sum().item()
-        return "cuda"
-    except Exception:  # noqa: BLE001 - 任何 CUDA 故障都按不可用处理，诚实回 CPU
+        return "cuda", ""
+    except Exception as exc:  # noqa: BLE001 - 任何 CUDA 故障都按不可用处理，诚实回 CPU
         torch.cuda.empty_cache()
         print(">> CUDA 探针失败，回退 CPU", file=sys.stderr)
-        return "cpu"
+        return "cpu", f"{type(exc).__name__}: {exc}"
 
 
 def _check() -> int:
@@ -175,17 +178,41 @@ def _load_model(model_dir: str, device: str) -> Any:
     return model
 
 
-def _main(model_dir: str, device: str, proto_fd: int) -> int:
+def _main(model_dir: str, requested: str, proto_fd: int) -> int:
     import torchaudio  # noqa: PLC0415
 
-    model = _load_model(model_dir, device)
+    device, probe_reason = _probe_device(requested)
+    no_cuda = probe_reason.startswith("torch.cuda.is_available")
+    fallback = bool(probe_reason) and requested != "cpu" and not no_cuda
+    reason = probe_reason if fallback else ""
     proto = os.fdopen(proto_fd, "w", encoding="utf-8")
 
     def send(obj: dict[str, object]) -> None:
         proto.write(json.dumps(obj, ensure_ascii=False) + "\n")
         proto.flush()
 
-    send({"ready": True, "device": device, "sample_rate": _SAMPLE_RATE})
+    if requested == "cuda" and device != "cuda":
+        send({"ready": False, "error": f"请求 CUDA 但探针失败：{probe_reason or '未知原因'}"})
+        return 1
+    try:
+        model = _load_model(model_dir, device)
+    except Exception as exc:  # noqa: BLE001 - 构造期 CUDA 故障按请求语义分叉
+        if device != "cuda" or requested == "cuda":
+            send({"ready": False, "error": f"模型加载失败：{type(exc).__name__}: {exc}"})
+            return 1
+        print(f">> CUDA 加载失败回退 CPU：{str(exc)[:160]}", file=sys.stderr)
+        device, fallback = "cpu", True
+        reason = f"{type(exc).__name__}: {exc}"
+        try:
+            model = _load_model(model_dir, device)
+        except Exception as cpu_exc:  # noqa: BLE001 - CPU 也起不来就是真失败
+            send({"ready": False, "error": f"CPU 加载也失败：{type(cpu_exc).__name__}: {cpu_exc}"})
+            return 1
+
+    send({
+        "ready": True, "requested": requested, "device": device,
+        "fallback": fallback, "reason": reason, "sample_rate": _SAMPLE_RATE,
+    })
 
     for line in sys.stdin:
         line = line.strip()
@@ -215,6 +242,9 @@ def _main(model_dir: str, device: str, proto_fd: int) -> int:
             torchaudio.save(job["out"], speech.unsqueeze(0), _SAMPLE_RATE)
             reply = {"id": job["id"], "ok": True}
         except Exception as exc:  # noqa: BLE001 - 逐段失败只回错误，进程不死（后续段继续）
+            import traceback  # noqa: PLC0415
+
+            traceback.print_exc(file=sys.stderr)
             reply = {"id": job.get("id", "?"), "ok": False, "error": f"{type(exc).__name__}: {exc}"}
         send(reply)
     return 0
@@ -224,7 +254,7 @@ def main() -> int:
     if "--check" in sys.argv:
         return _check()
     model_dir = sys.argv[1]
-    device = sys.argv[2] if len(sys.argv) > 2 else "auto"
+    requested = sys.argv[2] if len(sys.argv) > 2 else "auto"
 
     # 库的进度信息（">> loading..." 等 print）走 stdout 会污染 JSON 协议——
     # 在 import 任何 cosyvoice 模块前把 fd 1 换成 stderr，协议行用真正的 stdout 写。
@@ -233,9 +263,7 @@ def main() -> int:
     sys.stdout = sys.stderr
     _bootstrap_sys_path()
 
-    if device == "auto":
-        device = _probe_cuda()
-    return _main(model_dir, device, proto_fd)
+    return _main(model_dir, requested, proto_fd)
 
 
 if __name__ == "__main__":

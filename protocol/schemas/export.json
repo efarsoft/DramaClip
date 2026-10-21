@@ -168,6 +168,56 @@
             "partial",
             null
           ]
+        },
+        "compute": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/x-models/ComputeReport"
+          },
+          "description": "本次导出的算力回执（视频编码等）；NULL = 未记录"
+        }
+      }
+    },
+    "ComputeReport": {
+      "type": "object",
+      "required": [
+        "component",
+        "requested",
+        "resolved",
+        "actual",
+        "fallback",
+        "reason",
+        "device"
+      ],
+      "properties": {
+        "component": {
+          "type": "string"
+        },
+        "requested": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "cuda",
+            "cpu"
+          ]
+        },
+        "resolved": {
+          "type": "string"
+        },
+        "actual": {
+          "type": "string"
+        },
+        "fallback": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "device": {
+          "type": "string"
         }
       }
     },

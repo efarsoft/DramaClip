@@ -9,6 +9,7 @@ fd 1 换 stderr 保 JSON 通道、ready 行、{"id","ok",...} 应答）。
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
 import uuid
@@ -49,6 +50,9 @@ class VenvWorker:
                 [str(py), str(self._worker_src), json.dumps(self._config, ensure_ascii=False)],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 text=True, encoding="utf-8",
+                # 协议是 UTF-8，父进程写 UTF-8；子进程 stdin/stdout 默认走
+                # 系统 ANSI 代码页（中文 Windows 是 GBK），中文会被解成鬼字。
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
                 creationflags=_NO_WINDOW,
             )
         except OSError as exc:
@@ -56,7 +60,11 @@ class VenvWorker:
         ready = self._readline()
         if ready is None or not ready.get("ready"):
             self.close()
-            raise RuntimeError("worker 启动失败（venv 依赖不完整可重装修复）")
+            detail = str((ready or {}).get("error") or "").strip()
+            raise RuntimeError(
+                f"worker 启动失败：{detail}" if detail
+                else "worker 启动失败（venv 依赖不完整可重装修复）"
+            )
         self.ready = ready
         return ready
 

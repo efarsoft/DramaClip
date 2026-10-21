@@ -31,7 +31,7 @@ from dramaclip.engines.dedup import params as dedup_params
 from dramaclip.engines.exporter import ai_label, loudness
 from dramaclip.engines.narration.models import PlanData, TimelineSegment
 from dramaclip.engines.subtitle import caption_font
-from dramaclip.infra import config
+from dramaclip.infra import compute, config
 from dramaclip.infra.ffmpeg import probe as ffprobe_mod
 from dramaclip.infra.ffmpeg import runner
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg, resolve_ffprobe
@@ -251,6 +251,7 @@ def cut_segment_args(
     afade_out_s: float | None = None,
     erase_rects: list[tuple[float, float]] | None = None,
     erase_windows: list[tuple[float, float]] | None = None,
+    ai_label_vf: str | None = None,
 ) -> list[str]:
     """构建单段切割命令（Phase A）。
 
@@ -327,6 +328,10 @@ def cut_segment_args(
             f"ass={_escape_filter_path(ass_path)}"
             f":{caption_font.fontsdir_option(caption_font.caption_font())}"
         )
+    if ai_label_vf:
+        # AI 标注在每段烧一次：Phase B 流复制拼接，硬编成果不再整片重编。
+        # 失败即该段失败，交给现有段级回退/整片统一重跑——不允许无标注成片。
+        filters.append(ai_label_vf)
 
     args = [
         "-hide_banner",
@@ -441,12 +446,15 @@ def _escape_filter_path(path: str) -> str:
 
 # ---- A4-1 硬编探测：平台候选序 + 同形状质量参数真试编 + 会话级缓存 ----
 
-# 硬编候选序按平台：Windows/Linux 先 NVENC 后 QSV（Intel 核显），macOS 只有
-# VideoToolbox。编码器「列表里有」≠「真编能过」（驱动残缺/GPU 会话数满），所以每个
-# 候选都要做 0.1s 黑帧**真试编**——且必须带与正式合成**同形状**的质量参数
-# （`_video_codec_params`），只 `-f null` 探不出「参数不识别」这类实编挂。
+# 硬编候选序按平台：Windows 三厂商 NVENC→AMF→QSV，Linux 只有 NVENC/QSV（AMF 的
+# Linux 支持面未实测，不进候选）。编码器「列表里有」≠「真编能过」（驱动残缺/GPU
+# 会话数满），所以每个候选都要做 0.1s 黑帧**真试编**——且必须带与正式合成
+# **同形状**的质量参数（`_video_codec_params`），只 `-f null` 探不出「参数不识别」
+# 这类实编挂。
 _HW_CANDIDATES_BY_PLATFORM: dict[str, tuple[str, ...]] = {
-    "win32": ("h264_nvenc", "h264_qsv"),
+    # win32 三厂商：N 卡第一次命中；AMD 主机 nvenc 黑帧失败后第二次命中 AMF；
+    # Intel 核显最后兜底。全失败才 libx264。
+    "win32": ("h264_nvenc", "h264_amf", "h264_qsv"),
     "darwin": ("h264_videotoolbox",),
 }
 _HW_CANDIDATES_LINUX: tuple[str, ...] = ("h264_nvenc", "h264_qsv")
@@ -467,6 +475,15 @@ def _video_codec_params(video_codec: str) -> list[str]:
     """各编码器的质量参数——正式合成与探测真试编读**同一处**构造（不许各写一份）。"""
     if video_codec == "h264_nvenc":
         return ["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", "22"]
+    if video_codec == "h264_amf":
+        # cqp 22 对齐 NVENC 的 vbr/cq 22 与 QSV 的 global_quality 22；usage=transcoding
+        # 对文件导出而非低延迟场景。参数只在这一处定义，探针与正式段共用。
+        return [
+            "-usage", "transcoding",
+            "-quality", "quality",
+            "-rc", "cqp",
+            "-qp_i", "22", "-qp_p", "22", "-qp_b", "24",
+        ]
     if video_codec == "h264_qsv":
         # QSV 用全局质量（ICQ）对齐 NVENC 的 VBR+CQ 语义；preset 名与 x264 系不同。
         return ["-preset", "medium", "-global_quality", "22"]
@@ -554,7 +571,9 @@ def _run_cut(
 # 重跑请求一致 → 命中复用零成本跳过；只有硬编成功的段重编。宁可多付一次整片重编，
 # 不交付段间画质跳变的片子。
 
-_HW_ENCODERS = frozenset({"h264_nvenc", "h264_qsv", "h264_videotoolbox"})
+_HW_ENCODERS = frozenset(
+    {"h264_nvenc", "h264_amf", "h264_qsv", "h264_videotoolbox"}
+)
 _FALLBACK_CODEC = "libx264"
 # 输入侧错误（文件缺失/损坏、参数非法）换编码器重跑也没用，直接抛；
 # cancelled 不是编码失败；其余（含分类不出的 unknown，如超时被杀 stderr 空）按可回退。
@@ -733,6 +752,16 @@ def _prune_stale_segments(work_dir: Path, segment_count: int) -> None:
                 path.unlink(missing_ok=True)
 
 
+def _compute_requested(value: str) -> str:
+    """导出设置 / 实际 codec → 算力请求词汇（auto / cpu / cuda）。"""
+    normalized = (value or "").strip().lower()
+    if normalized in ("", "auto"):
+        return "auto"
+    if normalized in ("cpu", _FALLBACK_CODEC):
+        return "cpu"
+    return "cuda"
+
+
 def export_plan(
     plan: PlanData,
     episode_paths: dict[str, str],
@@ -753,18 +782,24 @@ def export_plan(
     subtitle_erase_rects: dict[str, list[tuple[float, float]]] | None = None,
     subtitle_erase_windows: dict[str, list[tuple[float, float]]] | None = None,
     burn_ai_label: bool = False,
+    compute_sink: Callable[[compute.ComputeReport], None] | None = None,
+    encoder_requested: str = "",
 ) -> Path:
     """执行两阶段导出，返回成片路径。
 
     A4-2 统一收口：请求硬编而中途发生段级回退时，整片换 libx264 再跑一次
     （见 _UniformCodecRetry 注释）——已回退段凭签名复用，只有硬编成功的段重编。
 
-    `burn_ai_label`（settings `export.ai_label`，默认关闭）：loudness 之后在成片
-    右上角烧「AI 生成」标注的独立 drawtext 遍（见 `ai_label` 模块）；开启时烧制
-    失败硬失败——用户明示要的标注不能静默缺席。
+    `burn_ai_label`（settings `export.ai_label`，默认关闭）：标注在每段烧一次
+    （见 `ai_label` 模块）；开启时任一段烧制失败即导出失败——用户明示要的标注
+    不能静默缺席，也不能靠整片 x264 重编把硬编收益吃掉。
+
+    `compute_sink` 只在整片成功（含统一重跑后成功）时收到一份 `video.encode`
+    回执：resolved=首轮选中编码器，actual=最终成片编码器，段级回退必须可见。
     """
+    state: dict[str, Any] = {"fallback": False, "reason": "", "fallback_count": 0}
     try:
-        return _export_plan_once(
+        path = _export_plan_once(
             plan, episode_paths, out_path, work_dir,
             tts_audio_by_segment=tts_audio_by_segment,
             cancel=cancel,
@@ -781,14 +816,20 @@ def export_plan(
             subtitle_erase_windows=subtitle_erase_windows,
             burn_ai_label=burn_ai_label,
             _allow_uniform_retry=True,
+            _report_state=state,
         )
+        actual = video_codec
     except _UniformCodecRetry:
+        count = int(state.get("fallback_count") or 0)
+        base_reason = str(state.get("reason") or "段级硬编失败")
+        state["fallback"] = True
+        state["reason"] = f"{base_reason}（共 {count} 段回退，整片统一 libx264 重跑）"
         _LOGGER.warning(
             "本轮出现段级硬编回退：整片按 %s 统一重跑一次，"
             "消除段间编码器混排的画质跳变（已回退段将凭签名复用）",
             _FALLBACK_CODEC,
         )
-        return _export_plan_once(
+        path = _export_plan_once(
             plan, episode_paths, out_path, work_dir,
             tts_audio_by_segment=tts_audio_by_segment,
             cancel=cancel,
@@ -805,7 +846,21 @@ def export_plan(
             subtitle_erase_windows=subtitle_erase_windows,
             burn_ai_label=burn_ai_label,
             _allow_uniform_retry=False,
+            _report_state=state,
         )
+        actual = _FALLBACK_CODEC
+    if compute_sink is not None:
+        compute_sink(
+            compute.ComputeReport(
+                component="video.encode",
+                requested=_compute_requested(encoder_requested or video_codec),
+                resolved=video_codec,
+                actual=actual,
+                fallback=bool(state["fallback"]),
+                reason=str(state["reason"]),
+            )
+        )
+    return path
 
 
 def _export_plan_once(
@@ -829,6 +884,7 @@ def _export_plan_once(
     subtitle_erase_windows: dict[str, list[tuple[float, float]]] | None = None,
     burn_ai_label: bool = False,
     _allow_uniform_retry: bool = True,
+    _report_state: dict[str, Any] | None = None,
 ) -> Path:
     """单次导出尝试（统一重跑的循环体，见 export_plan）。
 
@@ -848,6 +904,9 @@ def _export_plan_once(
     # 画布跟随首个源集画幅（16:9 进→16:9 出，不裁不拉；异画幅补黑），全片统一——
     # Phase B -c copy 拼接要求段段几何一致，逐集各画各的会拼出变换静默。
     out_size = resolve_canvas(episode_paths, out_size)
+    # 字号/边距由**解析后的画布**决定，不能用调用方传的上限猜；字体缺失在这里
+    # 硬失败（早于任何段编码），不给「跑了半小时才说标不了」的路径。
+    label_spec = ai_label.prepare(work_dir, out_size) if burn_ai_label else None
     _prune_stale_segments(work_dir, total)
 
     # Phase A：构建每段命令参数（含台词保护区安全切点、字幕、混音）；
@@ -914,6 +973,9 @@ def _export_plan_once(
             ),
             "zones_sha256": _zones_fingerprint(zones),
         }
+        if label_spec is not None:
+            # 只在开启时入签名：关闭标注的旧缓存逐字节兼容（键缺席 == 未开启）。
+            inputs["ai_label"] = label_spec.fingerprint
         existing = _read_sig(seg_path)
         if (
             existing is not None
@@ -993,6 +1055,7 @@ def _export_plan_once(
                     # 补丁痕迹消失（2026-10-09 裁决③）。整集窗共用，不按行分——
                     # OCR 条按帧拼接整行文本，行级时间没有落库。
                     erase_windows=(subtitle_erase_windows or {}).get(segment.episode_id),
+                    ai_label_vf=None if label_spec is None else label_spec.vf,
                 ),
                 seg_path=seg_path,
                 inputs=inputs,
@@ -1113,6 +1176,14 @@ def _export_plan_once(
             seg_path.unlink(missing_ok=True)  # 半成品不删会被 Phase B concat 拼进去
         fallback_args = _args_with_codec(args, _FALLBACK_CODEC)
         hw_codec = args[args.index("-c:v") + 1]
+        if _report_state is not None:
+            # 回执只记第一处失败原文（人话原因），次数另计；统一重跑后一并汇总。
+            _report_state["fallback"] = True
+            _report_state["fallback_count"] = int(_report_state.get("fallback_count") or 0) + 1
+            if not _report_state.get("reason"):
+                _report_state["reason"] = (
+                    f"第 {index + 1} 段硬编 {hw_codec} 失败（kind={exc.kind}）：{str(exc)[:200]}"
+                )
         _LOGGER.warning(
             "第 %d 段硬编 %s 失败（kind=%s）：已清半成品，回退 %s 重跑：%s",
             index + 1, hw_codec, exc.kind, _FALLBACK_CODEC, str(exc)[:200],
@@ -1151,12 +1222,6 @@ def _export_plan_once(
         loudness.normalize_in_place(
             out_path, target=loudness_target, work_dir=work_dir / "loudnorm"
         )
-    if burn_ai_label:
-        # AI 生成标注（settings export.ai_label，默认关闭）：loudness 之后的独立
-        # drawtext 遍，-c:a copy 保住响度归一成果；失败硬失败（ai_label 模块 docstring）
-        if on_progress is not None:
-            on_progress(97.0, "烧制 AI 标注")
-        ai_label.apply(out_path, work_dir, out_size)
     if on_progress is not None:
         on_progress(100.0, "导出完成")
     return out_path

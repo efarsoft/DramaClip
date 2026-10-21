@@ -266,6 +266,7 @@ def _voice(
         source_durations=source_durations,
         log=context.notifier.log,
         on_progress=on_progress,
+        data_dir=context.data_dir,
     )
 
 

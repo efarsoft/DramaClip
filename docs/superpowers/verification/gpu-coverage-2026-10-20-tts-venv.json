@@ -1,0 +1,114 @@
+{
+  "tool": "verify_gpu_coverage",
+  "version": 1,
+  "generated_at": "2026-10-20T14:47:38+08:00",
+  "environment": {
+    "platform": "win32",
+    "python": "3.11.16",
+    "interpreter": "<data>\\runtimes\\tts-venv\\Scripts\\python.exe",
+    "torch": "2.8.0+cpu",
+    "torch_cuda_available": "False",
+    "nvidia_smi": "['Quadro M4000, 582.78, 5.2']",
+    "ffmpeg": "ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers"
+  },
+  "summary": {
+    "pass": 6,
+    "fail": 0,
+    "unsupported": 4,
+    "note": "unsupported 不计入通过"
+  },
+  "records": [
+    {
+      "component": "separation.cpu",
+      "requested": "cpu",
+      "runtime": "tts-venv",
+      "status": "pass",
+      "actual": "cpu",
+      "reason": "",
+      "elapsed_s": 20.36
+    },
+    {
+      "component": "separation.cuda",
+      "requested": "cuda",
+      "runtime": "tts-venv",
+      "status": "pass",
+      "actual": "cuda",
+      "reason": "",
+      "elapsed_s": 24.75
+    },
+    {
+      "component": "asr.funasr.cpu",
+      "requested": "cpu",
+      "runtime": "tts-venv",
+      "status": "pass",
+      "actual": "cpu",
+      "reason": "",
+      "elapsed_s": 16.49
+    },
+    {
+      "component": "asr.funasr.cuda",
+      "requested": "cuda",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "ComputeUnavailableError: SenseVoice 请求 CUDA，但 CUDA 不可计算：AssertionError: Torch not compiled with CUDA enabled",
+      "elapsed_s": 0.0
+    },
+    {
+      "component": "tts.kokoro.cpu",
+      "requested": "cpu",
+      "runtime": "tts-venv",
+      "status": "pass",
+      "actual": "cpu",
+      "reason": "",
+      "elapsed_s": 12.36
+    },
+    {
+      "component": "tts.kokoro.cuda",
+      "requested": "cuda",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "RuntimeError: worker 启动失败：请求 CUDA 但探针失败：torch.cuda.is_available() = False",
+      "elapsed_s": 10.59
+    },
+    {
+      "component": "tts.indextts2.cpu",
+      "requested": "cpu",
+      "runtime": "tts-venv",
+      "status": "pass",
+      "actual": "cpu",
+      "reason": "",
+      "elapsed_s": 82.09
+    },
+    {
+      "component": "tts.indextts2.cuda",
+      "requested": "cuda",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "RuntimeError: worker 启动失败：请求 CUDA 但探针失败：torch.cuda.is_available() = False",
+      "elapsed_s": 2.86
+    },
+    {
+      "component": "tts.cosyvoice.cpu",
+      "requested": "cpu",
+      "runtime": "tts-venv",
+      "status": "pass",
+      "actual": "cpu",
+      "reason": "",
+      "elapsed_s": 56.88
+    },
+    {
+      "component": "tts.cosyvoice.cuda",
+      "requested": "cuda",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "RuntimeError: worker 启动失败：请求 CUDA 但探针失败：torch.cuda.is_available() = False",
+      "elapsed_s": 2.88
+    }
+  ],
+  "requirements": [],
+  "unmet": []
+}

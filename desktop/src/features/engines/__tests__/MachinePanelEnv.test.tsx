@@ -55,7 +55,11 @@ const NVIDIA_PROFILE: DeviceProfile = {
   cuda_runtime_installed: false,
   caps: {
     faster_whisper_gpu: { ok: true, ready: false, hint: '' },
-    demucs_gpu: { ok: true, ready: false, hint: 'torch CUDA 运行时接入后生效' },
+    vocal_separation_gpu: {
+      ok: true,
+      ready: false,
+      hint: '当前走 CPU（MDX-Net）；安装态不等于运行态，实际以后端回执为准',
+    },
   },
   driver_guidance: { needed: false, url: 'https://x', min_driver: '551', reason: '' },
   recommendation: '本地 GPU 引擎可启用（安装 CUDA 运行库后生效）',

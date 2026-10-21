@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from dramaclip.infra import compute
 from dramaclip.infra.model_manager.registry import ModelSpec
 from dramaclip.infra.paths import resolve_resources_dir
 
@@ -37,7 +38,12 @@ def sample_ref_voice() -> Path:
 
 
 def run_asr(
-    models_dir: Path, spec: ModelSpec, *, device: str = "cpu", compute_type: str = "auto"
+    models_dir: Path,
+    spec: ModelSpec,
+    *,
+    device: str = "auto",
+    compute_type: str = "auto",
+    data_dir: Path | None = None,
 ) -> dict[str, Any]:
     """ASR 自检：真加载、真转写。调用方保证模型已安装（缺模型是前置错误，不是自检结果）。"""
     sample = sample_wav()
@@ -47,7 +53,7 @@ def run_asr(
     try:
         # 构建也在自检范围内：「加载成功」本身就是判据的一半（缺 cuDNN、权重损坏
         # 都在构建期炸），不许把加载失败抛成 RPC 内部错误冒充「自检没跑」。
-        engine = _build_asr(models_dir, spec, device, compute_type)
+        engine = _build_asr(models_dir, spec, device, compute_type, data_dir)
         segments = engine.transcribe(sample, "zh")
     except Exception as exc:  # noqa: BLE001 - 自检要的就是真异常原文，不包装不吞
         return _fail(f"加载/推理失败：{type(exc).__name__}: {exc}")
@@ -61,16 +67,31 @@ def run_asr(
             "转写结果为空——随包样例是真人语音，空结果说明引擎没真跑通"
             "（常见原因：输出解析丢字，或缺时间戳被整条丢弃）"
         )
+    report = engine.compute() if hasattr(engine, "compute") else None
+    if report is not None:
+        try:
+            compute.assert_success(report)
+        except compute.ComputeUnavailableError as exc:
+            return {**_fail(str(exc)), "compute": report.to_dict()}
     return {
         "ok": True,
         "engine": engine.name,
         "chars": len(text),
         "elapsed_s": round(elapsed, 2),
         "text": text[:60],
+        "compute": report.to_dict() if report is not None else None,
     }
 
 
-def run_tts(models_dir: Path, work_dir: Path, spec: ModelSpec, voice: str) -> dict[str, Any]:
+def run_tts(
+    models_dir: Path,
+    work_dir: Path,
+    spec: ModelSpec,
+    voice: str,
+    *,
+    device: str = "auto",
+    data_dir: Path | None = None,
+) -> dict[str, Any]:
     """TTS 自检：真合成一句短话并验证时长——空文件/0 时长都算不过。"""
     from dramaclip.engines.tts import factory
     from dramaclip.engines.tts.base import audio_duration_s
@@ -81,7 +102,7 @@ def run_tts(models_dir: Path, work_dir: Path, spec: ModelSpec, voice: str) -> di
         engine_dir = None  # 云端引擎（edge）：没有本地模型这一说
     if engine_dir is not None and not engine_dir.is_dir():
         return _fail(f"模型未下载：{engine_dir}——先下载或导入再自检")
-    engine = factory.create(spec.engine, models_dir)
+    engine = factory.create(spec.engine, models_dir, device=device, data_dir=data_dir)
     if voice == "" and engine.capabilities().supports_cloning:
         # 克隆引擎没有「默认嗓音」可回退：业主未选参考时用随包样例顶上，
         # 让「引擎能不能出声」与「业主配没配过音色」两件事分开。
@@ -97,21 +118,38 @@ def run_tts(models_dir: Path, work_dir: Path, spec: ModelSpec, voice: str) -> di
     out.unlink(missing_ok=True)
     if duration <= 0:
         return _fail("合成结果不是有效音频（0 字节或时长无效）")
+    report = engine.compute() if hasattr(engine, "compute") else None
+    if report is not None:
+        try:
+            compute.assert_success(report)
+        except compute.ComputeUnavailableError as exc:
+            return {**_fail(str(exc)), "compute": report.to_dict()}
     return {
         "ok": True,
         "engine": spec.engine,
         "duration_s": round(duration, 2),
         "elapsed_s": round(elapsed, 2),
+        "compute": report.to_dict() if report is not None else None,
     }
 
 
-def _build_asr(models_dir: Path, spec: ModelSpec, device: str, compute_type: str) -> Any:
+def _build_asr(
+    models_dir: Path,
+    spec: ModelSpec,
+    device: str,
+    compute_type: str,
+    data_dir: Path | None = None,
+) -> Any:
+    from dramaclip.engines.analysis.runtime import resolve_asr_device
     from dramaclip.engines.analysis.transcriber import (
         FasterWhisperEngine,
         ParaformerEngine,
         SenseVoiceEngine,
     )
 
+    # 判据只有一份：自检调 runtime 的同一个解析函数，否则「自检能过、正式转写
+    # 却是另一条设备路」就是规格 §1 里那类假读数
+    device = resolve_asr_device(spec.engine, device, data_dir)
     if spec.engine == "faster_whisper":
         size = spec.model_id.removeprefix("faster-whisper-")
         return FasterWhisperEngine(
@@ -121,11 +159,11 @@ def _build_asr(models_dir: Path, spec: ModelSpec, device: str, compute_type: str
             compute_type=compute_type,
         )
     if spec.engine == "sensevoice":
-        return SenseVoiceEngine(models_dir=models_dir)
+        return SenseVoiceEngine(models_dir=models_dir, device=device)
     if spec.engine == "paraformer":
-        # device/compute_type 是 whisper（ctranslate2）的概念；funasr 栈自己管设备，
-        # CPU 就能跑，不硬传免得假装支持没验证过的 GPU 路径。
-        return ParaformerEngine(models_dir=models_dir)
+        # compute_type 是 whisper（ctranslate2）的概念，funasr 栈不认；device 则是
+        # funasr/torch 自己的设备语义，自检必须与正式转写同一条路径。
+        return ParaformerEngine(models_dir=models_dir, device=device)
     raise ValueError(f"{spec.engine} 没有能力层自检实现（只有 ASR/TTS 有真推理可跑）")
 
 

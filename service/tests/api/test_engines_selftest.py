@@ -113,6 +113,7 @@ def test_asr_selftest_forwards_device_and_compute_type_from_settings(
     """自检与正式转写必须同一副嗓子：asr.device/asr.compute_type 从设置一路传到构建。
 
     档位到不了构建，自检过了也不代表正式转写会用设置里的同一档位跑。
+    data_dir 也在这一路里：没有它，自检连设备解析入口都摸不到，跑的又是另一条路。
     """
     _install_whisper_small(tmp_path)
     captured: list[tuple[object, ...]] = []
@@ -129,9 +130,10 @@ def test_asr_selftest_forwards_device_and_compute_type_from_settings(
 
     assert result["ok"] is True
     assert len(captured) == 1
-    _models_dir, _spec, device, compute_type = captured[0]
+    _models_dir, _spec, device, compute_type, data_dir = captured[0]
     assert device == "cuda"
     assert compute_type == "float16"
+    assert data_dir == tmp_path
 
 
 def test_asr_selftest_refuses_when_model_missing(
@@ -181,7 +183,9 @@ def test_tts_selftest_synthesizes_and_measures(
                 wav.writeframes(b"\x00\x00" * 16000)  # 1 秒静音
             return out_path
 
-    monkeypatch.setattr(factory, "create", lambda engine, models_dir=None: _FakeTts())
+    monkeypatch.setattr(
+        factory, "create", lambda engine, models_dir=None, **_kwargs: _FakeTts()
+    )
     monkeypatch.setattr(
         "dramaclip.engines.tts.base.audio_duration_s", lambda path: 1.0
     )
@@ -294,7 +298,9 @@ def _run_tts_with(
     from dramaclip.engines.tts import factory
 
     (tmp_path / "models" / "tts" / "indextts2").mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(factory, "create", lambda name, models_dir=None: engine)
+    monkeypatch.setattr(
+        factory, "create", lambda name, models_dir=None, **_kwargs: engine
+    )
     return selftest_mod.run_tts(tmp_path / "models", tmp_path, _indextts_spec(), voice)
 
 

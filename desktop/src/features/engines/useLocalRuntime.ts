@@ -4,11 +4,21 @@ import { useCallback, useEffect, useState } from 'react';
 import { jobsApi, localRuntimeApi } from '../../services/client';
 import { useUiStore } from '../../stores/ui';
 
+export interface OrtGpuState {
+  readonly variant: string;
+  readonly gpu: boolean;
+  readonly providers: readonly string[];
+  readonly version: string;
+  readonly reason: string;
+}
+
 export interface LocalRuntimeState {
   /** 双栈 TTS 基线（indextts+torch）——旧口径，前端既有判据零改动。 */
   readonly installed: boolean | null;
   /** 按能力分组探针：indextts/funasr/kokoro/torch（升级补装按组判缺）。 */
   readonly groups: Record<string, boolean>;
+  /** 人声分离的 ORT 后端（安装期探测）；旧服务端无此字段时为 null。 */
+  readonly ortGpu: OrtGpuState | null;
   readonly jobId: string;
   readonly progress: number;
   readonly stage: string;
@@ -21,6 +31,7 @@ export function useLocalRuntime(): LocalRuntimeState {
   const serviceState = useUiStore((state) => state.serviceState);
   const [installed, setInstalled] = useState<boolean | null>(null);
   const [groups, setGroups] = useState<Record<string, boolean>>({});
+  const [ortGpu, setOrtGpu] = useState<OrtGpuState | null>(null);
   const [jobId, setJobId] = useState('');
   const [progress, setProgress] = useState(0);
   const [stage, setStage] = useState('');
@@ -30,6 +41,7 @@ export function useLocalRuntime(): LocalRuntimeState {
     const state = await localRuntimeApi.status();
     setInstalled(state.installed);
     setGroups(state.groups);
+    setOrtGpu(state.ort_gpu ?? null);
   }, []);
 
   useEffect(() => {
@@ -79,5 +91,5 @@ export function useLocalRuntime(): LocalRuntimeState {
       });
   };
 
-  return { installed, groups, jobId, progress, stage, busy, install };
+  return { installed, groups, ortGpu, jobId, progress, stage, busy, install };
 }

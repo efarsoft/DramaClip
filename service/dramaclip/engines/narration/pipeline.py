@@ -305,6 +305,7 @@ def synthesize_narration_texts(
     source_durations: dict[str, float],
     log: LogFn | None = None,
     on_progress: Callable[[int, int], None] | None = None,
+    data_dir: Path | None = None,
 ) -> PlanData:
     """逐段合成旁白并按 narration_id 回填时长与解说字幕。
 
@@ -316,6 +317,10 @@ def synthesize_narration_texts(
     `log` 是可选的 (level, message) 回调（api 侧接 notifier.log），每段合成都会
     留下 engine_requested/engine_used/fallback_used/fallback_reason 溯源记录；
     不传则只写模块级 logger。引擎纪律见 `_EnginePool`：显式不回退，auto 才回退。
+
+    `data_dir` 是设备解析入口（给工厂读运行环境安装态），没有它引擎按自身的 auto
+    语义走。不从 `models_dir.parent` 反推：`models_dir` 是调用方给的，测试里常是
+    tmp_path，猜出来的目录读 marker 会把「测试目录没装运行环境」读成「本机没装」。
     """
     _assert_voiceable(plan)
     if not plan.narration_texts:
@@ -328,6 +333,7 @@ def synthesize_narration_texts(
         api_key=settings.get("tts.api_key", ""),
         model=settings.get("tts.model", ""),
         device=str(settings.get("tts.device") or "auto"),
+        data_dir=data_dir,
     )
     # 音色按引擎独立成键；兼容升级前仅存全局 tts.voice 的旧库。
     # auto 链下每段可能落在不同引擎上，段级 voice 缺省时逐引擎取键。

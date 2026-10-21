@@ -15,6 +15,7 @@ import pytest
 
 from dramaclip.engines.tts import vocal_separation as vs
 from dramaclip.engines.tts.workers import separation_worker
+from dramaclip.infra.compute import ComputeUnavailableError
 
 # ---- worker 纯函数：干声挑选 ----
 
@@ -28,6 +29,49 @@ def test_vocals_of_returns_none_without_vocals() -> None:
     assert separation_worker._vocals_of(["a_(Instrumental)_x.wav"]) is None
 
 
+# ---- worker 设备决策：cpu 不碰 CUDA，显式 cuda 无 provider 即失败 ----
+def test_provider_plan_cpu_never_uses_cuda() -> None:
+    providers, resolved = separation_worker._provider_plan(
+        "cpu", ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    )
+    assert providers == ["CPUExecutionProvider"]
+    assert resolved == "cpu"
+
+
+def test_provider_plan_auto_uses_cuda_when_available() -> None:
+    providers, resolved = separation_worker._provider_plan(
+        "auto", ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    )
+    assert providers == ["CUDAExecutionProvider"]
+    assert resolved == "cuda"
+
+
+def test_provider_plan_auto_without_cuda_stays_cpu() -> None:
+    providers, resolved = separation_worker._provider_plan("auto", ["CPUExecutionProvider"])
+    assert providers == ["CPUExecutionProvider"]
+    assert resolved == "cpu"
+
+
+def test_provider_plan_explicit_cuda_without_provider_fails() -> None:
+    with pytest.raises(RuntimeError, match="CUDAExecutionProvider"):
+        separation_worker._provider_plan("cuda", ["CPUExecutionProvider"])
+
+
+def test_inject_cuda_dll_dirs_only_existing_known_subdirs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "cuda"
+    for name in ("cublas", "cudnn", "cudart"):
+        (root / name).mkdir(parents=True)
+    seen: list[str] = []
+    monkeypatch.setattr(separation_worker, "_add_dll_dir", lambda path: seen.append(str(path)))
+    monkeypatch.setattr(separation_worker.os, "add_dll_directory", None, raising=False)
+    monkeypatch.setattr(separation_worker.os, "environ", {"PATH": "C:/Windows"})
+    separation_worker._inject_cuda_dlls(root, torch_lib=None)
+    assert seen == [str(root / "cublas"), str(root / "cudnn"), str(root / "cudart")]
+    assert str(root / "cufft") not in seen
+
+
 # ---- 协议解析：worker 的 stdout 只认最后一行 JSON ----
 
 
@@ -35,30 +79,89 @@ def _completed(stdout: str, returncode: int = 0) -> subprocess.CompletedProcess[
     return subprocess.CompletedProcess([], returncode, stdout, stderr="")
 
 
+def _ok_payload(out: Path, **overrides: object) -> str:
+    payload: dict[str, object] = {
+        "ok": True,
+        "out": str(out),
+        "requested": "auto",
+        "resolved": "cuda",
+        "actual": "cuda",
+        "fallback": False,
+        "reason": "",
+        "providers": ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    }
+    payload.update(overrides)
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def test_collect_accepts_ok_answer(tmp_path: Path) -> None:
     out = tmp_path / "a.cleaned.wav"
     out.write_bytes(b"x")
-    result = _completed(json.dumps({"ok": True, "out": str(out)}, ensure_ascii=False))
-    assert vs._collect(result, out) == out
+    parsed = vs._collect(_completed(_ok_payload(out)), out, "auto")
+    assert parsed.path == out
+    assert parsed.compute.component == "tts.separation"
+    assert (parsed.compute.actual, parsed.compute.fallback) == ("cuda", False)
+    assert parsed.compute.device == "cuda"
+
+
+def test_collect_accepts_auto_fallback_with_reason(tmp_path: Path) -> None:
+    out = tmp_path / "a.cleaned.wav"
+    out.write_bytes(b"x")
+    parsed = vs._collect(
+        _completed(_ok_payload(
+            out, resolved="cuda", actual="cpu", fallback=True,
+            reason="CUDA 初始化失败", providers=["CPUExecutionProvider"],
+        )),
+        out, "auto",
+    )
+    assert parsed.compute.fallback is True
+    assert parsed.compute.reason == "CUDA 初始化失败"
+    assert parsed.compute.actual == "cpu"
+
+
+def test_collect_rejects_explicit_cuda_landing_cpu(tmp_path: Path) -> None:
+    out = tmp_path / "a.cleaned.wav"
+    out.write_bytes(b"x")
+    payload = _ok_payload(
+        out, requested="cuda", resolved="cuda", actual="cpu",
+        providers=["CPUExecutionProvider"],
+    )
+    with pytest.raises(ComputeUnavailableError, match="实际 cpu"):
+        vs._collect(_completed(payload), out, "cuda")
+
+
+def test_collect_rejects_unknown_actual(tmp_path: Path) -> None:
+    out = tmp_path / "a.cleaned.wav"
+    out.write_bytes(b"x")
+    payload = _ok_payload(out, actual="unknown", resolved="unknown")
+    with pytest.raises(ComputeUnavailableError, match="actual=unknown"):
+        vs._collect(_completed(payload), out, "auto")
+
+
+def test_collect_rejects_requested_mismatch(tmp_path: Path) -> None:
+    out = tmp_path / "a.cleaned.wav"
+    out.write_bytes(b"x")
+    payload = _ok_payload(out, requested="cuda")
+    with pytest.raises(RuntimeError, match="请求不一致"):
+        vs._collect(_completed(payload), out, "auto")
 
 
 def test_collect_rejects_error_answer(tmp_path: Path) -> None:
     result = _completed(json.dumps({"ok": False, "error": "模型读不出来"}))
     with pytest.raises(RuntimeError, match="模型读不出来"):
-        vs._collect(result, tmp_path / "a.cleaned.wav")
+        vs._collect(result, tmp_path / "a.cleaned.wav", "auto")
 
 
 def test_collect_rejects_non_protocol_stdout(tmp_path: Path) -> None:
     result = _completed("Traceback ... 环境没装")
     with pytest.raises(RuntimeError, match="没有返回协议应答"):
-        vs._collect(result, tmp_path / "a.cleaned.wav")
+        vs._collect(result, tmp_path / "a.cleaned.wav", "auto")
 
 
 def test_collect_rejects_missing_artifact(tmp_path: Path) -> None:
     out = tmp_path / "a.cleaned.wav"  # 故意不落盘
-    result = _completed(json.dumps({"ok": True, "out": str(out)}))
     with pytest.raises(RuntimeError, match="产物不存在"):
-        vs._collect(result, out)
+        vs._collect(_completed(_ok_payload(out)), out, "auto")
 
 
 # ---- clean_reference 编排：venv 前提 + worker 拉起 ----
@@ -70,6 +173,14 @@ def test_clean_reference_reports_missing_runtime(
     monkeypatch.setattr(vs, "_venv_python", lambda: tmp_path / "nope" / "python.exe")
     with pytest.raises(RuntimeError, match="运行环境"):
         vs.clean_reference(tmp_path / "models", tmp_path / "src.wav")
+
+
+def test_clean_reference_rejects_unknown_device(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(vs, "_venv_python", lambda: tmp_path / "python.exe")
+    with pytest.raises(ValueError, match="未知算力请求"):
+        vs.clean_reference(tmp_path / "models", tmp_path / "src.wav", device="gpu")
 
 
 def test_clean_reference_launches_worker_with_agreed_paths(
@@ -85,17 +196,50 @@ def test_clean_reference_launches_worker_with_agreed_paths(
     monkeypatch.setattr(vs, "ensure_model", lambda _models: None)
     seen: dict[str, object] = {}
 
-    def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         seen["cmd"] = cmd
-        return _completed(json.dumps({"ok": True, "out": str(out)}, ensure_ascii=False))
+        seen["kwargs"] = kwargs
+        return _completed(_ok_payload(out))
 
     monkeypatch.setattr(vs.subprocess, "run", fake_run)
-    assert vs.clean_reference(tmp_path / "models", src) == out
+    parsed = vs.clean_reference(tmp_path / "models", src)
+    assert parsed.path == out
     cmd: list[str] = seen["cmd"]  # type: ignore[assignment]
+    kwargs: dict[str, object] = seen["kwargs"]  # type: ignore[assignment]
     assert cmd[0] == str(fake_py)
     assert cmd[-6:] == [
-        "--in", str(src), "--out", str(out),
         "--models", str(tmp_path / "models" / "tts" / "separation"),
+        "--device", "auto",
+        "--cuda-dll-dir", str(tmp_path / "models" / "cuda"),
+    ]
+    # 中文参考路径曾因 GBK 解码把成功应答读成「没有返回协议应答」。
+    assert kwargs["encoding"] == "utf-8"
+    assert kwargs["errors"] == "replace"
+    env: dict[str, str] = kwargs["env"]  # type: ignore[assignment]
+    assert env["PYTHONIOENCODING"] == "utf-8"
+
+
+def test_clean_reference_passes_explicit_cuda(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = tmp_path / "src.wav"
+    src.write_bytes(b"x")
+    out = tmp_path / "src.cleaned.wav"
+    out.write_bytes(b"vocals")
+    fake_py = tmp_path / "python.exe"
+    fake_py.write_bytes(b"")
+    monkeypatch.setattr(vs, "_venv_python", lambda: fake_py)
+    monkeypatch.setattr(vs, "ensure_model", lambda _models: None)
+    seen: dict[str, list[str]] = {}
+
+    def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen["cmd"] = cmd
+        return _completed(_ok_payload(out, requested="cuda"))
+
+    monkeypatch.setattr(vs.subprocess, "run", fake_run)
+    vs.clean_reference(tmp_path / "models", src, device="cuda")
+    assert seen["cmd"][-4:] == [
+        "--device", "cuda", "--cuda-dll-dir", str(tmp_path / "models" / "cuda"),
     ]
 
 

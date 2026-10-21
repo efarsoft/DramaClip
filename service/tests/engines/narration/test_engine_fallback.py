@@ -64,7 +64,13 @@ def _install(
     created: list[str],
 ) -> None:
     def fake_create(
-        engine: str, models_dir: Any = None, *, api_key: str = "", model: str = ""
+        engine: str,
+        models_dir: Any = None,
+        *,
+        api_key: str = "",
+        model: str = "",
+        device: str = "auto",
+        data_dir: Any = None,
     ) -> Any:
         created.append(engine)
         if engine not in registry:

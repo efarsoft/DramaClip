@@ -39,7 +39,21 @@
           },
           "engine": { "type": "string" },
           "voice": { "type": "string" },
-          "text": { "type": "string" }
+          "text": { "type": "string" },
+          "compute": {
+            "type": ["object", "null"],
+            "description": "本次合成实际使用的算力（缓存命中带「缓存命中」原因）；null = 未记录",
+            "required": ["component", "requested", "resolved", "actual", "fallback", "reason", "device"],
+            "properties": {
+              "component": { "type": "string" },
+              "requested": { "type": "string", "enum": ["auto", "cuda", "cpu"] },
+              "resolved": { "type": "string" },
+              "actual": { "type": "string" },
+              "fallback": { "type": "boolean" },
+              "reason": { "type": "string" },
+              "device": { "type": "string" }
+            }
+          }
         }
       }
     },
@@ -78,6 +92,20 @@
               "reasons": { "type": "array", "items": { "type": "string" } },
               "suggestions": { "type": "array", "items": { "type": "string" } }
             }
+          },
+          "compute": {
+            "type": ["object", "null"],
+            "description": "人声分离本次实际设备；null = 未记录",
+            "required": ["component", "requested", "resolved", "actual", "fallback", "reason", "device"],
+            "properties": {
+              "component": { "type": "string" },
+              "requested": { "type": "string", "enum": ["auto", "cuda", "cpu"] },
+              "resolved": { "type": "string" },
+              "actual": { "type": "string" },
+              "fallback": { "type": "boolean" },
+              "reason": { "type": "string" },
+              "device": { "type": "string" }
+            }
           }
         }
       }
@@ -95,7 +123,20 @@
           "start": { "type": "number" },
           "end": { "type": "number" },
           "seconds": { "type": "number" },
-          "voice_set": { "type": "string" }
+          "voice_set": { "type": "string" },
+          "cleaned_with": {
+            "type": "string",
+            "enum": ["separation", "filter"],
+            "description": "separation=MDX-Net 分离；filter=分离不可用后的可见回退"
+          },
+          "compute": {
+            "type": ["object", "null"],
+            "description": "人声分离本次实际设备；filter 回退或未记录时为 null"
+          },
+          "clean_reason": {
+            "type": "string",
+            "description": "filter 回退的原因原文"
+          }
         }
       }
     }

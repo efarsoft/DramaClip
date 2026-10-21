@@ -4,6 +4,7 @@ import { PageSection } from '../../components/layout/PageKit';
 import { useNavigate } from 'react-router-dom';
 import type { ExportJob } from '@dramaclip/protocol';
 import { modeLabel } from '../../components/modeMeta';
+import { computeLabel } from '../engines/assetState';
 import { tokens } from '../../styles/theme';
 
 export function ExportsCard({ exports }: { exports: ExportJob[] | null }) {
@@ -26,6 +27,8 @@ function ExportRow({ job }: { job: ExportJob }) {
   const navigate = useNavigate();
   const label = job.status === 'completed' ? '完成' : job.status === 'failed' ? '失败' : '进行中';
   const color = job.status === 'completed' ? 'success' : job.status === 'failed' ? 'error' : 'processing';
+  const first = job.compute?.[0];
+  const runtime = computeLabel(first);
   return (
     <div
       onClick={() => {
@@ -49,7 +52,19 @@ function ExportRow({ job }: { job: ExportJob }) {
         </Tooltip>
       ) : null}
       <span style={{ color: tokens.textPrimary }}>{modeLabel(job.narration_mode)}</span>
-      <span style={{ marginLeft: 'auto', fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, fontFamily: tokens.fontFamilyMono, color: tokens.textTertiary }}>
+      {runtime !== undefined && (
+        <span
+          style={{
+            marginLeft: 'auto',
+            fontSize: tokens.text.meta.size,
+            lineHeight: tokens.text.meta.leading,
+            color: first?.fallback === true ? tokens.colorWarning : tokens.textTertiary,
+          }}
+        >
+          {runtime}
+        </span>
+      )}
+      <span style={{ marginLeft: runtime === undefined ? 'auto' : tokens.spaceSm, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, fontFamily: tokens.fontFamilyMono, color: tokens.textTertiary }}>
         {job.duration_s !== undefined ? `${String(Math.round(job.duration_s))}s` : ''}
       </span>
     </div>

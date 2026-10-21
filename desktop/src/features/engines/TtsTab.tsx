@@ -5,6 +5,7 @@
  */
 import { Button } from 'antd';
 import { useState } from 'react';
+import type { DefaultOptionType } from 'antd/es/select';
 import type { ReactElement } from 'react';
 import type { EngineConfig, ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
@@ -39,6 +40,7 @@ import { TtsPreviewButton } from './TtsPreviewButton';
 import { previewNotice } from './ttsPreview';
 import { useDownloadProgress } from './useDownloadProgress';
 import { useEngineConfigs } from './useEngineConfigs';
+import { useLocalRuntime } from './useLocalRuntime';
 import {
   TTS_ENGINES,
   isModelFreeEngine,
@@ -53,6 +55,18 @@ const ENGINE_KIND_LABEL: Record<string, string> = {
   indextts2: '本地 · 音色克隆（N 卡实时 / CPU 预生成）',
   cosyvoice_cloud: '云端 · 百炼按量计费',
 };
+
+const TTS_PARAMS: readonly { key: string; label: string; options: DefaultOptionType[] }[] = [
+  {
+    key: 'tts.device',
+    label: '运行设备',
+    options: [
+      { label: '自动（检测 GPU）', value: 'auto' },
+      { label: 'CPU', value: 'cpu' },
+      { label: 'CUDA（NVIDIA）', value: 'cuda' },
+    ],
+  },
+];
 
 const VOICE_HINT: Record<string, string> = {
   kokoro: 'Kokoro 提供 100 个中文音色（55 女 + 45 男），下拉可搜索',
@@ -302,6 +316,24 @@ function ActiveCard({
           <VoiceRow engine={engine} voice={voice} state={state} settings={settings} onSave={onSave} />
         ),
       },
+      ...(engine === 'indextts2'
+        ? [{ label: '人声分离', value: <SeparationBackendNote /> }]
+        : []),
+      // 云端引擎不看本机设备；只有本地引擎才摆这一行，避免「选了 CUDA 却走云端」的假选择。
+      ...(engine === 'edge' || engine === 'cosyvoice_cloud'
+        ? []
+        : TTS_PARAMS.map((param) => ({
+            label: param.label,
+            value: (
+              <SettingSelect
+                value={settings[param.key] ?? ''}
+                options={param.options}
+                onChange={(value: string) => {
+                  onSave({ [param.key]: value });
+                }}
+              />
+            ),
+          }))),
       { label: '引擎类型', value: ENGINE_KIND_LABEL[engine] ?? '未登记引擎' },
       { label: '磁盘实占', value: active === undefined ? '—' : formatBytes(active.size_bytes ?? 0) },
       { label: '生效时机', value: '保存后下次任务' },
@@ -309,6 +341,49 @@ function ActiveCard({
     footnote: `${VOICE_HINT[engine] ?? '换引擎后各自的音色互不覆盖'} · 试听是引擎原声，成片还要过响度归一`,
   };
   return <ActiveEngineCard {...card} />;
+}
+
+/** 分离后端只报安装期探测到的事实；实际任务用哪条路由清洗回执再确认。 */
+function SeparationBackendNote(): ReactElement | null {
+  const { installed, ortGpu, install } = useLocalRuntime();
+  if (installed === null) return null;
+  const style = { color: tokens.textSecondary, fontSize: tokens.text.meta.size };
+  if (!installed) {
+    return <span style={style}>运行环境未安装——人声分离暂不可用</span>;
+  }
+  const retry = ortGpu === null || (!ortGpu.gpu && !ortGpu.reason.includes('未检测到 NVIDIA'));
+  const retryButton = retry ? (
+    <Button
+      size="small"
+      type="link"
+      style={{ padding: 0, height: 'auto' }}
+      onClick={install}
+    >
+      重跑安装
+    </Button>
+  ) : null;
+  if (ortGpu === null) {
+    return (
+      <span style={style}>
+        ONNX Runtime 后端未探测：重跑本地运行环境安装
+        {retryButton}
+      </span>
+    );
+  }
+  if (ortGpu.gpu) {
+    const provider = ortGpu.providers[0] ?? 'CUDAExecutionProvider';
+    return (
+      <span style={style}>
+        {`GPU（${provider}${ortGpu.version === '' ? '' : `，ORT ${ortGpu.version}`}）`}
+      </span>
+    );
+  }
+  return (
+    <span style={style}>
+      {`CPU${ortGpu.reason === '' ? '' : ` · ${ortGpu.reason}`}`}
+      {retryButton}
+    </span>
+  );
 }
 
 /** 音色与试听同处一格：换音色必然要再听一次，分成两格等于让人自己记着去点。 */

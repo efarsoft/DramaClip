@@ -40,7 +40,8 @@ def _stub_run_cut(
 
 
 def test_candidate_order_by_platform() -> None:
-    assert encoder._hw_candidates("win32") == ["h264_nvenc", "h264_qsv"]
+    """win32 三厂商按 NVIDIA→AMD→Intel 排：N 卡第一次命中，AMD 第二次，核显兜底。"""
+    assert encoder._hw_candidates("win32") == ["h264_nvenc", "h264_amf", "h264_qsv"]
     assert encoder._hw_candidates("darwin") == ["h264_videotoolbox"]
     assert encoder._hw_candidates("linux") == ["h264_nvenc", "h264_qsv"]
 
@@ -62,7 +63,7 @@ def test_probe_encodes_black_frame_with_production_params_and_timeout(
     assert seen_kwargs[0].get("timeout_s") == pytest.approx(15.0), "驱动挂起要有 15s 兜底"
 
 
-@pytest.mark.parametrize("codec", ["h264_nvenc", "h264_qsv", "h264_videotoolbox"])
+@pytest.mark.parametrize("codec", ["h264_nvenc", "h264_amf", "h264_qsv", "h264_videotoolbox"])
 def test_probe_params_identical_to_cut_params(codec: str) -> None:
     """探针与正式段编码读**同一处**质量参数构造——一处改了另一处必须跟着变。"""
     cut = encoder.cut_segment_args(
@@ -114,3 +115,57 @@ def test_probe_crash_swallowed_as_unavailable(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(encoder, "_run_cut", boom)
     assert encoder.pick_hw_encoder() is None
+
+
+def test_amf_params_align_with_nvenc_quality() -> None:
+    """cqp 22 对齐 NVENC 的 vbr/cq 22 与 QSV 的 global_quality 22；B 帧常规略降。"""
+    assert encoder._video_codec_params("h264_amf") == [
+        "-usage", "transcoding",
+        "-quality", "quality",
+        "-rc", "cqp",
+        "-qp_i", "22", "-qp_p", "22", "-qp_b", "24",
+    ]
+
+
+def test_amf_selected_when_nvenc_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AMD 主机：nvenc 黑帧真试编失败后继续试 AMF 并命中，qsv 不再试。"""
+    monkeypatch.setattr(
+        encoder, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_amf", "h264_qsv"]
+    )
+    seen_args, _ = _stub_run_cut(monkeypatch, fail={"h264_nvenc"})
+
+    assert encoder.pick_hw_encoder() == "h264_amf"
+    assert len(seen_args) == 2, "命中即停：不该再试第三个候选"
+
+
+def test_amf_failure_falls_through_to_qsv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AMF 在 NVIDIA 机器上失败属预期：继续往下走，不影响最终选中 QSV。"""
+    monkeypatch.setattr(
+        encoder, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_amf", "h264_qsv"]
+    )
+    seen_args, _ = _stub_run_cut(monkeypatch, fail={"h264_nvenc", "h264_amf"})
+
+    assert encoder.pick_hw_encoder() == "h264_qsv"
+    assert len(seen_args) == 3
+
+
+def test_all_three_win32_candidates_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        encoder, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_amf", "h264_qsv"]
+    )
+    seen_args, _ = _stub_run_cut(monkeypatch, fail={"h264_nvenc", "h264_amf", "h264_qsv"})
+
+    assert encoder.pick_hw_encoder() is None
+    assert len(seen_args) == 3, "全失败要逐个试过才有资格说没有硬编"
+
+
+def test_amf_is_a_hw_encoder_for_segment_fallback() -> None:
+    """段级回退与整片统一重跑的判定必须认 AMF，否则 AMF 段失败不会触发 libx264 重跑。"""
+    assert "h264_amf" in encoder._HW_ENCODERS
+    args = encoder.cut_segment_args(
+        "src.mp4", "seg.mp4", start=0, end=1, audio="original",
+        tts_audio=None, rng=random.Random(0), video_codec="h264_amf",
+    )
+    exc = runner.FfmpegError("AMF 会话数满", kind="codec")
+    assert encoder._fallback_eligible(exc, args) is True
+    assert encoder._fallback_eligible(exc, encoder._args_with_codec(args, "libx264")) is False

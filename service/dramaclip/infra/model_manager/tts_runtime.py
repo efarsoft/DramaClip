@@ -16,13 +16,15 @@ API，4.x 可用——自检兜底）。产物路径：
 
 流程（阶段→进度）：uv.exe 下载(0-5) → venv 创建含独立 Python(5-15) →
 torch(15-45, GPU 探测定 cu128/CPU 变体) → 双栈依赖(45-60) → 分析依赖组
-funasr(60-66) → kokoro 依赖组(66-72) → 源码 zip（IndexTTS + CosyVoice +
-Matcha-TTS + PyWorld）(72-95) → import 自检（四族各一遍）(95-100)。全程
-多镜像容错，可取消，可重入（已存在阶段跳过；新增依赖组按 import 探针补装）。
+funasr(60-66) → kokoro 依赖组(66-70) → 人声分离 ORT(70-75，装后真探测) →
+源码 zip（IndexTTS + CosyVoice + Matcha-TTS + PyWorld）(75-95) → import
+自检（四族各一遍）(95-100)。全程多镜像容错，可取消，可重入（已存在阶段跳过；
+新增依赖组按 import 探针补装）。
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -30,9 +32,11 @@ import subprocess
 import tarfile
 import threading
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from dramaclip.infra.model_manager import cuda_runtime
 from dramaclip.infra.model_manager.fetch import download_file
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -48,6 +52,14 @@ _UV_ENV = {
 }
 _PYPI_MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
 _GH_PROXY = "https://gh-proxy.com/https://github.com"
+# ONNX Runtime 1.18.0 在 PyPI 的默认轮是 CUDA 11.8 构建（导入 cublas64_11/
+# cudart64_110），与本机 cu12 运行库不兼容；微软官方 CUDA 12 源的同版本轮
+# 导入 cublas64_12/cudart64_12/cufft64_11（2026-10-20 逐 DLL 实测）。
+_ORT_VERSION = "1.18.0"
+_ORT_GPU_INDEX = (
+    "https://aiinfra.pkgs.visualstudio.com/PublicPackages/"
+    "_packaging/onnxruntime-cuda-12/pypi/simple/"
+)
 _TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
 _TORCH_CPU = ["torch==2.8.0", "torchaudio==2.8.0"]
 # 以下尺寸全部为**实测精确字节数**（2026-09-24 逐件下载量得）：download_file 的
@@ -67,7 +79,6 @@ _COSYVOICE_EXTRAS = [
     "matplotlib==3.7.5",
     "networkx==3.1",
     "onnx==1.22.0",
-    "onnxruntime==1.18.0",
     "protobuf==5.29.6",  # onnx==1.22 要 >=4.25.1；抬升理由见上方注释（安全公告）
     "pydantic==2.7.0",
     "rich==13.7.1",
@@ -78,8 +89,9 @@ _COSYVOICE_EXTRAS = [
     "wget==3.2",
     "pyarrow==25.0.1",
 ]
-# 人声分离（参考音频清洗「彻底档」，vocal_separation.py）：MDX-Net 走
-# onnxruntime 纯 CPU，不碰 GPU 栈。torch/torchvision 必须在本组显式 pin——
+# 人声分离（参考音频清洗「彻底档」，vocal_separation.py）：MDX-Net 的 ORT
+# 后端单独按 GPU/CPU 变体安装（_install_ort），不进本组以免解析器拉默认轮。
+# torch/torchvision 必须在本组显式 pin——
 # audio-separator 的裸 torch 依赖 + onnx2torch 的裸 torchvision 依赖会让解析器
 # 把 torch 拉到 2.14（torchvision 0.29 连带），双栈全炸（2026-09-28 本机实测）。
 # torchvision 取 PyPI CPU 轮即可：onnx2torch 只用它的 CPU 算子做 ONNX 图转换，
@@ -230,6 +242,137 @@ def torch_variant(data_dir: Path) -> str:
     return raw if raw in ("cuda", "cpu") else "unknown"
 
 
+def _ort_marker(data_dir: Path) -> Path:
+    return venv_dir(data_dir).parent / "tts-venv.ort.json"
+
+
+def ort_state(data_dir: Path) -> dict[str, Any]:
+    """人声分离 ORT 后端：gpu / cpu / unknown（安装期真实 session 探测的结果）。
+
+    marker 只记录「装的时候探测到了什么」；实际任务以 worker 回执为准。
+    """
+    empty = {"variant": "unknown", "gpu": False, "providers": [], "version": "", "reason": ""}
+    try:
+        data = json.loads(_ort_marker(data_dir).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return empty
+    if not isinstance(data, dict):
+        return empty
+    variant = data.get("variant")
+    if variant not in ("gpu", "cpu"):
+        return empty
+    providers = data.get("providers")
+    return {
+        "variant": variant,
+        "gpu": variant == "gpu",
+        "providers": [str(p) for p in providers] if isinstance(providers, list) else [],
+        "version": str(data.get("version") or ""),
+        "reason": str(data.get("reason") or ""),
+    }
+
+
+def _write_ort_marker(data_dir: Path, **fields: Any) -> None:
+    marker = _ort_marker(data_dir)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(
+        json.dumps({"variant": "cpu", "providers": [], "version": "", "reason": "", **fields},
+                   ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _ort_install_plan(*, nvidia_present: bool, cuda_runtime_installed: bool) -> str:
+    """GPU ORT 的条件是硬件 + 运行库，与本 venv 的 torch 变体无关（老卡也能跑 CUDA EP）。"""
+    return "gpu" if nvidia_present and cuda_runtime_installed else "cpu"
+
+
+def _probe_ort_gpu(py: Path, data_dir: Path) -> dict[str, Any]:
+    """在 tts-venv 里跑 worker 的最小 CUDA session；只认 session 的 provider。"""
+    from dramaclip.engines.tts.workers import separation_worker
+
+    try:
+        result = subprocess.run(  # noqa: S603 - 固定解释器固定参数
+            [
+                str(py), str(Path(separation_worker.__file__)), "--probe",
+                "--cuda-dll-dir", str(cuda_runtime.runtime_dir(data_dir)),
+            ],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=180, creationflags=_NO_WINDOW, check=False,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    if not lines:
+        return {"ok": False, "error": "探针没有返回协议应答"}
+    try:
+        payload = json.loads(lines[-1])
+    except ValueError:
+        return {"ok": False, "error": "探针应答不是 JSON"}
+    return payload if isinstance(payload, dict) else {"ok": False, "error": "探针应答形状不对"}
+
+
+def _install_ort(
+    uv: Path,
+    venv: Path,
+    data_dir: Path,
+    *,
+    check_cancel: Callable[[], None],
+    progress: Callable[[float, str], None],
+) -> None:
+    """按变体安装 ONNX Runtime；GPU 探测失败回装 CPU 轮，绝不把安装态当可用态。"""
+    py = venv / "Scripts" / "python.exe"
+    nvidia_present = shutil.which("nvidia-smi") is not None
+    runtime_installed = cuda_runtime.status(data_dir)["installed"]
+    want = _ort_install_plan(
+        nvidia_present=nvidia_present, cuda_runtime_installed=runtime_installed
+    )
+    current = ort_state(data_dir)
+    if want == "cpu" and current["variant"] == "cpu" and _venv_imports_ok(py, ("onnxruntime",)):
+        return
+    if want == "gpu" and current["gpu"] and _probe_ort_gpu(py, data_dir).get("ok"):
+        return
+
+    check_cancel()
+    progress(70, "配置人声分离运行后端（ONNX Runtime）")
+    # CPU 轮与 GPU 轮互斥，不能同时留在 site-packages 里。
+    _run_uv(uv, venv, "pip", "uninstall", "onnxruntime", "onnxruntime-gpu")
+
+    if want == "gpu":
+        try:
+            _run_uv(uv, venv, "pip", "install", "--no-deps",
+                    f"onnxruntime-gpu=={_ORT_VERSION}", "--index-url", _ORT_GPU_INDEX)
+            probe = _probe_ort_gpu(py, data_dir)
+            if probe.get("ok"):
+                _write_ort_marker(
+                    data_dir, variant="gpu",
+                    providers=probe.get("providers") or [],
+                    version=str(probe.get("version") or _ORT_VERSION),
+                )
+                return
+            reason = f"分离 GPU 不可用：{probe.get('error') or 'CUDA session 探测失败'}"
+        except RuntimeError as exc:
+            reason = f"分离 GPU 不可用：{exc}"
+        check_cancel()
+        with contextlib.suppress(RuntimeError):
+            _run_uv(uv, venv, "pip", "uninstall", "onnxruntime", "onnxruntime-gpu")
+    else:
+        reason = (
+            "未检测到 NVIDIA 显卡"
+            if not nvidia_present
+            else "CUDA 运行库未安装（安装后可重跑本地运行环境以启用 GPU 分离）"
+        )
+
+    try:
+        _run_uv(uv, venv, "pip", "install", f"onnxruntime=={_ORT_VERSION}",
+                "--index-url", _PYPI_MIRROR)
+    except RuntimeError as exc:
+        # 主链不依赖 ORT：CPU 轮也装不上时只让分离不可用，不拖垮整个运行环境。
+        _write_ort_marker(data_dir, variant="cpu", reason=f"{reason}；CPU 轮安装失败：{exc}")
+        return
+    _write_ort_marker(data_dir, variant="cpu", reason=reason)
+
+
 def status(data_dir: Path) -> dict[str, Any]:
     """venv 安装态：installed = 双栈 TTS 基线（indextts+torch）通过；groups 按能力分族。
 
@@ -246,6 +389,7 @@ def status(data_dir: Path) -> dict[str, Any]:
             "dir": str(venv),
             "torch_variant": "unknown",
             "groups": {},
+            "ort_gpu": ort_state(data_dir),
         }
     src = data_dir / "runtimes" / "indextts-src"
     probe_code = (
@@ -281,6 +425,7 @@ def status(data_dir: Path) -> dict[str, Any]:
             "dir": str(venv),
             "torch_variant": torch_variant(data_dir),
             "groups": groups,
+            "ort_gpu": ort_state(data_dir),
         }
     except (OSError, subprocess.TimeoutExpired):
         return {
@@ -288,6 +433,7 @@ def status(data_dir: Path) -> dict[str, Any]:
             "dir": str(venv),
             "torch_variant": "unknown",
             "groups": {},
+            "ort_gpu": ort_state(data_dir),
         }
 
 
@@ -386,6 +532,11 @@ def install(
     if not _venv_imports_ok(py, ("kokoro",)):
         _pct(66, "安装 kokoro 依赖组（本地 TTS）")
         _run_uv(uv, venv, "pip", "install", *_KOKORO_EXTRAS, "--index-url", _PYPI_MIRROR)
+    _check_cancel()
+
+    # ④d 人声分离 ORT：N 卡 + CUDA 运行库才装 GPU 轮，装完立刻真建 session 探测；
+    # 探测失败回 CPU 轮并留原因——GPU 安装态不等于 GPU 可用。
+    _install_ort(uv, venv, data_dir, check_cancel=_check_cancel, progress=_pct)
     _check_cancel()
 
     # ⑤ 源码：IndexTTS zip（--no-deps 可编辑装）+ CosyVoice/Matcha/PyWorld

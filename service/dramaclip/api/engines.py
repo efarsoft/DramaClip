@@ -73,19 +73,24 @@ def _asr(context: AppContext, models_dir: Path, spec: registry.ModelSpec) -> dic
         raise RpcDomainError(
             _ERR_SELFTEST_STATE, f"{spec.name} 未安装——自检需要真实权重，请先下载或导入"
         )
-    device = str(context.settings.get("asr.device") or "cpu")
+    device = str(context.settings.get("asr.device") or "auto")
     compute_type = str(context.settings.get("asr.compute_type") or "auto")
-    return selftest_mod.run_asr(models_dir, spec, device=device, compute_type=compute_type)
+    return selftest_mod.run_asr(
+        models_dir, spec, device=device, compute_type=compute_type, data_dir=context.data_dir
+    )
 
 
 def _tts(context: AppContext, models_dir: Path, spec: registry.ModelSpec) -> dict[str, Any]:
     voice = str(
         context.settings.get(f"tts.voice.{spec.engine}") or context.settings.get("tts.voice") or ""
     )
-    result = selftest_mod.run_tts(models_dir, context.work_dir, spec, voice)
+    device = str(context.settings.get("tts.device") or "auto")
+    result = selftest_mod.run_tts(
+        models_dir, context.work_dir, spec, voice, device=device, data_dir=context.data_dir
+    )
     # A3 能力声明并入自检结果（不新增 RPC：protocol 方法集合被契约用例钉死）。
     # factory.capabilities 自己兜住探测异常，这里只需掩码 reason 里的敏感路径段。
-    caps = factory.capabilities(spec.engine, models_dir)
+    caps = factory.capabilities(spec.engine, models_dir, data_dir=context.data_dir)
     result["caps"] = _mask_paths(caps.to_dict(), models_dir, context)
     return result
 

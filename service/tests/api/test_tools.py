@@ -113,13 +113,27 @@ def test_tts_writes_into_tools_dir(
 ) -> None:
     synthesized: dict[str, str] = {}
 
-    def _fake_synthesize(engine, voice, text, models_dir, out_dir, key, *, api_key, model):
+    def _fake_synthesize(
+        engine,
+        voice,
+        text,
+        models_dir,
+        out_dir,
+        key,
+        *,
+        api_key,
+        model,
+        device="auto",
+        data_dir=None,
+    ):
         out = Path(out_dir) / f"{key}.mp3"
         out.write_bytes(b"x")
         synthesized["voice"] = voice
         synthesized["engine"] = engine
         synthesized["model"] = model
-        return out
+        synthesized["device"] = device
+        synthesized["data_dir"] = str(data_dir)
+        return out, None
 
     monkeypatch.setattr(tools_api, "_resolve_voice", lambda c, e, p, m: "zf_001")
     monkeypatch.setattr(tools_api, "_synthesize", _fake_synthesize)
@@ -131,6 +145,8 @@ def test_tts_writes_into_tools_dir(
     assert synthesized["voice"] == "zf_001"
     # 云端长文同样要按业主选的模型出，不能让工厂默认值替人做主
     assert synthesized["model"] == "cosyvoice-v3-flash"
+    # 长文工具也带上设备解析入口：没有它，工厂只能按引擎自身的 auto 语义走
+    assert synthesized["data_dir"] == str(context.data_dir)
 
 
 # ------------------------------------------------- P2：语音转文字 / 文案改写

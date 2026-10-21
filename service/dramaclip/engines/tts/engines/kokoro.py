@@ -11,6 +11,7 @@ from typing import Any
 
 from dramaclip.engines.tts.base import EngineCaps
 from dramaclip.engines.tts.text_split import split_long_text
+from dramaclip.infra import compute
 from dramaclip.infra.model_manager import worker_bridge
 from dramaclip.infra.paths import resolve_data_dir
 
@@ -32,6 +33,22 @@ def _kokoro_importable() -> bool:
     return importlib.util.find_spec("kokoro") is not None
 
 
+def _probe_torch_device(requested: str) -> tuple[str, str]:
+    """最小 CUDA 运算探针：老卡被认出但新栈无内核，加载大模型才崩。"""
+    if requested == "cpu":
+        return "cpu", ""
+    import torch  # noqa: PLC0415
+
+    if not torch.cuda.is_available():
+        return "cpu", "torch.cuda.is_available() = False"
+    try:
+        (torch.ones(4, device="cuda") * 2).sum().item()
+        return "cuda", ""
+    except Exception as exc:  # noqa: BLE001 - 任何 CUDA 故障都按不可用处理
+        torch.cuda.empty_cache()
+        return "cpu", f"{type(exc).__name__}: {exc}"
+
+
 class KokoroEngine:
     """实现 TtsEngine 协议（duck typing）。
 
@@ -41,10 +58,14 @@ class KokoroEngine:
     请求，拼接落盘在 worker 端 numpy 完成。
     """
 
-    def __init__(self, model_dir: Path) -> None:
+    def __init__(self, model_dir: Path, device: str = "auto") -> None:
         self._model_dir = model_dir
+        self._device = compute.normalize_requested(device)
         self._pipeline: Any | None = None
         self._worker: worker_bridge.VenvWorker | None = None
+        self._hello: dict[str, Any] | None = None
+        self._actual_device: str | None = None
+        self._fallback_reason = ""
         self._loaded = False
         self._lock = threading.Lock()
 
@@ -127,8 +148,10 @@ class KokoroEngine:
         from dramaclip.engines.tts.workers import kokoro_worker
 
         self._worker = worker_bridge.spawn_venv_worker(
-            Path(kokoro_worker.__file__), {"model_dir": str(self._model_dir)}
+            Path(kokoro_worker.__file__),
+            {"model_dir": str(self._model_dir), "device": self._device},
         )
+        self._hello = dict(self._worker.ready or {})
         return self._worker
 
     def _resolve_voice(self, voice: str) -> Path:
@@ -141,16 +164,54 @@ class KokoroEngine:
     def _ensure_pipeline(self) -> Any:
         if self._loaded:
             return self._pipeline
-        from kokoro import KPipeline
-        from kokoro.model import KModel
+        import torch  # noqa: PLC0415
+        from kokoro import KPipeline  # noqa: PLC0415
+        from kokoro.model import KModel  # noqa: PLC0415
 
+        target, probe_reason = _probe_torch_device(self._device)
+        if self._device == "cuda" and target != "cuda":
+            raise compute.ComputeUnavailableError(
+                f"Kokoro 请求 CUDA，探针失败：{probe_reason or '未知原因'}"
+            )
         with self._lock:
             if self._loaded:
                 return self._pipeline
             config = self._model_dir / "config.json"
             weights = self._model_dir / "kokoro-v1_1-zh.pth"
             kmodel = KModel(config=str(config), model=str(weights))
+            kmodel = kmodel.to(torch.device(target)).eval()
             pipeline = KPipeline(lang_code="z", model=kmodel)
             self._pipeline = pipeline
+            self._actual_device = target
+            if (
+                self._device == "auto"
+                and target == "cpu"
+                and probe_reason
+                and not probe_reason.startswith("torch.cuda.is_available")
+            ):
+                self._fallback_reason = probe_reason
             self._loaded = True
         return self._pipeline
+
+    def compute(self) -> compute.ComputeReport | None:
+        hello = self._hello
+        if hello is not None:
+            actual = "cuda" if str(hello.get("device") or "").startswith("cuda") else "cpu"
+            fallback = bool(hello.get("fallback"))
+            requested = str(hello.get("requested") or self._device)
+            reason = str(hello.get("reason") or "")
+        elif self._actual_device is not None:
+            actual = self._actual_device
+            fallback = bool(self._fallback_reason)
+            requested = self._device
+            reason = self._fallback_reason
+        else:
+            return None
+        return compute.ComputeReport(
+            component="tts.kokoro",
+            requested=requested,
+            resolved="cuda" if fallback or actual == "cuda" else "cpu",
+            actual=actual,
+            fallback=fallback,
+            reason=reason,
+        )

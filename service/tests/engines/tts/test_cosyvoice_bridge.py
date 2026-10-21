@@ -67,7 +67,7 @@ class _FakeProc:
 def bridge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _FakeProc:
     proc = _FakeProc()
     monkeypatch.setattr(mod, "runtime_ready", lambda: True)
-    monkeypatch.setattr(mod, "_ensure_worker", lambda _d: proc)
+    monkeypatch.setattr(mod, "_ensure_worker", lambda _d, _device="auto": proc)
     return proc
 
 
@@ -117,7 +117,7 @@ def test_failure_reply_raises_with_worker_error(
 ) -> None:
     proc = _FakeProc()
     monkeypatch.setattr(mod, "runtime_ready", lambda: True)
-    monkeypatch.setattr(mod, "_ensure_worker", lambda _d: proc)
+    monkeypatch.setattr(mod, "_ensure_worker", lambda _d, _device="auto": proc)
     proc.replies.append(json.dumps({"ok": False, "error": "boom"}))
 
     with pytest.raises(RuntimeError, match="boom"):
@@ -143,7 +143,8 @@ def test_worker_respawn_resets_hello_state(
     dead = _FakeProc()
     dead.terminated = True  # poll() -> 1：旧进程已死，强制走重拉分支
     monkeypatch.setattr(mod, "_PROC", dead)
-    monkeypatch.setattr(mod, "_HELLOED_FOR", dead)  # 旧进程的就绪状态
+    monkeypatch.setattr(mod, "_PROC_DEVICE", "auto")
+    monkeypatch.setattr(mod, "_HELLO", {dead: {"ready": True, "device": "cpu"}})
     monkeypatch.setattr(mod, "runtime_ready", lambda: True)
     fresh = _FakeProc()
 
@@ -157,6 +158,7 @@ def test_worker_respawn_resets_hello_state(
 
     assert fresh.replies == [], "新进程的就绪行被重新读过（不是沿用旧进程状态）"
     assert len(fresh.jobs) == 1
+    assert dead not in mod._HELLO, "旧进程的就绪行随进程一起作废"
 
 
 def test_long_text_is_split_into_clone_budget_and_concatenated(

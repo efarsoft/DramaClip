@@ -41,8 +41,10 @@ from dramaclip.engines.subtitle.ass_generator import (
     line_char_cap,
     split_subtitle_text,
 )
-from dramaclip.infra import config
-from dramaclip.infra.ffmpeg import cover as ffmpeg_cover  # noqa: F401 - 测试经 export_api.ffmpeg_cover 取模块对象打桩，引用面保留
+from dramaclip.infra import compute, config
+from dramaclip.infra.ffmpeg import (
+    cover as ffmpeg_cover,  # noqa: F401 - 测试经 export_api.ffmpeg_cover 取模块对象打桩，引用面保留
+)
 from dramaclip.infra.ffmpeg import probe
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -481,6 +483,7 @@ def render_export(
     run: ExportRun,
     *,
     report: Callable[[float, str], None],
+    job_id: str | None = None,
 ) -> Path:
     """渲染核心：剪辑→字幕→编码→写成品记录（失败抛异常，不管理 job）。
     """
@@ -656,6 +659,9 @@ def render_export(
         video_codec = encoder.pick_hw_encoder() or "libx264"
     else:
         video_codec = codec_setting
+    # 算力回执：导出成功才落库（失败没有「这次用了什么」的终态可言）；
+    # export_jobs 与 jobs 两处同写，界面读哪张表都不会各说各话。
+    reports: list[compute.ComputeReport] = []
     encoder.export_plan(
         plan_data,
         episode_paths,
@@ -677,7 +683,13 @@ def render_export(
         loudness_target=loudness.LoudnessTarget.from_settings(context.settings),
         # AI 生成标注（业主裁决 2026-10-15：用户开关、默认关闭；键名由 ai_label 模块单持）
         burn_ai_label=ai_label.enabled(context.settings),
+        compute_sink=reports.append,
+        encoder_requested=codec_setting,
     )
+    receipt = [item.to_dict() for item in reports]
+    exports_repo.set_compute(context.conn, export_id, receipt)
+    if job_id is not None:
+        context.job_store.set_compute(job_id, receipt)
     _log_clock_audit(context, clock_stats)
     exports_repo.mark_completed(context.conn, export_id, str(out_path))
     try:
@@ -802,12 +814,18 @@ def _ensure_clone_voice(
             context.conn,
             context.data_dir,
             [{"id": row["id"], "source_path": row["source_path"]}],
+            device=str(settings.get("tts.device") or "auto"),
         )
         settings[voice_key] = result["path"]
         settings_repo.set_value(context.conn, voice_key, result["path"])
+        clean_note = (
+            f"滤镜清洗（人声分离不可用：{result.get('clean_reason') or '未知原因'}）"
+            if result.get("cleaned_with") == "filter"
+            else "人声分离完成"
+        )
         context.notifier.log(
             "info",
-            f"已自动从剧集提取参考音色（{speaker}，{result['seconds']}s，人声分离完成）"
+            f"已自动从剧集提取参考音色（{speaker}，{result['seconds']}s，{clean_note}）"
             f"并设为 {engine} 参考",
         )
 
@@ -857,7 +875,7 @@ def _run_export(context: AppContext, job_id: str, run: ExportRun) -> None:
         render_report = (
             (lambda pct, label: report(35 + pct * 0.65, label)) if tts_needed else report
         )
-        out_path = render_export(context, voiced, report=render_report)
+        out_path = render_export(context, voiced, report=render_report, job_id=job_id)
         context.job_store.mark_completed(job_id)
         context.notifier.log("info", f"导出完成: {out_path.name}")
     except Exception as exc:

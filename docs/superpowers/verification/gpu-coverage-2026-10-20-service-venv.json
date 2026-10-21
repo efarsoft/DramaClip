@@ -1,0 +1,170 @@
+{
+  "tool": "verify_gpu_coverage",
+  "version": 1,
+  "generated_at": "2026-10-20T14:52:27+08:00",
+  "environment": {
+    "platform": "win32",
+    "python": "3.12.14",
+    "interpreter": "<repo>\\service\\.venv\\Scripts\\python.exe",
+    "torch": "2.14.1+cu126",
+    "torch_cuda_available": "True",
+    "gpu": "Quadro M4000",
+    "compute_capability": "5.2",
+    "nvidia_smi": "['Quadro M4000, 582.78, 5.2']",
+    "ffmpeg": "ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers"
+  },
+  "summary": {
+    "pass": 12,
+    "fail": 0,
+    "unsupported": 4,
+    "note": "unsupported 不计入通过"
+  },
+  "records": [
+    {
+      "component": "video.encode.cpu",
+      "requested": "cpu",
+      "runtime": "ffmpeg",
+      "status": "pass",
+      "actual": "libx264",
+      "reason": "",
+      "elapsed_s": 0.91
+    },
+    {
+      "component": "video.encode.cuda",
+      "requested": "cuda",
+      "runtime": "ffmpeg",
+      "status": "pass",
+      "actual": "h264_nvenc",
+      "reason": "",
+      "elapsed_s": 0.67
+    },
+    {
+      "component": "video.ai_label.cpu",
+      "requested": "cpu",
+      "runtime": "ffmpeg",
+      "status": "pass",
+      "actual": "libx264",
+      "reason": "标注区亮度 12.5（无标注 0.0）",
+      "elapsed_s": 0.36
+    },
+    {
+      "component": "video.ai_label.cuda",
+      "requested": "cuda",
+      "runtime": "ffmpeg",
+      "status": "pass",
+      "actual": "h264_nvenc",
+      "reason": "标注区亮度 12.5（无标注 0.0）",
+      "elapsed_s": 1.03
+    },
+    {
+      "component": "separation.cpu",
+      "requested": "cpu",
+      "runtime": "tts-venv",
+      "status": "pass",
+      "actual": "cpu",
+      "reason": "",
+      "elapsed_s": 16.49
+    },
+    {
+      "component": "separation.cuda",
+      "requested": "cuda",
+      "runtime": "tts-venv",
+      "status": "pass",
+      "actual": "cuda",
+      "reason": "",
+      "elapsed_s": 25.06
+    },
+    {
+      "component": "asr.whisper.cpu",
+      "requested": "cpu",
+      "runtime": "service-venv",
+      "status": "pass",
+      "actual": "cpu",
+      "reason": "",
+      "elapsed_s": 8.75
+    },
+    {
+      "component": "asr.whisper.cuda",
+      "requested": "cuda",
+      "runtime": "service-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "ComputeUnavailableError: faster-whisper 请求 CUDA，推理失败：RuntimeError: parallel_for failed: cudaErrorInvalidDevice: invalid device ordinal",
+      "elapsed_s": 1.11
+    },
+    {
+      "component": "asr.funasr.cpu",
+      "requested": "cpu",
+      "runtime": "service-venv",
+      "status": "pass",
+      "actual": "cpu",
+      "reason": "",
+      "elapsed_s": 30.7
+    },
+    {
+      "component": "asr.funasr.cuda",
+      "requested": "cuda",
+      "runtime": "service-venv",
+      "status": "pass",
+      "actual": "cuda",
+      "reason": "",
+      "elapsed_s": 6.58
+    },
+    {
+      "component": "tts.kokoro.cpu",
+      "requested": "cpu",
+      "runtime": "tts-venv",
+      "status": "pass",
+      "actual": "cpu",
+      "reason": "",
+      "elapsed_s": 13.88
+    },
+    {
+      "component": "tts.kokoro.cuda",
+      "requested": "cuda",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "RuntimeError: worker 启动失败：请求 CUDA 但探针失败：torch.cuda.is_available() = False",
+      "elapsed_s": 9.78
+    },
+    {
+      "component": "tts.indextts2.cpu",
+      "requested": "cpu",
+      "runtime": "tts-venv",
+      "status": "pass",
+      "actual": "cpu",
+      "reason": "",
+      "elapsed_s": 69.73
+    },
+    {
+      "component": "tts.indextts2.cuda",
+      "requested": "cuda",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "RuntimeError: worker 启动失败：请求 CUDA 但探针失败：torch.cuda.is_available() = False",
+      "elapsed_s": 2.78
+    },
+    {
+      "component": "tts.cosyvoice.cpu",
+      "requested": "cpu",
+      "runtime": "tts-venv",
+      "status": "pass",
+      "actual": "cpu",
+      "reason": "",
+      "elapsed_s": 50.31
+    },
+    {
+      "component": "tts.cosyvoice.cuda",
+      "requested": "cuda",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "RuntimeError: worker 启动失败：请求 CUDA 但探针失败：torch.cuda.is_available() = False",
+      "elapsed_s": 2.48
+    }
+  ],
+  "requirements": [],
+  "unmet": []
+}

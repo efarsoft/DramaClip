@@ -5,7 +5,8 @@ venv（tts-venv，见 tts_runtime.py）。文本前端是上游自带的 wetext�
 wheel，frontend.py:67 实测 import）。
 
 协议（与 indextts worker 逐字同形，见 workers/cosyvoice_worker.py）：
-  就绪行: {"ready": true, "device": "cuda"|"cpu"}
+  就绪行: {"ready": true, "requested": ..., "device": "cuda"|"cpu",
+           "fallback": bool, "reason": ...}
   请求:   {"id", "text", "voice": 参考音频路径, "out": 输出wav路径, "lang"}
   应答:   {"id", "ok": true|false, "error"?}
 
@@ -23,10 +24,12 @@ import subprocess  # noqa: S404 - 参数为受控列表
 import threading
 import wave
 from pathlib import Path
+from typing import Any
 
 from dramaclip.engines.tts import reference_qc
 from dramaclip.engines.tts.base import EngineCaps
 from dramaclip.engines.tts.text_split import split_long_text
+from dramaclip.infra import compute
 from dramaclip.infra.paths import resolve_data_dir
 
 _WORKER_SRC = Path(__file__).parents[1] / "workers" / "cosyvoice_worker.py"
@@ -46,9 +49,10 @@ _LOCK = threading.Lock()
 # 合成并发打同一进程时，无锁的 write/readline 会应答错配拿到别人的音频。
 _IO_LOCK = threading.Lock()
 _PROC: subprocess.Popen[str] | None = None
+_PROC_DEVICE: str | None = None
 # 就绪行整个 worker 生命周期只发一次，按进程对象身份记账（respawn 天然重置；
 # 记在引擎实例上会让第二个实例永远挂在 readline——indextts2 踩过的坑）。
-_HELLOED_FOR: subprocess.Popen[str] | None = None
+_HELLO: dict[subprocess.Popen[str], dict[str, Any]] = {}
 _RUNTIME_OK: bool | None = None
 
 
@@ -95,23 +99,33 @@ def shutdown_worker() -> None:
 
     挂在优雅退出路径（service_app.run 的 finally）；Electron 强杀到不了这里。
     """
-    global _PROC
+    global _PROC, _PROC_DEVICE
     with _IO_LOCK:
         proc = _PROC
         _PROC = None
+        _PROC_DEVICE = None
+        if proc is not None:
+            _HELLO.pop(proc, None)
     if proc is not None and proc.poll() is None:
         proc.terminate()
 
 
-def _ensure_worker(models_dir: Path | None) -> subprocess.Popen[str]:
-    global _PROC
+def _ensure_worker(models_dir: Path | None, device: str = "auto") -> subprocess.Popen[str]:
+    global _PROC, _PROC_DEVICE
     with _LOCK:
-        if _PROC is not None and _PROC.poll() is None:
-            return _PROC
+        if _PROC is not None:
+            alive = _PROC.poll() is None
+            if alive and device == _PROC_DEVICE:
+                return _PROC
+            # 死进程/设备承诺变了：旧进程的就绪行随进程一起作废
+            _HELLO.pop(_PROC, None)
+            if alive:
+                _PROC.terminate()
+            _PROC = None
         # device 交给 worker 内 torch 自检（老卡新栈无内核，载入才崩——最小 CUDA
         # 运算探针失败即回 CPU）。stderr 走继承：加载诊断落进服务日志，不盲飞。
         _PROC = subprocess.Popen(  # noqa: S603 - 固定脚本固定参数
-            [str(_env_python()), str(_WORKER_SRC), str(models_dir), "auto"],
+            [str(_env_python()), str(_WORKER_SRC), str(models_dir), device],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=None,
@@ -119,15 +133,25 @@ def _ensure_worker(models_dir: Path | None) -> subprocess.Popen[str]:
             encoding="utf-8",
             errors="replace",
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            env={**os.environ, "DRAMACLIP_COSYVOICE_SRC": str(_src_dir())},
+            env={
+                **os.environ,
+                "DRAMACLIP_COSYVOICE_SRC": str(_src_dir()),
+                # stdin/stdout 协议是 UTF-8；不指定时子进程按系统 ANSI 代码页
+                # 解码（中文 Windows=GBK），v3 的 Rust tokenizer 遇孤立代理项即拒。
+                "PYTHONIOENCODING": "utf-8",
+            },
         )
+        _PROC_DEVICE = device
         return _PROC
 
 
 class CosyVoiceEngine:
-    def __init__(self, model_dir: Path | None = None, engine: str = "cosyvoice") -> None:
+    def __init__(
+        self, model_dir: Path | None = None, engine: str = "cosyvoice", device: str = "auto"
+    ) -> None:
         self._model_dir = model_dir
         self._engine = engine
+        self._device = compute.normalize_requested(device)
 
     @property
     def name(self) -> str:
@@ -166,6 +190,22 @@ class CosyVoiceEngine:
                 "（引擎页「安装运行环境」）"
             )
         return True, "运行环境与模型就绪"
+
+    def compute(self) -> compute.ComputeReport | None:
+        proc = _PROC
+        hello = _HELLO.get(proc) if proc is not None else None
+        if hello is None:
+            return None
+        actual = "cuda" if str(hello.get("device") or "").startswith("cuda") else "cpu"
+        fallback = bool(hello.get("fallback"))
+        return compute.ComputeReport(
+            component="tts.cosyvoice",
+            requested=str(hello.get("requested") or self._device),
+            resolved="cuda" if fallback or actual == "cuda" else "cpu",
+            actual=actual,
+            fallback=fallback,
+            reason=str(hello.get("reason") or ""),
+        )
 
     def synthesize(self, text: str, voice: str, out_path: Path) -> Path:
         if not runtime_ready():
@@ -211,14 +251,20 @@ class CosyVoiceEngine:
 
     def _synth_one(self, text: str, ref: str, out_path: Path) -> None:
         """送一个 job 给 worker 并等应答。整段持 _IO_LOCK：一问一答中间不许插队。"""
-        global _HELLOED_FOR
         with _IO_LOCK:
-            proc = _ensure_worker(self._model_dir)
+            proc = _ensure_worker(self._model_dir, self._device)
             if proc.stdin is None or proc.stdout is None:
                 raise RuntimeError("worker 进程管道不可用")
-            if _HELLOED_FOR is not proc:
-                json.loads(proc.stdout.readline())  # 就绪行只此一条，按进程身份记（见模块头）
-                _HELLOED_FOR = proc
+            hello = _HELLO.get(proc)
+            if hello is None:
+                line = proc.stdout.readline()
+                try:
+                    hello = json.loads(line)
+                except ValueError as exc:
+                    raise RuntimeError("worker 未返回可解析的就绪行") from exc
+                if not hello.get("ready"):
+                    raise RuntimeError(f"worker 启动失败：{hello.get('error', '未知原因')}")
+                _HELLO[proc] = hello
             job = {"id": "0", "text": text, "voice": ref, "out": str(out_path)}
             proc.stdin.write(json.dumps(job, ensure_ascii=False) + "\n")
             proc.stdin.flush()

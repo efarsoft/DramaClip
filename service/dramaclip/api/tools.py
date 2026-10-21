@@ -216,11 +216,21 @@ def tts(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     voice = _resolve_voice(context, engine, params, models_dir)
     out_root = context.data_dir / _TOOL_ROOT / "tts"
     out_root.mkdir(parents=True, exist_ok=True)
-    key = _content_key(engine, voice, text)
     api_key = str(context.settings.get("tts.api_key", ""))
     model = str(context.settings.get("tts.model", ""))
-    path = _synthesize(
-        engine, voice, text, models_dir, out_root, key, api_key=api_key, model=model
+    device = str(context.settings.get("tts.device") or "auto")
+    key = _content_key(engine, voice, text, device, model)
+    path, _report = _synthesize(
+        engine,
+        voice,
+        text,
+        models_dir,
+        out_root,
+        key,
+        api_key=api_key,
+        model=model,
+        device=device,
+        data_dir=context.data_dir,
     )
     return {"path": str(path), "engine": engine, "voice": voice, "chars": len(text)}
 
@@ -246,17 +256,28 @@ def _synthesize(
     *,
     api_key: str,
     model: str = "",
-) -> Path:
+    device: str = "auto",
+    data_dir: Path | None = None,
+) -> tuple[Path, Any]:
     from dramaclip.api import tts as tts_api
 
     return tts_api._synthesize(
-        engine, voice, text, models_dir, out_dir, key, api_key=api_key, model=model
+        engine,
+        voice,
+        text,
+        models_dir,
+        out_dir,
+        key,
+        api_key=api_key,
+        model=model,
+        device=device,
+        data_dir=data_dir,
     )
 
 
-def _content_key(engine: str, voice: str, text: str) -> str:
+def _content_key(engine: str, voice: str, text: str, device: str, model: str) -> str:
     digest = hashlib.sha1(
-        f"{engine}|{voice}|{text}".encode(), usedforsecurity=False
+        f"{engine}|{voice}|{text}|{device}|{model}".encode(), usedforsecurity=False
     ).hexdigest()[:12]
     return f"tools-tts-{engine}-{digest}"
 

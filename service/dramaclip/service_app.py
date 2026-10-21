@@ -88,7 +88,7 @@ class ServiceApp:
             notifier=notifier,
             executor=executor,
             job_store=job_store,
-            analysis_runtime=AnalysisRuntime(settings, data_dir / "models"),
+            analysis_runtime=AnalysisRuntime(settings, data_dir / "models", data_dir),
             work_dir=work_dir,
             data_dir=data_dir,
         )

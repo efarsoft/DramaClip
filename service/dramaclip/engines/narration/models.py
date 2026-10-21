@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from dramaclip.infra.compute import ComputeReport
+
 AudioRole = Literal["original", "narration", "ducked"]
 
 
@@ -78,3 +80,6 @@ class PlanData(BaseModel):
     # 候选冲突窗（分值序）：超短钩子出片时按实测旁白时长二次选景用。
     # 旧库行缺该键 → 空表，布局退回时间轴里的冲突窗原位放置。
     scene_pool: list[SceneCandidate] = Field(default_factory=list)
+    # 本方案配音时真实推理的算力回执（按引擎去重）。全缓存命中的方案为空表：
+    # 空 = 这次没真正跑过合成，不是「未知」。
+    compute: list[ComputeReport] = Field(default_factory=list)

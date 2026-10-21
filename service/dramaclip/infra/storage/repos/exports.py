@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from typing import Any
@@ -23,7 +24,24 @@ _COLUMNS = (
     "cover_path",
     "selfcheck",
     "selfcheck_state",
+    "compute",
 )
+
+
+def _parse_compute(raw: object) -> list[dict[str, Any]] | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        value = json.loads(str(raw))
+    except ValueError:
+        return None  # 坏 JSON 按「没有回执」处理，不演成可用证据
+    return [dict(item) for item in value] if isinstance(value, list) else None
+
+
+def _row(row: tuple[Any, ...]) -> dict[str, Any]:
+    record = dict(zip(_COLUMNS, row, strict=True))
+    record["compute"] = _parse_compute(record["compute"])
+    return record
 
 
 def _now_ms() -> int:
@@ -121,12 +139,21 @@ def reset_for_retry(conn: sqlite3.Connection, export_id: str) -> bool:
     """
     cursor = conn.execute(
         "UPDATE export_jobs SET status = ?, error = NULL, output_path = NULL,"
-        " progress = 0, completed_at = NULL, selfcheck = NULL, selfcheck_state = NULL"
+        " progress = 0, completed_at = NULL, selfcheck = NULL, selfcheck_state = NULL,"
+        " compute = NULL"
         " WHERE id = ? AND status = ?",
         (STATUS_PENDING, export_id, STATUS_FAILED),
     )
     conn.commit()
     return (cursor.rowcount or 0) > 0
+
+
+def set_compute(conn: sqlite3.Connection, export_id: str, reports: list[dict[str, Any]]) -> None:
+    conn.execute(
+        "UPDATE export_jobs SET compute = ? WHERE id = ?",
+        (json.dumps(reports, ensure_ascii=False), export_id),
+    )
+    conn.commit()
 
 
 def list_by_project(conn: sqlite3.Connection, project_id: str) -> list[dict[str, Any]]:
@@ -135,7 +162,7 @@ def list_by_project(conn: sqlite3.Connection, project_id: str) -> list[dict[str,
         " ORDER BY created_at DESC",
         (project_id,),
     ).fetchall()
-    return [dict(zip(_COLUMNS, row, strict=True)) for row in rows]
+    return [_row(row) for row in rows]
 
 
 _WORKS_KEYS = (
@@ -243,4 +270,4 @@ def get(conn: sqlite3.Connection, export_id: str) -> dict[str, Any] | None:
     row = conn.execute(
         f"SELECT {', '.join(_COLUMNS)} FROM export_jobs WHERE id = ?", (export_id,)
     ).fetchone()
-    return dict(zip(_COLUMNS, row, strict=True)) if row else None
+    return _row(row) if row else None

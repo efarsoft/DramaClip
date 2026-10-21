@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from typing import Any
@@ -25,6 +26,16 @@ def is_terminal(status: str) -> bool:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _parse_compute(raw: object) -> list[dict[str, Any]] | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        value = json.loads(str(raw))
+    except ValueError:
+        return None  # 坏 JSON 按「没有回执」处理，不演成可用证据
+    return [dict(item) for item in value] if isinstance(value, list) else None
 
 
 # 非终态进度上限：没到 DONE 就不许写 100——「进度 100% 但任务没完成」是比卡住更糟的
@@ -97,22 +108,32 @@ class JobStore:
             )
         self._conn.commit()
 
+    def set_compute(self, job_id: str, reports: list[dict[str, Any]]) -> None:
+        self._conn.execute(
+            "UPDATE jobs SET compute = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(reports, ensure_ascii=False), _now_ms(), job_id),
+        )
+        self._conn.commit()
+
     def get(self, job_id: str) -> dict[str, Any] | None:
         row = self._conn.execute(
-            "SELECT id, type, ref_id, status, progress, label, error, created_at, updated_at"
-            " FROM jobs WHERE id = ?",
+            "SELECT id, type, ref_id, status, progress, label, error, created_at, updated_at,"
+            " compute FROM jobs WHERE id = ?",
             (job_id,),
         ).fetchone()
         if row is None:
             return None
         keys = (
             "id", "type", "ref_id", "status", "progress",
-            "label", "error", "created_at", "updated_at",
+            "label", "error", "created_at", "updated_at", "compute",
         )
-        return dict(zip(keys, row, strict=True))
+        record = dict(zip(keys, row, strict=True))
+        record["compute"] = _parse_compute(record["compute"])
+        return record
 
     _LIST_COLUMNS = (
-        "id", "type", "ref_id", "status", "progress", "label", "error", "created_at", "updated_at",
+        "id", "type", "ref_id", "status", "progress", "label", "error", "created_at",
+        "updated_at", "compute",
     )
 
     def list_recent(self, *, limit: int = 50, active_only: bool = False) -> list[dict[str, Any]]:
@@ -129,7 +150,13 @@ class JobStore:
             " ORDER BY updated_at DESC, created_at DESC, id LIMIT ?",
             params,
         ).fetchall()
-        return [dict(zip(self._LIST_COLUMNS, row, strict=True)) for row in rows]
+        return [self._parse_row(row) for row in rows]
+
+    @classmethod
+    def _parse_row(cls, row: tuple[Any, ...]) -> dict[str, Any]:
+        record = dict(zip(cls._LIST_COLUMNS, row, strict=True))
+        record["compute"] = _parse_compute(record["compute"])
+        return record
 
     def clear_finished(self) -> int:
         """删除全部终态任务记录（完成/失败/取消），返回删除条数；在跑与排队中的不动。"""

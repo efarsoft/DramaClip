@@ -15,6 +15,8 @@ from types import SimpleNamespace
 import pytest
 
 from dramaclip.api import tts as tts_api
+from dramaclip.engines.tts.vocal_separation import SeparationResult
+from dramaclip.infra.compute import ComputeReport
 from dramaclip.transport.rpc import RpcDomainError
 
 
@@ -77,7 +79,7 @@ def test_separate_mode_failure_carries_reason(
 ) -> None:
     src = _write_wav(tmp_path / "src.wav")
 
-    def boom(_models_dir: Path, _src: Path) -> Path:
+    def boom(_models_dir: Path, _src: Path, **_kwargs: object) -> SeparationResult:
         raise RuntimeError("TTS 运行环境未安装")
 
     monkeypatch.setattr(tts_api.vocal_separation, "clean_reference", boom)
@@ -87,19 +89,66 @@ def test_separate_mode_failure_carries_reason(
     assert "TTS 运行环境未安装" in info.value.message
 
 
-def test_separate_mode_returns_artifact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_separate_mode_returns_artifact_and_compute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     context = _context(tmp_path)
     src = _write_wav(tmp_path / "src.wav")
     artifact = _write_wav(tmp_path / "src.cleaned.wav", seconds=5.0)
-    seen: dict[str, Path] = {}
+    seen: dict[str, object] = {}
+    report = ComputeReport(
+        component="tts.separation", requested="auto", resolved="cuda",
+        actual="cuda", device="cuda",
+    )
     monkeypatch.setattr(
         tts_api.vocal_separation, "clean_reference",
-        lambda models_dir, path: seen.update(models=models_dir, src=path) or artifact,
+        lambda models_dir, path, **kwargs: seen.update(
+            models=models_dir, src=path, **kwargs
+        ) or SeparationResult(path=artifact, compute=report),
     )
 
     result = tts_api.clean_reference(context, {"path": str(src)})
 
     assert seen["models"] == context.data_dir / "models"
     assert seen["src"] == src
+    assert seen["device"] == "auto", "未设置 tts.device 时走 auto（允许试 GPU 后回退）"
     assert result["path"] == str(artifact)
+    assert result["compute"]["actual"] == "cuda"
     assert "reasons" in result["quality"] and "suggestions" in result["quality"]
+
+
+def test_separate_mode_honors_explicit_device_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = _context(tmp_path)
+    context.settings = {"tts.device": "cpu"}
+    src = _write_wav(tmp_path / "src.wav")
+    artifact = _write_wav(tmp_path / "src.cleaned.wav", seconds=2.0)
+    seen: dict[str, object] = {}
+    report = ComputeReport(
+        component="tts.separation", requested="cpu", resolved="cpu", actual="cpu",
+    )
+    monkeypatch.setattr(
+        tts_api.vocal_separation, "clean_reference",
+        lambda models_dir, path, **kwargs: seen.update(kwargs)
+        or SeparationResult(path=artifact, compute=report),
+    )
+
+    result = tts_api.clean_reference(context, {"path": str(src)})
+
+    assert seen["device"] == "cpu"
+    assert result["compute"]["requested"] == "cpu"
+
+
+def test_fast_mode_does_not_report_compute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = _write_wav(tmp_path / "src.wav")
+    artifact = _write_wav(tmp_path / "src.cleaned.wav", seconds=2.0)
+    monkeypatch.setattr(
+        tts_api.reference_clean, "clean_reference", lambda path: artifact
+    )
+
+    result = tts_api.clean_reference(_context(tmp_path), {"path": str(src), "mode": "fast"})
+
+    assert result.get("compute") is None

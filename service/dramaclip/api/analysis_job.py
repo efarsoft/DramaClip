@@ -475,15 +475,20 @@ def _analyze_one(
             )
             raw = stored
         else:
+            transcriber = context.analysis_runtime.transcriber()
             raw = pipeline.analyze_episode(
                 video_path=Path(str(episode["source_path"])),
                 work_dir=context.work_dir / episode_id,
-                transcriber=context.analysis_runtime.transcriber(),
+                transcriber=transcriber,
                 language=language,
                 cancel=cancel_event,
                 report=report,
                 hotwords=hotwords,
             )
+            # 算力账落任务行：通知流会滚走，任务详情才是可复核的真相源。
+            compute_report = getattr(transcriber, "compute", lambda: None)()
+            if compute_report is not None:
+                context.job_store.set_compute(job_id, [compute_report.to_dict()])
             asr_segments, ocr_segments, band, band_lines = _fuse_ocr(
                 context, episode, raw.asr_segments, ocr_bars, ocr_band, ocr_lines
             )  # noqa: F841 - band_lines 落库见下方 subtitle_band

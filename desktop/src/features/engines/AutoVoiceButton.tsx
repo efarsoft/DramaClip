@@ -5,6 +5,7 @@ import { App, Button } from 'antd';
 import { useState } from 'react';
 import { ttsApi } from '../../services/client';
 import { tokens } from '../../styles/theme';
+import { computeLabel } from './assetState';
 
 export function AutoVoiceButton({
   onSave,
@@ -29,10 +30,18 @@ export function AutoVoiceButton({
             onSave(result.path);
             const grade =
               result.quality === 'good' ? '优' : result.quality === 'fair' ? '中' : '差';
-            message.success(
-              `已从剧集提取主角音色（${result.speaker}，${String(result.seconds)} 秒，质检 ${grade}），并设为参考音色`,
-              6,
-            );
+            const compute = computeLabel(result.compute);
+            const text =
+              `已从剧集提取主角音色（${result.speaker}，${String(result.seconds)} 秒，` +
+              `质检 ${grade}${compute === undefined ? '' : `，${compute}`}），并设为参考音色`;
+            if (result.cleaned_with === 'filter') {
+              message.warning(
+                `${text}。人声分离不可用，已用滤镜清洗：${result.clean_reason ?? '未知原因'}`,
+                6,
+              );
+              return;
+            }
+            message.success(text, 6);
           })
           .catch((cause: unknown) => {
             message.error(cause instanceof Error ? cause.message : '自动提取失败', 6);

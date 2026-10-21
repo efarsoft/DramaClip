@@ -13,10 +13,100 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from dramaclip.engines.analysis import pause_split
 from dramaclip.engines.analysis.models import AsrSegment, WordSpan
+from dramaclip.infra import compute
 from dramaclip.infra.model_manager import worker_bridge
 
 _LOGGER = logging.getLogger(__name__)
 _CUDA_PROBLEM = re.compile(r"cublas|cudnn|cudart|cuda|gpu|int8 compute type", re.I)
+
+
+def _ct2_cuda_available() -> bool:
+    """CT2 能否看到 CUDA 设备；探不到一律按不可用，构造期再用真实失败兜底。"""
+    try:
+        import ctranslate2
+
+        return ctranslate2.get_cuda_device_count() > 0
+    except Exception:  # noqa: BLE001 - 坏装/未装是常态，不是转写失败
+        return False
+
+
+def _report_from_state(
+    component: str, requested: str, actual: str | None, fallback_reason: str
+) -> compute.ComputeReport | None:
+    """引擎状态 → 回执：没真加载过就返回 None；回退时 resolved 记曾尝试的 cuda。"""
+    if actual is None:
+        return None
+    resolved = "cpu" if requested == "cpu" or actual == "cpu" else "cuda"
+    if fallback_reason:
+        resolved = "cuda"
+    return compute.ComputeReport(
+        component=component,
+        requested=requested,
+        resolved=resolved,
+        actual=actual,
+        fallback=bool(fallback_reason),
+        reason=fallback_reason,
+    )
+
+
+def _probe_cuda_op(device: str) -> str:
+    """真实小算子探针：返回空串=可算，否则失败原因。
+
+    `torch.cuda.is_available()` 只说明编译/驱动可见，且 funasr 在不可见时会把
+    device 静默改成 cpu——不先算一下，显式 cuda 就会被静默落 CPU。
+    """
+    try:
+        import torch
+
+        (torch.ones(4, device=device) * 2).sum().item()
+    except Exception as exc:  # noqa: BLE001 - CPU-only torch/坏驱动都算不可算
+        return f"{type(exc).__name__}: {exc}"
+    return ""
+
+
+def _model_device(model: Any) -> str | None:
+    """模型真实落点：参数设备是物理证据，funasr 解析后的 kwargs.device 是退路。"""
+    inner = getattr(model, "model", model)
+    parameters = getattr(inner, "parameters", None)
+    if callable(parameters):
+        try:
+            first = next(parameters())
+        except (StopIteration, TypeError):
+            first = None
+        kind = getattr(getattr(first, "device", None), "type", None)
+        if kind in {"cuda", "cpu"}:
+            return str(kind)
+    resolved = getattr(model, "kwargs", None)
+    if isinstance(resolved, dict):
+        value = str(resolved.get("device") or "")
+        if value:
+            return "cuda" if value.startswith("cuda") else "cpu"
+    return None
+
+
+def _adopt_loaded_device(
+    component: str, requested: str, wanted: str, model: Any
+) -> tuple[str, str]:
+    """加载成功后的落点裁决：返回 (actual, fallback_reason)，违诺直接抛。"""
+    actual = _model_device(model)
+    if actual is None:
+        # 读不到落点就不许替显式 cuda 打包票；auto 至少探针已经证明可算。
+        if requested == "cuda":
+            raise compute.ComputeUnavailableError(
+                f"{component} 请求 CUDA，但无法确认模型的实际落点"
+            )
+        actual = "cuda" if wanted.startswith("cuda") else "cpu"
+    if requested == "cpu" and actual != "cpu":
+        raise compute.ComputeUnavailableError(
+            f"{component} 请求 CPU，funasr 把模型落在 {actual}"
+        )
+    if wanted.startswith("cuda") and actual != "cuda":
+        if requested == "cuda":
+            raise compute.ComputeUnavailableError(
+                f"{component} 请求 CUDA，funasr 把模型落在 {actual}（静默回退）"
+            )
+        return "cpu", f"funasr 把模型落在 {actual}"
+    return actual, ""
 
 
 def _resolve_torch_device(device: str) -> str:
@@ -70,9 +160,11 @@ class _FunasrWorker:
 
         self._inner = worker_bridge.VenvWorker(Path(funasr_worker.__file__), config)
         self.device = "cpu"
+        self.ready: dict[str, Any] = {}
 
     def start(self) -> None:
         ready = self._inner.start()
+        self.ready = dict(ready)
         self.device = str(ready.get("device") or "cpu")
 
     def generate(self, **kwargs: Any) -> list:  # type: ignore[type-arg]
@@ -123,6 +215,10 @@ class AsrEngine(Protocol):
         self, wav_path: Path, language: str = "zh", *, hotwords: str = ""
     ) -> list[AsrSegment]: ...
 
+    def compute(self) -> compute.ComputeReport | None:
+        """最近一次真实转写的算力回执；没跑过返回 None，不猜。"""
+        ...
+
 
 class FasterWhisperEngine:
     """faster-whisper（CTranslate2，CPU 可用，模型自动下载到 models_dir）。"""
@@ -138,10 +234,12 @@ class FasterWhisperEngine:
         compute_type: str = "auto",
     ) -> None:
         self._model_size = model_size
-        self._device = device
+        self._requested = compute.normalize_requested(device)
         self._models_dir = models_dir
         self._compute_type = compute_type
         self._model: WhisperModel | None = None
+        self._actual_device: str | None = None
+        self._fallback_reason = ""
 
     @property
     def name(self) -> str:
@@ -154,14 +252,19 @@ class FasterWhisperEngine:
             return self._run(self._ensure_model(), wav_path, language, hotwords)
         except Exception as exc:  # noqa: BLE001 - CUDA 运行库问题统一按关键字识别
             # cuBLAS/cuDNN 缺失往往在首次推理（惰性计算）时才暴露，构造期兜不住
-            if self._device == "cpu" or not _CUDA_PROBLEM.search(str(exc)):
+            if self._requested == "cuda":
+                raise compute.ComputeUnavailableError(
+                    f"faster-whisper 请求 CUDA，推理失败：{type(exc).__name__}: {exc}"
+                ) from exc
+            if self._actual_device == "cpu" or not _CUDA_PROBLEM.search(str(exc)):
                 raise
             _LOGGER.warning("CUDA 推理失败，自动回退 CPU：%s", exc)
             from faster_whisper import WhisperModel  # ml extras 懒加载
 
-            cpu_model = self._create(WhisperModel, "cpu")
-            self._model = cpu_model  # 缓存 CPU 模型，后续集不再重复走失败的 CUDA 路径
-            return self._run(cpu_model, wav_path, language, hotwords)
+            self._actual_device = "cpu"
+            self._fallback_reason = f"{type(exc).__name__}: {exc}"
+            self._model = self._create(WhisperModel, "cpu")
+            return self._run(self._model, wav_path, language, hotwords)
 
     def _run(
         self, model: WhisperModel, wav_path: Path, language: str, hotwords: str
@@ -196,28 +299,45 @@ class FasterWhisperEngine:
         if self._model is None:
             from faster_whisper import WhisperModel  # ml extras 懒加载
 
-            self._model = self._create(WhisperModel, self._device)
+            if self._requested == "cpu":
+                target = "cpu"
+            else:
+                target = "cuda" if self._requested == "cuda" or _ct2_cuda_available() else "cpu"
+            self._model = self._create(WhisperModel, target)
         return self._model
 
     def _create(self, cls: type[WhisperModel], device: str) -> WhisperModel:
         try:
-            return cls(
+            model = cls(
                 self._model_size,
                 device=device,
                 compute_type=self._compute_for(device),
                 download_root=str(self._models_dir) if self._models_dir else None,
             )
         except Exception as exc:  # noqa: BLE001 - CUDA 运行库问题统一按关键字识别
-            if device != "cpu" and _CUDA_PROBLEM.search(str(exc)):
-                # GPU 不可用（缺 cuBLAS/cuDNN、驱动不兼容等）：诚实降级 CPU 并留痕
-                _LOGGER.warning("CUDA 初始化失败，自动回退 CPU：%s", exc)
-                return cls(
-                    self._model_size,
-                    device="cpu",
-                    compute_type=self._compute_for("cpu"),
-                    download_root=str(self._models_dir) if self._models_dir else None,
-                )
-            raise
+            if device == "cpu" or not _CUDA_PROBLEM.search(str(exc)):
+                raise
+            if self._requested == "cuda":
+                raise compute.ComputeUnavailableError(
+                    f"faster-whisper 请求 CUDA，初始化失败：{type(exc).__name__}: {exc}"
+                ) from exc
+            _LOGGER.warning("CUDA 初始化失败，自动回退 CPU：%s", exc)
+            self._actual_device = "cpu"
+            self._fallback_reason = f"{type(exc).__name__}: {exc}"
+            model = cls(
+                self._model_size,
+                device="cpu",
+                compute_type=self._compute_for("cpu"),
+                download_root=str(self._models_dir) if self._models_dir else None,
+            )
+        else:
+            self._actual_device = "cuda" if device != "cpu" else "cpu"
+        return model
+
+    def compute(self) -> compute.ComputeReport | None:
+        return _report_from_state(
+            "asr.whisper", self._requested, self._actual_device, self._fallback_reason
+        )
 
     def _compute_for(self, device: str) -> str:
         """int8 是 CPU 档：ctranslate2 的 CUDA 后端在没有高效 int8 GEMM 的卡上直接拒绝，
@@ -245,8 +365,10 @@ class SenseVoiceEngine:
             models_dir / "asr" / "iic" / "SenseVoiceSmall" if models_dir is not None else None
         )
         self._model_dir = resolved
-        self._device = device
+        self._requested = compute.normalize_requested(device)
         self._model: Any = None
+        self._actual_device: str | None = None
+        self._fallback_reason = ""
 
     @property
     def name(self) -> str:
@@ -270,20 +392,47 @@ class SenseVoiceEngine:
             if auto_model is None:
                 self._model = self._venv_model()
                 return self._model
-            device = _resolve_torch_device(self._device)
+            device = _resolve_torch_device(self._requested)
+            if device.startswith("cuda"):
+                problem = _probe_cuda_op(device)
+                if problem:
+                    if self._requested == "cuda":
+                        raise compute.ComputeUnavailableError(
+                            f"SenseVoice 请求 CUDA，但 CUDA 不可计算：{problem}"
+                        )
+                    _LOGGER.warning("SenseVoice CUDA 探针失败回退 CPU：%s", problem)
+                    self._actual_device = "cpu"
+                    self._fallback_reason = problem
+                    device = "cpu"
             kwargs: dict[str, Any] = {"model": str(self._model_dir) if (
                 self._model_dir is not None and self._model_dir.is_dir()
             ) else "iic/SenseVoiceSmall", "device": device}
             try:
                 self._model = auto_model(**kwargs)
-            except Exception as exc:  # noqa: BLE001 - CUDA 类失败回退 CPU 重试一次
-                if device != "cpu" and _CUDA_PROBLEM.search(str(exc)):
-                    _LOGGER.warning("SenseVoice CUDA 加载失败回退 CPU：%s", str(exc)[:160])
-                    kwargs["device"] = "cpu"
-                    self._model = auto_model(**kwargs)
-                else:
+            except Exception as exc:  # noqa: BLE001 - CUDA 类失败按请求语义处理
+                if device == "cpu" or not _CUDA_PROBLEM.search(str(exc)):
                     raise
+                if self._requested == "cuda":
+                    raise compute.ComputeUnavailableError(
+                        f"SenseVoice 请求 CUDA，加载失败：{type(exc).__name__}: {exc}"
+                    ) from exc
+                _LOGGER.warning("SenseVoice CUDA 加载失败回退 CPU：%s", str(exc)[:160])
+                self._actual_device = "cpu"
+                self._fallback_reason = f"{type(exc).__name__}: {exc}"
+                kwargs["device"] = "cpu"
+                self._model = auto_model(**kwargs)
+            else:
+                self._actual_device, reason = _adopt_loaded_device(
+                    "SenseVoice", self._requested, device, self._model
+                )
+                if reason:
+                    self._fallback_reason = reason
         return self._model
+
+    def compute(self) -> compute.ComputeReport | None:
+        return _report_from_state(
+            "asr.funasr", self._requested, self._actual_device, self._fallback_reason
+        )
 
     def _venv_model(self) -> _FunasrWorker:
         """冻结/无 ml 态：本地智能运行环境里的 funasr worker（构造语义 worker 端镜像）。"""
@@ -295,10 +444,19 @@ class SenseVoiceEngine:
         worker = _spawn_funasr_worker({
             "engine": "sensevoice",
             "model": model_id,
-            "device": self._device,
+            "device": self._requested,
         })
+        self._adopt_worker_hello(worker)
         _LOGGER.info("SenseVoice 走本地运行环境 worker（device=%s）", worker.device)
         return worker
+
+    def _adopt_worker_hello(self, worker: _FunasrWorker) -> None:
+        """worker 就绪行是运行态唯一证据：父进程曾把 device 读出来又丢了。"""
+        hello = worker.ready
+        self._actual_device = "cuda" if worker.device.startswith("cuda") else "cpu"
+        self._fallback_reason = (
+            str(hello.get("reason") or "") if hello.get("fallback") else ""
+        )
 
 
 def _parse_sensevoice(raw: list) -> list[AsrSegment]:  # type: ignore[type-arg]
@@ -364,8 +522,10 @@ class ParaformerEngine:
         self._vad_model_dir = vad_model_dir
         self._spk_model_dir = spk_model_dir
         self._num_speakers = num_speakers
-        self._device = device
+        self._requested = compute.normalize_requested(device)
         self._model: Any = None
+        self._actual_device: str | None = None
+        self._fallback_reason = ""
 
     @property
     def name(self) -> str:
@@ -475,7 +635,18 @@ class ParaformerEngine:
                 else:
                     spk_kwargs["spk_model"] = "cam++"
                 spk_kwargs["spk_mode"] = "vad_segment"
-            device = _resolve_torch_device(self._device)
+            device = _resolve_torch_device(self._requested)
+            if device.startswith("cuda"):
+                problem = _probe_cuda_op(device)
+                if problem:
+                    if self._requested == "cuda":
+                        raise compute.ComputeUnavailableError(
+                            f"Paraformer 请求 CUDA，但 CUDA 不可计算：{problem}"
+                        )
+                    _LOGGER.warning("Paraformer CUDA 探针失败回退 CPU：%s", problem)
+                    self._actual_device = "cpu"
+                    self._fallback_reason = problem
+                    device = "cpu"
             model_id = str(self._model_dir) if (
                 self._model_dir is not None and self._model_dir.is_dir()
             ) else "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
@@ -487,14 +658,30 @@ class ParaformerEngine:
             }
             try:
                 self._model = auto_model(**kwargs)
-            except Exception as exc:  # noqa: BLE001 - CUDA 类失败回退 CPU 重试一次
-                if device != "cpu" and _CUDA_PROBLEM.search(str(exc)):
-                    _LOGGER.warning("Paraformer CUDA 加载失败回退 CPU：%s", str(exc)[:160])
-                    kwargs["device"] = "cpu"
-                    self._model = auto_model(**kwargs)
-                else:
+            except Exception as exc:  # noqa: BLE001 - CUDA 类失败按请求语义处理
+                if device == "cpu" or not _CUDA_PROBLEM.search(str(exc)):
                     raise
+                if self._requested == "cuda":
+                    raise compute.ComputeUnavailableError(
+                        f"Paraformer 请求 CUDA，加载失败：{type(exc).__name__}: {exc}"
+                    ) from exc
+                _LOGGER.warning("Paraformer CUDA 加载失败回退 CPU：%s", str(exc)[:160])
+                self._actual_device = "cpu"
+                self._fallback_reason = f"{type(exc).__name__}: {exc}"
+                kwargs["device"] = "cpu"
+                self._model = auto_model(**kwargs)
+            else:
+                self._actual_device, reason = _adopt_loaded_device(
+                    "Paraformer", self._requested, device, self._model
+                )
+                if reason:
+                    self._fallback_reason = reason
         return self._model
+
+    def compute(self) -> compute.ComputeReport | None:
+        return _report_from_state(
+            "asr.funasr", self._requested, self._actual_device, self._fallback_reason
+        )
 
     def _venv_model(self) -> _FunasrWorker:
         """冻结/无 ml 态：本地智能运行环境里的 funasr worker（构造语义 worker 端镜像）。"""
@@ -504,15 +691,23 @@ class ParaformerEngine:
         worker = _spawn_funasr_worker({
             "engine": "paraformer",
             "model": model_id,
-            "device": self._device,
+            "device": self._requested,
             "vad_model_dir": str(self._vad_model_dir) if self._vad_model_dir else None,
             "spk_model_dir": str(self._spk_model_dir) if self._spk_model_dir else None,
         })
+        self._adopt_worker_hello(worker)
         _LOGGER.info(
             "Paraformer 走本地运行环境 worker（device=%s diarization=%s）",
             worker.device, self.diarization,
         )
         return worker
+
+    def _adopt_worker_hello(self, worker: _FunasrWorker) -> None:
+        hello = worker.ready
+        self._actual_device = "cuda" if worker.device.startswith("cuda") else "cpu"
+        self._fallback_reason = (
+            str(hello.get("reason") or "") if hello.get("fallback") else ""
+        )
 
 
 def _parse_paraformer(raw: list, gap_s: float) -> list[AsrSegment]:  # type: ignore[type-arg]
@@ -702,6 +897,9 @@ class DashscopeCloudAsrEngine:
     def supports_model(cls, model: str) -> bool:
         """按模型族判定分离能力——`asr.model` 能在工厂里换，声明就得跟着换。"""
         return model.startswith(cls._DIARIZED_MODEL_PREFIX)
+
+    def compute(self) -> compute.ComputeReport | None:
+        return compute.cloud("asr.cloud")
 
     @property
     def supports_diarization(self) -> bool:

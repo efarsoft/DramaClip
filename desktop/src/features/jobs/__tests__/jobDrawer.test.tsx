@@ -229,7 +229,7 @@ describe('StatusBar 任务段', () => {
     render(<StatusBar />);
 
     expect(await screen.findByText(/在跑 1/)).toBeTruthy();
-    expect(screen.getByText('62%')).toBeTruthy();  // 卷二 #18：最高优先级在跑 job 的 %
+    expect(screen.getByText(/进度 62\s*%/)).toBeTruthy();  // 卷二 #18：最高优先级在跑 job 的 %
     expect(screen.getByText(/失败 1/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /在跑 1/ }));
     expect(useJobsStore.getState().drawerOpen).toBe(true);

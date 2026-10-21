@@ -68,6 +68,8 @@ DEFAULTS: dict[str, str] = {
     "vision.cloud_api_key": "",
     "vision.cloud_model": "",
     "tts.engine": "edge",
+    # 本地 TTS 设备：auto=能力+运行时都过才用 GPU，失败回退并记账；cuda=承诺，失败即报错
+    "tts.device": "auto",
     # 音色按引擎独立成键：两引擎音色体系互不相通（Kokoro 音色名 / 微软官方名）
     "tts.voice.kokoro": "zf_001",
     "tts.voice.edge": "zh-CN-XiaoxiaoNeural",

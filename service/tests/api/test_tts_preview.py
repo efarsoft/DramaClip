@@ -78,10 +78,17 @@ def fake_engine(monkeypatch: pytest.MonkeyPatch) -> FakeEngine:
 
 def _install(monkeypatch: pytest.MonkeyPatch, stub: FakeEngine) -> FakeEngine:
     def _create(
-        name: str, models_dir: Path | None = None, *, api_key: str = "", model: str = ""
+        name: str,
+        models_dir: Path | None = None,
+        *,
+        api_key: str = "",
+        model: str = "",
+        device: str = "auto",
+        data_dir: Path | None = None,
     ) -> FakeEngine:
         stub.created.append(name)
         stub.auth.append((api_key, model))
+        stub.device = device
         return stub
 
     monkeypatch.setattr(tts_api, "create_tts", _create)
@@ -202,7 +209,13 @@ def test_preview_reports_engine_failure_instead_of_swapping_engine(
     created: list[str] = []
 
     def _create(
-        name: str, models_dir: Path | None = None, *, api_key: str = "", model: str = ""
+        name: str,
+        models_dir: Path | None = None,
+        *,
+        api_key: str = "",
+        model: str = "",
+        device: str = "auto",
+        data_dir: Path | None = None,
     ) -> ExplodingEngine:
         created.append(name)
         return stub

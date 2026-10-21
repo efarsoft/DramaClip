@@ -2,31 +2,26 @@
 
 业主裁决（2026-10-15）：AI 标注从「强制合规声明」改为「用户开关、默认关闭」——
 各平台对 AI 合成内容的标注要求不一，是否标注由使用者按发布平台自行决定，
-软件不强制、不代决。开启后在成片右上角烧「AI 生成」字样。
+软件不强制、不代决。开启后在每段画面右上角烧「AI 生成」字样。
 
 实现要点：
+- 段滤镜而非整片后处理：标注随 Phase A 每段烧一次，Phase B `-c copy` 拼接，
+  硬编成果不再被一遍 libx264 整片重编吃掉；内容摘要进段签名，改文案/字体/画布会重编；
 - drawtext + textfile：CJK 文本不进滤镜串（Windows 命令行与 ffmpeg 滤镜解析的
   转义坑全部绕开），与 `infra/ffmpeg/cover.py` 封面标题字层同款方案；
-- 独立后处理遍（loudness 之后）：`-c:a copy` 保住响度归一成果，只重编视频。
-  关闭时不进这条路径，零额外开销；
-- 烧制失败**硬失败**（AiLabelError 上抛，导出记失败）：用户开了标注却静默交付
-  无标注成片，比导出失败更糟——那条路至少看得见、可重试。封面/自检那种「增强
-  项降级」的惯例不适用这里：标注是用户明示要买的东西，不是锦上添花。
+- 字体缺失**硬失败**（AiLabelError 上抛，导出记失败）：用户开了标注却静默交付
+  无标注成片，比导出失败更糟——那条路至少看得见、可重试。标注是用户明示要买的
+  东西，不是锦上添花的增强项。
 """
 
 from __future__ import annotations
 
-import contextlib
-import logging
-import os
-import tempfile
+import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 
 from dramaclip.infra import config
 from dramaclip.infra.ffmpeg import cover as ffmpeg_cover
-from dramaclip.infra.ffmpeg import runner
-
-_LOGGER = logging.getLogger(__name__)
 
 #: 标注文案：平台规则通行的最短声明（抖音/视频号/小红书均要求明示 AI 生成）。
 LABEL_TEXT = "AI 生成"
@@ -36,13 +31,19 @@ _MARGIN_RATIO = 0.03
 #: 字号按画布高度 1/34（1080×1920 → 56px）；下限 24 防小画布糊成一片。
 _FONTSIZE_DIVISOR = 34
 _FONTSIZE_MIN = 24
-#: 后处理遍是整片重编：超时按 concat 重编码同档（loudness 那遍 600s 是滤镜内
-# 192kHz 重采样的账，这边纯 x264 编码，给足 3600s）。
-_TIMEOUT_S = 3600.0
 
 
 class AiLabelError(RuntimeError):
-    """AI 标注烧制失败（用户已开启标注，不能静默交付无标注成片）。"""
+    """AI 标注准备失败（用户已开启标注，不能静默交付无标注成片）。"""
+
+
+@dataclass(frozen=True)
+class AiLabelSpec:
+    """一次导出共用的标注：滤镜串、段签名摘要与共享 textfile。"""
+
+    vf: str
+    fingerprint: str
+    textfile: Path
 
 
 def enabled(settings: config.Settings) -> bool:
@@ -67,48 +68,19 @@ def label_vf(face: Path, textfile: Path, out_size: tuple[int, int]) -> str:
     return "drawtext=" + ":".join(opts)
 
 
-def apply(out_path: Path, work_dir: Path, out_size: tuple[int, int]) -> None:
-    """在成片右上角烧「AI 生成」标注（原地替换）。失败抛 AiLabelError。"""
+def prepare(work_dir: Path, out_size: tuple[int, int]) -> AiLabelSpec:
+    """准备标注滤镜与内容摘要（字体缺失抛 AiLabelError）。
+
+    摘要覆盖文案 + 画布派生的字号/边距 + 字体文件内容；textfile 路径不进摘要
+    （它随 work_dir 变化，进签名会让每次续跑都判不可复用）。
+    """
     face = ffmpeg_cover.bundled_font_face()
     if face is None:
         raise AiLabelError("随包字体不可用，无法烧制 AI 生成标注")
     work_dir.mkdir(parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(prefix=".ai-label-", suffix=".txt", dir=work_dir)
-    os.close(fd)
-    textfile = Path(name)
-    staged = work_dir / "ai_label_stage.mp4"
-    try:
-        textfile.write_text(LABEL_TEXT, encoding="utf-8")
-        args = [
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-i",
-            str(out_path),
-            "-vf",
-            label_vf(face, textfile, out_size),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "medium",
-            "-crf",
-            "18",
-            "-c:a",
-            "copy",
-            "-map_metadata",
-            "-1",
-            str(staged),
-        ]
-        try:
-            runner.run(args, timeout_s=_TIMEOUT_S)
-        except runner.FfmpegError as exc:
-            raise AiLabelError(f"AI 标注烧制失败：{exc}") from exc
-        os.replace(staged, out_path)
-        _LOGGER.info("AI 生成标注已烧制：%s", out_path.name)
-    finally:
-        # Windows 上 ffmpeg 刚退出时句柄可能未释放：清理尽力而为，不许炸掉已成功的替换
-        with contextlib.suppress(OSError):
-            textfile.unlink(missing_ok=True)
-        with contextlib.suppress(OSError):
-            staged.unlink(missing_ok=True)
+    textfile = work_dir / ".ai-label.txt"
+    textfile.write_text(LABEL_TEXT, encoding="utf-8")
+    vf = label_vf(face, textfile, out_size)
+    payload = [LABEL_TEXT, vf, hashlib.sha256(face.read_bytes()).hexdigest()]
+    fingerprint = hashlib.sha256("\0".join(payload).encode("utf-8")).hexdigest()
+    return AiLabelSpec(vf=vf, fingerprint=fingerprint, textfile=textfile)

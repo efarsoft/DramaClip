@@ -85,8 +85,26 @@
         "progress": { "type": "number" },
         "label": { "type": ["string", "null"], "description": "人读阶段，队列页显示" },
         "error": { "type": ["string", "null"] },
+        "compute": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/x-models/ComputeReport" },
+          "description": "任务终态落库的算力回执；NULL = 本次没有可报告的运行证据"
+        },
         "created_at": { "type": "integer" },
         "updated_at": { "type": "integer" }
+      }
+    },
+    "ComputeReport": {
+      "type": "object",
+      "required": ["component", "requested", "resolved", "actual", "fallback", "reason", "device"],
+      "properties": {
+        "component": { "type": "string" },
+        "requested": { "type": "string", "enum": ["auto", "cuda", "cpu"] },
+        "resolved": { "type": "string" },
+        "actual": { "type": "string" },
+        "fallback": { "type": "boolean" },
+        "reason": { "type": "string" },
+        "device": { "type": "string" }
       }
     }
   }

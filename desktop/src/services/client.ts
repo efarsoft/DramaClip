@@ -241,6 +241,14 @@ export const localRuntimeApi = {
     dir: string;
     torch_variant: string;
     groups: Record<string, boolean>;
+    /** 人声分离 ORT 后端（安装期真实 session 探测）；旧服务端可能缺省。 */
+    ort_gpu?: {
+      variant: string;
+      gpu: boolean;
+      providers: string[];
+      version: string;
+      reason: string;
+    };
   }> => rpc('models.local_runtime_status', {}),
   install: (): Promise<{ job_id: string }> =>
     rpc<{ job_id: string }>('models.install_local_runtime', {}),

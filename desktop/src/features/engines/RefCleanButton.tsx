@@ -10,6 +10,7 @@ import { App, Button } from 'antd';
 import { useState, type ReactElement } from 'react';
 import { ttsApi } from '../../services/client';
 import { tokens } from '../../styles/theme';
+import { computeLabel } from './assetState';
 
 const GRADE_LABEL: Record<string, string> = { good: '优', fair: '中', poor: '差' };
 
@@ -33,9 +34,11 @@ export function RefCleanButton({
           .cleanReference(path, 'separate')
           .then((result) => {
             const snr = result.quality.metrics.snr_db;
+            const compute = computeLabel(result.compute);
             message.success(
               `清洗完成（${GRADE_LABEL[result.quality.grade] ?? result.quality.grade}）` +
                 (snr === undefined ? '' : ` · 信噪比 ${String(snr)}dB`) +
+                (compute === undefined ? '' : ` · ${compute}`) +
                 '，已换用清洗后的参考',
             );
             onCleaned(result.path);

@@ -1,13 +1,15 @@
 """engines.exporter.ai_label：AI 生成标注（settings export.ai_label，默认关闭）。
 
 业主裁决 2026-10-15：AI 标注由用户决定开启/关闭、默认关闭——本组测试钉住
-「默认关」「滤镜串形状」「失败硬失败」三件事。真实 ffmpeg 执行由真机 DoD 覆盖
-（同 test_encoder.py 的规矩：命令构建在单测，执行在端到端）。
+「默认关」「滤镜串形状」「字体缺失硬失败」「段滤镜而非整片后处理」几件事。
+真实 ffmpeg 执行由真机 DoD 覆盖（同 test_encoder.py 的规矩：命令构建在单测，
+执行在端到端）。
 """
 
 from __future__ import annotations
 
 import inspect
+import random
 from pathlib import Path
 
 import pytest
@@ -82,56 +84,81 @@ def _stub_font(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return face
 
 
-def test_apply_burns_and_replaces(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """开启路径：textfile 写「AI 生成」→ 音频流复制 → 原子替换成片。"""
+def test_prepare_writes_textfile_and_fingerprint(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     _stub_font(monkeypatch, tmp_path)
     work = tmp_path / "work"
-    captured: dict[str, object] = {}
-
-    def fake_run(args: list[str], **kwargs: object) -> None:
-        captured["args"] = args
-        textfiles = list(work.glob(".ai-label-*.txt"))
-        assert len(textfiles) == 1
-        captured["text"] = textfiles[0].read_text(encoding="utf-8")
-        captured["timeout_s"] = kwargs.get("timeout_s")
-        Path(args[-1]).write_bytes(b"labeled")  # 产出 staged，让 os.replace 成功
-
-    monkeypatch.setattr(ai_label.runner, "run", fake_run)
-    out = tmp_path / "film.mp4"
-    out.write_bytes(b"raw")
-    ai_label.apply(out, work, (1080, 1920))
-
-    assert out.read_bytes() == b"labeled", "原地替换为烧过标注的成片"
-    assert captured["text"] == ai_label.LABEL_TEXT
-    assert captured["timeout_s"] == ai_label._TIMEOUT_S
-    joined = " ".join(captured["args"])  # type: ignore[arg-type]
-    assert "-c:a copy" in joined, "音频流复制：保住 loudness 归一成果"
-    assert "-c:v libx264" in joined
-    # 临时 textfile 与 staged 都不残留
-    assert list(work.glob(".ai-label-*.txt")) == []
-    assert not (work / "ai_label_stage.mp4").exists()
+    spec = ai_label.prepare(work, (1080, 1920))
+    assert spec.textfile == work / ".ai-label.txt"
+    assert spec.textfile.read_text(encoding="utf-8") == ai_label.LABEL_TEXT
+    assert spec.vf.startswith("drawtext=")
+    assert len(spec.fingerprint) == 64
+    assert str(spec.textfile) not in spec.fingerprint, "临时路径不进签名"
+    assert list(work.glob(".ai-label-*.txt")) == [], "固定文件名，不留临时文件"
 
 
-def test_apply_ffmpeg_failure_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """ffmpeg 失败 → AiLabelError 上抛（导出记失败），不静默交付无标注成片。"""
-    _stub_font(monkeypatch, tmp_path)
-
-    def boom(args: list[str], **kwargs: object) -> None:
-        raise ai_label.runner.FfmpegError("encode failed")
-
-    monkeypatch.setattr(ai_label.runner, "run", boom)
-    out = tmp_path / "film.mp4"
-    out.write_bytes(b"raw")
-    with pytest.raises(ai_label.AiLabelError, match="encode failed"):
-        ai_label.apply(out, tmp_path / "work", (1080, 1920))
-    assert out.read_bytes() == b"raw", "原片不被半成品替换"
-    assert not (tmp_path / "work" / "ai_label_stage.mp4").exists()
+def test_prepare_fingerprint_tracks_font_content(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """换字体文件内容必须换签名：否则段级复用会拿旧字体的成片顶上。"""
+    face = _stub_font(monkeypatch, tmp_path)
+    first = ai_label.prepare(tmp_path / "work", (1080, 1920))
+    face.write_bytes(b"another-font")
+    second = ai_label.prepare(tmp_path / "work", (1080, 1920))
+    assert first.fingerprint != second.fingerprint
 
 
-def test_apply_without_font_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """随包字体缺失同样硬失败：标注是用户明示要买的，不是可降级的增强项。"""
+def test_prepare_without_font_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(ai_label.ffmpeg_cover, "bundled_font_face", lambda: None)
-    out = tmp_path / "film.mp4"
-    out.write_bytes(b"raw")
     with pytest.raises(ai_label.AiLabelError, match="字体"):
-        ai_label.apply(out, tmp_path / "work", (1080, 1920))
+        ai_label.prepare(tmp_path, (1080, 1920))
+
+
+def test_ai_label_is_a_segment_filter_not_a_post_pass() -> None:
+    assert not hasattr(ai_label, "apply"), "整片后处理必须删除"
+    args = encoder.cut_segment_args(
+        "src.mp4", "out.mp4", start=0, end=1, audio="original", tts_audio=None,
+        rng=random.Random(7), ai_label_vf="drawtext=textfile=x",
+    )
+    vf = args[args.index("-vf") + 1]
+    assert "drawtext=textfile=x" in vf, "标注必须进段滤镜，随 Phase B 流复制拼接"
+
+
+def test_ai_label_fingerprint_enters_the_segment_signature(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """开启标注时内容摘要必须进签名（换文案/字体要重编）；关闭时键缺席，旧缓存不失效。"""
+    from dramaclip.engines.narration.models import PlanData, TimelineSegment
+
+    _stub_font(monkeypatch, tmp_path)
+    source = tmp_path / "ep.mp4"
+    source.write_bytes(b"x")
+    plan = PlanData(
+        mode="raw_clip",
+        timeline=[TimelineSegment(episode_id="ep1", start=0.0, end=1.0, audio="original")],
+    )
+    monkeypatch.setattr(
+        encoder, "_run_cut", lambda args, *_a, **_k: Path(args[-1]).write_bytes(b"seg")
+    )
+    monkeypatch.setattr(
+        encoder, "_concat", lambda _files, out: Path(out).write_bytes(b"film")
+    )
+
+    on_work = tmp_path / "on"
+    encoder._export_plan_once(
+        plan, {"ep1": str(source)}, tmp_path / "on.mp4", on_work, burn_ai_label=True
+    )
+    on_sig = encoder._read_sig(on_work / "seg_000.mp4")
+    assert on_sig is not None
+    assert len(str(on_sig["inputs"]["ai_label"])) == 64
+
+    off_work = tmp_path / "off"
+    encoder._export_plan_once(
+        plan, {"ep1": str(source)}, tmp_path / "off.mp4", off_work, burn_ai_label=False
+    )
+    off_sig = encoder._read_sig(off_work / "seg_000.mp4")
+    assert off_sig is not None
+    assert "ai_label" not in off_sig["inputs"]

@@ -12,7 +12,7 @@ from dramaclip.engines.analysis.transcriber import (
     ParaformerEngine,
     SenseVoiceEngine,
 )
-from dramaclip.infra import config
+from dramaclip.infra import config, device_resolve
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,14 +22,19 @@ _CLOUD_ASR_MODEL = "qwen-audio-3.1-asr-flash"
 class AnalysisRuntime:
     """transcriber 等引擎的懒加载单例容器（线程安全由构建锁保证）。"""
 
-    def __init__(self, settings: config.Settings, models_dir: Path) -> None:
+    def __init__(
+        self, settings: config.Settings, models_dir: Path, data_dir: Path | None = None
+    ) -> None:
         self._settings = settings
         self._models_dir = models_dir
+        self._data_dir = data_dir
         self._transcriber: AsrEngine | None = None
 
     def transcriber(self) -> AsrEngine:
         if self._transcriber is None:
-            self._transcriber = _build_transcriber(self._settings, self._models_dir)
+            self._transcriber = _build_transcriber(
+                self._settings, self._models_dir, self._data_dir
+            )
         return self._transcriber
 
 
@@ -79,7 +84,9 @@ def _resolve_diarization(
     return wanted
 
 
-def _build_transcriber(settings: config.Settings, models_dir: Path) -> AsrEngine:
+def _build_transcriber(
+    settings: config.Settings, models_dir: Path, data_dir: Path | None = None
+) -> AsrEngine:
     engine = settings.get("asr.engine", "faster_whisper")
     if engine not in supported():
         available = " / ".join(sorted(supported()))
@@ -93,6 +100,7 @@ def _build_transcriber(settings: config.Settings, models_dir: Path) -> AsrEngine
                 settings, engine=engine, supports=DashscopeCloudAsrEngine.supports_model(model)
             ),
         )
+    device = resolve_asr_device(engine, settings.get("asr.device", "auto"), data_dir)
     if engine == "paraformer":
         diarize = _resolve_diarization(
             settings, engine=engine, supports=ParaformerEngine.supports_diarization
@@ -102,23 +110,33 @@ def _build_transcriber(settings: config.Settings, models_dir: Path) -> AsrEngine
             vad_model_dir=models_dir / "asr" / "fsmn-vad" if diarize else None,
             spk_model_dir=models_dir / "asr" / "campplus" if diarize else None,
             num_speakers=config.get_int(settings, "asr.num_speakers"),
-            device=settings.get("asr.device", "auto"),
+            device=device,
         )
     # 剩下两个引擎没有说话人通道：auto 关、false 关，显式 true 在核验里炸
     _resolve_diarization(settings, engine=engine, supports=False)
     if engine == "sensevoice":
-        return SenseVoiceEngine(
-            models_dir=models_dir,
-            device=settings.get("asr.device", "auto"),
-        )
+        return SenseVoiceEngine(models_dir=models_dir, device=device)
     model_size = settings.get("asr.model", "base")
-    device = settings.get("asr.device", "cpu")
     return FasterWhisperEngine(
         model_size,
         device=device,
         models_dir=models_dir / "asr" / "faster-whisper",
         compute_type=settings.get("asr.compute_type", "auto"),
     )
+
+
+def resolve_asr_device(engine: str, requested: str | None, data_dir: Path | None) -> str:
+    """设备解析的唯一入口是 `device_resolve`；这里只决定「有没有解析入口」。
+
+    `data_dir is None` 原样透传意图：`resolve_data_dir()` 会 mkdir，不该藏在引擎构造里
+    （测试会因此往真实用户目录写）。自检（`selftest._build_asr`）调同一个函数，判据
+    只有这一份。`compute_type` 不在解析范围——它是 ctranslate2 的量化档位
+    （int8/float16），CPU 上同样有意义。
+    """
+    if data_dir is None:
+        return requested or "auto"
+    resolution = device_resolve.resolve_engine("asr", engine, requested, data_dir)
+    return resolution.device if resolution is not None else (requested or "auto")
 
 
 def language(settings: config.Settings) -> str:

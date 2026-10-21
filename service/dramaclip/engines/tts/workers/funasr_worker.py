@@ -30,21 +30,44 @@ _CUDA_PROBLEM = re.compile(r"cublas|cudnn|cudart|cuda|gpu|int8 compute type", re
 _PUNC_FALSE_ALARM = "Missing punc_model, which is required by spk_model."
 
 
-def _probe_device(device: str) -> str:
-    """auto → 真探针（最小 CUDA 运算）：老卡被认出但新 CUDA 栈无内核，载入大模型才崩。"""
-    if device not in ("", "auto"):
-        return "cuda:0" if device == "cuda" else device
+def _probe_device(device: str) -> tuple[str, str]:
+    """返回 (实际设备, 原因)。显式 cuda 的探针失败由调用方直接判失败。"""
+    if device == "cpu":
+        return "cpu", ""
     import torch  # noqa: PLC0415
 
     if not torch.cuda.is_available():
-        return "cpu"
+        return "cpu", "torch.cuda.is_available() = False"
     try:
         (torch.ones(4, device="cuda") * 2).sum().item()
-        return "cuda:0"
-    except Exception:  # noqa: BLE001 - 任何 CUDA 故障都按不可用处理，诚实回 CPU
+        return "cuda:0", ""
+    except Exception as exc:  # noqa: BLE001 - 任何 CUDA 故障都按不可用处理，诚实回 CPU
         torch.cuda.empty_cache()
         print(">> CUDA 探针失败，回退 CPU", file=sys.stderr)
-        return "cpu"
+        return "cpu", f"{type(exc).__name__}: {exc}"
+
+
+def _model_device(model: Any) -> str | None:
+    """模型真实落点：参数设备是物理证据，funasr 解析后的 kwargs.device 是退路。
+
+    与 transcriber._model_device 同一判据（worker 进程不能 import dramaclip）。
+    """
+    inner = getattr(model, "model", model)
+    parameters = getattr(inner, "parameters", None)
+    if callable(parameters):
+        try:
+            first = next(parameters())
+        except (StopIteration, TypeError):
+            first = None
+        kind = getattr(getattr(first, "device", None), "type", None)
+        if kind in {"cuda", "cpu"}:
+            return str(kind)
+    resolved = getattr(model, "kwargs", None)
+    if isinstance(resolved, dict):
+        value = str(resolved.get("device") or "")
+        if value:
+            return "cuda" if value.startswith("cuda") else "cpu"
+    return None
 
 
 def _build_kwargs(cfg: dict[str, Any], device: str) -> dict[str, Any]:
@@ -96,27 +119,61 @@ def main() -> int:
     os.dup2(2, 1)
     sys.stdout = sys.stderr
 
+    def _emit(obj: dict[str, Any]) -> None:
+        os.write(real_stdout, (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8"))
+
     logging.getLogger("funasr").addFilter(_PuncFilter())
 
     from funasr import AutoModel  # noqa: PLC0415 - 本文件只在 venv 内运行
 
-    device = _probe_device(str(cfg.get("device") or "auto"))
+    requested = str(cfg.get("device") or "auto")
+    device, probe_reason = _probe_device(requested)
+    if requested == "cuda" and device != "cuda:0":
+        _emit({"ready": False, "error": f"请求 CUDA 但探针失败：{probe_reason}"})
+        return 1
+    # 机器没有 CUDA 不算「试过 GPU 后失败」：fallback 只在真探针失败时为真。
+    no_cuda = probe_reason.startswith("torch.cuda.is_available")
+    fallback = bool(probe_reason) and requested != "cpu" and not no_cuda
+    reason = probe_reason if fallback else ""
     kwargs = _build_kwargs(cfg, device)
     try:
         model = AutoModel(**kwargs)
-    except Exception as exc:  # noqa: BLE001 - CUDA 类失败回退 CPU 重试一次（同主进程语义）
-        if device != "cpu" and _CUDA_PROBLEM.search(str(exc)):
-            print(f">> CUDA 加载失败回退 CPU: {str(exc)[:160]}", file=sys.stderr)
-            device = "cpu"
-            kwargs["device"] = device
-            model = AutoModel(**kwargs)
-        else:
+    except Exception as exc:  # noqa: BLE001 - CUDA 类失败按请求语义处理
+        if device == "cpu" or not _CUDA_PROBLEM.search(str(exc)):
             raise
+        if requested == "cuda":
+            _emit({"ready": False, "error": f"CUDA 加载失败：{type(exc).__name__}: {exc}"})
+            return 1
+        print(f">> CUDA 加载失败回退 CPU: {str(exc)[:160]}", file=sys.stderr)
+        device = "cpu"
+        fallback = True
+        reason = f"{type(exc).__name__}: {exc}"
+        kwargs["device"] = device
+        model = AutoModel(**kwargs)
 
-    def _emit(obj: dict[str, Any]) -> None:
-        os.write(real_stdout, (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8"))
+    actual = _model_device(model)
+    if actual is not None:
+        if requested == "cpu" and actual != "cpu":
+            _emit({"ready": False, "error": f"请求 CPU 但 funasr 把模型落在 {actual}"})
+            return 1
+        if device.startswith("cuda") and actual != "cuda":
+            if requested == "cuda":
+                _emit({
+                    "ready": False,
+                    "error": f"请求 CUDA 但 funasr 把模型落在 {actual}（静默回退）",
+                })
+                return 1
+            fallback = True
+            reason = f"funasr 把模型落在 {actual}"
+        device = actual
 
-    _emit({"ready": True, "device": device})
+    _emit({
+        "ready": True,
+        "device": device,
+        "requested": requested,
+        "fallback": fallback,
+        "reason": reason,
+    })
     request: dict[str, Any] = {}
     for line in sys.stdin:
         line = line.strip()

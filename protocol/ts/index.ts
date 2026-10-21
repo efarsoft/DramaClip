@@ -221,6 +221,17 @@ export interface AnalysisJobStatus {
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 
+/** 本次任务实际用了什么算力：请求、解析、实际、是否回退与原因（服务端回执原文）。 */
+export interface ComputeReport {
+  readonly component: string;
+  readonly requested: 'auto' | 'cuda' | 'cpu';
+  readonly resolved: string;
+  readonly actual: string;
+  readonly fallback: boolean;
+  readonly reason: string;
+  readonly device: string;
+}
+
 export interface JobInfo {
   readonly id: string;
   readonly type: string;
@@ -230,6 +241,8 @@ export interface JobInfo {
   /** 人读阶段文本（服务端字段就叫 label，见 protocol/schemas/jobs.json JobInfo）。 */
   readonly label?: string | null;
   readonly error?: string | null;
+  /** 任务终态落库的算力回执；NULL/缺省 = 本次没有可报告的运行证据。 */
+  readonly compute?: readonly ComputeReport[] | null;
   readonly created_at: number;
   readonly updated_at: number;
 }
@@ -316,6 +329,8 @@ export interface PlanData {
   readonly dropped_segments?: number;
   /** 叙事母题 id（story_arc 九卡之一）；空串/缺省 = 角度没带母题（旧库行），卡面跳过。 */
   readonly arc?: string;
+  /** 本次方案配音各引擎的算力回执（只记真实推理过的引擎）。 */
+  readonly compute?: readonly ComputeReport[];
 }
 
 export interface NarrationPlan {
@@ -436,6 +451,8 @@ export interface ExportJob {
   /** 四项自检成绩单；从未自检为 null（徽章整排「—」）。 */
   readonly selfcheck?: SelfCheck | null;
   readonly selfcheck_state?: SelfCheckState | null;
+  /** 本次导出的算力回执（视频编码等）；NULL/缺省 = 未记录。 */
+  readonly compute?: readonly ComputeReport[] | null;
 }
 
 /** 作品库条目（跨项目已完成成片，export.list_works）。 */
@@ -561,6 +578,8 @@ export interface SelftestResult {
   readonly at?: number;
   /** TTS：引擎能力快照。 */
   readonly caps?: SelftestCaps;
+  /** 本次自检实际使用的算力；缺省 = 该引擎没有可报告设备。 */
+  readonly compute?: ComputeReport | null;
 }
 
 /** 自检账本（engines.selftest_results）：key → 结果。 */
@@ -626,6 +645,8 @@ export interface TtsPreviewResult {
   readonly engine: string;
   readonly voice: string;
   readonly text: string;
+  /** 本次合成实际使用的算力（缓存命中带「缓存命中」原因）；缺省 = 未记录。 */
+  readonly compute?: ComputeReport | null;
 }
 
 /** tools.extract_start 返回体。 */
@@ -691,6 +712,11 @@ export interface TtsAutoVoiceResult {
   /** 提取产物质检（B6 口径）。 */
   readonly quality: 'good' | 'fair' | 'poor';
   readonly voice_set: 'tts.voice.indextts2';
+  /** separation=MDX-Net 分离；filter=分离不可用后的可见回退。 */
+  readonly cleaned_with?: 'separation' | 'filter';
+  readonly compute?: ComputeReport | null;
+  /** filter 回退的原因原文。 */
+  readonly clean_reason?: string;
 }
 
 /** narration.recommend_modes 返回体：推荐的模式与理由（随项目缓存）。 */
@@ -707,6 +733,8 @@ export interface TtsCleanReferenceResult {
     readonly reasons: ReadonlyArray<string>;
     readonly suggestions: ReadonlyArray<string>;
   };
+  /** 人声分离本次实际设备；缺省 = 未记录。 */
+  readonly compute?: ComputeReport | null;
 }
 
 /** 引擎配置（云端/服务端点多实例，单启用；出参不含明文 api_key，只出 masked）。 */

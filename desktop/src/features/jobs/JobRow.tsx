@@ -9,6 +9,7 @@ import { jobsApi } from '../../services/client';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 import { useJobsStore } from '../../stores/jobs';
+import { computeLabel } from '../engines/assetState';
 import {
   durationLabel,
   isActiveJob,
@@ -197,6 +198,13 @@ function JobMetaLine({
   }
   if (job.status === 'pending') parts.push('等待并发额度');
   if (elapsed !== null) parts.push(`${isActiveJob(job) ? '已进行' : '耗时'} ${durationLabel(elapsed)}`);
+  if (!isActiveJob(job) && job.status !== 'pending') {
+    const runtime = (job.compute ?? [])
+      .map((report) => computeLabel(report))
+      .filter((label): label is string => label !== undefined)
+      .join(' · ');
+    if (runtime !== '') parts.push(runtime);
+  }
   const showCancel = isActiveJob(job);
   if (parts.length === 0 && !showCancel) return null;
   return (
