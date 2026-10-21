@@ -11,6 +11,13 @@ import sys
 # 必须先于任何可能传递 import huggingface_hub 的模块；setdefault 保留显式调试覆盖。
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
+# stdio 钉 UTF-8：控制台代码页（CI 的 cp1252、中文 Windows 的 GBK）接不住启动横幅与
+# 日志里的中文就整个进程崩（CI 冒烟实证）；Electron spawn 的管道编码由父进程定，
+# 这里 reconfigure 只影响无法编码时的行为，对已协商好的管道无损。
+for _stdio in (sys.stdout, sys.stderr):
+    if _stdio is not None and hasattr(_stdio, "reconfigure"):
+        _stdio.reconfigure(encoding="utf-8")
+
 from dramaclip.service_app import ServiceApp  # noqa: E402 - 须在 env 设置之后 import
 
 _EXIT_ENV_MISSING = 2
