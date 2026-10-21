@@ -3636,6 +3636,13 @@ git commit -m "feat: 队列页认识参考清洗行、设置页摆出 AMF/QSV—
 
 ## Task 11: 全量验证、真机核对与规格订正
 
+> **实测订正（执行本 Task 时记，2026-10-21）**
+> - Step 1 后端全量：`1789 passed, 1 skipped, 0 failed`（337s，退出码 0）。
+> - Step 5 跑法必须补 `--data-dir ../data`：不带它时脚本回落 `%APPDATA%/DramaClip`（那目录 `models/` 是空的、`runtimes/` 只有遗留名 `indextts-venv`），16 项里 12 项 UNSUPPORTED，读起来像「本机缺装」；正确跑法得 **11 pass / 0 fail / 5 unsupported**，`host_gpu` 同时列出 Quadro M4000（nvidia，主）与 RX 5500 XT（amd）并滤掉虚拟显示适配器。验收 JSON 不记 data_dir，事后分辨不出来——这条已进项目环境备忘。
+> - Step 6 不能用 `npm run dev`：dev 模式数据目录硬编码为仓库 `data/`，跑一次即写 live 库。改用一次性 jsdom 走查，把本机 `system.health` 真载荷 + `data/runtimes/tts-venv.ort.json` 真标记喂给各屏读 DOM 文本。两个读数陷阱：① `gpu.snapshot()` 首访只给待定态、真结论在后台线程，一次性 `python -c` 永远读不到，必须同进程轮询到 `ready`；② StatusBar/MachinePanel 的 health 在 useEffect 里，不等 settle 读到的是首帧「待检测」，不是缺陷。
+> - Step 6 走查出的两处口径缺口（**留待业主裁定，本批未动代码**）：`GpuCard` 只读 `gpu_info` 不读 `caps`，在 `faster_whisper_gpu.ready=false` 的宿主上仍写「转写加速（GPU）已就绪 · 首次转写时将自动启用 GPU 加速」——出厂默认 `asr.engine=faster_whisper` 时该承诺为假（本机现设 paraformer 恰好为真，所以 live 库看不出破绽）；`MachinePanel` 的「此卡不支持」列表仍按 `cap.hint === ''` 且硬排除 `indextts2_gpu`/`funasr_gpu`，真机 DOM 实测结果是 `此卡不支持：转写加速、视觉 8B`——sm_70 那条硬事实对用户完全隐身（该排除是 c84ddbb 为「灰灯误导」加的，本批已有 `reason` 字段可替代它）。
+> - Step 7 顺带抓到计划自身的行号漂移：写的 `encoder.py:585` 现为 `:599`，规格里改为引用 `_fallback_eligible()` 函数名而不是行号。
+
 **Files:**
 - Modify: `docs/superpowers/specs/2026-10-20-windows-multi-vendor-gpu-design.md:284`（`_is_hw_encoder` 订正）
 
