@@ -197,7 +197,7 @@ export function ProductionPage() {
         )}
       </div>
       <div ref={exportRef}>
-        <ExportsCard exports={exports} />
+        <ExportsCard exports={exports} onRefresh={() => void reloadExports()} />
       </div>
     </PageShell>
   );

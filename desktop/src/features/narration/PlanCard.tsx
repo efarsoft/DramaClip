@@ -42,12 +42,17 @@ export function PlanCard({
   recommended,
   onToggle,
   episodeCovers = {},
+  onReroll,
+  rerolling = false,
 }: {
   plan: NarrationPlan;
   checked: boolean;
   recommended: boolean;
   onToggle: () => void;
   episodeCovers?: Record<string, SourceEpisode>;
+  /** 重掷此条（规格 §1.3 补救入口）：提供才显示按钮——详情页等只读场合不传。 */
+  onReroll?: () => void;
+  rerolling?: boolean;
 }) {
   const card = planCardView(plan);
   const [copyOpen, setCopyOpen] = useState(false);
@@ -81,7 +86,7 @@ export function PlanCard({
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm, minHeight: 130, flex: 1, minWidth: 0 }}>
-        <CardHeader card={card} recommended={recommended} checked={checked} />
+        <CardHeader card={card} recommended={recommended} checked={checked} onReroll={onReroll} rerolling={rerolling} />
         {card.hook !== '' && <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textPrimary }}>{card.hook}</span>}
         {card.reason !== '' && <span style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, color: tokens.textSecondary }}>{card.reason}</span>}
         {card.gate !== '' && (
@@ -99,10 +104,14 @@ function CardHeader({
   card,
   recommended,
   checked,
+  onReroll,
+  rerolling,
 }: {
   card: PlanCardView;
   recommended: boolean;
   checked: boolean;
+  onReroll?: () => void;
+  rerolling?: boolean;
 }): ReactElement {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, flexWrap: 'wrap' }}>
@@ -118,6 +127,11 @@ function CardHeader({
         </>
       )}
       <CardBadges recommended={recommended} checked={checked} pickable={card.pickable} />
+      {onReroll !== undefined && (
+        <Button size="small" loading={rerolling === true} onClick={(e) => { e.stopPropagation(); onReroll(); }}>
+          重掷
+        </Button>
+      )}
     </div>
   );
 }

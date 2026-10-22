@@ -30,6 +30,8 @@ export interface PlanBatch {
   spec: PlanBatchSpec | null;
   error: string;
   run: (modes: NarrationMode[], k: number) => Promise<void>;
+  /** 重掷单条：同模式产出 1 条新方案、排除被掷掉的那条（粒度定案=单条不是整批）。 */
+  rerollOne: (plan: NarrationPlan) => Promise<void>;
   cancel: () => Promise<void>;
 }
 
@@ -185,5 +187,51 @@ export function usePlanBatch(projectId: string): PlanBatch {
     };
   }, [pollUntilTerminal, projectId]);
 
-  return { planning, percent, stageText, plans, failDetail, batchId, spec, error, run, cancel };
+  /** 重掷单条：同模式 k=1、exclude 掉被掷的那条；新方案落在新批次，**追加**进当前
+   * 视图而不是切走——用户正在挑的是这一批，切走等于把他正在挑的方案藏起来。 */
+  const rerollOne = useCallback(
+    async (plan: NarrationPlan): Promise<void> => {
+      if (planning) return;
+      setPlanning(true);
+      setError('');
+      setFailDetail('');
+      setStageText('重掷此条');
+      try {
+        const { job_id: jobId } = await narrationApi.planVariants(
+          projectId,
+          [plan.narration_mode],
+          1,
+          [plan.id],
+        );
+        jobIdRef.current = jobId;
+        for (;;) {
+          const job = await analysisApi.status(jobId);
+          setStageText(job.message ?? '');
+          setFailDetail(job.error ?? '');
+          if (isTerminal(job.status)) {
+            const all = await narrationApi.listPlans(projectId);
+            setPlans((prev) => {
+              const known = new Set(prev.map((p) => p.id));
+              const grown = all.filter((p) => p.batch_id === jobId && !known.has(p.id));
+              return grown.length > 0 ? [...prev, ...grown] : prev;
+            });
+            if (job.status !== 'completed') {
+              setError(reasonOr(job.error, reasonOr(job.message, `重掷作业${job.status}`)));
+            }
+            return;
+          }
+          await sleep(POLL_INTERVAL_MS);
+        }
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        jobIdRef.current = null;
+        setPlanning(false);
+        setStageText('');
+      }
+    },
+    [planning, projectId],
+  );
+
+  return { planning, percent, stageText, plans, failDetail, batchId, spec, error, run, rerollOne, cancel };
 }

@@ -68,6 +68,8 @@ export function PlanPickList({
             recommended={recommended.includes(plan.id)}
             checked={picked.includes(plan.id)}
             onToggle={() => { setPicked((prev) => toggleId(prev, plan.id)); }}
+            onReroll={() => { void batch.rerollOne(plan); }}
+            rerolling={batch.planning}
           />
         ))}
       </div>

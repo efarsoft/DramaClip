@@ -178,6 +178,22 @@
             "$ref": "#/x-models/ComputeReport"
           },
           "description": "本次导出的算力回执（视频编码等）；NULL = 未记录"
+        },
+        "degraded_notes": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "required": ["subject", "outcome", "at"],
+            "properties": {
+              "subject": { "type": "string" },
+              "outcome": { "type": "string" },
+              "at": { "type": "number" }
+            }
+          },
+          "description": "允许型降级留痕（账在库层）；NULL = 本次无降级"
         }
       }
     },

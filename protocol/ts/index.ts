@@ -473,6 +473,8 @@ export interface ExportJob {
   readonly selfcheck_state?: SelfCheckState | null;
   /** 本次导出的算力回执（视频编码等）；NULL/缺省 = 未记录。 */
   readonly compute?: readonly ComputeReport[] | null;
+  /** 允许型降级留痕（账在库层）；NULL/缺省 = 本次无降级。 */
+  readonly degraded_notes?: readonly { subject: string; outcome: string; at: number }[] | null;
 }
 
 /** 作品库条目（跨项目已完成成片，export.list_works）。 */
