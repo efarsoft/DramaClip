@@ -728,12 +728,10 @@ def render_export(
         # 元信息回填/时长审计失败不影响导出成功——但"没回填、没核对"必须写进账面
         _note_degraded(context, "成片元信息回填与时长审计", "库里没有实测时长，事后核对也没做", exc)
     # 开场 3 秒质检（W6）：零文案模式跳过，解说模式无声开场留痕建议重掷
-    try:
-        _probe_opening_silence(
-            context, str(out_path), str(plan_row["narration_mode"] or ""),
-        )
-    except Exception:  # noqa: BLE001 - 事后体检失败绝不挡已成功的导出
-        pass
+    # （_probe_opening_silence 自带 try-except，不会抛出）
+    _probe_opening_silence(
+        context, str(out_path), str(plan_row["narration_mode"] or ""),
+    )
     # 四项自检（09-10 #29：导出期产出字段）：增强项绝不挡导出，留 NULL 也要留痕
     try:
         _selfcheck_one(context, export_id)
