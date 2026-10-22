@@ -1,6 +1,6 @@
 /** 路由清单：与 navItems.ts 一起构成信息架构的两份数据真相源。 */
 
-export const TOP_LEVEL_ROUTES = ['/', '/projects', '/works', '/queue', '/tools', '/engines', '/settings', '/about'] as const;
+export const TOP_LEVEL_ROUTES = ['/', '/dramas', '/works', '/queue', '/tools', '/engines', '/settings', '/about'] as const;
 
 export const DETAIL_ROUTES = [
   '/drama/:projectId',
@@ -10,6 +10,7 @@ export const DETAIL_ROUTES = [
 
 export const LEGACY_REDIRECTS: Readonly<Record<string, string>> = {
   '/models': '/engines',
+  '/projects': '/dramas',
 };
 
 export const LEGACY_PARAM_REDIRECTS: readonly { from: string; to: string }[] = [

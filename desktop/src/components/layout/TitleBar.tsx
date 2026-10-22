@@ -11,7 +11,7 @@ import logo from '../../assets/logo.png';
 
 export function TitleBar(): React.ReactElement {
   const location = useLocation();
-  const onProjectArea = location.pathname.startsWith('/projects');
+  const onProjectArea = location.pathname.startsWith('/dramas');
   return (
     <div
       style={{

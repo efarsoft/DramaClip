@@ -41,7 +41,7 @@ export function WorkbenchHeader({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceMd }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, flexWrap: 'wrap' }}>
-        <Button size="small" icon={<LeftOutlined />} onClick={() => { void navigate('/projects'); }}>
+        <Button size="small" icon={<LeftOutlined />} onClick={() => { void navigate('/dramas'); }}>
           项目
         </Button>
         <h1 style={PAGE_TITLE}>{project?.name ?? '…'}</h1>

@@ -99,7 +99,7 @@ function WorkbenchFooter({ projectId, doneCount }: { projectId: string; doneCoun
       lockedHint="完成至少一集分析后解锁"
       nextLabel="选择出片模式"
       onPrev={() => {
-        void navigate('/projects');
+        void navigate('/dramas');
       }}
       onNext={() => {
         void navigate(`/projects/${projectId}/produce`);

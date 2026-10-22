@@ -24,7 +24,7 @@ export const NAV_GROUPS: readonly NavGroup[] = ['loop', 'config'];
 
 export const NAV_ITEMS: readonly NavItem[] = [
   { path: '/', label: '工作台', icon: DashboardOutlined, group: 'loop' },
-  { path: '/projects', label: '项目', icon: FolderOutlined, group: 'loop' },
+  { path: '/dramas', label: '剧库', icon: FolderOutlined, group: 'loop' },
   { path: '/works', label: '成品', icon: PlaySquareOutlined, group: 'loop' },
   { path: '/queue', label: '队列', icon: OrderedListOutlined, group: 'loop' },
   { path: '/tools', label: '工具箱', icon: ToolOutlined, group: 'loop' },

@@ -61,7 +61,7 @@ export function DramaShell({
             <Button
               size="small"
               onClick={() => {
-                void navigate('/projects');
+                void navigate('/dramas');
               }}
             >
               回剧库

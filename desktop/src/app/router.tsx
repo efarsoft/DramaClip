@@ -20,7 +20,7 @@ export function Router() {
       <Routes>
         <Route element={<App />}>
           <Route path="/" element={<HomePage />} />
-          <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/dramas" element={<ProjectsPage />} />
           <Route path="/works" element={<WorksPage />} />
           <Route path="/works/:exportId" element={<WorksDetailPage />} />
           <Route path="/queue" element={<QueuePage />} />
