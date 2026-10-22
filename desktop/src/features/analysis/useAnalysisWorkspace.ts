@@ -9,6 +9,7 @@ import type {
 } from '@dramaclip/protocol';
 import { analysisApi, jobsApi, projectApi } from '../../services/client';
 import { syncSelectionOnEpisodes, useDramaSelectionStore } from '../../stores/dramaSelection';
+import { useJobsStore } from '../../stores/jobs';
 import { useUiStore } from '../../stores/ui';
 
 /** status 轮询间隔：progress 通知仅驱动进度条，轮询是可靠性兜底。 */
@@ -54,16 +55,19 @@ async function fetchActiveJob(projectId: string): Promise<AnalysisJobStatus | nu
   }
 }
 
-/** 在跑作业的轮询兜底：settled 即停。 */
+/** 在跑作业的轮询兜底：settled 即停；在跑期间向 jobs 单写方登记快消费档（2s 节距）。 */
 function useJobPolling(job: AnalysisJobStatus | null, refreshJob: (jobId: string) => Promise<void>): void {
   const activeJobId = job?.status === 'running' || job?.status === 'pending' ? job.job_id : null;
+  const enterFast = useJobsStore((state) => state.enterFast);
   useEffect(() => {
     if (activeJobId === null) return;
+    const release = enterFast();
     const timer = setInterval(() => void refreshJob(activeJobId), JOB_POLL_MS);
     return () => {
+      release();
       clearInterval(timer);
     };
-  }, [activeJobId, refreshJob]);
+  }, [activeJobId, enterFast, refreshJob]);
 }
 
 /** 两条真启动路径：全部精转 = analysis.start（勾选集）；仅推荐集精转 = prescreen(then_analyze)。 */
@@ -94,6 +98,7 @@ export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
   const [results, setResults] = useState<AnalysisResults | null>(null);
   const [job, setJob] = useState<AnalysisJobStatus | null>(null);
   const serviceState = useUiStore((state) => state.serviceState);
+  const analysisProgress = useUiStore((state) => state.analysisProgress);
   const selectedIds = useDramaSelectionStore((state) =>
     state.projectId === projectId ? state.episodeIds : EMPTY_SELECTION,
   );
@@ -148,6 +153,15 @@ export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
     },
     [loadAll],
   );
+
+  // progress.update 事件复活（规格 §1.4）：轮询 3s 是兜底对齐，事件到了先把
+  // 进度/阶段并进 job——进度条不必等下一个轮询窗。两条写同一个 job sink。
+  useEffect(() => {
+    if (analysisProgress === null || job === null) return;
+    if (analysisProgress.jobId !== job.job_id) return;
+    if (analysisProgress.percent === job.progress && analysisProgress.message === job.message) return;
+    setJob({ ...job, progress: analysisProgress.percent, message: analysisProgress.message });
+  }, [analysisProgress, job]);
 
   useJobPolling(job, refreshJob);
 

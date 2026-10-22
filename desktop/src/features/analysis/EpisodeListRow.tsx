@@ -250,12 +250,15 @@ function RowMeta({
 }): React.ReactElement {
   // 三态各自可辨；失败用 status/error（#F87171）——#FF4D4F 只留给钩子语义，
   // colorWarning 已被同行的「高光」计数占用，挪用会让失败与提示撞色。
+  // 四态（规格 §1.4）：running 曾被并进「待分析」——单集在跑界面毫无反应
   const state =
     status === 'done'
       ? { label: '已转写', color: tokens.colorSuccess }
       : status === 'failed'
         ? { label: '分析失败', color: tokens.colorError }
-        : { label: '待分析', color: tokens.textTertiary };
+        : status === 'running'
+          ? { label: '分析中', color: tokens.colorPrimary }
+          : { label: '待分析', color: tokens.textTertiary };
   return (
     <span
       style={{

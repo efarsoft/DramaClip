@@ -15,6 +15,9 @@ interface HeaderProps {
   doneCount: number;
   running: boolean;
   progressPercent: number;
+  /** 已选集数与 canStart（规格 §1.4）：勾 0 集点「批量分析」是静默 no-op——按钮禁用 + 回声。 */
+  selectedCount: number;
+  canStart: boolean;
   tier: TranscribeTier;
   onTierChange: (next: TranscribeTier) => void;
   onBatchAnalyze: () => void;
@@ -29,6 +32,8 @@ export function WorkbenchHeader({
   doneCount,
   running,
   progressPercent,
+  selectedCount,
+  canStart,
   tier,
   onTierChange,
   onBatchAnalyze,
@@ -62,9 +67,14 @@ export function WorkbenchHeader({
               取消分析
             </Button>
           ) : (
-            <Button size="small" disabled={total === 0} onClick={onBatchAnalyze}>
-              {tier === 'recommended' ? '预筛后精转推荐集' : '批量分析所选'}
-            </Button>
+            <>
+              <span style={{ ...TEXT_META, color: tokens.textTertiary }}>
+                已选 <span style={NUM}>{String(selectedCount)}/{String(total)}</span> 集
+              </span>
+              <Button size="small" disabled={!canStart} onClick={onBatchAnalyze}>
+                {tier === 'recommended' ? '预筛后精转推荐集' : '批量分析所选'}
+              </Button>
+            </>
           )}
         </span>
       </div>

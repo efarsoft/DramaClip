@@ -96,7 +96,7 @@ function TraceBody({
         <TraceContent content={content} onBack={onBack} />
       ) : traces === null ? (
         <div style={{ textAlign: 'center', padding: tokens.spaceXl }}>
-          <Spin />
+          <Spin /> 正在读留痕清单
         </div>
       ) : traces.length === 0 ? (
         <div style={{ color: tokens.textTertiary, textAlign: 'center', padding: tokens.spaceXl }}>
@@ -115,7 +115,7 @@ function TraceBody({
       )}
       {reading !== null && content === '' && error === '' && (
         <div style={{ textAlign: 'center', padding: tokens.spaceSm }}>
-          <Spin size="small" />
+          <Spin size="small" /> 正在读留痕原文
         </div>
       )}
     </>

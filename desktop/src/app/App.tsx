@@ -3,6 +3,7 @@ import { AppLayout } from '../components/layout/AppLayout';
 import { JobsFeed } from '../features/jobs/JobsFeed';
 import { onServiceEvent, systemApi } from '../services/client';
 import { subscribeAnalysisProgress, subscribeModelDownloadProgress, useUiStore } from '../stores/ui';
+import { subscribeNotifyLog } from '../stores/jobs';
 
 /** 应用壳：装配全局事件订阅 + 布局 + 任务喂数（docs/desktop/01 §1）。 */
 export function App() {
@@ -16,6 +17,7 @@ export function App() {
     [setServiceState],
   );
   useEffect(() => subscribeAnalysisProgress(), []);
+  useEffect(() => subscribeNotifyLog(), []);
   useEffect(() => subscribeModelDownloadProgress(), []);
 
   // 刷新后补发事件可能早于订阅，主动校准一次服务状态

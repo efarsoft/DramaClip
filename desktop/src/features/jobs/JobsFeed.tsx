@@ -14,6 +14,7 @@ const LIST_LIMIT = 200;
 export function JobsFeed(): ReactElement {
   const serviceState = useUiStore((state) => state.serviceState);
   const drawerOpen = useJobsStore((state) => state.drawerOpen);
+  const fast = useJobsStore((state) => state.fast);
 
   useEffect(() => {
     if (serviceState !== 'ready') return;
@@ -31,12 +32,12 @@ export function JobsFeed(): ReactElement {
         });
     };
     tick();
-    const timer = setInterval(tick, drawerOpen ? OPEN_INTERVAL_MS : CLOSED_INTERVAL_MS);
+    const timer = setInterval(tick, drawerOpen || fast > 0 ? OPEN_INTERVAL_MS : CLOSED_INTERVAL_MS);
     return () => {
       stopped = true;
       clearInterval(timer);
     };
-  }, [serviceState, drawerOpen]);
+  }, [serviceState, drawerOpen, fast]);
 
   return <JobDrawer />;
 }

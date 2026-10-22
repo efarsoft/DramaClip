@@ -38,6 +38,8 @@ export function WorkbenchPage() {
         doneCount={doneCount}
         running={running}
         progressPercent={running && workspace.job !== null ? workspace.job.progress : 0}
+        selectedCount={workspace.selectedIds.length}
+        canStart={workspace.canStart}
         tier={tierState.tier}
         onTierChange={tierState.setTier}
         onBatchAnalyze={() => {

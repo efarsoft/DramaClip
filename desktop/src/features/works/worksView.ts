@@ -91,12 +91,14 @@ export function episodeLabel(episodeIds: readonly string[] | null | undefined, e
 }
 
 /** 自检筛选 chip（#30）：'all' 只活在界面层，不发服务端。 */
-export type WorksFilterKey = 'all' | 'passed' | 'failed' | 'unchecked';
+export type WorksFilterKey = 'all' | 'passed' | 'failed' | 'partial' | 'unchecked';
 
 export const WORKS_FILTERS: readonly { key: WorksFilterKey; label: string }[] = [
   { key: 'all', label: '全部' },
   { key: 'passed', label: '自检通过' },
   { key: 'failed', label: '有红' },
+  // partial = 「有灰无红」（自检部分量到、部分量不到）：此前筛不出也看不见（规格 §1.4）
+  { key: 'partial', label: '有灰' },
   { key: 'unchecked', label: '未检' },
 ];
 

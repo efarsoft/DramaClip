@@ -92,6 +92,7 @@ function JobsBody(): ReactElement {
       <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
         仅显示最近变更的 200 条任务。
       </span>
+      <SessionLogFeed />
     </div>
   );
 }
@@ -138,4 +139,42 @@ function useCancelJob(): [Readonly<Record<string, CancelNote>>, (jobId: string) 
       });
   };
   return [notes, cancel];
+}
+
+
+/** 本会话留痕（规格 §1.2 实时流）：log.append 按作业归档的滚动视图，只增不清——
+ * 事后可查的账在 export_jobs.degraded_notes，这里只服务「作业进行中」的即时观察。 */
+function SessionLogFeed(): React.ReactElement {
+  const notifyLog = useJobsStore((state) => state.notifyLog);
+  if (notifyLog.length === 0) {
+    return (
+      <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
+        本会话暂无业务日志。
+      </span>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
+        本会话留痕（实时流，重启即失；事后账在任务与成片记录里）
+      </span>
+      <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {notifyLog.map((entry, index) => (
+          <span
+            key={entry.at + String(index)}
+            style={{
+              fontSize: tokens.text.badge.size,
+              lineHeight: tokens.text.badge.leading,
+              fontFamily: 'monospace',
+              color: entry.level === 'warn' ? tokens.colorWarning : tokens.textTertiary,
+              wordBreak: 'break-all',
+            }}
+          >
+            {entry.jobId !== null ? `[${entry.jobId.slice(0, 6)}] ` : ''}
+            {entry.message}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
