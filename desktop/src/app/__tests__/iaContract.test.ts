@@ -59,10 +59,9 @@ describe('信息架构一致性', () => {
   });
 
   it('保参重定向表的目标存在，且参数名逐一对应', () => {
-    const known = new Set<string>(TOP_LEVEL_ROUTES);
+    const known = new Set<string>([...TOP_LEVEL_ROUTES, ...DETAIL_ROUTES]);
     for (const entry of LEGACY_PARAM_REDIRECTS) {
-      const base = entry.to.replace(/\/:\w+$/, '');
-      expect(known.has(base), `${entry.from} → ${entry.to}：目标基路径不是顶层路由`).toBe(true);
+      expect(known.has(entry.to), `${entry.from} → ${entry.to}：目标不是已登记的路由`).toBe(true);
       const fromParams = [...entry.from.matchAll(/:(\w+)/g)].map((match) => match[1]);
       const toParams = [...entry.to.matchAll(/:(\w+)/g)].map((match) => match[1]);
       expect(toParams, '保参重定向的参数名必须逐一对应').toEqual(fromParams);
@@ -70,13 +69,11 @@ describe('信息架构一致性', () => {
     }
   });
 
-  it('单剧入口与出片页都指向已登记的详情路由', () => {
+  it('单剧入口与出片页都指向已登记的详情路由（剧空间合一单路由）', () => {
     const sample = dramaEntryPath('abc123');
-    expect(sample).toBe('/projects/abc123/analysis');
-    expect(dramaProducePath('abc123')).toBe('/projects/abc123/produce');
-    for (const p of [sample, dramaProducePath('abc123')]) {
-      expect(DETAIL_ROUTES.some((route) => route.endsWith(p.slice(p.lastIndexOf('/'))))).toBe(true);
-    }
+    expect(sample).toBe('/drama/abc123?focus=analysis');
+    expect(dramaProducePath('abc123')).toBe('/drama/abc123?focus=planning');
+    expect(DETAIL_ROUTES).toContain('/drama/:projectId');
   });
 
   it('三份清单内部都没有重复', () => {

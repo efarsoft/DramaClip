@@ -5,11 +5,9 @@ import { useNavigate } from 'react-router-dom';
 import type { Project } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
 import type { TranscribeTier } from './analysisView';
-import { StepsNav } from './StepsNav';
 import { TierPicker } from './TierPicker';
 
 interface HeaderProps {
-  projectId: string;
   project: Project | null;
   total: number;
   doneCount: number;
@@ -26,7 +24,6 @@ interface HeaderProps {
 }
 
 export function WorkbenchHeader({
-  projectId,
   project,
   total,
   doneCount,
@@ -78,7 +75,6 @@ export function WorkbenchHeader({
           )}
         </span>
       </div>
-      <StepsNav projectId={projectId} stepReady={doneCount > 0} />
     </div>
   );
 }

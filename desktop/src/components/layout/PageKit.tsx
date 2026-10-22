@@ -133,8 +133,6 @@ export function PageSection({
 
 /** 向导页底栏：上一步 / 进度文案 / 下一步（禁用时给出解锁条件）。 */
 export function PageFooter({
-  step,
-  total,
   canProceed,
   proceedHint,
   lockedHint,
@@ -142,8 +140,6 @@ export function PageFooter({
   onPrev,
   onNext,
 }: {
-  step: number;
-  total: number;
   canProceed: boolean;
   proceedHint: string;
   /** 未满足推进条件时悬停给出的原因；不传则不给提示。 */
@@ -165,13 +161,6 @@ export function PageFooter({
         borderTop: `1px solid ${tokens.borderSecondary}`,
       }}
     >
-      <Button
-        icon={<RightOutlined style={{ transform: 'rotate(180deg)' }} />}
-        disabled={step <= 1}
-        onClick={onPrev}
-      >
-        上一步
-      </Button>
       <span
         style={{
           fontSize: tokens.text.meta.size,
@@ -179,7 +168,7 @@ export function PageFooter({
           color: tokens.textTertiary,
         }}
       >
-        步骤 {String(step)} / {String(total)} · {proceedHint}
+        {proceedHint}
       </span>
       <Tooltip title={canProceed ? '' : (lockedHint ?? '')}>
         <Button type="primary" style={{ marginLeft: 'auto' }} disabled={!canProceed} onClick={onNext}>

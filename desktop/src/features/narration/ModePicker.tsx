@@ -1,4 +1,4 @@
-/** 阶段①（规格 §6 的 ③）：选模式、定每个模式出几条，发起规划并显示进度。 */
+/** 阶段·选模式（规格 §6 的 ③）：选模式、定每个模式出几条，发起规划并显示进度。 */
 import { Alert, Button, Card, Select, Tag } from 'antd';
 import { PageSection } from '../../components/layout/PageKit';
 import type { ModeRecommendation, NarrationMode } from '@dramaclip/protocol';
@@ -35,7 +35,7 @@ export function ModePicker({
   onKChange: (k: number) => void;
 }) {
   return (
-    <PageSection title="① 选模式，出方案">
+    <PageSection title="选模式，出方案">
       {recommendation !== null && recommendation.modes.length > 0 && (
         <RecommendationLine recommendation={recommendation} recLoading={recLoading} onReroll={onReroll} />
       )}

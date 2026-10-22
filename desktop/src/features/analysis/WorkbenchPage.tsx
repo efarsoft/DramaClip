@@ -32,7 +32,6 @@ export function WorkbenchPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg, height: '100%' }}>
       <WorkbenchHeader
-        projectId={projectId}
         project={project}
         total={workspace.episodes.length}
         doneCount={doneCount}
@@ -91,8 +90,6 @@ function WorkbenchFooter({ projectId, doneCount }: { projectId: string; doneCoun
   const navigate = useNavigate();
   return (
     <PageFooter
-      step={1}
-      total={4}
       canProceed={doneCount > 0}
       proceedHint={
         doneCount === 0

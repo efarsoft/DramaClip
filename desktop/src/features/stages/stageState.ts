@@ -159,8 +159,7 @@ export function activeStageOf(activeTypes: ReadonlySet<string>): StageKey | null
 
 /** 阶段 → 剧空间真实路由：①② 的界面在分析页里，③④ 的界面在出片页里。 */
 export function stageRoute(dramaId: string, stage: StageKey): string {
-  if (stage === 'intake' || stage === 'analysis') return `/projects/${dramaId}/analysis`;
-  return `/projects/${dramaId}/produce`;
+  return `/drama/${dramaId}?focus=${stage}`;
 }
 
 /** 一条剧只给一条卡点：按「失败 > 过期 > 没喂料 > 正在跑 > 停滞 > 没开跑」取最重的一条。 */

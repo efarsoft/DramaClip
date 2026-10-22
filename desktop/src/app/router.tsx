@@ -30,20 +30,11 @@ export function Router() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/about" element={<AboutPage />} />
           {/* 剧空间壳（卷三意见 06 第一刀）：组合挂载，path 字面量与 IA 登记表零漂移 */}
+          {/* 剧空间合一（W3·§3.2-1）：单路由两区块，阶段条变纯锚点 */}
           <Route
-            path="/projects/:projectId/analysis"
+            path="/drama/:projectId"
             element={
-              <DramaShell>
-                <WorkbenchPage />
-              </DramaShell>
-            }
-          />
-          <Route
-            path="/projects/:projectId/produce"
-            element={
-              <DramaShell>
-                <ProductionPage />
-              </DramaShell>
+              <DramaShell analysis={<WorkbenchPage />} produce={<ProductionPage />} />
             }
           />
           {Object.entries(LEGACY_REDIRECTS).map(([from, to]) => (

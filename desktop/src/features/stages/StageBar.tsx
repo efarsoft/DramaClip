@@ -37,9 +37,8 @@ export interface StageBarProps {
 
 /** 段目标带 focus 参数：出片页内 ③④ 各有实体卡片区，滚过去而不是只到页顶。 */
 function segmentTarget(projectId: string, key: StageKey): string {
-  const base = stageRoute(projectId, key);
-  if (key === 'planning' || key === 'export') return `${base}?focus=${key}`;
-  return base;
+  // stageRoute 已带 ?focus=（合一单路由后全段都是锚点），不再二次拼接
+  return stageRoute(projectId, key);
 }
 
 export function StageBar({ projectId, stages, note, factsError, current, activeStage, activeProgress }: StageBarProps): ReactElement {

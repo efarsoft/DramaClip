@@ -1,4 +1,4 @@
-/** 阶段②（规格 §6 的 ④）：只读方案卡 → 勾选 → 开始出片；卡头覆盖度行常驻（静默清单第 2 条），
+/** 阶段·挑方案（规格 §6 的 ④）：只读方案卡 → 勾选 → 开始出片；卡头覆盖度行常驻（静默清单第 2 条），
  * 底栏成本预估一期口径（意见08）：条数 + 磁盘（估），耗时/LLM 没有实测口径就是「—」。 */
 import { Alert, Button, Empty, Tooltip } from 'antd';
 import { useEffect, useState } from 'react';
@@ -55,7 +55,7 @@ export function PlanPickList({
   const disk = estimateDisk(picked.length, avgBytes);
   return (
     <PageSection
-      title="② 挑方案，去出片"
+      title="挑方案，去出片"
       dense
       extra={coverage === null ? undefined : <CoverageChip coverage={coverage} />}
     >
@@ -92,7 +92,7 @@ export function PlanPickList({
 /** 还没有方案：区分「正在产出」与「还没点生成」两种空，不混成一句话。 */
 function NoPlansSection({ planning }: { planning: boolean }): React.ReactElement {
   return (
-    <PageSection title="② 挑方案，去出片" dense>
+    <PageSection title="挑方案，去出片" dense>
       <Empty
         description={planning ? '方案正在一条条产出' : '选好模式、定每个模式几条，点「生成方案」'}
         styles={{ image: { height: 60 } }}

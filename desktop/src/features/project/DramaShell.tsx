@@ -1,29 +1,53 @@
-/** 剧空间壳（卷三意见 06）：布局 + 大阶段条；第二刀完成任务账状态提升。
+/** 剧空间壳（W3·档3 结构手术 §3.2-1）：单路由 /drama/:id，两块内容上下堆叠。
  *
- * 壳 = 顶部大阶段条 + 子区滚动容器。用组合而不是嵌套路由：router.tsx 的 path
- * 字面量与 IA 登记表（iaContract）零漂移。任务账来自全局 stores/jobs（JobsFeed
- * 唯一轮询点），壳不自拉 jobs.list——阶段灯随快照实时点亮。
- * 高度链要显式接管：分析页根部 height:100% 需要确定高度的父级，出片页长内容
- * 在壳内滚动（main 不再二次滚动）——壳不给高度链，域页会被压扁。
- * 剧找不到时横幅压顶但 children 照渲染：壳是加法，不替域页做「渲染与否」的决定，
- * 账本暂时取不到也不连坐白屏。
+ * 阶段条是纯锚点：?focus= 由 StageBar/入口路径携带（analysis/intake → 分析区块，
+ * planning/export → 出片区块内部锚由 useFocusScroll 接管），滚动监听把「当前段」
+ * 归到真实滚动位置——①④ 可达性问题由构造消失（旧双路由把 ①②③④ 切歪）。
+ * 剧找不到时横幅压顶但区块照渲染：壳是加法，不替域页做「渲染与否」的决定。
  */
 import { Alert, Button } from 'antd';
-import type { ReactElement, ReactNode } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { tokens } from '../../styles/theme';
 import { StageBar } from '../stages/StageBar';
-import type { StageKey } from '../stages/stageState';
+import { type StageKey } from '../stages/stageState';
 import { useDramaFacts } from './useDramaFacts';
 
-export function DramaShell({ children }: { children: ReactNode }): ReactElement {
+export function DramaShell({
+  analysis,
+  produce,
+}: {
+  analysis: ReactNode;
+  produce: ReactNode;
+}): ReactElement {
   const { projectId } = useParams();
-  const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const id = projectId ?? '';
   const { state } = useDramaFacts(id);
-  // 路由决定「现在在哪一段」：出片页覆盖③规划与④出片，高亮取③（进入出片先面对规划）
-  const current: StageKey = location.pathname.endsWith('/produce') ? 'planning' : 'analysis';
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [current, setCurrent] = useState<StageKey>('analysis');
+
+  // focus 锚点：analysis/intake → 分析区块顶；planning/export → 出片区块内部的
+  // useFocusScroll 自管（它读同一 query），这里只负责滚到区块骨架。
+  const focus = searchParams.get('focus');
+  useEffect(() => {
+    if (focus !== 'analysis' && focus !== 'intake') return;
+    document.getElementById('drama-section-analysis')?.scrollIntoView({ block: 'start' });
+  }, [focus]);
+
+  // 滚动监听 → current（§3.2-1：current 由实际滚动区块决定，不由路由后缀）
+  const onScroll = (): void => {
+    const container = containerRef.current;
+    if (container === null) return;
+    const boundary = container.getBoundingClientRect().top + 96;
+    let best: StageKey = 'analysis';
+    const production = document.getElementById('drama-section-produce');
+    if (production !== null && production.getBoundingClientRect().top <= boundary) {
+      best = 'planning';
+    }
+    setCurrent(best);
+  };
 
   return (
     <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
@@ -56,7 +80,18 @@ export function DramaShell({ children }: { children: ReactNode }): ReactElement 
           activeProgress={state.kind === 'ok' ? state.activeProgress : null}
         />
       )}
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>{children}</div>
+      <div
+        ref={containerRef}
+        onScroll={onScroll}
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: tokens.space2xl }}
+      >
+        <section id="drama-section-analysis" style={{ display: 'flex', flexDirection: 'column' }}>
+          {analysis}
+        </section>
+        <section id="drama-section-produce" style={{ display: 'flex', flexDirection: 'column' }}>
+          {produce}
+        </section>
+      </div>
     </div>
   );
 }
