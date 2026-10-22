@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -19,6 +19,7 @@ from dramaclip.api.export_audit import (
     _log_clock_audit,
     _note_degraded,
     _planned_narration_segments,
+    _probe_opening_silence,
 )
 from dramaclip.api.export_covers import (
     SubtitleCover,
@@ -41,6 +42,7 @@ from dramaclip.engines.subtitle.ass_generator import (
     line_char_cap,
     split_subtitle_text,
 )
+from dramaclip.engines.subtitle.srt import SrtCue, format_srt
 from dramaclip.infra import compute, config
 from dramaclip.infra.ffmpeg import (
     cover as ffmpeg_cover,  # noqa: F401 - 测试经 export_api.ffmpeg_cover 取模块对象打桩，引用面保留
@@ -444,8 +446,8 @@ def _run_selfcheck_batch(context: AppContext, job_id: str, export_ids: list[str]
 def delete_export(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     """删除一条成片（09-10 §3.4 危险操作规矩）：文件先移入 <data>/.trash/<日期>/ 再删行。
 
-    可恢复性落在文件层：成片与封面都搬（不搬封面就成孤儿），「关于 → 本地数据」
-    入口可达 .trash；DB 行硬删（与 project.delete 同先例）。两类失败分开对待：
+    可恢复性落在文件层：成片、封面与逐句时间轴旁挂文件都搬（不搬就成孤儿），「关于 →
+    本地数据」入口可达 .trash；DB 行硬删（与 project.delete 同先例）。两类失败分开对待：
     文件不在盘上 → 如实报 missing、不挡删行（记录指向的东西本来已经没了）；
     围栏/OSError → 整单拒绝（宁留记录，不产无法追溯的孤儿文件）。
     """
@@ -457,11 +459,16 @@ def delete_export(context: AppContext, params: dict[str, Any]) -> dict[str, Any]
     trash_dir = root / ".trash" / date.today().isoformat()
     trashed: list[str] = []
     missing: list[str] = []
+    targets: list[Path] = []
     for key in ("output_path", "cover_path"):
         raw = row.get(key)
-        if not raw:
-            continue
-        path = Path(str(raw))
+        if raw:
+            targets.append(Path(str(raw)))
+    sidecar = Path(str(row["output_path"])).with_suffix(".srt") if row.get("output_path") else None
+    if sidecar is not None and sidecar.is_file():
+        # 逐句时间轴旁挂文件不在 DB 列里（路径由成片名推出），盘上有就得跟着走
+        targets.append(sidecar)
+    for path in targets:
         if not path.is_file():
             missing.append(str(path))
             continue
@@ -575,6 +582,8 @@ def render_export(
 
     # 台词时钟对账（立案④）：逐段记 (烧录行数, 可对照行数, 零重叠行数)，出片后汇总一条明账。
     clock_stats: list[tuple[int, int, int]] = []
+    # 逐段收下的**段内相对**字幕行，出片后按 Phase B 实测偏移搬到成片刻度（H1）
+    burned_lines: dict[int, list[tuple[float, float, str]]] = {}
 
     def burn_subtitle(segment_index: int, text: str, duration_s: float) -> str:
         """生成段级 ass 文件并返回路径（相对时间轴 0→duration）。
@@ -605,6 +614,9 @@ def render_export(
                 }
             )
             cursor += span
+        burned_lines[segment_index] = [
+            (float(line["start"]), float(line["end"]), str(line["text"])) for line in lines
+        ]
         ass_path.write_text(
             build_ass(
                 lines,
@@ -640,6 +652,9 @@ def render_export(
             lines.extend(_dialogue_ass_lines(item, cap))
         if not lines:
             return None
+        burned_lines[segment_index] = [
+            (float(line["start"]), float(line["end"]), str(line["text"])) for line in lines
+        ]
         ass_dir = context.work_dir / "export" / export_id
         ass_dir.mkdir(parents=True, exist_ok=True)
         ass_path = ass_dir / f"seg_{segment_index:03d}.ass"
@@ -665,6 +680,8 @@ def render_export(
     # 算力回执：导出成功才落库（失败没有「这次用了什么」的终态可言）；
     # export_jobs 与 jobs 两处同写，界面读哪张表都不会各说各话。
     reports: list[compute.ComputeReport] = []
+    # 拼接清单上的实测偏移（成片逐句时间轴的刻度来源）；成功轮只会到一份，取最后一条
+    offsets_emitted: list[Sequence[tuple[int, float]]] = []
     encoder.export_plan(
         plan_data,
         episode_paths,
@@ -688,6 +705,7 @@ def render_export(
         burn_ai_label=ai_label.enabled(context.settings),
         compute_sink=reports.append,
         encoder_requested=codec_setting,
+        segment_offsets_sink=offsets_emitted.append,
     )
     # 清洗在前、编码在后：读账的人按时间顺序看（规格 §3.5）
     receipt = [*run.voice_reports, *(item.to_dict() for item in reports)]
@@ -696,6 +714,10 @@ def render_export(
         context.job_store.set_compute(job_id, receipt)
     _log_clock_audit(context, clock_stats)
     exports_repo.mark_completed(context.conn, export_id, str(out_path))
+    _write_film_srt(
+        context, out_path, burned_lines,
+        dict(offsets_emitted[-1]) if offsets_emitted else None,
+    )
     try:
         media = probe.probe(out_path)
         exports_repo.set_meta(
@@ -705,6 +727,13 @@ def render_export(
     except (ValueError, OSError) as exc:
         # 元信息回填/时长审计失败不影响导出成功——但"没回填、没核对"必须写进账面
         _note_degraded(context, "成片元信息回填与时长审计", "库里没有实测时长，事后核对也没做", exc)
+    # 开场 3 秒质检（W6）：零文案模式跳过，解说模式无声开场留痕建议重掷
+    try:
+        _probe_opening_silence(
+            context, str(out_path), str(plan_row["narration_mode"] or ""),
+        )
+    except Exception:  # noqa: BLE001 - 事后体检失败绝不挡已成功的导出
+        pass
     # 四项自检（09-10 #29：导出期产出字段）：增强项绝不挡导出，留 NULL 也要留痕
     try:
         _selfcheck_one(context, export_id)
@@ -723,6 +752,43 @@ def render_export(
     except (OSError, ValueError) as exc:
         _note_degraded(context, "封面截帧", "本条成片没有封面（列表用占位图）", exc)
     return out_path
+
+
+def _write_film_srt(
+    context: AppContext,
+    out_path: Path,
+    burned_lines: dict[int, list[tuple[float, float, str]]],
+    offsets: dict[int, float] | None,
+) -> None:
+    """成片同名 `.srt`：段内相对字幕时刻 + Phase B 实测段偏移＝成片刻度。
+
+    偏移来自渲染层拼接清单的实测段长，不是 `timeline[].start/end` 声明窗口——后者不含
+    抖动切点与保护区外扩，用它凑出来的时间轴整条错位，跳到的是别的句子（比没有更坏，
+    且看不出来）。所以量不到就**不落盘**，只记一条允许型降级。
+    不烧字幕的模式（raw_clip）本来没有逐句可核对：空账不是降级。
+    """
+    rows = [
+        (index, start, end, text)
+        for index in sorted(burned_lines)
+        for (start, end, text) in burned_lines[index]
+    ]
+    if not rows:
+        return
+    if offsets is None or any(row[0] not in offsets for row in rows):
+        _note_degraded(context, "成片逐句时间轴", "出片页点不开逐句核对，只有视频本身")
+        return
+    try:
+        out_path.with_suffix(".srt").write_text(
+            format_srt(
+                [
+                    SrtCue(offsets[index] + start, offsets[index] + end, text)
+                    for index, start, end, text in rows
+                ]
+            ),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        _note_degraded(context, "成片逐句时间轴", "出片页点不开逐句核对（旁挂文件没写成）", exc)
 
 
 def _needs_voice(plan: PlanData) -> bool:

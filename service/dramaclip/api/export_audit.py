@@ -8,6 +8,9 @@
 from __future__ import annotations
 
 import logging
+import re
+import subprocess
+import sys
 from typing import Any
 
 from dramaclip.api.context import AppContext
@@ -155,3 +158,44 @@ def _log_clock_audit(context: AppContext, stats: list[tuple[int, int, int]]) -> 
         _note_degraded(context, "台词时钟对账", "本条成片的驻留窗重叠没有账面", exc)
         return
     _emit_note(context, "info", message)
+
+
+# ── 开场 3 秒质检（W6·§6.1）───────────────────────────────────────────
+
+_SILENCE_THRESHOLD_DB = -50.0
+"""麦克风/环境底噪在 −60 以下，−50 是「有内容」与「近似无声」的干净分界（实测）。"""
+
+
+def _probe_opening_silence(
+    context: AppContext, output_path: str, narration_mode: str
+) -> None:
+    """导出后探测成片前 3 秒的音频响度——解说模式无声开场是钩子站不住的信号。
+
+    零文案模式（raw_clip 等）开场只有画面是合法路径，不检查。
+    探测自身失败静默跳过——事后体检不许拖垮已成功的导出。
+    """
+    from dramaclip.api.narration_plans import _NO_TTS_MODES  # noqa: PLC0415 - 延迟导入避免循环
+
+    if narration_mode in _NO_TTS_MODES:
+        return
+    try:
+        null_dev = "NUL" if sys.platform == "win32" else "/dev/null"
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        result = subprocess.run(
+            ["ffmpeg", "-i", output_path, "-t", "3",
+             "-af", "volumedetect", "-f", "null", null_dev],
+            capture_output=True, text=True, timeout=15, creationflags=flags, check=False,
+        )
+        match = re.search(r"mean_volume:\s*(-?[\d.]+)\s*dB", result.stderr)
+        if match is None:
+            return
+        mean_db = float(match.group(1))
+        if mean_db >= _SILENCE_THRESHOLD_DB:
+            return
+        _note_degraded(
+            context, "开场 3 秒质检",
+            f"前 3 秒平均响度 {mean_db:.0f}dB（阈值 {_SILENCE_THRESHOLD_DB:.0f}）——"
+            "钩子可能站不住，建议在方案层重掷此条钩子",
+        )
+    except Exception:  # noqa: BLE001 - 事后体检失败绝不挡已成功的导出
+        pass
