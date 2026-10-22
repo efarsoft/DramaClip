@@ -21,6 +21,11 @@ _JOB_ID: ContextVar[str | None] = ContextVar("dramaclip_job_id", default=None)
 logger = logging.getLogger("dramaclip.job")
 
 
+def current_job_id() -> str | None:
+    """当前线程绑定的作业 id（无作业上下文为 None）：降级账等库面写入靠它解析作业引用。"""
+    return _JOB_ID.get()
+
+
 class Notifier:
     """把业务事件包装为 JSON-RPC 通知并发送。engines 不直接持有本类——api 层注入。"""
 

@@ -13,6 +13,8 @@ from typing import Any
 from dramaclip.api.context import AppContext
 from dramaclip.engines.exporter import encoder
 from dramaclip.engines.narration.models import PlanData
+from dramaclip.infra.storage.repos import exports as exports_repo
+from dramaclip.transport import notify as notify_mod
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,9 +41,26 @@ def _note_degraded(
 
     这些分支原先一律 `contextlib.suppress(Exception)` 或 `pass`——账面干净得像一切
     正常，而「没做成」和「做出来没问题」是两回事（§3.3.1「允许，但必须留痕」）。
+
+    两层账（规格 §1.2）：通知流是实时面（重启即失），**库是真相源**——导出作业
+    上下文内追加进 `export_jobs.degraded_notes`，成片卡/队列页事后可读。无作业
+    上下文（成片列表重测等旁路调用）只有通知面，如实不落库。
     """
     detail = "" if exc is None else f"：{type(exc).__name__}: {str(exc)[:120]}"
-    _emit_note(context, "warn", f"{subject}未落地{detail}——{outcome}")
+    message = f"{subject}未落地{detail}——{outcome}"
+    _emit_note(context, "warn", message)
+    _ledger(context, subject, outcome)
+
+
+def _ledger(context: AppContext, subject: str, outcome: str) -> None:
+    """账在库层：作业上下文里 ref_id=export_id 时追加降级账；解析不了就只留通知面。"""
+    job_id = notify_mod.current_job_id()
+    if not job_id:
+        return
+    job = context.job_store.get(job_id) if getattr(context, "job_store", None) else None
+    if job is None or job.get("type") != "export":
+        return
+    exports_repo.append_degraded(context.conn, str(job["ref_id"]), subject, outcome)
 
 
 def _clock_audit(

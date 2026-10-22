@@ -25,6 +25,7 @@ _COLUMNS = (
     "selfcheck",
     "selfcheck_state",
     "compute",
+    "degraded_notes",
 )
 
 
@@ -38,9 +39,20 @@ def _parse_compute(raw: object) -> list[dict[str, Any]] | None:
     return [dict(item) for item in value] if isinstance(value, list) else None
 
 
+def _parse_degraded(raw: object) -> list[dict[str, Any]] | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        value = json.loads(str(raw))
+    except ValueError:
+        return None  # 坏 JSON 按「无账」处理，不演成有历史
+    return [dict(item) for item in value] if isinstance(value, list) else None
+
+
 def _row(row: tuple[Any, ...]) -> dict[str, Any]:
     record = dict(zip(_COLUMNS, row, strict=True))
     record["compute"] = _parse_compute(record["compute"])
+    record["degraded_notes"] = _parse_degraded(record["degraded_notes"])
     return record
 
 
@@ -140,12 +152,37 @@ def reset_for_retry(conn: sqlite3.Connection, export_id: str) -> bool:
     cursor = conn.execute(
         "UPDATE export_jobs SET status = ?, error = NULL, output_path = NULL,"
         " progress = 0, completed_at = NULL, selfcheck = NULL, selfcheck_state = NULL,"
-        " compute = NULL"
+        " compute = NULL, degraded_notes = NULL"
         " WHERE id = ? AND status = ?",
         (STATUS_PENDING, export_id, STATUS_FAILED),
     )
     conn.commit()
     return (cursor.rowcount or 0) > 0
+
+
+def append_degraded(conn: sqlite3.Connection, export_id: str, subject: str, outcome: str) -> None:
+    """追加一条降级账（规格 §1.2「账在库」层；通知流只是实时面，重启即失）。
+
+    读-改-写在同一导出作业线程内串行发生，无并发写者；库中坏 JSON 按「从零起账」
+    处理——不演成有历史，也不让坏账挡新账。
+    """
+    row = conn.execute(
+        "SELECT degraded_notes FROM export_jobs WHERE id = ?", (export_id,)
+    ).fetchone()
+    notes: list[dict[str, Any]] = []
+    if row is not None and row[0]:
+        try:
+            parsed = json.loads(str(row[0]))
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, list):
+            notes = [dict(item) for item in parsed]
+    notes.append({"subject": subject, "outcome": outcome, "at": _now_ms()})
+    conn.execute(
+        "UPDATE export_jobs SET degraded_notes = ? WHERE id = ?",
+        (json.dumps(notes, ensure_ascii=False), export_id),
+    )
+    conn.commit()
 
 
 def set_compute(conn: sqlite3.Connection, export_id: str, reports: list[dict[str, Any]]) -> None:
