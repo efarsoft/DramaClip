@@ -11,11 +11,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from dramaclip.api import export_audit
+from dramaclip.engines.narration.models import PlanData
 from dramaclip.infra.jobs import JobStore
 from dramaclip.infra.storage.repos import exports as exports_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
-from dramaclip.engines.narration.models import PlanData
 from dramaclip.transport import notify as notify_mod
 
 
