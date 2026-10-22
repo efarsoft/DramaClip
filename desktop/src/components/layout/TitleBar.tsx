@@ -109,7 +109,7 @@ const SEARCH_INPUT_STYLE: CSSProperties = {
   color: tokens.textPrimary,
   fontSize: tokens.text.meta.size,
   lineHeight: tokens.text.meta.leading,
-  outline: 'none',
+  // outline 不抹：全局 :focus-visible 焦点环是键盘可达性的唯一真相（§2.4）
 };
 
 interface ProjectOption {

@@ -110,7 +110,7 @@ function ExportRow({ job, onRefresh }: { job: ExportJob; onRefresh: () => void }
           {runtime}
         </span>
       )}
-      <span style={{ marginLeft: runtime === undefined ? 'auto' : tokens.spaceSm, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, fontFamily: tokens.fontFamilyMono, color: tokens.textTertiary }}>
+      <span style={{ marginLeft: runtime === undefined ? 'auto' : tokens.spaceSm, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, fontFamily: tokens.fontFamilyMono, fontVariantNumeric: 'tabular-nums', color: tokens.textTertiary }}>
         {job.duration_s !== undefined ? `${String(Math.round(job.duration_s))}s` : '—'}
       </span>
     </div>

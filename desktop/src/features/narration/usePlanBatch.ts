@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NarrationMode, NarrationPlan } from '@dramaclip/protocol';
 import { analysisApi, jobsApi, narrationApi, projectApi } from '../../services/client';
+import { useJobsStore } from '../../stores/jobs';
 import { POLL_INTERVAL_MS, isTerminal, reasonOr, sleep } from './poll';
 
 export interface PlanBatchSpec {
@@ -71,6 +72,12 @@ export function usePlanBatch(projectId: string): PlanBatch {
   const [spec, setSpec] = useState<PlanBatchSpec | null>(null);
   const [error, setError] = useState('');
   const jobIdRef = useRef<string | null>(null);
+  const enterFast = useJobsStore((state) => state.enterFast);
+  useEffect(() => {
+    // 规划在跑：向 jobs 单写方登记快消费档（轮询节距提到 2s，进度不闷）
+    if (!planning) return;
+    return enterFast();
+  }, [enterFast, planning]);
 
   const cancel = useCallback(async (): Promise<void> => {
     const jobId = jobIdRef.current;
