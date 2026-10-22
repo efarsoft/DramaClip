@@ -14,6 +14,7 @@ from dramaclip.api.narration_plans import (  # noqa: F401 - _NO_TTS_MODES 供测
     _NO_TTS_MODES,
     SUPPORTED_MODES,
     _run_plan_variants,
+    expected_copy_source,
 )
 from dramaclip.engines.narration import mode_recommend, variant_scoring
 from dramaclip.engines.narration import pipeline as narration_pipeline
@@ -69,15 +70,22 @@ def list_plans(context: AppContext, params: dict[str, Any]) -> list[dict[str, An
 
 
 def _annotate_gate(row: dict[str, Any]) -> dict[str, Any]:
-    """给方案卡补上过不了门禁的原因；不改落库 status。"""
-    try:
-        issues = defects(PlanData.model_validate(row["plan_data"]))
-    except (TypeError, ValueError):
-        issues = ["方案数据损坏"]
-    if not issues:
-        return row
+    """给方案卡补上文案来源判据与过不了门禁的原因；不改落库 status。
+
+    「是否降级」是界面拿 copy_source 与 copy_source_expected 拼出来的判读——这里
+    只原样陈述两键，不塞布尔结论（2026-10-16 规格 §1.1）。
+    """
     annotated = dict(row)
-    annotated["block_reason"] = issues[0]
+    try:
+        plan = PlanData.model_validate(row["plan_data"])
+    except (TypeError, ValueError):
+        annotated["block_reason"] = "方案数据损坏"
+        return annotated
+    annotated["copy_source"] = plan.planner
+    annotated["copy_source_expected"] = expected_copy_source(plan.mode)
+    issues = defects(plan)
+    if issues:
+        annotated["block_reason"] = issues[0]
     return annotated
 
 

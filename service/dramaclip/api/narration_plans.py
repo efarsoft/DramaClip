@@ -64,6 +64,15 @@ _ZERO_COPY_MODES = _NO_TTS_MODES
 # 第四份手抄模式清单——纯剪辑作业连口味层的答案都无人可读，不该为它付选题往返。
 _NARRATION_MODES = frozenset(SUPPORTED_MODES) - _NO_TTS_MODES
 
+
+def expected_copy_source(mode: str) -> str:
+    """该模式的方案文案应当来自哪里：``llm_script``（LLM 成稿）或 ``rule``（规则预算）。
+
+    「模式 → 来源」的唯一判定接口：verify_modes 与方案卡徽章都从它取判据，不许
+    另立第二份手抄模式表（2026-10-16 规格 §1.1；手抄表漏 highlight_cut 的漂移实证）。
+    """
+    return "rule" if mode in _NO_TTS_MODES else "llm_script"
+
 # 剧本驱动的唯一模式。2026-09-12 裁决之后**九个模式都能在一条方案里跨集取画面**
 # （Task 3c 的 casting 层给六个规则编排器补上了集身份），所以这个集合不再表示
 # "只有它能跨集"——那是一句已经作废的话，留着它就是留下一句关于代码的假话。

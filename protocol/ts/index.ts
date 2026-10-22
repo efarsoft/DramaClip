@@ -369,6 +369,10 @@ export interface NarrationPlan {
   readonly batch_id?: string | null;
   /** 过不了转化门禁时的第一条原因；ready 方案无此字段。 */
   readonly block_reason?: string;
+  /** 文案实际来源（PlanData.planner 原样陈述）；与 expected 拼读出「是否降级」。 */
+  readonly copy_source?: string;
+  /** 该模式应有的文案来源（llm_script / rule，expected_copy_source 判据）。 */
+  readonly copy_source_expected?: string;
   /** 发布文案+话题标签（随候选标题生成）；旧方案无此字段。 */
   readonly publish_meta?: PublishMeta | null;
 }

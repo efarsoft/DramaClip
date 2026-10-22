@@ -112,27 +112,13 @@ ALL_DUCKED_MODES = {"full_narration"}
 DUCK_RESIDUAL_TOL_DB = 2.0
 
 # 编排来源预期：文案真值化（P-1.5）之后，除零加工两模式外必须是 LLM 成稿。
-# 这张表不是抄清单，是从代码事实推出来的：
-#   · `api/narration.py::_NO_TTS_MODES` 恰好是 raw_clip / subtitle_flow，两者不产旁白槽位，
-#     `_generate_one` 只在 `plan.narration_texts` 非空时才调 copywriter，
-#     于是 `PlanData.planner` 停在默认值 "rule"（`engines/narration/models.py`）；
-#   · dialogue_narration 走 `script_driver`，`build_from_script_episodes` 里直接写
-#     `planner="llm_script"`；
-#   · 其余五个模式由 `copywriter.write_plan_copy` 置 `planner="llm_script"`，
-#     而它已无模板兜底（Task 5），拿不到合格文案就抛，不会悄悄退回 "rule"。
-# 九模式清单与 `SUPPORTED_MODES` / `pipeline.MODE_LABELS` 逐名核对一致（main() 里还有一道
-# 运行时核对，见那里的注释）。
-EXPECT_PLANNER = {
-    "raw_clip": "rule",
-    "subtitle_flow": "rule",
-    "intro_narration": "llm_script",
-    "cross_narration": "llm_script",
-    "ultra_short_hook": "llm_script",
-    "dialogue_narration": "llm_script",
-    "full_narration": "llm_script",
-    "dual_host_chat": "llm_script",
-    "inner_monologue": "llm_script",
-}
+# 判据已归位为 `narration_plans.expected_copy_source`（由 _NO_TTS_MODES 派生）——
+# 2026-10-16 规格 §1.1：手抄表漏 highlight_cut 的漂移实证，此处不再留第二份表。
+
+# 响度窗口（LU）：实测 integrated 与目标的允许偏差。这个数是**实测出来的**，不是拍的：
+# Task 8 落地（混音求和挂前瞻限幅 + Phase C 真峰有界重试）后，仓里九部真成片重跑一遍，
+# integrated 落在 −15.01…−13.94 LUFS（对 −14 目标最大偏离 1.01 LU）、真峰 −3.77…−2.17 dBTP
+# （门限 −1.0）。最差 1.01 LU 之上放到 2.5，一是给 dynamic 模式在更热素材上留余量
 
 # 响度窗口（LU）：实测 integrated 与目标的允许偏差。这个数是**实测出来的**，不是拍的：
 # Task 8 落地（混音求和挂前瞻限幅 + Phase C 真峰有界重试）后，仓里九部真成片重跑一遍，
@@ -402,17 +388,17 @@ def _same_drive_temp(prefix: str) -> Path:
 def _mode_table_drift() -> list[str]:
     """门禁自己手抄的模式清单必须与生产清单逐名对上，返回不一致的说明列表。
 
-    为什么要这道核对：三张预期表都用 `EXPECT_*.get(mode, 默认值)` 取值，新增一个模式而
-    忘了登记时，它会**按默认值悄悄判绿**（新解说模式被当成 "rule" 来源、被当成 "many" 段旁白），
-    这正是 `api/narration.py` 里明令"绝不另立第四份手抄模式清单"要防的事——而门禁手上就抄了
-    三份。宁可开跑前就红，也不要一份过期预期表把 Task 10 的出口判据变成假绿。
+    为什么要这道核对：两张预期表都用 `EXPECT_*.get(mode, 默认值)` 取值，新增一个模式而
+    忘了登记时，它会**按默认值悄悄判绿**（被当成 "many" 段旁白）——这正是 `api/narration.py`
+    里明令"绝不另立第四份手抄模式清单"要防的事——而门禁手上就抄了表。宁可开跑前就红，
+    也不要一份过期预期表把 Task 10 的出口判据变成假绿。
+    文案来源判据已不在其列：`expected_copy_source` 由集合派生，结构上不可能漂。
     """
     authoritative = set(narration_api.SUPPORTED_MODES)
     problems: list[str] = []
     for name, table in (
         ("ALL_MODES", ALL_MODES),
         ("EXPECT_NARRATION", EXPECT_NARRATION),
-        ("EXPECT_PLANNER", EXPECT_PLANNER),
         ("pipeline.MODE_LABELS", narration_pipeline.MODE_LABELS),
     ):
         missing = authoritative - set(table)
@@ -981,7 +967,9 @@ def main() -> int:
             failures.append(f"{mode}: 成片无音轨")
         # 文案来源：P-1.5 之后解说模式必须是 LLM 成稿，"rule" 说明它还在走模板
         # 或编剧链根本没接上（copywriter 无兜底，接上了就不会退回 rule）。
-        expected_planner = EXPECT_PLANNER.get(mode, "rule")
+        # 判据从 expected_copy_source 取——highlight_cut 在此由构造获得 "rule"，
+        # 不再靠 .get 默认值兜（手抄表漏登记它的漂移实证）。
+        expected_planner = narration_api.expected_copy_source(mode)
         if rec["planner"] != expected_planner:
             failures.append(f"{mode}: 文案来源 planner={rec['planner']}，预期 {expected_planner}"
                             "（说明该模式仍在走模板或剧本链没接上）")
