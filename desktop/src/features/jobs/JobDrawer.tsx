@@ -98,7 +98,7 @@ function JobsBody(): ReactElement {
 }
 
 /** 主体名册：抽屉打开时低频拉一次；拉不到就用空名册（退化成短 id，不阻塞任务行）。 */
-function useJobSubjects(open: boolean): JobSubjectNames {
+export function useJobSubjects(open: boolean): JobSubjectNames {
   const [names, setNames] = useState<JobSubjectNames>(EMPTY_NAMES);
   useEffect(() => {
     if (!open) return;
@@ -144,7 +144,7 @@ function useCancelJob(): [Readonly<Record<string, CancelNote>>, (jobId: string) 
 
 /** 本会话留痕（规格 §1.2 实时流）：log.append 按作业归档的滚动视图，只增不清——
  * 事后可查的账在 export_jobs.degraded_notes，这里只服务「作业进行中」的即时观察。 */
-function SessionLogFeed(): React.ReactElement {
+export function SessionLogFeed(): React.ReactElement {
   const notifyLog = useJobsStore((state) => state.notifyLog);
   if (notifyLog.length === 0) {
     return (

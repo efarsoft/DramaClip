@@ -103,12 +103,15 @@ export function JobRow({
   serverTimeMs,
   note,
   onCancel,
+  onRetry,
 }: {
   job: JobInfo;
   names: JobSubjectNames;
   serverTimeMs: number | null;
   note: CancelNote | undefined;
   onCancel: () => void;
+  /** 失败行的重试动作（规格 §3.5 队列页）：提供才显示——抽屉场景不传则维持原样。 */
+  onRetry?: () => void;
 }): ReactElement {
   const elapsed = jobElapsedMs(job, serverTimeMs);
   return (
@@ -129,6 +132,13 @@ export function JobRow({
         >
           {job.error}
         </span>
+      )}
+      {job.status === 'failed' && onRetry !== undefined && (
+        <div>
+          <Button size="small" onClick={onRetry}>
+            重试
+          </Button>
+        </div>
       )}
     </div>
   );
