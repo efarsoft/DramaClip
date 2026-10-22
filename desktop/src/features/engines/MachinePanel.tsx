@@ -238,6 +238,7 @@ function SpecCell({ label, value }: { label: string; value: string }): ReactElem
           overflow: 'hidden',
           textOverflow: 'ellipsis',
         }}
+        title={value}
       >
         {value}
       </span>

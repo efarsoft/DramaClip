@@ -176,6 +176,7 @@ function RowTitle({ row, hero, serverTimeMs }: { row: MatrixRow; hero: boolean; 
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
         }}
+        title={row.project.name}
       >
         {row.project.name}
       </span>

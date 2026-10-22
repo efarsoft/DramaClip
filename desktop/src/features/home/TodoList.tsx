@@ -56,7 +56,7 @@ function TodoRow({
     <div style={{ ...mixins.listRow(), padding: `0 ${tokens.spaceLg}` }}>
       <span data-testid="severity-dot" style={mixins.statusDot(DOT_COLOR[item.severity])} />
       <span
-        title={item.detail === '' ? undefined : item.detail}
+        title={item.text}
         style={{
           minWidth: 0,
           overflow: 'hidden',

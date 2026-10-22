@@ -1,5 +1,5 @@
 /** 出片记录：本项目历次导出的终态列表，点开进成片详情；失败行带重试（规格 §1.3）。 */
-import { Button, Empty, Tag, Tooltip } from 'antd';
+import { App as AntdApp, Button, Empty, Tag, Tooltip } from 'antd';
 import { PageSection } from '../../components/layout/PageKit';
 import { useNavigate } from 'react-router-dom';
 import { useState, type ReactElement } from 'react';
@@ -22,7 +22,7 @@ export function ExportsCard({
       {exports === null ? null : exports.length === 0 ? (
         <Empty description="还没有出片记录——选好方案点「出片所选」" styles={{ image: { height: 60 } }} />
       ) : (
-        <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
           {exports.map((job) => (
             <ExportRow key={job.id} job={job} onRefresh={onRefresh} />
           ))}
@@ -33,6 +33,7 @@ export function ExportsCard({
 }
 
 function ExportRow({ job, onRefresh }: { job: ExportJob; onRefresh: () => void }) {
+  const { message } = AntdApp.useApp();
   const navigate = useNavigate();
   const [retrying, setRetrying] = useState(false);
   const label = job.status === 'completed' ? '完成' : job.status === 'failed' ? '失败' : '进行中';
@@ -47,14 +48,24 @@ function ExportRow({ job, onRefresh }: { job: ExportJob; onRefresh: () => void }
     exportApi
       .retry(job.id)
       .then(() => onRefresh())
+      .catch((error: unknown) => {
+        message.error(error instanceof Error ? error.message : String(error));
+      })
       .finally(() => setRetrying(false));
   };
 
+  // 详情页要播成片、读旁挂时间轴，未成功的行里这两样都还没有——点进去是黑房子（规格 §1.6）。
+  const openable = job.status === 'completed' && job.output_path !== undefined && job.output_path !== '';
+
   return (
     <div
-      onClick={() => {
-        void navigate(`/works/${job.id}`);
-      }}
+      onClick={
+        openable
+          ? (): void => {
+              void navigate(`/works/${job.id}`);
+            }
+          : undefined
+      }
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -63,7 +74,7 @@ function ExportRow({ job, onRefresh }: { job: ExportJob; onRefresh: () => void }
         borderBottom: `1px solid ${tokens.borderSecondary}`,
         fontSize: tokens.text.body.size,
         lineHeight: tokens.text.body.leading,
-        cursor: 'pointer',
+        cursor: openable ? 'pointer' : 'default',
       }}
     >
       <Tag color={color}>{label}</Tag>

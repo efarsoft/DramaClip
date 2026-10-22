@@ -2,12 +2,21 @@
 import { layout } from '../../styles/theme';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+const STORAGE_KEY = 'dramaclip.split-pct';
+
 export function useSplitDrag(initialPct: number = layout.split.initial): {
   pct: number;
   containerRef: React.RefObject<HTMLDivElement | null>;
   onHandleDown: () => void;
 } {
-  const [pct, setPct] = useState<number>(initialPct);
+  const [pct, setPct] = useState<number>(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      return stored !== null ? Math.min(layout.split.max, Math.max(layout.split.min, Number(stored))) : initialPct;
+    } catch {
+      return initialPct;
+    }
+  });
   const containerRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
 
@@ -20,7 +29,13 @@ export function useSplitDrag(initialPct: number = layout.split.initial): {
       if (!draggingRef.current || containerRef.current === null) return;
       const rect = containerRef.current.getBoundingClientRect();
       const next = ((event.clientX - rect.left) / rect.width) * 100;
-      setPct(Math.min(layout.split.max, Math.max(layout.split.min, next)));
+      const clamped = Math.min(layout.split.max, Math.max(layout.split.min, next));
+      setPct(clamped);
+      try {
+        localStorage.setItem(STORAGE_KEY, String(clamped));
+      } catch {
+        // 隐私模式/配额满——不阻塞拖拽
+      }
     };
     const up = (): void => {
       draggingRef.current = false;

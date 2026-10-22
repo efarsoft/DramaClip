@@ -159,6 +159,7 @@ export function PageFooter({
         padding: `0 ${layout.footer.paddingX}`,
         background: tokens.bgSidebar,
         borderTop: `1px solid ${tokens.borderSecondary}`,
+        boxShadow: tokens.shadowSticky,
       }}
     >
       <span

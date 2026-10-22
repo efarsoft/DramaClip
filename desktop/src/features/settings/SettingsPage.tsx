@@ -128,7 +128,7 @@ function SettingsView(props: {
             position: 'sticky',
             bottom: 0,
             zIndex: 10,
-            margin: `0 -${tokens.space2xl}`,
+            // 负边距已撤（§3.4 单层滚动原则）：不留唯一负边距撑出横向滚动条
             padding: `${tokens.spaceMd} ${tokens.space2xl}`,
             display: 'flex',
             alignItems: 'center',
