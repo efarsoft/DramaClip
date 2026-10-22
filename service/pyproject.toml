@@ -45,6 +45,15 @@ ml = [
   # CI 打的安装包没带上它（v0.2.2 首次 CI 打包实证）——真机 1.27.7 验收版
   "dashscope>=1.27.7",
 ]
+# dev 进程内分支的事实依赖（torch/funasr/kokoro）：E-2 后「主 venv 零 torch」是
+# **打包态**契约；dev/测试态的进程内 ASR/TTS 回退分支仍 import 这三样。不声明
+# 就等于「本机侥幸」——新机器按清单装齐后测试照挂（v0.2.2 CI 六轮揭雷的根源）。
+# 版本下界 = 真机验收版；torch 的 +cu126 变体由装机命令的 --index-url 决定。
+devml = [
+  "torch>=2.8",
+  "funasr>=1.4.16",
+  "kokoro>=0.9.4",
+]
 
 [project.scripts]
 dramaclip-service = "dramaclip.__main__:main"

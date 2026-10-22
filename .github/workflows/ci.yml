@@ -36,15 +36,11 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-      # torch 预装 CPU 轮子（PyPI linux 默认轮子含 CUDA 栈，多 2GB 下载）
-      - name: 安装依赖（ml + dev，torch 走 CPU 轮子）
+      # torch/torchaudio 预装 CPU 轮子（PyPI linux 默认轮子含 CUDA 栈，多 2GB 下载）
+      - name: 安装依赖（ml + dev + devml，torch 走 CPU 轮子）
         run: |
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install torchaudio --index-url https://download.pytorch.org/whl/cpu
-          pip install -e '.[ml,dev]'
-          # engine_ready 的事实判据是 funasr 可导入（runtime.supported）：不装则
-          # sensevoice/paraformer 全系测试在 Linux 上必假红（Windows dev 真机有）
-          pip install 'funasr==1.4.16'
+          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+          pip install -e '.[ml,dev,devml]'
           # 云端 ASR 适配器的运行时依赖（已进 ml extra，此处显式与 extra 同版双保险）
           pip install 'dashscope==1.27.7'
       # 测试夹具用真 ffmpeg 生成样片：解析器 resources→PATH，Linux 上落 PATH
