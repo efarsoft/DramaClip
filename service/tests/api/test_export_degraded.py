@@ -13,7 +13,9 @@ from types import SimpleNamespace
 from dramaclip.api import export_audit
 from dramaclip.infra.jobs import JobStore
 from dramaclip.infra.storage.repos import exports as exports_repo
+from dramaclip.infra.storage.repos import plans as plans_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
+from dramaclip.engines.narration.models import PlanData
 from dramaclip.transport import notify as notify_mod
 
 
@@ -23,7 +25,15 @@ def test_note_degraded_lands_in_export_ledger(
     tmp = tmp_path / "src"
     tmp.mkdir()
     project_id = str(projects_repo.create(memory_db, "留痕剧", str(tmp))["id"])
-    export_id = exports_repo.create(memory_db, project_id, "n1", "full_narration")
+    plan_id = plans_repo.create(
+        memory_db,
+        project_id,
+        "full_narration",
+        ["ep1"],
+        PlanData(mode="full_narration").model_dump(),
+        status="draft",
+    )["id"]
+    export_id = exports_repo.create(memory_db, project_id, plan_id, "full_narration")
     store = JobStore(memory_db)
     job_id = store.create("export", ref_id=export_id)
     context = SimpleNamespace(
@@ -36,14 +46,18 @@ def test_note_degraded_lands_in_export_ledger(
         export_audit._note_degraded(  # noqa: SLF001
             context, "封面截帧", "本条成片没有封面（列表用占位图）"
         )
+        export_audit._note_degraded(  # noqa: SLF001 - 同作业内第二条要追加不是覆盖
+            context, "成片时长审计", "本条成片的事后核对没有做"
+        )
     finally:
         notify_mod._JOB_ID.reset(token)
 
     record = exports_repo.get(memory_db, export_id)
     notes = record["degraded_notes"]
-    assert notes is not None and len(notes) == 1
+    assert notes is not None and len(notes) == 2
     assert notes[0]["subject"] == "封面截帧"
     assert "占位图" in notes[0]["outcome"]
+    assert notes[1]["subject"] == "成片时长审计"
 
     export_audit._note_degraded(  # noqa: SLF001 - 同作业内第二条要追加不是覆盖
         context, "成片时长审计", "本条成片的事后核对没有做"
@@ -58,7 +72,15 @@ def test_note_degraded_without_job_context_only_notifies(
     tmp = tmp_path / "src"
     tmp.mkdir()
     project_id = str(projects_repo.create(memory_db, "留痕剧", str(tmp))["id"])
-    export_id = exports_repo.create(memory_db, project_id, "n1", "full_narration")
+    plan_id = plans_repo.create(
+        memory_db,
+        project_id,
+        "full_narration",
+        ["ep1"],
+        PlanData(mode="full_narration").model_dump(),
+        status="draft",
+    )["id"]
+    export_id = exports_repo.create(memory_db, project_id, plan_id, "full_narration")
     context = SimpleNamespace(
         conn=memory_db,
         job_store=JobStore(memory_db),
@@ -74,7 +96,15 @@ def test_note_degraded_non_export_job_not_ledgered(
     tmp = tmp_path / "src"
     tmp.mkdir()
     project_id = str(projects_repo.create(memory_db, "留痕剧", str(tmp))["id"])
-    export_id = exports_repo.create(memory_db, project_id, "n1", "full_narration")
+    plan_id = plans_repo.create(
+        memory_db,
+        project_id,
+        "full_narration",
+        ["ep1"],
+        PlanData(mode="full_narration").model_dump(),
+        status="draft",
+    )["id"]
+    export_id = exports_repo.create(memory_db, project_id, plan_id, "full_narration")
     store = JobStore(memory_db)
     job_id = store.create("analysis", ref_id="other-project")
     context = SimpleNamespace(
@@ -95,7 +125,15 @@ def test_reset_for_retry_clears_degraded_notes(
 ) -> None:
     """重试 = 覆盖写新导出：上一轮的降级账随旧产物一并作废，新一轮重新记账。"""
     project_id = str(projects_repo.create(memory_db, "留痕剧", str(tmp_path))["id"])
-    export_id = exports_repo.create(memory_db, project_id, "n1", "full_narration")
+    plan_id = plans_repo.create(
+        memory_db,
+        project_id,
+        "full_narration",
+        ["ep1"],
+        PlanData(mode="full_narration").model_dump(),
+        status="draft",
+    )["id"]
+    export_id = exports_repo.create(memory_db, project_id, plan_id, "full_narration")
     exports_repo.append_degraded(memory_db, export_id, "封面截帧", "占位图")
     exports_repo.mark_failed(memory_db, export_id, "boom")
 
