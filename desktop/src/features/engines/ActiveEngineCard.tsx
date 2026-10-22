@@ -3,7 +3,7 @@
  * 卡上只出现两类事实——设置里的当前选择，和资产库对那个选择体检出的结论。
  */
 import type { ReactNode } from 'react';
-import { tokens } from '../../styles/theme';
+import { tokens , layout } from '../../styles/theme';
 import type { AssetState } from './assetState';
 import { StateBadge } from './AssetKit';
 
@@ -143,7 +143,7 @@ function PropGrid({ props }: { props: readonly ActiveProp[] }): React.ReactEleme
               fontSize: tokens.text.meta.size,
               lineHeight: tokens.text.meta.leading,
               color: tokens.textSecondary,
-              marginTop: 2,
+              marginTop: layout.nudge.badgeTop,
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',

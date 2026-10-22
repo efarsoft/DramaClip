@@ -9,7 +9,7 @@ import { Button } from 'antd';
 import type { ReactElement } from 'react';
 import type { ModelInfo, SelftestResults } from '@dramaclip/protocol';
 import { mixins } from '../../styles/mixins';
-import { tokens } from '../../styles/theme';
+import { tokens , layout } from '../../styles/theme';
 import type { AttentionAsset, EngineTab, Reports } from './assetState';
 import { activeAsset, assetState, attentionAssets, reportFor } from './assetState';
 import { RepairActions } from './RepairActions';
@@ -241,7 +241,7 @@ function StepNode({
         </div>
         <div
           style={{
-            marginTop: 2,
+            marginTop: layout.nudge.badgeTop,
             fontSize: tokens.text.badge.size,
             lineHeight: tokens.text.badge.leading,
             color: step.ok ? tokens.textSecondary : tone,

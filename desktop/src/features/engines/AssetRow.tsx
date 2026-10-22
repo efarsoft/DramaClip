@@ -8,7 +8,7 @@ import { useState } from 'react';
 import type { ReactElement } from 'react';
 import type { ModelInfo, SelftestResult, VerifyReport } from '@dramaclip/protocol';
 import { mixins } from '../../styles/mixins';
-import { tokens } from '../../styles/theme';
+import { tokens , layout } from '../../styles/theme';
 import {
   type AssetState,
   assetState,
@@ -229,7 +229,7 @@ function RatingCell({ model }: { model: ModelInfo }): ReactElement {
     return <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>—</span>;
   }
   return (
-    <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <span style={{ display: 'flex', flexDirection: 'column', gap: layout.stack.tight }}>
       {(model.speed ?? 0) > 0 && <RatingDots label="速度" level={model.speed ?? 0} />}
       {(model.quality ?? 0) > 0 && <RatingDots label="精度" level={model.quality ?? 0} />}
     </span>

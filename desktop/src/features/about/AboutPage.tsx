@@ -8,7 +8,7 @@ import { useEffect, useState, type CSSProperties, type ReactElement } from 'reac
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import { appPaths, appVersion, revealInFolder, systemApi } from '../../services/client';
 import { mixins } from '../../styles/mixins';
-import { tokens } from '../../styles/theme';
+import { tokens , layout } from '../../styles/theme';
 import { OPEN_SOURCE } from './openSource';
 import logo from '../../assets/logo.png';
 import wechatQrcode from '../../assets/images/wechat-qrcode.jpg';
@@ -25,7 +25,7 @@ export function AboutPage(): ReactElement {
       <PageHeader title="关于" desc="项目信息 · 版本 · 本地数据 · 许可与声明" />
       <ProjectBlock />
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: tokens.space2xl, alignItems: 'start' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.space2xl, minWidth: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.space2xl, minWidth: 0, maxWidth: layout.readable.width }}>
           <LocalDataBlock />
           <WechatBlock />
         </div>

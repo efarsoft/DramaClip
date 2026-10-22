@@ -57,19 +57,12 @@ function measureDebt(): Record<string, number> {
  * 债务表：文件 → 该文件当前的字面量度量处数。逐文件精确对账，不写「至少」——
  * 「至少」让债可以在文件内部涨，也让迁完的文件继续挂在表上冒充还在还债。
  * 还债协议（§8.3「一碰就必须归零」）：动到某个参照页时，把该屏的字面量清干净并从表里
- * 删掉整行；只减不增。值不在阶梯上（2px 微间隙、'1px 6px' 芯片内边距）不是留着字面量的
- * 理由——按 layout.chip 的先例登记成具名值，而不是新造一档。
+ * 删掉整行；只减不增。
+ * W2（2026-10-22）起台账关闭：最后 8 文件 9 处（引擎中心紧凑堆叠/配置卡）已按
+ * layout.stack/nudge/configCard 登记归零。台账清零后本表必须恒等空对象——
+ * 全仓任何新的度量字面量都会让逐文件对账先红，棘轮语义由空账等值断言承担。
  */
-const MEASURE_DEBT: Readonly<Record<string, number>> = {
-  'features/engines/CloudConfigSection.tsx': 2,
-  'features/engines/ActiveEngineCard.tsx': 1,
-  'features/engines/AssetRow.tsx': 1,
-  'features/engines/LocalRuntimeSlot.tsx': 1,
-  'features/engines/LlmTab.tsx': 1,
-  'features/engines/MachinePanel.tsx': 1,
-  'features/engines/ReadinessCard.tsx': 1,
-  'features/engines/TtsPreviewButton.tsx': 1,
-};
+const MEASURE_DEBT: Readonly<Record<string, number>> = {};
 
 describe('§8.3 度量口径与棘轮', () => {
   // 口径先用例钉住，再用它扫全站：口径若被人顺手放宽，这几条先红
@@ -111,28 +104,12 @@ describe('§8.3 度量口径与棘轮', () => {
     expect(countMeasure('{\n  padding:\n    tokens.spaceMd,\n}')).toBe(0);
   });
 
-  it('扫描面不得缩水：债务表非空且真扫到已知债文件', () => {
+  it('台账已关闭（W2 清零）：全仓度量字面量必须恒等空账', () => {
+    // 台账清零后，空账等值断言就是全量棘轮：任何文件新增度量字面量都会让 found
+    // 偏离空对象而先红——比「扫到已知债文件」的下限式检查更严。扫描器逻辑本身
+    // 由上面的口径用例钉住。
     const found = measureDebt();
-    // 下限随合法还债下移（只减不增，§8.3）：P-B2 把 RecentWorks/StatChips/ContinueCard
-    // 三块吸收进 DramaMatrix，P-B3 把 ProjectCard 重写成零字面量的 DramaCard，22 → 18；
-    // P-D 重写 WorksPage（拆成 worksView/WorkCard 等）与 WorksDetailPage 归零，18 → 16；
-    // P-C④ 出片段重排顺手清掉 ExportsCard/StyleSelectCard（'10px 14px' 登记为
-    // layout.cardBodyCompact），16 → 14；P-C⑨ 设置页两分区顺手清掉 SettingsPage
-    // （marginTop:3 登记为 layout.field.helpMarginTop），14 → 13；P-C⑤ 分析域四文件
-    // （EpisodeListPanel/StepsNav/TranscriptCard/CurveCard）全部归零（脱阶值登记为
-    // layout.stepNav/inlineInput/badgeChip/cardBodyCurve），13 → 9；全局改造批清掉
-    // 工作台右栏 EnvPanel/TipsPanel（六处脱阶值登记为 layout.envPanel），9 → 8。
-    // 它防的是扫描面被删窄，不是禁止还债——逐文件对账在下面那条，才是真棘轮。
-    expect(Object.keys(found).length).toBeGreaterThanOrEqual(8);
-    expect(found, 'CloudConfigSection 的 2 处是余下最密的一屏，扫不到就是扫描面被删窄').toHaveProperty(
-      'features/engines/CloudConfigSection.tsx',
-      2,
-    );
-  });
-
-  it('债务逐文件对账——新增字面量、债务不降、迁完仍挂账，三种都算红', () => {
-    const found = measureDebt();
-    expect(found, `实测：\n${JSON.stringify(found, null, 2)}`).toEqual(MEASURE_DEBT);
+    expect(found).toEqual({});
   });
 });
 

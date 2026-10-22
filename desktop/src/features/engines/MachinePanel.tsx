@@ -5,7 +5,7 @@ import { Button } from 'antd';
 import type { DeviceProfile, GpuVendor, HealthResult, ModelInfo } from '@dramaclip/protocol';
 import { localRuntimeApi, runtimeApi, systemApi } from '../../services/client';
 import { mixins } from '../../styles/mixins';
-import { tokens } from '../../styles/theme';
+import { tokens , layout } from '../../styles/theme';
 import { FIT_VERDICT_COLOR, FIT_VERDICT_LABEL, judgeMachine, parseSizeGb, specsFromHealth } from './machineFit';
 
 function SectionCard({ children }: { children: React.ReactNode }): ReactElement {
@@ -226,7 +226,7 @@ function specCellsOf(health: HealthResult | null): { label: string; value: strin
 
 function SpecCell({ label, value }: { label: string; value: string }): ReactElement {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: layout.stack.tight, minWidth: 0 }}>
       <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>{label}</span>
       <span
         style={{

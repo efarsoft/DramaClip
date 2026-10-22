@@ -2,7 +2,7 @@ import { Button, Input, Modal } from 'antd';
 import { useState } from 'react';
 import type { Project } from '@dramaclip/protocol';
 import { pickFolder } from '../../services/client';
-import { tokens } from '../../styles/theme';
+import { tokens , layout } from '../../styles/theme';
 
 /** 建剧与重命名弹窗：从 ProjectsPage 拆出，页面文件只留编排（§8 max-lines）。
  * 统一 Overlay 规格（卷二 #11/#12）：宽 720 与引擎域弹窗同宽、标题/footer 走 antd 默认
@@ -23,7 +23,7 @@ export function RenameModal({
     <Modal
       title="重命名项目"
       open={target !== null}
-      width={720}
+      width={layout.overlay.width}
       okButtonProps={{ disabled: name.trim() === '' }}
       onOk={() => { onRename(name.trim()); }}
       onCancel={onClose}
@@ -114,7 +114,7 @@ export function CreateProjectModal({
     <Modal
       title="新建项目"
       open={open}
-      width={720}
+      width={layout.overlay.width}
       onOk={() => void onSubmit()}
       okText="创建并扫描"
       okButtonProps={{ disabled: name.trim() === '' || folder === '', loading: submitting }}

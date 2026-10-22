@@ -154,11 +154,11 @@ function SessionLogFeed(): React.ReactElement {
     );
   }
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}>
       <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
         本会话留痕（实时流，重启即失；事后账在任务与成片记录里）
       </span>
-      <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}>
         {notifyLog.map((entry, index) => (
           <span
             key={entry.at + String(index)}

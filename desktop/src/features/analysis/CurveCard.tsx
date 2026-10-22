@@ -26,7 +26,7 @@ const TOOLTIP_STYLE = {
 
 /** 坐标刻度：纯数字，走等宽（§1.3）；tick 是 SVG 属性位，只取字号不取行高。 */
 const TICK_STYLE = {
-  fill: tokens.textTertiary,
+  fill: tokens.decorativeMuted,
   fontSize: tokens.text.badge.size,
   fontFamily: tokens.fontFamilyMono,
 } as const;

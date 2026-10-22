@@ -2,7 +2,7 @@
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ReactElement } from 'react';
 import type { EngineConfig } from '@dramaclip/protocol';
-import { tokens } from '../../styles/theme';
+import { tokens , layout } from '../../styles/theme';
 import { ConfigModal, type FormState } from './CloudConfigModal';
 import { useEngineConfigs } from './useEngineConfigs';
 
@@ -69,7 +69,7 @@ function ConfigRow({
         display: 'flex',
         alignItems: 'center',
         gap: tokens.spaceMd,
-        padding: '10px 14px',
+        padding: layout.configCard.padding,
         borderRadius: tokens.radiusControl,
         border: `1px solid ${active ? tokens.colorPrimary : tokens.borderSecondary}`,
         background: active ? tokens.accentSoft : tokens.bgLayout,
@@ -81,6 +81,8 @@ function ConfigRow({
           width: 6,
           height: 6,
           borderRadius: tokens.radiusDot,
+          // 状态圆点是「有没有在跑」的指示器不是装饰：用达标的 textTertiary（4.79:1），
+          // decorativeMuted（2.88）只服务纯装饰位（§2.2 数值门禁的豁免说明）
           background: active ? tokens.colorSuccess : tokens.textTertiary,
           flexShrink: 0,
         }}
@@ -137,7 +139,7 @@ function RowAction({
 
 const ADD_BUTTON: React.CSSProperties = {
   width: '100%',
-  padding: '9px',
+  padding: `${layout.configCard.paddingCompact}px`,
   borderRadius: tokens.radiusControl,
   border: `1px dashed ${tokens.border}`,
   background: 'none',

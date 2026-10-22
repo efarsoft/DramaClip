@@ -3,7 +3,7 @@ import { UndoOutlined } from '@ant-design/icons';
 import { Alert, Button, Input, Modal } from 'antd';
 import type { ReactElement } from 'react';
 import type { PromptInfo } from '@dramaclip/protocol';
-import { tokens } from '../../styles/theme';
+import { tokens , layout } from '../../styles/theme';
 
 export function PromptEditor({
   editing,
@@ -26,7 +26,7 @@ export function PromptEditor({
     <Modal
       title={`编辑 · ${editing?.title ?? ''}`}
       open={editing !== null}
-      width={720}
+      width={layout.overlay.width}
       okText="保存"
       cancelText="取消"
       okButtonProps={{ disabled: editing !== null && draft === editing.current }}

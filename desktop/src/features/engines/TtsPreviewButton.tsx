@@ -7,7 +7,7 @@ import { SoundOutlined } from '@ant-design/icons';
 import { Button } from 'antd';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { mediaUrl, ttsApi } from '../../services/client';
-import { tokens } from '../../styles/theme';
+import { tokens , layout } from '../../styles/theme';
 
 export function TtsPreviewButton({
   engine,
@@ -47,7 +47,7 @@ export function TtsPreviewButton({
   };
 
   return (
-    <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+    <span style={{ display: 'inline-flex', flexDirection: 'column', gap: layout.stack.tight, minWidth: 0 }}>
       <Button
         size="small"
         icon={<SoundOutlined />}

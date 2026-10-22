@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { Alert, Button, Modal, Steps } from 'antd';
-import { tokens } from '../../styles/theme';
+import { tokens , layout } from '../../styles/theme';
 import { useImportFlow } from './useImportFlow';
 import { IdentifyStep, SourceStep } from './ImportWizardSteps';
 import { DoneStep, LandStep } from './ImportWizardLanding';
@@ -40,7 +40,7 @@ export function ImportModelModal({
     if (!open) setSession((count) => count + 1);
   }, [open]);
   return (
-    <Modal open={open} title="导入本地模型" width={720} footer={null} onCancel={onClose}>
+    <Modal open={open} title="导入本地模型" width={layout.overlay.width} footer={null} onCancel={onClose}>
       <WizardBody key={session} onClose={onClose} onChanged={onChanged} onActivate={onActivate} />
     </Modal>
   );

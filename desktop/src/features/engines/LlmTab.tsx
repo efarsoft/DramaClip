@@ -1,7 +1,7 @@
 /** LLM 引擎：OpenAI 兼容端点多实例（云端服务或本地 Ollama/LM Studio 同协议），单启用。 */
 import { WarningOutlined } from '@ant-design/icons';
 import { PageSection } from '../../components/layout/PageKit';
-import { tokens } from '../../styles/theme';
+import { tokens , layout } from '../../styles/theme';
 import { CloudConfigSection } from './CloudConfigSection';
 
 export function LlmTab({ onChanged }: { onChanged: () => void }): React.ReactElement {
@@ -51,7 +51,7 @@ function UnconfiguredNotice(): React.ReactElement {
         maxWidth: 860,
       }}
     >
-      <WarningOutlined style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, marginTop: 1 }} />
+      <WarningOutlined style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, marginTop: layout.nudge.iconTop }} />
       <span>
         未配置时：分析（转写、冲突打分）改用关键词打分，仍可跑完；但解说文案必须由编剧模型产出，
         没有兜底——七个解说模式的每条方案都会失败并在任务里说明原因。

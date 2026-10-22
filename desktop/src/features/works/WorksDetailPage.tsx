@@ -73,7 +73,7 @@ export function WorksDetailPage(): ReactElement {
               hasPlan={detail.planId !== ''}
             />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg, minWidth: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg, minWidth: 0, maxWidth: layout.readable.width }}>
             <SelfCheckSection
               selfcheck={detail.job.selfcheck}
               onSelfcheck={detail.onSelfcheck}

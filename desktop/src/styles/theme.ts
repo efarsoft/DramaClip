@@ -47,12 +47,24 @@ export const tokens = {
   gradientAccent: 'linear-gradient(135deg, #6D9BFF 0%, #9B7BFF 100%)',
   textPrimary: '#F0F4FF',
   textSecondary: '#A8B4CE',
-  textTertiary: '#5E6C8C',
+  /** 三档文字提到达标（§2.1）：#8291B2 对 bgElevated 4.79:1 过 AA 正文；
+   * 档位分离改靠字号与用途（1.52 < 1.89 的数学），不靠颜色。 */
+  textTertiary: '#8291B2',
+  /** 装饰性非文字用途（图形 fill/底点/antd 三级字）专用旧值：文字位禁用（§2.1 门禁）。 */
+  decorativeMuted: '#5E6C8C',
   /** 界面字面栈（§7.1）：随包 Inter + 思源子集打头，系统字面只作兜底。
    *  思源用自别名 'DramaClip SC' 而非本名：随包的是「简体子集、无西文」，
    *  占用本名会把使用者机器上完整版的 Noto Sans SC 顶掉，反而不可复核。 */
   fontFamilyUi: "'Inter', 'DramaClip SC', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif",
   fontFamilyMono: "'JetBrains Mono', 'Cascadia Mono', Consolas, monospace",
+  /** 焦点环（§2.4）：键盘走查可见性——两处 outline:none 的替代真相。 */
+  focusRing: '#7C9CFF',
+  /** 动效基线（§2.3）：三档时长 + 两档缓动；可动属性白名单见 global.css 动效段注释。 */
+  motionFast: '120ms',
+  motionNormal: '180ms',
+  motionSlow: '240ms',
+  easeEnter: 'cubic-bezier(0.2, 0, 0, 1)',
+  easeExit: 'cubic-bezier(0.4, 0, 1, 1)',
   // ---- CSS 侧氛围与控件色（§7.1：global.css 不得藏第二处色值真相，全部在此登记） ----
   scrollThumb: '#262F47',
   scrollThumbHover: '#3D4D73',
@@ -128,6 +140,10 @@ export const tokens = {
 export const layout = {
   /** 内容页满宽（§2：1080 居中从未实现过，注释删掉，不留第二处真相）。 */
   page: { paddingBlock: tokens.space2xl, gap: tokens.space2xl },
+  /** 覆盖层统一宽（§2.5）：四处 width={720} 各写一份的归一（档3 的 Overlay 组件消费）。 */
+  overlay: { width: 720 },
+  /** 区块级阅读宽度（§2.5 已更正做法）：只管承载完整句子的文本块，页级仍铺满。 */
+  readable: { width: 880 },
   fullbleed: { paddingBlock: tokens.spaceXl, gap: tokens.spaceXl },
   /** 中密度对冲：字号升档后卡内留白从 16 收到 12，气靠行高给。 */
   card: { padding: tokens.spaceMd },
@@ -168,6 +184,10 @@ export const layout = {
   iconNudge: 2,
   /** 来源徽标/无音轨一类迷你芯片 '0 6px' 内边距：6 脱阶照实登记。 */
   badgeChip: { paddingBlock: 0, paddingInline: 6 },
+  /** 度量债清偿（W2·§2.5）：徽章/图标的紧凑堆叠与微推、引擎中心配置卡内边距，8 文件 9 处照实登记。 */
+  stack: { tight: 2 },
+  nudge: { badgeTop: 2, iconTop: 1 },
+  configCard: { padding: '10px 14px', paddingCompact: 9 },
   /** EnvPanel/TipsPanel 度量债偿还（全局改造批）：六处脱阶值照实登记，不新造一档。 */
   envPanel: {
     itemPaddingBlock: 9,
@@ -199,6 +219,12 @@ export const cssVars = {
   'dc-scroll-thumb': tokens.scrollThumb,
   'dc-scroll-thumb-hover': tokens.scrollThumbHover,
   'dc-selection-bg': tokens.selectionBg,
+  'dc-focus-ring': tokens.focusRing,
+  'dc-motion-fast': tokens.motionFast,
+  'dc-motion-normal': tokens.motionNormal,
+  'dc-motion-slow': tokens.motionSlow,
+  'dc-ease-enter': tokens.easeEnter,
+  'dc-ease-exit': tokens.easeExit,
   'dc-ambient-primary': tokens.ambientPrimary,
   'dc-ambient-accent': tokens.ambientAccent,
   'dc-card-top-highlight': tokens.cardTopHighlight,
@@ -229,7 +255,7 @@ export const dramaTheme: ThemeConfig = {
     colorBorderSecondary: tokens.borderSecondary,
     colorText: tokens.textPrimary,
     colorTextSecondary: tokens.textSecondary,
-    colorTextTertiary: tokens.textTertiary,
+    colorTextTertiary: tokens.decorativeMuted,
     borderRadius: tokens.radiusControl,
     // 与 tokens.text.body 同值：漏这一条，Table/Input/Modal/Select 继续 13，
     // 界面变成一半 13 一半 14，比改之前更糟（规格 §1.4）。

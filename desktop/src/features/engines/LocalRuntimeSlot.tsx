@@ -2,7 +2,7 @@
 import type { ReactElement } from 'react';
 import { DownloadOutlined } from '@ant-design/icons';
 import { Button, Progress } from 'antd';
-import { tokens } from '../../styles/theme';
+import { tokens , layout } from '../../styles/theme';
 import { useLocalRuntime } from './useLocalRuntime';
 
 export type RuntimeScope = 'tts' | 'asr';
@@ -64,7 +64,7 @@ function SlotView({
   }
   return (
     <div style={SLOT_BOX}>
-      <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: layout.stack.tight }}>
         <span style={{ color: tokens.textSecondary }}>{state.stage || '准备中…'}</span>
         <Progress percent={Math.round(state.progress)} size="small" showInfo={false} />
       </span>

@@ -270,7 +270,7 @@ function RowMeta({
       }}
     >
       {/* 时长与计数是数字位：等宽（§1.3）。 */}
-      <span style={{ fontFamily: tokens.fontFamilyMono }}>{Math.round(duration)}s</span>
+      <span style={{ fontFamily: tokens.fontFamilyMono, fontVariantNumeric: 'tabular-nums' }}>{Math.round(duration)}s</span>
       <span style={{ color: state.color }}>● {state.label}</span>
       {hasAudio === false && (
         <span

@@ -99,4 +99,4 @@ const TEXT_META = {
 } as const;
 
 /** 计数与百分比的数字位（§1.3）：只包数字，中文留给界面字体。 */
-const NUM = { fontFamily: tokens.fontFamilyMono } as const;
+const NUM = { fontFamily: tokens.fontFamilyMono, fontVariantNumeric: 'tabular-nums' } as const;

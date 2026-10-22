@@ -63,7 +63,7 @@ const INPUT_STYLE = {
   fontSize: tokens.text.body.size,
   lineHeight: tokens.text.body.leading,
   padding: `${String(layout.inlineInput.paddingBlock)}px ${layout.inlineInput.paddingInline}`,
-  outline: 'none',
+  // outline 不抹：全局 :focus-visible 焦点环是键盘可达性的唯一真相（§2.4）
 } as const;
 
 function SegmentRow({
