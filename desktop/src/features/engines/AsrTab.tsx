@@ -104,7 +104,7 @@ export function AsrTab({
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
       <LocalRuntimeSlot scope="asr" />
       {recommendation !== 'none' ? (
-        <CloudNudgeCard domain="asr" kind={recommendation} onGoCloud={() => { setPane('cloud'); }} />
+        <CloudNudgeCard domain="asr" onConnected={() => { onChanged?.(); }} />
       ) : null}
       {activeCloud !== undefined ? (
         <ActiveEngineCard
