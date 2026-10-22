@@ -489,6 +489,10 @@ def _analyze_one(
             compute_report = getattr(transcriber, "compute", lambda: None)()
             if compute_report is not None:
                 context.job_store.set_compute(job_id, [compute_report.to_dict()])
+            # 转写质量预警（时间轴坍缩特征等）：如实转达不拦流程——分析层没有更好的
+            # 时间轴可换，能做的是把「这份转写不可信」告诉用户，建议切云端重析。
+            for warning in raw.warnings:
+                context.notifier.log("warn", f"{label} {warning}", job_id=job_id)
             asr_segments, ocr_segments, band, band_lines = _fuse_ocr(
                 context, episode, raw.asr_segments, ocr_bars, ocr_band, ocr_lines
             )  # noqa: F841 - band_lines 落库见下方 subtitle_band

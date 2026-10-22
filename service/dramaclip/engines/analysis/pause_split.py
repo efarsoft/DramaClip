@@ -138,6 +138,22 @@ def speech_clips(
     return clips
 
 
+def fill_degenerate(clips: list[Clip], *, max_clip_s: float = _MAX_CLIP_S) -> str | None:
+    """切分退化信号：顶格片段（≈max_clip_s）占比过半 → 能量谷疑被 BGM 填满。
+
+    正常素材的切点落在真实停顿上，片段长短随语句自然分布；BGM 填满停顿时谷不深、
+    语音区段连成一片，二次切分也只能在「最不坏的位置」硬下刀——产物里大量片段顶到
+    max_clip_s。《颠勺》EP1 实锤形态：切分退化 → 整条直喂 → funasr VAD 失效 →
+    时间轴坍缩。返回描述文案（None=切分健康），调用方据此留痕/建议切云端。
+    """
+    if len(clips) < 2:
+        return None
+    at_cap = sum(1 for clip in clips if clip.end - clip.start >= max_clip_s * 0.95)
+    if at_cap * 2 < len(clips):
+        return None
+    return f"{at_cap}/{len(clips)} 段顶到 {max_clip_s:.0f}s 上限、无真实停顿可切"
+
+
 def _weakest(center_frame: int, window: int, energies: list[float]) -> int:
     """center_frame ± window 范围内能量最低的帧索引（最像停顿的位置）。"""
     lo = max(0, center_frame - window)

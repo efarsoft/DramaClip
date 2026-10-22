@@ -187,3 +187,51 @@ def test_narrative_texture_healthy_passes() -> None:
     for f in report.findings:
         if f.rule_id in ("NARR_SUSPENSE_QUOTA", "NARR_IMAGE_QUOTA", "NARR_EMOTION_BEAT"):
             assert f.passed is True, f.rule_id
+
+
+def test_person_intro_repeat_flags_second_full_intro() -> None:
+    """同一人物两次全套介绍 → FUND_PERSON_INTRO_ONCE 软标记（需人工），不拦片。"""
+    script = {
+        "hook": "她替嫁进了将军府",
+        "segments": [
+            _seg_text("苏明月，将军府嫡女，却在府里连下人都不如。"),
+            _seg_text("她熬了整整三年。"),
+            _seg_text("苏明月，将军府嫡女，今天终于要反击了。"),
+        ],
+        "cta": "点击左下角看全集",
+    }
+    report = A.review_script(script, [])
+    by_id = {f.rule_id: f for f in report.findings}
+    finding = by_id["FUND_PERSON_INTRO_ONCE"]
+    assert finding.passed is False
+    assert finding.severity == "soft" and finding.needs_human is True
+    assert "苏明月" in finding.message and "×2" in finding.message
+
+
+def test_person_intro_healthy_passes_and_prior_carried() -> None:
+    """无重复 → 通过；前集已介绍过的人物本稿再走全套 → CARRIED 软标记；
+    无 prior 数据时 CARRIED 规则不参审（不该装作查过）。"""
+    healthy = {
+        "hook": "她替嫁进了将军府",
+        "segments": [
+            _seg_text("苏明月，将军府嫡女，却在府里连下人都不如。"),
+            _seg_text("王承恩，司礼监秉笔太监，是她在宫里唯一的靠山。"),
+            _seg_text("两人立下血誓，共赴绝路。"),
+        ],
+        "cta": "点击左下角看全集",
+    }
+    report = A.review_script(healthy, [])
+    by_id = {f.rule_id: f for f in report.findings}
+    assert by_id["FUND_PERSON_INTRO_ONCE"].passed is True
+    assert by_id["FUND_PERSON_INTRO_ONCE"].needs_human is False
+    assert "FUND_PERSON_INTRO_CARRIED" not in by_id
+
+    prior = ["上一条视频里，苏明月，将军府嫡女，刚被退了婚。"]
+    carried_report = A.review_script(healthy, [], prior_texts=prior)
+    carried = {f.rule_id: f for f in carried_report.findings}
+    assert carried["FUND_PERSON_INTRO_ONCE"].passed is True, "本稿内各介绍一次不算重复"
+    assert carried["FUND_PERSON_INTRO_CARRIED"].passed is False
+    assert "苏明月" in carried["FUND_PERSON_INTRO_CARRIED"].message
+    assert "王承恩" not in carried["FUND_PERSON_INTRO_CARRIED"].message, (
+        "只报前集介绍过的人物"
+    )

@@ -75,3 +75,6 @@ class EpisodeRawAnalysis(BaseModel):
     asr_segments: list[AsrSegment] = Field(default_factory=list)
     scenes: list[SceneInfo] = Field(default_factory=list)
     audio: AudioFeatures = Field(default_factory=AudioFeatures)
+    # 转写质量预警（如实记录不拦流程）：时间轴坍缩特征等。旧产物无此字段，读入按空表，
+    # 与 beats 同款兼容姿势——不强制重分析。
+    warnings: list[str] = Field(default_factory=list)

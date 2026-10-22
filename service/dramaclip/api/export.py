@@ -19,7 +19,7 @@ from dramaclip.api.export_audit import (
     _log_clock_audit,
     _note_degraded,
     _planned_narration_segments,
-    _probe_opening_silence,
+    _probe_silence_quality,
 )
 from dramaclip.api.export_covers import (
     SubtitleCover,
@@ -727,9 +727,9 @@ def render_export(
     except (ValueError, OSError) as exc:
         # 元信息回填/时长审计失败不影响导出成功——但"没回填、没核对"必须写进账面
         _note_degraded(context, "成片元信息回填与时长审计", "库里没有实测时长，事后核对也没做", exc)
-    # 开场 3 秒质检（W6）：零文案模式跳过，解说模式无声开场留痕建议重掷
-    # （_probe_opening_silence 自带 try-except，不会抛出）
-    _probe_opening_silence(
+    # 成片静默体检（W6）：零文案模式跳过；解说模式无声开场/结尾、中段死气段留痕
+    # （_probe_silence_quality 自带 try-except，不会抛出）
+    _probe_silence_quality(
         context, str(out_path), str(plan_row["narration_mode"] or ""),
     )
     # 四项自检（09-10 #29：导出期产出字段）：增强项绝不挡导出，留 NULL 也要留痕

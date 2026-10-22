@@ -551,6 +551,17 @@ class ParaformerEngine:
                 exc,
             )
             clips = []
+        else:
+            # 切分退化＝谷被 BGM 填满（《颠勺》EP1 形态的前兆）：片段顶格无真实停顿，
+            # 逐段转写的防并句前提已经不成立。引擎层只作如实记录——用户的账面由
+            # pipeline 的产物级坍缩检测兜（两条信号互补：这条在转写前，那条在转写后）。
+            degenerate = pause_split.fill_degenerate(clips)
+            if degenerate:
+                _LOGGER.warning(
+                    "停顿切分退化（%s）：能量谷疑被 BGM 填满，"
+                    "并句/时间戳漂移风险高，建议切云端 ASR",
+                    degenerate,
+                )
         with _punc_false_alarm_silenced():
             if len(clips) <= 1:
                 return self._transcribe_one(model, wav_path, language, hotwords)

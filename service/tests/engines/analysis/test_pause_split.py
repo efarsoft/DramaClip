@@ -100,3 +100,21 @@ def test_sample_width_mismatch_raises(tmp_path: Path) -> None:
         wf.writeframes(b"\x80" * _RATE)
     with pytest.raises(ValueError, match="16k 单声道"):
         pause_split.speech_clips(wav)
+
+
+def test_fill_degenerate_flags_capped_clips() -> None:
+    """顶格片段过半 → 退化信号（谷被 BGM 填满）；健康长短分布与单片段不报。"""
+    capped = [pause_split.Clip(k * 12.0, (k + 1) * 12.0) for k in range(6)]
+    message = pause_split.fill_degenerate(capped)
+    assert message is not None and "6/6" in message
+    healthy = [
+        pause_split.Clip(0.0, 3.2),
+        pause_split.Clip(4.0, 9.5),
+        pause_split.Clip(11.0, 14.0),
+        pause_split.Clip(15.0, 21.0),
+        pause_split.Clip(22.0, 27.5),
+    ]
+    assert pause_split.fill_degenerate(healthy) is None
+    assert pause_split.fill_degenerate([pause_split.Clip(0.0, 300.0)]) is None, (
+        "单片段走整条直喂路径，退化信号不归它管"
+    )

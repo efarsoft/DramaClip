@@ -11,6 +11,7 @@ import logging
 import re
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext
@@ -160,42 +161,145 @@ def _log_clock_audit(context: AppContext, stats: list[tuple[int, int, int]]) -> 
     _emit_note(context, "info", message)
 
 
-# ── 开场 3 秒质检（W6·§6.1）───────────────────────────────────────────
+# ── 成片静默体检（W6·§6.1 开场 3 秒 + 扩展：结尾 3 秒 / 中段死气段）───────
 
 _SILENCE_THRESHOLD_DB = -50.0
 """麦克风/环境底噪在 −60 以下，−50 是「有内容」与「近似无声」的干净分界（实测）。"""
 
+_SILENCE_DETECT_MIN_S = 1.0
+"""silencedetect 的最短静默段：开场/结尾窗口覆盖判的计数单位，再短的网络静音帧不算。"""
 
-def _probe_opening_silence(
+_WINDOW_S = 3.0
+"""开场/结尾质检窗口：短视频前 3 秒决定划走与否，收尾同理。"""
+
+_WINDOW_COVER = 0.9
+"""窗口内静默覆盖率 ≥90% 判无声——判「整段没内容」，不是「均值偏低」。"""
+
+_DEAD_GAP_S = 5.0
+"""中段死气门槛：解说话间留白普遍 ≤2s，连续 ≥5s 无声才算节奏塌陷。"""
+
+_DEAD_GAP_REPORT_MAX = 3
+"""留痕里最多列出的死气段数：账面要可读，全列交给总数。"""
+
+
+def _run_silencedetect(output_path: str) -> str:
+    """全片 silencedetect 扫描，返回 stderr（ffmpeg 的统计结果走 stderr）。
+
+    一次进程调用喂三条判定（开场/结尾/中段）——逐窗 volumedetect 要三次解码，
+    全片扫描只解码一遍。
+    """
+    null_dev = "NUL" if sys.platform == "win32" else "/dev/null"
+    # CREATE_NO_WINDOW 是 Windows 独有属性：getattr 姿势过 linux 视角的类型检查
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    result = subprocess.run(
+        ["ffmpeg", "-i", output_path,
+         "-af", f"silencedetect=noise={_SILENCE_THRESHOLD_DB:.0f}dB:d={_SILENCE_DETECT_MIN_S}",
+         "-f", "null", null_dev],
+        capture_output=True, text=True, timeout=120, creationflags=flags, check=False,
+    )
+    return result.stderr
+
+
+def _silent_windows(stderr: str, duration_s: float) -> list[tuple[float, float]]:
+    """silencedetect 输出 → 静默区间表 [(start, end)]；片尾未闭合的 start 用时长补。
+
+    ffmpeg 对「一直静到片尾」的区间只报 start 不报 end——不补的话结尾判定永远看不见
+    片尾静默，而那恰是无声收尾最常见的形态。
+    """
+    windows: list[tuple[float, float]] = []
+    open_start: float | None = None
+    for line in stderr.splitlines():
+        match = re.search(r"silence_start:\s*(-?[\d.]+)", line)
+        if match:
+            open_start = float(match.group(1))
+            continue
+        match = re.search(r"silence_end:\s*(-?[\d.]+)", line)
+        if match and open_start is not None:
+            end = float(match.group(1))
+            if end > open_start:
+                windows.append((open_start, end))
+            open_start = None
+    if open_start is not None and duration_s > open_start:
+        windows.append((open_start, duration_s))
+    return windows
+
+
+def _covered_ratio(
+    windows: list[tuple[float, float]], start: float, end: float
+) -> float:
+    """[start, end) 窗口被静默区间覆盖的比例；窗口非法或无重叠记 0。"""
+    span = end - start
+    if span <= 0:
+        return 0.0
+    overlap = sum(
+        min(w_end, end) - max(w_start, start)
+        for w_start, w_end in windows
+        if min(w_end, end) > max(w_start, start)
+    )
+    return min(overlap / span, 1.0)
+
+
+def _probe_silence_quality(
     context: AppContext, output_path: str, narration_mode: str
 ) -> None:
-    """导出后探测成片前 3 秒的音频响度——解说模式无声开场是钩子站不住的信号。
+    """导出后静默体检三判定：开场 3 秒 / 结尾 3 秒 / 中段死气段。
 
-    零文案模式（raw_clip 等）开场只有画面是合法路径，不检查。
-    探测自身失败静默跳过——事后体检不许拖垮已成功的导出。
+    解说模式的无声开场是钩子站不住的信号（W6·§6.1）；无声结尾是收尾戛然而止、
+    追更转化断在最后一步的信号；中段连续 ≥5s 无声是节奏塌陷。判定都只留痕不拦片，
+    与时长审计同纪律。零文案模式（raw_clip 等）原声本就是主体，静默可能是剧情本身，
+    不检查。探测自身失败静默跳过——事后体检不许拖垮已成功的导出。
     """
     from dramaclip.api.narration_plans import _NO_TTS_MODES  # noqa: PLC0415 - 延迟导入避免循环
 
     if narration_mode in _NO_TTS_MODES:
         return
     try:
-        null_dev = "NUL" if sys.platform == "win32" else "/dev/null"
-        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        result = subprocess.run(
-            ["ffmpeg", "-i", output_path, "-t", "3",
-             "-af", "volumedetect", "-f", "null", null_dev],
-            capture_output=True, text=True, timeout=15, creationflags=flags, check=False,
-        )
-        match = re.search(r"mean_volume:\s*(-?[\d.]+)\s*dB", result.stderr)
-        if match is None:
-            return
-        mean_db = float(match.group(1))
-        if mean_db >= _SILENCE_THRESHOLD_DB:
-            return
+        duration_s = 0.0
+        try:
+            from dramaclip.infra.ffmpeg import probe as ffprobe_mod  # noqa: PLC0415
+
+            media = ffprobe_mod.probe(Path(output_path))
+            duration_s = float(media.duration_s or 0.0)
+        except Exception:  # noqa: BLE001 - 时长拿不到只搁置结尾判定，开场/中段照做
+            pass
+        windows = _silent_windows(_run_silencedetect(output_path), duration_s)
+    except Exception:  # noqa: BLE001 - 事后体检失败绝不挡已成功的导出
+        return
+    _report_silence_quality(context, windows, duration_s)
+
+
+def _report_silence_quality(
+    context: AppContext, windows: list[tuple[float, float]], duration_s: float
+) -> None:
+    """三判定装配：每条独立成账，互不屏蔽（开场塌+结尾塌同时存在就该都看见）。"""
+    if _covered_ratio(windows, 0.0, _WINDOW_S) >= _WINDOW_COVER:
         _note_degraded(
             context, "开场 3 秒质检",
-            f"前 3 秒平均响度 {mean_db:.0f}dB（阈值 {_SILENCE_THRESHOLD_DB:.0f}）——"
-            "钩子可能站不住，建议在方案层重掷此条钩子",
+            f"前 {_WINDOW_S:.0f} 秒近无声（静默覆盖 ≥{_WINDOW_COVER:.0%}，阈值"
+            f" {_SILENCE_THRESHOLD_DB:.0f}dB）——钩子可能站不住，建议在方案层重掷此条钩子",
         )
-    except Exception:  # noqa: BLE001 - 事后体检失败绝不挡已成功的导出
-        pass
+    if duration_s > _WINDOW_S + 1.0:
+        tail_start = duration_s - _WINDOW_S
+        if _covered_ratio(windows, tail_start, duration_s) >= _WINDOW_COVER:
+            _note_degraded(
+                context, "结尾 3 秒质检",
+                f"末 {_WINDOW_S:.0f} 秒近无声（静默覆盖 ≥{_WINDOW_COVER:.0%}）——"
+                "收尾可能戛然而止，追更转化断在最后一步，建议核对成片尾部是否完整",
+            )
+    interior = [
+        (start, end)
+        for start, end in windows
+        if start >= _WINDOW_S and end - start >= _DEAD_GAP_S
+        and (duration_s <= 0 or end <= duration_s - _WINDOW_S)
+    ]
+    if interior:
+        total_s = sum(end - start for start, end in interior)
+        shown = "、".join(
+            f"{start:.0f}s–{end:.0f}s" for start, end in interior[:_DEAD_GAP_REPORT_MAX]
+        )
+        more = f" 等 {len(interior)} 处" if len(interior) > _DEAD_GAP_REPORT_MAX else ""
+        _note_degraded(
+            context, "中段死气段检测",
+            f"检出 {len(interior)} 处连续 ≥{_DEAD_GAP_S:.0f}s 无声"
+            f"（{shown}{more}，合计 {total_s:.0f}s）——节奏可能塌陷，建议核对剪辑松紧",
+        )

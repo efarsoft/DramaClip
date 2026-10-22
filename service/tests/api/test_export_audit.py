@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 
 from dramaclip.api import export as export_api
+from dramaclip.api import export_audit
 from dramaclip.engines.exporter import encoder
 from dramaclip.engines.narration.models import PlanData, TimelineSegment
 from dramaclip.infra.ffmpeg import probe as probe_mod
@@ -172,3 +173,64 @@ def test_audit_probe_failure_never_blocks_export(
     row = exports_repo.get(memory_db, export_id)
     assert row is not None and row["status"] == exports_repo.STATUS_COMPLETED
     assert row["error"] is None
+
+
+# ---- 成片静默体检（开场 3 秒 / 结尾 3 秒 / 中段死气段）--------------------
+
+
+def test_silent_windows_parses_unclosed_tail() -> None:
+    """ffmpeg 对「静到片尾」的区间只报 start：解析端用时长补，否则结尾判定看不见片尾静默。"""
+    stderr = (
+        "[s] silence_start: 0.0\n"
+        "[s] silence_end: 2.9 | silence_duration: 2.9\n"
+        "[s] silence_start: 10.0\n"
+        "[s] silence_end: 16.0 | silence_duration: 6.0\n"
+        "[s] silence_start: 57.0\n"
+    )
+    assert export_audit._silent_windows(stderr, 60.0) == [(0.0, 2.9), (10.0, 16.0), (57.0, 60.0)]
+
+
+def test_silence_quality_flags_opening_tail_and_dead_gaps() -> None:
+    """开场无声 + 中段死气 + 无声结尾 → 三条独立账；够不着门槛的短静默零账。"""
+    flagged: list[dict[str, Any]] = []
+    export_audit._report_silence_quality(
+        SimpleNamespace(notifier=Notifier(flagged.append)),
+        [(0.0, 2.9), (10.0, 16.0), (57.0, 60.0)],
+        60.0,
+    )
+    messages = [str(m["params"]["message"]) for m in flagged if m["method"] == "log.append"]
+    assert any("开场 3 秒质检" in m for m in messages), messages
+    assert any("中段死气段检测" in m for m in messages), messages
+    assert any("结尾 3 秒质检" in m for m in messages), messages
+
+    quiet: list[dict[str, Any]] = []
+    export_audit._report_silence_quality(
+        SimpleNamespace(notifier=Notifier(quiet.append)), [(30.0, 33.0)], 60.0
+    )
+    assert quiet == [], "3s 静默够不着死气门槛（≥5s），不该吵"
+
+
+def test_silence_quality_skips_no_tts_and_never_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """零文案模式跳过探测；探测自身挂掉不抛（事后体检不许拖垮已成功的导出）。"""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        export_audit, "_run_silencedetect", lambda path: calls.append(path) or ""
+    )
+    export_audit._probe_silence_quality(None, "x.mp4", "raw_clip")
+    assert calls == [], "零文案模式不该触发探测"
+
+    def _fake_probe(_path: str) -> probe_mod.MediaInfo:
+        return probe_mod.MediaInfo(
+            duration_s=60.0, width=1080, height=1920, fps=30.0, has_audio=True
+        )
+
+    def _boom(_path: str) -> str:
+        raise RuntimeError("ffmpeg 炸了")
+
+    monkeypatch.setattr(probe_mod, "probe", _fake_probe)
+    monkeypatch.setattr(export_audit, "_run_silencedetect", _boom)
+    export_audit._probe_silence_quality(
+        SimpleNamespace(notifier=Notifier([])), "x.mp4", "full_narration"
+    )

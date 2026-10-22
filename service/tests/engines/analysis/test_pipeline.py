@@ -83,3 +83,24 @@ def test_extract_audio_wav_is_16k_mono(sample_video: Path, tmp_path: Path) -> No
     with wave.open(str(wav), "rb") as handle:
         assert handle.getframerate() == 16000
         assert handle.getnchannels() == 1
+
+
+def test_collapse_warning_flags_squeezed_timeline() -> None:
+    """46 段挤 0–11.58s（《颠勺》EP1 实锤形态）→ 坍缩警告；分布正常/段数不足不报。"""
+    squeezed = [
+        AsrSegment(start=k * 0.25, end=k * 0.25 + 0.2, text="词") for k in range(46)
+    ]
+    warning = pipeline.collapse_warning(squeezed, 2700.0)
+    assert warning is not None
+    assert "坍缩" in warning and "46" in warning and "2700" in warning
+    spread = [
+        AsrSegment(start=float(k) * 55.0, end=float(k) * 55.0 + 3.0, text="台词")
+        for k in range(46)
+    ]
+    assert pipeline.collapse_warning(spread, 2700.0) is None, "全片铺开的段不是坍缩"
+    assert pipeline.collapse_warning(squeezed[:10], 2700.0) is None, (
+        "少量段挤在窄窗是台词稀疏集的正常场景"
+    )
+    assert pipeline.collapse_warning(squeezed, 0.0) is not None, (
+        "时长拿不到时按跨度本身判（15s 窗）"
+    )

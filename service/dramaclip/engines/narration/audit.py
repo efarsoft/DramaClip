@@ -424,14 +424,127 @@ def _cross_episode_finding(segs: list[dict[str, Any]]) -> Finding:
     )
 
 
+# 人物完整介绍的三种中文句式（追更纪律：同一人物全套介绍只许出现一次）。
+# 称号词表与短剧题材对齐（古装宫斗/权谋为主）；单字称号（王/帝/后）太短、误报源，不收。
+_INTRO_TITLES = (
+    "皇帝|可汗|皇后|皇太后|太后|太妃|王爷|亲王|郡王|侯爷|将军|大将军|大人|公公|太监|"
+    "皇子|公主|太子|世子|公子|小姐|夫人|娘子|姑娘|阁老|尚书|御史|太尉|侍卫|指挥使|"
+    "千户|百户|县令|知府|丞相|宰相|首辅|军师|管家|掌柜|掌门|长老|国师|太师|太傅|驸马|锦衣卫|"
+    "殿下|陛下|娘娘|状元|捕头|镖头|少主|家主|宗主|摄政王|九千岁|千岁"
+)
+# 式A：称号同位语「摄政王萧临，先帝胞弟」——称号后紧跟百家姓起头的人名，防「将军出征，」误报
+_INTRO_APPOSITE_RE = re.compile(
+    r"(?:" + _INTRO_TITLES + r")([" + _SURNAME + r"][\u4e00-\u9fa5]{1,2})[，,、]"
+    r"[^,,。;;!?!?]{2,16}"
+)
+# 式B：名字+逗号+称号「李若琏，锦衣卫指挥使」「王承恩，司礼监秉笔太监」——人名以百家姓
+# 起头；称号前允许 ≤6 字修饰（司礼监秉笔/当朝/先帝亲封式），偶发从句误报交软规则人工兜
+_INTRO_DESC_RE = re.compile(
+    r"([" + _SURNAME + r"][\u4e00-\u9fa5]{1,3})[，,]"
+    r"[^,,。;;!?!?]{0,6}?(?:" + _INTRO_TITLES + r")"
+)
+# 式C：系词式「李若琏是当朝锦衣卫指挥使」——姓氏起头 + 系词 + 少量引导字 + 称号
+_INTRO_COPULA_RE = re.compile(
+    r"([" + _SURNAME + r"][\u4e00-\u9fa5]{1,3})(?:便是|正是|乃是|就是|是)"
+    r"[^,,。;;!?!?]{0,6}?(?:" + _INTRO_TITLES + r")"
+)
+
+
+def _extract_intro_names(text: str) -> list[tuple[str, str]]:
+    """从一段解说文本提取「完整介绍句」的人名键 + 展示片段。
+
+    三式命中即算完整介绍（身份随出场带出的句式）；提取是启发式，指纹只用作
+    「同一人名被介绍几次」的计数——软规则+需人工，宁可漏报不可冤枉从句。
+    同一处介绍被多式同时命中（如「李若琏，锦衣卫指挥使」既中式B也似中式C的
+    邻域）只计一次：按人名 span 重叠去重，重复计数会把一次介绍报成两次。
+    """
+    names: list[tuple[str, str]] = []
+    seen_spans: list[tuple[int, int]] = []
+    for regex in (_INTRO_APPOSITE_RE, _INTRO_DESC_RE, _INTRO_COPULA_RE):
+        for match in regex.finditer(text):
+            start, end = match.start(1), match.end(1)
+            if any(start < seen_end and end > seen_start for seen_start, seen_end in seen_spans):
+                continue
+            name = match.group(1)
+            if len(name) >= 2:
+                seen_spans.append((start, end))
+                names.append((name, text[max(0, match.start() - 2) : match.end() + 4]))
+    return names
+
+
+def _person_intro_findings(
+    segs: list[dict[str, Any]], prior_texts: list[str] | None = None
+) -> list[Finding]:
+    """人物纪律组（软+需人工）：同一人物被「完整介绍」超过一次，或前集已介绍过再走全套。
+
+    「完整介绍」= 身份随出场带出的句式（式A/B/C）；同稿内第二次出现就是违例
+    ——观众刚认识又要重认识一遍；prior_texts（同剧前集稿文本，调用方注入）里
+    已介绍过的人物再走全套，追更观众早已知晓。prompt 只许「身份或关系随出场
+    带一句」，全套介绍重复出现即违反。与九规则组同款：固定一条记录通过/不通过，
+    跨稿规则只在 prior_texts 在场时才参审（没有前集数据时不该装作查过）。
+    """
+    texts = [str(s.get("text", "") or "") for s in segs]
+    hits: dict[str, list[str]] = {}
+    for text in texts:
+        for name, snippet in _extract_intro_names(text):
+            hits.setdefault(name, []).append(snippet)
+    findings: list[Finding] = []
+    repeated = {name: spots for name, spots in hits.items() if len(spots) >= 2}
+    detail = "；".join(
+        f"『{name}』×{len(spots)}（{spots[0][:10]}…）" for name, spots in repeated.items()
+    )
+    findings.append(
+        Finding(
+            "FUND_PERSON_INTRO_ONCE", "fund_base", "soft",
+            not repeated,
+            "未检出同一人物被完整介绍多次"
+            if not repeated
+            else f"同一人物被完整介绍多次：{detail}——第二次只许一句带过，禁止重走全套介绍",
+            location=",".join(
+                f"segment[{i}]"
+                for i, text in enumerate(texts)
+                if any(name in text for name in repeated)
+            )[:200],
+            prompt_quote="每个出场的人都要让观众认得出来（身份或关系随出场带一句）；同一人物全稿只用一个写法；",
+            needs_human=bool(repeated),
+        )
+    )
+    if not prior_texts:
+        return findings
+    prior_names: set[str] = set()
+    for text in prior_texts:
+        prior_names.update(name for name, _ in _extract_intro_names(text))
+    carried = {name: spots[0] for name, spots in hits.items() if name in prior_names}
+    carried_detail = "；".join(
+        f"『{name}』（{snippet[:10]}…）" for name, snippet in carried.items()
+    )
+    findings.append(
+        Finding(
+            "FUND_PERSON_INTRO_CARRIED", "fund_base", "soft",
+            not carried,
+            "前集无重复介绍"
+            if not carried
+            else f"前集已完整介绍过的人物本稿再走全套：{carried_detail}"
+            "——追更观众早已知晓，应改为一句带过（如「上集说到的某人」）",
+            location="segments",
+            prompt_quote="每个出场的人都要让观众认得出来（身份或关系随出场带一句）；同一人物全稿只用一个写法；",
+            needs_human=bool(carried),
+        )
+    )
+    return findings
+
+
 def review_script(
     script: dict[str, Any],
     transcript: list[dict[str, Any]] | None = None,
+    *,
+    prior_texts: list[str] | None = None,
 ) -> ReviewReport:
     """审查 _STRUCTURE_PROMPT + 基本功层（full）约束。
 
     transcript: 清洗后的带时间戳台词，字段 episode/start/end/speaker/text。
     用于时间上界、互不重叠、声纹换名、编造外事件等可验证项。
+    prior_texts: 同剧前集稿的解说文本（调用方注入，缺省 None 只查同稿内重复）。
     规则按组拆在 _*_findings 子函数里，这里只做装配；产出顺序与拆分前逐条一致。
     """
     transcript = transcript or []
@@ -458,19 +571,25 @@ def review_script(
     findings.extend(_invented_anchor_findings(segs))
     findings.extend(_narrative_texture_findings(segs))
     findings.append(_cross_episode_finding(segs))
+    findings.extend(_person_intro_findings(segs, prior_texts))
 
     return ReviewReport(target="script", findings=findings,
                         meta={"n_segments": len(segs), "ep_bounds": ep_bounds})
 
 
-def audit_script(script: Any, transcript: list[dict[str, Any]] | None = None) -> ReviewReport:
+def audit_script(
+    script: Any,
+    transcript: list[dict[str, Any]] | None = None,
+    *,
+    prior_texts: list[str] | None = None,
+) -> ReviewReport:
     """编剧链内联审查封装：`Script` 模型（或同形 dict）→ 规则审查报告。
 
     write_script_episodes 的 attempts 循环逐稿调用；hard 未过条目带 prompt_quote
-    重掷（规则锚定原句），soft 只记账不拦。
+    重掷（规则锚定原句），soft 只记账不拦。prior_texts 透传给人物介绍重复规则。
     """
     payload = script.model_dump() if hasattr(script, "model_dump") else script
-    return review_script(payload, transcript)
+    return review_script(payload, transcript, prior_texts=prior_texts)
 
 
 # ---------------------------------------------------------------------------
