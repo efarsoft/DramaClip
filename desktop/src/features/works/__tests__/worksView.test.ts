@@ -81,8 +81,8 @@ describe('自检徽章三态', () => {
     expect(badges[2]?.detail).toContain('无音轨');
   });
 
-  it('筛选词表：全部/自检通过/有红/未检', () => {
-    expect(WORKS_FILTERS.map((f) => f.label)).toEqual(['全部', '自检通过', '有红', '未检']);
+  it('筛选词表：全部/自检通过/有红/有灰/未检（有灰无红=partial，规格 §1.4）', () => {
+    expect(WORKS_FILTERS.map((f) => f.label)).toEqual(['全部', '自检通过', '有红', '有灰', '未检']);
   });
 });
 
