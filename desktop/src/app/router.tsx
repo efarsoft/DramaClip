@@ -5,7 +5,6 @@ import { ProjectsPage } from '../features/project/ProjectsPage';
 import { DramaShell } from '../features/project/DramaShell';
 import { WorkbenchPage } from '../features/analysis/WorkbenchPage';
 import { ProductionPage } from '../features/narration/ProductionPage';
-import { QueuePage } from '../features/jobs/QueuePage';
 import { EnginesPage } from '../features/engines/EnginesPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
 import { WorksPage } from '../features/works/WorksPage';
@@ -23,7 +22,6 @@ export function Router() {
           <Route path="/dramas" element={<ProjectsPage />} />
           <Route path="/works" element={<WorksPage />} />
           <Route path="/works/:exportId" element={<WorksDetailPage />} />
-          <Route path="/queue" element={<QueuePage />} />
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/engines" element={<EnginesPage />} />
           <Route path="/engines/:tab" element={<EnginesPage />} />
