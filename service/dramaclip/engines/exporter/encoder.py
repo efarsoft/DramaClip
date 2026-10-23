@@ -19,11 +19,11 @@ import subprocess  # noqa: S404 - 参数为受控列表
 import sys
 import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.dedup import jitter
@@ -438,8 +438,10 @@ def _escape_filter_path(path: str) -> str:
     try:
         relative = os.path.relpath(normalized).replace("\\", "/")
     except ValueError:
-        relative = normalized
-    if not relative.startswith(".."):
+        # 跨盘符（数据目录与工作目录不同盘）根本没有相对路径可算：必须落到下面
+        # 转义盘符那一支，交出去的 `C:/…` 会被 ffmpeg 在冒号处切开当选项值。
+        relative = ""
+    if relative and not relative.startswith(".."):
         return relative.replace("'", r"\'")
     return normalized.replace(":", r"\\:").replace("'", r"\'")
 
@@ -627,6 +629,16 @@ class _SegmentJob:
     reuse: bool
 
 
+class _SegmentArtifact(NamedTuple):
+    """Phase A 交给 Phase B 的一份产物：时间轴序号 + 盘上路径。
+
+    序号跟着路径一起走，偏移才不必靠「两处各自排序再指望它们对齐」——清单序＝拼接序。
+    """
+
+    index: int
+    path: Path
+
+
 def _sig_path_for(seg_path: Path) -> Path:
     return seg_path.with_suffix(".sig")
 
@@ -784,6 +796,7 @@ def export_plan(
     burn_ai_label: bool = False,
     compute_sink: Callable[[compute.ComputeReport], None] | None = None,
     encoder_requested: str = "",
+    segment_offsets_sink: Callable[[Sequence[tuple[int, float]]], None] | None = None,
 ) -> Path:
     """执行两阶段导出，返回成片路径。
 
@@ -796,6 +809,9 @@ def export_plan(
 
     `compute_sink` 只在整片成功（含统一重跑后成功）时收到一份 `video.encode`
     回执：resolved=首轮选中编码器，actual=最终成片编码器，段级回退必须可见。
+
+    `segment_offsets_sink` 只在整片成功且段长全部实测到时收到 `[(段序号, 成片起点秒)]`，
+    顺序＝拼接序；用于给成片侧产出逐句时间轴（见 `_segment_offsets`）。不传即零额外探测。
     """
     state: dict[str, Any] = {"fallback": False, "reason": "", "fallback_count": 0}
     try:
@@ -815,6 +831,7 @@ def export_plan(
             subtitle_erase_rects=subtitle_erase_rects,
             subtitle_erase_windows=subtitle_erase_windows,
             burn_ai_label=burn_ai_label,
+            segment_offsets_sink=segment_offsets_sink,
             _allow_uniform_retry=True,
             _report_state=state,
         )
@@ -845,6 +862,7 @@ def export_plan(
             subtitle_erase_rects=subtitle_erase_rects,
             subtitle_erase_windows=subtitle_erase_windows,
             burn_ai_label=burn_ai_label,
+            segment_offsets_sink=segment_offsets_sink,
             _allow_uniform_retry=False,
             _report_state=state,
         )
@@ -883,6 +901,7 @@ def _export_plan_once(
     subtitle_erase_rects: dict[str, list[tuple[float, float]]] | None = None,
     subtitle_erase_windows: dict[str, list[tuple[float, float]]] | None = None,
     burn_ai_label: bool = False,
+    segment_offsets_sink: Callable[[Sequence[tuple[int, float]]], None] | None = None,
     _allow_uniform_retry: bool = True,
     _report_state: dict[str, Any] | None = None,
 ) -> Path:
@@ -1217,17 +1236,41 @@ def _export_plan_once(
     if fallback_seen["v"] and _allow_uniform_retry:
         raise _UniformCodecRetry()
 
-    _concat(_concat_manifest(jobs), out_path)
+    manifest = _concat_manifest(jobs)
+    _concat([item.path for item in manifest], out_path)
     if loudness_target is not None:
         loudness.normalize_in_place(
             out_path, target=loudness_target, work_dir=work_dir / "loudnorm"
         )
+    if segment_offsets_sink is not None:
+        offsets = _segment_offsets(manifest)
+        if offsets is not None:
+            segment_offsets_sink(offsets)
     if on_progress is not None:
         on_progress(100.0, "导出完成")
     return out_path
 
 
-def _concat_manifest(jobs: list[_SegmentJob]) -> list[Path]:
+def _segment_offsets(manifest: list[_SegmentArtifact]) -> list[tuple[int, float]] | None:
+    """各段起点（秒）＝按拼接序累加**实测**段长；测不出返回 None，调用方据此不产出时间轴。
+
+    成片逐句时间轴只有这一个诚实来源：`timeline[].start/end` 是源片坐标，观众看到的
+    是切完拼接后的成片坐标，两者差着 jitter 与保护区外扩。拿计划声明值凑一份等于把
+    误差固化成"看起来精确"的假账，所以宁可不给。
+    """
+    offsets: list[tuple[int, float]] = []
+    cursor = 0.0
+    try:
+        for item in manifest:
+            offsets.append((item.index, cursor))
+            cursor += ffprobe_mod.probe(item.path).duration_s
+    except Exception as exc:  # noqa: BLE001 - 测不出就不交付，别拿半截偏移冒充
+        _LOGGER.warning("段偏移测量失败（%s）：本条成片不产出逐句时间轴", str(exc)[:200])
+        return None
+    return offsets
+
+
+def _concat_manifest(jobs: list[_SegmentJob]) -> list[_SegmentArtifact]:
     """Phase B 段清单以 **jobs 为准逐段验盘**，不按 `glob("seg_*.mp4")` 收。
 
     glob 回答的是"目录里恰好有什么"，不是"这次渲染产出了什么"：某段 ffmpeg 退出码 0
@@ -1236,7 +1279,7 @@ def _concat_manifest(jobs: list[_SegmentJob]) -> list[Path]:
     属禁止级，当场判死。顺带两笔账：清单按 `job.index` 排（词法排序会把 `seg_1000`
     插到 `seg_999` 前面），且本次段集不再受 work_dir 里别的文件影响。
     """
-    paths: list[Path] = []
+    items: list[_SegmentArtifact] = []
     broken: list[str] = []
     for job in sorted(jobs, key=lambda job: job.index):
         try:
@@ -1244,7 +1287,7 @@ def _concat_manifest(jobs: list[_SegmentJob]) -> list[Path]:
         except OSError:  # 缺盘/目录/权限问题一律按"这块产物不可信"
             usable = False
         if usable:
-            paths.append(job.seg_path)
+            items.append(_SegmentArtifact(job.index, job.seg_path))
         else:
             broken.append(f"第 {job.index + 1} 段（{job.seg_path.name}）")
     if broken:
@@ -1252,7 +1295,7 @@ def _concat_manifest(jobs: list[_SegmentJob]) -> list[Path]:
             f"编码报成功的段有 {len(broken)}/{len(jobs)} 段不在盘上或为空文件："
             f"{'、'.join(broken[:5])}——缺段成片不予交付"
         )
-    return paths
+    return items
 
 
 def _concat_list_line(path: Path) -> str:

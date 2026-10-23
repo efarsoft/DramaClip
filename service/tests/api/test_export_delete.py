@@ -82,6 +82,26 @@ def test_delete_moves_output_and_cover_then_drops_row(
     assert harness.rpc("export.list_works", {}) == []
 
 
+def test_delete_moves_the_film_srt_sidecar_too(
+    memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """逐句时间轴旁挂文件跟着成片走：不搬就成了删不掉的孤儿（与封面同判据）。"""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    harness = Harness(memory_db, data_dir)
+    export_id, out_path, _cover = _seed_completed(memory_db, data_dir, with_cover=False)
+    srt_path = out_path.with_suffix(".srt")
+    srt_path.write_text("1\n00:00:02,000 --> 00:00:04,000\n台词\n", encoding="utf-8")
+
+    result = harness.rpc("export.delete", {"export_id": export_id})
+
+    trash_dir = data_dir / ".trash" / date.today().isoformat()
+    assert not srt_path.exists(), "旁挂文件必须一起搬走"
+    assert (trash_dir / srt_path.name).is_file()
+    assert str(trash_dir / srt_path.name) in result["trashed"], result["trashed"]
+    assert result["missing"] == []
+
+
 def test_delete_reports_missing_files_but_still_drops_row(
     memory_db: sqlite3.Connection, tmp_path: Path
 ) -> None:

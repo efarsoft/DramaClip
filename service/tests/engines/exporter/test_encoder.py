@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import random
 
+import pytest
+
 from dramaclip.engines.exporter import encoder
 from dramaclip.engines.exporter.encoder import cut_segment_args
 from dramaclip.engines.subtitle import caption_font
@@ -434,3 +436,23 @@ def test_missing_windows_keep_full_length_erase() -> None:
             erase_windows=windows,
         )
         assert _vf(args) == baseline, f"窗={windows} 降级必须不可见"
+
+
+def test_ass_path_beyond_relativizing_escapes_the_drive_colon(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """relpath 走不通（跨盘符抛 ValueError）时必须落到「转义盘符冒号」那一支。
+
+    真机验收撞到的失效原文：`Unable to parse "original_size" option value
+    "/Users/…/seg_000.ass" as image size`——未转义的 `C:/…` 交给 ffmpeg，它在冒号处
+    切开滤镜参数，`C` 成了 filename、剩下的整条路径成了下一个位置参数。
+    """
+    import os
+
+    def _cross_drive(_path: str, *_args: str) -> str:
+        raise ValueError("path is on mount 'C:', start on mount 'D:'")
+
+    monkeypatch.setattr(os.path, "relpath", _cross_drive)
+    assert encoder._escape_filter_path("C:/data/export/seg_000.ass") == (
+        r"C\\:/data/export/seg_000.ass"
+    )

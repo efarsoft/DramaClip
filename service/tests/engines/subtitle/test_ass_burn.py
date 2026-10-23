@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import os  # noqa: S404 - 只为 skipif 判断平台
 import subprocess  # noqa: S404 - 参数为受控列表
 from pathlib import Path
 from typing import Any
@@ -219,3 +220,47 @@ def test_the_advance_constant_is_the_bundled_face_measured_advance(tmp_path: Pat
     assert advance > model - 4.0, (
         f"实测步进 {advance:.1f}px 远小于常数允许的 {model:.1f}px：上限白留了余量，重标它"
     )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="盘符冒号只在 Windows 上存在")
+def test_an_absolute_ass_path_really_burns_ink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """跨盘符那支只能交绝对路径：这份转义必须真烧得出墨（真 ffmpeg 量墨，不是比字符串）。
+
+    单元测试只能证明形状，证明不了 ffmpeg 认这个形状。真机验收里失败的那次读起来像渲染层
+    坏了：`Unable to parse "original_size" option value "/Users/…/seg_000.ass"`——盘符冒号
+    没转义时，ffmpeg 在冒号处切开滤镜参数，把路径当成了下一个位置参数的值。
+    """
+    from dramaclip.engines.exporter import encoder
+
+    target = tmp_path / "abs" / "seg_000.ass"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        build_ass([{"start": 0, "end": 2, "text": "盘符冒号转义"}], presets.get_preset("conflict-impact")),
+        encoding="utf-8",
+    )
+
+    def _cross_drive(_path: str, *_args: str) -> str:
+        raise ValueError("path is on mount 'C:', start on mount 'D:'")
+
+    monkeypatch.setattr(os.path, "relpath", _cross_drive)
+    escaped = encoder._escape_filter_path(str(target))
+    assert ":" in escaped, f"没走到绝对路径那一支，这条量的是相对路径：{escaped}"
+    out = tmp_path / "abs.png"
+    res = subprocess.run(  # noqa: S603 - 受控参数
+        [
+            str(_FFMPEG), "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "color=c=0x101010:s=1080x1920:d=2:r=25",
+            "-vf", f"ass={escaped}:{caption_font.fontsdir_option(caption_font.caption_font())}",
+            "-ss", "0.7", "-frames:v", "1", str(out),
+        ],
+        cwd=str(tmp_path.parent),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert res.returncode == 0, f"绝对路径烧录被 ffmpeg 拒了：{res.stderr.strip()[:220]}"
+    frame = np.asarray(Image.open(out).convert("RGB"), dtype=np.int16)
+    assert int(_ink(frame).sum()) > 0, "绝对路径烧出了空画面：字幕没上屏"

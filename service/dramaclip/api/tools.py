@@ -22,6 +22,7 @@ from dramaclip.engines.analysis import fusion, subtitle_ocr
 from dramaclip.engines.analysis.models import OcrSegment
 from dramaclip.engines.analysis.pipeline import extract_audio
 from dramaclip.engines.narration import scriptwriter
+from dramaclip.engines.subtitle.srt import SrtCue, format_srt
 from dramaclip.engines.tts import factory
 from dramaclip.transport.rpc import Router, RpcDomainError
 
@@ -116,7 +117,7 @@ def _run_extract(context: AppContext, job_id: str, media_path: Path) -> None:
         lines = fusion.fuse(asr_segments, ocr_segments)
 
         text = "\n".join(segment.text.strip() for segment in lines if segment.text.strip())
-        srt = _format_srt(lines)
+        srt = format_srt([SrtCue(segment.start, segment.end, segment.text) for segment in lines])
         (out_dir / "copy.txt").write_text(text + "\n", encoding="utf-8")
         (out_dir / "copy.srt").write_text(srt, encoding="utf-8")
         meta = {
@@ -286,20 +287,3 @@ def _media_duration_s(path: Path) -> float:
     from dramaclip.engines.tts import base as tts_base
 
     return tts_base.audio_duration_s(path)
-
-
-def _format_srt(lines: list[Any]) -> str:
-    def _stamp(seconds: float) -> str:
-        ms = round(seconds * 1000)
-        hour, rem = divmod(ms, 3_600_000)
-        minute, rem = divmod(rem, 60_000)
-        sec, milli = divmod(rem, 1000)
-        return f"{hour:02d}:{minute:02d}:{sec:02d},{milli:03d}"
-
-    blocks = []
-    for index, segment in enumerate(lines, 1):
-        text = segment.text.strip()
-        if not text:
-            continue
-        blocks.append(f"{index}\n{_stamp(segment.start)} --> {_stamp(segment.end)}\n{text}")
-    return "\n\n".join(blocks) + ("\n" if blocks else "")
