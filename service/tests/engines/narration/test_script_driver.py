@@ -56,8 +56,8 @@ _EPISODES: list[dict[str, Any]] = [
 _SCRIPT_PAYLOAD: dict[str, Any] = {
     "hook": "钩子",
     "segments": [
-        {"episode": 1, "start": 1.0, "end": 10.0, "text": "第一集解说"},
-        {"episode": 2, "start": 5.0, "end": 15.0, "text": "第二集解说"},
+        {"episode": 1, "start": 1.0, "end": 10.0, "text": "她替嫁进了将军府，却在府里连下人都不如"},
+        {"episode": 2, "start": 5.0, "end": 15.0, "text": "他一战封神，仇人跪了一地"},
     ],
     "cta": "点我看结局",
 }
@@ -204,8 +204,13 @@ def test_script_plan_carries_what_the_sanitizer_ate(driver: Any) -> None:
     payload = {
         "hook": "钩子",
         "segments": [
-            {"episode": 1, "start": 1.0, "end": 10.0, "text": "第一集解说"},
-            {"episode": 2, "start": 5.0, "end": 15.0, "text": "第二集解说"},
+            {
+                "episode": 1,
+                "start": 1.0,
+                "end": 10.0,
+                "text": "她替嫁进了将军府，却在府里连下人都不如",
+            },
+            {"episode": 2, "start": 5.0, "end": 15.0, "text": "他一战封神，仇人跪了一地"},
             {"episode": 9, "start": 1.0, "end": 8.0, "text": "不存在的第九集"},
         ],
         "cta": "点我看结局",

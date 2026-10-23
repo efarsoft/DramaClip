@@ -235,3 +235,101 @@ def test_person_intro_healthy_passes_and_prior_carried() -> None:
     assert "王承恩" not in carried["FUND_PERSON_INTRO_CARRIED"].message, (
         "只报前集介绍过的人物"
     )
+
+
+def test_metanarrative_catches_chinese_numeral_form() -> None:
+    """数字中文化先于内联审查跑：「第3集」出口已成「第三集」——零容忍规则必须认中文数词。"""
+    script = {
+        "hook": "她替嫁进了将军府",
+        "segments": [_seg_text("第三集，她终于反击。")],
+        "cta": "点击左下角看全集",
+    }
+    report = A.review_script(script, [])
+    meta = [f for f in report.findings if f.rule_id == "FUND_NO_METANARRATIVE"]
+    assert meta and meta[0].passed is False, "「第三集」是元叙述，中文数词形态不得漏检"
+
+
+def test_time_bounds_prefers_episode_durations_over_transcript_tail() -> None:
+    """整集时长注入后，摘录尾之外的合法尾场不再硬判超界（与清洗层同一真相源）。"""
+    script = {
+        "hook": "她背着一口锅",
+        "segments": [{"episode": 1, "start": 110.0, "end": 118.0, "text": "尾场打斗，她赢了。"}],
+        "cta": "",
+    }
+    transcript = [{"episode": 1, "start": 0.0, "end": 105.0, "speaker": "A", "text": "台词"}]
+    old_scope = A.review_script(script, transcript)
+    new_scope = A.review_script(script, transcript, episode_durations={1: 120.0})
+    by_old = {f.rule_id: f for f in old_scope.findings}
+    by_new = {f.rule_id: f for f in new_scope.findings}
+    assert by_old["STRUCT_TIME_BOUNDS"].passed is False, "旧口径（摘录尾 105s）确实会误判"
+    assert by_new["STRUCT_TIME_BOUNDS"].passed is True, "整集时长口径放行合法尾场"
+
+
+def test_phrase_monotony_flags_three_same_head_or_tail() -> None:
+    """连续三段同头/同尾＝模板感（批1 宣称的「句式雷同」判据补齐）。"""
+    script = {
+        "hook": "她替嫁进了将军府",
+        "segments": [
+            _seg_text("他竟敢欺她失势。"),
+            _seg_text("他竟敢退她婚约。"),
+            _seg_text("他竟敢断她生路。"),
+            _seg_text("山下的集市比想象里吵得多。"),
+        ],
+        "cta": "点击左下角看全集",
+    }
+    report = A.review_script(script, [])
+    mono = [f for f in report.findings if f.rule_id == "NARR_PHRASE_MONOTONY"]
+    assert mono and mono[0].passed is False
+    assert "他竟" in mono[0].message
+
+
+def test_episode_jump_flags_non_adjacent_leap() -> None:
+    """相邻段集号跨度 >1：相邻优先承诺失守，点名交人工（soft）。"""
+    script = {
+        "hook": "她背着一口锅",
+        "segments": [
+            {"episode": 1, "start": 0.0, "end": 2.0, "text": "铺垫。"},
+            {"episode": 4, "start": 0.0, "end": 2.0, "text": "大跨度跳集的爆点。"},
+        ],
+        "cta": "点击左下角看全集",
+    }
+    report = A.review_script(script, [])
+    jump = [f for f in report.findings if f.rule_id == "STRUCT_EPISODE_JUMP"]
+    assert jump and jump[0].passed is False
+    assert jump[0].severity == "soft"
+
+
+def test_copy_line_cap_accepts_production_tolerance() -> None:
+    """review 与生产同容差（cap×1.2）：61–72 字的生产放行稿不得在审查里恒 REJECT。"""
+    report = A.review_copy(
+        [{"id": "a", "text": "字" * 65}], [{"id": "a"}], mode="full_narration"
+    )
+    line = [f for f in report.findings if f.rule_id == "COPY_LINE_CAP"]
+    assert line and line[0].passed is True, "65 字 ≤ 72（60×1.2）生产容差，审查不得翻脸"
+
+
+def test_all_prompt_quotes_are_literal_substrings() -> None:
+    """守卫：prompt_quote 必须是 prompt 常量的字面子串——省略号/尾标点漂移会让
+    hard 重掷给模型喂「不存在的原句」，规则锚定变成幻觉锚定。"""
+    import ast
+    import inspect
+
+    from dramaclip.engines.narration import copywriter as C
+    from dramaclip.engines.narration import scriptwriter as S
+
+    texts = []
+    for mod in (S, C):
+        for name in dir(mod):
+            value = getattr(mod, name)
+            if isinstance(value, str) and len(value) > 30:
+                texts.append(value)
+    misses = []
+    tree = ast.parse(inspect.getsource(A))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg == "prompt_quote":
+            if not isinstance(node.value, ast.Constant):
+                continue  # f-string 动态 quote（行长两条）由 test_audit 现有用例覆盖
+            quote = node.value.value
+            if not any(quote in text for text in texts):
+                misses.append(quote[:50])
+    assert misses == [], f"以下 prompt_quote 不再是 prompt 原文的字面子串：{misses}"

@@ -215,3 +215,32 @@ def test_plan_data_without_scene_pool_validates_empty() -> None:
     raw = PlanData(mode="full_narration").model_dump()
     raw.pop("scene_pool")
     assert PlanData.model_validate(raw).scene_pool == []
+
+
+def test_cross_layout_restamps_bridge_to_anchor_episode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """跨集桥的编排层集号（build_cross 盖当前场景集）与布局锚点集号（下一场景集）
+    不同：落位必须改章到锚点集——保留旧集号会让 start=下一集时钟−时长 落进本集
+    的错误位置（本集场景起点普遍 ≈0，直接负起点误报判死），encoder 还会按旧集号
+    从错集取画面。布局测试此前只有手工 ep2 桥的用例，没盖住真实产物形状。"""
+    plan = PlanData(
+        mode="cross_narration",
+        timeline=[
+            TimelineSegment(episode_id="ep1", start=10.0, end=18.0, audio="original"),
+            TimelineSegment(
+                episode_id="ep1", start=15.0, end=19.0,
+                audio="narration", narration_id="cross-1",  # type: ignore[arg-type]
+            ),
+            TimelineSegment(episode_id="ep2", start=10.0, end=16.0, audio="original"),
+        ],
+        narration_texts=[NarrationText(id="cross-1", text="承接上一幕")],
+    )
+    result = _voice_slots(
+        monkeypatch, tmp_path, plan, {"cross": 4.0}, {"ep1": 90.0, "ep2": 40.0}
+    )
+    assert [(s.episode_id, s.start, s.end, s.audio) for s in result.timeline] == [
+        ("ep1", 10.0, 18.0, "original"),
+        ("ep2", 6.0, 10.0, "narration"),
+        ("ep2", 10.0, 16.0, "original"),
+    ], "桥段落进 ep2 空隙后必须改章 ep2，时间戳与集号同轴"

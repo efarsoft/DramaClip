@@ -143,3 +143,30 @@ def test_a_rejected_answer_is_traced_too(monkeypatch, tmp_path) -> None:
     assert "未产出有效标题" in outcome
     assert blob["raw"] == {"titles": ["  ", ""]}
     assert blob["accepted"] == 0
+
+
+def test_title_gate_rejects_oversize_and_banned_phrases(monkeypatch) -> None:
+    """prompt 承诺的 ≤20 字/违禁腔必须有验收：出界剔除，trace 记 gate_rejected。"""
+    payload = {
+        "titles": [
+            "将军府里的替嫁新娘",
+            "超" * 25,
+            "关注我看全集",
+            "她掀了喜帕那一刻全场跪了",
+        ],
+        "caption": "一句话钩子",
+        "tags": ["爽剧"],
+    }
+    result, _client = _generate(monkeypatch, payload)
+    texts = [t["text"] for t in result["titles"]]
+    assert texts == ["将军府里的替嫁新娘", "她掀了喜帕那一刻全场跪了"]
+    assert result["titles"][0]["selected"] is True
+
+
+def test_caption_oversize_or_banned_is_dropped_not_published(monkeypatch) -> None:
+    """caption 宁缺毋滥：超 40 字或含违禁腔直接 None（缺了不挡标题的契约不变）。"""
+    result, _client = _generate(
+        monkeypatch,
+        {"titles": ["好标题"], "caption": "长" * 41, "tags": []},
+    )
+    assert result["caption"] is None

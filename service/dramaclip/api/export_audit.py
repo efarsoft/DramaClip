@@ -17,6 +17,7 @@ from typing import Any
 from dramaclip.api.context import AppContext
 from dramaclip.engines.exporter import encoder
 from dramaclip.engines.narration.models import PlanData
+from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 from dramaclip.infra.storage.repos import exports as exports_repo
 from dramaclip.transport import notify as notify_mod
 
@@ -186,13 +187,14 @@ def _run_silencedetect(output_path: str) -> str:
     """全片 silencedetect 扫描，返回 stderr（ffmpeg 的统计结果走 stderr）。
 
     一次进程调用喂三条判定（开场/结尾/中段）——逐窗 volumedetect 要三次解码，
-    全片扫描只解码一遍。
+    全片扫描只解码一遍。二进制必须走 resolver：打包环境只有随包 ffmpeg、无系统
+    PATH，裸命令名每次 FileNotFoundError 会被外层吞成「体检静默永不运行」。
     """
     null_dev = "NUL" if sys.platform == "win32" else "/dev/null"
     # CREATE_NO_WINDOW 是 Windows 独有属性：getattr 姿势过 linux 视角的类型检查
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     result = subprocess.run(
-        ["ffmpeg", "-i", output_path,
+        [str(resolve_ffmpeg()), "-i", output_path,
          "-af", f"silencedetect=noise={_SILENCE_THRESHOLD_DB:.0f}dB:d={_SILENCE_DETECT_MIN_S}",
          "-f", "null", null_dev],
         capture_output=True, text=True, timeout=120, creationflags=flags, check=False,

@@ -74,8 +74,12 @@ def _decimal_cn(text: str) -> str:
 def _sub(match: re.Match[str]) -> str:
     if match.group("frac"):
         return match.group("frac")  # 1/2 这类分数读法不确定：整串放过，不做半截转换
+    if match.group("date") or match.group("range"):
+        # 日期（2026-10-22）与区间连写（3-4集/12-15年）读法不确定：整串放过。
+        # 没有这两个分支，「3-4」会被负号分支读成「三负四」，比不转更糟。
+        return match.group(0)
     if match.group("year"):
-        return _year_cn(match.group("year")[: -len("年")]) + "年"
+        return _year_cn(match.group("year")[: -len("年")].strip()) + "年"
     if match.group("pct"):
         return "百分之" + _decimal_cn(match.group("pct")[:-1])
     if match.group("ratio"):
@@ -84,7 +88,8 @@ def _sub(match: re.Match[str]) -> str:
     if match.group("dec"):
         return _decimal_cn(match.group("dec"))
     if match.group("neg"):
-        return "负" + int_to_cn(int(match.group("neg")))
+        # int_to_cn 对负数自带「负」前缀：这里再手写一个就产出「负负五」（实测）。
+        return int_to_cn(int(match.group("neg")))
     return int_to_cn(int(match.group("int").replace(",", "")))
 
 
@@ -92,10 +97,15 @@ def _year_cn(digits: str) -> str:
     return "".join(_DIGITS[int(ch)] for ch in digits)
 
 
-# 顺序即优先级：年份最窄先行，百分/比分/小数/负号各自整体吃掉，纯整数殿后
+# 顺序即优先级：年份最窄先行，百分/比分/小数/负号各自整体吃掉，纯整数殿后。
+# 年份允许数字与「年」之间夹空白（「2003 年」排版空格是常态，不认就读成「两千零三 年」）；
+# 比分分支会吃掉 HH:MM 钟点（读成「八比三十」）——已知取舍：比分与钟点在文案里
+# 无法可靠区分，宁可误读比分格式也不给钟点开第二套读法（两套必有一套错得更隐蔽）。
 _TOKEN = re.compile(
     r"(?P<frac>\d+/\d+)"
-    r"|(?P<year>\d{4}年)"
+    r"|(?P<date>\d{4}-\d{1,2}-\d{1,2})"
+    r"|(?P<range>\d+-\d+)"
+    r"|(?P<year>\d{4}\s*年)"
     r"|(?P<pct>\d+(?:\.\d+)?%)"
     r"|(?P<ratio>\d+(?:\.\d+)?[:：]\d+(?:\.\d+)?)"
     r"|(?P<dec>\d+\.\d+)"

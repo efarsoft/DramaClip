@@ -38,6 +38,9 @@ class NarrationText(BaseModel):
     duration: float | None = None
     # 槽位职责，进编剧 prompt：如「原声之间的串联：承接上一幕、留下一幕的悬念」
     brief: str = ""
+    # 槽位字数预算（编排层按空隙算出，如 cross 桥段）：填词验收帽取 min(全局帽,
+    # 预算)——brief 里的口头提醒只是劝，这里是闸；旧库记录无此字段按无预算。
+    char_budget: int | None = None
 
 
 class StrategySpec(BaseModel):

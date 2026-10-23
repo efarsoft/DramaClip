@@ -120,6 +120,7 @@ def _sanitize(
         raise ValueError(f"选题只给出 {len(items)} 条角度，要求 {k} 条")
     briefs: list[AngleBrief] = []
     seen: set[str] = set()
+    arc_seen: dict[str, int] = {}
     for item in items[:k]:
         if not isinstance(item, dict):
             raise ValueError("angles 里存在非对象项")
@@ -155,6 +156,14 @@ def _sanitize(
         unknown = [number for number in numbers if number not in known_numbers]
         if unknown:
             raise ValueError(f"角度「{name}」取材集不存在：{unknown}")
+        arc_seen[arc] = arc_seen.get(arc, 0) + 1
+        if not zero_copy and arc_seen[arc] > 2:
+            # 批内同母题超过一半：prompt 承诺「母题尽量不重复」——母题轮换本身是
+            # 对单一套路疲劳的解药（story_arc docstring），K 条全押一张卡等于白跑。
+            raise ValueError(
+                f"母题「{arc}」在本批出现 {arc_seen[arc]} 次（上限 2）：母题要轮换，"
+                "同一骨架的多条角度是伪多样性"
+            )
         seen.add(name)
         briefs.append(
             AngleBrief(

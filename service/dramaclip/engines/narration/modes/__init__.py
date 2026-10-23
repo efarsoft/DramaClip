@@ -69,7 +69,8 @@ def build_highlight_cut(
 
     参考真机混剪流程：选段=冲突分头部、时长=统一 5 秒快切、顺序=时间序
     （预告叙事），冲突分最高的场景前置做开场；零 TTS 零字幕加工，
-    BGM 床由 selector 按主导情绪选曲（should_add_bgm 默认开）。
+    「配乐床」目前是占位描述：engines/bgm/selector.py 尚未接线（生产零调用），
+    接线前成片没有 BGM——W7 落地时替换此句。
     邻接合并不适用于此模式：快切本身就是节奏，碎片化是设计意图而非缺陷。
     """
     if not scenes:

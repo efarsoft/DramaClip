@@ -115,11 +115,16 @@ def _slot_block(
 def _sanitize(
     raw: Any, texts: list[NarrationText], limit: int
 ) -> dict[str, str]:
-    """按 id 取用，绝不按位置推断；漏答、空答、超长都算没答，交由调用方重试或抛。"""
+    """按 id 取用，绝不按位置推断；漏答、空答、超长都算没答，交由调用方重试或抛。
+
+    超长判据逐槽取 min(全局帽, 槽位 char_budget)：cross 桥段的空隙预算由编排层
+    算好挂槽上（brief 是劝，char_budget 是闸）——全局帽放行的 60 字在 5s 空隙里
+    出不了片，写超要在填词期就重试，不能拖到合成期才判死整条方案。
+    """
     lines = raw.get("lines") if isinstance(raw, dict) else None
     if not isinstance(lines, list):
         raise ValueError("编剧未返回 lines 数组")
-    wanted = {text.id for text in texts}
+    wanted = {text.id: text for text in texts}
     got: dict[str, str] = {}
     for item in lines:
         if not isinstance(item, dict):
@@ -128,13 +133,31 @@ def _sanitize(
         value = to_chinese_numerals(str(item.get("text", "")).strip())
         if key not in wanted or value == "":
             continue
-        if len(value) > limit:
-            raise ValueError(f"槽位 {key} 文案 {len(value)} 字，超过上限 {limit} 字")
+        budget = wanted[key].char_budget
+        slot_limit = min(limit, budget) if budget is not None else limit
+        if len(value) > slot_limit:
+            raise ValueError(f"槽位 {key} 文案 {len(value)} 字，超过上限 {slot_limit} 字")
         got[key] = value
     missing = [text.id for text in texts if text.id not in got]
     if missing:
         raise ValueError(f"编剧漏了 {len(missing)} 个槽位：{', '.join(missing)}")
+    _reject_metanarrative(got)
     return got
+
+
+def _reject_metanarrative(filled: dict[str, str]) -> None:
+    """逐槽生产链的元叙述硬闸：prompt 零容忍，但离线 review_copy 只在网关/工具跑，
+    生产填词链此前只验行长与 id 覆盖——一句带「镜头/素材」的槽位文案会直接进 TTS。
+    延迟 import audit：audit 对本模块的引用也在函数内，模块加载期无环。
+    """
+    from dramaclip.engines.narration.audit import _METANARRATIVE_RE  # noqa: PLC0415
+
+    for key, text in filled.items():
+        hit = _METANARRATIVE_RE.search(text)
+        if hit:
+            raise ValueError(
+                f"槽位 {key} 出现元叙述「{hit.group(0)}」：禁止提及镜头/画面/素材/转写（零容忍）"
+            )
 
 
 def build_copy_request(
@@ -195,7 +218,6 @@ def write_plan_copy(
     project_name = str(settings.get("_project_name") or "").strip()
     if not project_name:
         raise ValueError("缺少项目名：编剧需要剧名作为称谓")
-    line_cap = _line_cap_of(plan.mode)
     # 行长上限按模式：超短的全部文案就这一两条，60 字/段的分段阅读规则套在它身上
     # 会逼出 6 秒残件（首版实测）——给它 4 倍空间，密度由 brief 的效果要求保证。
     line_cap = _ULTRA_SHORT_LINE_CHARS if plan.mode == "ultra_short_hook" else _MAX_LINE_CHARS

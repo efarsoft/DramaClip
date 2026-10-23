@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dramaclip.engines.narration.models import PlanData
 
-_BANNED = ("关注我", "点赞", "二维码")
+# 与 audit._FORBIDDEN_CTA_RE 同表收敛（「收藏」曾漏：审查挂了门禁却放行）；
+# audit 侧「关注」宽匹配是有意的——审查比发布门禁严一档，两边不许再各自漂移。
+_BANNED = ("关注我", "点赞", "收藏", "二维码")
 _CTA_OK = ("全集", "点进去", "后面更狠")
 
 

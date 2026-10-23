@@ -525,7 +525,12 @@ def _rewrite_copy_until_retellable(
     if settings.get("narration.rewrite_loop", "1") != "1":
         return plan
 
-    notes = [f"复述卡点：{c.get('note', '')}" for c in first_report.confusions[:4]]
+    # 卡点带原句定位（quote=哪句卡住）：只给 note（「太密」）不定位，重写模型只能全篇盲改
+    notes = [
+        f"复述卡点：{c.get('note', '')}（原句：{c.get('quote', '')[:40]}）"
+        if c.get('quote') else f"复述卡点：{c.get('note', '')}"
+        for c in first_report.confusions[:4]
+    ]
     notes.extend(first_report.reasons)
     # 评分器六维诊断并流（2026-10-20 审计①）：两个 LLM 各看一半——复述抓
     # 「听不懂」，评分抓「不吸引」（节奏/钩子/CTA）；只喂复述卡点会把可读但

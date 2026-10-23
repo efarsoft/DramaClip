@@ -30,6 +30,19 @@ _SYSTEM_PROMPT = (
     '只输出 JSON：{"titles": ["标题1", ...], "caption": "发布文案", "tags": ["标签1", ...]}'
 )
 
+# prompt 承诺的硬约束（≤20 字/违禁腔），此前只有嘴上约定没有验收——LLM 遵从率
+# 不稳，超长与违禁腔漏出去就是发布端事故。与 prompt 同表，出界剔除后如实交剩余。
+_TITLE_MAX_CHARS = 20
+_CAPTION_MAX_CHARS = 40
+_BANNED_PHRASES = ("关注我", "点赞", "收藏", "订阅", "二维码", "第一集完整版", "免费")
+
+
+def _passes_title_gate(text: str) -> bool:
+    """单条标题验收：超长/违禁腔剔除（剧透无法机检，仍靠 prompt 与人工挑选）。"""
+    if len(text) > _TITLE_MAX_CHARS:
+        return False
+    return not any(phrase in text for phrase in _BANNED_PHRASES)
+
 
 def generate(
     plan_data: dict[str, Any],
@@ -51,20 +64,31 @@ def generate(
     user = "解说文案：\n" + "\n".join(texts)
     data = client.chat_json(system, user, temperature=0.75)
     raw = data.get("titles", []) if isinstance(data, dict) else []
-    titles = [
-        {"text": title.strip(), "selected": False}
-        for title in raw
-        if isinstance(title, str) and title.strip()
+    candidates = [
+        title.strip() for title in raw if isinstance(title, str) and title.strip()
     ]
+    titles = [
+        {"text": title, "selected": False}
+        for title in candidates
+        if _passes_title_gate(title)
+    ]
+    rejected = len(candidates) - len(titles)
     caption = _clean_caption(data)
     tags = _clean_tags(data)
     # 判空抛出前先把往返落盘：标题忽好忽坏时，这是唯一能复盘的证据
     dump_trace(
         trace_path,
-        {"engine": "titles", "system": system, "user": user, "raw": data, "accepted": len(titles)},
+        {
+            "engine": "titles", "system": system, "user": user, "raw": data,
+            "accepted": len(titles), "gate_rejected": rejected,
+        },
     )
     if not titles:
-        raise ValueError("模型未产出有效标题")
+        raise ValueError(
+            f"模型未产出有效标题（候选 {len(candidates)} 条全部超长或含违禁腔）"
+            if candidates
+            else "模型未产出有效标题"
+        )
     titles[0]["selected"] = True
     return {"titles": titles, "caption": caption, "tags": tags}
 
@@ -73,7 +97,13 @@ def _clean_caption(data: Any) -> str | None:
     caption = data.get("caption") if isinstance(data, dict) else None
     if not isinstance(caption, str):
         return None
-    return caption.strip() or None
+    clean = caption.strip()
+    # caption 缺了不挡标题（docstring 契约），但超长/违禁的宁缺毋滥
+    if not clean or len(clean) > _CAPTION_MAX_CHARS:
+        return None
+    if any(phrase in clean for phrase in _BANNED_PHRASES):
+        return None
+    return clean
 
 
 def _clean_tags(data: Any) -> list[str]:

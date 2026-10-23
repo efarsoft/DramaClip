@@ -207,3 +207,23 @@ def test_build_plan_threads_material_into_ultra_short() -> None:
     assert (hook.start, hook.end) == (110.0, 140.0), "hook 尾锚在冲突场景开头，不吸附"
     assert (conflict.start, conflict.end) == (140.0, 147.9), "冲突窗口 end 吸附到拍点"
     assert (cta.start, cta.end) == (147.9, 162.9), "CTA 段不吸附"
+
+
+def test_cross_bridge_slots_carry_char_budget_and_no_dead_floor() -> None:
+    """空隙预算结构化进 char_budget（brief 是劝，char_budget 是闸）；
+    小空隙给小预算而非旧的 20 字死下限（空隙 <4.5s 的方案不再结构性必死）。"""
+    tight = stamp(
+        [(1, "ep1", [
+            ConflictScore(scene_index=0, start=0.0, end=8.0, score=90),
+            ConflictScore(scene_index=1, start=10.0, end=18.0, score=88),
+            ConflictScore(scene_index=2, start=20.0, end=28.0, score=86),
+        ])]
+    )
+    plan = build_cross(tight, _STRATEGY)
+    bridges = [t for t in plan.narration_texts if t.id.startswith("cross-")]
+    assert len(bridges) == 3
+    assert bridges[-1].char_budget is None, "收尾槽没有空隙约束"
+    for bridge in bridges[:-1]:
+        assert bridge.char_budget is not None and 0 < bridge.char_budget < 60, (
+            f"小空隙桥段应拿到紧预算，实得 {bridge.char_budget}"
+        )

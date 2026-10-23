@@ -86,18 +86,24 @@ def build_cross(
         narration_seconds = _HOOK_TTS_FALLBACK_S
         slot_id = f"cross-{index + 1}"
         bridge = "原声片段之间的串联：承接上一幕，可用一句内反差点透两幕落差，给下一幕留半句钩"
+        char_budget: int | None = None
         if index + 1 < len(picked):
             # 空隙预算（真机 2026-10-20：cross-2 文案 48 字实测 10.74s > 9.70s
             # 空隙整条判死）：导出时桥段旁白收尾锚下场景开头、向前伸进空隙——
             # 空隙在这里可算出，写进职责让编剧按预算下笔，而不是让导出门禁随机处决。
+            # 预算同时结构化进 char_budget：填词验收按 min(全局帽, 预算) 逐槽把关
+            # （brief 是劝，char_budget 是闸），写超在填词期就重试，不再拖到合成期判死。
+            # 不设下限：小空隙给小预算（3s≈12 字也能成句），旧的 20 字下限让
+            # 空隙 <4.5s 的方案结构性必死——brief 号称「控制在 20 字内」本身就是误导。
             nxt = picked[index + 1]
             floor = cursor.get(nxt.episode_id, 0.0)
             gap = max(0.0, float(nxt.start) - floor)
-            char_cap = max(20, min(60, int(gap * 4.0)))  # indextts2 实测 ≈4.5 字/秒，留 12% 裕量
-            if char_cap < 60:
+            cap = min(60, int(gap * 4.0))  # indextts2 实测 ≈4.5 字/秒，留 12% 裕量
+            if cap < 60:
+                char_budget = cap
                 bridge += (
                     f"（本段旁白的空隙约 {gap:.0f} 秒，"
-                    f"文案控制在 {char_cap} 字内，超了出不了片）"
+                    f"文案控制在 {cap} 字内，超了出不了片）"
                 )
             brief = bridge
         else:
@@ -105,7 +111,7 @@ def build_cross(
                 "收尾：留缺口（可加退出代价——暗示不看完的损失，禁止编造情节），"
                 "一句指向看全集，禁止关注/点赞"
             )
-        texts.append(NarrationText(id=slot_id, brief=brief))
+        texts.append(NarrationText(id=slot_id, brief=brief, char_budget=char_budget))
         # 旁白画面：当前场景尾部（收尾旁白=末场景自己的尾巴）
         tail_start = round(max(scene.start, scene.end - narration_seconds), 3)
         segments.append(

@@ -76,3 +76,21 @@ def test_script_fields_all_converted_at_exit() -> None:
     assert script.segments[0].text == "涨了百分之五十"
     assert script.segments[1].text == "他背着玄铁锅"
     assert script.cta.startswith("涨了百分之五十以后点左下角")
+
+
+def test_negative_single_prefix_not_double() -> None:
+    """负号分支与 int_to_cn 各加一次「负」=「负负五」（实测）：前缀只许出现一次。"""
+    assert to_chinese_numerals("气温-5度") == "气温负五度"
+    assert to_chinese_numerals("-12城") == "负十二城"
+
+
+def test_date_and_range_pass_through_untouched() -> None:
+    """日期与区间连写读法不确定：整串放过，绝不被负号分支读成「三负四」。"""
+    assert to_chinese_numerals("第3-4集") == "第3-4集"
+    assert to_chinese_numerals("12-15年") == "12-15年"
+    assert to_chinese_numerals("2026-10-22") == "2026-10-22"
+
+
+def test_year_with_space_still_reads_digit_by_digit() -> None:
+    """「2003 年」排版空格是常态：年份分支必须容忍，读出「二零零三年」。"""
+    assert to_chinese_numerals("2003 年 spring") == "二零零三年 spring"

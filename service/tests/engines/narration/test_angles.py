@@ -380,3 +380,14 @@ def test_prompt_block_names_the_selling_point(llm: Any) -> None:
     )
     block = angles.prompt_block(brief)
     assert "复仇线" in block and "第 3 集反杀最狠" in block and "他跪着进了门" in block
+
+
+def test_same_arc_majority_rejects_batch(llm: Any) -> None:
+    """prompt 承诺批内「母题尽量不重复」：K 条全押同一张卡＝伪多样性（母题轮换
+    是对单一套路疲劳的解药），整批不合格走重试。"""
+    same = [_angle(1, 1), _angle(2, 2), _angle(3, 3)]
+    for item in same:
+        item["arc"] = _ARC_IDS[0]
+    llm.queue.append({"angles": same})
+    with pytest.raises(ValueError, match="母题"):
+        _select()

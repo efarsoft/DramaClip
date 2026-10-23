@@ -81,23 +81,43 @@ def test_valid_payload_returns_sanitized_script() -> None:
     assert llm.calls == 1
 
 
-def test_segments_sorted_and_overlaps_trimmed_per_episode() -> None:
+def test_narrative_order_kept_while_in_episode_clamping_still_bites() -> None:
+    """跨集叙事序是母题结构卡的落地机制（先扬后揭＝开场挂后集画面）：
+    清洗保留模型给的顺序，不做跨集重排；集内游标钳制照常按起点序生效。
+    （旧实现按 (集号,起点) 全局排序，把非线序骨架静默塌回顺叙——已裁决拆除。）"""
+    payload = dict(
+        _VALID_PAYLOAD,
+        segments=[
+            {"episode": 2, "start": 8.0, "end": 15.0, "text": "开场挂后集画面"},
+            {"episode": 1, "start": 1.0, "end": 22.0, "text": "前集铺垫"},
+            {"episode": 2, "start": 20.0, "end": 30.0, "text": "回到后集揭晓"},
+        ],
+    )
+    script = _run(FakeLLM([payload]))
+    assert [(s.episode, s.start, s.end) for s in script.segments] == [
+        (2, 8.0, 15.0),
+        (1, 1.0, 22.0),
+        (2, 20.0, 30.0),
+    ], "模型叙事序原样保留，钳制不改写顺序"
+
+
+def test_in_episode_overlap_still_trimmed_by_cursor() -> None:
+    """同集内乱序提交：区间按起点序游标钳制（重叠被裁），模型序不救区间。"""
     payload = dict(
         _VALID_PAYLOAD,
         segments=[
             {"episode": 1, "start": 20.0, "end": 30.0, "text": "乱序段"},
             {"episode": 1, "start": 1.0, "end": 22.0, "text": "覆盖段"},
-            {"episode": 1, "start": 25.0, "end": 30.0, "text": "重叠裁剪"},
             {"episode": 2, "start": 8.0, "end": 15.0, "text": "另一集不受第一集游标影响"},
         ],
     )
     script = _run(FakeLLM([payload]))
     ep1 = [segment for segment in script.segments if segment.episode == 1]
-    starts = [segment.start for segment in ep1]
-    assert starts == sorted(starts), "同集内乱序段被排序"
-    for first, second in zip(ep1, ep1[1:], strict=False):
-        assert first.end <= second.start + 0.01, "重叠被逐集游标裁剪"
-    assert script.segments[-1].episode == 2
+    clamped = sorted((s.start, s.end) for s in ep1)
+    assert clamped[0] == (1.0, 22.0), "起点 1.0 的段按起点序先钳"
+    assert clamped[1][0] >= 22.0, "20.0 起的段被集内游标推挤到前段尾之后"
+    ep2 = [segment for segment in script.segments if segment.episode == 2]
+    assert ep2 and ep2[0].start == 8.0, "另一集不受第一集游标影响"
 
 
 def test_out_of_bounds_clamped_to_episode_duration() -> None:

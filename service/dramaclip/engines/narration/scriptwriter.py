@@ -202,33 +202,49 @@ def _sanitize_episodes(raw: Any, durations: dict[int, float]) -> tuple[Script | 
     返回 (剧本, 钳制段数)：钳制是悄悄改数（负起点抬到 0、超长尾裁到集时长、
     重叠段起点后移），段数进留痕才能对上「剧本为什么变短了」这笔账。
     集时长缺失（<=0）等于没有上界可钳：只去重叠不裁尾，宁可放过也不整批丢光。
+
+    **跨集叙事序是母题结构卡的落地机制**（先扬后揭＝开场挂后集画面），清洗不得
+    重排跨集顺序——早先按 (集号,起点) 全局排序，把模型铺好的非线序静默塌回顺叙，
+    非线序骨架的母题卡全部失效而方案卡仍显示对应徽标。推挤游标按集分键，只需要
+    **集内**有序：先按集分组、组内按起点排序做钳制，再按模型原始序输出；同集段
+    若被模型排乱（违规 prompt 的时间序承诺），交给 audit 的 STRUCT_NON_OVERLAP
+    硬规则按输出序判，不在这里偷偷救。
     """
     script = Script.model_validate(raw)
-    kept: list[ScriptSegment] = []
-    cursors: dict[int, float] = {}
+    indexed = list(enumerate(script.segments))
+    per_episode: dict[int, list[tuple[int, ScriptSegment]]] = {}
+    for index, segment in indexed:
+        if segment.episode in durations:
+            per_episode.setdefault(segment.episode, []).append((index, segment))
     clamped = 0
-    for segment in sorted(script.segments, key=lambda s: (s.episode, s.start)):
-        if segment.episode not in durations:
-            continue
-        duration = durations[segment.episode]
-        start = max(segment.start, cursors.get(segment.episode, 0.0))
-        end = min(segment.end, duration) if duration > 0 else segment.end
-        text = segment.text.strip()
-        if end - start < 0.5 or text == "":
-            continue
-        updated = {"start": round(start, 2), "end": round(end, 2), "text": text}
-        if updated["start"] != segment.start or updated["end"] != segment.end:
-            clamped += 1
-            logger.info(
-                "剧本段钳制：第%d集 %s-%ss → %s-%ss",
-                segment.episode,
-                segment.start,
-                segment.end,
-                updated["start"],
-                updated["end"],
-            )
-        kept.append(segment.model_copy(update=updated))
-        cursors[segment.episode] = end
+    updated_by_index: dict[int, dict[str, Any]] = {}
+    for episode, items in per_episode.items():
+        cursor = 0.0
+        duration = durations[episode]
+        for index, segment in sorted(items, key=lambda pair: pair[1].start):
+            start = max(segment.start, cursor)
+            end = min(segment.end, duration) if duration > 0 else segment.end
+            text = segment.text.strip()
+            if end - start < 0.5 or text == "":
+                continue
+            updated = {"start": round(start, 2), "end": round(end, 2), "text": text}
+            if updated["start"] != segment.start or updated["end"] != segment.end:
+                clamped += 1
+                logger.info(
+                    "剧本段钳制：第%d集 %s-%ss → %s-%ss",
+                    segment.episode,
+                    segment.start,
+                    segment.end,
+                    updated["start"],
+                    updated["end"],
+                )
+            updated_by_index[index] = updated
+            cursor = end
+    kept = [
+        segment.model_copy(update=updated_by_index[index])
+        for index, segment in indexed
+        if index in updated_by_index
+    ]
     if len(kept) < _MIN_SEGMENTS:
         return None, clamped
     dropped = len(script.segments) - len(kept)
@@ -523,7 +539,7 @@ def write_script_episodes(
             attempts[-1]["rejected"] = f"正文仅 {kept} 段（要求至少 {floor} 段）"
             script = None
         if script is not None and audit_hard:
-            report = A.audit_script(script, transcript)
+            report = A.audit_script(script, transcript, episode_durations=durations)
             hard_fails = [f for f in report.findings if f.severity == "hard" and not f.passed]
             soft_ids = [f.rule_id for f in report.findings if f.severity == "soft" and not f.passed]
             attempts[-1]["audit"] = {

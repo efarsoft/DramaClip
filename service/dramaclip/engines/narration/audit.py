@@ -65,7 +65,11 @@ class ReviewReport:
 # 通用侦探（heuristics）
 # ---------------------------------------------------------------------------
 
-_METANARRATIVE_RE = re.compile(r"第\s*\d+\s*集|画面里|镜头|素材|转写|台词前|字幕")
+# 「第X集」要同时认阿拉伯与中文数词：数字中文化收口（numerals）先于内联审查跑，
+# 「第3集」到 audit 手里已经是「第三集」——只认 \d 的话这条零容忍硬规则对该形态恒为死规则。
+_METANARRATIVE_RE = re.compile(
+    r"第[零〇一二三四五六七八九十百千两\d]+\s*集|画面里|镜头|素材|转写|台词前|字幕"
+)
 _ARABIC_NUM_RE = re.compile(r"\d{2,}")          # 两位及以上阿拉伯数字（应写中文）
 _PERSON_FIRST = ("我", "咱们", "咱")
 _PERSON_SECOND = ("你", "你们", "您")
@@ -174,11 +178,44 @@ def _narrative_texture_findings(segs: list[dict[str, Any]]) -> list[Finding]:
         prompt_quote="每三到四段落一个人物的体感或心理瞬间（「脸上发烫」「攥紧了指节」式——用身体写内心，禁直呼「愤怒/悲伤」这类情绪名词）",
         needs_human=True,
     ))
+    findings.append(_phrase_monotony_finding(segs))
     return findings
 
 
+_TAIL_PUNCT = "。，、；：！？…—,,.;:!?'\"」』）)>》"
+
+
+def _phrase_monotony_finding(segs: list[dict[str, Any]]) -> Finding:
+    """句式雷同三连（软+需人工）：连续 ≥3 段同头或同尾＝模板感。
+
+    批1（e888a42）宣称落了「句式雷同」检测，实际只落了问号配额/意象配额/情绪
+    落点三条，原始病灶「同款句式三连（模板感）」始终无判据——这里补上：开头
+    2 字或去尾标点后收尾 2 字，连续三段全同即点名。文案层的「相邻槽位禁止
+    同款收尾」承诺同用这条判据兜底。
+    """
+    texts = [str(s.get("text", "") or "").strip() for s in segs]
+    heads = [t[:2] for t in texts if len(t) >= 2]
+    tails = [t.rstrip(_TAIL_PUNCT)[-2:] for t in texts if len(t) >= 2]
+    hits: list[str] = []
+    for i in range(max(len(heads) - 2, 0)):
+        if heads[i] and heads[i] == heads[i + 1] == heads[i + 2]:
+            hits.append(f"段{i + 1}-{i + 3} 同头「{heads[i]}」")
+        if tails[i] and tails[i] == tails[i + 1] == tails[i + 2]:
+            hits.append(f"段{i + 1}-{i + 3} 同尾「{tails[i]}」")
+    return Finding(
+        "NARR_PHRASE_MONOTONY", "fund_full", "soft",
+        not hits,
+        "未检出句式雷同三连"
+        if not hits
+        else f"句式雷同三连：{'；'.join(hits[:4])}——换句式或换收尾，模板感是划走开关",
+        location="segments",
+        prompt_quote="相邻段禁止同款收尾",
+        needs_human=bool(hits),
+    )
+
+
 def _script_shape_findings(segs: list[dict[str, Any]]) -> list[Finding]:
-    """结构组一：JSON 只输出（尾句）+ 每片段带 episode（首条）。"""
+    """结构组一：JSON 只输出（尾句）+ 每片段带 episode（首条）+ 跨集跳变点名（软）。"""
     findings: list[Finding] = []
     findings.append(Finding(
         "STRUCT_JSON_ONLY", "structure", "hard", True,
@@ -186,13 +223,45 @@ def _script_shape_findings(segs: list[dict[str, Any]]) -> list[Finding]:
     ))
     missing_ep = [i for i, s in enumerate(segs) if "episode" not in s or s.get("episode") is None]
     findings.append(Finding(
-        "STRUCT_EPISODE_REQUIRED", "structure", "hard",
+        "STRUCT_EPISODE_REQUIRED", "structure",
+        "hard",
         not missing_ep,
         "每个片段都带 episode" if not missing_ep else f"缺 episode 的片段下标：{missing_ep}",
         location="segments" if missing_ep else "",
         prompt_quote="每个片段都必须带 episode，一个都不能漏；",
     ))
+    findings.append(_episode_jump_finding(segs))
     return findings
+
+
+def _episode_jump_finding(segs: list[dict[str, Any]]) -> Finding:
+    """跨集跳变点名（软+需人工）：相邻段集号跨度 >1 即「相邻优先」承诺失守。
+
+    prompt 承诺「换集优先取相邻集，大跨度跳集只许跳往确有关键爆点的集」——
+    此前验证侧零覆盖，全靠模型自觉。跨度可算：点名交给人工判断「确有关键爆点」
+    是否成立，不当 hard（大跨度跳集是 prompt 允许的例外路径，只是要过人眼）。
+    """
+    episodes = [int(s.get("episode", 1)) for s in segs]
+    jumps: list[str] = []
+    for i in range(len(episodes) - 1):
+        span = abs(episodes[i + 1] - episodes[i])
+        if span > 1:
+            jumps.append(
+                f"段{i + 1}→{i + 2}（第{episodes[i]}集→第{episodes[i + 1]}集，跨 {span} 集）"
+            )
+    return Finding(
+        "STRUCT_EPISODE_JUMP", "structure", "soft",
+        not jumps,
+        "换集均为相邻集"
+        if not jumps
+        else f"存在大跨度跳集：{'；'.join(jumps[:4])}——须逐一确认目标集确有关键爆点",
+        location="segments",
+        prompt_quote=(
+            "换集优先取相邻集，大跨度跳集只许跳往确有关键爆点的集，"
+            "且前集段尾必须把跨集因果说破，禁止无因果跳切；"
+        ),
+        needs_human=bool(jumps),
+    )
 
 
 def _script_time_findings(
@@ -306,7 +375,7 @@ def _speaker_and_meta_findings(
         "声纹标签 [角色X] 已全部换成推断真名" if not unresolved
         else f"仍存在未解析声纹标签的片段下标：{unresolved}（应换真名或保留原标签并说明）",
         location="segments" if unresolved else "",
-        prompt_quote="台词前的[角色X]是声纹聚类标签…写文案时换成你从称呼与剧情推断出的真名，推断不出再保留原标签；",
+        prompt_quote="台词前的[角色X]是声纹聚类标签，同一标签即同一个人：写文案时换成你从称呼与剧情推断出的真名，推断不出再保留原标签；",
         needs_human=True,
     ))
     meta_hits = []
@@ -323,7 +392,7 @@ def _speaker_and_meta_findings(
         if not meta_hits
         else f"出现元叙述：{meta_hits}",
         location=";".join(meta_hits) if meta_hits else "",
-        prompt_quote="禁元叙述（零容忍）：…「第X集」「画面里」「镜头」「素材」这类字眼一个不许有…",
+        prompt_quote="禁元叙述（零容忍）：解说员在讲故事不在讲文件——「第X集」「画面里」「镜头」「素材」这类字眼一个不许有，观众不该意识到这是被剪出来的视频。",
     ))
     return findings
 
@@ -344,7 +413,7 @@ def _numerals_and_person_findings(
         "解说文案中未见阿拉伯数字（已中文化）" if not arabic_in_text
         else f"含阿拉伯数字的片段下标：{arabic_in_text}（应写中文）",
         location="segments" if arabic_in_text else "",
-        prompt_quote="数字一律写中文（两千斤/八年/四十七块）…",
+        prompt_quote="数字一律写中文（两千斤/八年/四十七块）：「2,000斤」是报表写法，配音念出来全毁。",
         needs_human=True,
     ))
     joined = hook + cta + " ".join(s.get("text", "") for s in segs)
@@ -402,7 +471,7 @@ def _invented_anchor_findings(segs: list[dict[str, Any]]) -> list[Finding]:
             if not invent_hits
             else f"疑似转写外硬锚点：{invent_hits[:3]}（须原样出自转写，禁止为凑锚点发明）",
             location=";".join(f"segment[{i}]" for i, _ in invent_hits) if invent_hits else "",
-            prompt_quote="真实锚点（年份/金额/物件/称呼）只能原样摘自转写，转写里没有就少写，禁止为凑数发明；",
+            prompt_quote="真实锚点（年份/金额/物件/称呼）只能原样摘自转写，转写里没有就少写，禁止为凑数发明",
             needs_human=True,
         )
     ]
@@ -419,7 +488,7 @@ def _cross_episode_finding(segs: list[dict[str, Any]]) -> Finding:
         if not cross
         else f"跨集涉及 {eps_present}，需人工确认每处跳集前段尾已把跨集因果说破",
         location="segments" if cross else "",
-        prompt_quote="换集优先取相邻集，大跨度跳集只许跳往确有关键爆点的集，且前集段尾必须把跨集因果说破；",
+        prompt_quote="换集优先取相邻集，大跨度跳集只许跳往确有关键爆点的集，且前集段尾必须把跨集因果说破，禁止无因果跳切；",
         needs_human=cross,
     )
 
@@ -505,7 +574,7 @@ def _person_intro_findings(
                 for i, text in enumerate(texts)
                 if any(name in text for name in repeated)
             )[:200],
-            prompt_quote="每个出场的人都要让观众认得出来（身份或关系随出场带一句）；同一人物全稿只用一个写法；",
+            prompt_quote="每个出场的人都要让观众认得出来（身份或关系随出场带一句）；同一人物全稿只用一个写法",
             needs_human=bool(repeated),
         )
     )
@@ -527,7 +596,7 @@ def _person_intro_findings(
             else f"前集已完整介绍过的人物本稿再走全套：{carried_detail}"
             "——追更观众早已知晓，应改为一句带过（如「上集说到的某人」）",
             location="segments",
-            prompt_quote="每个出场的人都要让观众认得出来（身份或关系随出场带一句）；同一人物全稿只用一个写法；",
+            prompt_quote="每个出场的人都要让观众认得出来（身份或关系随出场带一句）；同一人物全稿只用一个写法",
             needs_human=bool(carried),
         )
     )
@@ -539,21 +608,29 @@ def review_script(
     transcript: list[dict[str, Any]] | None = None,
     *,
     prior_texts: list[str] | None = None,
+    episode_durations: dict[int, float] | None = None,
 ) -> ReviewReport:
     """审查 _STRUCTURE_PROMPT + 基本功层（full）约束。
 
     transcript: 清洗后的带时间戳台词，字段 episode/start/end/speaker/text。
     用于时间上界、互不重叠、声纹换名、编造外事件等可验证项。
     prior_texts: 同剧前集稿的解说文本（调用方注入，缺省 None 只查同稿内重复）。
+    episode_durations: 各集整集时长（秒）——时间上界与清洗层同源用它；缺省退回
+    「转写摘录最大 end」旧口径。两口径差＝摘录尾到集尾的无台词段：模型在那写段
+    合法，旧口径却硬判超界带原句重掷，最坏三次全废（真集摘录普遍只到 60-80%）。
     规则按组拆在 _*_findings 子函数里，这里只做装配；产出顺序与拆分前逐条一致。
     """
     transcript = transcript or []
 
-    # 时间上界表：episode -> 该集最大 end
+    # 时间上界表：episode -> 上界秒。整集时长在场优先（与清洗钳制同一真相源）；
+    # 缺省退旧口径（转写摘录最大 end），网关等无时长上下文的调用方不受影响。
     ep_bounds: dict[int, float] = {}
-    for seg in transcript:
-        ep = int(seg.get("episode", 1))
-        ep_bounds[ep] = max(ep_bounds.get(ep, 0.0), float(seg.get("end", 0.0)))
+    if episode_durations:
+        ep_bounds = {ep: float(dur) for ep, dur in episode_durations.items() if dur > 0}
+    else:
+        for seg in transcript:
+            ep = int(seg.get("episode", 1))
+            ep_bounds[ep] = max(ep_bounds.get(ep, 0.0), float(seg.get("end", 0.0)))
 
     segs = script.get("segments", []) if isinstance(script, dict) else []
     hook = (script.get("hook", "") if isinstance(script, dict) else "") or ""
@@ -582,14 +659,18 @@ def audit_script(
     transcript: list[dict[str, Any]] | None = None,
     *,
     prior_texts: list[str] | None = None,
+    episode_durations: dict[int, float] | None = None,
 ) -> ReviewReport:
     """编剧链内联审查封装：`Script` 模型（或同形 dict）→ 规则审查报告。
 
     write_script_episodes 的 attempts 循环逐稿调用；hard 未过条目带 prompt_quote
-    重掷（规则锚定原句），soft 只记账不拦。prior_texts 透传给人物介绍重复规则。
+    重掷（规则锚定原句），soft 只记账不拦。prior_texts/episode_durations 透传给
+    人物介绍重复与时间上界规则。
     """
     payload = script.model_dump() if hasattr(script, "model_dump") else script
-    return review_script(payload, transcript, prior_texts=prior_texts)
+    return review_script(
+        payload, transcript, prior_texts=prior_texts, episode_durations=episode_durations
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -607,7 +688,7 @@ def review_copy(
     lines: 模型输出 [{"id","text"}]；slots: 编排器给的 [{"id","task","start","end","lines"}]。
     """
     findings: list[Finding] = []
-    from dramaclip.engines.narration.copywriter import _line_cap_of
+    from dramaclip.engines.narration.copywriter import _OVERSIZE_TOLERANCE, _line_cap_of
     cap = _line_cap_of(mode)
 
     line_ids = [line.get("id") for line in lines]
@@ -624,15 +705,18 @@ def review_copy(
     ))
 
     # —— 每条不超过行长上限 ——
+    # —— 每条不超过行长上限（验收按生产同款容差：copywriter 收稿按 cap×1.2 放行，
+    # 这里若按裸 cap 判，生产已放行的 61–72 字稿在审查里恒 REJECT，假加固建议由此而来）——
+    oversize_cap = int(cap * _OVERSIZE_TOLERANCE)
     over = [
         (line.get("id"), len(line.get("text", "")))
         for line in lines
-        if len(line.get("text", "")) > cap
+        if len(line.get("text", "")) > oversize_cap
     ]
     findings.append(Finding(
         "COPY_LINE_CAP", "copy", "hard",
         not over,
-        f"每条均 ≤ {cap} 字" if not over else f"超长：{over}",
+        f"每条均 ≤ {oversize_cap} 字" if not over else f"超长：{over}",
         location="lines" if over else "",
         prompt_quote=f"每条不超过 {cap} 字；",
     ))
@@ -648,7 +732,7 @@ def review_copy(
         not meta_hits,
         "无元叙述字眼" if not meta_hits else f"出现元叙述的槽位：{meta_hits}",
         location=";".join(str(h) for h in meta_hits) if meta_hits else "",
-        prompt_quote="禁元叙述（零容忍）：…「第X集」「画面里」「镜头」「素材」这类字眼一个不许有…",
+        prompt_quote="禁元叙述（零容忍）：解说员在讲故事不在讲文件——「第X集」「画面里」「镜头」「素材」这类字眼一个不许有，观众不该意识到这是被剪出来的视频。",
     ))
 
     # —— 完成「要做的事」（软：空文本 / 明显跑题无法全判，标需人工）——
@@ -672,7 +756,7 @@ def review_copy(
         "COPY_SPEAKER_RESOLVE", "fund_slot", "soft",
         not unresolved,
         "声纹标签已换真名" if not unresolved else f"未解析声纹标签槽位：{unresolved}",
-        prompt_quote="台词前的[角色X]是声纹聚类标签…写文案时换成你从称呼与剧情推断出的真名",
+        prompt_quote="台词前的[角色X]是声纹聚类标签，同一标签即同一个人：写文案时换成你从称呼与剧情推断出的真名",
         needs_human=True,
     ))
 

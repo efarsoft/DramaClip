@@ -565,14 +565,20 @@ def _stub_language_and_tts(
             )
             # 样稿对齐各槽位 brief 的字数区间（超短全稿 ≥60 字、各槽不超各自上限）：
             # 桩模型也必须交出「够密度且合规」的文案，薄稿/超限两道门都拦不足额交付。
-            def _line(slot: str) -> dict[str, str]:
+            def _line(slot: str, block: str) -> dict[str, str]:
                 body = (
                     f"{slot} 的解说：沈修远买凶杀妻，八年后她以龙王之尊归来"
                     "揭穿杀局——点击左下角，免费观看全集。"
                 )[:60]  # prompt 硬性要求每条不超过 60 字；「看全集」必须留在截断后
-                return {"id": slot, "text": body if body.endswith("。") else body + "。"}
+                # cross 桥位带空隙预算（brief 里的「控制在 N 字内」）：桩模型与真模型
+                # 同责——不按预算交稿就会在填词期被逐槽帽拦下（char_budget 是闸）。
+                budget = re.search(r"控制在 (\d+) 字内", block)
+                if budget:
+                    cap = int(budget.group(1))
+                    body = body[: cap - 1].rstrip("，、；—-") + "。"
+                return {"id": slot, "text": body}
 
-            return {"lines": [_line(slot) for slot, _block in slot_blocks]}
+            return {"lines": [_line(slot, block) for slot, block in slot_blocks]}
 
     patch_client_for(monkeypatch, angles, _Llm)
     patch_client_for(monkeypatch, copywriter, _Llm)

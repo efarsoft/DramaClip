@@ -496,6 +496,12 @@ def _layout_cross(
     就把场景顶出集尾（真机 2026-10-06：cross-3 差 0.16s 整条判死）。场景窗吸附
     过最强台词 span，挪了就不是那句台词——所以桥段改为收尾锚在下个场景开头、
     向前伸进空隙；末段桥（没有下一场景）接在自己场景窗之后。空隙放不下如实报错。
+
+    桥段落位后 **re-stamp 成锚点集号**：build_cross 给桥段盖的是当前场景的集
+    （旁白压刚看过画面的延续帧），但空隙锚位算的是**下一场景**的集内时钟——
+    跨集方案里两件事不同集：保留旧集号会让 start=下一集时钟−时长 落进本集的
+    错误位置（本集场景起点普遍 ≈0，直接负起点误报判死），encoder 还会按旧集号
+    从错误集取画面。布局语义＝桥段属于下一集时间轴，落位即改章。
     """
     segments = plan.timeline
     timeline: list[dict[str, Any]] = []
@@ -514,11 +520,14 @@ def _layout_cross(
         next_original = next(
             (s for s in segments[index + 1 :] if s.audio != "narration"), None
         )
+        anchor_episode = (
+            next_original.episode_id if next_original is not None else segment.episode_id
+        )
         if next_original is None:
             start = cursor.get(segment.episode_id, float(segment.start))
         else:
             start = float(next_original.start) - duration
-            floor = cursor.get(next_original.episode_id, 0.0)
+            floor = cursor.get(anchor_episode, 0.0)
             if start < floor:
                 raise RuntimeError(
                     f"交叉桥段 {slot} 实测 {duration:.2f}s，但 "
@@ -529,7 +538,7 @@ def _layout_cross(
         end = start + duration
         timeline.append(
             {
-                "episode_id": segment.episode_id,
+                "episode_id": anchor_episode,
                 "start": round(start, 3),
                 "end": round(end, 3),
                 "audio": "narration",
@@ -537,7 +546,7 @@ def _layout_cross(
                 "subtitle_text": text,
             }
         )
-        cursor[segment.episode_id] = end
+        cursor[anchor_episode] = end
     _emit(
         log,
         f"交叉布局按实测时长把 {sum(1 for s in timeline if s['audio'] == 'narration')}"
