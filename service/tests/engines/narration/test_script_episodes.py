@@ -310,3 +310,43 @@ def test_audit_hard_reroll_carries_prompt_quotes() -> None:
     assert len(fake.prompts) == 2, "重掷恰好一次，不做无谓的第三次尝试"
     assert "上一稿违反了这些硬规则" in fake.prompts[1], "重掷问句点名违规"
     assert "禁「他竟然…」式空泛悬念" in fake.prompts[1], "注入的是 prompt 原句（规则锚定）"
+
+
+def test_sanitize_keeps_model_narrative_order_across_episodes() -> None:
+    """跨集叙事序是母题结构卡的落地机制（先扬后揭＝开场挂后集画面）：
+    清洗只钳集内区间，不得把跨集顺序重排回集号升序——全局排序曾把
+    非线序骨架的母题静默塌回顺叙。"""
+    script = {
+        "hook": "爆点前置",
+        "segments": [
+            {"episode": 2, "start": 5.0, "end": 15.0, "text": "巅峰一幕"},
+            {"episode": 1, "start": 1.0, "end": 11.0, "text": "铺垫"},
+            {"episode": 2, "start": 20.0, "end": 30.0, "text": "揭晓"},
+        ],
+        "cta": "点击左下角看全集",
+    }
+    result, clamped = scriptwriter._sanitize_episodes(script, {1: 120.0, 2: 120.0})
+    assert result is not None and clamped == 0
+    assert [(s.episode, s.start, s.end) for s in result.segments] == [
+        (2, 5.0, 15.0),
+        (1, 1.0, 11.0),
+        (2, 20.0, 30.0),
+    ], "模型给的叙事序必须原样保留"
+
+
+def test_sanitize_still_clamps_within_episode_by_start_order() -> None:
+    """集内推挤语义不变：同集段按起点排序钳制（游标只看集内前段）。"""
+    script = {
+        "hook": "铺垫",
+        "segments": [
+            {"episode": 1, "start": 5.0, "end": 15.0, "text": "后段先到"},
+            {"episode": 1, "start": 1.0, "end": 12.0, "text": "前段后到"},
+        ],
+        "cta": "点击左下角看全集",
+    }
+    result, clamped = scriptwriter._sanitize_episodes(script, {1: 120.0})
+    assert result is not None
+    starts = sorted((s.start, s.end) for s in result.segments)
+    assert starts[0] == (1.0, 12.0), "起点 1.0 的段钳制不受模型顺序影响"
+    assert starts[1][0] >= 12.0, "后段的起点仍被集内游标推挤到前段尾之后"
+    assert clamped >= 1
