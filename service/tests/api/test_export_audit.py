@@ -234,3 +234,82 @@ def test_silence_quality_skips_no_tts_and_never_raises(
     export_audit._probe_silence_quality(
         SimpleNamespace(notifier=Notifier([])), "x.mp4", "full_narration"
     )
+
+
+# ---- TTS 回环校验（开关默认关）--------------------------------------------
+
+
+def _tts_plan(audio: Path) -> Any:
+    from dramaclip.engines.narration.models import NarrationText, PlanData
+
+    return PlanData(mode="full_narration", narration_texts=[
+        NarrationText(id="n1", text="她攥紧了指节，把肉端上桌", audio_path=str(audio)),
+    ])
+
+
+def _tts_context(tmp_path: Path, settings: dict[str, Any], engine_name: str, heard: str) -> Any:
+    from types import SimpleNamespace
+
+    class _FakeEngine:
+        name = engine_name
+
+        @staticmethod
+        def compute():
+            return None
+
+        @staticmethod
+        def transcribe(path: Path, language: str = "zh", *, hotwords: str = ""):
+            from dramaclip.engines.analysis.models import AsrSegment
+
+            return [AsrSegment(start=0.0, end=1.0, text=heard)]
+
+    audio = tmp_path / "n1.wav"
+    audio.write_bytes(b"fake")
+    return SimpleNamespace(
+        settings={"export.tts_verify": "1", **settings},
+        analysis_runtime=SimpleNamespace(transcriber=lambda: _FakeEngine()),
+    ), audio
+
+
+def test_tts_verify_skipped_by_default(tmp_path: Path) -> None:
+    """开关默认关：零动作零加载（模型懒加载的硬保证）。"""
+    context, audio = _tts_context(
+        tmp_path, {"export.tts_verify": "0"}, "paraformer", "完全无关的文本"
+    )
+    calls: list[object] = []
+    context.analysis_runtime.transcriber = (
+        lambda: calls.append(1) or context.analysis_runtime.transcriber()
+    )
+    export_audit._verify_tts_by_asr(context, _tts_plan(audio))
+    assert calls == [], "开关关时不得触碰引擎"
+
+
+def test_tts_verify_flags_high_cer_slot(tmp_path: Path) -> None:
+    """字错率超阈值：槽位点名进降级账（留痕不拦片）。"""
+    from dramaclip.engines.narration.models import NarrationText, PlanData
+
+    context, audio = _tts_context(tmp_path, {}, "paraformer", "完全无关的不同文本呀")
+    plan = PlanData(mode="full_narration", narration_texts=[
+        NarrationText(id="n1", text="她攥紧了指节把肉端上桌", audio_path=str(audio)),
+    ])
+    sent: list[dict[str, Any]] = []
+    context.notifier = Notifier(sent.append)
+    export_audit._verify_tts_by_asr(context, plan)
+    assert any("字错率" in str(m["params"]["message"]) for m in sent if m["method"] == "log.append")
+
+
+def test_tts_verify_skips_cloud_engine(tmp_path: Path) -> None:
+    """云端 ASR 自动跳过：回环是高频质检，不能偷偷计费。"""
+    context, audio = _tts_context(tmp_path, {}, "dashscope_cloud:qwen-audio", "任意")
+    sent: list[dict[str, Any]] = []
+    context.notifier = Notifier(sent.append)
+    export_audit._verify_tts_by_asr(context, _tts_plan(audio))
+    assert any("云端" in str(m["params"]["message"]) for m in sent if m["method"] == "log.append")
+
+
+def test_char_error_rate_strips_punctuation() -> None:
+    """CER 只比字：标点/空白不进分母，单字错读（7%）必超 5% 阈值。"""
+    cer, _ = export_audit._char_error_rate(
+        "她攥紧了指节，把肉端上桌。", "她攒紧了指节，把肉端上桌。"
+    )
+    assert cer == pytest.approx(1 / 11), "剥标点后 11 字 1 错"

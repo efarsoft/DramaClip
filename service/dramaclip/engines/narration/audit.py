@@ -329,6 +329,40 @@ def _hook_findings(hook: str) -> list[Finding]:
     ]
 
 
+def _hook_payoff_finding(hook: str, segs: list[dict[str, Any]]) -> Finding:
+    """钩子兑现（软+需人工）：钩子抛出的具体锚（物件/数字/人名/身份）至少一个在正文再现。
+
+    标题党一次就伤账号权重：钩子说「他背着一口锅」，正文再没提锅＝观众被骗一次。
+    锚点抓不到（纯抽象/纯情绪钩子）不判——宁漏勿冤；锚点宽松匹配（正文出现
+    即算兑现），抓「彻底悬空」的硬伤，不做精细的兑现度评分。
+    """
+    body = "".join(str(s.get("text", "") or "") for s in segs)
+    anchors: list[str] = []
+    for regex in (
+        _CONCRETE_OBJECT_RE,
+        _TITLE_CLAIM_RE,
+        re.compile(r"[零〇一二三四五六七八九十百千万两]+\s*[斤吨年个月天夜尺丈里步块两银两贯]"),
+        re.compile(r"[" + _SURNAME + r"][一-龥]{1,3}"),
+    ):
+        for match in regex.finditer(hook):
+            text = match.group(0)
+            if len(text) >= 2:
+                anchors.append(text)
+    payoff = any(anchor in body for anchor in anchors) if anchors else True
+    detail = "；".join(anchors[:5]) if anchors else ""
+    return Finding(
+        "FUND_HOOK_PAYOFF", "fund_base", "soft",
+        payoff,
+        "钩子锚点在正文有兑现"
+        if payoff
+        else f"钩子抛出的锚点（{detail}）正文全部未再现——承诺的悬念没兑现＝标题党，"
+             "要么正文给答案，要么钩子换锚",
+        location="hook" if not payoff else "",
+        prompt_quote="hook 必须含一个具体反差事实（身份/生死/数字），禁「他竟然…」式空泛悬念；",
+        needs_human=not payoff,
+    )
+
+
 def _cta_findings(cta: str) -> list[Finding]:
     """结构组四：cta 三段式 + 禁空喊。"""
     cta_forbidden = bool(_FORBIDDEN_CTA_RE.search(cta))
@@ -640,6 +674,7 @@ def review_script(
     findings.extend(_script_shape_findings(segs))
     findings.extend(_script_time_findings(segs, ep_bounds))
     findings.extend(_hook_findings(hook))
+    findings.append(_hook_payoff_finding(hook, segs))
     findings.extend(_cta_findings(cta))
     findings.extend(_speaker_and_meta_findings(segs, hook, cta))
     findings.extend(_numerals_and_person_findings(segs, hook, cta))

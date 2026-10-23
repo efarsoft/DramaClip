@@ -180,6 +180,9 @@ _DEAD_GAP_S = 5.0
 """中段死气门槛：解说话间留白普遍 ≤2s，连续 ≥5s 无声才算节奏塌陷。"""
 
 _DEAD_GAP_REPORT_MAX = 3
+
+_TTS_VERIFY_CER = 0.05
+"""TTS 回环字错率阈值：错读 1-2 字/50 字 = 2-4% 在内，5% 以上必是可闻硬伤。"""
 """留痕里最多列出的死气段数：账面要可读，全列交给总数。"""
 
 
@@ -268,6 +271,82 @@ def _probe_silence_quality(
     except Exception:  # noqa: BLE001 - 事后体检失败绝不挡已成功的导出
         return
     _report_silence_quality(context, windows, duration_s)
+
+
+def _char_error_rate(
+    reference: str, hypothesis: str
+) -> tuple[float, str]:
+    """字符级 CER（编辑距离/参考长）+ 第一个错位点的对照样例（账面要能定位到字）。
+
+    双侧先剥标点/空白/声调无关符：TTS 的错读是「字」的问题，逗号句号不算。
+    """
+    def keep(s: str) -> str:
+        return "".join(ch for ch in s if ch.isalnum() or "一" <= ch <= "鿿")
+    ref, hyp = keep(reference), keep(hypothesis)
+    if not ref:
+        return 0.0, ""
+    prev = list(range(len(hyp) + 1))
+    for i, r in enumerate(ref, 1):
+        cur = [i]
+        for j, h in enumerate(hyp, 1):
+            cur.append(min(prev[j] + 1, cur[-1] + 1, prev[j - 1] + (r != h)))
+        prev = cur
+    distance = prev[-1]
+    sample = ""
+    if distance:
+        sample = f"参考「{ref[:16]}…」识别「{hyp[:16]}…」"
+    return distance / len(ref), sample
+
+
+def _verify_tts_by_asr(context: AppContext, plan_data: PlanData) -> None:
+    """TTS 回环校验（W6 后续·开关 export.tts_verify 默认关）：合成旁白过一遍本地
+    ASR，与文案做字错率比对——错读/漏字是成片硬伤，观众一听就出戏，此前零验证。
+
+    「用产品的耳朵检验产品的嘴」。三条纪律：
+    - 引擎强制本地：解析出的 ASR 是云端时跳过并留痕（回环是高频质检，绝不能
+      偷偷花用户的云费用）；
+    - 只留痕不拦片：超阈值的槽位点名进降级账，人工听后裁决（质检没有更好的
+      时间轴可换，能做的是把「这段可疑」如实上报）；
+    - 模型懒加载：开关不开时零成本，开了也只在首次校验时加载一次（AnalysisRuntime
+      单例缓存）。
+    """
+    from dramaclip.infra import config  # noqa: PLC0415
+
+    if not config.get_bool(context.settings, "export.tts_verify"):
+        return
+    slots = [
+        text for text in plan_data.narration_texts
+        if text.text.strip() and text.audio_path and Path(text.audio_path).is_file()
+    ]
+    if not slots:
+        return
+    try:
+        engine = context.analysis_runtime.transcriber()
+        if engine.name.startswith("dashscope"):
+            _note_degraded(
+                context, "TTS 回环校验",
+                "当前 ASR 为云端引擎（回环高频质检不能偷偷计费），装本地引擎后可用", None,
+            )
+            return
+        report = engine.compute()
+        _ = report  # 引擎实例化即触发加载；compute 结果归算力账，不在这里重复记账
+    except Exception as exc:  # noqa: BLE001 - 本地引擎装不上/加载失败不挡导出
+        _note_degraded(context, "TTS 回环校验", "本地 ASR 不可用，本片跳过听感校验", exc)
+        return
+    for text in slots:
+        try:
+            segments = engine.transcribe(Path(str(text.audio_path)), language="zh")
+        except Exception as exc:  # noqa: BLE001 - 单槽转写失败不影响其余槽
+            _note_degraded(context, "TTS 回环校验", f"槽位 {text.id} 转写失败，跳过", exc)
+            continue
+        hypothesis = "".join(seg.text for seg in segments)
+        cer, sample = _char_error_rate(text.text, hypothesis)
+        if cer > _TTS_VERIFY_CER:
+            _note_degraded(
+                context, "TTS 回环校验",
+                f"槽位 {text.id} 字错率 {cer:.0%}（阈值 {_TTS_VERIFY_CER:.0%}）{sample}"
+                "——疑似错读/漏字，建议人工听该段；错读字可收进热词表",
+            )
 
 
 def _report_silence_quality(

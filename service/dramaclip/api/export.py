@@ -22,6 +22,7 @@ from dramaclip.api.export_audit import (
     _note_degraded,
     _planned_narration_segments,
     _probe_silence_quality,
+    _verify_tts_by_asr,
 )
 from dramaclip.api.export_covers import (
     SubtitleCover,
@@ -1043,6 +1044,9 @@ def _run_export(context: AppContext, job_id: str, run: ExportRun) -> None:
         # 标题先生成再渲染：render_export 尾部的封面字层要用第一条标题，
         # 而 titles 生成不依赖渲染产物（LLM 只吃 plan_data），顺序对调零副作用。
         _ensure_titles(context, run.plan_row)
+        # TTS 回环校验（开关 export.tts_verify 默认关）：合成旁白过本地 ASR 比对
+        # 文案，错读/漏字留痕点名——渲染前做，账面跟片走；失败不挡导出（函数内兜）。
+        _verify_tts_by_asr(context, run.plan_data)
         render_report = (
             (lambda pct, label: report(35 + pct * 0.65, label)) if tts_needed else report
         )

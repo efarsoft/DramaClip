@@ -100,6 +100,9 @@ DEFAULTS: dict[str, str] = {
     # BGM 床总开关（C 项接线，默认开）：曲库空/该模式不该铺时自动无 BGM＝现状出片，
     # 开着不改变无曲用户的行为——「无曲可用＝逐字节一致」是 selector 的硬验收。
     "export.bgm": "1",
+    # TTS 回环校验（默认关）：旁白音频过本地 ASR 与文案比对字错率——有真实耗时
+    # （合成后多一遍 ASR）且依赖本地引擎，由用户显式开启；云端 ASR 时自动跳过不计费。
+    "export.tts_verify": "0",
     "hardware.max_parallel_jobs": "2",
     # Agent 网关（本机 127.0.0.1 HTTP 工具面：外部 agent 调用审查/出稿；api/agent_gateway.py）
     "agent_gateway.enabled": "false",
