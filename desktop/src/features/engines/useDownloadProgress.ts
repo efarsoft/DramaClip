@@ -2,12 +2,7 @@
 import type { ModelInfo } from '@dramaclip/protocol';
 import { type ModelDownloadState, useUiStore } from '../../stores/ui';
 
-export function useDownloadProgress(model: ModelInfo | undefined): number | undefined {
-  const download = useDownloadState(model);
-  return download?.status === 'downloading' ? download.percent : undefined;
-}
-
-/** 整条下载状态（含速度/ETA/失败原因）：failed 态渲染与重试入口靠它（附录 B②）。 */
+/** 整条下载状态（进度三件套 + 失败原因）：failed 态渲染与重试入口靠它（附录 B②）。 */
 export function useDownloadState(model: ModelInfo | undefined): ModelDownloadState | undefined {
   return useUiStore((state) =>
     model === undefined ? undefined : state.modelDownloads[model.model_id],

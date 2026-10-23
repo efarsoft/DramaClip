@@ -16,7 +16,8 @@ vi.mock('../useLocalRuntime', () => ({ useLocalRuntime: runtime.state }));
 function state(over: Partial<LocalRuntimeState>): LocalRuntimeState {
   return {
     installed: true, groups: {}, ortGpu: null, jobId: '', progress: 0,
-    stage: '', busy: false, install: vi.fn(), ...over,
+    stage: '', busy: false, probeProblem: '', installProblem: '',
+    install: vi.fn(), retryProbe: vi.fn(), ...over,
   };
 }
 

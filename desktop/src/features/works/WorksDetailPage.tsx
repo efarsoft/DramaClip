@@ -1,18 +1,25 @@
-/** 成片详情页：预览 + 文件（完整路径）+ 追溯（角度·取材集·方案区）+ 自检四项 + 文案与标题。 */
-import { CopyOutlined, FolderOpenOutlined } from '@ant-design/icons';
+/** 成片详情页：预览 + 文件（完整路径）+ 追溯（角度·取材集·方案区）+ 自检四项 + 逐句核对与标题。 */
+import { CopyOutlined, DownloadOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button, Empty, Tag } from 'antd';
-import type { ReactElement } from 'react';
+import type { ReactElement, RefObject } from 'react';
+import { useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { Episode, ExportJob } from '@dramaclip/protocol';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import { modeLabel } from '../../components/modeMeta';
-import { copyFiles, mediaUrl, pickFolder, revealInFolder } from '../../services/client';
+import { CueList } from '../cues/CueList';
+import { useSrtCues } from '../cues/useSrtCues';
+import { sidecarSrtPath } from '../cues/srt';
+import { copyFiles, mediaUrl, pickFolder, saveTextFile, revealInFolder } from '../../services/client';
 import { mixins } from '../../styles/mixins';
 import { layout, tokens } from '../../styles/theme';
 import { SelfCheckSection } from './SelfCheckSection';
 import { TitlesSection } from './TitlesSection';
 import { useWorkDetail } from './useWorkDetail';
 import { episodeLabel } from './worksView';
+
+/** §1.4 诚实边界：这份时间轴记录的是字幕烧上去的时刻，不是音节出声的时刻——不得写「精确到语音」。 */
+const TIMELINE_PROVENANCE = '时间轴取自烧录字幕的分行时刻，非语音对齐';
 
 function formatDuration(s: number | undefined): string {
   if (s === undefined || s <= 0) return '—';
@@ -34,6 +41,7 @@ function formatDate(ms: number | undefined): string {
 export function WorksDetailPage(): ReactElement {
   const { exportId = '' } = useParams();
   const detail = useWorkDetail(exportId);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   if (detail.failed) {
     return (
@@ -42,6 +50,11 @@ export function WorksDetailPage(): ReactElement {
       </PageShell>
     );
   }
+
+  const onSeek = (seconds: number): void => {
+    const video = videoRef.current;
+    if (video !== null) video.currentTime = seconds;
+  };
 
   return (
     <PageShell>
@@ -64,7 +77,7 @@ export function WorksDetailPage(): ReactElement {
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
-            <PreviewColumn job={detail.job} />
+            <PreviewColumn job={detail.job} videoRef={videoRef} />
             <TraceSection
               projectId={detail.job.project_id}
               angle={detail.angle}
@@ -79,14 +92,21 @@ export function WorksDetailPage(): ReactElement {
               onSelfcheck={detail.onSelfcheck}
               onReload={detail.reload}
             />
-            <NarrationSection texts={detail.narrationTexts} mode={detail.job.narration_mode} />
+            <NarrationSection
+              texts={detail.narrationTexts}
+              mode={detail.job.narration_mode}
+              srtPath={sidecarSrtPath(detail.job.output_path ?? '')}
+              onSeek={onSeek}
+            />
             <TitlesSection
               titles={detail.titles}
               publish={detail.publish}
               generating={detail.generating}
+              saving={detail.saving}
               hasPlan={detail.planId !== ''}
+              problem={detail.titleProblem}
               onGenerate={detail.onGenerate}
-              onChange={detail.setTitles}
+              onSelect={detail.onSelectTitles}
             />
           </div>
         </div>
@@ -95,7 +115,13 @@ export function WorksDetailPage(): ReactElement {
   );
 }
 
-function PreviewColumn({ job }: { job: ExportJob }): ReactElement {
+function PreviewColumn({
+  job,
+  videoRef,
+}: {
+  job: ExportJob;
+  videoRef: RefObject<HTMLVideoElement | null>;
+}): ReactElement {
   const { message } = AntdApp.useApp();
   const onReveal = (): void => {
     const path = job.output_path;
@@ -122,11 +148,18 @@ function PreviewColumn({ job }: { job: ExportJob }): ReactElement {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
       <PageSection title="预览" dense>
-        <video
-          src={mediaUrl(job.output_path ?? '')}
-          controls
-          style={{ width: '100%', aspectRatio: '9 / 16', objectFit: 'contain', background: tokens.posterBase, display: 'block' }}
-        />
+        {job.output_path === undefined || job.output_path === '' ? (
+          <div style={{ padding: tokens.spaceMd, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
+            成片文件还不在盘上（未完成或已删除）
+          </div>
+        ) : (
+          <video
+            ref={videoRef}
+            src={mediaUrl(job.output_path)}
+            controls
+            style={{ width: '100%', aspectRatio: '9 / 16', objectFit: 'contain', background: tokens.posterBase, display: 'block' }}
+          />
+        )}
       </PageSection>
       <PageSection title="文件">
         <MetaRow label="模式" value={modeLabel(job.narration_mode)} />
@@ -188,47 +221,101 @@ function TraceSection({
         >
           去方案区
         </Button>
+        {!hasPlan && (
+          <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
+            方案已删除：本页只读，回跳方案区不可用
+          </span>
+        )}
       </div>
     </PageSection>
   );
 }
 
-function NarrationSection({ texts, mode }: { texts: { id: string; text: string }[]; mode: string | undefined }): ReactElement {
+/** 成片旁挂时间轴（output_path 同名 .srt）＝逐句核对：点一行把成片播到那一句。没有就如实说没有，读不到才报错。 */
+function NarrationSection({
+  texts,
+  mode,
+  srtPath,
+  onSeek,
+}: {
+  texts: { id: string; text: string }[];
+  mode: string | undefined;
+  srtPath: string;
+  onSeek: (seconds: number) => void;
+}): ReactElement {
   const { message } = AntdApp.useApp();
-  const all = texts.map((t) => t.text).join('\n\n');
-  const noCopy = texts.length === 0;
+  const { cues, error, missing } = useSrtCues(srtPath);
+  // 复制的是屏幕上那份：有逐句就复制烧上去的行，没有才复制方案文案。
+  const all = cues !== null ? cues.map((cue) => cue.text).join('\n\n') : texts.map((t) => t.text).join('\n\n');
+  const onSaveSrt = (): void => {
+    void fetch(mediaUrl(srtPath))
+      .then((resp) => resp.text())
+      .then((content) => saveTextFile(srtPath.replaceAll('\\', '/').split('/').pop() ?? 'timeline.srt', content))
+      .then((saved) => {
+        if (saved !== null) message.success('SRT 已保存');
+      })
+      .catch((err: unknown) => {
+        message.error(err instanceof Error ? err.message : 'SRT 保存失败');
+      });
+  };
   return (
     <PageSection
       title="解说文案"
       extra={
-        !noCopy && (
-          <Button
-            size="small"
-            icon={<CopyOutlined />}
-            onClick={() => {
-              void navigator.clipboard.writeText(all).then(() => message.success('解说文案已复制'));
-            }}
-          >
-            复制全文
-          </Button>
+        all !== '' && (
+          <span style={{ display: 'flex', gap: tokens.spaceSm }}>
+            {cues !== null && (
+              <Button size="small" icon={<DownloadOutlined />} onClick={onSaveSrt}>
+                保存 SRT
+              </Button>
+            )}
+            <Button
+              size="small"
+              icon={<CopyOutlined />}
+              onClick={() => {
+                void navigator.clipboard.writeText(all).then(() => message.success('解说文案已复制'));
+              }}
+            >
+              复制全文
+            </Button>
+          </span>
         )
       }
       dense
     >
-      {noCopy ? (
-        <div style={{ padding: tokens.spaceMd, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
-          {mode === 'raw_clip' || mode === 'subtitle_flow'
-            ? '该模式无解说文案（纯原片/字幕流）'
-            : '解说文案加载中或为空'}
+      {cues !== null ? (
+        <div title={TIMELINE_PROVENANCE}>
+          <CueList cues={cues} onSeek={onSeek} />
         </div>
       ) : (
-        texts.map((t) => <NarrationRow key={t.id} id={t.id} text={t.text} />)
+        <>
+          {missing && (
+            <div style={{ padding: `${tokens.spaceXs} 0`, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
+              本条没有逐句时间轴（旧成片 / 该模式不烧字幕）
+            </div>
+          )}
+          {error !== '' && (
+            <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.errorText }}>
+              {error}
+            </div>
+          )}
+          {texts.length > 0 ? (
+            texts.map((t, index) => <NarrationRow key={t.id} ordinal={index + 1} text={t.text} />)
+          ) : !missing && error === '' ? (
+            <div style={{ padding: tokens.spaceMd, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
+              {mode === 'raw_clip' || mode === 'subtitle_flow'
+                ? '该模式无解说文案（纯原片/字幕流）'
+                : '解说文案加载中或为空'}
+            </div>
+          ) : null}
+        </>
       )}
     </PageSection>
   );
 }
 
-function NarrationRow({ id, text }: { id: string; text: string }): ReactElement {
+/** 方案文案行：左列是序号（内部段 id 不上屏——那是数据库的主键，不是给人核对的坐标）。 */
+function NarrationRow({ ordinal, text }: { ordinal: number; text: string }): ReactElement {
   return (
     <div style={{ ...mixins.listRow(), alignItems: 'flex-start' }}>
       <span
@@ -241,7 +328,7 @@ function NarrationRow({ id, text }: { id: string; text: string }): ReactElement 
           paddingTop: layout.monoAlignTop,
         }}
       >
-        {id}
+        {String(ordinal)}
       </span>
       <span
         style={{

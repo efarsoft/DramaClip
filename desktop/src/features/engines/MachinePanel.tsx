@@ -5,8 +5,10 @@ import { Button } from 'antd';
 import type { DeviceProfile, GpuVendor, HealthResult, ModelInfo } from '@dramaclip/protocol';
 import { localRuntimeApi, runtimeApi, systemApi } from '../../services/client';
 import { mixins } from '../../styles/mixins';
-import { tokens , layout } from '../../styles/theme';
+import { tokens, layout } from '../../styles/theme';
 import { FIT_VERDICT_COLOR, FIT_VERDICT_LABEL, judgeMachine, parseSizeGb, specsFromHealth } from './machineFit';
+import { errorText } from './errorText';
+import { useEnvStatus, type EnvStatus } from './runtimeState';
 
 function SectionCard({ children }: { children: React.ReactNode }): ReactElement {
   return (
@@ -27,21 +29,42 @@ function SectionCard({ children }: { children: React.ReactNode }): ReactElement 
 export function MachinePanel({ models }: { models: readonly ModelInfo[] }): ReactElement {
   const navigate = useNavigate();
   const [health, setHealth] = useState<HealthResult | null>(null);
+  const [healthProblem, setHealthProblem] = useState('');
+  const [probing, setProbing] = useState(true);
+  const [tick, setTick] = useState(0);
   useEffect(() => {
+    let stopped = false;
+    setProbing(true);
     void systemApi
       .health()
-      .then(setHealth)
-      .catch(() => undefined);
-  }, []);
+      .then((result) => {
+        if (stopped) return;
+        setHealth(result);
+        setHealthProblem('');
+      })
+      .catch((error: unknown) => {
+        // 取数失败是终局无数，不许留成「还在测」的省略号，也不许留成上一次的数（规格 H3 §3.3）
+        if (stopped) return;
+        setHealth(null);
+        setHealthProblem(errorText(error, '服务端未给出原因'));
+      })
+      .finally(() => {
+        if (!stopped) setProbing(false);
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [tick]);
   const probeCuda = useCallback(() => runtimeApi.status(), []);
   const probeLocal = useCallback(() => localRuntimeApi.status(), []);
-  const cuda = useEnvStatus(probeCuda);
-  const localRuntime = useEnvStatus(probeLocal);
+  const { status: cuda, reload: reloadCuda } = useEnvStatus(probeCuda);
+  const localRuntime = useEnvStatus(probeLocal).status;
+  const cudaInstall = useCudaInstall(cuda, reloadCuda);
   const gpu = health?.gpu_info;
   const specs = specsFromHealth(health);
   const maxSizeGb = maxLocalModelSizeGb(models);
   const verdict = judgeMachine(specs, maxSizeGb);
-  const cells = specCellsOf(health);
+  const cells = specCellsOf(health, probing);
   return (
     <SectionCard>
       <div style={{ fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, fontWeight: 600, color: tokens.textPrimary }}>
@@ -52,8 +75,37 @@ export function MachinePanel({ models }: { models: readonly ModelInfo[] }): Reac
           <SpecCell key={cell.label} label={cell.label} value={cell.value} />
         ))}
       </div>
+      {healthProblem !== '' && (
+        <div
+          style={{
+            marginTop: tokens.spaceSm,
+            display: 'flex',
+            alignItems: 'center',
+            gap: tokens.spaceSm,
+          }}
+        >
+          <span
+            style={{
+              fontSize: tokens.text.meta.size,
+              lineHeight: tokens.text.meta.leading,
+              color: tokens.errorText,
+            }}
+          >
+            {`本机信息取不到：${healthProblem}`}
+          </span>
+          <Button
+            size="small"
+            onClick={() => {
+              setTick((prev) => prev + 1);
+            }}
+          >
+            重试
+          </Button>
+        </div>
+      )}
       <EnvSection
         cuda={cuda}
+        cudaInstall={cudaInstall}
         localRuntime={localRuntime}
         gpuVendor={gpu?.ready === true ? gpu.vendor : 'unknown'}
         onGoTts={() => {
@@ -64,31 +116,48 @@ export function MachinePanel({ models }: { models: readonly ModelInfo[] }): Reac
       {verdict.verdict !== 'unknown' && <VerdictLine verdict={verdict} maxSizeGb={maxSizeGb} />}
       <div style={{ marginTop: tokens.spaceSm, fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
         本卡回答硬件「装得下 / 跑得动」与两个运行环境在不在；修复动作各有其家：CUDA
-        运行库在本页「转写加速（GPU）」卡，本地智能运行环境在 ASR / 配音 TTS 页。某次转写实际走了哪张卡，看语音识别域内的转写加速卡。
+        运行库的下载就在本卡运行环境这一行，本地智能运行环境在 ASR / 配音 TTS 页。某次转写实际走了哪张卡，看语音识别域内的转写加速卡。
       </div>
     </SectionCard>
   );
 }
 
-/** 运行环境探测三态：装好 / 没装 / 探测失败——取不到 ≠ 不存在，失败不冒充「未安装」。 */
-type EnvStatus = 'loading' | 'installed' | 'missing' | 'unknown';
-
-function useEnvStatus(probe: () => Promise<{ installed: boolean }>): EnvStatus {
-  const [status, setStatus] = useState<EnvStatus>('loading');
+/**
+ * CUDA 运行库的下载动作就在「未安装」那句旁边（规格 §2.3：指路不指按钮）——原先这句让用户
+ * 去兄弟栅格位的 GPU 卡点下载，而设备钉在 CPU 时那张卡连下载行都不渲染，指路于是指向一个
+ * 不在场的按钮。装成后自己重探（不逼用户刷页面）；装不起来把原因常驻在这一行，
+ * 不交给会自己消失的 toast。
+ */
+function useCudaInstall(
+  status: EnvStatus,
+  reload: () => void,
+): { installing: boolean; problem: string; start: () => void } {
+  const [installing, setInstalling] = useState(false);
+  const [problem, setProblem] = useState('');
   useEffect(() => {
-    let stopped = false;
-    probe()
-      .then((result) => {
-        if (!stopped) setStatus(result.installed ? 'installed' : 'missing');
-      })
-      .catch(() => {
-        if (!stopped) setStatus('unknown');
-      });
+    if (!installing) return undefined;
+    if (status === 'installed') {
+      setInstalling(false);
+      return undefined;
+    }
+    const timer = setInterval(reload, 2000);
     return () => {
-      stopped = true;
+      clearInterval(timer);
     };
-  }, [probe]);
-  return status;
+  }, [installing, status, reload]);
+  const start = useCallback((): void => {
+    setProblem('');
+    void runtimeApi
+      .install()
+      .then(() => {
+        setInstalling(true);
+        reload();
+      })
+      .catch((error: unknown) => {
+        setProblem(`CUDA 运行库下载失败：${errorText(error, '服务端未给出原因')}`);
+      });
+  }, [reload]);
+  return { installing, problem, start };
 }
 
 const ENV_DOT: Record<EnvStatus, string> = {
@@ -99,19 +168,23 @@ const ENV_DOT: Record<EnvStatus, string> = {
 };
 
 /** 运行环境两行：CUDA 运行库（转写加速）+ 本地智能运行环境（本地识别/克隆/kokoro）。
- * 总览只给结论与落点（本页口径）：CUDA 的下载按钮在隔壁 GPU 卡，运行环境的一键
- * 安装在 ASR / 配音 TTS 页——这里不重复放动作，缺了就给落点。 */
+ * 总览口径（规格 §2.3 改）：CUDA 的下载就在本行行内——设备钉在 CPU 时隔壁 GPU 卡不渲染
+ * 下载行，原先那句「去 GPU 卡下载」指向的是不在场的按钮。本地运行环境是 2~6GB 的独立栈，
+ * 进度与分组判缺在它自己的安装槽里（ASR / 配音 TTS 页），那一行仍只给落点。 */
 function EnvSection({
   cuda,
+  cudaInstall,
   localRuntime,
   gpuVendor,
   onGoTts,
 }: {
   cuda: EnvStatus;
+  cudaInstall: { installing: boolean; problem: string; start: () => void };
   localRuntime: EnvStatus;
   gpuVendor: GpuVendor;
   onGoTts: () => void;
 }): ReactElement {
+  const installDue = cuda === 'missing' && gpuVendor === 'nvidia' && !cudaInstall.installing;
   return (
     <div
       style={{
@@ -126,7 +199,23 @@ function EnvSection({
       <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
         运行环境
       </span>
-      <EnvRow label="CUDA 运行库" status={cuda} text={cudaText(cuda, gpuVendor)} />
+      <EnvRow
+        label="CUDA 运行库"
+        status={cuda}
+        text={cudaText(cuda, gpuVendor, cudaInstall.installing)}
+        action={
+          installDue ? (
+            <Button size="small" type="link" style={{ padding: 0, height: 'auto' }} onClick={cudaInstall.start}>
+              {cudaInstall.problem === '' ? '下载运行库' : '重试下载运行库'}
+            </Button>
+          ) : undefined
+        }
+      />
+      {cudaInstall.problem !== '' && (
+        <div style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.errorText }}>
+          {cudaInstall.problem}
+        </div>
+      )}
       <EnvRow
         label="本地智能运行环境"
         status={localRuntime}
@@ -143,7 +232,7 @@ function EnvSection({
   );
 }
 
-function cudaText(status: EnvStatus, vendor: GpuVendor): string {
+function cudaText(status: EnvStatus, vendor: GpuVendor, installing: boolean): string {
   if (status === 'loading') return '检测中…';
   if (status === 'unknown') return '状态未知 · 探测失败，稍后刷新页面重试';
   if (status === 'installed') {
@@ -152,7 +241,9 @@ function cudaText(status: EnvStatus, vendor: GpuVendor): string {
     if (vendor === 'unknown') return '已安装 · 显卡状态探测中';
     return '已安装 · 本机无 NVIDIA 显卡，不会启用';
   }
-  if (vendor === 'nvidia') return '未安装 · 转写走 CPU，可在本页「转写加速（GPU）」卡下载';
+  // 下载中的那句话留在本行：按钮已在场，进度也在场，不必再指路去别的卡
+  if (installing) return '下载中…（约 600MB，完成后重启服务生效）';
+  if (vendor === 'nvidia') return '未安装 · 转写走 CPU';
   if (vendor === 'none') return '未安装 · 未检测到独立显卡，无需安装，转写走 CPU';
   if (vendor === 'unknown') return '未安装 · 显卡状态探测中，暂按 CPU 运行';
   return '未安装 · 转写加速需要 NVIDIA CUDA，无需安装，当前走 CPU';
@@ -194,32 +285,46 @@ function EnvRow({
   );
 }
 
-/** 硬件三格文案：显卡 / 内存 / 数据盘——取不到就如实「…」，不冒充有答案。 */
-function specCellsOf(health: HealthResult | null): { label: string; value: string }[] {
+/** 硬件三格文案：显卡 / 内存 / 数据盘。
+ * `…` 只留给还活着的探测（本页在问 / 服务端后台补测）；取数终局无数一律 `—`，
+ * 原因交给卡内的故障行或格内的「服务端未给出」——占位符不许冒充进度（规格 H3 §3.3）。
+ */
+function specCellsOf(health: HealthResult | null, probing: boolean): { label: string; value: string }[] {
   const gpu = health?.gpu_info;
+  const lost = health === null && !probing;
+  const unfilled = health === null ? '—' : '— · 服务端未给出';
   return [
     {
       label: '显卡',
-      value: !gpu?.ready
-        ? '显卡待检测…'
-        : gpu.vendor === 'none'
-          ? '未检测到独立显卡 · 走 CPU'
-          : gpu.vendor === 'nvidia'
-            ? `${gpu.name}${gpu.memory_total_mb > 0 ? ` · ${String(Math.round(gpu.memory_total_mb / 1024))}GB` : ''}${gpu.max_cuda_version !== '' ? ` · CUDA ${gpu.max_cuda_version}` : ''}`
-            : gpu.name !== ''
-              ? `${gpu.name} · 驱动 ${gpu.driver_version}`
-              : '独立显卡 · 驱动未读到',
+      value: lost
+        ? '—'
+        : !gpu?.ready
+          ? '显卡待检测…'
+          : gpu.vendor === 'none'
+            ? '未检测到独立显卡 · 走 CPU'
+            : gpu.vendor === 'nvidia'
+              ? `${gpu.name}${gpu.memory_total_mb > 0 ? ` · ${String(Math.round(gpu.memory_total_mb / 1024))}GB` : ''}${gpu.max_cuda_version !== '' ? ` · CUDA ${gpu.max_cuda_version}` : ''}`
+              : gpu.name !== ''
+                ? `${gpu.name} · 驱动 ${gpu.driver_version}`
+                : '独立显卡 · 驱动未读到',
     },
     {
       label: '内存',
       value:
         health?.ram_total_gb !== undefined
           ? `${String(health.ram_free_gb ?? '—')} / ${String(health.ram_total_gb)} GB 可用`
-          : '…',
+          : probing
+            ? '…'
+            : unfilled,
     },
     {
       label: '数据盘可用',
-      value: health?.disk_free_gb !== undefined ? `${String(health.disk_free_gb)} GB` : '…',
+      value:
+        health?.disk_free_gb !== undefined
+          ? `${String(health.disk_free_gb)} GB`
+          : probing
+            ? '…'
+            : unfilled,
     },
   ];
 }

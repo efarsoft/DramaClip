@@ -55,7 +55,6 @@ export function PlanCard({
   rerolling?: boolean;
 }) {
   const card = planCardView(plan);
-  const [copyOpen, setCopyOpen] = useState(false);
   // 取材集如实展示全集分布（真机误读修正）；封面缩略图已移除——业主裁决：
   // 单张首集画面+集号角标传达不了取材范围，反而误导（2026-10-20）
   const materialNumbers = plan.episode_ids
@@ -94,7 +93,6 @@ export function PlanCard({
         )}
         <CardFooter card={card} plan={plan} materialsLabel={materialsLabel} />
       </div>
-      <PlanCopyModal plan={plan} open={copyOpen} onClose={() => { setCopyOpen(false); }} />
     </Card>
   );
 }

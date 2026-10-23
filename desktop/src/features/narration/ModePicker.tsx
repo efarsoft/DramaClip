@@ -103,6 +103,11 @@ function PlanToolbar({
         <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
           已选 {String(modes.length)} / {String(MODE_INFO.length)} 个模式
         </span>
+        {modes.length === 0 && (
+          <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.colorWarning }}>
+            先勾选至少一个模式
+          </span>
+        )}
         <Button size="small" disabled={batch.planning} onClick={onSelectAll}>
           全选
         </Button>

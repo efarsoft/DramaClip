@@ -1,9 +1,9 @@
-// 下载 UX：进度三件套上屏、failed 态可见且可重试（附录 B②）、
+// 下载 UX：进度三件套上屏、failed 态可见且可重试（附录 B②）、下载中给取消（规格 H3 §3.1.2）、
 // 事件解析不瞎猜缺字段——每一条都对着 stores/ui 与 ModelDownloadPopover 的真实行为。
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App as AntdApp } from 'antd';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ServiceEvent } from '@dramaclip/protocol';
+import type { JobInfo, ServiceEvent } from '@dramaclip/protocol';
 import { subscribeModelDownloadProgress, useUiStore } from '../../../stores/ui';
 import { activeStateNote } from '../assetState';
 import { downloadingLabel } from '../downloadLabel';
@@ -11,6 +11,13 @@ import { DownloadSourceButton } from '../ModelDownloadPopover';
 import { model, report } from './fixtures';
 
 const download = vi.fn((...args: unknown[]) => Promise.resolve({ job_id: 'j1', args }));
+const jobList = vi.fn<
+  (limit: number, activeOnly?: boolean) => Promise<{ jobs: JobInfo[]; server_time_ms: number }>
+>(() => Promise.resolve({ jobs: [], server_time_ms: 0 }));
+const jobCancel = vi.fn(
+  (jobId: string): Promise<{ job_id: string; cancelling: boolean; reason?: string }> =>
+    Promise.resolve({ job_id: jobId, cancelling: true }),
+);
 let captured: ((event: ServiceEvent) => void) | null = null;
 
 // vi.mock 会被提升到 import 之前执行，但工厂里的闭包在测试期才被调用——
@@ -27,6 +34,10 @@ vi.mock('../../../services/client', () => ({
   },
 
   modelsApi: { download: (id: string, source?: string) => download(id, source) },
+  jobsApi: {
+    list: (limit: number, activeOnly?: boolean) => jobList(limit, activeOnly),
+    cancel: (jobId: string) => jobCancel(jobId),
+  },
   localRuntimeApi: {
     status: vi.fn(() =>
       Promise.resolve({
@@ -151,6 +162,60 @@ describe('DownloadSourceButton · 三态渲染', () => {
     );
     expect(screen.getByRole('button', { name: /下载/ })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /重试/ })).toBeNull();
+  });
+});
+
+describe('下载中的取消入口（规格 H3 §3.1.2）', () => {
+  const job = (id: string, refId: string): JobInfo => ({
+    id,
+    type: 'model_download',
+    ref_id: refId,
+    status: 'running',
+    progress: 45,
+    created_at: 0,
+    updated_at: 0,
+  });
+
+  function downloading(): void {
+    useUiStore.getState().setModelDownload('kokoro-82m', {
+      percent: 45,
+      status: 'downloading',
+      speed: '2 MB/s',
+      eta: '1分02秒',
+      message: '',
+    });
+    render(
+      <AntdApp>
+        <DownloadSourceButton model={model()} onChanged={() => undefined} />
+      </AntdApp>,
+    );
+  }
+
+  it('下载中就有「取消」：按 ref_id 认领那一支 model_download，取消成功随即销账', async () => {
+    downloading();
+    jobList.mockResolvedValueOnce({ jobs: [job('j7', 'other-model'), job('j8', 'kokoro-82m')], server_time_ms: 0 });
+    fireEvent.click(screen.getByRole('button', { name: /取\s*消/ }));
+    await waitFor(() => {
+      expect(jobCancel).toHaveBeenCalledWith('j8');
+    });
+    expect(useUiStore.getState().modelDownloads['kokoro-82m']).toBeUndefined();
+  });
+
+  it('服务端查不到进行中的下载（刷新页面后的过期账）→ 一样销掉，不留着假「下载中」', async () => {
+    downloading();
+    fireEvent.click(screen.getByRole('button', { name: /取\s*消/ }));
+    expect(await screen.findByText(/服务端已经没有进行中的下载任务/)).toBeTruthy();
+    expect(jobCancel).not.toHaveBeenCalled();
+    expect(useUiStore.getState().modelDownloads['kokoro-82m']).toBeUndefined();
+  });
+
+  it('不可中断时如实回：原因进提示，进度账不动（绝不谎报「已取消」）', async () => {
+    downloading();
+    jobList.mockResolvedValueOnce({ jobs: [job('j8', 'kokoro-82m')], server_time_ms: 0 });
+    jobCancel.mockResolvedValueOnce({ job_id: 'j8', cancelling: false, reason: '任务已终态' });
+    fireEvent.click(screen.getByRole('button', { name: /取\s*消/ }));
+    expect(await screen.findByText(/取消没生效：任务已终态/)).toBeTruthy();
+    expect(useUiStore.getState().modelDownloads['kokoro-82m']?.status).toBe('downloading');
   });
 });
 

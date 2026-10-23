@@ -3,12 +3,17 @@ import type { ReactElement } from 'react';
 import { Button, Tooltip } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import type { GpuInfo } from '@dramaclip/protocol';
-import { useEffect, useState } from 'react';
 import { runtimeApi } from '../../services/client';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
+import { useEnvStatus, type EnvStatus } from './runtimeState';
 
-function statusOf(info: GpuInfo | null, device: string): { text: string; color: string } {
+/**
+ * 出词口径：卡型可得（`gpu_info`）**不等于**转写能走 GPU——还差 CUDA 运行库这一件。
+ * 运行库状态取自与「本机运行条件」卡同一个 hook：同屏两张卡不许对同一件事说相反的话，
+ * 所以这里只报状态、不放下载按钮（那枚按钮在运行环境那一行，全站唯一入口）。
+ */
+function statusOf(info: GpuInfo | null, device: string, runtime: EnvStatus): { text: string; color: string } {
   if (!info?.ready) {
     return { text: '检测中…', color: tokens.textTertiary };
   }
@@ -18,6 +23,15 @@ function statusOf(info: GpuInfo | null, device: string): { text: string; color: 
       ? { text: '未检测到独立显卡 · 转写将以 CPU 运行', color: tokens.textSecondary }
       : { text: '未检测到 NVIDIA 显卡 · 转写将以 CPU 运行', color: tokens.textSecondary };
   }
+  if (runtime === 'loading') {
+    return { text: '显卡在位 · CUDA 运行库状态检测中…', color: tokens.textTertiary };
+  }
+  if (runtime === 'unknown') {
+    return { text: 'CUDA 运行库状态未知 · 暂按 CPU 运行', color: tokens.textTertiary };
+  }
+  if (runtime === 'missing') {
+    return { text: 'CUDA 运行库未安装 · 转写当前走 CPU', color: tokens.colorWarning };
+  }
   if (device === 'cpu') {
     return {
       text: '已就绪 · 当前运行设备为 CPU，将运行设备切换为「自动」即可启用 GPU 加速',
@@ -25,7 +39,7 @@ function statusOf(info: GpuInfo | null, device: string): { text: string; color: 
     };
   }
   return {
-    text: '已就绪 · 首次转写时将自动启用 GPU 加速（CUDA 运行库缺失时自动回退 CPU）',
+    text: '已就绪 · CUDA 运行库已装 · 转写可用 GPU 加速',
     color: tokens.colorSuccess,
   };
 }
@@ -56,38 +70,8 @@ function metaOf(info: GpuInfo | null): string {
   return parts.join(' · ');
 }
 
-/** CUDA 运行库安装状态探测：未装标记 + 安装中 2s 轮询直到装好。 */
-function useRuntimeProbe(): { runtimeMissing: boolean; installing: boolean; onInstall: () => void } {
-  const [runtimeMissing, setRuntimeMissing] = useState(false);
-  const [installing, setInstalling] = useState(false);
-
-  useEffect(() => {
-    let stopped = false;
-    const probe = (): void => {
-      void runtimeApi
-        .status()
-        .then((s) => {
-          if (!stopped) setRuntimeMissing(!s.installed);
-          if (s.installed && installing) setInstalling(false);
-        })
-        .catch(() => undefined);
-    };
-    probe();
-    if (!installing) return () => {
-      stopped = true;
-    };
-    const timer = setInterval(probe, 2000);
-    return () => {
-      stopped = true;
-      clearInterval(timer);
-    };
-  }, [installing]);
-
-  const onInstall = (): void => {
-    void runtimeApi.install().then(() => { setInstalling(true); }).catch(() => undefined);
-  };
-  return { runtimeMissing, installing, onInstall };
-}
+/** 与「本机运行条件」卡同一探测：同一屏不许对运行库在不在给出两个答案。 */
+const probeRuntime = (): Promise<{ installed: boolean }> => runtimeApi.status();
 
 export function GpuCard({
   info,
@@ -98,12 +82,9 @@ export function GpuCard({
   device: string;
   onRefresh: () => void;
 }): ReactElement {
-  const status = statusOf(info, device);
+  const { status: runtime } = useEnvStatus(probeRuntime);
+  const status = statusOf(info, device, runtime);
   const meta = metaOf(info);
-  const { runtimeMissing, installing, onInstall } = useRuntimeProbe();
-
-  const showRuntime =
-    info?.ready === true && info.vendor === 'nvidia' && device !== 'cpu' && runtimeMissing;
   return (
     <div
       style={{
@@ -135,7 +116,6 @@ export function GpuCard({
         </span>
       </div>
       {meta !== '' && <MetaLine text={meta} />}
-      {showRuntime && <RuntimeRow installing={installing} onInstall={onInstall} />}
     </div>
   );
 }
@@ -153,29 +133,6 @@ function MetaLine({ text }: { text: string }): ReactElement {
       }}
     >
       {text}
-    </div>
-  );
-}
-
-function RuntimeRow({ installing, onInstall }: { installing: boolean; onInstall: () => void }): ReactElement {
-  return (
-    <div
-      style={{
-        marginTop: tokens.spaceSm,
-        marginLeft: tokens.spaceLg,
-        display: 'flex',
-        alignItems: 'center',
-        gap: tokens.spaceSm,
-      }}
-    >
-      <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.colorWarning }}>
-        {installing ? 'CUDA 运行库下载中…（约 600MB，完成后重启服务生效）' : 'CUDA 运行库未安装 · 转写将以 CPU 运行'}
-      </span>
-      {!installing && (
-        <Button size="small" type="primary" onClick={onInstall}>
-          下载运行库
-        </Button>
-      )}
     </div>
   );
 }

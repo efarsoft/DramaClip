@@ -26,6 +26,8 @@ export interface FieldSpec {
   readonly max?: number;
   /** select 选项；voice 等联动字段按当前草稿值返回。 */
   readonly options?: (values: SettingsMap) => readonly Option[];
+  /** 取数故障行：原因常驻可见文本 + 就地重试，不静默吞成空目录（规格 H3 §3.2.2）。 */
+  readonly problem?: { readonly text: string; readonly onRetry: () => void };
 }
 
 export interface SectionSpec {
@@ -35,11 +37,16 @@ export interface SectionSpec {
 }
 
 /** 目录类选项的注入源（SettingsPage 异步取回后传入，spec 本身保持纯数据）。 */
+export type CatalogName = 'styles' | 'presets';
+
 export interface DynamicOptions {
   /** narration.list_styles 的风格目录（不含「自动匹配」，由 spec 自己置顶）。 */
   readonly styles: readonly Option[];
-  /** subtitle.list_presets 的预设目录；取不到时为空数组，控件照实显示当前值。 */
+  /** subtitle.list_presets 的预设目录；取不到时为空数组，控件不编选项。 */
   readonly presets: readonly Option[];
+  /** 目录取不到的原话（空串＝取到了）。裸 id 不能冒充名字，故障要说在可见文本里并可重试（规格 H3 §3.2.2）。 */
+  readonly problems: Readonly<Record<CatalogName, string>>;
+  readonly retry: (catalog: CatalogName) => void;
 }
 
 const ANALYSIS_SECTION: SectionSpec = {
@@ -65,6 +72,23 @@ const ANALYSIS_SECTION: SectionSpec = {
   ],
 };
 
+/** 目录取不到时的故障行规格；取到了（空串）就没有这一行——空目录不能伪装成「库里没东西」。 */
+function problemOf(
+  catalog: CatalogName,
+  label: string,
+  dynamic: DynamicOptions,
+): { text: string; onRetry: () => void } | undefined {
+  const problem = dynamic.problems[catalog];
+  return problem === ''
+    ? undefined
+    : {
+        text: `${label}取不到：${problem}`,
+        onRetry: () => {
+          dynamic.retry(catalog);
+        },
+      };
+}
+
 function productionSection(dynamic: DynamicOptions): SectionSpec {
   return {
     id: 'production',
@@ -84,6 +108,7 @@ function productionSection(dynamic: DynamicOptions): SectionSpec {
         type: 'select',
         help: '与出片中心的风格选择器同键同源；改动对下一次规划生效',
         options: () => [{ label: '自动匹配（推荐）', value: 'auto' }, ...dynamic.styles],
+        problem: problemOf('styles', '风格目录', dynamic),
       },
     ],
   };
@@ -99,8 +124,9 @@ function subtitleSection(dynamic: DynamicOptions): SectionSpec {
         key: 'subtitle.default_preset',
         label: '内封字幕默认预设',
         type: 'select',
-        help: '出片时烧录内封字幕所用的预设；预设目录取不到时此处照实显示当前值',
+        help: '出片时烧录内封字幕所用的预设（取不到目录时此处会另起一行说明）',
         options: () => dynamic.presets,
+        problem: problemOf('presets', '预设目录', dynamic),
       },
     ],
   };

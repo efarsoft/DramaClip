@@ -3,12 +3,13 @@
  * 「检查更新」与公众号/打赏二维码未实装——缺席而非假控件，实装后在此补。
  */
 import { InfoOutlined } from '@ant-design/icons';
-import { App as AntdApp } from 'antd';
+import { App as AntdApp, Button } from 'antd';
 import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import { appPaths, appVersion, revealInFolder, systemApi } from '../../services/client';
+import { errorText } from '../engines/errorText';
 import { mixins } from '../../styles/mixins';
-import { tokens , layout } from '../../styles/theme';
+import { tokens, layout } from '../../styles/theme';
 import { OPEN_SOURCE } from './openSource';
 import logo from '../../assets/logo.png';
 import wechatQrcode from '../../assets/images/wechat-qrcode.jpg';
@@ -103,38 +104,85 @@ function ProjectBlock(): ReactElement {
 
 function VersionBlock(): ReactElement {
   const [app, setApp] = useState('');
+  const [appProblem, setAppProblem] = useState('');
   const [service, setService] = useState('');
+  const [serviceProblem, setServiceProblem] = useState('');
+  const [tick, setTick] = useState(0);
+  const retry = (): void => {
+    setTick((prev) => prev + 1);
+  };
   useEffect(() => {
-    void appVersion().then(setApp);
+    let stopped = false;
+    void appVersion()
+      .then((value) => {
+        if (stopped) return;
+        setApp(value);
+        setAppProblem('');
+      })
+      .catch((error: unknown) => {
+        if (!stopped) setAppProblem(errorText(error, '宿主未给出版本'));
+      });
     void systemApi
       .ping()
       .then((ping) => {
+        if (stopped) return;
         setService(ping.service_version);
+        setServiceProblem('');
       })
-      .catch(() => undefined);
-  }, []);
+      .catch((error: unknown) => {
+        if (stopped) return;
+        setService('');
+        setServiceProblem(errorText(error, '服务端未给出原因'));
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [tick]);
   return (
     <PageSection title="版本">
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}>
-        <VersionRow label="应用" value={app} />
-        <VersionRow label="Python 服务" value={service} />
+        <VersionRow label="应用" value={app} problem={appProblem} onRetry={retry} />
+        <VersionRow label="Python 服务" value={service} problem={serviceProblem} onRetry={retry} />
       </div>
     </PageSection>
   );
 }
 
-/** 版本行：元信息字阶，版本号本身走等宽（§1.3 数字必配 mono）。 */
-function VersionRow({ label, value }: { label: string; value: string }): ReactElement {
+/** 版本行：元信息字阶，版本号本身走等宽（§1.3 数字必配 mono）。
+ * 三态各归各记号：还在问＝`…`，问到了＝v 号，问不到＝`—` + 原话 + 重试（规格 H3 §3.3）。 */
+function VersionRow({
+  label,
+  value,
+  problem,
+  onRetry,
+}: {
+  label: string;
+  value: string;
+  problem: string;
+  onRetry: () => void;
+}): ReactElement {
+  const shown = value !== '' ? `v${value}` : problem === '' ? '…' : '—';
   return (
     <span
       style={{
         fontSize: tokens.text.meta.size,
         lineHeight: tokens.text.meta.leading,
         color: tokens.textSecondary,
+        display: 'flex',
+        alignItems: 'center',
+        gap: tokens.spaceXs,
       }}
     >
-      {label}{' '}
-      <span style={{ fontFamily: tokens.fontFamilyMono }}>{value === '' ? '…' : `v${value}`}</span>
+      {`${label} `}
+      <span style={{ fontFamily: tokens.fontFamilyMono }}>{shown}</span>
+      {problem !== '' && (
+        <>
+          <span style={{ color: tokens.errorText }}>{`取不到：${problem}`}</span>
+          <Button size="small" onClick={onRetry}>
+            重试
+          </Button>
+        </>
+      )}
     </span>
   );
 }

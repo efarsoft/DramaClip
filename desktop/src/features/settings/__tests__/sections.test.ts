@@ -32,6 +32,9 @@ const KNOWN_KEYS = new Set([
 const dynamic: DynamicOptions = {
   styles: [{ label: '通用', value: 'general' }],
   presets: [{ label: '冲突冲击', value: 'conflict-impact' }],
+  // 目录取不到时才填原话；空串＝取到了，故障行不出现
+  problems: { styles: '', presets: '' },
+  retry: () => undefined,
 };
 
 function section(id: string) {

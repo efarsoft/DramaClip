@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { App as AntdApp } from 'antd';
 import type { Episode, ExportJob, PublishMeta, TitleCandidate } from '@dramaclip/protocol';
 import { exportApi, projectApi, rpc, titlesApi } from '../../services/client';
+import { errorText } from '../engines/errorText';
 import { useJobsStore } from '../../stores/jobs';
 import { useUiStore } from '../../stores/ui';
 
@@ -80,7 +81,12 @@ function useLoadedDetail(exportId: string, reloadTick: number): LoadedDetail {
   };
 }
 
-/** 动作侧：重生成标题（发布文案/标签随之刷新）+ 补测此片（排入自检作业并展开抽屉；结果落库后点「刷新」看成绩单）。 */
+/** 动作侧：重生成标题（发布文案/标签随之刷新）+ 星标选用落库 + 补测此片（排入自检作业并展开抽屉；结果落库后点「刷新」看成绩单）。
+ *
+ * 标题的选用态以服务端为唯一真相：点星标提交整表给 `narration.update_titles`，回声取
+ * 返回值——先改本地再落库会在失败时留下一个刷新就没的选用态（规格 §2.1）。失败原因常驻
+ * 在这一区，不交给会自己消失的 toast（配方 3「坏消息常驻」）。
+ */
 function useDetailActions(
   planId: string,
   setTitles: (titles: TitleCandidate[]) => void,
@@ -89,8 +95,11 @@ function useDetailActions(
   const { message } = AntdApp.useApp();
   const setDrawerOpen = useJobsStore((state) => state.setDrawerOpen);
   const [generating, setGenerating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [titleProblem, setTitleProblem] = useState('');
   const onGenerate = useCallback((): void => {
     setGenerating(true);
+    setTitleProblem('');
     void titlesApi
       .generate(planId)
       .then((r) => {
@@ -98,12 +107,30 @@ function useDetailActions(
         setPublish({ caption: r.caption, tags: r.tags });
       })
       .catch((error: unknown) => {
-        message.error(error instanceof Error ? error.message : String(error));
+        setTitleProblem(`生成候选标题失败：${errorText(error, '服务端未给出原因')}`);
       })
       .finally(() => {
         setGenerating(false);
       });
-  }, [planId, setTitles, setPublish, message]);
+  }, [planId, setTitles, setPublish]);
+  const onSelectTitles = useCallback(
+    (next: TitleCandidate[]): void => {
+      setSaving(true);
+      setTitleProblem('');
+      void titlesApi
+        .update(planId, next)
+        .then((r) => {
+          setTitles(r.titles);
+        })
+        .catch((error: unknown) => {
+          setTitleProblem(`标题选用未保存：${errorText(error, '服务端未给出原因')}`);
+        })
+        .finally(() => {
+          setSaving(false);
+        });
+    },
+    [planId, setTitles],
+  );
   const onSelfcheck = useCallback((exportId: string): void => {
     void exportApi
       .selfcheck([exportId])
@@ -119,7 +146,7 @@ function useDetailActions(
         message.error(error instanceof Error ? error.message : String(error));
       });
   }, [message, setDrawerOpen]);
-  return { generating, onGenerate, onSelfcheck };
+  return { generating, saving, titleProblem, onGenerate, onSelectTitles, onSelfcheck };
 }
 
 export function useWorkDetail(exportId: string): WorkDetail {
@@ -132,7 +159,10 @@ export function useWorkDetail(exportId: string): WorkDetail {
   return {
     ...loaded,
     generating: actions.generating,
+    saving: actions.saving,
+    titleProblem: actions.titleProblem,
     onGenerate: actions.onGenerate,
+    onSelectTitles: actions.onSelectTitles,
     onSelfcheck: () => {
       actions.onSelfcheck(exportId);
     },
@@ -142,7 +172,11 @@ export function useWorkDetail(exportId: string): WorkDetail {
 
 export interface WorkDetail extends LoadedDetail {
   generating: boolean;
+  saving: boolean;
+  /** 标题区常驻的坏消息原文（生成失败或选用未落库）；空串＝没有坏消息。 */
+  titleProblem: string;
   onGenerate: () => void;
+  onSelectTitles: (titles: TitleCandidate[]) => void;
   onSelfcheck: () => void;
   reload: () => void;
 }

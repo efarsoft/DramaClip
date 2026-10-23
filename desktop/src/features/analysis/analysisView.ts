@@ -35,6 +35,16 @@ export function missingAudioEpisodes(episodes: readonly Episode[]): Episode[] {
   return episodes.filter((episode) => episode.has_audio === false);
 }
 
+/** 集 id → 失败原因原文（`EpisodeAnalysisResult.error` 在本仓的第一个读者，H3 §3.1.1）。
+ *  服务端没写的仍然没有——空值不编造成「未知原因」之外的话。 */
+export function analysisErrorsOf(results: AnalysisResults | null): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const item of results?.episodes ?? []) {
+    if (item.error !== undefined && item.error !== '') out[item.episode_id] = item.error;
+  }
+  return out;
+}
+
 export interface PrescreenCoverage {
   /** 预筛过的集数（recommended 非 null）。 */
   readonly prescreened: number;

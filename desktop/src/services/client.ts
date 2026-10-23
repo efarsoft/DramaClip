@@ -226,14 +226,6 @@ export const runtimeApi = {
     rpc<{ job_id: string }>('models.install_runtime', {}),
 } as const;
 
-/** IndexTTS 运行环境（隔离 venv）：状态/一键安装（作业模式有进度）。 */
-export const indexttsApi = {
-  status: (): Promise<{ installed: boolean; dir: string }> =>
-    rpc<{ installed: boolean; dir: string }>('models.indextts_status', {}),
-  install: (): Promise<{ job_id: string }> =>
-    rpc<{ job_id: string }>('models.install_indextts', {}),
-} as const;
-
 /** 本地智能运行环境（E-2：tts-venv 承载 funasr/kokoro）：分组状态/一键安装。 */
 export const localRuntimeApi = {
   status: (): Promise<{

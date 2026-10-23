@@ -1,13 +1,23 @@
 /** 偏好设置页：settings.get 全量载入 → 分区编辑 → 差异保存（settings.update）。
- * 目录类选项（解说风格 / 字幕预设）异步取回后注入 spec；取不到就空目录，控件照实显示当前值。 */
+ * 目录类选项（解说风格 / 字幕预设）异步取回后注入 spec；取不到要说「目录取不到 + 原因」并给重试，
+ * 不静默吞成空目录——空目录里的裸 id 会被当成名字（规格 H3 §3.2.2）。 */
 import { App as AntdApp, Button, Input, InputNumber, Select, Switch } from 'antd';
 import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import { narrationApi, rpc, subtitleApi } from '../../services/client';
+import { errorText } from '../engines/errorText';
 import { mixins } from '../../styles/mixins';
 import { layout, tokens } from '../../styles/theme';
-import { buildSections, type DynamicOptions, type FieldSpec, type SectionSpec, type SettingsMap } from './sections';
+import {
+  buildSections,
+  type CatalogName,
+  type DynamicOptions,
+  type FieldSpec,
+  type Option,
+  type SectionSpec,
+  type SettingsMap,
+} from './sections';
 
 const PAGE_DESC = '分析阈值、字幕与出片参数；LLM/ASR/TTS 引擎配置在「引擎中心」管理。';
 
@@ -40,7 +50,6 @@ export function SettingsPage() {
   const [original, setOriginal] = useState<SettingsMap | null>(null);
   const [draft, setDraft] = useState<SettingsMap | null>(null);
   const [saving, setSaving] = useState(false);
-  const [dynamic, setDynamic] = useState<DynamicOptions>({ styles: [], presets: [] });
 
   const load = useCallback(async () => {
     const values = await rpc<SettingsMap>('settings.get');
@@ -52,27 +61,44 @@ export function SettingsPage() {
     void load();
   }, [load]);
 
-  // 目录类选项各自独立取：一个失败不拖垮另一个，失败侧目录为空（不编选项）
-  useEffect(() => {
-    void narrationApi
-      .listStyles()
-      .catch(() => [])
-      .then((styles) => {
-        setDynamic((prev) => ({
-          ...prev,
-          styles: styles.map((style) => ({ label: style.name, value: style.style_id })),
-        }));
-      });
-    void subtitleApi
-      .listPresets()
-      .catch(() => [])
-      .then((presets) => {
-        setDynamic((prev) => ({
-          ...prev,
-          presets: presets.map((preset) => ({ label: preset.preset_name, value: preset.preset_id })),
-        }));
+  const [catalog, setCatalog] = useState<{ styles: Option[]; presets: Option[] }>({
+    styles: [],
+    presets: [],
+  });
+  const [problems, setProblems] = useState<Record<CatalogName, string>>({
+    styles: '',
+    presets: '',
+  });
+
+  // 目录各自独立取：一个失败不拖垮另一个；失败侧目录留空（不编选项），原话进故障行（可重试）
+  const loadCatalog = useCallback((catalogName: CatalogName) => {
+    const options: Promise<Option[]> =
+      catalogName === 'styles'
+        ? narrationApi
+            .listStyles()
+            .then((styles) => styles.map((style) => ({ label: style.name, value: style.style_id })))
+        : subtitleApi
+            .listPresets()
+            .then((presets) => presets.map((preset) => ({ label: preset.preset_name, value: preset.preset_id })));
+    void options
+      .then((next) => {
+        setCatalog((prev) => ({ ...prev, [catalogName]: next }));
+        setProblems((prev) => ({ ...prev, [catalogName]: '' }));
+      })
+      .catch((error: unknown) => {
+        setProblems((prev) => ({ ...prev, [catalogName]: errorText(error, '服务端未给出原因') }));
       });
   }, []);
+
+  useEffect(() => {
+    loadCatalog('styles');
+    loadCatalog('presets');
+  }, [loadCatalog]);
+
+  const dynamic: DynamicOptions = useMemo(
+    () => ({ styles: catalog.styles, presets: catalog.presets, problems, retry: loadCatalog }),
+    [catalog, problems, loadCatalog],
+  );
 
   const sections = useMemo(() => buildSections(dynamic), [dynamic]);
 
@@ -304,6 +330,29 @@ function FieldRow({
       </div>
       <div style={mixins.fieldControlCol()}>
         <FieldControl spec={spec} value={value} values={values} onChange={onChange} />
+        {spec.problem !== undefined && (
+          <div
+            style={{
+              marginTop: layout.field.helpMarginTop,
+              display: 'flex',
+              alignItems: 'center',
+              gap: tokens.spaceSm,
+            }}
+          >
+            <span
+              style={{
+                fontSize: tokens.text.meta.size,
+                lineHeight: tokens.text.meta.leading,
+                color: tokens.errorText,
+              }}
+            >
+              {spec.problem.text}
+            </span>
+            <Button size="small" onClick={spec.problem.onRetry}>
+              重试
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -10,7 +10,9 @@ import {
   assetState,
   assetSummary,
   canActivate,
+  cardStateNote,
   deleteNote,
+  downloadFailureNote,
   domainStats,
   externalAssets,
   failureNote,
@@ -23,6 +25,7 @@ import {
   warnSummary,
   localDomainModels,
 } from '../assetState';
+import type { ModelDownloadState } from '../../../stores/ui';
 import { externalRecord, importRecord, model, report, selftestOk } from './fixtures';
 
 describe('assetState', () => {
@@ -283,5 +286,39 @@ describe('localDomainModels（E-2 云端不再混入本地资产库）', () => {
     ];
     expect(localDomainModels(rows, 'tts').map((m) => m.model_id)).toEqual(['kokoro']);
     expect(localDomainModels(rows, 'asr').map((m) => m.model_id)).toEqual(['paraformer']);
+  });
+});
+
+describe('downloadFailureNote · 下载失败的原话交给宿主行（规格 H3 §3.1.2）', () => {
+  const dl = (over: Partial<ModelDownloadState>): ModelDownloadState => ({
+    percent: 0,
+    status: 'failed',
+    speed: '',
+    eta: '',
+    message: '',
+    ...over,
+  });
+
+  it('failed → 分类原话整句给出，宿主行直接当可见文本渲染（不再只挂悬停）', () => {
+    expect(downloadFailureNote(dl({ message: '网络超时或连接被断——稍后重试' }))).toBe(
+      '下载失败：网络超时或连接被断——稍后重试',
+    );
+  });
+
+  it('failed 但后端分类不出原因 → 如实说没给原因，不留一条静默空态', () => {
+    expect(downloadFailureNote(dl({ message: '' }))).toContain('服务端未给出分类原因');
+  });
+
+  it('下载中 / 已完成 / 压根没下过 → 不占这一行', () => {
+    expect(downloadFailureNote(dl({ status: 'downloading', message: 'x' }))).toBeUndefined();
+    expect(downloadFailureNote(dl({ status: 'done', message: 'x' }))).toBeUndefined();
+    expect(downloadFailureNote(undefined)).toBeUndefined();
+  });
+
+  it('cardStateNote：最近一次下载失败优先于体检补充行，没失败才回到原口径', () => {
+    const broken = report({ ok: false, checks: [{ name: '必需文件齐全', status: 'fail', detail: '缺 config.json' }] });
+    expect(cardStateNote('incomplete', broken, dl({ message: '磁盘空间不足' }))).toBe('下载失败：磁盘空间不足');
+    expect(cardStateNote('incomplete', broken, undefined)).toContain('缺 config.json');
+    expect(cardStateNote(null, undefined, undefined)).toBeUndefined();
   });
 });

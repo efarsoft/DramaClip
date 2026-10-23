@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { layout, tokens } from '../../styles/theme';
 import { localRuntimeApi } from '../../services/client';
+import { errorText } from '../engines/errorText';
 
 interface EnvRow {
   readonly name: string;
@@ -27,52 +28,75 @@ export function EnvPanel({
   const navigate = useNavigate();
   const asr = (models ?? []).find((m) => m.required);
   const kokoro = (models ?? []).find((m) => m.model_id.includes('kokoro'));
-  // 本地智能运行环境（E-2）：本地识别/克隆/kokoro 的共同地基，缺组=待更新
-  const [runtime, setRuntime] = useState<{ ok: boolean | null; ready: boolean }>({
+  // 本地智能运行环境（E-2）：本地识别/克隆/kokoro 的共同地基，缺组=待更新；
+  // 探测取不到是终局无数，要说「探测失败 + 原话」，不许留成「还在探」的省略号（规格 H3 §3.3）
+  const [runtime, setRuntime] = useState<{ ok: boolean | null; ready: boolean; problem: string }>({
     ok: null,
     ready: false,
+    problem: '',
   });
   useEffect(() => {
-    // 测试态 bridge 未装配时 rpc 同步抛错——同步异常一并兜成「未知」
+    // 测试态 bridge 未装配时 rpc 同步抛错——同步异常一并兜成「探测失败」
     try {
       localRuntimeApi
         .status()
         .then((s) => {
           const groups = s.groups;
           const ready = Boolean(s.installed && groups.funasr && groups.kokoro);
-          setRuntime({ ok: ready, ready });
+          setRuntime({ ok: ready, ready, problem: '' });
         })
-        .catch(() => {
-          setRuntime({ ok: null, ready: false });
+        .catch((error: unknown) => {
+          setRuntime({ ok: null, ready: false, problem: errorText(error, '服务端未给出原因') });
         });
-    } catch {
-      setRuntime({ ok: null, ready: false });
+    } catch (error: unknown) {
+      setRuntime({ ok: null, ready: false, problem: errorText(error, '本机取不到探测结果') });
     }
   }, []);
   const rows: EnvRow[] = [
     llmBaseUrl === ''
-      ? { name: 'LLM 文案引擎', ok: false, status: '未配置', action: { label: '去配置', path: '/engines/llm' } }
+      ? {
+          name: 'LLM 文案引擎',
+          ok: false,
+          status: '未配置',
+          action: { label: '去配置', path: '/engines/llm' },
+        }
       : { name: 'LLM 文案引擎', ok: true, status: '已配置' },
     asr === undefined
-      ? { name: 'ASR 语音识别', ok: null, status: '…' }
+      ? {
+          name: 'ASR 语音识别',
+          ok: null,
+          status: models === null ? '…' : '— · 目录里没有必装识别模型',
+        }
       : asr.status === 'installed'
         ? { name: 'ASR 语音识别', ok: true, status: `已安装 · ${asr.name}` }
-        : { name: 'ASR 语音识别', ok: false, status: '未安装', action: { label: '去下载', path: '/engines/asr' } },
+        : {
+            name: 'ASR 语音识别',
+            ok: false,
+            status: '未安装',
+            action: { label: '去下载', path: '/engines/asr' },
+          },
     ttsEngine === 'kokoro'
       ? kokoro?.status === 'installed'
         ? { name: 'TTS 配音', ok: true, status: 'Kokoro 本地 · 已就绪' }
-        : { name: 'TTS 配音', ok: false, status: 'Kokoro 缺模型', action: { label: '去下载', path: '/engines/tts' } }
-      : { name: 'TTS 配音', ok: true, status: 'Edge 云端 · 已就绪' },
-    runtime.ok === null
-      ? { name: '本地运行环境', ok: null, status: '…' }
-      : runtime.ready
-        ? { name: '本地运行环境', ok: true, status: '已就绪 · 识别/克隆/Kokoro' }
         : {
-            name: '本地运行环境',
+            name: 'TTS 配音',
             ok: false,
-            status: !runtime.ok ? '未安装' : '待更新（缺依赖组）',
-            action: { label: '去安装', path: '/engines/tts' },
-          },
+            status: 'Kokoro 缺模型',
+            action: { label: '去下载', path: '/engines/tts' },
+          }
+      : { name: 'TTS 配音', ok: true, status: 'Edge 云端 · 已就绪' },
+    runtime.problem !== ''
+      ? { name: '本地运行环境', ok: null, status: `探测失败：${runtime.problem}` }
+      : runtime.ok === null
+        ? { name: '本地运行环境', ok: null, status: '…' }
+        : runtime.ready
+          ? { name: '本地运行环境', ok: true, status: '已就绪 · 识别/克隆/Kokoro' }
+          : {
+              name: '本地运行环境',
+              ok: false,
+              status: !runtime.ok ? '未安装' : '待更新（缺依赖组）',
+              action: { label: '去安装', path: '/engines/tts' },
+            },
     { name: 'FFmpeg 编码', ok: true, status: '内置 · 就绪' },
   ];
   return (
@@ -85,7 +109,8 @@ export function EnvPanel({
 }
 
 function EnvItem({ row, onAction }: { row: EnvRow; onAction: (path: string) => void }) {
-  const dot = row.ok === null ? tokens.textTertiary : row.ok ? tokens.colorSuccess : tokens.colorWarning;
+  const dot =
+    row.ok === null ? tokens.textTertiary : row.ok ? tokens.colorSuccess : tokens.colorWarning;
   return (
     <div
       style={{
@@ -99,7 +124,14 @@ function EnvItem({ row, onAction }: { row: EnvRow; onAction: (path: string) => v
       }}
     >
       <span style={{ width: 110, flexShrink: 0, color: tokens.textSecondary }}>{row.name}</span>
-      <span style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceSm, color: tokens.textTertiary }}>
+      <span
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: tokens.spaceSm,
+          color: tokens.textTertiary,
+        }}
+      >
         <span style={{ width: 6, height: 6, borderRadius: tokens.radiusDot, background: dot }} />
         {row.status}
       </span>
@@ -140,9 +172,34 @@ export function TipsPanel(): ReactElement {
   return (
     <RightPanel title="快速上手">
       {TIPS.map((tip) => (
-        <div key={tip.text} style={{ display: 'flex', gap: tokens.spaceSm, padding: `${String(layout.envPanel.tipPaddingBlock)}px 0`, alignItems: 'flex-start' }}>
-          <span style={{ color: tokens.colorPrimary, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading, marginTop: layout.envPanel.tipIconMarginTop }}>{tip.icon}</span>
-          <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>{tip.text}</span>
+        <div
+          key={tip.text}
+          style={{
+            display: 'flex',
+            gap: tokens.spaceSm,
+            padding: `${String(layout.envPanel.tipPaddingBlock)}px 0`,
+            alignItems: 'flex-start',
+          }}
+        >
+          <span
+            style={{
+              color: tokens.colorPrimary,
+              fontSize: tokens.text.body.size,
+              lineHeight: tokens.text.body.leading,
+              marginTop: layout.envPanel.tipIconMarginTop,
+            }}
+          >
+            {tip.icon}
+          </span>
+          <span
+            style={{
+              fontSize: tokens.text.meta.size,
+              lineHeight: tokens.text.meta.leading,
+              color: tokens.textTertiary,
+            }}
+          >
+            {tip.text}
+          </span>
         </div>
       ))}
     </RightPanel>

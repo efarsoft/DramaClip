@@ -11,6 +11,8 @@ interface ListProps {
   orderedIds: string[];
   byId: Map<string, Episode>;
   highlights: Partial<Record<string, HighlightSegment[]>>;
+  /** 集 id → 失败原因原文（H3 §3.1.1）；没有原因的集缺席，行内如实说「未入库」。 */
+  errors: Record<string, string>;
   activeEpisodeId: string | null;
   selectedIds: readonly string[];
   running: boolean;
@@ -54,6 +56,7 @@ export function EpisodeListPanel(props: ListProps): React.ReactElement {
             key={id}
             episode={episode}
             highlightCount={highlightCount(id)}
+            error={props.errors[id] ?? ''}
             active={props.activeEpisodeId === id}
             checked={props.selectedIds.includes(id)}
             dropTarget={props.overIndex === index && props.dragIndex.current !== null}

@@ -15,7 +15,7 @@ import { localDomainModels } from './assetState';
 import {
   activateSettings,
   activeAsset,
-  activeStateNote,
+  cardStateNote,
   assetState,
   canActivate,
   externalAssets,
@@ -37,7 +37,7 @@ import {
 import { SettingSelect } from './SettingSelect';
 import { CloudNudgeCard } from './CloudNudgeCard';
 import { cloudRecommendation } from './cloudRecommend';
-import { useDownloadProgress } from './useDownloadProgress';
+import { useDownloadState } from './useDownloadProgress';
 import { useEngineConfigs } from './useEngineConfigs';
 
 const PARAMS: readonly { key: string; label: string; options: DefaultOptionType[] }[] = [
@@ -202,13 +202,14 @@ function ActiveCard({
 }): ReactElement {
   const report = active === undefined ? undefined : reportFor(reports, active.model_id);
   const state = active === undefined ? null : assetState(active, report, selftests?.[active.model_id]);
+  const download = useDownloadState(active);
   const card: ActiveCardProps = {
     domain: '语音识别 ASR',
     title: active?.name ?? '未选择模型',
     state,
     hint: '设置里没有可用的识别模型，去下方资产库选一个；或切「云端配置」接云端转写',
-    stateNote: state === null ? undefined : activeStateNote(state, report),
-    progress: useDownloadProgress(active),
+    stateNote: cardStateNote(state, report, download),
+    progress: download?.status === 'downloading' ? download.percent : undefined,
     picker: (
       <MixedEnginePicker
         width={210}

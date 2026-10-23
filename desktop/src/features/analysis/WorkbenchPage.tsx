@@ -4,7 +4,7 @@ import { Alert, App as AntdApp } from 'antd';
 import type { AnalysisResults } from '@dramaclip/protocol';
 import { analysisApi, revealInFolder } from '../../services/client';
 import { layout, tokens } from '../../styles/theme';
-import { prescreenCoverage } from './analysisView';
+import { analysisErrorsOf, prescreenCoverage } from './analysisView';
 import { useAnalysisWorkspace } from './useAnalysisWorkspace';
 import { useEpisodeOrder } from './useEpisodeOrder';
 import { useProjectDetail, useEpisodeReorder } from './useProjectDetail';
@@ -161,6 +161,7 @@ function TwoColumns(props: TwoColumnsProps): React.ReactElement {
           orderedIds={order.orderedIds}
           byId={order.byId}
           highlights={props.results?.highlights ?? {}}
+          errors={analysisErrorsOf(props.results)}
           activeEpisodeId={props.activeEpisodeId}
           selectedIds={props.selectedIds}
           running={props.running}

@@ -31,6 +31,8 @@ interface UiState {
   setCurrentProjectId: (id: string | null) => void;
   setAnalysisProgress: (progress: AnalysisProgress | null) => void;
   setModelDownload: (modelId: string, state: ModelDownloadState) => void;
+  /** 取消下载后销账：下载进度事件不会为「已取消」再发一条终态，留着就是永久假「下载中」。 */
+  clearModelDownload: (modelId: string) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -50,6 +52,13 @@ export const useUiStore = create<UiState>((set) => ({
   setModelDownload: (modelId, downloadState) => {
     set((state) => ({
       modelDownloads: { ...state.modelDownloads, [modelId]: downloadState },
+    }));
+  },
+  clearModelDownload: (modelId) => {
+    set((state) => ({
+      modelDownloads: Object.fromEntries(
+        Object.entries(state.modelDownloads).filter(([key]) => key !== modelId),
+      ),
     }));
   },
 }));

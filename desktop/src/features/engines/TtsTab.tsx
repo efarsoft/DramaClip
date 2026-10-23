@@ -14,7 +14,7 @@ import type { AssetState, Reports } from './assetState';
 import { localDomainModels,
   activateSettings,
   activeAsset,
-  activeStateNote,
+  cardStateNote,
   assetState,
   externalAssets,
   formatBytes,
@@ -39,7 +39,7 @@ import { RefVoiceSelect } from './RefVoiceSelect';
 import { SettingSelect } from './SettingSelect';
 import { TtsPreviewButton } from './TtsPreviewButton';
 import { previewNotice } from './ttsPreview';
-import { useDownloadProgress } from './useDownloadProgress';
+import { useDownloadState } from './useDownloadProgress';
 import { useEngineConfigs } from './useEngineConfigs';
 import { CloudNudgeCard } from './CloudNudgeCard';
 import { cloudRecommendation } from './cloudRecommend';
@@ -134,7 +134,7 @@ export function TtsTab({
       )}
       {/* IndexTTS 运行环境安装槽：配音页固定显示（业主裁决 2026-09-24）——入口可见性
           不该押在「先切到 indextts2」上，资产库那行的试听/选为生效随时会撞上它。
-          判据仍是 models.indextts_status：装好后槽自己消失，不是常驻横幅。
+          判据是 models.local_runtime_status：装好后槽自己消失，不是常驻横幅。
           2~6GB 的独立 Python + torch 不悄悄装——「选为生效」不代装，给显式一键引导，
           试听/自检/导出的失败文案指的就是这扇门（曾经只有文案没有门）。 */}
       <LocalRuntimeSlot scope="tts" />
@@ -292,13 +292,14 @@ function ActiveCard({
       ? (modelFree ? null : 'missing')
       : assetState(active, report, selftests?.[active.model_id]);
   const voice = settings[voiceSettingKey(engine)] ?? '';
+  const download = useDownloadState(active);
   const card: ActiveCardProps = {
     domain: '配音 TTS',
     title: active?.name ?? (engine === '' ? '未选引擎' : ttsEngineLabel(engine)),
     state,
     hint: '云端引擎，无需本地模型 · 需联网',
-    stateNote: state === null ? undefined : activeStateNote(state, report),
-    progress: useDownloadProgress(active),
+    stateNote: cardStateNote(state, report, download),
+    progress: download?.status === 'downloading' ? download.percent : undefined,
     picker: (
       <MixedEnginePicker
         localValue={engine}
@@ -347,9 +348,16 @@ function ActiveCard({
 
 /** 分离后端只报安装期探测到的事实；实际任务用哪条路由清洗回执再确认。 */
 export function SeparationBackendNote({ machine }: { machine: MachineSpecs }): ReactElement | null {
-  const { installed, ortGpu, install } = useLocalRuntime();
-  if (installed === null) return null;
+  const { installed, ortGpu, install, probeProblem } = useLocalRuntime();
   const style = { color: tokens.textSecondary, fontSize: tokens.text.meta.size };
+  if (installed === null) {
+    // 探测中不占位；探测取不到得说「未知」——静默吞掉这一行等于把它从账上抹了（规格 H3 §3.2.1）
+    return probeProblem === '' ? null : (
+      <span style={{ ...style, color: tokens.colorWarning }}>
+        {`运行环境状态未知：探测失败（${probeProblem}）——人声分离后端未确认`}
+      </span>
+    );
+  }
   if (!installed) {
     return <span style={style}>运行环境未安装——人声分离暂不可用</span>;
   }

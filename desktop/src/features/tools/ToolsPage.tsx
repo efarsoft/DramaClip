@@ -1,16 +1,16 @@
 /** 工具箱页：Tabs 选项卡组织三个工具（视频文案提取/语音转文字/文字转语音）。
- * 文案改写是提取/转写产出文案之后的加工步骤：结果区内置「选风格 → 改写 → 审查标注」，
+ * 视频文案提取是左播放器 + 右逐句文案的两栏核对屏；文案改写是提取/转写产出文案之后的加工步骤，
  * 改写稿可直接送配音，形成提取→改写→配音闭环。 */
 import {
   AudioOutlined,
-  CopyOutlined,
   DownloadOutlined,
   FileSearchOutlined,
   FolderOpenOutlined,
   PlaySquareOutlined,
+  ProfileOutlined,
   SoundOutlined,
 } from '@ant-design/icons';
-import { App as AntdApp, Button, Input, Select, Spin, Tabs } from 'antd';
+import { App as AntdApp, Button, Empty, Input, Spin, Tabs } from 'antd';
 import type { ReactElement } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ToolsExtractPayload, ToolsGetResultResult } from '@dramaclip/protocol';
@@ -24,6 +24,7 @@ import {
 } from '../../services/client';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import { tokens } from '../../styles/theme';
+import { CopyResultPanel } from './CopyResultPanel';
 
 const PAGE_DESC = '不依赖项目流程的独立小工具：贴视频/音频出文案，一键改写，文字转语音。';
 
@@ -103,10 +104,12 @@ export function ToolsPage(): ReactElement {
   );
 }
 
-/** 工具一：视频文案提取（ASR + 硬字幕 OCR 融合，短剧文案的金标准链路）。 */
+/** 工具一：视频文案提取（ASR + 硬字幕 OCR 融合，短剧文案的金标准链路）。
+ * 左栏选片与播放，右栏逐句核对——点右栏某句，播放器跳到该句起点。 */
 function CopyExtractTool({ onSendToTts }: { onSendToTts: (text: string) => void }): ReactElement {
   const { message } = AntdApp.useApp();
   const poll = useJobPoll();
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const [videoPath, setVideoPath] = useState('');
   const [status, setStatus] = useState<'idle' | 'queued' | 'running' | 'failed'>('idle');
   const [failReason, setFailReason] = useState('');
@@ -147,6 +150,11 @@ function CopyExtractTool({ onSendToTts }: { onSendToTts: (text: string) => void 
       });
   };
 
+  const onSeek = (seconds: number): void => {
+    const video = videoRef.current;
+    if (video) video.currentTime = seconds;
+  };
+
   const onDownloadSrt = (): void => {
     if (result === null) return;
     void fetch(mediaUrl(result.srt_path))
@@ -166,10 +174,69 @@ function CopyExtractTool({ onSendToTts }: { onSendToTts: (text: string) => void 
   };
 
   return (
-    <PageSection
-      title="视频文案提取"
-      extra={<FileSearchOutlined style={{ color: tokens.textTertiary }} />}
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'minmax(300px, 420px) minmax(0, 1fr)',
+        gap: tokens.spaceLg,
+        alignItems: 'start',
+      }}
     >
+      <ExtractSourceCard
+        videoPath={videoPath}
+        busy={busy}
+        failReason={failReason}
+        videoSrc={result === null ? '' : mediaUrl(result.video_path)}
+        videoRef={videoRef}
+        onPick={onPick}
+        onExtract={onExtract}
+      />
+      <PageSection title="提取文案" extra={<ProfileOutlined style={{ color: tokens.textTertiary }} />}>
+        {result === null ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description="提取完成后，逐句文案出现在这里"
+            style={{ paddingBlock: tokens.spaceLg }}
+          />
+        ) : (
+          <CopyResultPanel
+            text={result.text}
+            meta={`提取 ${String(result.chars)} 字 · ${String(result.lines)} 行 · 视频 ${String(result.duration_s)} 秒`}
+            srtPath={result.srt_path}
+            onSeek={onSeek}
+            onSendToTts={onSendToTts}
+            srtAction={
+              <Button size="small" icon={<DownloadOutlined />} onClick={onDownloadSrt}>
+                保存 SRT
+              </Button>
+            }
+          />
+        )}
+      </PageSection>
+    </div>
+  );
+}
+
+/** 左栏：选片、发起提取、播放器（videoSrc 为空表示还没出结果，播放器不上屏）。 */
+function ExtractSourceCard({
+  videoPath,
+  busy,
+  failReason,
+  videoSrc,
+  videoRef,
+  onPick,
+  onExtract,
+}: {
+  videoPath: string;
+  busy: boolean;
+  failReason: string;
+  videoSrc: string;
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+  onPick: () => void;
+  onExtract: () => void;
+}): ReactElement {
+  return (
+    <PageSection title="视频文案提取" extra={<FileSearchOutlined style={{ color: tokens.textTertiary }} />}>
       <div style={{ display: 'flex', gap: tokens.spaceSm, alignItems: 'center' }}>
         <Input
           style={{ flex: 1 }}
@@ -178,34 +245,29 @@ function CopyExtractTool({ onSendToTts }: { onSendToTts: (text: string) => void 
           readOnly
         />
         <Button onClick={onPick}>选择视频</Button>
-        <Button
-          type="primary"
-          icon={<FileSearchOutlined />}
-          loading={busy}
-          onClick={onExtract}
-        >
+      </div>
+      <div style={{ marginTop: tokens.spaceSm }}>
+        <Button type="primary" icon={<FileSearchOutlined />} loading={busy} onClick={onExtract} block>
           开始提取
         </Button>
       </div>
       <ExtractStatus
         busy={busy}
         failReason={failReason}
-        runningHint="转写与硬字幕识别中，耗时与视频时长成正比；完成后结果出现在下方"
+        runningHint="转写与硬字幕识别中，耗时与视频时长成正比；完成后文案出现在右侧"
       />
-      {result !== null && (
-        <CopyResultPanel
-          text={result.text}
-          meta={`提取 ${String(result.chars)} 字 · ${String(result.lines)} 行 · 视频 ${String(result.duration_s)} 秒`}
-          onSendToTts={onSendToTts}
-          srtAction={
-            <Button
-              size="small"
-              icon={<DownloadOutlined />}
-              onClick={onDownloadSrt}
-            >
-              保存 SRT
-            </Button>
-          }
+      {videoSrc !== '' && (
+        <video
+          ref={videoRef}
+          src={videoSrc}
+          controls
+          style={{
+            width: '100%',
+            maxHeight: 380,
+            marginTop: tokens.spaceMd,
+            borderRadius: tokens.radiusControl,
+            background: tokens.posterBase,
+          }}
         />
       )}
     </PageSection>
@@ -249,15 +311,14 @@ function ExtractStatus({
   return null;
 }
 
-/** 工具二：语音文件转文字（纯 ASR，无 OCR）。 */
+/** 工具二：语音文件转文字（纯 ASR，无 OCR）。没有画面可播，逐句时间轴只读。 */
 function AsrTool({ onSendToTts }: { onSendToTts: (text: string) => void }): ReactElement {
   const { message } = AntdApp.useApp();
   const poll = useJobPoll();
   const [audioPath, setAudioPath] = useState('');
   const [busy, setBusy] = useState(false);
   const [failReason, setFailReason] = useState('');
-  const [text, setText] = useState('');
-  const [meta, setMeta] = useState('');
+  const [result, setResult] = useState<ToolsExtractPayload | null>(null);
 
   const onPick = (): void => {
     void pickAudioFile().then((picked) => {
@@ -271,7 +332,7 @@ function AsrTool({ onSendToTts }: { onSendToTts: (text: string) => void }): Reac
       return;
     }
     setBusy(true);
-    setText('');
+    setResult(null);
     setFailReason('');
     void toolsApi
       .asrStart(audioPath)
@@ -279,10 +340,7 @@ function AsrTool({ onSendToTts }: { onSendToTts: (text: string) => void }): Reac
         poll.start(r.job_id, (detail) => {
           setBusy(false);
           if (detail.status === 'completed' && detail.result) {
-            setText(detail.result.text);
-            setMeta(
-              `转写 ${String(detail.result.chars)} 字 · 音频 ${String(detail.result.duration_s)} 秒`,
-            );
+            setResult(detail.result);
           } else {
             setFailReason(detail.error ?? '转写失败');
           }
@@ -308,164 +366,16 @@ function AsrTool({ onSendToTts }: { onSendToTts: (text: string) => void }): Reac
           开始转写
         </Button>
       </div>
-      <ExtractStatus
-        busy={busy}
-        failReason={failReason}
-        runningHint="转写中，耗时与音频时长成正比"
-      />
-      {text !== '' && (
-        <CopyResultPanel text={text} meta={meta} onSendToTts={onSendToTts} />
+      <ExtractStatus busy={busy} failReason={failReason} runningHint="转写中，耗时与音频时长成正比" />
+      {result !== null && (
+        <CopyResultPanel
+          text={result.text}
+          meta={`转写 ${String(result.chars)} 字 · 音频 ${String(result.duration_s)} 秒`}
+          srtPath={result.srt_path}
+          onSendToTts={onSendToTts}
+        />
       )}
     </PageSection>
-  );
-}
-
-type RewriteStyle = 'paraphrase' | 'card';
-
-/** 产出文案结果区的改写子面板：选风格→改写→审查标注→改写稿动作（自含触发）。 */
-function RewritePanel({ sourceText, onSendToTts }: { sourceText: string; onSendToTts: (text: string) => void }): ReactElement {
-  const { message } = AntdApp.useApp();
-  const [rewriteStyle, setRewriteStyle] = useState<RewriteStyle>('paraphrase');
-  const [rewritten, setRewritten] = useState('');
-  const [notes, setNotes] = useState<readonly string[]>([]);
-  const [rewriting, setRewriting] = useState(false);
-
-  const onRewrite = (): void => {
-    setRewriting(true);
-    void toolsApi
-      .rewrite(sourceText, rewriteStyle)
-      .then((r) => {
-        setRewritten(r.text);
-        setNotes(r.notes);
-        if (r.notes.length > 0) {
-          message.warning(`改写完成，但有 ${String(r.notes.length)} 条审查标注`);
-        } else {
-          message.success('改写完成');
-        }
-      })
-      .catch((error: unknown) => {
-        message.error(error instanceof Error ? error.message : String(error));
-      })
-      .finally(() => {
-        setRewriting(false);
-      });
-  };
-
-  return (
-    <div style={{ marginTop: tokens.spaceSm }}>
-      <div style={{ display: 'flex', gap: tokens.spaceSm, alignItems: 'center' }}>
-        <Select<RewriteStyle>
-          size="small"
-          style={{ width: 190 }}
-          value={rewriteStyle}
-          options={[
-            { label: '原文复述（换说法不换事实）', value: 'paraphrase' },
-            { label: '按文风卡重写（对齐解说文风）', value: 'card' },
-          ]}
-          onChange={setRewriteStyle}
-        />
-        <Button size="small" loading={rewriting} onClick={onRewrite}>
-          改写
-        </Button>
-      </div>
-      {rewritten !== '' && (
-        <div style={{ marginTop: tokens.spaceSm }}>
-          <Input.TextArea rows={6} value={rewritten} readOnly />
-          {notes.length > 0 && (
-            <ul
-              style={{
-                margin: `${tokens.spaceSm} 0 0`,
-                paddingLeft: tokens.spaceLg,
-                fontSize: tokens.text.meta.size,
-                color: tokens.textTertiary,
-              }}
-            >
-              {notes.map((note) => (
-                <li key={note}>{note}</li>
-              ))}
-            </ul>
-          )}
-          <div style={{ marginTop: tokens.spaceSm, display: 'flex', gap: tokens.spaceSm }}>
-            <Button
-              size="small"
-              icon={<CopyOutlined />}
-              onClick={() => {
-                void navigator.clipboard.writeText(rewritten).then(() => message.success('改写稿已复制'));
-              }}
-            >
-              复制改写稿
-            </Button>
-            <Button
-              size="small"
-              type="primary"
-              ghost
-              onClick={() => {
-                onSendToTts(rewritten);
-              }}
-            >
-              送改写稿配音
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** 产出文案结果区：原文全文 + 元信息动作行 + 改写子面板。
- * 提取与语音转文字两个工具共用；改写是文案的加工步骤，不是独立工具。 */
-function CopyResultPanel(props: {
-  text: string;
-  meta: string;
-  srtAction?: ReactElement;
-  onSendToTts: (text: string) => void;
-}): ReactElement {
-  const { message } = AntdApp.useApp();
-
-  const copy = useCallback(
-    (content: string, tip: string): void => {
-      void navigator.clipboard.writeText(content).then(() => message.success(tip));
-    },
-    [message],
-  );
-
-  return (
-    <div style={{ marginTop: tokens.spaceMd }}>
-      <Input.TextArea rows={8} value={props.text} readOnly />
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: tokens.spaceSm,
-          marginTop: tokens.spaceSm,
-        }}
-      >
-        <span style={{ fontSize: tokens.text.meta.size, color: tokens.textTertiary }}>{props.meta}</span>
-        <span style={{ marginLeft: 'auto', display: 'flex', gap: tokens.spaceSm, alignItems: 'center' }}>
-          {props.srtAction}
-          <Button
-            size="small"
-            icon={<CopyOutlined />}
-            onClick={() => {
-              copy(props.text, '全文已复制');
-            }}
-          >
-            复制全文
-          </Button>
-          <Button
-            size="small"
-            type="primary"
-            ghost
-            onClick={() => {
-              props.onSendToTts(props.text);
-            }}
-          >
-            送文字转语音
-          </Button>
-        </span>
-      </div>
-      <RewritePanel sourceText={props.text} onSendToTts={props.onSendToTts} />
-    </div>
   );
 }
 

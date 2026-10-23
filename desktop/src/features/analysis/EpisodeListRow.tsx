@@ -9,6 +9,7 @@ import { layout, tokens } from '../../styles/theme';
 export function EpisodeListRow({
   episode,
   highlightCount,
+  error,
   active,
   checked,
   dropTarget,
@@ -21,6 +22,8 @@ export function EpisodeListRow({
 }: {
   episode: Episode;
   highlightCount: number;
+  /** 服务端 `EpisodeAnalysisResult.error` 原文；空串 = 库里没记原因。 */
+  error: string;
   active: boolean;
   checked: boolean;
   dropTarget: boolean;
@@ -51,6 +54,9 @@ export function EpisodeListRow({
           highlightCount={highlightCount}
           hasAudio={episode.has_audio}
         />
+        {episode.status === 'failed' && (
+          <FailureLine error={error} />
+        )}
       </span>
       <MoveButtons onMove={onMove} />
     </DragShell>
@@ -289,6 +295,25 @@ function RowMeta({
           高光 {String(highlightCount)}
         </span>
       )}
+    </span>
+  );
+}
+
+/** 失败行的原因行（H3 §3.1.1）：「分析失败」四个字不是账——服务端写了原文就上屏，
+ *  没写就如实说没入库并指向日志。挂 Tooltip 等于没挂：账不在鼠标下面。 */
+function FailureLine({ error }: { error: string }): React.ReactElement {
+  return (
+    <span
+      style={{
+        fontSize: tokens.text.badge.size,
+        lineHeight: tokens.text.badge.leading,
+        color: tokens.colorError,
+        overflow: 'hidden',
+        whiteSpace: 'nowrap',
+        textOverflow: 'ellipsis',
+      }}
+    >
+      {error === '' ? '失败原因未入库：原文在本轮作业日志里' : `失败原因：${error}`}
     </span>
   );
 }

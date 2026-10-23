@@ -14,6 +14,7 @@ import type {
   SelftestResults,
   VerifyReport,
 } from '@dramaclip/protocol';
+import type { ModelDownloadState } from '../../stores/ui';
 
 export type Reports = ReadonlyMap<string, VerifyReport>;
 
@@ -195,6 +196,26 @@ export function activeStateNote(
   if (state === 'untested') return '文件校验通过，但能力自检还没通过——资产行里点「自检」，过了才叫就绪';
   if (state === 'unverified') return '还没校验过——资产行里点「体检」按判据核一遍';
   return undefined;
+}
+
+/**
+ * 下载失败的原话（附录 B② + 规格 H3 §3.1.2）：由宿主行写进**可见文本**——
+ * 一次性 toast 会自己消失，悬停要鼠标配合；只有分类不出原因的失败才允许只说「失败了」。
+ */
+export function downloadFailureNote(download: ModelDownloadState | undefined): string | undefined {
+  if (download?.status !== 'failed') return undefined;
+  return download.message === '' ? '上次下载失败了：服务端未给出分类原因' : `下载失败：${download.message}`;
+}
+
+/** 生效卡状态行的唯一出口：最近一次下载失败优先（比体检结论新），其次体检补充行。 */
+export function cardStateNote(
+  state: AssetState | null,
+  report: VerifyReport | undefined,
+  download: ModelDownloadState | undefined,
+): string | undefined {
+  const failed = downloadFailureNote(download);
+  if (failed !== undefined) return failed;
+  return state === null ? undefined : activeStateNote(state, report);
 }
 
 /** 「就绪与修复」段的一条待办：现象 + 后果（§10.5 三要素的前两件，动作在行内按钮上）。 */

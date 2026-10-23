@@ -13,7 +13,7 @@ import { PageSection } from '../../components/layout/PageKit';
 import type { DomainTabProps } from './EnginesPage';
 import type { Reports } from './assetState';
 import {
-  activeStateNote,
+  cardStateNote,
   assetState,
   canActivate,
   externalAssets,
@@ -29,7 +29,7 @@ import {
   MixedEnginePicker,
   activeCloudConfig,
 } from './CloudDomainUI';
-import { useDownloadProgress } from './useDownloadProgress';
+import { useDownloadState } from './useDownloadProgress';
 import { useEngineConfigs } from './useEngineConfigs';
 
 export function VisionTab({
@@ -167,13 +167,14 @@ function ActiveCard({
 }): ReactElement {
   const report = active === undefined ? undefined : reportFor(reports, active.model_id);
   const state = active === undefined ? null : assetState(active, report, selftests?.[active.model_id]);
+  const download = useDownloadState(active);
   const card: ActiveCardProps = {
     domain: '画面理解 VL',
     title: active?.name ?? '未启用（视觉轨关闭）',
     state,
     hint: '设置里没有生效档位——下方资产库选一档即启用；关闭即回到纯台词解说',
-    stateNote: state === null ? undefined : activeStateNote(state, report),
-    progress: useDownloadProgress(active),
+    stateNote: cardStateNote(state, report, download),
+    progress: download?.status === 'downloading' ? download.percent : undefined,
     picker: (
       <MixedEnginePicker
         width={210}

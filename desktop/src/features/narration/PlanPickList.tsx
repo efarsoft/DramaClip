@@ -143,6 +143,11 @@ function ProduceBar({
         <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
           已选 {String(count)} / {String(total)} 条方案
         </span>
+        {count === 0 && (
+          <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.colorWarning }}>
+            先勾选至少一条方案
+          </span>
+        )}
         <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
           成本预估
         </span>

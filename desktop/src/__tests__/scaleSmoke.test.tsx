@@ -202,6 +202,7 @@ function smokeEpisodeList(): void {
       orderedIds={episodes.map((episode) => episode.id)}
       byId={byId}
       highlights={{}}
+      errors={{}}
       activeEpisodeId={null}
       selectedIds={[]}
       running={false}

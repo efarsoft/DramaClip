@@ -8,11 +8,12 @@ import { useState } from 'react';
 import type { ReactElement } from 'react';
 import type { ModelInfo, SelftestResult, VerifyReport } from '@dramaclip/protocol';
 import { mixins } from '../../styles/mixins';
-import { tokens , layout } from '../../styles/theme';
+import { tokens, layout } from '../../styles/theme';
 import {
   type AssetState,
   assetState,
   computeLabel,
+  downloadFailureNote,
   failureNote,
   formatBytes,
   warnNote,
@@ -166,14 +167,13 @@ function StateCell({
   const runtime = computeLabel(selftest?.compute);
   // warn 上卡（§10.1 降级的另一半：可见 + 有修法）；储备资产的「引擎接入」warn 是分区自带的事实，不重复展示。
   const warns = note === undefined && state !== 'reserve' ? warnSummary(report) : undefined;
-  // 失败态上屏（附录 B②）：分类原因写在行里，不只在一次性 toast 里闪一下
-  const failed = download?.status === 'failed' && download.message !== '' ? download.message : undefined;
+  // 失败态上屏（附录 B② + 规格 H3 §3.1.2）：分类原因写在行里，不只在一次性 toast 或悬停里
+  const failed = downloadFailureNote(download);
   return (
     <span style={{ minWidth: 0 }}>
       <StateBadge state={state} progress={download?.status === 'downloading' ? download.percent : undefined} />
       {failed !== undefined && (
         <div
-          title={`上次下载失败：${failed}`}
           style={{
             fontSize: tokens.text.badge.size,
             lineHeight: tokens.text.badge.leading,
@@ -183,7 +183,7 @@ function StateCell({
             whiteSpace: 'nowrap',
           }}
         >
-          下载失败：{failed}
+          {failed}
         </div>
       )}
       {note !== undefined && (

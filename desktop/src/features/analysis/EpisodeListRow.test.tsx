@@ -18,7 +18,7 @@ function episode(status: Episode['status']): Episode {
   };
 }
 
-function renderRow(target: Episode): ReturnType<typeof render> {
+function renderRow(target: Episode, error = ''): ReturnType<typeof render> {
   return render(
     <EpisodeListRow
       episode={target}
@@ -26,6 +26,7 @@ function renderRow(target: Episode): ReturnType<typeof render> {
       active={false}
       checked={false}
       dropTarget={false}
+      error={error}
       onActivate={vi.fn()}
       onToggle={vi.fn()}
       onDragStart={vi.fn()}
@@ -70,6 +71,25 @@ describe('缺音轨标记（取不到 ≠ 没有）', () => {
     expect(queryByText('无音轨')).toBeNull();
     const legacy = renderRow(episode('pending'));
     expect(legacy.queryByText('无音轨')).toBeNull();
+  });
+});
+
+describe('失败原因常驻（H3 §3.1.1：服务端原文是账，不是悬停彩蛋）', () => {
+  it('有服务端原文：灯下面直接打原文（非 Tooltip/title）', () => {
+    const { getByText } = renderRow(episode('failed'), '音频轨提取失败：ffprobe 退出码 1');
+    const line = getByText(/^失败原因：音频轨提取失败/);
+    expect(line.closest('[role="tooltip"]')).toBeNull();
+    expect(line.hasAttribute('title')).toBe(false);
+  });
+
+  it('库里没有原因：如实说没记录并指向日志，不静默只剩四个字', () => {
+    const { getByText } = renderRow(episode('failed'), '');
+    expect(getByText(/失败原因未入库/)).toBeTruthy();
+  });
+
+  it('非失败态不带原因（旧原文不串台）', () => {
+    const { queryByText } = renderRow(episode('done'), '上一轮的失败原文');
+    expect(queryByText(/上一轮的失败原文/)).toBeNull();
   });
 });
 

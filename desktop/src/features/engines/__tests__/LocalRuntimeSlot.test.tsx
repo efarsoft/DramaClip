@@ -6,14 +6,26 @@
  * 消失，不做常驻横幅。ASR 页同槽同判据（scope=asr 判 funasr 组，升级补装路径）。
  */
 import { App as AntdApp } from 'antd';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { localRuntimeApi } from '../../../services/client';
+import type { JobInfo } from '@dramaclip/protocol';
+import { jobsApi, localRuntimeApi } from '../../../services/client';
 import { useUiStore } from '../../../stores/ui';
 import { AsrTab } from '../AsrTab';
 import { TtsTab } from '../TtsTab';
 import { specsFromHealth } from '../machineFit';
 import { model, report, reportsOf } from './fixtures';
+
+const jobInfo = (over: Partial<JobInfo>): JobInfo => ({
+  id: 'j-local',
+  type: 'local_runtime_install',
+  ref_id: null,
+  status: 'running',
+  progress: 0,
+  created_at: 0,
+  updated_at: 0,
+  ...over,
+});
 
 vi.mock('../../../services/client', () => ({
   engineConfigsApi: {
@@ -40,10 +52,6 @@ vi.mock('../../../services/client', () => ({
     selftestResults: vi.fn(() => Promise.resolve({})),
   },
   ttsApi: { preview: vi.fn(() => Promise.resolve({})) },
-  indexttsApi: {
-    status: vi.fn(() => Promise.resolve({ installed: false, dir: '' })),
-    install: vi.fn(() => Promise.resolve({ job_id: 'j-install' })),
-  },
   localRuntimeApi: {
     status: vi.fn(() =>
       Promise.resolve({ installed: false, dir: '', torch_variant: 'unknown', groups: {} }),
@@ -155,4 +163,34 @@ describe('本地智能运行环境安装槽 · 接线', () => {
     expect(await screen.findByText(/待更新/)).toBeTruthy();
     expect(await screen.findByRole('button', { name: /安装运行环境/ })).toBeTruthy();
   });
+
+  it('探测取不到 → 槽位说「状态未知」并重探，不报「未安装」、不挂安装按钮（规格 H3 §3.2.1）', async () => {
+    vi.mocked(localRuntimeApi.status).mockRejectedValue(new Error('sidecar 无响应'));
+    renderTts('indextts2');
+    // 同一个未知在配音页有两处读者（安装槽 + 人声分离后端那一行）：一处说未知、另一处静默吞掉就是假账
+    const lines = await screen.findAllByText(/状态未知：探测失败（sidecar 无响应）/);
+    expect(lines).toHaveLength(2);
+    expect(screen.getByRole('button', { name: /重试探测/ })).toBeTruthy();
+    expect(screen.queryAllByText(/未安装/)).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: /安装运行环境/ })).toBeNull();
+  });
+
+  it('安装启动被拒 → 原因常驻槽位并改口径为「重试安装」，不靠一次 toast 交代（规格 H3 §3.1.3）', async () => {
+    vi.mocked(localRuntimeApi.install).mockRejectedValueOnce(new Error('磁盘只剩 200MB，装不下 2GB'));
+    renderTts('indextts2');
+    fireEvent.click(await screen.findByRole('button', { name: /安装运行环境/ }));
+    expect(await screen.findByText(/启动安装失败：磁盘只剩 200MB，装不下 2GB/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /重试安装/ })).toBeTruthy();
+  });
+
+  it('安装作业失败 → 槽位不消失，原话常驻并给「重试安装」（规格 H3 §3.1.3）', async () => {
+    vi.mocked(jobsApi.get).mockResolvedValueOnce({
+      job: jobInfo({ status: 'failed', error: 'venv 创建失败：目录只读' }),
+    });
+    renderTts('indextts2');
+    fireEvent.click(await screen.findByRole('button', { name: /安装运行环境/ }));
+    // 3s 一轮的作业轮询：这一条花的是真时间，换假定时器会把 antd 的动效一起冻住
+    expect(await screen.findByText(/安装失败：venv 创建失败：目录只读/, {}, { timeout: 8000 })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /重试安装/ })).toBeTruthy();
+  }, 12000);
 });
