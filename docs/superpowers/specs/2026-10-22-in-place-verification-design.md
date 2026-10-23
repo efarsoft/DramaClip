@@ -240,5 +240,7 @@ W3 的 `StateBlock` 管**屏级四态**（空/载入/失败/部分成功）。�
 | RC5 `audit.py:525` docstring 的「指纹」 | 1 | 断言没错，用词踩线 | copyTruth 源码面红线不认语境（那里说的是「人名键」，不是比对指纹），改成「人名键只用作…计数」。 |
 
 - **测得（`git checkout-index` 快照＝本次提交态）**：全量 `npx vitest run` **91 文件 / 741 例全绿**；`npm run typecheck`（`tsconfig.app.json` + `tsconfig.node.json`）0 错；`npx eslint <本次 20 个桌面文件>` 0 错；后端 `service/tests/engines/narration` **409 passed**（`audit.py` 只动注释一行），`ruff check` 本文件 0 错。
-- **快照首跑的一条红不是断言红**：`EnginesImport.test.tsx` 报 `Test timed out in 5000ms`——快照没带 Vite 转换缓存（`import` 占 45%），91 个 worker 同时冷启动把它压过 5s；单跑该文件 7 例全绿（该例 2207ms），warm 复跑全量 741 绿。工作树里同样的超时抖动出现在 `LocalRuntimeSlot`（单跑 3628ms，全量复跑时 5147ms 越线）。**这是 `testTimeout=5000` 与重并行渲染测试的既有张力，本批次未动它**（改法要么全局加宽超时、要么 `isolate:false` 复用 worker，两条都改变全量口径，另立）。
+- **超时红不是断言红，但要按「必然复现」对待**：默认口径（不设 `maxWorkers`）连跑 6 次全量＝**4 次超时红、2 次全绿**，越线的固定是**每个文件里第一个重渲染用例**——`EnginesImport > 库里查得到这一行…` 与 `LocalRuntimeSlot > 未装 + 选 indextts2…`（都是整张 AntD 页/卡的 jsdom 首挂载）。单跑这两个文件全绿，实测该两例分别 2207ms、3628ms——离 `testTimeout=5000` 只差一次争用。判据三条各留读数：单跑（排除争用）、warm 复跑（排除冷缓存）、贴单跑耗时（证明它本就贴线）；超时红的消息永远是 `Test timed out in 5000ms`，不给 expected/received，这就是它和断言红的分界。
+  - **`vitest.config.ts` 现状**：只设了 `environment: 'jsdom'` 与 `include`，`testTimeout` 与 `isolate` 都走默认（5000ms、true ⇒ 91 个 worker 各起一份环境）。
+  - **两条候选口径已实测，结论相反**（本机 16 逻辑核）：① `--no-isolate` 最快（54.19s）但**不是修法**——6 条红，其中 `StatusBar` 三条 GPU 段读到「待检测」、`downloadUx` 两条，全是跨文件的 store 残留，另有 1 条照旧超时；② `--maxWorkers=4` 保持 isolate，97.14s、91 文件全绿。默认 `maxWorkers`（≈核数−1）跑 83-112s，与 ② 同量级却换来抖动。**待定案（本批不动配置）**：要么按 ② 把 `maxWorkers` 写进配置或 CI，要么全局加宽 `testTimeout`（挂死的用例会晚 10s 才红，不掩盖断言）；`isolate:false` 这条已被实测否掉。
 - **`ruff check service` 仍 2 错**：都在 `service/tests/engines/narration/test_audit.py`（`I001` 导入序 + 一条 `range(0, …)`），属并行文案线已提交的债，本批次未动。
