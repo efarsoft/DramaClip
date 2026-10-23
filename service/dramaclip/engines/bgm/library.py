@@ -55,6 +55,23 @@ class BgmTrack:
     source_url: str
 
 
+def track_from_row(row: dict[str, object]) -> BgmTrack:
+    """bgm_tracks 表行 → BgmTrack（接线层桥）：运行时选曲只认 dataclass，不认表字典。
+
+    数值列做宽容转换（入库侧已保证类型，这里只防旧库脏行）——坏行宁可让
+    selector 收到保守值，不在出片链上炸。
+    """
+    return BgmTrack(
+        file=Path(str(row.get("file_path") or "")),
+        emotion=str(row.get("emotion") or "default"),
+        duration_s=float(str(row.get("duration_s") or 0.0)),
+        bpm=None if row.get("bpm") is None else float(str(row["bpm"])),
+        license=str(row.get("license") or ""),
+        attribution=str(row.get("attribution") or ""),
+        source_url=str(row.get("source_url") or ""),
+    )
+
+
 @dataclass(frozen=True)
 class ScanResult:
     """一次扫描的完整结果：入库素材 + 跳过留痕（理由是人话，直接进 UI/日志）。"""

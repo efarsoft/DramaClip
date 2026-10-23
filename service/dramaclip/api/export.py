@@ -16,6 +16,7 @@ from dramaclip.api.export_audit import (
     _audit_duration,
     _clock_audit,
     _declared_duration_s,
+    _emit_note,
     _log_clock_audit,
     _note_degraded,
     _planned_narration_segments,
@@ -32,6 +33,8 @@ from dramaclip.api.export_covers import (
     ensure_covers,
 )
 from dramaclip.engines.analysis.models import SpeechZone
+from dramaclip.engines.bgm import library as bgm_library
+from dramaclip.engines.bgm import selector as bgm_selector
 from dramaclip.engines.exporter import ai_label, encoder, loudness, selfcheck
 from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
@@ -49,6 +52,7 @@ from dramaclip.infra.ffmpeg import (
 )
 from dramaclip.infra.ffmpeg import probe
 from dramaclip.infra.storage.repos import analysis as analysis_repo
+from dramaclip.infra.storage.repos import bgm as bgm_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import exports as exports_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
@@ -488,6 +492,36 @@ def delete_export(context: AppContext, params: dict[str, Any]) -> dict[str, Any]
     return {"ok": True, "trashed": trashed, "missing": missing}
 
 
+def _pick_bgm_track(context: AppContext, plan_data: PlanData) -> Path | None:
+    """BGM 床选曲（C 项接线层唯一入口）：设置/曲库两层门禁（模式门禁在 selector 内）。
+
+    返回 None 的所有情形都是合法态＝现状出片：设置关、表读不了、库空、该模式
+    不该铺（raw_clip/dialogue_narration 源片自带 BGM）、情绪无曲且 default 也无、
+    曲目文件已不在盘上。「无曲可用＝逐字节一致」是 selector 的硬验收，这里不猜。
+    """
+    if not config.get_bool(context.settings, "export.bgm"):
+        return None
+    try:
+        rows = bgm_repo.list_all(context.conn)
+    except Exception as exc:  # noqa: BLE001 - 曲库读不了不挡导出
+        _note_degraded(context, "BGM 曲库读取", "本条成片不铺 BGM 床", exc)
+        return None
+    tracks = [bgm_library.track_from_row(row) for row in rows]
+    track = bgm_selector.select_bgm(plan_data, tracks)
+    if track is None:
+        return None
+    if not track.file.is_file():
+        _note_degraded(
+            context, "BGM 曲目文件缺失", "本条成片不铺 BGM 床（请重扫素材库）", None
+        )
+        return None
+    bpm = f"{track.bpm:.0f}bpm" if track.bpm is not None else "bpm未测"
+    _emit_note(
+        context, "info", f"BGM 床：{track.file.name}（{track.emotion}，{bpm}，音量 15%）"
+    )
+    return track.file
+
+
 def render_export(
     context: AppContext,
     run: ExportRun,
@@ -706,6 +740,9 @@ def render_export(
         compute_sink=reports.append,
         encoder_requested=codec_setting,
         segment_offsets_sink=offsets_emitted.append,
+        # BGM 床（C 项接线）：设置/模式/曲库三层门禁在 _pick_bgm 内，任一层不过
+        # 返回 None＝现状出片。混音失败在 encoder 层向上抛，这里降级留痕不挡导出。
+        bgm_track=_pick_bgm_track(context, plan_data),
     )
     # 清洗在前、编码在后：读账的人按时间顺序看（规格 §3.5）
     receipt = [*run.voice_reports, *(item.to_dict() for item in reports)]

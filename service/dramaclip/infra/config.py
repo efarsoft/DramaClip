@@ -97,6 +97,9 @@ DEFAULTS: dict[str, str] = {
     # 字样（engines/exporter/ai_label.py，loudness 之后的独立 drawtext 遍）。
     # 平台标注要求因平台而异，是否标注由使用者按发布平台自行决定——不强制、不代决。
     "export.ai_label": "false",
+    # BGM 床总开关（C 项接线，默认开）：曲库空/该模式不该铺时自动无 BGM＝现状出片，
+    # 开着不改变无曲用户的行为——「无曲可用＝逐字节一致」是 selector 的硬验收。
+    "export.bgm": "1",
     "hardware.max_parallel_jobs": "2",
     # Agent 网关（本机 127.0.0.1 HTTP 工具面：外部 agent 调用审查/出稿；api/agent_gateway.py）
     "agent_gateway.enabled": "false",

@@ -57,6 +57,11 @@ _SEGMENT_SAMPLE_RATE = 48000
 _SEGMENT_CHANNEL_LAYOUT = "stereo"
 _SEGMENT_CHANNEL_LAYOUT = "stereo"
 
+# BGM 床（C 项接线）：音量与尾淡出。0.15 压在原声衬底（0.08/0.10）之上、旁白之下；
+# 1.2s 尾淡出让成片收尾不停在硬切的音乐上（顺带让「结尾 3 秒质检」对有床成片不失真）。
+_BGM_BED_VOLUME = "0.15"
+_BGM_TAIL_FADE_S = 1.2
+
 # 压底段的原声音量（旁白段 10% / 全片衬底段 8%）。真机门禁按名字读这两个数——它要用同一个
 # 值算出该段的预测响度再去量实测，所以音量只在这里定义一次。写成字符串是因为它直接拼进滤镜。
 _NARRATION_BED_VOLUME = "0.1"
@@ -797,6 +802,7 @@ def export_plan(
     compute_sink: Callable[[compute.ComputeReport], None] | None = None,
     encoder_requested: str = "",
     segment_offsets_sink: Callable[[Sequence[tuple[int, float]]], None] | None = None,
+    bgm_track: Path | None = None,
 ) -> Path:
     """执行两阶段导出，返回成片路径。
 
@@ -832,6 +838,7 @@ def export_plan(
             subtitle_erase_windows=subtitle_erase_windows,
             burn_ai_label=burn_ai_label,
             segment_offsets_sink=segment_offsets_sink,
+            bgm_track=bgm_track,
             _allow_uniform_retry=True,
             _report_state=state,
         )
@@ -863,6 +870,7 @@ def export_plan(
             subtitle_erase_windows=subtitle_erase_windows,
             burn_ai_label=burn_ai_label,
             segment_offsets_sink=segment_offsets_sink,
+            bgm_track=bgm_track,
             _allow_uniform_retry=False,
             _report_state=state,
         )
@@ -902,6 +910,7 @@ def _export_plan_once(
     subtitle_erase_windows: dict[str, list[tuple[float, float]]] | None = None,
     burn_ai_label: bool = False,
     segment_offsets_sink: Callable[[Sequence[tuple[int, float]]], None] | None = None,
+    bgm_track: Path | None = None,
     _allow_uniform_retry: bool = True,
     _report_state: dict[str, Any] | None = None,
 ) -> Path:
@@ -1238,6 +1247,11 @@ def _export_plan_once(
 
     manifest = _concat_manifest(jobs)
     _concat([item.path for item in manifest], out_path)
+    if bgm_track is not None:
+        try:
+            _mix_bgm_bed(out_path, bgm_track, work_dir / "bgm")
+        except Exception as exc:  # noqa: BLE001 - 增强项失败不挡已拼好的成片（进程日志是底账）
+            _LOGGER.warning("BGM 床混音失败（%s）：本条成片不带 BGM 出片", str(exc)[:200])
     if loudness_target is not None:
         loudness.normalize_in_place(
             out_path, target=loudness_target, work_dir=work_dir / "loudnorm"
@@ -1249,6 +1263,47 @@ def _export_plan_once(
     if on_progress is not None:
         on_progress(100.0, "导出完成")
     return out_path
+
+
+def _mix_bgm_bed(film: Path, track: Path, work_dir: Path) -> None:
+    """整片铺 BGM 床（C 项「一片一床」v1 等音量）：循环补齐成片长、尾部淡出、与
+    原混音叠加；只动音频轨（视频流复制零重编成本），完成后原地替换。
+
+    - `normalize=0` 必须显式关：amix 默认把每路各乘 1/n，人声会跟着减半；
+    - 床音量 0.15：压在原声衬底段（8%/10%）之上、旁白之下——床是连续情绪层，
+      不是主旋律；
+    - 尾部淡出顺带回应「结尾 3 秒质检」：无声收尾的成片有了床就不再误报，
+      戛然而止的听感问题也在床的层面解决；
+    - 混音失败向上抛，由调用方降级留痕（事后体检纪律）——临时文件里混，
+      原成片不会半途损毁。
+    """
+    work_dir.mkdir(parents=True, exist_ok=True)
+    mixed = work_dir / f"bgm-mixed{film.suffix}"
+    duration = ffprobe_mod.probe(film).duration_s
+    fade_start = max(duration - _BGM_TAIL_FADE_S, 0.0)
+    runner.run(
+        [
+            "-hide_banner", "-loglevel", "error", "-y",
+            "-i", str(film),
+            "-stream_loop", "-1",
+            "-i", str(track),
+            "-filter_complex",
+            (
+                f"[1:a]volume={_BGM_BED_VOLUME},"
+                f"afade=t=out:st={fade_start:.3f}:d={_BGM_TAIL_FADE_S}[bed];"
+                "[0:a][bed]amix=inputs=2:duration=first:normalize=0[a]"
+            ),
+            "-map", "0:v", "-map", "[a]",
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "192k",
+            "-t", f"{duration:.3f}",
+            str(mixed),
+        ],
+        timeout_s=900,
+    )
+    if not mixed.is_file() or mixed.stat().st_size == 0:
+        raise RuntimeError("BGM 床混音未产出文件")
+    mixed.replace(film)
 
 
 def _segment_offsets(manifest: list[_SegmentArtifact]) -> list[tuple[int, float]] | None:
