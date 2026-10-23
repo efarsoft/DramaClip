@@ -60,24 +60,20 @@ from dramaclip.infra.storage import db
 from dramaclip.transport.notify import Notifier
 from dramaclip.transport.rpc import Router, RpcRequest
 
-ALL_MODES = [
-    "raw_clip", "intro_narration", "cross_narration", "ultra_short_hook",
-    "dialogue_narration", "full_narration", "subtitle_flow",
-    "dual_host_chat", "inner_monologue",
-]
+# 模式清单从生产侧构造：门禁里手抄第二份表迟早漏掉新模式（这张表漏过 highlight_cut）。
+ALL_MODES = list(narration_api.SUPPORTED_MODES)
 
 # 各模式的旁白预期，取自 docs/service/02 §3 与各模式 docstring 的设计定义。
 # 写成表是为了不再拿"全局最小时长 + 一律要有旁白"去套所有模式——那会造成假失败。
+# 键跟着 SUPPORTED_MODES 走，忘登记的新模式不会按默认值悄悄判绿；值只有两条手写判据：
+# `none` 由 `expected_copy_source` 反推（零文案必无旁白槽位），`one` 是片头解说的设计定义。
 EXPECT_NARRATION = {
-    "raw_clip": "none",          # 零加工：不烧字幕、不遮罩、无旁白
-    "subtitle_flow": "none",     # 金句流：只烧句级字幕，无旁白音频
-    "intro_narration": "one",    # 片头解说：一段引子旁白 + 正片原声
-    "cross_narration": "many",   # 原声/旁白交替
-    "ultra_short_hook": "many",  # 钩子 + 收尾 CTA
-    "dialogue_narration": "many",
-    "full_narration": "many",    # 全片 ducked：每段都要旁白
-    "dual_host_chat": "many",
-    "inner_monologue": "many",
+    mode: (
+        "none"
+        if narration_api.expected_copy_source(mode) == "rule"
+        else "one" if mode == "intro_narration" else "many"
+    )
+    for mode in narration_api.SUPPORTED_MODES
 }
 
 MIN_MEAN_VOLUME_DB = -70.0  # 近乎静音的判据：旁白整条丢失会落在这里
@@ -111,14 +107,9 @@ ALL_DUCKED_MODES = {"full_narration"}
 # `duck_residuals`；要改这个数先看那一列。
 DUCK_RESIDUAL_TOL_DB = 2.0
 
-# 编排来源预期：文案真值化（P-1.5）之后，除零加工两模式外必须是 LLM 成稿。
-# 判据已归位为 `narration_plans.expected_copy_source`（由 _NO_TTS_MODES 派生）——
-# 2026-10-16 规格 §1.1：手抄表漏 highlight_cut 的漂移实证，此处不再留第二份表。
-
-# 响度窗口（LU）：实测 integrated 与目标的允许偏差。这个数是**实测出来的**，不是拍的：
-# Task 8 落地（混音求和挂前瞻限幅 + Phase C 真峰有界重试）后，仓里九部真成片重跑一遍，
-# integrated 落在 −15.01…−13.94 LUFS（对 −14 目标最大偏离 1.01 LU）、真峰 −3.77…−2.17 dBTP
-# （门限 −1.0）。最差 1.01 LU 之上放到 2.5，一是给 dynamic 模式在更热素材上留余量
+# 编排来源预期：文案真值化（P-1.5）之后，除零文案模式外必须是 LLM 成稿。
+# 判据已归位为 `narration_plans.expected_copy_source`（由 _NO_TTS_MODES 派生），
+# 「零文案」就是它报 "rule" 的那一档——此处不再留第二份表。
 
 # 响度窗口（LU）：实测 integrated 与目标的允许偏差。这个数是**实测出来的**，不是拍的：
 # Task 8 落地（混音求和挂前瞻限幅 + Phase C 真峰有界重试）后，仓里九部真成片重跑一遍，
@@ -386,13 +377,13 @@ def _same_drive_temp(prefix: str) -> Path:
 
 
 def _mode_table_drift() -> list[str]:
-    """门禁自己手抄的模式清单必须与生产清单逐名对上，返回不一致的说明列表。
+    """门禁手上的模式表必须与生产清单逐名对上，返回不一致的说明列表。
 
-    为什么要这道核对：两张预期表都用 `EXPECT_*.get(mode, 默认值)` 取值，新增一个模式而
-    忘了登记时，它会**按默认值悄悄判绿**（被当成 "many" 段旁白）——这正是 `api/narration.py`
-    里明令"绝不另立第四份手抄模式清单"要防的事——而门禁手上就抄了表。宁可开跑前就红，
+    `ALL_MODES`/`EXPECT_NARRATION` 现在由 `SUPPORTED_MODES` 与 `expected_copy_source`
+    构造，这道核对对它们是恒等式——留着是因为「改回手抄表」真的发生过，恒等式一旦被手抄
+    替掉必须当场红，而不是等下一个新模式漂出去。`pipeline.MODE_LABELS` 是真手抄：忘登记
+    标签时 `build_plan` 会抛"模式暂未支持"，但报表得先认得出那一档。宁可开跑前就红，
     也不要一份过期预期表把 Task 10 的出口判据变成假绿。
-    文案来源判据已不在其列：`expected_copy_source` 由集合派生，结构上不可能漂。
     """
     authoritative = set(narration_api.SUPPORTED_MODES)
     problems: list[str] = []
@@ -751,11 +742,19 @@ def main() -> int:
     args = ap.parse_args()
 
     modes = ALL_MODES if args.modes == "all" else [m.strip() for m in args.modes.split(",")]
+    unknown = [mode for mode in modes if mode not in EXPECT_NARRATION]
+    if unknown:
+        # 陌生模式名以前会走 `.get(mode, "many")` 的默认预期，报表上就是一条从没被任何判据看过的"绿"。
+        print(
+            f"模式名不存在：{', '.join(unknown)}（可用：{', '.join(ALL_MODES)}）",
+            file=sys.stderr,
+        )
+        return 2
     for exe in (FFMPEG, FFPROBE):
         if not Path(exe).is_file():
             print(f"缺少可执行文件：{exe}（随包 resources/ffmpeg/ 缺失，请重新安装或补齐）", file=sys.stderr)
             return 2
-    # 预期表核对排在最前面（连临时目录都不建）：表都过期了，跑出来的绿是假绿。
+    # 模式表核对排在干活的核对之前（连临时目录都不建）：表都过期了，跑出来的绿是假绿。
     drift = _mode_table_drift()
     if drift:
         for line in drift:
@@ -1015,7 +1014,7 @@ def main() -> int:
         if rec["max_freeze_s"] >= MAX_FREEZE_S:
             failures.append(f"{mode}: 存在 {rec['max_freeze_s']}s 冻结画面")
         wants_tts = sum(1 for c in CAPTURED if c["audio"] in ("narration", "ducked"))
-        expected = EXPECT_NARRATION.get(mode, "many")
+        expected = EXPECT_NARRATION[mode]
         if expected == "none":
             if wants_tts or rec["segments_mixed"]:
                 failures.append(f"{mode}: 该模式设计上无旁白，却混入 {wants_tts} 段")

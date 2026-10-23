@@ -236,8 +236,9 @@ def test_an_absolute_ass_path_really_burns_ink(
 
     target = tmp_path / "abs" / "seg_000.ass"
     target.parent.mkdir(parents=True, exist_ok=True)
+    cues = [{"start": 0, "end": 2, "text": "盘符冒号转义"}]
     target.write_text(
-        build_ass([{"start": 0, "end": 2, "text": "盘符冒号转义"}], presets.get_preset("conflict-impact")),
+        build_ass(cues, presets.get_preset("conflict-impact")),
         encoding="utf-8",
     )
 

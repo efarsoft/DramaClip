@@ -8,7 +8,9 @@ from __future__ import annotations
 from typing import Any
 
 from dramaclip.engines.narration import audit as A
-from dramaclip.engines.narration.audit import review_script  # noqa: F401 - 追加用例经 review_script 直呼
+from dramaclip.engines.narration.audit import (
+    review_script,  # noqa: F401 - 追加用例经 review_script 直呼
+)
 
 _TRANSCRIPT = [
     {
@@ -333,3 +335,35 @@ def test_all_prompt_quotes_are_literal_substrings() -> None:
             if not any(quote in text for text in texts):
                 misses.append(quote[:50])
     assert misses == [], f"以下 prompt_quote 不再是 prompt 原文的字面子串：{misses}"
+
+
+def test_hook_payoff_flags_unfulfilled_anchor() -> None:
+    """钩子抛出「玉佩」正文全部未再现＝标题党悬空（软标记需人工）。"""
+    script = {
+        "hook": "他攥着那块玉佩，追了三条街",
+        "segments": [_seg_text("她转身离府，再没回头。"), _seg_text("马车出了城门。")],
+        "cta": "点击左下角看全集",
+    }
+    report = A.review_script(script, [])
+    payoff = [f for f in report.findings if f.rule_id == "FUND_HOOK_PAYOFF"]
+    assert payoff and payoff[0].passed is False
+    assert "玉佩" in payoff[0].message
+
+
+def test_hook_payoff_passes_when_anchor_recurs() -> None:
+    """钩子锚点（三千两）在正文再现＝兑现；纯抽象钩子无锚点不判。"""
+    fulfilled = {
+        "hook": "她背着一口锅，欠下三千两",
+        "segments": [_seg_text("三千两借据烧成灰，她一无所有。")],
+        "cta": "点击左下角看全集",
+    }
+    by_id = {f.rule_id: f for f in A.review_script(fulfilled, []).findings}
+    assert by_id["FUND_HOOK_PAYOFF"].passed is True
+
+    abstract = {
+        "hook": "谁能想到她会这样反击",
+        "segments": [_seg_text("她掀了桌子，全场安静。")],
+        "cta": "点击左下角看全集",
+    }
+    by_id2 = {f.rule_id: f for f in A.review_script(abstract, []).findings}
+    assert by_id2["FUND_HOOK_PAYOFF"].passed is True, "锚点抓不到的抽象钩子不判（宁漏勿冤）"

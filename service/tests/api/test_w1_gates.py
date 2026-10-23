@@ -6,7 +6,9 @@ G3/G4 的界面侧契约在 desktop vitest（w1Gates.test.ts）。变异锚定�
 
 from __future__ import annotations
 
+import importlib.util
 import re
+import sys
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[3]
@@ -80,3 +82,38 @@ def test_g2_judgement_table_is_single_source() -> None:
             if key_pattern.search(path.read_text(encoding="utf-8")):
                 offenders.append(path)
     assert offenders == [], f"发现第二处「模式 → 来源」手抄表：{offenders}"
+
+
+def _load_mode_gate():
+    script = _REPO / "scripts" / "verify_modes.py"
+    spec = importlib.util.spec_from_file_location("verify_modes", script)
+    assert spec is not None and spec.loader is not None
+    gate = importlib.util.module_from_spec(spec)
+    sys.modules["verify_modes"] = gate
+    spec.loader.exec_module(gate)
+    return gate
+
+
+def test_g2_mode_gate_tables_derive_from_production_mode_list() -> None:
+    """真机门禁的模式表必须由生产清单构造，取值路径上不许留静默默认。
+
+    为什么要在 CI 里钉它：门禁脚本本身不在 CI 跑，手抄表漂了不会有人发现——而漂出去
+    那一档过去会按 `many` 的默认预期判绿，报表上就是一条从没被任何判据看过的"绿"。
+    变异锚点：把 `ALL_MODES` 改回手抄列表并漏掉一个模式名，本用例必红。
+    """
+    gate = _load_mode_gate()
+    from dramaclip.api.narration_plans import SUPPORTED_MODES
+
+    assert list(gate.ALL_MODES) == list(SUPPORTED_MODES)
+    assert set(gate.EXPECT_NARRATION) == set(SUPPORTED_MODES)
+    assert gate._mode_table_drift() == []
+
+    # 点名历史上漂过的那档与唯一的手写例外，证明值不是全表落在同一个默认上
+    assert gate.EXPECT_NARRATION["highlight_cut"] == "none", "纯剪辑模式被判成了要有旁白"
+    assert gate.EXPECT_NARRATION["intro_narration"] == "one", "片头解说只有一段引子旁白"
+    assert sorted(m for m, want in gate.EXPECT_NARRATION.items() if want == "none") == [
+        "highlight_cut",
+        "raw_clip",
+        "subtitle_flow",
+    ]
+
