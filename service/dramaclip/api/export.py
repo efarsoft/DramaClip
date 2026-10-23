@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import threading
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
@@ -66,6 +67,14 @@ _ERR_EXPORT_NOT_FOUND = -32404
 _ERR_EXPORT_NOT_RETRYABLE = -32405  # 导出域 -32400~-32499（见 common.json x-error-codes）
 _ERR_TRASH_FENCE = -32408  # 产物不在数据目录内，拒绝搬移（models.delete 围栏的同款规矩）
 _ERR_TRASH_MOVE = -32409  # 移入回收失败（OSError）：宁留记录，不产无法追溯的孤儿文件
+_ERR_PUBLISH_DATA = -32410  # 发布数据录入不合法（W8）：宁拒收，不存脏数据污染回流账
+
+_PUBLISH_PLATFORMS = ("抖音", "快手", "视频号", "小红书", "B站", "其他")
+
+
+def _now_ms() -> int:
+    """录入时刻（毫秒）：与 repo 层时间戳同源同单位。"""
+    return int(time.time() * 1000)
 
 
 def _safe_filename(name: str) -> str:
@@ -84,6 +93,7 @@ def register(router: Router, context: AppContext) -> None:
     router.register("export.ensure_covers", lambda params: ensure_covers(context, params))
     router.register("export.delete", lambda params: delete_export(context, params))
     router.register("export.selfcheck", lambda params: selfcheck_batch(context, params))
+    router.register("export.set_publish_data", lambda params: set_publish_data(context, params))
 
 
 @dataclass(frozen=True)
@@ -286,6 +296,51 @@ def get_export(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     if row is None:
         raise RpcDomainError(_ERR_EXPORT_NOT_FOUND, f"导出记录不存在: {export_id}")
     return _decode_json_columns(row, ("selfcheck",))
+
+
+def set_publish_data(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """发布数据录入（W8·MVP）：观众投票是唯一的外部真相源，代理指标全是猜测。
+
+    低摩擦口径：platform/plays/retention_pct 三项必填（十秒填完），likes/
+    published_at 可选；键白名单收口，多余键丢弃不存。retention_pct 用 0-100
+    的百分数（创作者后台的展示口径，免换算）。data=None 清除录入。
+    """
+    export_id = str(params.get("export_id", ""))
+    if exports_repo.get(context.conn, export_id) is None:
+        raise RpcDomainError(_ERR_EXPORT_NOT_FOUND, f"导出记录不存在: {export_id}")
+    raw = params.get("data")
+    if raw is None:
+        exports_repo.set_publish_data(context.conn, export_id, None)
+        return {"ok": True, "publish_data": None}
+    if not isinstance(raw, dict):
+        raise RpcDomainError(_ERR_PUBLISH_DATA, "data 必须是对象或 null")
+    platform = str(raw.get("platform", "")).strip()
+    if platform not in _PUBLISH_PLATFORMS:
+        raise RpcDomainError(
+            _ERR_PUBLISH_DATA, f"platform 必须是 {'/'.join(_PUBLISH_PLATFORMS)} 之一"
+        )
+    try:
+        plays = int(str(raw.get("plays")))
+        retention = float(str(raw.get("retention_pct")))
+    except (TypeError, ValueError) as exc:
+        raise RpcDomainError(_ERR_PUBLISH_DATA, f"plays/retention_pct 必填且为数字: {exc}") from exc
+    if plays < 0 or not 0 <= retention <= 100:
+        raise RpcDomainError(_ERR_PUBLISH_DATA, "plays ≥ 0 且 retention_pct ∈ [0, 100]")
+    likes_raw = raw.get("likes")
+    likes = None if likes_raw in (None, "") else int(str(likes_raw))
+    if likes is not None and likes < 0:
+        raise RpcDomainError(_ERR_PUBLISH_DATA, "likes ≥ 0")
+    published_at = str(raw.get("published_at") or "").strip() or None
+    data = {
+        "platform": platform,
+        "plays": plays,
+        "retention_pct": round(retention, 2),
+        "likes": likes,
+        "published_at": published_at,
+        "recorded_at": _now_ms(),
+    }
+    exports_repo.set_publish_data(context.conn, export_id, data)
+    return {"ok": True, "publish_data": data}
 
 
 def _decode_json_columns(row: dict[str, Any], columns: tuple[str, ...]) -> dict[str, Any]:

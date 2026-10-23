@@ -453,6 +453,20 @@ export interface SelfCheck {
 /** 自检汇总态：passed 四项全绿 / failed 任一红 / partial 有灰无红；null = 从未自检。 */
 export type SelfCheckState = 'passed' | 'failed' | 'partial';
 
+/** 发布数据回流（W8）：观众投票是系统唯一的外部真相源；NULL = 未录入。 */
+export interface PublishData {
+  /** 平台枚举：抖音/快手/视频号/小红书/B站/其他（服务端白名单校验）。 */
+  readonly platform: string;
+  readonly plays: number;
+  /** 完播率百分数 0-100（创作者后台展示口径，免换算）。 */
+  readonly retention_pct: number;
+  readonly likes?: number | null;
+  /** 发布日期（YYYY-MM-DD，可选）。 */
+  readonly published_at?: string | null;
+  /** 录入时刻（毫秒，服务端记录）。 */
+  readonly recorded_at: number;
+}
+
 export interface ExportJob {
   readonly id: string;
   readonly project_id: string;
@@ -475,6 +489,8 @@ export interface ExportJob {
   readonly compute?: readonly ComputeReport[] | null;
   /** 允许型降级留痕（账在库层）；NULL/缺省 = 本次无降级。 */
   readonly degraded_notes?: readonly { subject: string; outcome: string; at: number }[] | null;
+  /** 发布数据回流（W8）；NULL = 未录入。 */
+  readonly publish_data?: PublishData | null;
 }
 
 /** 作品库条目（跨项目已完成成片，export.list_works）。 */
@@ -497,6 +513,8 @@ export interface WorkItem {
   readonly episode_ids?: string[] | null;
   readonly selfcheck?: SelfCheck | null;
   readonly selfcheck_state?: SelfCheckState | null;
+  /** 发布数据回流（W8）；NULL = 未录入。 */
+  readonly publish_data?: PublishData | null;
 }
 
 /** 模型下载源（kind ∈ modelscope | hf_mirror | huggingface）。 */

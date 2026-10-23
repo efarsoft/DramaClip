@@ -1,9 +1,10 @@
 /** 成片详情页：预览 + 文件（完整路径）+ 追溯（角度·取材集·方案区）+ 自检四项 + 逐句核对与标题。 */
 import { CopyOutlined, DownloadOutlined, FolderOpenOutlined } from '@ant-design/icons';
-import { App as AntdApp, Button, Empty, Tag } from 'antd';
+import { App as AntdApp, Button, DatePicker, Empty, InputNumber, Select, Tag } from 'antd';
 import type { ReactElement, RefObject } from 'react';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import dayjs from 'dayjs';
 import type { Episode, ExportJob } from '@dramaclip/protocol';
 import { dramaProducePath } from '../../app/routes';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
@@ -11,7 +12,8 @@ import { modeLabel } from '../../components/modeMeta';
 import { CueList } from '../cues/CueList';
 import { useSrtCues } from '../cues/useSrtCues';
 import { sidecarSrtPath } from '../cues/srt';
-import { copyFiles, mediaUrl, pickFolder, saveTextFile, revealInFolder } from '../../services/client';
+import { copyFiles, exportApi, mediaUrl, pickFolder, saveTextFile, revealInFolder } from '../../services/client';
+import { errorText } from '../engines/errorText';
 import { mixins } from '../../styles/mixins';
 import { layout, tokens } from '../../styles/theme';
 import { SelfCheckSection } from './SelfCheckSection';
@@ -109,6 +111,7 @@ export function WorksDetailPage(): ReactElement {
               onGenerate={detail.onGenerate}
               onSelect={detail.onSelectTitles}
             />
+            <PublishDataSection job={detail.job} onReload={detail.reload} />
           </div>
         </div>
       )}
@@ -354,6 +357,132 @@ function MetaRow({ label, value }: { label: string; value: string }): ReactEleme
         {value}
       </span>
     </div>
+  );
+}
+
+/** 发布平台枚举：与服务端 _PUBLISH_PLATFORMS 同表（白名单在服务端，这里只是选项列表）。 */
+const PUBLISH_PLATFORMS = ['抖音', '快手', '视频号', '小红书', 'B站', '其他'];
+const PLATFORM_MEMORY_KEY = 'dramaclip.publish-platform';
+
+/** 发布数据回流（W8）：完播率是系统唯一的外部真相源——录一次十秒，攒的是自进化的原料。
+ * 低摩擦口径：平台/播放量/完播率三项必填，点赞与发布日期可选；平台记住上次选择。 */
+function PublishDataSection({ job, onReload }: { job: ExportJob; onReload: () => void }): ReactElement {
+  const { message } = AntdApp.useApp();
+  const existing = job.publish_data ?? null;
+  const [platform, setPlatform] = useState(
+    existing?.platform ?? localStorage.getItem(PLATFORM_MEMORY_KEY) ?? '抖音',
+  );
+  const [plays, setPlays] = useState<number | null>(existing?.plays ?? null);
+  const [retention, setRetention] = useState<number | null>(existing?.retention_pct ?? null);
+  const [likes, setLikes] = useState<number | null>(existing?.likes ?? null);
+  const [publishedAt, setPublishedAt] = useState<dayjs.Dayjs | null>(
+    existing?.published_at ? dayjs(existing.published_at) : null,
+  );
+  const [saving, setSaving] = useState(false);
+
+  const save = (): void => {
+    if (plays === null || retention === null) {
+      message.warning('播放量与完播率为必填');
+      return;
+    }
+    setSaving(true);
+    exportApi
+      .setPublishData(job.id, {
+        platform,
+        plays,
+        retention_pct: retention,
+        likes,
+        published_at: publishedAt !== null ? publishedAt.format('YYYY-MM-DD') : null,
+      })
+      .then(() => {
+        localStorage.setItem(PLATFORM_MEMORY_KEY, platform);
+        message.success('发布数据已记录');
+        onReload();
+      })
+      .catch((error: unknown) => message.error(errorText(error, '录入失败')))
+      .finally(() => { setSaving(false); });
+  };
+
+  const clear = (): void => {
+    setSaving(true);
+    exportApi
+      .setPublishData(job.id, null)
+      .then(() => {
+        message.success('已清除录入');
+        onReload();
+      })
+      .catch((error: unknown) => message.error(errorText(error, '清除失败')))
+      .finally(() => { setSaving(false); });
+  };
+
+  return (
+    <PageSection
+      title="发布数据"
+      extra={
+        existing !== null && (
+          <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
+            录于 {formatDate(existing.recorded_at)}
+          </span>
+        )
+      }
+      dense
+    >
+      <div style={{ display: 'flex', gap: tokens.spaceSm, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Select
+          size="small"
+          value={platform}
+          onChange={setPlatform}
+          options={PUBLISH_PLATFORMS.map((name) => ({ value: name, label: name }))}
+          style={{ width: 104 }}
+        />
+        <InputNumber
+          size="small"
+          min={0}
+          step={100}
+          precision={0}
+          placeholder="播放量*"
+          value={plays}
+          onChange={(value) => { setPlays(typeof value === 'number' ? value : null); }}
+          style={{ width: 128 }}
+        />
+        <InputNumber
+          size="small"
+          min={0}
+          max={100}
+          placeholder="完播率*"
+          value={retention}
+          onChange={(value) => { setRetention(typeof value === 'number' ? value : null); }}
+          suffix="%"
+          style={{ width: 112 }}
+        />
+        <InputNumber
+          size="small"
+          min={0}
+          placeholder="赞(选填)"
+          value={likes}
+          onChange={(value) => { setLikes(typeof value === 'number' ? value : null); }}
+          style={{ width: 112 }}
+        />
+        <DatePicker
+          size="small"
+          placeholder="发布日期(选填)"
+          value={publishedAt}
+          onChange={(value) => { setPublishedAt(value); }}
+          style={{ width: 150 }}
+        />
+        <Button type="primary" size="small" loading={saving} onClick={save}>
+          保存
+        </Button>
+        {existing !== null && (
+          <Button size="small" type="text" danger loading={saving} onClick={clear}>
+            清除
+          </Button>
+        )}
+      </div>
+      <div style={{ marginTop: tokens.spaceXs, fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
+        完播率是观众的真实投票，也是成片质量唯一的外部判据——按方案回溯后用于选题与评分的反馈
+      </div>
+    </PageSection>
   );
 }
 

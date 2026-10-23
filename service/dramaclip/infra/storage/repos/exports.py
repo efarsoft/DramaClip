@@ -26,6 +26,7 @@ _COLUMNS = (
     "selfcheck_state",
     "compute",
     "degraded_notes",
+    "publish_data",
 )
 
 
@@ -53,7 +54,30 @@ def _row(row: tuple[Any, ...]) -> dict[str, Any]:
     record = dict(zip(_COLUMNS, row, strict=True))
     record["compute"] = _parse_compute(record["compute"])
     record["degraded_notes"] = _parse_degraded(record["degraded_notes"])
+    record["publish_data"] = _parse_publish(record["publish_data"])
     return record
+
+
+def _parse_publish(raw: object) -> dict[str, Any] | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        value = json.loads(str(raw))
+    except ValueError:
+        return None  # 坏 JSON 按「未录入」处理，不演成可用证据
+    return dict(value) if isinstance(value, dict) else None
+
+
+def set_publish_data(conn: sqlite3.Connection, export_id: str, data: dict[str, Any] | None) -> None:
+    """发布数据录入（W8）：dict → JSON 单列存；None = 清除录入。
+
+    通话出口只有这一条：校验在 RPC 层（平台枚举/数值范围），这里不重复。
+    """
+    conn.execute(
+        "UPDATE export_jobs SET publish_data = ? WHERE id = ?",
+        (None if data is None else json.dumps(data, ensure_ascii=False), export_id),
+    )
+    conn.commit()
 
 
 def _now_ms() -> int:
@@ -215,6 +239,7 @@ _WORKS_KEYS = (
     "narration_plan_id",
     "selfcheck",
     "selfcheck_state",
+    "publish_data",
     "angle",
     "episode_ids",
 )
@@ -235,7 +260,8 @@ def list_completed_works(
     sql = (
         "SELECT e.id, e.project_id, p.name AS project_name, e.narration_mode, e.output_path,"
         " e.duration_s, e.size_bytes, e.completed_at, e.cover_path,"
-        " e.narration_plan_id, e.selfcheck, e.selfcheck_state, np.angle, np.episode_ids"
+        " e.narration_plan_id, e.selfcheck, e.selfcheck_state, e.publish_data,"
+        " np.angle, np.episode_ids"
         " FROM export_jobs e JOIN projects p ON p.id = e.project_id"
         " LEFT JOIN narration_plans np ON np.id = e.narration_plan_id"
         " WHERE e.status = ? AND e.output_path IS NOT NULL"
@@ -249,7 +275,10 @@ def list_completed_works(
     sql += " ORDER BY COALESCE(e.completed_at, e.created_at) DESC LIMIT ?"
     args.append(limit)
     rows = conn.execute(sql, args).fetchall()
-    return [dict(zip(_WORKS_KEYS, row, strict=True)) for row in rows]
+    out = [dict(zip(_WORKS_KEYS, row, strict=True)) for row in rows]
+    for record in out:
+        record["publish_data"] = _parse_publish(record.get("publish_data"))
+    return out
 
 
 def set_selfcheck(conn: sqlite3.Connection, export_id: str, payload: str, state: str) -> None:

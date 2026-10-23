@@ -8,7 +8,7 @@ import type {
   SelftestResults, ServiceEvent, StyleInfo, SubtitlePresetInfo, TitleCandidate, TtsAutoVoiceResult,
   ToolsExtractStartResult, ToolsGetResultResult, ToolsRewriteResult, ToolsTtsResult,
   TtsCleanReferenceResult, TtsPreviewResult, VerifyReport, WorkItem as WorksItem,
-} from '@dramaclip/protocol';
+  PublishData } from '@dramaclip/protocol';
 
 function bridge(): DramaClipBridge {
   return window.dramaclip;
@@ -198,6 +198,21 @@ export const exportApi = {
   /** 删除成片（§3.4）：服务端把文件移入 .trash/<日期>/ 后删记录；missing=盘上已缺的文件。 */
   delete: (exportId: string): Promise<{ ok: boolean; trashed: string[]; missing: string[] }> =>
     rpc<{ ok: boolean; trashed: string[]; missing: string[] }>('export.delete', { export_id: exportId }),
+  /** 发布数据录入（W8）：data=null 清除。 */
+  setPublishData: (
+    exportId: string,
+    data: {
+      platform: string;
+      plays: number;
+      retention_pct: number;
+      likes?: number | null;
+      published_at?: string | null;
+    } | null,
+  ): Promise<{ ok: boolean; publish_data: PublishData | null }> =>
+    rpc<{ ok: boolean; publish_data: PublishData | null }>('export.set_publish_data', {
+      export_id: exportId,
+      data,
+    }),
   /** 历史成片补测四项自检（job 化）；给 exportIds 则重测指定条目。 */
   selfcheck: (
     exportIds?: string[],

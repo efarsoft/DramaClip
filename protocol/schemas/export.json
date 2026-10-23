@@ -186,14 +186,35 @@
           ],
           "items": {
             "type": "object",
-            "required": ["subject", "outcome", "at"],
+            "required": [
+              "subject",
+              "outcome",
+              "at"
+            ],
             "properties": {
-              "subject": { "type": "string" },
-              "outcome": { "type": "string" },
-              "at": { "type": "number" }
+              "subject": {
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string"
+              },
+              "at": {
+                "type": "number"
+              }
             }
           },
           "description": "允许型降级留痕（账在库层）；NULL = 本次无降级"
+        },
+        "publish_data": {
+          "oneOf": [
+            {
+              "$ref": "#/x-models/PublishData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "发布数据回流（W8）；NULL = 未录入"
         }
       }
     },
@@ -271,7 +292,10 @@
           "type": "integer"
         },
         "cover_path": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "NULL = 成片封面还没补拍；渲染层显示占位图，不请求 null 路径"
         },
         "narration_plan_id": {
@@ -318,6 +342,68 @@
             "partial",
             null
           ]
+        },
+        "publish_data": {
+          "oneOf": [
+            {
+              "$ref": "#/x-models/PublishData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "发布数据回流（W8）；NULL = 未录入"
+        }
+      }
+    },
+    "PublishData": {
+      "type": "object",
+      "required": [
+        "platform",
+        "plays",
+        "retention_pct",
+        "recorded_at"
+      ],
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "抖音",
+            "快手",
+            "视频号",
+            "小红书",
+            "B站",
+            "其他"
+          ],
+          "description": "平台白名单在服务端校验"
+        },
+        "plays": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "retention_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "完播率百分数（创作者后台展示口径）"
+        },
+        "likes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "published_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "发布日期 YYYY-MM-DD（可选）"
+        },
+        "recorded_at": {
+          "type": "integer",
+          "description": "录入时刻毫秒"
         }
       }
     }
@@ -562,6 +648,96 @@
           },
           "queued": {
             "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "name": "export.set_publish_data",
+      "summary": "发布数据录入（W8）：观众投票是唯一外部真相源；data=null 清除录入",
+      "params": {
+        "type": "object",
+        "required": [
+          "export_id",
+          "data"
+        ],
+        "properties": {
+          "export_id": {
+            "type": "string"
+          },
+          "data": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "platform",
+                  "plays",
+                  "retention_pct"
+                ],
+                "properties": {
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "抖音",
+                      "快手",
+                      "视频号",
+                      "小红书",
+                      "B站",
+                      "其他"
+                    ]
+                  },
+                  "plays": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "retention_pct": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "likes": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
+                  },
+                  "published_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "ok",
+          "publish_data"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "publish_data": {
+            "oneOf": [
+              {
+                "$ref": "#/x-models/PublishData"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       }
