@@ -2,6 +2,7 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { Alert, App as AntdApp } from 'antd';
 import type { AnalysisResults } from '@dramaclip/protocol';
+import { dramaProducePath } from '../../app/routes';
 import { analysisApi, revealInFolder } from '../../services/client';
 import { layout, tokens } from '../../styles/theme';
 import { analysisErrorsOf, prescreenCoverage } from './analysisView';
@@ -15,7 +16,7 @@ import { PageFooter } from '../../components/layout/PageKit';
 import { EpisodeListPanel } from './EpisodeListPanel';
 import { EpisodeDetail } from './EpisodeDetail';
 
-/** 分析工作台页（路由 /projects/:id/analysis）。 */
+/** 分析工作台（挂在剧空间 `/drama/:id` 的分析区块，锚点 focus=analysis）。 */
 export function WorkbenchPage() {
   const { projectId = '' } = useParams();
   const { message } = AntdApp.useApp();
@@ -102,7 +103,7 @@ function WorkbenchFooter({ projectId, doneCount }: { projectId: string; doneCoun
         void navigate('/dramas');
       }}
       onNext={() => {
-        void navigate(`/projects/${projectId}/produce`);
+        void navigate(dramaProducePath(projectId));
       }}
     />
   );

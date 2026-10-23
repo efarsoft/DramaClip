@@ -1,6 +1,6 @@
 /** 路由清单：与 navItems.ts 一起构成信息架构的两份数据真相源。 */
 
-export const TOP_LEVEL_ROUTES = ['/', '/dramas', '/works', '/queue', '/tools', '/engines', '/settings', '/about'] as const;
+export const TOP_LEVEL_ROUTES = ['/', '/dramas', '/works', '/tools', '/engines', '/settings', '/about'] as const;
 
 export const DETAIL_ROUTES = [
   '/drama/:projectId',
@@ -21,10 +21,16 @@ export const LEGACY_PARAM_REDIRECTS: readonly { from: string; to: string }[] = [
   { from: '/projects/:projectId/produce', to: '/drama/:projectId' },
 ];
 
+/** 剧空间合一后的详情路径唯一写法：`focus` 是区块锚点，取值见 DramaShell。
+ *  各处「跳去那一页」都必须经这里拼，别处再写一遍 `/drama/…?focus=…` 就是第二处真相。 */
+export function dramaFocusPath(projectId: string, focus: string): string {
+  return `/drama/${projectId}?focus=${focus}`;
+}
+
 export function dramaEntryPath(projectId: string): string {
-  return `/drama/${projectId}?focus=analysis`;
+  return dramaFocusPath(projectId, 'analysis');
 }
 
 export function dramaProducePath(projectId: string): string {
-  return `/drama/${projectId}?focus=planning`;
+  return dramaFocusPath(projectId, 'planning');
 }

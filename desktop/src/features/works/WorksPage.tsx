@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { Alert, Button, Card, Empty } from 'antd';
 import { SafetyCertificateOutlined } from '@ant-design/icons';
 import type { WorkItem } from '@dramaclip/protocol';
+import { dramaProducePath } from '../../app/routes';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
@@ -50,7 +51,7 @@ export function WorksPage(): React.ReactElement {
         selectedIds={batch.selectedIds}
         onOpen={(id) => { void navigate(`/works/${id}`); }}
         onPreview={setPreview}
-        onJumpPlan={(work) => { void navigate(`/projects/${work.project_id}/produce?focus=planning`); }}
+        onJumpPlan={(work) => { void navigate(dramaProducePath(work.project_id)); }}
         onFolder={onFolder}
         onToggleSelect={batch.toggle}
       />

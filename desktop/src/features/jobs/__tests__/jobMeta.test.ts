@@ -63,8 +63,8 @@ describe('类型词与路由', () => {
   });
 
   it('项目引用型才路由进项目；export 走成品详情；环境类聚合到引擎；semantic 无处可去', () => {
-    expect(jobRoute(job())).toBe('/projects/p1/analysis');
-    expect(jobRoute(job({ type: 'narration' }))).toBe('/projects/p1/produce');
+    expect(jobRoute(job())).toBe('/drama/p1?focus=analysis');
+    expect(jobRoute(job({ type: 'narration' }))).toBe('/drama/p1?focus=planning');
     expect(jobRoute(job({ type: 'export', ref_id: 'e9' }))).toBe('/works/e9');
     expect(jobRoute(job({ type: 'model_download', ref_id: 'whisper-small' }))).toBe('/engines');
     expect(jobRoute(job({ type: 'semantic', ref_id: 'ep1' }))).toBeNull();

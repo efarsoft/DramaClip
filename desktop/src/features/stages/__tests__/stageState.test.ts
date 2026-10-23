@@ -140,13 +140,13 @@ describe('deriveBlockNote 卡点优先级', () => {
       tone: 'error',
       text: '卡在分析：Whisper 缺模型：转写无法开始',
       actionLabel: '去处理',
-      route: '/projects/p1/analysis',
+      route: '/drama/p1?focus=analysis',
     });
   });
 
   it('narration 失败卡③，路由进出片页；error 缺失说未知原因', () => {
     const note = deriveBlockNote(facts({ failed: { type: 'narration', error: '' } }), deriveStages(facts()), CTX);
-    expect(note).toMatchObject({ stage: 'planning', tone: 'error', text: '卡在规划：未知原因', route: '/projects/p1/produce' });
+    expect(note).toMatchObject({ stage: 'planning', tone: 'error', text: '卡在规划：未知原因', route: '/drama/p1?focus=planning' });
   });
 
   it('过期方案压过一切非失败卡点', () => {
@@ -194,7 +194,7 @@ describe('deriveBlockNote 卡点优先级', () => {
 describe('continueRoute 继续按钮', () => {
   it('③④ 在跑去出片页；全完成去成品库；否则回分析页', () => {
     expect(continueRoute('p1', deriveStages(facts({ activeTypes: new Set(['narration']) })))).toEqual({
-      route: '/projects/p1/produce',
+      route: '/drama/p1?focus=planning',
       label: '继续出片',
     });
     expect(continueRoute('p1', deriveStages(facts({ workCount: 2, analyzedCount: 6, planCount: 4 })))).toEqual({
@@ -202,11 +202,11 @@ describe('continueRoute 继续按钮', () => {
       label: '看成品',
     });
     expect(continueRoute('p1', deriveStages(facts({ workCount: 2 })))).toEqual({
-      route: '/projects/p1/produce',
+      route: '/drama/p1?focus=planning',
       label: '继续出片',
     });
     expect(continueRoute('p1', deriveStages(facts()))).toEqual({
-      route: '/projects/p1/analysis',
+      route: '/drama/p1?focus=analysis',
       label: '继续分析',
     });
   });
@@ -221,7 +221,7 @@ describe('过期对账（09-10 §3.1 三戳）：双过期催办与 stageFactsOf
       tone: 'warning',
       text: '素材有新增，分析还没跟上：转写与方案落后于片库',
       actionLabel: '重跑分析',
-      route: '/projects/p1/analysis',
+      route: '/drama/p1?focus=analysis',
     });
   });
 

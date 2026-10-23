@@ -62,12 +62,12 @@ describe('buildTodos', () => {
 
   it('analysis 失败 → 跳分析页', () => {
     const items = buildTodos(base({ failedJobs: [job()] }));
-    expect(items[0]?.action?.path).toBe('/projects/p1/analysis');
+    expect(items[0]?.action?.path).toBe('/drama/p1?focus=analysis');
   });
 
   it('narration 失败 → 跳出片页', () => {
     const items = buildTodos(base({ failedJobs: [job({ id: 'j2', type: 'narration' })] }));
-    expect(items[0]?.action?.path).toBe('/projects/p1/produce');
+    expect(items[0]?.action?.path).toBe('/drama/p1?focus=planning');
   });
 
   it('ref_id 不是 project_id 的三类不进待办', () => {

@@ -64,7 +64,7 @@ describe('createDramaFromFolder', () => {
     expect(result).toEqual({
       projectId: 'p1',
       name: '逆袭开局',
-      entryPath: '/projects/p1/analysis',
+      entryPath: '/drama/p1?focus=analysis',
     });
   });
 });

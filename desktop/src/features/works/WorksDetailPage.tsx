@@ -5,6 +5,7 @@ import type { ReactElement, RefObject } from 'react';
 import { useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { Episode, ExportJob } from '@dramaclip/protocol';
+import { dramaProducePath } from '../../app/routes';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import { modeLabel } from '../../components/modeMeta';
 import { CueList } from '../cues/CueList';
@@ -215,7 +216,7 @@ function TraceSection({
           block
           disabled={!hasPlan}
           onClick={() => {
-            void navigate(`/projects/${projectId}/produce?focus=planning`);
+            void navigate(dramaProducePath(projectId));
           }}
           style={{ marginTop: tokens.spaceXs }}
         >

@@ -4,7 +4,7 @@ import { NAV_GROUPS, NAV_ITEMS, isNavActive, navByGroup } from '../navItems';
 describe('导轨清单', () => {
   it('分两组', () => {
     expect(NAV_GROUPS).toEqual(['loop', 'config']);
-    expect(navByGroup('loop').map((item) => item.label)).toEqual(['工作台', '项目', '成品', '工具箱']);
+    expect(navByGroup('loop').map((item) => item.label)).toEqual(['工作台', '剧库', '成品', '工具箱']);
     expect(navByGroup('config').map((item) => item.label)).toEqual(['引擎', '设置', '关于']);
   });
 
@@ -52,10 +52,11 @@ describe('命中判定', () => {
     expect(isNavActive(engines, '/engines/asr')).toBe(true);
   });
 
-  it('进单剧详情保持「项目」高亮', () => {
-    const projects = byPath('/projects');
-    expect(isNavActive(projects, '/projects/abc123/analysis')).toBe(true);
-    expect(isNavActive(projects, '/projects/abc123/produce')).toBe(true);
+  it('进单剧详情保持「剧库」高亮', () => {
+    // 详情是 /drama/:id（单数），列表项是 /dramas：段名不同源，靠 alsoActiveFor 别名才亮
+    const dramas = byPath('/dramas');
+    expect(isNavActive(dramas, '/dramas')).toBe(true);
+    expect(isNavActive(dramas, '/drama/abc123')).toBe(true);
   });
 
   it('前缀按路径段边界匹配', () => {
@@ -65,7 +66,7 @@ describe('命中判定', () => {
   });
 
   it('任一时刻至多一项命中', () => {
-    const paths = ['/', '/projects', '/projects/a/analysis', '/works', '/engines/llm', '/settings'];
+    const paths = ['/', '/dramas', '/drama/a', '/works', '/works/e1', '/engines/llm', '/settings'];
     for (const pathname of paths) {
       const hits = NAV_ITEMS.filter((item) => isNavActive(item, pathname));
       expect(hits.length, `${pathname} 命中 ${String(hits.length)} 项`).toBe(1);

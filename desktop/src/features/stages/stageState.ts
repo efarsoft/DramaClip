@@ -14,6 +14,7 @@
  * 成品数是硬数据，「已出片」灯不受影响（聚合 RPC 落地后补 active）。
  */
 import type { JobInfo, Project } from '@dramaclip/protocol';
+import { dramaFocusPath } from '../../app/routes';
 
 export type StageKey = 'intake' | 'analysis' | 'planning' | 'export';
 export type StageState = 'idle' | 'active' | 'done' | 'stale' | 'unknown';
@@ -159,7 +160,7 @@ export function activeStageOf(activeTypes: ReadonlySet<string>): StageKey | null
 
 /** 阶段 → 剧空间真实路由：①② 的界面在分析页里，③④ 的界面在出片页里。 */
 export function stageRoute(dramaId: string, stage: StageKey): string {
-  return `/drama/${dramaId}?focus=${stage}`;
+  return dramaFocusPath(dramaId, stage);
 }
 
 /** 一条剧只给一条卡点：按「失败 > 过期 > 没喂料 > 正在跑 > 停滞 > 没开跑」取最重的一条。 */
@@ -268,13 +269,13 @@ function notShippedNote(facts: StageFacts, ctx: BlockContext): BlockNote | null 
 /** 「继续」按钮去哪：最深的活跃阶段说了算；全完成去成品库；否则回分析页。 */
 export function continueRoute(dramaId: string, stages: StageMap): { readonly route: string; readonly label: string } {
   if (stages.planning === 'active' || stages.export === 'active') {
-    return { route: `/projects/${dramaId}/produce`, label: '继续出片' };
+    return { route: stageRoute(dramaId, 'planning'), label: '继续出片' };
   }
   if (allStagesDone(stages)) return { route: '/works', label: '看成品' };
   if (stages.planning === 'done' || stages.export === 'done') {
-    return { route: `/projects/${dramaId}/produce`, label: '继续出片' };
+    return { route: stageRoute(dramaId, 'planning'), label: '继续出片' };
   }
-  return { route: `/projects/${dramaId}/analysis`, label: '继续分析' };
+  return { route: stageRoute(dramaId, 'analysis'), label: '继续分析' };
 }
 
 // ── 从 jobs.list 行提取剧维度事实（一次扫描，零额外 RPC）──────────────

@@ -34,7 +34,7 @@ export function readLastDrama(): LastDrama | null {
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
   const candidate = parsed as Partial<LastDrama>;
-  // 只认形状完整的记录：缺 id 的对象拼进路径会得到 /projects/undefined/analysis。
+  // 只认形状完整的记录：缺 id 的对象拼进路径会得到 /drama/undefined。
   if (typeof candidate.id !== 'string' || candidate.id === '') return null;
   if (typeof candidate.name !== 'string') return null;
   if (typeof candidate.visitedAtMs !== 'number') return null;

@@ -75,6 +75,11 @@ const REASON_LEDGER: readonly { readonly file: string; readonly visible: RegExp;
     visible: /探测失败：\$\{runtime\.problem\}/,
     why: '环境行的探测失败原话',
   },
+  {
+    file: 'features/home/TodoList.tsx',
+    visible: /\{detail\}/,
+    why: '待办的作业失败原因原文常驻第二行',
+  },
 ];
 
 /** `…` 账本：每处占位符都要说得出「它凭什么还算还在测」。 */

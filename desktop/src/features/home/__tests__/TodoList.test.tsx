@@ -13,7 +13,7 @@ function item(over: Partial<TodoItem> = {}): TodoItem {
     text: '《A》分析任务失败',
     detail: 'ffmpeg 退出码 1',
     severity: 'error',
-    action: { kind: 'navigate', label: '去处理', path: '/projects/p1/analysis' },
+    action: { kind: 'navigate', label: '去处理', path: '/drama/p1?focus=analysis' },
     ...over,
   };
 }
@@ -57,7 +57,7 @@ describe('TodoList', () => {
   it('navigate 动作点下去带着目标路径回调', () => {
     const { onNavigate } = renderList([item()]);
     screen.getByRole('button', { name: '去处理' }).click();
-    expect(onNavigate).toHaveBeenCalledWith('/projects/p1/analysis');
+    expect(onNavigate).toHaveBeenCalledWith('/drama/p1?focus=analysis');
   });
 
   it('restart-service 动作触发重启回调，不试图导航', () => {
@@ -69,15 +69,17 @@ describe('TodoList', () => {
     expect(onNavigate).not.toHaveBeenCalled();
   });
 
-  it('detail 非空时挂在 title 上，原文不截断', () => {
+  it('detail 非空时原文进可见文本第二行，折行不截断（H3 §3.1：挂 title 等于没挂）', () => {
     const long = 'x'.repeat(300);
-    renderList([item({ detail: long })]);
-    expect(screen.getByTitle(long)).toBeTruthy();
+    const { container } = renderList([item({ detail: long })]);
+    expect(screen.getByText(long)).toBeTruthy();
+    expect(container.querySelector('[title=""]')).toBeNull();
   });
 
-  it('detail 为空时不挂空 title', () => {
+  it('detail 为空时不渲染原因行，只留结论一行', () => {
     const { container } = renderList([item({ detail: '' })]);
     expect(container.querySelector('[title=""]')).toBeNull();
+    expect(screen.getByText('《A》分析任务失败')).toBeTruthy();
   });
 
   it('error 用 status/error（#F87171），不用钩子红 #FF4D4F', () => {

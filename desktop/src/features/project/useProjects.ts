@@ -3,6 +3,7 @@ import { App as AntdApp } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Project } from '@dramaclip/protocol';
+import { dramaEntryPath } from '../../app/routes';
 import { projectApi } from '../../services/client';
 
 export interface ProjectsController {
@@ -42,7 +43,7 @@ export function useProjects(): ProjectsController {
       const project = await projectApi.create(name, folder);
       await projectApi.scanEpisodes(project.id);
       message.success(`已创建「${name}」`);
-      await navigate(`/projects/${project.id}/analysis`);
+      await navigate(dramaEntryPath(project.id));
     },
     [message, navigate],
   );

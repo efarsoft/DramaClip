@@ -95,7 +95,7 @@ describe('buildMatrixRows 行派生', () => {
     expect(row?.failed).toBe(true);
     expect(row?.running).toBe(false);
     expect(row?.note).toMatchObject({ tone: 'error', text: '卡在分析：Whisper 缺模型：转写无法开始' });
-    expect(row?.cont).toEqual({ route: '/projects/p1/analysis', label: '继续分析' });
+    expect(row?.cont).toEqual({ route: '/drama/p1?focus=analysis', label: '继续分析' });
   });
 
   it('在跑剧：running 标记 + 卡点用 job.label 人读文本 + 继续去出片页', () => {
@@ -103,7 +103,7 @@ describe('buildMatrixRows 行派生', () => {
     expect(row?.running).toBe(true);
     expect(row?.workCount).toBe(2);
     expect(row?.note).toMatchObject({ tone: 'action', text: '写方案 2/9' });
-    expect(row?.cont).toEqual({ route: '/projects/p2/produce', label: '继续出片' });
+    expect(row?.cont).toEqual({ route: '/drama/p2?focus=planning', label: '继续出片' });
   });
 
   it('聚合计数：全部/在跑/有失败/已出片各归各的', () => {
@@ -179,14 +179,14 @@ describe('DramaMatrix 继续与卡点', () => {
     fireEvent.click(first);
     expect(onNavigate).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByText('替嫁新娘'));
-    expect(onNavigate).toHaveBeenLastCalledWith('/projects/p1/analysis');
+    expect(onNavigate).toHaveBeenLastCalledWith('/drama/p1?focus=analysis');
   });
 
   it('卡点动作按钮走自己的路由，不触发整行跳转', async () => {
     const onNavigate = matrix();
     fireEvent.click(await screen.findByRole('button', { name: /去处理/ }));
     expect(onNavigate).toHaveBeenCalledTimes(1);
-    expect(onNavigate).toHaveBeenCalledWith('/projects/p1/analysis');
+    expect(onNavigate).toHaveBeenCalledWith('/drama/p1?focus=analysis');
   });
 
   it('继续上次：最近打开的剧置顶 + 芯片点名 + 铺底', async () => {

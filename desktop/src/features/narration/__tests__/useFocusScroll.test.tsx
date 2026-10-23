@@ -20,9 +20,9 @@ function Probe(): ReactElement {
 
 function renderAt(search: string): void {
   render(
-    <MemoryRouter initialEntries={[`/projects/p1/produce${search}`]}>
+    <MemoryRouter initialEntries={[`/drama/p1${search}`]}>
       <Routes>
-        <Route path="/projects/:projectId/produce" element={<Probe />} />
+        <Route path="/drama/:projectId" element={<Probe />} />
       </Routes>
     </MemoryRouter>,
   );

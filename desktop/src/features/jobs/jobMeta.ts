@@ -1,6 +1,7 @@
 /** 任务展示元数据：类型词 / 路由 / 主体文案 / 排序 / 时长——纯函数与常量，不发 RPC。 */
 import type { JobInfo, JobStatus } from '@dramaclip/protocol';
 import { isActiveJob } from '../../stores/jobs';
+import { dramaFocusPath } from '../../app/routes';
 
 // 在跑判定与汇总住在 stores/jobs（StatusBar 在 components 层，禁止反向依赖 features）；
 // 这里转出单一来源，features 侧调用方不必记两个地址。
@@ -27,7 +28,7 @@ export const JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
 const PROJECT_REF_ROUTES: Readonly<Record<string, string>> = {
   analysis: 'analysis',
   prescreen: 'analysis',
-  narration: 'produce',
+  narration: 'planning',
 };
 
 /** 落点在引擎页的类型：ref 是固定串或产物路径，不含项目语境，因此只能聚合到 /engines。 */
@@ -59,7 +60,7 @@ export function jobRoute(job: JobInfo): string | null {
   if (job.type === 'export_selfcheck') return '/works';  // 批次作业没有单条落点，去成品库看结果
   const sub = PROJECT_REF_ROUTES[job.type];
   if (sub === undefined || job.ref_id === null || job.ref_id === '') return null;
-  return `/projects/${job.ref_id}/${sub}`;
+  return dramaFocusPath(job.ref_id, sub);
 }
 
 /** 主体名册：抽屉打开时低频拉取，把 ref_id 翻译成人读名字。 */

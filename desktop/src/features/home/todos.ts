@@ -1,5 +1,6 @@
 /** 工作台待办派生：纯函数，不发 RPC。 */
 import type { ModelInfo } from '@dramaclip/protocol';
+import { dramaFocusPath, dramaProducePath } from '../../app/routes';
 
 export interface TodoAction {
   readonly kind: 'navigate' | 'restart-service';
@@ -47,11 +48,11 @@ const DAY = 86_400_000;
 const STALLED_DAYS = 14;
 const MAX_STALLED = 5;
 
-/** 仅收 ref_id=project_id 的任务类型；export→export_id、semantic→episode_id 无法路由。 */
+/** 仅收 ref_id=project_id 的任务类型；export→export_id、semantic→episode_id 无法路由。值是剧空间区块锚点。 */
 const JOB_ROUTES: Readonly<Record<string, string>> = {
   analysis: 'analysis',
   prescreen: 'analysis',
-  narration: 'produce',
+  narration: 'planning',
 };
 
 const SEVERITY_RANK: Readonly<Record<string, number>> = { error: 0, warning: 1, info: 2 };
@@ -107,7 +108,7 @@ export function buildTodos(input: TodoInput): TodoItem[] {
       key: `job-${job.id}`,
       text: `任务失败: ${job.error ?? '未知原因'}`,
       severity: 'error',
-      action: { kind: 'navigate', label: '去处理', path: `/projects/${job.refId}/${sub}` },
+      action: { kind: 'navigate', label: '去处理', path: dramaFocusPath(job.refId, sub) },
     });
   }
 
@@ -129,7 +130,7 @@ function pushIfStalled(items: TodoItem[], drama: DramaState, serverTimeMs: numbe
     key: `stalled-${drama.id}`,
     text: `${drama.name}：${String(drama.episodeCount)} 集已就位 ${String(Math.floor(age))} 天，还没有成品`,
     severity: 'info',
-    action: { kind: 'navigate', label: '去出片', path: `/projects/${drama.id}/produce` },
+    action: { kind: 'navigate', label: '去出片', path: dramaProducePath(drama.id) },
   });
 }
 

@@ -1,6 +1,6 @@
 # DramaClip 就地核对与取用批次（H1-H3）· 设计规格
 
-**日期**：2026-10-22 · **状态**：H1-H3 已实施，验收记录见 §7.1-§7.3 · **业主裁决**：「H1+H2+H3 一起推进」（含 H1 的后端那一刀）、「批准直接进入实施」
+**日期**：2026-10-22 · **状态**：H1-H3 已实施，验收记录见 §7.1-§7.4 · **业主裁决**：「H1+H2+H3 一起推进」（含 H1 的后端那一刀）、「批准直接进入实施」
 **提交切分**：后端那一刀（`srt.py` + encoder sink + 侧车 `.srt` + 跨盘符转义）已提交 `db1dbfd`；H1 前端（`features/cues/`）与 H2、H3 连同本文件在同一提交里入库。
 **上位文件**：`docs/superpowers/specs/2026-10-16-ui-truth-and-polish-design.md`（W1-W3，档1 已提交 `02d7ede`）、`docs/superpowers/specs/2026-09-10-dramaclip-ui-redesign-design.md`（信息架构）、`docs/superpowers/specs/2026-09-21-desktop-typography-density-design.md`（token 与状态契约）。
 **与路线图的边界**：`docs/05-开发路线图.md` 的 P3 批次表由业主自维护，本文件不合并、不引用其排期。
@@ -220,9 +220,25 @@ W3 的 `StateBlock` 管**屏级四态**（空/载入/失败/部分成功）。�
   - **「解不出＝导出失败」的口径**：没有把已 `completed` 的出片翻成 `failed`（那会推翻 §1.3 已定案的允许型降级），而是两头堵——门禁钉死「写得出来、且与实烧行一一对齐」，界面 `useSrtCues` 没有任何回退分支：404＝「本条没有逐句时间轴」（不报失败），非 404 的读失败与「SRT 里没有可解析的句子」都常驻原话，任何一支都不猜时间。
 - **测得（改后复跑）**：H3 定点 8 个文件 **81 例全绿**；`features/engines` + `features/about` **238 例全绿**；`tsc --noEmit` 0 错；`ruff check` 本批次文件 0 错。
 - **改前引入的 lint 债已清**：本批次新写的 6 处 eslint 错（`no-confusing-void-expression` × 4、未用导入、`prefer-optional-chain`）已改；剩下 **16 处逐行核过是 HEAD 原样**（`ExportsCard` 的 `type ReactElement`/`note.at + String(index)`、`JobDrawer`、`usePlanBatch` 超行等），不属本批次、未动。后端 `ruff` 1 错在 `engines/narration/audit.py:249`（并行 W6 的行长）。
-- **全量 `npx vitest run`（桌面）＝741 例、11 红**：全部落在并行会话的 W3 路由改名与 W6 文案门禁家族（`iaContract`、`navItems` ×3、`stageState` ×3、`createDrama`、`dramaMatrix`、`TodoList`、`copyTruth` 的「指纹」），判据是这些文件本批次一行未改、失败信息一律是 `/projects/p1/analysis` vs `/drama/p1?focus=analysis` 或「指纹」注释——**待业主裁定由哪一批收口，本批次不代改**。
+- **全量 `npx vitest run`（桌面）＝741 例、11 红**：全部落在并行会话的 W3 路由改名与 W6 文案门禁家族（`iaContract`、`navItems` ×3、`stageState` ×3、`createDrama`、`dramaMatrix`、`TodoList`、`copyTruth` 的「指纹」），判据是这些文件本批次一行未改、失败信息一律是 `/projects/p1/analysis` vs `/drama/p1?focus=analysis` 或「指纹」注释——**待业主裁定由哪一批收口，本批次不代改**（已裁定并收口，见 §7.4）。
   - **归属复核（2026-10-23，不再只靠「没改过」推断）**：`git archive HEAD desktop protocol` 到 Temp + junction 挂真 `node_modules`，单跑那 7 个文件 → 路由家族 **10 条同名红在 HEAD 原样复现**；`copyTruth` 的「源码注释不得出现「指纹」」也在 HEAD 快照里红（该快照没带 `docs/`、`service/`，扫描面缩水会让它的其余例一起红，故只取「指纹」这一条的定性结论）。工作树 diff 里 `grep 指纹` 命中 0 行。快照跑完用 `Remove-Item` 先拆 junction 再删目录——`rm -rf` 直接穿过 junction 会删到真 `node_modules`。
 - **`db1dbfd` 提交态复核**：`git archive db1dbfd service` 到 Temp，`PYTHONPATH=<快照>/service` 跑 `tests/api/test_export_film_srt.py`、`test_export_delete.py`、`tests/engines/exporter`、`tests/engines/subtitle`＝**272 passed**。首跑 70 红是快照没带只读资源：`caption_font` 要 `resources/fonts` 里的 .otf，缺字面直接 `FileNotFoundError`——判据缺失不是代码缺陷，补 `DRAMACLIP_RESOURCES_DIR` 指回真 `resources` 即全绿（`infra/paths.py:32` 认这个环境变量）。
 - **本批次文件的 eslint 余量**：`npx eslint <本批次改动文件>`＝8 错，逐条 `git show HEAD:<file>` 对过字节原样（`AsrTab:107`、`TtsTab:109` 的 `onChanged?.()`；`ExportsCard` 的 `type ReactElement`、`.then(() => onRefresh())`、`.finally(() => setRetrying(false))`、`note.at + String(index)`），不属本批次、未动。本批次自己引入的两处（`downloadUx.test.tsx` 替身的未用参数）已按仓库既有写法改成 `vi.fn<(limit, activeOnly?) => Promise<…>>()`——类型带元数、实现不收参数，TS2554 与 `no-unused-vars` 一次解决。
 - **全量后端 `pytest tests`＝1829 收集、4 红、0 error**：`test_scriptwriter.py::test_segments_sorted_and_overlaps_trimmed_per_episode`（`assert [22.0, 1.0] == [1.0, 22.0]`）、`test_script_driver.py` 两条、`test_rule_modes_ready.py::test_rule_mode_back_to_ready[cross_narration]`（`'failed' != 'completed'`）。被测模块 `engines/narration/{scriptwriter,pipeline,modes_w5,copywriter,numerals,audit,models}.py` 与 `api/{tools,export_audit}.py` 全是**未提交的工作树改动**（并行文案线），本批次后端只新增 `tests/api/test_export_film_srt.py` 一例，四条红与它无关。计数要显式 `-o addopts=""` 才拿得到——仓库 `addopts = "-q"` 会吞掉终态摘要行（旧坑，别再按 `tail` 有无 `passed` 判绿）。
 - **格式约定不追**：`npx prettier --check src` 在 HEAD 就有约百档不合规（仓库 lint 脚本只有 eslint），本批次不整档 `--write`（会把并行会话未提交的行一起改写、把无关 diff 记到我头上），只把被自己改出空格残渣的 `tokens , layout` 四处修回。
+
+### 7.4 桌面 11 红的收口（2026-10-23，业主指令「先解决桌面那 11 个测试红」）
+
+§7.3 那条「待业主裁定」的账已结。判据先行：先在 `git archive HEAD` 快照里逐条复现（§7.3 归属复核），确认 11 条与档2 无关，再分**断言过期**与**真回归**两类——前者只改断言，后者必须改代码。
+
+| 根因 | 红数 | 定性 | 收口 |
+|---|---|---|---|
+| RC1 `TOP_LEVEL_ROUTES` 里 `/queue` 登记残留 | 1 | 真回归（幽灵路径） | `ae17286` 撤导轨项时只摘了导航，没摘路由登记——登记了却没有路由也没有入口。已从登记里删除。 |
+| RC2 合一后导轨在 `/drama/:id` 整条熄灭 | 3 | **真回归**（用户可见） | `5e74173` 把单剧详情改成 `/drama/:id`，与列表项 `/dramas` 不同段名，`isNavActive` 只认前缀 → 进剧库任何一部剧，导轨全灭。加 `NavItem.alsoActiveFor`，命中按**路径段边界**算（`/works` 不认 `/works-archive`）。 |
+| RC3 `/projects/:id/…` 发射器残留 | 5 | 真回归（锚点丢失） | 这三条只剩重定向，而 `LegacyParamRedirect` 按 pattern 重建 `to`，`?focus` 会被丢掉——跳过去落不到区块。收口＝`routes.ts` 单一构造器 `dramaFocusPath(id, focus)`，`stageState`/`todos`/`jobMeta`/`WorkbenchPage`/`useProjects`/`WorksDetailPage`/`WorksPage` 全部改走它（`narration` 任务的锚点值同时纠正为 `planning`）；断言同步到 `/drama/p1?focus=…`。 |
+| RC4 `TodoList` 把 `detail` 咽了 | 1 | **真回归**（H3 §3.1 同类违规） | `todos.ts` 注释写着「原因原文进 detail 不截断」，`TodoRow` 却只渲染 `text`——原话一行都没上屏。改法＝详情常驻第二行（`listRow({rows:2})` + 与 `EpisodeListRow.FailureLine` 同构的列 Flex 子行，`overflowWrap:'anywhere'` 折行不截断、颜色沿用本行状态点），登记进 `REASON_LEDGER`（现 13 处）。测试从 `getByTitle` 换成 `getByText`：原文进可见文本才是账。 |
+| RC5 `audit.py:525` docstring 的「指纹」 | 1 | 断言没错，用词踩线 | copyTruth 源码面红线不认语境（那里说的是「人名键」，不是比对指纹），改成「人名键只用作…计数」。 |
+
+- **测得（`git checkout-index` 快照＝本次提交态）**：全量 `npx vitest run` **91 文件 / 741 例全绿**；`npm run typecheck`（`tsconfig.app.json` + `tsconfig.node.json`）0 错；`npx eslint <本次 20 个桌面文件>` 0 错；后端 `service/tests/engines/narration` **409 passed**（`audit.py` 只动注释一行），`ruff check` 本文件 0 错。
+- **快照首跑的一条红不是断言红**：`EnginesImport.test.tsx` 报 `Test timed out in 5000ms`——快照没带 Vite 转换缓存（`import` 占 45%），91 个 worker 同时冷启动把它压过 5s；单跑该文件 7 例全绿（该例 2207ms），warm 复跑全量 741 绿。工作树里同样的超时抖动出现在 `LocalRuntimeSlot`（单跑 3628ms，全量复跑时 5147ms 越线）。**这是 `testTimeout=5000` 与重并行渲染测试的既有张力，本批次未动它**（改法要么全局加宽超时、要么 `isolate:false` 复用 worker，两条都改变全量口径，另立）。
+- **`ruff check service` 仍 2 错**：都在 `service/tests/engines/narration/test_audit.py`（`I001` 导入序 + 一条 `range(0, …)`），属并行文案线已提交的债，本批次未动。

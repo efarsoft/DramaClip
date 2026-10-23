@@ -1,4 +1,4 @@
-/** 今日待办：每条 = 状态点 + 一行结论 + 右侧 ghost 动作（规格 §4.1、DSS §3.1/§4.3）。
+/** 今日待办：每条 = 状态点 + 一行结论（有原因则再接一行原因）+ 右侧 ghost 动作（规格 §4.1、DSS §3.1/§4.3）。
  *
  * 与被它取代的 TodoCard 的区别不是样式：旧版用 AntD Alert，只能"通知"、点不动。
  * 本版每条必须带一个可执行动作——没有落点的状态不进待办（取舍见 todos.ts 顶部注释）。
@@ -52,27 +52,48 @@ function TodoRow({
   onNavigate: (path: string) => void;
   onRestartService: () => void;
 }): ReactElement {
+  const detail = item.detail ?? '';
   return (
-    <div style={{ ...mixins.listRow(), padding: `0 ${tokens.spaceLg}` }}>
+    <div style={{ ...mixins.listRow({ rows: detail === '' ? 1 : 2 }), padding: `0 ${tokens.spaceLg}` }}>
       <span data-testid="severity-dot" style={mixins.statusDot(DOT_COLOR[item.severity])} />
-      <span
-        title={item.text}
-        style={{
-          minWidth: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-          fontSize: tokens.text.body.size,
-          lineHeight: tokens.text.body.leading,
-          color: tokens.textPrimary,
-        }}
-      >
-        {item.text}
+      <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+        <span
+          title={item.text}
+          style={{
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            fontSize: tokens.text.body.size,
+            lineHeight: tokens.text.body.leading,
+            color: tokens.textPrimary,
+          }}
+        >
+          {item.text}
+        </span>
+        {detail !== '' && <DetailLine detail={detail} color={DOT_COLOR[item.severity]} />}
       </span>
       {item.action && (
         <GhostAction action={item.action} onNavigate={onNavigate} onRestartService={onRestartService} />
       )}
     </div>
+  );
+}
+
+/** 原因行（H3 §3.1）：详情原文常驻第二行、折行不截断——挂 title 等于没挂，账不在鼠标下面。
+ *  颜色沿用本行的状态点，让「严重度」只有一条色通道。 */
+function DetailLine({ detail, color }: { detail: string; color: string }): ReactElement {
+  return (
+    <span
+      style={{
+        fontSize: tokens.text.badge.size,
+        lineHeight: tokens.text.badge.leading,
+        color,
+        overflowWrap: 'anywhere',
+      }}
+    >
+      {detail}
+    </span>
   );
 }
 
