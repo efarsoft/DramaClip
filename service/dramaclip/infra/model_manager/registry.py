@@ -115,7 +115,7 @@ def detect_status(
                     break
         else:
             # 通用：目录树内（含子目录）任一模型权重文件即已安装
-            for pattern in ("*.pth", "*.pt", "*.bin", "*.onnx", "*.safetensors"):
+            for pattern in ("*.pth", "*.pt", "*.bin", "*.onnx", "*.safetensors", "*.ckpt"):
                 hit = next(base.rglob(pattern), None)
                 if hit is not None:
                     installed, resolved, asset = True, base, base
@@ -221,7 +221,7 @@ def fill_size_cache(models_dir: Path) -> None:
                 if asset is not None:
                     break
         else:
-            for pattern in ("*.pth", "*.pt", "*.bin", "*.onnx", "*.safetensors"):
+            for pattern in ("*.pth", "*.pt", "*.bin", "*.onnx", "*.safetensors", "*.ckpt"):
                 if next(base.rglob(pattern), None) is not None:
                     asset = base
                     break
@@ -287,6 +287,10 @@ def engine_ready(spec: ModelSpec) -> bool:
         # 视觉运行时（engines/vision）已接线：档位激活的实 gate 是模型文件在场
         # （体检 ok）+ 分析时 open_session 对 llama-server 的二次判据。
         return True
+    elif spec.kind == "music":
+        # 配乐运行时（engines/music）已接线：生成是引擎中心的显式动作，资产的实
+        # gate 是三件套文件在场（体检 ok）+ music 运行环境安装（music_runtime）。
+        return True
     return spec.kind in ("tts", "asr") and spec.engine in supported()
 
 
@@ -312,7 +316,7 @@ _REQUIREMENTS: dict[str, tuple[str, ...]] = {
     # 目录（文本前端词表）。清单量自 HF Fun-CosyVoice3-0.5B-2512（本机验证组合的取文件集）。
     "cosyvoice3": ("cosyvoice3.yaml", "llm.pt", "flow.pt", "hift.pt", "speech_tokenizer_v3.onnx"),
 }
-_WEIGHT_SUFFIXES = (".bin", ".pth", ".pt", ".onnx", ".safetensors", ".gguf")
+_WEIGHT_SUFFIXES = (".bin", ".pth", ".pt", ".onnx", ".safetensors", ".gguf", ".ckpt")
 _HEX = set("0123456789abcdef")
 
 
