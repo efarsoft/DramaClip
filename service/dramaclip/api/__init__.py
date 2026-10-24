@@ -13,6 +13,7 @@ def build_router(context: AppContext, shutdown: Callable[[], None]) -> Router:
     """组装全部命名空间。新增命名空间在此登记 import 与 register。"""
     from dramaclip.api import (
         analysis,
+        bgm,
         engine_configs,
         engines,
         export,
@@ -49,4 +50,5 @@ def build_router(context: AppContext, shutdown: Callable[[], None]) -> Router:
     models.register(router, context)
     engines.register(router, context)
     jobs.register(router, context)
+    bgm.register(router, context)
     return router

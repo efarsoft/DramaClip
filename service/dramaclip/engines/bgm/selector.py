@@ -45,6 +45,12 @@ def should_add_bgm(mode: str) -> bool:
     return mode not in _BGM_OFF_MODES
 
 
+def target_bpm(emotion: str) -> float:
+    """情绪 → 目标 bpm 档位（选曲与生成的共同取值点：生成时按它下参数，
+    曲子天然落在选曲目标附近，pick_track 的最近匹配一拍即合）。"""
+    return _TARGET_BPM.get(emotion, _TARGET_BPM["default"])
+
+
 def dominant_emotion(plan: PlanData) -> str:
     """全片主导情绪：段情绪标签的众数；平局按 severity 序取先；空时间轴 → default。
 

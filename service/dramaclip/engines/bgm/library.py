@@ -150,6 +150,17 @@ def _measure_bpm(path: Path) -> float | None:
         return None
 
 
+def measure_track(path: Path) -> tuple[float, float | None]:
+    """单曲测量（时长, bpm|None）：生成入库走单文件通道，不必全库重扫。
+
+    时长是硬输入（测不出抛异常由调用方留痕），bpm 是增强（降级 None，与扫描同哲学）。
+    """
+    duration = audio_duration_s(path)
+    if duration <= 0:
+        raise ValueError(f"时长非正（{duration:g}s），疑似坏文件")
+    return round(duration, 3), _measure_bpm(path)
+
+
 def scan_library(bgm_dir: Path) -> ScanResult:
     """扫描曲库目录 → (入库素材, 跳过留痕)。低频入库工具，不在渲染热路径上。
 
