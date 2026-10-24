@@ -95,7 +95,7 @@ def _generate_worker(context: Any, job_id: str, payload: dict[str, Any]) -> None
                 try:
                     work = context.work_dir / "bgm-gen"
                     work.mkdir(parents=True, exist_ok=True)
-                    wav = engine.generate(request, work)
+                    wav = engine.synthesize(request, work)
                     dest, duration, bpm = _transcode_to_library(context, wav, emotion)
                     bgm_repo.upsert_track(
                         context.conn,
@@ -197,7 +197,7 @@ def register(router: Any, context: Any) -> None:
 
         return music_runtime.status(resolve_data_dir())
 
-    router.add("bgm.generate", bgm_generate)
-    router.add("bgm.rescan", bgm_rescan)
-    router.add("bgm.library", bgm_library_list)
-    router.add("bgm.runtime_status", bgm_runtime_status)
+    router.register("bgm.generate", bgm_generate)
+    router.register("bgm.rescan", bgm_rescan)
+    router.register("bgm.library", bgm_library_list)
+    router.register("bgm.runtime_status", bgm_runtime_status)

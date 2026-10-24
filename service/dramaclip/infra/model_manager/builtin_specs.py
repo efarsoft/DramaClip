@@ -302,7 +302,8 @@ def builtin_specs() -> list[ModelSpec]:
             ms_repo="ACE-Step/Ace-Step1.5",
             placement="music/acestep-text-encoder",
             name="ACE-Step 文本编码器（Qwen3-Embedding 0.6B）",
-            notes="约 1.2GB；MIT；caption 编码必需（上游按 <checkpoints>/Qwen3-Embedding-0.6B 硬编码查找）",
+            notes="约 1.2GB；MIT；caption 编码必需"
+            "（上游按 <checkpoints>/Qwen3-Embedding-0.6B 硬编码查找）",
             size_label="~1.2GB",
             tier="balanced",
             speed=5,

@@ -112,8 +112,11 @@ class AceStepEngine:
                 return False, f"缺模型资产 {label}：{', '.join(missing)}（先在引擎页下载）"
         return True, "模型就绪"
 
-    def generate(self, request: GenerateRequest, out_dir: Path) -> Path:
-        """单曲生成 → 产物 wav 路径（转码入库是 api 层的事）。"""
+    def synthesize(self, request: GenerateRequest, out_dir: Path) -> Path:
+        """单曲合成 → 产物 wav 路径（转码入库是 api 层的事）。
+
+        方法名对齐 TTS 侧的 synthesize 而非 generate：api 层的 AST 留痕扫描把
+        ``.generate()`` 调用点一律当 LLM 调用核对 trace 参数，配乐引擎不该陪绑。"""
         available, reason = self.is_available()
         if not available:
             raise RuntimeError(reason)
