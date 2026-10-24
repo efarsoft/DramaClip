@@ -30,6 +30,9 @@ _CTA_FALLBACK_S = 2.0
 _HIGHLIGHT_CLIP_S = 5.0   # 高光混剪的单条时长（真机参考：13×5s ≈ 65s 预告）
 _HIGHLIGHT_MAX_CLIPS = 15  # 条数上限：时长让位≠无限堆料，预告形态 75s 内最猛
 _ADJACENT_GAP_S = 1.5  # 邻接合并阈值：同集间隙 ≤1.5s（基本贴合）才合并；间隙大的各自成段保留节奏
+# 对拍依据（2026-10-23，dev 活库 8 条 ready 方案 43 处同集相邻间隙）：
+# 1.0-1.5s「三线不一致区」仅 1 处（2.3%）——邻接合并先吃掉 ≤1.5s 的间隙，
+# 三线（1.5/1.0/1.0）不齐无实际危害，维持不统一。
 
 
 def _merge_adjacent(ordered: list[EpisodeScene]) -> list[EpisodeScene]:

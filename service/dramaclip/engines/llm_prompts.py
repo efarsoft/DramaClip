@@ -58,12 +58,6 @@ SPECS: list[PromptSpec] = [
         _default("dramaclip.engines.semantic.conflict", "_SYSTEM_PROMPT"),
     ),
     PromptSpec(
-        "prompt.style_select_system",
-        "风格自选",
-        "口味层：LLM 读转写从风格库选解说风格",
-        _default("dramaclip.engines.narration.styles", "_SELECT_SYSTEM_PROMPT"),
-    ),
-    PromptSpec(
         "prompt.angles_system",
         "选题角度",
         "为一模式选出 K 条卖点互异的取材角度",

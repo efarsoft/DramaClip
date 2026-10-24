@@ -5,11 +5,8 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
-from dramaclip.engines.llm_trace import dump_trace
-from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable
 from dramaclip.infra.paths import resolve_resources_dir
 
 FALLBACK_STYLE_ID = "general"
@@ -83,63 +80,3 @@ def resolve_style_id(preferred: str | None, genre: str | None = None) -> str:
     return FALLBACK_STYLE_ID
 
 
-_SELECT_SYSTEM_PROMPT = (
-    "你是短剧推广策略师。根据台词转写判断剧情题材与爽点，"
-    "从风格库中选出最适合「导看全集」的解说风格。只输出 JSON："
-    '{"style_id":"风格id","reason":"一句话理由"}，不要其他内容。'
-    "reason 必须引用转写中至少一处具体细节（人物/事件/台词）作为判断依据，禁止空泛套话。"
-    "选风格是为了让成片更好点、更好追，不是为了文风花哨。"
-)
-
-
-def select_style_with_reason(
-    llm: LlmClient,
-    transcript: list[dict[str, Any]],
-    *,
-    max_lines: int = 40,
-    system_prompt: str | None = None,
-    trace_path: Path | None = None,
-) -> tuple[str, str] | None:
-    """口味层：LLM 读转写从风格库自选风格，返回 (style_id, reason)。
-    """
-    styles = _load_builtin()
-    if not styles:
-        return None
-    menu = "\n".join(
-        f"- {sid} {data.get('name', '')}：{data.get('desc', '')}"
-        for sid, data in sorted(styles.items())
-    )
-    lines = [
-        f"{float(item.get('start', 0)):.0f}s {str(item.get('text', '')).strip()}"
-        for item in transcript
-        if str(item.get('text', '')).strip()
-    ][:max_lines]
-    if not lines:
-        return None
-    user_prompt = f"风格库：\n{menu}\n\n台词转写节选：\n" + "\n".join(lines)
-    system = system_prompt or _SELECT_SYSTEM_PROMPT
-    raw: Any = None
-    error = ""
-    try:
-        raw = llm.chat_json(system, user_prompt)
-    except LlmUnavailable as exc:
-        error = f"{type(exc).__name__}: {exc}"
-    picked = str(raw.get("style_id", "")).strip() if isinstance(raw, dict) else ""
-    reason = str(raw.get("reason", "")).strip() if isinstance(raw, dict) else ""
-    accepted = picked in styles
-    # 模型报库外风格 id 时界面只看到"按题材匹配"，留痕是唯一的解释
-    dump_trace(
-        trace_path,
-        {
-            "engine": "style_select",
-            "system": system,
-            "user": user_prompt,
-            "raw": raw,
-            "error": error,
-            "style_id": picked,
-            "accepted": accepted,
-        },
-    )
-    if not accepted:
-        return None
-    return picked, reason or "剧情匹配"

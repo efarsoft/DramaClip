@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,8 @@ from typing import Any
 from dramaclip.engines import llm_prompts
 from dramaclip.engines.llm_trace import dump_trace, trace_path
 from dramaclip.engines.semantic.llm_client import LlmUnavailable, client_for
+
+_LOGGER = logging.getLogger(__name__)
 
 SCORING_LLM_TIMEOUT_S = 240.0  # 与选题/成稿同量级：一次读整批方案的解说全文
 _ATTEMPTS = 2
@@ -99,6 +102,7 @@ def _parse_batch(raw: Any, expected: int) -> dict[int, dict[str, Any]]:
     if not isinstance(items, list):
         raise ValueError("评分未返回 scores 数组")
     parsed: dict[int, dict[str, Any]] = {}
+    duplicates: list[int] = []
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -109,11 +113,18 @@ def _parse_batch(raw: Any, expected: int) -> dict[int, dict[str, Any]]:
         if not dims:
             continue
         suggestion = item.get("suggestion")
+        if index in parsed:
+            # 重复编号＝LLM 手滑（同一变体评了两份）：后到者丢弃——分数张冠李戴比
+            # 缺一份分更糟，且丢弃留痕让 attempts 能对账「为什么少了一条」。
+            duplicates.append(index)
+            continue
         parsed[index] = {
             "dims": dims,
             "total": weighted_total(dims),
             "suggestion": str(suggestion).strip() if isinstance(suggestion, str) else "",
         }
+    if duplicates:
+        _LOGGER.warning("评分批重复编号（后到者丢弃）：%s", duplicates)
     if not parsed:
         raise ValueError("评分未产出任何合法条目")
     return parsed

@@ -9,7 +9,6 @@
 
 - `prompt.genre_system`　题材分类：分析层：判断短剧主导题材（失败自动降级关键词）
 - `prompt.conflict_system`　冲突打分：分析层：逐场景冲突强度评分，驱动选料排序
-- `prompt.style_select_system`　风格自选：口味层：LLM 读转写从风格库选解说风格
 - `prompt.angles_system`　选题角度：为一模式选出 K 条卖点互异的取材角度
 - `prompt.scriptwriter_system`　剧情解说·结构指令：剧本 JSON 格式与段数/时间轴等结构要求；手艺底线在下面那张卡
 - `prompt.scriptwriter_fundamentals`　解说基本功（编剧与填词共用）：说书人视角/半句钩/导看全集/片长服从故事等常驻手艺底线，两条成稿链路都拼上这一段

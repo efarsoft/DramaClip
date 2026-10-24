@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import random
+import shutil
 import subprocess  # noqa: S404 - 参数为受控列表
 import sys
 import threading
@@ -1371,7 +1372,7 @@ def _concat(segment_files: list[Path], out_path: Path) -> None:
     拼完做时长审计（实测 vs 各段实测和，超阈值抛错不出片；测不出只 warn 留痕）。
     """
     if len(segment_files) == 1:
-        out_path.write_bytes(segment_files[0].read_bytes())
+        shutil.copyfile(segment_files[0], out_path)
         _audit_film_duration(out_path, segment_files)
         return
     signatures = [_video_signature(segment) for segment in segment_files]
