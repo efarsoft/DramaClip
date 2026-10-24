@@ -59,5 +59,8 @@
 
 ### 中间积木（形态整体成熟前的可落地位，均待业主点单）
 
-- **BGM 定制生成**：ACE-Step 1.5 本地生成纯器乐 BGM 替换静态曲库（Apache-2.0 商用干净；显存社区口径 <4GB，须真机核）。业主此前"numpy 编曲不可做"的空白由它补上；可做半日 spike：五情绪 prompt → 生成曲 vs 曲库 A/B。
+- **BGM 定制生成**：
+  - **ACE-Step 1.5 —— 首选，全指标核实通过**（2026-10-24 模型卡+仓库核）：MIT 许可（1.5 独立仓库 github.com/ace-step/ACE-Step-1.5，与 v1 老仓库 Apache-2.0 区分）；2B DiT ~4.7GB 权重，<4GB 显存可跑（量化+offload 口径），XL 4B 档 ≥12GB；时长 **10 秒–10 分钟**（90s+ BGM 床全覆盖）；元数据控制 **duration/BPM/key/scale/time-signature**（比现役曲库仅有 bpm 字段控制力强一档）；纯器乐 `[Instrumental]` 标签（中文官方教程确认）；50+ 语言、中文文档齐全；**Windows 一等公民**（.bat 脚本+portable 7z 包）；自带 REST API（`acestep-api`，localhost:8001）——可套 tts-venv worker 化双路径装配模式。速度 A100 <2s / RTX 3090 <10s 每首。质量口径：SongBench 不如 YuE2，但 BGM 床场景是纯器乐无人声，人声歌曲质量差距大概率不敏感。
+  - **YuE2-3B（m-a.p）—— 许可一票否决，不进产品**：权重 CC BY-NC 4.0 非商用（与 MMS 对齐器禁入同款裁决）；质量确实第一（SongBench 6.96 超 Suno v5/v6，48kHz 立体声，RTX 4090 实测 3.6 分钟歌 71s、峰值显存 11.2GB），且「可编辑符号乐谱（ABC 规划→改谱→渲染）+ bring-your-own-score」的设计值得借鉴，但许可不解锁一切白搭。官方要求 24GB 卡+Linux 优先。
+  - 待业主点单的半日 spike：拉 ACE-Step 1.5 Windows 包 → 五情绪纯器乐 prompt（各配 BPM 区间/key/结构）→ 每情绪 2–3 首 120–180s → 现役 bgm 扫描入库（librosa bpm + 五情绪子目录，零代码改动）→ 真机成片 A/B 曲库 vs 生成曲。集成形态默认建议**离线批量生成入库**（零运行时依赖，BGM 床混音链一字节不改）而非运行时按剧本生成（+3-5GB 运行时依赖）。
 - **音效第三路**：foley 线四家开源，但扩散模型 RTF 与体量未核——立项前提是 RTF 可接受或有云端 API。
