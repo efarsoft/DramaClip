@@ -10,6 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from dramaclip.engines import llm_prompts
 from dramaclip.engines.llm_trace import dump_trace
 from dramaclip.engines.narration import audit as A
 from dramaclip.engines.narration.numerals import to_chinese_numerals
@@ -107,9 +108,15 @@ def fundamentals_layer(
     prompts: dict[str, str] | None = None, scope: str = "full"
 ) -> str:
     """基本功层文本：剧本链路用全稿版，逐槽填词用逐槽版（模型一次只见一个槽，
-    注入全稿规则只是噪声）。scope=full→FUNDAMENTALS，slot→FUNDAMENTALS_SLOT。"""
-    if prompts and (text := prompts.get("prompt.scriptwriter_fundamentals")):
-        return text
+    注入全稿规则只是噪声）。scope=full→FUNDAMENTALS，slot→FUNDAMENTALS_SLOT。
+
+    覆盖语义＝「用户真改写过才接管两档」：settings 全量落库后 overrides_from
+    会把**默认值**也带上，旧实现把「默认值在场」当覆盖，slot 链永远吃全稿版
+    （SLOT 从未生效）——而整份全稿规则灌进单槽上下文正是 docstring 明说要避免
+    的噪声源。值≠注册表默认 ⇒ 用户手笔，接管两档（覆盖一张卡两边生效的契约）。"""
+    override = (prompts or {}).get("prompt.scriptwriter_fundamentals", "")
+    if override and override != llm_prompts.SPEC_BY_KEY["prompt.scriptwriter_fundamentals"].default:
+        return override
     return FUNDAMENTALS if scope == "full" else FUNDAMENTALS_SLOT
 
 
@@ -459,6 +466,7 @@ def write_script_episodes(
     prompts: dict[str, str] | None = None,
     min_segments: int | None = None,
     audit_hard: bool = False,
+    prior_texts: list[str] | None = None,
 ) -> Script:
     """跨集剧本：读多集转写（每集一个「【第N集】」分组），产出带集号的跨集故事剧本。
     """
@@ -539,7 +547,9 @@ def write_script_episodes(
             attempts[-1]["rejected"] = f"正文仅 {kept} 段（要求至少 {floor} 段）"
             script = None
         if script is not None and audit_hard:
-            report = A.audit_script(script, transcript, episode_durations=durations)
+            report = A.audit_script(
+                script, transcript, episode_durations=durations, prior_texts=prior_texts
+            )
             hard_fails = [f for f in report.findings if f.severity == "hard" and not f.passed]
             soft_ids = [f.rule_id for f in report.findings if f.severity == "soft" and not f.passed]
             attempts[-1]["audit"] = {

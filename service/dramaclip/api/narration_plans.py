@@ -155,6 +155,12 @@ def _run_plan_variants(
         context.job_store.mark_running(job_id)
         settings = narration_api._effective_settings(context, project_id)
         try:
+            settings["_prior_texts_json"] = json.dumps(
+                _collect_prior_texts(context, project_id), ensure_ascii=False
+            )
+        except Exception as exc:  # noqa: BLE001 - 既往稿读不了＝跨稿查重退化为同稿内，不挡生成
+            context.notifier.log("warning", f"同剧既往稿读取失败，跨稿查重退化为同稿内: {exc}")
+        try:
             episode_inputs = _inject_run_settings(context, settings, episodes, modes)
         except Exception as exc:  # noqa: BLE001 - 任务级装配失败必须落进 jobs 表，不能留 running
             _settle_failed(context, job_id, str(exc))
@@ -442,6 +448,11 @@ def _plan_one(
         plan, used_ids = script_driver.script_dialogue_plan(
             scoped, settings, angle_block=variant.angle_block, trace_dir=trace_dir
         )
+        # 复述质检接入（此前只覆盖逐槽族，最重的剧本链反而没有质检）。不达标
+        # 只留痕不自动重写：整稿重写＝与首稿同价的 LLM 往返（逐槽族「改写若干槽」
+        # 的 economics 在剧本链不成立），是否自动换血等不达标率数据说话（数据反馈
+        # harness）——卡点进通知面与 trace，人工裁决「重掷此条」。
+        _retell_gate(plan, settings, trace_dir, context.notifier)
         return plan.model_copy(update={"arc": variant.arc}), used_ids
 
     scenes, highlights, material = _casting_for(context, episodes, variant)
@@ -501,6 +512,38 @@ def _plan_one(
         )
     used_ids = sorted({segment.episode_id for segment in plan.timeline})
     return plan.model_copy(update={"arc": variant.arc}), used_ids
+
+
+def _collect_prior_texts(context: AppContext, project_id: str, *, limit: int = 3) -> list[str]:
+    """同剧既往稿的解说文本（最近 limit 条 ready）：跨稿人物介绍重复规则的比对源。
+
+    追更观众看的是同剧的多条视频——上一条介绍过的人物这一条再走全套就是浪费。
+    只取 ready（draft 是有缺陷被拦下的稿，它的重复不该污染比对基准）；文本直接
+    拼槽位 text（不拼 brief），经 settings 进剧本链的 audit（不进生成 prompt，
+    不占上下文预算）。
+    """
+    texts: list[str] = []
+    for row in plans_repo.list_by_project(context.conn, project_id):
+        if len(texts) >= limit:
+            break
+        if row.get("status") != "ready":
+            continue
+        raw = row.get("plan_data")
+        try:
+            plan_data = json.loads(raw) if isinstance(raw, str) else raw
+        except ValueError:
+            continue
+        if not isinstance(plan_data, dict):
+            continue
+        slots = [
+            str(item.get("text", "")).strip()
+            for item in plan_data.get("narration_texts") or []
+            if item.get("text")
+        ]
+        joined = "\n".join(slots)
+        if joined.strip():
+            texts.append(joined)
+    return texts
 
 
 def _rewrite_copy_until_retellable(

@@ -63,6 +63,20 @@ def resolve_run_style(
     return style
 
 
+def _prior_texts_of(settings: dict[str, str]) -> list[str] | None:
+    """编排层塞进 settings 的同剧既往稿（api 层唯一写入点）：跨稿人物介绍的比对源。"""
+    import json
+
+    raw = settings.get("_prior_texts_json")
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return None
+    return [str(item) for item in parsed] if isinstance(parsed, list) else None
+
+
 def script_dialogue_plan(
     episode_inputs: list[dict[str, Any]],
     settings: dict[str, str],
@@ -96,6 +110,7 @@ def script_dialogue_plan(
         trace_path=trace_path,
         prompts=llm_prompts.overrides_from(settings),
         min_segments=min_segments,
+        prior_texts=_prior_texts_of(settings),
     )
 
     episode_map = {
