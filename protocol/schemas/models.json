@@ -897,6 +897,25 @@
           }
         }
       }
+    },
+    {
+      "name": "models.install_music_runtime",
+      "summary": "引导配乐生成运行环境（music-venv：torch 2.7.1 + acestep，独立于双栈 venv）安装，作业模式有进度可取消",
+      "params": {
+        "type": "object",
+        "properties": {}
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        }
+      }
     }
   ]
 }

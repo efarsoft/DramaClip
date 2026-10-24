@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bgm.schema.json",
+  "title": "bgm",
+  "namespace": "bgm",
+  "x-models": {
+    "BgmGenerateRequest": {
+      "type": "object",
+      "required": [
+        "emotions"
+      ],
+      "properties": {
+        "emotions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "五情绪键子集：default/anger/triumph/suspense/sadness"
+        },
+        "per_emotion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "每情绪生成条数，默认 1"
+        },
+        "duration_s": {
+          "type": "integer",
+          "enum": [
+            120,
+            180
+          ],
+          "description": "单曲时长档，默认 120"
+        },
+        "caption": {
+          "type": "string",
+          "description": "可选自定义风格描述；空则用情绪预设"
+        }
+      }
+    },
+    "BgmGroup": {
+      "type": "object",
+      "required": [
+        "emotion",
+        "count",
+        "total_s"
+      ],
+      "properties": {
+        "emotion": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "total_s": {
+          "type": "number"
+        }
+      }
+    },
+    "BgmTrackRow": {
+      "type": "object",
+      "required": [
+        "id",
+        "file_path",
+        "emotion",
+        "duration_s"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "file_path": {
+          "type": "string"
+        },
+        "emotion": {
+          "type": "string"
+        },
+        "duration_s": {
+          "type": "number"
+        },
+        "bpm": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "license": {
+          "type": "string"
+        },
+        "attribution": {
+          "type": "string"
+        },
+        "source_url": {
+          "type": "string"
+        },
+        "added_at": {
+          "type": "integer"
+        }
+      }
+    },
+    "BgmLibrary": {
+      "type": "object",
+      "required": [
+        "groups",
+        "tracks"
+      ],
+      "properties": {
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/x-models/BgmGroup"
+          }
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/x-models/BgmTrackRow"
+          }
+        }
+      }
+    },
+    "BgmRescanResult": {
+      "type": "object",
+      "required": [
+        "tracks"
+      ],
+      "properties": {
+        "tracks": {
+          "type": "integer"
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "BgmRuntimeStatus": {
+      "type": "object",
+      "required": [
+        "installed",
+        "dir",
+        "torch_variant"
+      ],
+      "properties": {
+        "installed": {
+          "type": "boolean"
+        },
+        "dir": {
+          "type": "string"
+        },
+        "torch_variant": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "x-methods": [
+    {
+      "name": "bgm.generate",
+      "summary": "BGM 批量生成任务（ACE-Step 本地）：生成→转 ogg→落曲库情绪子目录→入库，作业模式",
+      "params": {
+        "$ref": "#/x-models/BgmGenerateRequest"
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "bgm.rescan",
+      "summary": "曲库全量重扫入库（手工投放素材的收编通道），幂等",
+      "params": {
+        "type": "object",
+        "properties": {}
+      },
+      "result": {
+        "$ref": "#/x-models/BgmRescanResult"
+      }
+    },
+    {
+      "name": "bgm.library",
+      "summary": "曲库清单：按情绪分组统计 + 全量曲目行",
+      "params": {
+        "type": "object",
+        "properties": {}
+      },
+      "result": {
+        "$ref": "#/x-models/BgmLibrary"
+      }
+    },
+    {
+      "name": "bgm.runtime_status",
+      "summary": "配乐运行环境安装态（零探针文件判据）",
+      "params": {
+        "type": "object",
+        "properties": {}
+      },
+      "result": {
+        "$ref": "#/x-models/BgmRuntimeStatus"
+      }
+    }
+  ]
+}

@@ -984,3 +984,49 @@ export interface PromptInfo {
 export interface PromptsListResult {
   readonly prompts: PromptInfo[];
 }
+
+/** 配乐域（bgm）：ACE-Step 本地 BGM 生成 + 曲库。 */
+
+/** 五情绪键（与曲库子目录/选曲情绪同一分类法）。 */
+export type BgmEmotion = 'default' | 'anger' | 'triumph' | 'suspense' | 'sadness';
+
+export interface BgmGenerateRequest {
+  readonly emotions: readonly BgmEmotion[];
+  readonly per_emotion?: number;
+  readonly duration_s?: 120 | 180;
+  readonly caption?: string;
+}
+
+export interface BgmGroup {
+  readonly emotion: string;
+  readonly count: number;
+  readonly total_s: number;
+}
+
+export interface BgmTrackRow {
+  readonly id: string;
+  readonly file_path: string;
+  readonly emotion: string;
+  readonly duration_s: number;
+  readonly bpm?: number | null;
+  readonly license: string;
+  readonly attribution: string;
+  readonly source_url: string;
+  readonly added_at: number;
+}
+
+export interface BgmLibrary {
+  readonly groups: readonly BgmGroup[];
+  readonly tracks: readonly BgmTrackRow[];
+}
+
+export interface BgmRescanResult {
+  readonly tracks: number;
+  readonly skipped?: ReadonlyArray<{ readonly file: string; readonly reason: string }>;
+}
+
+export interface BgmRuntimeStatus {
+  readonly installed: boolean;
+  readonly dir: string;
+  readonly torch_variant: string;
+}

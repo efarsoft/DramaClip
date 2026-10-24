@@ -4,7 +4,7 @@
  * 也就是 models.list + models.verify + system.health 三份真实数据；
  * 域卡只给结论与落点，修复动作在待修清单行内与域内资产库里发生。
  */
-import { AudioOutlined, EditOutlined, RightOutlined, SoundOutlined } from '@ant-design/icons';
+import { AudioOutlined, EditOutlined, PlayCircleOutlined, RightOutlined, SoundOutlined } from '@ant-design/icons';
 import type { ReactElement, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ModelInfo, SelftestResults } from '@dramaclip/protocol';
@@ -93,9 +93,10 @@ function DomainCards({
     { tab: 'asr', name: '语音识别 ASR', icon: <AudioOutlined />, step: stepOf('asr'), stats: domainStats(models, reports, 'asr') },
     { tab: 'tts', name: '配音 TTS', icon: <SoundOutlined />, step: stepOf('tts'), stats: domainStats(models, reports, 'tts') },
     { tab: 'llm', name: '文案 LLM', icon: <EditOutlined />, step: stepOf('llm') },
+    { tab: 'music', name: '配乐 BGM', icon: <PlayCircleOutlined />, stats: domainStats(models, reports, 'music') },
   ];
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: tokens.spaceLg }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: tokens.spaceLg }}>
       {domains.map((domain) => (
         <DomainCard
           key={domain.tab}

@@ -55,6 +55,9 @@ def register(router: Router, context: AppContext) -> None:
     router.register(
         "models.install_local_runtime", lambda params: install_local_runtime(context, params)
     )
+    router.register(
+        "models.install_music_runtime", lambda params: install_music_runtime(context, params)
+    )
     router.register("models.delete", lambda params: delete(context, params))
 
 
@@ -633,6 +636,53 @@ def install_indextts(context: AppContext, _params: dict[str, Any]) -> dict[str, 
     前端逐步切到 install_local_runtime。
     """
     return _install_local_runtime(context, ready_label="IndexTTS 运行环境已就绪")
+
+
+def install_music_runtime(context: AppContext, _params: dict[str, Any]) -> dict[str, Any]:
+    """引导配乐生成运行环境（music-venv）安装：独立 venv（上游 torch 2.7.1 pin
+    与双栈 2.8.0 冲突，隔离是唯一稳妥解），流程 uv → venv → torch → acestep
+    源码包 → 自检。状态查询走 bgm.runtime_status（零探针文件判据）。"""
+    from dramaclip.infra.model_manager import music_runtime
+
+    if music_runtime.installed(context.data_dir):
+        raise RpcDomainError(_ERR_MODEL_STATE, "配乐运行环境已就绪")
+    _active = [
+        j for j in context.job_store.list_recent(limit=50, active_only=True)
+        if j["type"] == "music_runtime"
+    ]
+    if _active:
+        raise RpcDomainError(_ERR_MODEL_STATE, "已有安装任务进行中，请等待完成或取消")
+    job_id = context.job_store.create("music_runtime", ref_id="music-runtime")
+    context.job_store.mark_running(job_id)
+    cancel_event = threading.Event()
+    context.cancel_events[job_id] = cancel_event
+    done_event = threading.Event()
+
+    def _run() -> None:
+        try:
+            music_runtime.install(
+                context.data_dir,
+                cancel=cancel_event,
+                on_progress=lambda percent, stage: context.job_store.set_progress(
+                    job_id, float(percent), stage
+                ),
+            )
+            context.notifier.log("info", "配乐运行环境安装完成")
+        except Exception as exc:  # noqa: BLE001 - 作业失败原样落 error
+            context.job_store.mark_failed(job_id, str(exc))
+        finally:
+            done_event.set()
+
+    def _watch() -> None:
+        done_event.wait()
+        job = context.job_store.get(job_id)
+        if job is not None and job["status"] == "running":
+            context.job_store.mark_completed(job_id)
+        context.cancel_events.pop(job_id, None)
+
+    threading.Thread(target=_run, daemon=True, name="music-runtime-install").start()
+    threading.Thread(target=_watch, daemon=True, name="music-runtime-watch").start()
+    return {"job_id": job_id}
 
 
 def _install_local_runtime(context: AppContext, *, ready_label: str) -> dict[str, Any]:

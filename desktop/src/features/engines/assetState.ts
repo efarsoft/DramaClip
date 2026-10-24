@@ -20,7 +20,7 @@ export type Reports = ReadonlyMap<string, VerifyReport>;
 
 export type AssetState = 'ready' | 'untested' | 'unverified' | 'incomplete' | 'missing' | 'reserve';
 
-export type EngineTab = 'asr' | 'tts' | 'llm' | 'vision';
+export type EngineTab = 'asr' | 'tts' | 'llm' | 'vision' | 'music';
 
 const LABEL: Record<AssetState, string> = {
   ready: '就绪',
@@ -322,7 +322,7 @@ function findAsset(
  * 它们的接入入口在「云端配置」域（engine_configs enable → 镜像生效设置键）。 */
 export function localDomainModels(
   models: readonly ModelInfo[],
-  kind: 'asr' | 'tts',
+  kind: 'asr' | 'tts' | 'music',
 ): ModelInfo[] {
   return models.filter((model) => model.kind === kind && model.cloud !== true);
 }

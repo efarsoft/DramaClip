@@ -1,6 +1,7 @@
 /** 渲染层唯一 IPC 出口（docs/desktop/01 §4）。组件禁止直接调 window.dramaclip。 */
 import type {
-  AnalysisJobStatus, AnalysisResults, CopyFilesResult, DashboardSummary, DataPaths, DramaClipBridge,
+  AnalysisJobStatus, AnalysisResults, BgmGenerateRequest, BgmLibrary, BgmRescanResult,
+  BgmRuntimeStatus, CopyFilesResult, DashboardSummary, DataPaths, DramaClipBridge,
   EngineConfig, ExportJob, ExportSubmitResult, ExportTranscriptsResult, HealthResult, ImportInspection,
   ImportRecord, JobInfo, JobsListResult, LlmTraceListResult, ModeRecommendation, ModelInfo, NarrationMode,
   NarrationPlan, OrphanCopy, PingResult, PlanDetail, PlanTraceResult, PlanVariantsResult, Project,
@@ -266,6 +267,21 @@ export interface ImportRecordsResult {
   readonly records: ImportRecord[];
   readonly error: string;
 }
+
+/** 配乐生成运行环境（music-venv，独立于双栈 tts-venv）：安装走作业模式，状态在 bgmApi。 */
+export const musicRuntimeApi = {
+  install: (): Promise<{ job_id: string }> =>
+    rpc<{ job_id: string }>('models.install_music_runtime', {}),
+} as const;
+
+/** 配乐域（bgm）：ACE-Step 本地 BGM 生成 + 曲库清单/重扫。 */
+export const bgmApi = {
+  generate: (req: BgmGenerateRequest): Promise<{ job_id: string }> =>
+    rpc<{ job_id: string }>('bgm.generate', req as unknown as Record<string, unknown>),
+  rescan: (): Promise<BgmRescanResult> => rpc<BgmRescanResult>('bgm.rescan', {}),
+  library: (): Promise<BgmLibrary> => rpc<BgmLibrary>('bgm.library', {}),
+  runtimeStatus: (): Promise<BgmRuntimeStatus> => rpc<BgmRuntimeStatus>('bgm.runtime_status', {}),
+} as const;
 
 export const modelsApi = {
   list: (): Promise<ModelInfo[]> => rpc<ModelInfo[]>('models.list'),
