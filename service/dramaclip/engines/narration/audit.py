@@ -33,6 +33,9 @@ class Finding:
     location: str = ""              # 出问题的字段路径，如 segment[3].text
     prompt_quote: str = ""          # 该规则对应的 prompt 原文（溯源）
     needs_human: bool = False       # soft 规则默认需人工复核
+    # 可执行修法（指出问题不算批评，批评必须带怎么改——重掷/重写循环吃这条；
+    # 给不出具体修法的问题就别填，空串=只有定位没有修法）
+    fix_hint: str = ""
 
 
 @dataclass
@@ -427,6 +430,7 @@ def _speaker_and_meta_findings(
         else f"出现元叙述：{meta_hits}",
         location=";".join(meta_hits) if meta_hits else "",
         prompt_quote="禁元叙述（零容忍）：解说员在讲故事不在讲文件——「第X集」「画面里」「镜头」「素材」这类字眼一个不许有，观众不该意识到这是被剪出来的视频。",
+        fix_hint="删掉该字眼，改成角色的动作或台词直接呈现；hook 与 cta 里出现时整句重写",
     ))
     return findings
 
@@ -449,6 +453,7 @@ def _numerals_and_person_findings(
         location="segments" if arabic_in_text else "",
         prompt_quote="数字一律写中文（两千斤/八年/四十七块）：「2,000斤」是报表写法，配音念出来全毁。",
         needs_human=True,
+        fix_hint="把这些片段里的阿拉伯数字逐个改写成中文数词（2000→两千，47→四十七）",
     ))
     joined = hook + cta + " ".join(s.get("text", "") for s in segs)
     fp = _count(joined, _PERSON_FIRST)

@@ -64,6 +64,13 @@ _FUND_BASE = (
 内容纪律：所有情节、细节、台词必须来自给定转写，禁止编造转写外的事件或设定；真实锚点（年份/金额/物件/称呼）只能原样摘自转写，转写里没有就少写，禁止为凑数发明——编出来的「具体」比抽象更假，观众一听就出戏。专有名词照转写里的写法，转写没给的宁写「那座山」「京城」，不用你记忆里的山名剧名补齐。转写没点名的人用「那人/她/对方」代称，不许安插转写外身份；转写含明显错字、听不清或断句乱时，只讲画面里能确定的事，宁可少说，不许编圆。
 禁元叙述（零容忍）：解说员在讲故事不在讲文件——「第X集」「画面里」「镜头」「素材」这类字眼一个不许有，观众不该意识到这是被剪出来的视频。
 数字一律写中文（两千斤/八年/四十七块）：「2,000斤」是报表写法，配音念出来全毁。人称二选一并全篇统一，禁止中途切换。
+交稿前自检（逐条过完再交，任何一条不过先改完再交）：
+一、通篇搜一遍：没有「第X集/画面里/镜头/素材」这类字眼；
+二、正文没有两位以上的阿拉伯数字，金额年份都是中文；
+三、结尾没有「关注/点赞/收藏」这类号召；
+四、人称从头到尾一个立场，没有中途切换；
+五、每段时间起止真实递增、互不重叠，段数达到要求下限；
+六、最后一段停在最高潮的半拍上，不是把故事讲圆。
 """
     + STYLE_CARD
 )
@@ -506,6 +513,12 @@ def write_script_episodes(
                 "\n\n上一稿违反了这些硬规则，重写时逐条避免：\n"
                 + "\n".join(f"- {q}" for q in attempts[-1]["audit_quotes"])
             )
+            details = attempts[-1].get("audit_details") or []
+            if details:
+                ask += (
+                    "\n\n上一稿的具体违例（逐条对照修正，改完按「交稿前自检」过一遍再交）：\n"
+                    + "\n".join(f"- {d}" for d in details[:8])
+                )
         elif attempts and attempts[-1].get("rejected"):
             tail_note = (
                 f"上一次你只写了 {attempts[-1]['rejected']}。"
@@ -557,8 +570,15 @@ def write_script_episodes(
                 "soft": soft_ids,
             }
             if hard_fails:
-                # 规则锚定重掷：把 prompt 原句喂回去，而不是让模型猜哪条没过
+                # 规则锚定重掷：把 prompt 原句喂回去，而不是让模型猜哪条没过；
+                # 再带上逐条违例明细（哪里违了+怎么改）——只喂规则原文，模型每轮
+                # 都在盲改同一类错（重掷诊断升级 2026-10-24）。
                 attempts[-1]["audit_quotes"] = [f.prompt_quote for f in hard_fails if f.prompt_quote]
+                attempts[-1]["audit_details"] = [
+                    f"{f.location or '全文'}：{f.message}"
+                    + (f"（改法：{f.fix_hint}）" if f.fix_hint else "")
+                    for f in hard_fails
+                ]
                 script = None
         if script is not None:
             break
