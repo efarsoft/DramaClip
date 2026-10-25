@@ -7,7 +7,7 @@
 AI 替你把全剧看完、稿写好、角色原声克隆成解说嗓、画面剪口对齐镜头、响度混到发布标准——
 媒体处理全部在你这台机器上跑完，素材不出本机，中断了随时接着跑。
 
-![version](https://img.shields.io/badge/version-0.2.2-7C9CFF)
+![version](https://img.shields.io/badge/version-0.2.3-7C9CFF)
 ![platform](https://img.shields.io/badge/platform-Windows-4A5568)
 ![python](https://img.shields.io/badge/Python-3.12%2B-3776AB)
 ![node](https://img.shields.io/badge/Node.js-24%2B-339933)
