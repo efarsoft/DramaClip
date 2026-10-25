@@ -9,7 +9,7 @@ import {
   ReloadOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
-import { Button, Checkbox, Input, InputNumber, Select, Table } from 'antd';
+import { Button, Checkbox, Input, InputNumber, Select, Table, Tabs } from 'antd';
 import type { ReactElement } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
@@ -248,6 +248,7 @@ function LibraryCard({
   onChanged: () => void;
 }): ReactElement {
   const { playingPath, toggle } = useBgmPlayer(setNotice);
+  const [filter, setFilter] = useState<string>('all');
   const rescan = async (): Promise<void> => {
     setNotice('');
     try {
@@ -262,9 +263,11 @@ function LibraryCard({
       setNotice(`重扫失败：${errText(exc)}`);
     }
   };
-  const tracks = [...(lib?.tracks ?? [])].sort(
-    (a, b) => a.emotion.localeCompare(b.emotion) || a.file_path.localeCompare(b.file_path),
-  );
+  const tracks = [...(lib?.tracks ?? [])]
+    .filter((t) => filter === 'all' || t.emotion === filter)
+    .sort(
+      (a, b) => a.emotion.localeCompare(b.emotion) || a.file_path.localeCompare(b.file_path),
+    );
   return (
     <PageSection
       title="曲库"
@@ -280,13 +283,33 @@ function LibraryCard({
         </Button>
       }
     >
+      <Tabs
+        size="small"
+        activeKey={filter}
+        onChange={setFilter}
+        items={[
+          { key: 'all', label: `全部（${String(lib?.tracks.length ?? 0)}）` },
+          ...EMOTIONS.map((e) => {
+            const group = lib?.groups.find((g) => g.emotion === e.key);
+            return {
+              key: e.key,
+              label: `${e.label}（${String(group?.count ?? 0)}）`,
+            };
+          }),
+        ]}
+      />
       <Table
         size="small"
         rowKey="id"
         pagination={{ pageSize: 20, hideOnSinglePage: true }}
         dataSource={tracks.map((t) => ({ ...t }))}
         columns={[
-          { title: '情绪', dataIndex: 'emotion', width: 90 },
+          {
+            title: '情绪',
+            dataIndex: 'emotion',
+            width: 90,
+            render: (v: string) => EMOTIONS.find((e) => e.key === v)?.label ?? v,
+          },
           {
             title: '曲目',
             dataIndex: 'file_path',
