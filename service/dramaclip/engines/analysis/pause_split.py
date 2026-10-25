@@ -43,7 +43,43 @@ class PauseAnalysisUnavailable(ValueError):
 
 
 def _frame_energies(pcm: bytes, frame_bytes: int) -> list[float]:
-    """逐帧 RMS（16bit 小端）：audioop 在 3.13 移除，纯 int 运算。"""
+    """逐帧 RMS（16bit 小端）：numpy 向量化，numpy 缺失回退纯 int 循环。
+
+    数值契约（逐位一致，不是近似——间隙阈值经活库对拍定值，能量算法漂移会
+    悄悄改切点）：int64 整数累加与顺序无关，与纯 Python 的 int 累加恒等；
+    开方两侧都走 ``math.sqrt``/``np.sqrt``（IEEE 754 正确舍入操作）——最初
+    Python 侧写 ``(total/samples) ** 0.5``，实测 Windows 的 pow 与 sqrt 有
+    1-ulp 差异被对拍测试抓住（2026-10-24）。分块累计把 3h 集（pcm ≈ 345MB）
+    的额外内存峰值压在几十 MB，换两个数量级的提速。
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        return _frame_energies_python(pcm, frame_bytes)
+
+    samples = frame_bytes // 2
+    frames = (len(pcm) - len(pcm) % frame_bytes) // frame_bytes
+    if frames <= 0:
+        return []
+    all_samples = np.frombuffer(pcm, dtype="<i2", count=frames * samples)
+    totals = np.empty(frames, dtype=np.int64)
+    block = 1 << 14  # 每块 16384 帧 ≈ 8 分钟音频；块内 int64 中间量 ~60MB
+    for lo in range(0, frames, block):
+        hi = min(lo + block, frames)
+        chunk = all_samples[lo * samples : hi * samples].reshape(hi - lo, samples)
+        totals[lo:hi] = (chunk.astype(np.int64) * chunk.astype(np.int64)).sum(axis=1)
+    roots = np.sqrt(totals / samples)
+    return [float(value) for value in roots]
+
+
+def _frame_energies_python(pcm: bytes, frame_bytes: int) -> list[float]:
+    """纯 int 参考实现（numpy 缺失降级 + 对拍基准）：audioop 在 3.13 移除。
+
+    开方用 math.sqrt（IEEE 正确舍入）而非 ``** 0.5``——与 numpy 路径逐位同源，
+    见 _frame_energies 的数值契约注释。
+    """
+    import math
+
     energies: list[float] = []
     for i in range(0, len(pcm) - frame_bytes + 1, frame_bytes):
         total = 0
@@ -51,7 +87,7 @@ def _frame_energies(pcm: bytes, frame_bytes: int) -> list[float]:
         for j in range(samples):
             sample = int.from_bytes(pcm[i + j * 2 : i + j * 2 + 2], "little", signed=True)
             total += sample * sample
-        energies.append((total / samples) ** 0.5)
+        energies.append(math.sqrt(total / samples))
     return energies
 
 

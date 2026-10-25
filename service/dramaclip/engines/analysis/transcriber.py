@@ -312,8 +312,29 @@ class FasterWhisperEngine:
             result.append(AsrSegment(start=seg.start, end=seg.end, text=text, words=words))
         return result
 
+    def _require_local_model(self) -> None:
+        """本地模型预检：缺失给行动性引导，不在分析路径里静默联网下载。
+
+        download_root 的 HF 缓存布局与 registry.detect_status 同一套
+        （models--Systran--…/snapshots/<rev>/model.bin），引擎中心「下载」落的
+        正是这一份。放行缺失的话，huggingface_hub 会自己去撞网络——国内网络
+        下用户看到的是英文连接超时，那是「分析失败没细节」的又一种来源。
+        """
+        if self._models_dir is None:
+            return
+        short = self._model_size.removeprefix("faster-whisper-")
+        for cache_dir in sorted(self._models_dir.glob(f"models--*faster-whisper-{short}")):
+            for snapshot in sorted(cache_dir.glob("snapshots/*"), reverse=True):
+                if (snapshot / "model.bin").is_file():
+                    return
+        raise ValueError(
+            f"未找到本地 Whisper 模型（{self._model_size}）："
+            "请到「引擎中心 → 语音识别 ASR」下载模型资产后再分析"
+        )
+
     def _ensure_model(self) -> WhisperModel:
         if self._model is None:
+            self._require_local_model()
             from faster_whisper import WhisperModel  # ml extras 懒加载
 
             if self._requested == "cpu":
