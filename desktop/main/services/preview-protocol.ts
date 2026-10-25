@@ -25,6 +25,9 @@ const CONTENT_TYPES: Record<string, string> = {
   png: 'image/png',
   mp3: 'audio/mpeg',
   wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  flac: 'audio/flac',
+  m4a: 'audio/mp4',
 };
 
 /** 未带 Range 的整读上限：封面 jpg 与试听 wav 都在 MB 级，1GiB 已是极限余量。 */

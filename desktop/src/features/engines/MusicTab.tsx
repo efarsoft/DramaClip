@@ -3,13 +3,24 @@
  与 ASR/TTS 域的分工差异：配乐没有「选为生效」——模型装好即可用，生成是显式
  动作（离线批量入库，导出选曲链零改动消费）；曲库清单来自 bgm_tracks 表（服务端
  已入库的事实），不是资产目录扫描。 */
-import { ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import {
+  PauseCircleOutlined,
+  PlayCircleOutlined,
+  ReloadOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons';
 import { Button, Checkbox, Input, InputNumber, Select, Table } from 'antd';
 import type { ReactElement } from 'react';
-import { useCallback, useEffect, useState } from 'react';
-import type { BgmEmotion, BgmLibrary, BgmRuntimeStatus, ModelInfo } from '@dramaclip/protocol';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type {
+  BgmEmotion,
+  BgmLibrary,
+  BgmRuntimeStatus,
+  BgmTrackRow,
+  ModelInfo,
+} from '@dramaclip/protocol';
 import { PageSection } from '../../components/layout/PageKit';
-import { bgmApi, musicRuntimeApi } from '../../services/client';
+import { bgmApi, mediaUrl, musicRuntimeApi } from '../../services/client';
 import { tokens } from '../../styles/theme';
 import { DownloadSourceButton } from './ModelDownloadPopover';
 import { StateBadge } from './AssetKit';
@@ -25,6 +36,54 @@ const EMOTIONS: readonly { key: BgmEmotion; label: string }[] = [
 ];
 
 const errText = (exc: unknown): string => (exc instanceof Error ? exc.message : String(exc));
+
+function useBgmPlayer(onStop: (message: string) => void): {
+  playingPath: string | null;
+  toggle: (path: string) => void;
+} {
+  const [playingPath, setPlayingPath] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playingRef = useRef<string | null>(null);
+
+  const stop = useCallback((): void => {
+    if (audioRef.current !== null) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    playingRef.current = null;
+    setPlayingPath(null);
+  }, []);
+
+  const toggle = useCallback(
+    (path: string): void => {
+      if (audioRef.current !== null && playingRef.current === path) {
+        stop();
+        return;
+      }
+      if (audioRef.current !== null) {
+        audioRef.current.pause();
+      }
+      const element = new Audio(mediaUrl(path));
+      element.onended = () => {
+        audioRef.current = null;
+        playingRef.current = null;
+        setPlayingPath(null);
+      };
+      audioRef.current = element;
+      playingRef.current = path;
+      setPlayingPath(path);
+      element.play().catch(() => {
+        audioRef.current = null;
+        playingRef.current = null;
+        setPlayingPath(null);
+        onStop('试听播放失败（文件不可读或格式不支持）');
+      });
+    },
+    [onStop, stop],
+  );
+  useEffect(() => stop, [stop]);
+  return { playingPath, toggle };
+}
 
 export function MusicTab({ domain }: { domain: DomainTabProps }): ReactElement {
   const musicModels = domain.models.filter(
@@ -188,6 +247,7 @@ function LibraryCard({
   setNotice: (text: string) => void;
   onChanged: () => void;
 }): ReactElement {
+  const { playingPath, toggle } = useBgmPlayer(setNotice);
   const rescan = async (): Promise<void> => {
     setNotice('');
     try {
@@ -202,6 +262,9 @@ function LibraryCard({
       setNotice(`重扫失败：${errText(exc)}`);
     }
   };
+  const tracks = [...(lib?.tracks ?? [])].sort(
+    (a, b) => a.emotion.localeCompare(b.emotion) || a.file_path.localeCompare(b.file_path),
+  );
   return (
     <PageSection
       title="曲库"
@@ -219,20 +282,74 @@ function LibraryCard({
     >
       <Table
         size="small"
-        rowKey="emotion"
-        pagination={false}
-        dataSource={(lib?.groups ?? []).map((group) => ({ ...group }))}
+        rowKey="id"
+        pagination={{ pageSize: 20, hideOnSinglePage: true }}
+        dataSource={tracks.map((t) => ({ ...t }))}
         columns={[
-          { title: '情绪', dataIndex: 'emotion', width: 120 },
-          { title: '曲目数', dataIndex: 'count', width: 100 },
-          { title: '总时长(秒)', dataIndex: 'total_s', width: 120 },
+          { title: '情绪', dataIndex: 'emotion', width: 90 },
           {
-            title: '说明',
-            render: () => '导出时按主导情绪选最近 BPM 一曲铺床；生成曲与手工投放曲同权参选',
+            title: '曲目',
+            dataIndex: 'file_path',
+            render: (_: unknown, row: BgmTrackRow) =>
+              row.file_path.replaceAll('\\', '/').split('/').pop(),
+          },
+          {
+            title: '时长',
+            dataIndex: 'duration_s',
+            width: 90,
+            render: (v: number) => `${String(Math.round(v))}s`,
+          },
+          {
+            title: 'BPM',
+            dataIndex: 'bpm',
+            width: 80,
+            render: (v: number | null) => (v == null ? '—' : String(v)),
+          },
+          {
+            title: '来源',
+            dataIndex: 'license',
+            width: 150,
+            render: (v: string, row: BgmTrackRow) =>
+              row.license.includes('本地生成') ? 'ACE-Step 生成' : v || row.attribution || '手工投放',
+          },
+          {
+            title: '',
+            key: 'play',
+            width: 70,
+            render: (_: unknown, row: BgmTrackRow) => (
+              <PlayButton
+                path={row.file_path}
+                active={playingPath === row.file_path}
+                onToggle={toggle}
+              />
+            ),
           },
         ]}
       />
     </PageSection>
+  );
+}
+
+function PlayButton({
+  path,
+  active,
+  onToggle,
+}: {
+  path: string;
+  active: boolean;
+  onToggle: (path: string) => void;
+}): ReactElement {
+  return (
+    <Button
+      size="small"
+      type={active ? 'primary' : 'default'}
+      icon={active ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+      onClick={() => {
+        onToggle(path);
+      }}
+    >
+      {active ? '停止' : '试听'}
+    </Button>
   );
 }
 
