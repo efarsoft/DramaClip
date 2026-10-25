@@ -240,6 +240,15 @@ AI 替你把全剧看完、稿写好、角色原声克隆成解说嗓、画面�
 - **Kokoro / edge-tts / IndexTTS-2.5 / CosyVoice** - 本地与云端多路配音；百炼 DashScope 适配器（ASR/TTS 云端引擎底层就绪）
 - **OpenAI 兼容 LLM** - 编剧、语义与转写精炼层（云端或本地端点，凭据在界面配置）
 
+### GPU 支持
+按显卡厂商自动适配，能力面各不相同：
+
+- **NVIDIA**：全量加速——转写/音色克隆走 CUDA（安装运行环境时按显卡算力自动选轮），人声分离走 ONNX Runtime GPU，导出视频走 NVENC 硬编。
+- **AMD**：导出视频走 AMF 硬编（导出时真试编）；人声分离走 DirectML（安装运行环境时自动选轮）；转写/配音走 CPU。
+- **Intel**：导出视频走 QSV 硬编；人声分离走 DirectML；**Arc 独显与 Meteor Lake+ 核显可装 XPU 加速轮**——转写/音色克隆走 Intel XPU 后端（实验性：算子覆盖未经验证，首次真算失败会自动回退 CPU，也可在设置里显式选 CPU）。
+- **云端兜底**：没有 NVIDIA 独显时，界面会自动建议云端引擎（百炼 ASR/TTS），质量不受本机硬件限制。
+- 后续版本的本地推理引擎切换将覆盖 AMD/Intel 显卡的本地 AI 加速（Vulkan 后端），现阶段 AMD 显卡的转写/配音建议配合云端引擎使用。
+
 ### 媒体管线
 - **FFmpeg 8.1.1（随包内置，免安装）** - 滤镜链编排、ASS 字幕烧录、libx264 / NVENC 编码
 - **EBU R128 loudnorm** - 成片响度归一与真峰值复核
@@ -269,7 +278,7 @@ AI 替你把全剧看完、稿写好、角色原声克隆成解说嗓、画面�
 - Node.js 24+
 - Python 3.12+ 与 [uv](https://docs.astral.sh/uv/)（管理 `service/.venv`，依赖真相源）
 - FFmpeg **无需安装**（已随包内置 `resources/ffmpeg/`）
-- NVIDIA 显卡可选——无显卡全流程照跑
+- 显卡全可选——无独显全流程照跑（详见上方「GPU 支持」：NVIDIA 全量加速，AMD/Intel 视频硬编 + 部分加速，其余走云端）
 
 ### 安装步骤
 

@@ -132,3 +132,12 @@
 6. 结论回写本节。
 
 **AMD DML-ONNX：业主拍板排除（复杂度考量）**——funasr-ONNX/kokoro-onnx 不做，5500XT 的分离 DML 已落地成果留用。**UI 显式 xpu 选项**：auto 默认已自动上 XPU，显式选项待协议加 `torch_device` 字段后另行小批。
+
+### 9.3 AMD 路线终裁与 spike 记录（2026-10-25 晚）
+
+业主再度拍板：**AMD 路线选「等 v0.3 Vulkan」**（原排除升级为终裁）；spike 已在本机 5500XT 真跑，发现归档：
+
+- **funasr 官方导出器深坑**：`AutoModel.export(type=onnx)` 的图内 `make_pad_mask` 钉死常量 512 帧（约 5 秒），`max_seq_len` kwarg 经 deepcopy 链**不生效**（内层模型 `export_rebuild_model` 重新绑定导出面，实例级 patch 被覆盖）；正确 patch 点= `funasr.models.paraformer.export_meta` 模块函数（已实测可注入 alphas/peaks 输出）。输入 >~200 帧即 ScatterND 形状错——**官方单图导出对长音频就是坏的**，与社区 fork（QuadraV 修复版）修复对象一致。
+- **时间戳可随图带出**：patch `export_meta.export_forward` 返回 predictor 的 `alphas`/`pre_peak_index` 后，导出物含字边界帧数据（本机实测 [1, L+1] 形状）。
+- **热词不可导出**：SeACo 热词模块无 ONNX 导出通道——任何 ONNX 化路线的公共缺口。
+- **终裁**：不修官方导出器、不引 sherpa-onnx 拆分图自研编排；AMD 用户现阶段转写/配音走 CPU 或云端引擎，本地加速等 v0.3 Vulkan。spike 导出物（865MB）已清理；脚本要点存本节。
