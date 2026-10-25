@@ -13,6 +13,7 @@ from dramaclip.engines.llm_trace import dump_trace, trace_path
 from dramaclip.engines.narration import casting, conversion, scriptwriter
 from dramaclip.engines.narration.models import NarrationText, PlanData, TimelineSegment
 from dramaclip.engines.narration.numerals import to_chinese_numerals
+from dramaclip.engines.narration.prompt_rules import assemble as _assemble_rules
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable, client_for
 
 logger = logging.getLogger(__name__)
@@ -42,21 +43,23 @@ def _line_cap_of(mode: str) -> int:
 
 def _structure_prompt(mode: str) -> str:
     """结构指令按模式组装：行长上限随模式（超短不设 60 字帽，时长让位）。"""
-    return (
-        "你是这部剧的专属解说编剧：全集看了三遍，角色底细如数家珍，"
-        "现在在饭桌上给朋友讲它——讲完他要连夜去刷原剧。事实只来自下面给出的台词。"
-        "下面给出若干旁白槽位，每个标注了「要做的事」、覆盖的画面区间、区间内原片台词。"
-        "为每个槽位各写一条解说文案。"
-        '只输出 JSON：{"lines": [{"id": "槽位id", "text": "解说文案"}]}，不要其他文字。'
-        f"硬性要求（一字不差）：lines 必须覆盖全部槽位 id；"
-        f"每条不超过 {_line_cap_of(mode)} 字；"
-        "文案必须完成该槽位的「要做的事」，不得答非所问；"
-        "情节、细节、称谓只能来自给定台词，禁止编造台词之外的事件。"
-        "写法（稀疏用，别每段齐备——真人有偏科）：开场可引区内最冲突原话、"
-        "条尾可留半句钩勾住下一条；口语短句，转折只用结果/谁知/哪成想；"
-        "念着拗口就重写，这段要被配音念出来，不是给人看的文章。"
-        "全篇手艺（本次调用看得到全部槽位，这两条做得到）：相邻槽位禁止同款收尾；"
-        "同一个核心意象（数字+物件）全篇至多完整点名两次，再提用代称。"
+    return _assemble_rules(
+
+            "你是这部剧的专属解说编剧：全集看了三遍，角色底细如数家珍，"
+            "现在在饭桌上给朋友讲它——讲完他要连夜去刷原剧。事实只来自下面给出的台词。"
+            "下面给出若干旁白槽位，每个标注了「要做的事」、覆盖的画面区间、区间内原片台词。"
+            "为每个槽位各写一条解说文案。"
+            '只输出 JSON：{"lines": [{"id": "槽位id", "text": "解说文案"}]}，不要其他文字。'
+            "硬性要求（一字不差）：{lines_cover_all_slots}"
+            f"每条不超过 {_line_cap_of(mode)} 字；"
+            "{slot_contract}"
+            "情节、细节、称谓只能来自给定台词，禁止编造台词之外的事件。"
+            "写法（稀疏用，别每段齐备——真人有偏科）：开场可引区内最冲突原话、"
+            "条尾可留半句钩勾住下一条；口语短句，转折只用结果/谁知/哪成想；"
+            "念着拗口就重写，这段要被配音念出来，不是给人看的文章。"
+            "全篇手艺（本次调用看得到全部槽位，这两条做得到）：相邻槽位禁止同款收尾；"
+            "同一个核心意象（数字+物件）全篇至多完整点名两次，再提用代称。"
+
     )
 
 

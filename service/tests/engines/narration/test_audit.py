@@ -311,13 +311,19 @@ def test_copy_line_cap_accepts_production_tolerance() -> None:
 
 
 def test_all_prompt_quotes_are_literal_substrings() -> None:
-    """守卫：prompt_quote 必须是 prompt 常量的字面子串——省略号/尾标点漂移会让
-    hard 重掷给模型喂「不存在的原句」，规则锚定变成幻觉锚定。"""
+    """守卫（注册表单源版）：规则原文只存 prompt_rules 一处，字面一致由装配构造
+    恒真——这条守卫查的是三件仍然需要人守的事：
+    ① audit 引用的每个 key 在注册表里存在（拼错 key 当场爆，不静默）；
+    ② 注册表每条原文仍是装配后 prompt 常量的字面子串（防有人绕开注册表手改
+       常量，让 {key} 占位与注册表值各活各的）；
+    ③ 注册表没有孤儿条目（每条都被 audit 引用——注册表烂掉的起点就是没人
+       记得某条还在不在用）。"""
     import ast
     import inspect
 
     from dramaclip.engines.narration import copywriter as C
     from dramaclip.engines.narration import scriptwriter as S
+    from dramaclip.engines.narration.prompt_rules import RULE_TEXTS
 
     texts = []
     for mod in (S, C):
@@ -325,16 +331,27 @@ def test_all_prompt_quotes_are_literal_substrings() -> None:
             value = getattr(mod, name)
             if isinstance(value, str) and len(value) > 30:
                 texts.append(value)
-    misses = []
+
     tree = ast.parse(inspect.getsource(A))
+    used: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.keyword) and node.arg == "prompt_quote":
-            if not isinstance(node.value, ast.Constant):
-                continue  # f-string 动态 quote（行长两条）由 test_audit 现有用例覆盖
-            quote = node.value.value
-            if not any(quote in text for text in texts):
-                misses.append(quote[:50])
-    assert misses == [], f"以下 prompt_quote 不再是 prompt 原文的字面子串：{misses}"
+            if not isinstance(node.value, ast.Subscript):
+                continue  # f-string 动态 quote（行长两条）由现有用例覆盖
+            key_node = node.value.slice
+            if isinstance(key_node, ast.Constant):
+                used.add(str(key_node.value))
+    unknown = sorted(used - set(RULE_TEXTS))
+    assert unknown == [], f"audit 引用了注册表不存在的 key：{unknown}"
+
+    orphans = sorted(set(RULE_TEXTS) - used)
+    assert orphans == [], f"注册表存在无人引用的孤儿条目（删掉或接线）：{orphans}"
+
+    homeless = [
+        key for key, text in RULE_TEXTS.items()
+        if not any(text in candidate for candidate in texts)
+    ]
+    assert homeless == [], f"以下注册表原文不再出现在任何 prompt 常量中：{homeless}"
 
 
 def test_hook_payoff_flags_unfulfilled_anchor() -> None:

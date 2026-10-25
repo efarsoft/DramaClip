@@ -18,6 +18,8 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from dramaclip.engines.narration.prompt_rules import RULE_TEXTS as _RULES
+
 # ---------------------------------------------------------------------------
 # 数据结构
 # ---------------------------------------------------------------------------
@@ -146,7 +148,7 @@ def _narrative_texture_findings(segs: list[dict[str, Any]]) -> list[Finding]:
         "问号收尾配额内" if len(suspensive) <= 2
         else f"以问号收尾的段 {len(suspensive)} 个（下标 {suspensive}）——悬问连发节拍单一",
         location="segments" if suspensive else "",
-        prompt_quote="全稿以问号收尾的段至多两个，相邻段禁止同款收尾；",
+        prompt_quote=_RULES["question_ending_cap"],
         needs_human=True,
     ))
 
@@ -161,7 +163,7 @@ def _narrative_texture_findings(segs: list[dict[str, Any]]) -> list[Finding]:
         "核心意象点名在配额内" if not over
         else f"同一「数字+量词」意象点名超两次：{over}——再提用代称或只讲新后果",
         location=";".join(sorted(over)) if over else "",
-        prompt_quote="核心意象（数字+物件，如两千斤玄铁锅）全稿至多完整点名两次，再提只讲它带来的新后果。",
+        prompt_quote=_RULES["core_motif_cap"],
         needs_human=True,
     ))
 
@@ -178,7 +180,7 @@ def _narrative_texture_findings(segs: list[dict[str, Any]]) -> list[Finding]:
         else f"连续 {window} 段无体感/心理落点的窗口：{beatless[:3]}"
         "——事件复述连排，情绪共鸣偏薄",
         location=";".join(f"segments[{i}]" for i in beatless[:3]) if beatless else "",
-        prompt_quote="每三到四段落一个人物的体感或心理瞬间（「脸上发烫」「攥紧了指节」式——用身体写内心，禁直呼「愤怒/悲伤」这类情绪名词）",
+        prompt_quote=_RULES["body_sensation_sparse"],
         needs_human=True,
     ))
     findings.append(_phrase_monotony_finding(segs))
@@ -212,7 +214,7 @@ def _phrase_monotony_finding(segs: list[dict[str, Any]]) -> Finding:
         if not hits
         else f"句式雷同三连：{'；'.join(hits[:4])}——换句式或换收尾，模板感是划走开关",
         location="segments",
-        prompt_quote="相邻段禁止同款收尾",
+        prompt_quote=_RULES["no_same_ending_adjacent"],
         needs_human=bool(hits),
     )
 
@@ -222,7 +224,7 @@ def _script_shape_findings(segs: list[dict[str, Any]]) -> list[Finding]:
     findings: list[Finding] = []
     findings.append(Finding(
         "STRUCT_JSON_ONLY", "structure", "hard", True,
-        "输出为合法 JSON（解析通过）", prompt_quote="只输出 JSON，不要多余文字。",
+        "输出为合法 JSON（解析通过）", prompt_quote=_RULES["json_only"],
     ))
     missing_ep = [i for i, s in enumerate(segs) if "episode" not in s or s.get("episode") is None]
     findings.append(Finding(
@@ -231,7 +233,7 @@ def _script_shape_findings(segs: list[dict[str, Any]]) -> list[Finding]:
         not missing_ep,
         "每个片段都带 episode" if not missing_ep else f"缺 episode 的片段下标：{missing_ep}",
         location="segments" if missing_ep else "",
-        prompt_quote="每个片段都必须带 episode，一个都不能漏；",
+        prompt_quote=_RULES["every_segment_episode"],
     ))
     findings.append(_episode_jump_finding(segs))
     return findings
@@ -289,7 +291,7 @@ def _script_time_findings(
             not bound_viol,
             "start/end 均未超过所在集上界" if not bound_viol else f"超界片段下标：{bound_viol}",
             location="segments" if bound_viol else "",
-            prompt_quote="start/end 取自转写台词的时间区间，不得超过该集上界；",
+            prompt_quote=_RULES["time_within_transcript"],
         ),
         Finding(
             "STRUCT_NON_OVERLAP", "structure", "hard",
@@ -297,7 +299,7 @@ def _script_time_findings(
             "同集内按时间递增且互不重叠"
             if not overlap_viol else f"重叠/倒序片段下标：{overlap_viol}",
             location="segments" if overlap_viol else "",
-            prompt_quote="同集内按时间递增且互不重叠；",
+            prompt_quote=_RULES["timeline_sorted_no_overlap"],
         ),
     ]
 
@@ -318,7 +320,7 @@ def _hook_findings(hook: str) -> list[Finding]:
             not hook_empty,
             "hook 非「他竟然…」式空泛悬念" if not hook_empty else "hook 为空泛悬念（'他竟然'式）",
             location="hook" if hook_empty else "",
-            prompt_quote="hook 必须含一个具体反差事实（身份/生死/数字），禁「他竟然…」式空泛悬念；",
+            prompt_quote=_RULES["hook_concrete_contrast"],
         ),
         Finding(
             "STRUCT_HOOK_ANCHOR", "structure", "soft",
@@ -326,7 +328,7 @@ def _hook_findings(hook: str) -> list[Finding]:
             "hook 含具体反差锚点（数字/身份/生死/物件）" if hook_has_anchor
             else "hook 未检出具体反差锚点（可能偏虚，需人工复核）",
             location="hook" if not hook_has_anchor else "",
-            prompt_quote="hook 必须含一个具体反差事实（身份/生死/数字）",
+            prompt_quote=_RULES["hook_concrete_contrast"],
             needs_human=True,
         ),
     ]
@@ -361,7 +363,7 @@ def _hook_payoff_finding(hook: str, segs: list[dict[str, Any]]) -> Finding:
         else f"钩子抛出的锚点（{detail}）正文全部未再现——承诺的悬念没兑现＝标题党，"
              "要么正文给答案，要么钩子换锚",
         location="hook" if not payoff else "",
-        prompt_quote="hook 必须含一个具体反差事实（身份/生死/数字），禁「他竟然…」式空泛悬念；",
+        prompt_quote=_RULES["hook_concrete_contrast"],
         needs_human=not payoff,
     )
 
@@ -379,7 +381,7 @@ def _cta_findings(cta: str) -> list[Finding]:
             if not cta_forbidden
             else "cta 出现禁用引导词（关注/点赞/收藏/二维码）",
             location="cta" if cta_forbidden else "",
-            prompt_quote="禁剧透最大反转、禁空喊关注/点赞/收藏/二维码；",
+            prompt_quote=_RULES["no_spoiler_climax"],
         ),
         Finding(
             "STRUCT_CTA_THREE_PART", "structure", "soft",
@@ -387,10 +389,7 @@ def _cta_findings(cta: str) -> list[Finding]:
             "cta 含『点击引导 + 看全集』三段式要素" if (cta_has_click and cta_has_watch)
             else f"cta 三段式不全（点击={cta_has_click} 看全集={cta_has_watch}）",
             location="cta" if not (cta_has_click and cta_has_watch) else "",
-            prompt_quote=(
-                "cta 必须是三段式转化引导"
-                "（悬念半句+「点击左下角」+「免费/立即观看全集」，可带剧名）"
-            ),
+            prompt_quote=_RULES["cta_three_part"],
             needs_human=True,
         ),
     ]
@@ -412,7 +411,7 @@ def _speaker_and_meta_findings(
         "声纹标签 [角色X] 已全部换成推断真名" if not unresolved
         else f"仍存在未解析声纹标签的片段下标：{unresolved}（应换真名或保留原标签并说明）",
         location="segments" if unresolved else "",
-        prompt_quote="台词前的[角色X]是声纹聚类标签，同一标签即同一个人：写文案时换成你从称呼与剧情推断出的真名，推断不出再保留原标签；",
+        prompt_quote=_RULES["speaker_tag_realname"],
         needs_human=True,
     ))
     meta_hits = []
@@ -429,7 +428,7 @@ def _speaker_and_meta_findings(
         if not meta_hits
         else f"出现元叙述：{meta_hits}",
         location=";".join(meta_hits) if meta_hits else "",
-        prompt_quote="禁元叙述（零容忍）：解说员在讲故事不在讲文件——「第X集」「画面里」「镜头」「素材」这类字眼一个不许有，观众不该意识到这是被剪出来的视频。",
+        prompt_quote=_RULES["metanarrative"],
         fix_hint="删掉该字眼，改成角色的动作或台词直接呈现；hook 与 cta 里出现时整句重写",
     ))
     return findings
@@ -451,7 +450,7 @@ def _numerals_and_person_findings(
         "解说文案中未见阿拉伯数字（已中文化）" if not arabic_in_text
         else f"含阿拉伯数字的片段下标：{arabic_in_text}（应写中文）",
         location="segments" if arabic_in_text else "",
-        prompt_quote="数字一律写中文（两千斤/八年/四十七块）：「2,000斤」是报表写法，配音念出来全毁。",
+        prompt_quote=_RULES["numerals_cn"],
         needs_human=True,
         fix_hint="把这些片段里的阿拉伯数字逐个改写成中文数词（2000→两千，47→四十七）",
     ))
@@ -463,7 +462,7 @@ def _numerals_and_person_findings(
         not (fp > 0 and sp > 0),
         "人称未混用（一/二人称未同时出现）" if not (fp > 0 and sp > 0)
         else f"一/二人称同时出现（第一={fp} 第二={sp}），可能中途切换",
-        prompt_quote="人称二选一并全篇统一，禁止中途切换。",
+        prompt_quote=_RULES["person_consistent"],
         needs_human=True,
     ))
     return findings
@@ -487,7 +486,7 @@ def _fabrication_findings(
             "FUND_NO_FABRICATION", "fund_base", "soft",
             not fabricated,
             "未检出明显转写外专名" if not fabricated else f"疑似编造专名：{fabricated[:3]}",
-            prompt_quote="所有情节、细节、台词必须来自给定转写，禁止编造转写外的事件或设定；",
+            prompt_quote=_RULES["no_fabrication"],
             needs_human=True,
         )
     ]
@@ -510,7 +509,7 @@ def _invented_anchor_findings(segs: list[dict[str, Any]]) -> list[Finding]:
             if not invent_hits
             else f"疑似转写外硬锚点：{invent_hits[:3]}（须原样出自转写，禁止为凑锚点发明）",
             location=";".join(f"segment[{i}]" for i, _ in invent_hits) if invent_hits else "",
-            prompt_quote="真实锚点（年份/金额/物件/称呼）只能原样摘自转写，转写里没有就少写，禁止为凑数发明",
+            prompt_quote=_RULES["anchor_from_transcript"],
             needs_human=True,
         )
     ]
@@ -527,7 +526,7 @@ def _cross_episode_finding(segs: list[dict[str, Any]]) -> Finding:
         if not cross
         else f"跨集涉及 {eps_present}，需人工确认每处跳集前段尾已把跨集因果说破",
         location="segments" if cross else "",
-        prompt_quote="换集优先取相邻集，大跨度跳集只许跳往确有关键爆点的集，且前集段尾必须把跨集因果说破，禁止无因果跳切；",
+        prompt_quote=_RULES["adjacent_episode_jump"],
         needs_human=cross,
     )
 
@@ -613,7 +612,7 @@ def _person_intro_findings(
                 for i, text in enumerate(texts)
                 if any(name in text for name in repeated)
             )[:200],
-            prompt_quote="每个出场的人都要让观众认得出来（身份或关系随出场带一句）；同一人物全稿只用一个写法",
+            prompt_quote=_RULES["characters_recognizable"],
             needs_human=bool(repeated),
         )
     )
@@ -635,7 +634,7 @@ def _person_intro_findings(
             else f"前集已完整介绍过的人物本稿再走全套：{carried_detail}"
             "——追更观众早已知晓，应改为一句带过（如「上集说到的某人」）",
             location="segments",
-            prompt_quote="每个出场的人都要让观众认得出来（身份或关系随出场带一句）；同一人物全稿只用一个写法",
+            prompt_quote=_RULES["characters_recognizable"],
             needs_human=bool(carried),
         )
     )
@@ -741,7 +740,7 @@ def review_copy(
         not missing,
         "lines 覆盖全部槽位 id" if not missing else f"漏覆盖槽位：{missing}",
         location="lines" if missing else "",
-        prompt_quote="lines 必须覆盖全部槽位 id；",
+        prompt_quote=_RULES["lines_cover_all_slots"],
     ))
 
     # —— 每条不超过行长上限 ——
@@ -772,7 +771,7 @@ def review_copy(
         not meta_hits,
         "无元叙述字眼" if not meta_hits else f"出现元叙述的槽位：{meta_hits}",
         location=";".join(str(h) for h in meta_hits) if meta_hits else "",
-        prompt_quote="禁元叙述（零容忍）：解说员在讲故事不在讲文件——「第X集」「画面里」「镜头」「素材」这类字眼一个不许有，观众不该意识到这是被剪出来的视频。",
+        prompt_quote=_RULES["metanarrative"],
     ))
 
     # —— 完成「要做的事」（软：空文本 / 明显跑题无法全判，标需人工）——
@@ -782,7 +781,7 @@ def review_copy(
         not empty,
         "无空文案槽位" if not empty else f"空文案槽位：{empty}（未完成任务契约）",
         location=";".join(str(e) for e in empty) if empty else "",
-        prompt_quote="文案必须完成该槽位的「要做的事」，不得答非所问；",
+        prompt_quote=_RULES["slot_contract"],
         needs_human=True,
     ))
 
@@ -796,7 +795,7 @@ def review_copy(
         "COPY_SPEAKER_RESOLVE", "fund_slot", "soft",
         not unresolved,
         "声纹标签已换真名" if not unresolved else f"未解析声纹标签槽位：{unresolved}",
-        prompt_quote="台词前的[角色X]是声纹聚类标签，同一标签即同一个人：写文案时换成你从称呼与剧情推断出的真名",
+        prompt_quote=_RULES["speaker_tag_realname"],
         needs_human=True,
     ))
 
