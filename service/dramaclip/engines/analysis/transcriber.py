@@ -39,6 +39,10 @@ def _report_from_state(
     resolved = "cpu" if requested == "cpu" or actual == "cpu" else "cuda"
     if fallback_reason:
         resolved = "cuda"
+    if actual.startswith("xpu") or requested.startswith("xpu"):
+        resolved = "xpu"
+        if fallback_reason:
+            resolved = "cpu"
     return compute.ComputeReport(
         component=component,
         requested=requested,
@@ -74,7 +78,7 @@ def _model_device(model: Any) -> str | None:
         except (StopIteration, TypeError):
             first = None
         kind = getattr(getattr(first, "device", None), "type", None)
-        if kind in {"cuda", "cpu"}:
+        if kind in {"cuda", "xpu", "cpu"}:
             return str(kind)
     resolved = getattr(model, "kwargs", None)
     if isinstance(resolved, dict):
@@ -119,7 +123,11 @@ def _resolve_torch_device(device: str) -> str:
         try:
             import torch
 
-            return "cuda:0" if torch.cuda.is_available() else "cpu"
+            if torch.cuda.is_available():
+                return "cuda:0"
+            if torch.xpu.is_available():
+                return "xpu"
+            return "cpu"
         except Exception:  # noqa: BLE001 - torch 缺失/坏装一律 CPU（funasr 基线路径）
             return "cpu"
     if device == "cuda":

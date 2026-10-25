@@ -27,6 +27,14 @@ def _probe_device(requested: str) -> tuple[str, str]:
         return "cpu", ""
     import torch  # noqa: PLC0415
 
+    if requested.startswith("xpu"):
+        if not torch.xpu.is_available():
+            return "cpu", "torch.xpu.is_available() = False"
+        try:
+            (torch.ones(4, device="xpu") * 2).sum().item()
+            return "xpu", ""
+        except Exception as exc:  # noqa: BLE001 - XPU 算子/驱动缺口如实回退 CPU
+            return "cpu", f"{type(exc).__name__}: {exc}"
     if not torch.cuda.is_available():
         return "cpu", "torch.cuda.is_available() = False"
     try:

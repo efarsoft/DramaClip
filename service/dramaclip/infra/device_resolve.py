@@ -96,7 +96,9 @@ def resolve(component: str, requested: str | None, data_dir: Path) -> DeviceReso
     if intent == "cpu":
         return DeviceResolution(component, cap, "cpu", "cpu", "cpu", "cpu", "")
     if ready:
-        return DeviceResolution(component, cap, "auto", "cuda", "cuda", "cuda", "")
+        # torch_device 由 profile 按主机厂商给出（nvidia=cuda / intel+xpu 轮=xpu / 其余 cpu）
+        device = str(prof.get("torch_device") or "cuda")
+        return DeviceResolution(component, cap, "auto", device, device, device, "")
     return DeviceResolution(
         component, cap, "auto", "cpu", "cpu", "cpu", reason, downgraded=ok
     )

@@ -98,6 +98,12 @@ module = [
 ignore_missing_imports = true
 follow_imports = "skip"
 
+# d3d_probe 是 win32-only 的 ctypes COM 直呼：mypy --platform linux 下
+# ctypes.WinDLL/HRESULT 等属性天然不存在，整模块豁免（探测失败回退 CIM）
+[[tool.mypy.overrides]]
+module = ["dramaclip.infra.d3d_probe"]
+ignore_errors = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

@@ -53,6 +53,7 @@ _UV_ENV = {
 }
 _PYPI_MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
 _GH_PROXY = "https://gh-proxy.com/https://github.com"
+_TORCH_XPU_INDEX = "https://download.pytorch.org/whl/xpu"
 # ONNX Runtime 1.18.0 在 PyPI 的默认轮是 CUDA 11.8 构建（导入 cublas64_11/
 # cudart64_110），与本机 cu12 运行库不兼容；微软官方 CUDA 12 源的同版本轮
 # 导入 cublas64_12/cudart64_12/cufft64_11（2026-10-20 逐 DLL 实测）。
@@ -170,14 +171,26 @@ _COSYVOICE_SOURCES = [
 
 
 def _gpu_variant() -> str:
-    """cuda / cpu：N 卡在场且算力 ≥7.0 才装 cu128 轮。
+    """cuda / xpu / cpu：N 卡算力 ≥7.0 走 cu128；Intel Arc/Ultra 级适配器走 xpu 轮；其余 CPU。
 
     老卡（<7.0，Maxwell/Pascal）的 cu126 兼容轮已实测否决（2026-10-16）：
-    torch 2.8.0+cu126 在 Quadro M4000（sm_52）装得上但算子无内核——
+    torch 2.8.0+cu126 在 Quadro M4000（sm_52）装得上、算子无内核——
     「Torch not compiled with CUDA enabled」，官方 2.8 起 CUDA 内核最低
     算力线即 7.0（早前验证 sm_52 可用的是 2.14+cu126，版本与变体是两个
     维度）。老卡走 CPU 轮，CUDA 可用性由合成探针如实回退。
+
+    xpu 判据（2026-10-25）：vendor intel（D3D PCI ID 优先）+ 适配器名含
+    Arc/Ultra（Meteor Lake+ 核显与 Arc 独显的命名特征；老 Gen9.5 核显无
+    XPU 后端不入）。最终裁决在 worker 的 torch.xpu 真算探针——装错轮的
+    代价是一次 CPU 回退与如实 reason。
     """
+    raw_adapters = gpu.snapshot_sync().get("adapters") or []
+    adapters = (
+        [a for a in raw_adapters if isinstance(a, dict)] if isinstance(raw_adapters, list) else []
+    )
+    if _intel_xpu_capable(adapters):
+        print("[tts-runtime] Intel Arc/Ultra 适配器在场：装 torch XPU 轮")
+        return "xpu"
     if shutil.which("nvidia-smi") is None:
         return "cpu"
     probe = subprocess.run(  # noqa: S603 - 固定二进制受控参数
@@ -197,6 +210,23 @@ def _gpu_variant() -> str:
         print(f"[tts-runtime] N 卡算力 {cap} 低于 cu128 支持线（7.0）：装 CPU 轮")
         return "cpu"
     return "cuda"
+
+
+def _intel_xpu_capable(adapters: list[dict[str, object]] | None) -> bool:
+    """Intel 主机且存在 Arc/Ultra 级适配器（XPU 轮的目标硬件）。"""
+    for adapter in adapters or []:
+        if not isinstance(adapter, dict):
+            continue
+        if adapter.get("is_virtual") or adapter.get("is_software"):
+            continue
+        vendor = str(adapter.get("vendor") or "")
+        vendor_id = str(adapter.get("vendor_id") or "")
+        if vendor != "intel" and vendor_id != "0x8086":
+            continue
+        name_l = str(adapter.get("name") or "").lower()
+        if "arc" in name_l or "ultra" in name_l:
+            return True
+    return False
 
 
 def venv_dir(data_dir: Path) -> Path:
@@ -240,7 +270,7 @@ def torch_variant(data_dir: Path) -> str:
     except OSError:
         return "unknown"
     # 认不得的值（磁盘损坏/手改）如实 unknown，不冒充 cpu。
-    return raw if raw in ("cuda", "cpu") else "unknown"
+    return raw if raw in ("cuda", "cpu", "xpu") else "unknown"
 
 
 def _ort_marker(data_dir: Path) -> Path:
@@ -554,7 +584,7 @@ def install(
     # 也不能只看 nvidia-smi 在场——老卡（如 Pascal 5.2）在 cu128 里没有内核，
     # 装 GPU 轮是白下 2.5GB，CUDA 是否真能用再由 worker 合成时的探针诚实回退。
     variant = _gpu_variant()
-    variant_label = "CUDA 12.8" if variant == "cuda" else "CPU"
+    variant_label = {"cuda": "CUDA 12.8", "xpu": "Intel XPU"}.get(variant, "CPU")
     _pct(18, f"安装 torch（{variant_label} 变体，约 0.2-2.5GB）")
     _install_torch(uv, venv, variant)
     _check_cancel()
@@ -744,6 +774,11 @@ def _install_torch(uv: Path, venv: Path, variant: str) -> None:
     的 flat 目录做 --find-links（torch==2.8.0 匹配 +cuNNN local version，
     pip/uv 语义），其余传递依赖仍走清华。
     """
+    if variant == "xpu":
+        # XPU 轮自包含（索引自带 intel-cmplr-lib-rt/intel-openmp 运行时依赖）；
+        # 与 cuda 轮互斥语义同源：变体是安装期决策，运行期探针如实回退 CPU。
+        _run_uv(uv, venv, "pip", "install", *_TORCH_CPU, "--index-url", _TORCH_XPU_INDEX)
+        return
     if variant == "cpu":
         _run_uv(uv, venv, "pip", "install", *_TORCH_CPU, "--index-url", _PYPI_MIRROR)
         return

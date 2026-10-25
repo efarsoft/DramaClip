@@ -170,8 +170,34 @@ def _cap(ok: bool, ready: bool, hint: str, reason: str) -> dict[str, Any]:
 def _tts_torch_variant(override: str | None) -> str:
     """tts-venv 的 torch 变体：调用方给了就用调用方的（按它自己的 data_dir），否则现读全局。"""
     if override is not None:
-        return override if override in ("cuda", "cpu") else "unknown"
-    return "cuda" if _torch_variant_is_cuda() else "unknown"
+        return override if override in ("cuda", "cpu", "xpu") else "unknown"
+    from dramaclip.infra.model_manager import tts_runtime as _ttr
+    from dramaclip.infra.paths import resolve_data_dir as _rdd
+
+    value = _ttr.torch_variant(_rdd())
+    return value if value in ("cuda", "cpu", "xpu") else "unknown"
+
+
+def _snapshot_intel_xpu_adapter(snapshot: dict[str, Any]) -> bool:
+    """快照里是否存在 Arc/Ultra 级 Intel 适配器（XPU 轮的可运行判据）。
+
+    名称 token 判代：Arc 独显与 Meteor Lake+ 核显的适配器名都带 arc/ultra；
+    老 Gen9.5 核显（如 UHD 630）无 XPU 后端，名称不含两者 → 不判真。
+    """
+    adapters = snapshot.get("adapters") or []
+    for adapter in adapters:
+        if not isinstance(adapter, dict):
+            continue
+        vendor_ok = (
+            str(adapter.get("vendor_id") or "") == "0x8086"
+            or str(adapter.get("vendor") or "") == "intel"
+        )
+        if not vendor_ok:
+            continue
+        name_l = str(adapter.get("name") or "").lower()
+        if "arc" in name_l or "ultra" in name_l:
+            return True
+    return False
 
 
 def profile(
@@ -227,11 +253,20 @@ def profile(
 
     cuda_ok = is_nvidia and _cuda_major_ok(max_cuda_version)
     variant = _tts_torch_variant(torch_variant)
+    # Intel XPU 双门：主机有 Arc/Ultra 级适配器 且 tts-venv 装的是 xpu 轮——
+    # 两条都真才点亮 torch 系引擎（funasr/indextts/cosyvoice/kokoro）的 XPU 结论
+    intel_xpu = (
+        vendor == "intel"
+        and variant == "xpu"
+        and _snapshot_intel_xpu_adapter(snapshot)
+    )
 
     if probing:
         tier_label = _PENDING_LABEL
     elif nvidia_hw:
         tier_label = _TIER_LABELS[tier] if tier != "none" else _VRAM_UNKNOWN_LABEL
+    elif intel_xpu:
+        tier_label = "Intel 显卡 · XPU 加速（算子覆盖未经验证）"
     else:
         tier_label = _VENDOR_TIER_LABELS.get(vendor) or _TIER_LABELS["none"]
 
@@ -257,6 +292,11 @@ def profile(
         recommendation = _NO_CARD_RECOMMENDATION
     else:
         recommendation = "本地 GPU 引擎可启用" + runtime_tail
+    if intel_xpu and not probing:
+        recommendation = (
+            "ASR/音色克隆可走 Intel XPU（算子覆盖未经验证，失败自动回退 CPU 或改用云端引擎）；"
+            "视频导出可用本卡硬件编码（QSV，导出时真试编）"
+        )
 
     def note(cap_key: str, local: bool = False) -> tuple[str, str, bool]:
         """待定/非 NVIDIA 两类短路：(hint, reason, 是否短路)。"""
@@ -386,6 +426,18 @@ def profile(
         "vocal_separation_gpu": _cap(hardware_ok, separation_ready, sep_hint, sep_reason),
         **visual,
     }
+    if intel_xpu:
+        # 覆盖 note() 的非 NVIDIA 短路：Intel XPU 主机上 torch 系两引擎点亮 XPU；
+        # faster_whisper（ctranslate2 无 XPU 后端）与分离（ORT DML 另批）维持现状。
+        caps["funasr_gpu"] = _cap(
+            True,
+            True,
+            "Intel XPU 后端可用（算子覆盖未经验证，首次真算以实况为准）",
+            "Intel XPU",
+        )
+        caps["indextts2_gpu"] = _cap(
+            True, True, "Intel XPU 后端（算子覆盖未经验证）", "Intel XPU",
+        )
     return {
         "tier": tier,
         "tier_label": tier_label,
@@ -394,6 +446,7 @@ def profile(
         "memory_total_mb": memory_total_mb,
         "max_cuda_version": max_cuda_version,
         "cuda_runtime_installed": cuda_runtime_installed,
+        "torch_device": "xpu" if intel_xpu else ("cuda" if is_nvidia else "cpu"),
         "caps": caps,
         "driver_guidance": driver_guidance,
         "recommendation": recommendation,

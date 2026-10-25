@@ -36,6 +36,14 @@ def _probe_device(device: str) -> tuple[str, str]:
         return "cpu", ""
     import torch  # noqa: PLC0415
 
+    if device.startswith("xpu"):
+        if not torch.xpu.is_available():
+            return "cpu", "torch.xpu.is_available() = False"
+        try:
+            (torch.ones(4, device="xpu") * 2).sum().item()
+            return "xpu", ""
+        except Exception as exc:  # noqa: BLE001 - XPU 算子/驱动缺口如实回退 CPU
+            return "cpu", f"{type(exc).__name__}: {exc}"
     if not torch.cuda.is_available():
         return "cpu", "torch.cuda.is_available() = False"
     try:
@@ -60,13 +68,17 @@ def _model_device(model: Any) -> str | None:
         except (StopIteration, TypeError):
             first = None
         kind = getattr(getattr(first, "device", None), "type", None)
-        if kind in {"cuda", "cpu"}:
+        if kind in {"cuda", "xpu", "cpu"}:
             return str(kind)
     resolved = getattr(model, "kwargs", None)
     if isinstance(resolved, dict):
         value = str(resolved.get("device") or "")
         if value:
-            return "cuda" if value.startswith("cuda") else "cpu"
+            if value.startswith("cuda"):
+                return "cuda"
+            if value.startswith("xpu"):
+                return "xpu"
+            return "cpu"
     return None
 
 

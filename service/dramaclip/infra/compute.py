@@ -5,6 +5,7 @@
 的段级回退是既有的可用性保护，允许发生但必须带原因、落在 libx264 且可见。
 分离的 DirectML 通道：`requested` 词汇不变（auto/cuda/cpu），`resolved/actual`
 允许 `"dml"`——它是解析结果不是请求项，显式 cuda 落 dml 照样判违约。
+Intel XPU 通道（torch xpu 轮，2026-10-25）：同口径，`resolved/actual` 允许 `"xpu"`。
 """
 
 from __future__ import annotations
@@ -54,11 +55,11 @@ class ComputeReport:
                 raise ValueError("video.encode 的 fallback 只表示硬编失败后整片重跑 libx264")
         elif self.fallback and (
             self.requested != "auto"
-            or self.resolved not in ("cuda", "dml")
+            or self.resolved not in ("cuda", "dml", "xpu")
             or self.actual != "cpu"
         ):
             raise ValueError("fallback=true 只表示 auto 下试过 GPU 后落 CPU，且必须带原因")
-        if self.requested == "cpu" and self.resolved in ("cuda", "dml"):
+        if self.requested == "cpu" and self.resolved in ("cuda", "dml", "xpu"):
             raise ValueError("requested=cpu 不得解析到 GPU 后端")
         if not self.device:
             object.__setattr__(self, "device", self.actual)

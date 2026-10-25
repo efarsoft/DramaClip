@@ -34,10 +34,19 @@ def _kokoro_importable() -> bool:
 
 
 def _probe_torch_device(requested: str) -> tuple[str, str]:
-    """最小 CUDA 运算探针：老卡被认出但新栈无内核，加载大模型才崩。"""
+    """最小 CUDA/XPU 运算探针：老卡被认出但新栈无内核，加载大模型才崩。"""
     if requested == "cpu":
         return "cpu", ""
     import torch  # noqa: PLC0415
+
+    if requested.startswith("xpu"):
+        if not torch.xpu.is_available():
+            return "cpu", "torch.xpu.is_available() = False"
+        try:
+            (torch.ones(4, device="xpu") * 2).sum().item()
+            return "xpu", ""
+        except Exception as exc:  # noqa: BLE001 - XPU 算子/驱动缺口如实回退 CPU
+            return "cpu", f"{type(exc).__name__}: {exc}"
 
     if not torch.cuda.is_available():
         return "cpu", "torch.cuda.is_available() = False"
@@ -60,7 +69,8 @@ class KokoroEngine:
 
     def __init__(self, model_dir: Path, device: str = "auto") -> None:
         self._model_dir = model_dir
-        self._device = compute.normalize_requested(device)
+        # "xpu" 是解析结果不是请求项（dml 同款口径），不经 normalize 词汇
+        self._device = device if device.startswith("xpu") else compute.normalize_requested(device)
         self._pipeline: Any | None = None
         self._worker: worker_bridge.VenvWorker | None = None
         self._hello: dict[str, Any] | None = None
@@ -197,6 +207,8 @@ class KokoroEngine:
         hello = self._hello
         if hello is not None:
             actual = "cuda" if str(hello.get("device") or "").startswith("cuda") else "cpu"
+            if actual == "cpu" and str(hello.get("device") or "").startswith("xpu"):
+                actual = "xpu"
             fallback = bool(hello.get("fallback"))
             requested = str(hello.get("requested") or self._device)
             reason = str(hello.get("reason") or "")
@@ -207,10 +219,14 @@ class KokoroEngine:
             reason = self._fallback_reason
         else:
             return None
+        if actual.startswith("xpu") or requested.startswith("xpu"):
+            resolved = "cpu" if actual == "cpu" else "xpu"
+        else:
+            resolved = "cuda" if fallback or actual == "cuda" else "cpu"
         return compute.ComputeReport(
             component="tts.kokoro",
             requested=requested,
-            resolved="cuda" if fallback or actual == "cuda" else "cpu",
+            resolved=resolved,
             actual=actual,
             fallback=fallback,
             reason=reason,

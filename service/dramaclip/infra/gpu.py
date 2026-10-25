@@ -10,6 +10,8 @@ import subprocess
 import sys
 import threading
 
+from dramaclip.infra import d3d_probe
+
 _CUDA_RE = re.compile(r"CUDA(?:\s+UMD)?\s+Version\s*:\s*(\d+(?:\.\d+)?)", re.I)
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -75,8 +77,15 @@ _VENDOR_MATCHES = (
 _VENDOR_ORDER = ("nvidia", "amd", "intel", "other")
 
 
-def classify_vendor(name: str) -> str:
-    """按适配器名认厂商；认不出归 other——宁可不归功，也不冒充 NVIDIA。"""
+def classify_vendor(name: str, vendor_id: int | None = None) -> str:
+    """认厂商：PCI 厂商 ID（D3D 层采集）优先，名称 token 兜底；认不出归 other。
+
+    宁可不归功，也不冒充 NVIDIA。
+    """
+    if vendor_id is not None:
+        mapped = d3d_probe._PCI_VENDOR_NAMES.get(vendor_id)
+        if mapped:
+            return mapped
     lowered = (name or "").lower()
     for vendor, tokens in _VENDOR_MATCHES:
         if any(token in lowered for token in tokens):
@@ -116,8 +125,8 @@ def parse_cim_output(raw: str) -> list[dict[str, str]]:
     return adapters
 
 
-def choose_primary(adapters: list[dict[str, str]]) -> dict[str, str] | None:
-    """主适配器按 NVIDIA > AMD > Intel > other；同级保持 CIM 返回顺序。"""
+def choose_primary(adapters: list[dict[str, object]]) -> dict[str, object] | None:
+    """主适配器按 NVIDIA > AMD > Intel > other；同级保持枚举返回顺序。"""
     for vendor in _VENDOR_ORDER:
         for adapter in adapters:
             if adapter["vendor"] == vendor:
@@ -207,18 +216,52 @@ def _query_nvidia_smi() -> dict[str, object] | None:
 
 
 def detect() -> dict[str, object]:
-    """同步探测（阻塞，最长 ~20s）：CIM 厂商事实 + nvidia-smi CUDA 事实 → 宿主结论。
+    """同步探测（阻塞，最长 ~20s）：DXGI PCI 身份 + CIM 驱动版本 + nvidia-smi CUDA 事实。
 
-    仅由 prefetch 后台线程调用。合并规则见规格 §2.2：虚拟设备在 parse 阶段剔除，
-    smi 的 NVIDIA 条目覆盖 CIM 同名项（缺则补插首位），CUDA 三项只在该项确为
-    NVIDIA 且 smi 可读时填充——CIM 看得到 N 卡不等于 smi 一定在。
+    仅由 prefetch 后台线程调用。合并规则：DXGI 可用时以它为主（厂商按 PCI ID
+    精确判定 + 专用显存），CIM 按名称补驱动版本、独有适配器追加；DXGI 失败回退
+    纯 CIM。虚拟设备在解析阶段剔除，smi 的 NVIDIA 条目覆盖同名项，CUDA 三项只在
+    确为 NVIDIA 且 smi 可读时填充。
     """
-    adapters: list[dict[str, str]] = []
+    adapters: list[dict[str, object]] = []
     if sys.platform == "win32":
         try:
             adapters = list(_query_cim_adapters())
         except Exception:  # noqa: BLE001 - 探测不许拖垮服务：CIM 侧任何意外都当作没有适配器
             adapters = []
+    d3d: list[dict[str, object]] = []
+    if sys.platform == "win32":
+        try:
+            d3d = list(d3d_probe.enumerate_adapters())
+        except Exception:  # noqa: BLE001 - DXGI/COM 任何意外都回退 CIM 路径
+            d3d = []
+    if d3d:
+        by_name = {str(a["name"]).lower(): a for a in adapters}
+        merged: list[dict[str, object]] = []
+        for item in d3d:
+            name = str(item["name"])
+            if (
+                not name
+                or item.get("is_software")
+                or item.get("is_virtual")
+                or is_virtual_adapter(name)
+            ):
+                continue
+            row: dict[str, object] = {
+                "name": name,
+                "vendor": classify_vendor(name, _to_int_maybe(item["vendor_id"])),
+                "driver_version": "",
+                "vendor_id": item["vendor_id"],
+                "device_id": item["device_id"],
+                "dedicated_video_mb": item["dedicated_video_mb"],
+            }
+            cim = by_name.pop(name.lower(), None)
+            if cim is not None:
+                row["driver_version"] = cim["driver_version"]
+            merged.append(row)
+        for cim in by_name.values():
+            merged.append(dict(cim))
+        adapters = merged
     smi = _query_nvidia_smi()
     if smi is not None:
         nvidia_name = str(smi["name"]) or ""
@@ -251,6 +294,14 @@ def detect() -> dict[str, object]:
 def _to_int_mb(raw: str) -> int:
     digits = re.sub(r"[^0-9]", "", raw)
     return int(digits) if digits else 0
+
+
+def _to_int_maybe(raw: object) -> int | None:
+    """「0x8086」形态的十六进制串 → int；非串/解析失败 → None。"""
+    try:
+        return int(str(raw), 16) if str(raw).startswith("0x") else int(str(raw))
+    except (TypeError, ValueError):
+        return None
 
 
 def snapshot(force: bool = False) -> dict[str, object]:

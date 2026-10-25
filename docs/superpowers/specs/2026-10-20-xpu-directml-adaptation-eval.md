@@ -99,13 +99,36 @@
 
 - 不动 0.2.2 发布计划；不改 CUDA-only 定则的对外口径；不引入 torch-directml；不引入 ZLUDA；macOS（CoreML/MPS）另立规格。
 
-## 9. 收口（2026-10-25）
+## 9. 状态变迁（2026-10-25 两阶段）
 
-四裁决点终态，本评估稿就此关闭，后续事实归 audio.cpp 迁移规格（specs/2026-10-22-audiocpp-full-audio-migration.md）：
+### 9.1 收口（同日上午，已被 §9.2 推翻）
 
-1. **人声分离 DML：已落地**（批B eb3795b，DML 三选一；5500XT 真机 2.4x+位级一致）——留用至 v0.3 焚烧 ORT 路径为止（迁移规格第三步删除清单）。
-2. **funasr-ONNX：正式关闭，不做**——两条决定性理由：①funasr 栈在 v0.3 拆除名单上（ASR 换 Qwen3-ASR+Aligner 两段），3-5 天产线化投入是给已排期拆除的栈打加速补丁；②热词通道在 ONNX 路线支持不确定（现役真机热词功能有回归风险）。原估 0.5 天验证 + 3-5 天产线化作废。
-3. **XPU：维持不做**——§8 账单（1.5~2 周）在案，真正拦路是「无 Arc 验证硬件 + 无已知客群」；将来若两条件成立，按 §8.1 先行第 6 项（0.5 天上游就绪度核查）再议。
-4. **whisper 非 NVIDIA 加速：维持不做。**
+初版结论为「专项关闭」：分离 DML 已落地留用至 v0.3 焚烧、funasr-ONNX 关闭、XPU 维持不做、AMD/Intel 加速命题移交 audio.cpp Vulkan 后端。
 
-**AMD/Intel GPU 加速命题的最终去向**：audio.cpp 的 Vulkan 后端原生跨厂商（v0.3 验收门已含 5500XT Vulkan 真跑 + RDNA1 三态回退 CPU），零适配工程——本专项想解决的问题在 v0.3 里由 GGML 栈免费解决。云端优先档（批A ed1c97 + 能力感知 5a07763）维持非 N 卡主机的正解。
+### 9.2 业主推翻（2026-10-25 晚）：XPU 核显/独显专项重启，实现先行
+
+业主裁决：**推翻收口，实现 XPU**；AMD 显卡路线（DML-ONNX）拍板排除（复杂度考量）；Intel 核显/独显（Arc/Meteor Lake+）走 PyTorch XPU 轮；**真机验证挂起——业主稍后提供开发机**，实现先行、验证按 playbook 后补。audio.cpp 迁移（v0.3）不受影响：XPU 变体是现役 torch 栈的安装期决策，v0.3 焚烧清单照旧。
+
+**已落地（同日批次）**：
+
+| 项 | 内容 |
+|---|---|
+| D3D 检测层 | `infra/d3d_probe.py`：纯 ctypes 枚举 DXGI 适配器（厂商/设备 PCI ID + 专用显存，软件/虚拟机剔除，失败回退 CIM 并留 stderr 痕）；采纳 Const-me/Whisper 系 fork 的厂商 ID 形态（0x1002/0x10DE/0x8086/0x15AD） |
+| gpu.snapshot | DXGI 为主合并 CIM（名称补驱动版本），`classify_vendor` 支持 PCI ID 精判 |
+| compute 契约 | `resolved/actual` 词汇 + `"xpu"`（dml 同款先例；requested 词汇不变） |
+| device_profile | Intel XPU 双门（vendor intel + torch 变体 xpu + 快照含 Arc/Ultra 级适配器）→ funasr/indextts2 caps 点亮 XPU；whisper（ctranslate2 无后端）与分离维持现状；新增 `torch_device` 字段 |
+| device_resolve | auto ready → `torch_device`（nvidia=cuda / intel+xpu 轮=xpu / 其余 cpu） |
+| 安装矩阵 | `_gpu_variant()` 三分支：Intel Arc/Ultra 级 → xpu 轮（官方 xpu index，torch/torchaudio 2.8.0 与现役钉版精确匹配）；进程内 `torch_variant()` 词汇扩展 |
+| worker/引擎 | 四 worker + kokoro/transcriber 进程内探针加 xpu 支（`torch.xpu.is_available()` + mini-op，失败如实回退 CPU）；funasr 1.4.16 源码级原生透传（§8.1 第 6 项上游就绪度核查在源头层面通过） |
+
+**未验证风险（开发机到位后按 playbook 关闭）**：逐模型算子覆盖（CosyVoice 流匹配/IndexTTS2 自定义部件/kokoro 在 XPU 上未验，缺算子即运行期炸 → 显式 cpu 设置回退）；RTF 收益未测（核显共享内存带宽，跑不赢 CPU 就不上）。
+
+**验证 playbook（开发机到位后执行）**：
+1. `torch.xpu.is_available()` + `torch.xpu.get_device_name(0)` 记录设备；
+2. 四 worker 自检（引擎页逐个跑通）；
+3. paraformer@xpu vs cpu：大明一集 CER + 段起点偏差 p50/p95 + RTF；
+4. TTS 听感（q8/bf16 语义在 GGUF；torch 栈直接同权重对比）+ RTF；
+5. 任一引擎算子缺口 → 该引擎显式回 CPU（`asr.device`/`tts.device` 设置），其余保留 XPU；
+6. 结论回写本节。
+
+**AMD DML-ONNX：业主拍板排除（复杂度考量）**——funasr-ONNX/kokoro-onnx 不做，5500XT 的分离 DML 已落地成果留用。**UI 显式 xpu 选项**：auto 默认已自动上 XPU，显式选项待协议加 `torch_device` 字段后另行小批。
