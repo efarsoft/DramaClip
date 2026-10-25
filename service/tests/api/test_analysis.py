@@ -181,6 +181,12 @@ def test_start_completes_and_persists(
 def test_failed_engine_marks_episode_only(
     harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
 ) -> None:
+    """引擎级配置错（每集同因倒下）：集逐个标 failed，任务判 failed 且明细入任务行。
+
+    全败不再是 completed——绿色「完成」配两集 failed 是把错误配置伪装成成功
+    （2026-10-24 客户「分析失败没细节」审计裁决）。逐集失败不中断其余集的
+    语义保持不变（部分失败场景见 test_analysis_resilience）。
+    """
     project_id = _make_project(harness, tmp_path, sample_video)
 
     def exploding_transcriber() -> FakeTranscriber:
@@ -190,7 +196,9 @@ def test_failed_engine_marks_episode_only(
     result = harness.rpc("analysis.start", {"project_id": project_id})
     status = harness.wait_done(str(result["job_id"]))
 
-    assert status["status"] == "completed", "单集失败不应中断任务"
+    assert status["status"] == "failed"
+    assert "全部 2 集分析失败" in str(status["error"])
+    assert "引擎炸了" in str(status["error"])
     results = harness.rpc("analysis.results", {"project_id": project_id})
     assert [ep["status"] for ep in results["episodes"]] == ["failed", "failed"]
     assert all(ep["asr_segment_count"] == 0 for ep in results["episodes"])

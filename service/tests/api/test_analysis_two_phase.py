@@ -36,7 +36,10 @@ def _context(memory_db: sqlite3.Connection, tmp_path: Path) -> SimpleNamespace:
         work_dir=tmp_path / "work",
         settings={"analysis.ocr_enabled": "0"},
         analysis_runtime=SimpleNamespace(transcriber=lambda: SimpleNamespace(name="fake")),
-        job_store=SimpleNamespace(set_progress=lambda *a, **k: None),
+        job_store=SimpleNamespace(
+            set_progress=lambda *a, **k: None,
+            append_detail=lambda *a, **k: None,
+        ),
         notifier=Notifier(lambda _m: None),
     )
 

@@ -165,18 +165,20 @@ def _weakest(center_frame: int, window: int, energies: list[float]) -> int:
 def split_wav(
     wav_path: Path, clips: list[Clip], out_dir: Path
 ) -> list[tuple[Clip, Path]]:
-    """按片段切出 wav 文件（ffmpeg 精确 seek），返回 [(片段, 路径)]。"""
-    import subprocess
+    """按片段切出 wav 文件（ffmpeg 精确 seek），返回 [(片段, 路径)]。
 
-    from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
+    走受控 runner 而非裸 subprocess：超时（挂死的 ffmpeg 不再挂死整个分析）+
+    失败带 stderr 尾巴（CalledProcessError 只有一句 exit status，排查无从下手）。
+    这是 paraformer 与云端 ASR 两条路径的共同热路径，规范与 contact_sheet 一致。
+    """
+    from dramaclip.infra.ffmpeg import runner
 
     out_dir.mkdir(parents=True, exist_ok=True)
     results: list[tuple[Clip, Path]] = []
     for index, clip in enumerate(clips):
         out = out_dir / f"clip-{index:02d}.wav"
-        subprocess.run(  # noqa: S603 - 参数为受控列表
+        runner.run(
             [
-                str(resolve_ffmpeg()),
                 "-hide_banner", "-loglevel", "error", "-y",
                 "-i", str(wav_path),
                 "-ss", f"{clip.start:.3f}",
@@ -184,7 +186,7 @@ def split_wav(
                 "-c", "copy",
                 str(out),
             ],
-            check=True,
+            timeout_s=120,
         )
         results.append((clip, out))
     return results

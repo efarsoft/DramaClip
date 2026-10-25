@@ -331,7 +331,12 @@ def _sample_frames(video_path: Path, work_dir: Path, band: _Band) -> list[Path]:
         str(out_dir / "f%04d.jpg"),
     ]
     subprocess.run(cmd, check=True, capture_output=True, timeout=600)  # noqa: S603
-    return sorted(out_dir.glob("f*.jpg"))
+    # 帧序按解析出的序号排，不按文件名字典序：%04d 在超万帧（约 2h47m+）后
+    # 产出 f10000.jpg 这类名字，字典序会把时间轴彻底排乱。
+    return sorted(
+        out_dir.glob("f*.jpg"),
+        key=lambda p: int(p.stem[1:]) if p.stem[1:].isdigit() else 0,
+    )
 
 
 def _merge_runs(results: list[tuple[float, FrameResult]]) -> list[OcrSegment]:

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
 import logging
+import threading
 from pathlib import Path
 
 from dramaclip.engines.analysis.transcriber import (
@@ -20,7 +22,7 @@ _CLOUD_ASR_MODEL = "qwen-audio-3.1-asr-flash"
 
 
 class AnalysisRuntime:
-    """transcriber 等引擎的懒加载单例容器（线程安全由构建锁保证）。"""
+    """transcriber 等引擎的懒加载单例容器（构建锁保证并发首触只构建一次）。"""
 
     def __init__(
         self, settings: config.Settings, models_dir: Path, data_dir: Path | None = None
@@ -29,13 +31,17 @@ class AnalysisRuntime:
         self._models_dir = models_dir
         self._data_dir = data_dir
         self._transcriber: AsrEngine | None = None
+        self._lock = threading.Lock()
 
     def transcriber(self) -> AsrEngine:
-        if self._transcriber is None:
-            self._transcriber = _build_transcriber(
-                self._settings, self._models_dir, self._data_dir
-            )
-        return self._transcriber
+        # 锁是必须的：分析任务、导出 TTS 回环验证、工具箱提取三路共享这个单例，
+        # 并发首触无锁会双构建（双模型加载 + 旧实例泄漏）。
+        with self._lock:
+            if self._transcriber is None:
+                self._transcriber = _build_transcriber(
+                    self._settings, self._models_dir, self._data_dir
+                )
+            return self._transcriber
 
 
 def supported() -> frozenset[str]:
@@ -48,7 +54,11 @@ def supported() -> frozenset[str]:
     funasr 系（sensevoice/paraformer）E-2 起依赖本地运行环境：主 venv 装了 ml 组
     （dev/测试态）或本地智能运行环境带了 funasr 组（打包态按需装）二者其一才上清单。
     """
-    names = {"faster_whisper", "dashscope_cloud"}
+    names = {"faster_whisper"}
+    # dashscope 上清单前先验包在场（v0.2.2 曾有发布包缺 dashscope 的事故）：
+    # 缺包时不挂清单——选了也只会首轮转写裸 ImportError，不如如实「待接入」。
+    if importlib.util.find_spec("dashscope") is not None:
+        names.add("dashscope_cloud")
     try:
         import funasr  # noqa: F401
 

@@ -158,6 +158,7 @@ class _FunasrWorker:
     def __init__(self, config: dict[str, Any]) -> None:
         from dramaclip.engines.tts.workers import funasr_worker
 
+        self._config = dict(config)
         self._inner = worker_bridge.VenvWorker(Path(funasr_worker.__file__), config)
         self.device = "cpu"
         self.ready: dict[str, Any] = {}
@@ -168,6 +169,22 @@ class _FunasrWorker:
         self.device = str(ready.get("device") or "cpu")
 
     def generate(self, **kwargs: Any) -> list:  # type: ignore[type-arg]
+        try:
+            return self._call(kwargs)
+        except RuntimeError as exc:
+            # worker 进程死亡（原生崩溃/OOM）不该连坐本批剩余每一集：
+            # 就地重生一次再试；再挂如实上抛（那时的错误仍是可读的人话）。
+            if "意外退出" not in str(exc) or self._inner.proc is not None:
+                raise
+            _LOGGER.warning("funasr worker 已退出，重启后重试本次请求")
+            self._inner.close()
+            fresh = _spawn_funasr_worker(self._config)
+            self._inner = fresh._inner
+            self.ready = fresh.ready
+            self.device = fresh.device
+            return self._call(kwargs)
+
+    def _call(self, kwargs: dict[str, Any]) -> list:  # type: ignore[type-arg]
         payload = {**kwargs, "input": str(kwargs.get("input", ""))}
         msg = self._inner.request({"kwargs": payload})
         if not msg.get("ok"):
@@ -468,6 +485,10 @@ def _parse_sensevoice(raw: list) -> list[AsrSegment]:  # type: ignore[type-arg]
         if not timestamps:
             continue
         for cursor, span in enumerate(timestamps):
+            # 解包守卫与 _parse_paraformer 同款：畸形行（≠2 元素）跳过而不是
+            # ValueError: too many values to unpack 炸掉整集。
+            if not isinstance(span, (list, tuple)) or len(span) != 2:
+                continue
             beg_ms, end_ms = span
             chunk = text_chunks[cursor] if cursor < len(text_chunks) else ""
             if chunk:

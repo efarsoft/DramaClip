@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import wave
 from pathlib import Path
 
 from dramaclip.engines.analysis.models import AudioFeatures, SpeechZone
+
+_LOGGER = logging.getLogger(__name__)
 
 _CHUNK_MS = 80
 _INT16_FULL_SCALE = 32768.0
@@ -21,8 +24,16 @@ _BEATS_CAP = 20000
 
 
 def analyze_audio(wav_path: Path) -> AudioFeatures:
-    """输入 16k 单声道 wav（管线标准产物），输出能量曲线/静音比/语音区/BPM。"""
-    import numpy as np  # ml extras 懒加载
+    """输入 16k 单声道 wav（管线标准产物），输出能量曲线/静音比/语音区/BPM。
+
+    numpy 缺失（残缺安装）降级空特征 + warn 留痕，不炸分析——增强层缺失只
+    降级自己（scene_detector/OCR 同款纪律）。
+    """
+    try:
+        import numpy as np  # ml extras 懒加载
+    except ImportError:
+        _LOGGER.warning("numpy 未安装，音频特征分析降级（能量曲线/语音区/BPM 不可用）")
+        return AudioFeatures(silence_ratio=1.0)
 
     with wave.open(str(wav_path), "rb") as handle:
         sample_rate = handle.getframerate()

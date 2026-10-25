@@ -37,6 +37,7 @@ _ERR_JOB_NOT_FOUND = -32201
 _ERR_NO_EPISODES = -32202
 _ERR_NO_ANALYSIS = -32203
 _ERR_SEGMENT_INVALID = -32204
+_ERR_ANALYSIS_BUSY = -32205
 
 
 def register(router: Router, context: AppContext) -> None:
@@ -80,11 +81,28 @@ def _active_ingest_job(context: AppContext, project_id: str) -> dict[str, Any] |
     return None
 
 
+def _assert_no_active_ingest(context: AppContext, project_id: str) -> None:
+    """并发守卫：同项目同时只允许一个分析/预筛任务。
+
+    双跑不是无害的并行：两条管线会向同一个 work_dir 写同名中间 wav（两个
+    ffmpeg 同时写一个文件），还会互相覆盖集状态——「能开新任务即说明无并发」
+    是假设不是约束，这里把它变成约束。
+    """
+    active = _active_ingest_job(context, project_id)
+    if active is not None:
+        raise RpcDomainError(
+            _ERR_ANALYSIS_BUSY,
+            f"该项目已有进行中的任务（{active.get('type')} {active.get('id')}），"
+            "请等待完成或取消后再开始",
+        )
+
+
 def prescreen(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     """阶段一：批量轻量预筛（原案 3附），结果落 episode_prescreen 并推荐。"""
     project_id = str(params.get("project_id", ""))
     if projects_repo.get(context.conn, project_id) is None:
         raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
+    _assert_no_active_ingest(context, project_id)
     targets = [
         episode
         for episode in episodes_repo.list_by_project(context.conn, project_id)
@@ -153,7 +171,15 @@ def _run_prescreen(
         context.job_store.set_progress(job_id, 100.0, "预筛完成")
         context.notifier.progress(job_id, 100.0, "预筛完成")
         context.job_store.mark_completed(job_id)
-        if then_analyze:
+    except Exception as exc:
+        context.job_store.mark_failed(job_id, str(exc))
+        context.notifier.log("error", f"预筛失败: {exc}")
+    finally:
+        context.cancel_events.pop(job_id, None)
+    # then_analyze 的移交必须在任务终态之后、且在 mark_failed 的 except 之外：
+    # start() 的失败不该回写已完成的预筛任务（对终态二次迁移会抛错逃逸）。
+    if then_analyze:
+        try:
             recommended_ids = [
                 str(episode["id"])
                 for episode in targets
@@ -161,11 +187,8 @@ def _run_prescreen(
             ]
             if recommended_ids:
                 start(context, {"project_id": project_id, "episode_ids": recommended_ids})
-    except Exception as exc:
-        context.job_store.mark_failed(job_id, str(exc))
-        context.notifier.log("error", f"预筛失败: {exc}")
-    finally:
-        context.cancel_events.pop(job_id, None)
+        except Exception as exc:  # noqa: BLE001 - 移交失败如实留痕，不连坐已完成的预筛
+            context.notifier.log("error", f"预筛完成但自动分析未启动: {exc}")
 
 
 def _prescreen_recommended(context: AppContext, episode_id: str) -> bool:
@@ -177,6 +200,7 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     project_id = str(params.get("project_id", ""))
     if projects_repo.get(context.conn, project_id) is None:
         raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
+    _assert_no_active_ingest(context, project_id)
     episode_ids = params.get("episode_ids")
     if episode_ids is None:
         # analyzing 一并纳入：能开新任务即说明无并发分析，该状态必为崩溃/中断残留
@@ -321,6 +345,9 @@ def update_asr(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     episode = episodes_repo.get(context.conn, episode_id)
     if episode is None or str(episode["project_id"]) != project_id:
         raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"集不存在: {episode_id}")
+    if episode["status"] == "analyzing":
+        # 与进行中的分析并发改写会被任务随后的 update_asr_segments 覆盖——拒掉而不是让用户白改。
+        raise RpcDomainError(_ERR_SEGMENT_INVALID, "该集正在分析中，请等分析完成后再修改转写")
     record = analysis_repo.get(context.conn, episode_id)
     if record is None:
         raise RpcDomainError(_ERR_NO_ANALYSIS, "该集尚无分析结果")
@@ -438,11 +465,9 @@ def results(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         episode_id = str(episode["id"])
         prescreen = prescreen_repo.get(context.conn, episode_id)
         record = analysis_repo.get(context.conn, episode_id)
-        segments = json.loads(record["asr_segments"]) if record else []
-        highlights = json.loads(record["highlights"]) if record and record["highlights"] else []
-        conflict_scores = (
-            json.loads(record["conflict_scores"]) if record and record["conflict_scores"] else []
-        )
+        segments = _loads_list(record["asr_segments"]) if record else []
+        highlights = _loads_list(record["highlights"]) if record else []
+        conflict_scores = _loads_list(record["conflict_scores"]) if record else []
         if segments:
             asr_map[episode_id] = segments
         if highlights:
@@ -451,7 +476,12 @@ def results(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
             conflict_map[episode_id] = conflict_scores
         if prescreen is not None:
             prescreen_map[episode_id] = prescreen
-        visual = json.loads(record["visual_track"]) if record and record["visual_track"] else None
+        visual = None
+        if record and record["visual_track"]:
+            try:
+                visual = json.loads(record["visual_track"])
+            except (TypeError, json.JSONDecodeError, ValueError):
+                visual = None
         if isinstance(visual, dict) and visual.get("frames"):
             visual_map[episode_id] = visual
         entry: dict[str, Any] = {
@@ -483,10 +513,22 @@ def results(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _loads_list(raw: Any) -> list[Any]:
+    """JSON 列宽容解析：一行坏数据不能炸掉整个 results RPC（与 export_transcripts
+    的守卫同口径）。坏行降级为空列表——丢的是那一列的展示，不是整个接口。"""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError, ValueError):
+        return []
+    return value if isinstance(value, list) else []
+
+
 def _scene_count(record: dict[str, Any] | None) -> int:
     if record is None or not record["scene_data"]:
         return 0
-    return len(json.loads(record["scene_data"]))
+    return len(_loads_list(record["scene_data"]))
 
 
 def _audio_peak(record: dict[str, Any] | None) -> tuple[float | None, bool]:

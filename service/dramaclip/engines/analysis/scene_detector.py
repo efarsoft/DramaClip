@@ -3,16 +3,27 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from dramaclip.engines.analysis.models import SceneInfo
+
+_LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_THRESHOLD = 30.0
 
 
 def detect_scenes(video_path: Path, *, threshold: float = _DEFAULT_THRESHOLD) -> list[SceneInfo]:
-    """物理镜头边界检测（依赖 scenedetect，属 ml extras 懒加载）。"""
-    from scenedetect import ContentDetector, detect  # ml extras 懒加载
+    """物理镜头边界检测（依赖 scenedetect，属 ml extras 懒加载）。
+
+    缺依赖降级为空场景表 + warn 留痕，不炸分析——OCR 通道同款纪律：
+    增强层缺失只降级自己，不让整集分析陪葬（rapidocr 缺包事故同款形态）。
+    """
+    try:
+        from scenedetect import ContentDetector, detect  # ml extras 懒加载
+    except ImportError:
+        _LOGGER.warning("scenedetect 未安装，本轮跳过镜头检测（场景层降级为空）")
+        return []
 
     scene_list = detect(str(video_path), ContentDetector(threshold=threshold))
     return [

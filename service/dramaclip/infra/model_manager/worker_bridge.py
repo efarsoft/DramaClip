@@ -83,6 +83,10 @@ class VenvWorker:
         assert self._proc is not None and self._proc.stdin is not None
         with self._lock:
             req_id = uuid.uuid4().hex
+            # 写前探活：worker 进程已死时 stdin.write 抛的是裸 OSError
+            # （[Errno 22]/broken pipe），调用方拿到的是天书——先探活给人话。
+            if self._proc.poll() is not None:
+                raise RuntimeError("worker 意外退出（可重装修复运行环境）")
             self._proc.stdin.write(
                 json.dumps({"id": req_id, **payload}, ensure_ascii=False) + "\n"
             )

@@ -167,6 +167,21 @@ def set_status(conn: sqlite3.Connection, project_id: str, status: str) -> None:
     conn.commit()
 
 
+def reset_stale_analyzing(conn: sqlite3.Connection) -> int:
+    """启动清扫：硬杀/崩溃残留的 analyzing 项目行复位为 ready。
+
+    任务的 finally 与集状态清扫各管各的，唯独 project 行没有兜底——崩溃后
+    UI 会永远显示一个 phantom「分析中」项目。能活到下次启动就说明没有任何
+    分析还在跑，analyzing 必为残留。返回复位行数。
+    """
+    cursor = conn.execute(
+        "UPDATE projects SET status = 'ready', updated_at = ? WHERE status = 'analyzing'",
+        (_now_ms(),),
+    )
+    conn.commit()
+    return cursor.rowcount
+
+
 def rename(conn: sqlite3.Connection, project_id: str, name: str) -> bool:
     cursor = conn.execute(
         "UPDATE projects SET name = ?, updated_at = ? WHERE id = ?",

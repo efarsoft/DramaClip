@@ -353,30 +353,34 @@ def _run_job(
     cancel_event: threading.Event,
 ) -> None:
     """执行池任务：全剧 OCR→热词→逐集分析，单集失败不中断其余。"""
-    context.job_store.mark_running(job_id)
-    projects_repo.set_status(context.conn, project_id, "analyzing")
-    vision = vision_engine.open_session(
-        context.data_dir, context.data_dir / "models", context.settings
-    )
-    if vision is not None:
-        context.notifier.log(
-            "info", f"视觉轨启用（{vision.model_id}）：逐集画面理解将随分析进行", job_id=job_id
-        )
+    vision = None
     total = len(targets)
     failures = 0
-    language = runtime.language(context.settings)
-    if context.settings.get("analysis.ocr_enabled", "1") == "1" and not _ocr_channel_available(
-        context
-    ):
-        # 降级打标：OCR 通道缺失 → 本轮产物是纯 ASR 降级版（无硬字幕融合）。
-        # ocr_channel 参与源签名，装好 rapidocr 后签名失配自动强制重算。
-        context.notifier.log(
-            "warn",
-            "OCR 字幕通道不可用（rapidocr 未安装），分析产物为纯 ASR 降级版；"
-            "依赖就绪后相关集将自动重新分析",
-            job_id=job_id,
-        )
     try:
+        # mark_running 之后的每一步都在 try 内：任务体里任何异常都必须落进
+        # mark_failed——pre-try 窗口的异常曾让任务永久停在 running（项目卡
+        # analyzing、集卡 analyzing，只能重启服务清扫）。
+        context.job_store.mark_running(job_id)
+        projects_repo.set_status(context.conn, project_id, "analyzing")
+        vision = vision_engine.open_session(
+            context.data_dir, context.data_dir / "models", context.settings
+        )
+        if vision is not None:
+            context.notifier.log(
+                "info", f"视觉轨启用（{vision.model_id}）：逐集画面理解将随分析进行", job_id=job_id
+            )
+        language = runtime.language(context.settings)
+        if context.settings.get("analysis.ocr_enabled", "1") == "1" and not _ocr_channel_available(
+            context
+        ):
+            # 降级打标：OCR 通道缺失 → 本轮产物是纯 ASR 降级版（无硬字幕融合）。
+            # ocr_channel 参与源签名，装好 rapidocr 后签名失配自动强制重算。
+            context.notifier.log(
+                "warn",
+                "OCR 字幕通道不可用（rapidocr 未安装），分析产物为纯 ASR 降级版；"
+                "依赖就绪后相关集将自动重新分析",
+                job_id=job_id,
+            )
         # 挖掘阶段逐集播报：任务标签/进度通知可见（此前整批分析前几分钟毫无动静）
         # 挖掘阶段计入总进度前 30%：OCR 逐集要数分钟，恒 0% 会被当成卡死（业主实测反馈）
         def mining_report(done: int, count: int) -> None:
@@ -409,9 +413,21 @@ def _run_job(
                 hotwords=hotwords,
             ):
                 failures += 1
-        context.job_store.mark_completed(job_id)
+        if failures == total:
+            # 全军覆没不是「完成」：错误码级配置错（未知引擎/缺 Key/运行环境缺）
+            # 会让每集以同样的方式倒下，逐集明细已由 append_detail 聚在 error 列。
+            detail = ""
+            job = context.job_store.get(job_id)
+            if job is not None:
+                detail = str(job.get("error") or "")
+            context.job_store.mark_failed(
+                job_id,
+                f"全部 {total} 集分析失败" + (f"：{detail}" if detail else ""),
+            )
+        else:
+            context.job_store.mark_completed(job_id)
     except Exception as exc:  # 引擎级致命错误（如模型加载失败）
-        context.job_store.mark_failed(job_id, str(exc))
+        context.job_store.mark_failed(job_id, f"分析任务失败: {exc}")
         context.notifier.log("error", f"分析任务失败: {exc}")
     finally:
         if vision is not None:
@@ -581,6 +597,16 @@ def _analyze_one(
         episodes_repo.mark_done(context.conn, episode_id)
         return True
     except Exception as exc:
-        episodes_repo.set_status(context.conn, episode_id, "failed")
-        context.notifier.log("error", f"{label} 分析失败: {exc}")
+        if cancel_event.is_set():
+            # 用户取消（ffmpeg/管线抛出的取消异常也走这里）：集恢复进任务前的
+            # 状态，job 由循环头的 mark_cancelled 收口——把取消记成「分析失败」
+            # 是对用户的误报。
+            episodes_repo.set_status(context.conn, episode_id, str(episode["status"]))
+            context.notifier.log("info", f"{label} 已取消", job_id=job_id)
+        else:
+            episodes_repo.set_status(context.conn, episode_id, "failed")
+            # 失败原因落任务行（append_detail 聚合）：状态轮询与日志流都会滚走，
+            # 任务详情是事后唯一的可查账面——否则就是客户看到的「分析失败」三个字。
+            context.job_store.append_detail(job_id, f"{label}: {exc}")
+            context.notifier.log("error", f"{label} 分析失败: {exc}")
         return False
