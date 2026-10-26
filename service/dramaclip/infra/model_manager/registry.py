@@ -115,7 +115,9 @@ def detect_status(
                     break
         else:
             # 通用：目录树内（含子目录）任一模型权重文件即已安装
-            for pattern in ("*.pth", "*.pt", "*.bin", "*.onnx", "*.safetensors", "*.ckpt"):
+            for pattern in (
+                "*.pth", "*.pt", "*.bin", "*.onnx", "*.safetensors", "*.ckpt", "*.gguf",
+            ):
                 hit = next(base.rglob(pattern), None)
                 if hit is not None:
                     installed, resolved, asset = True, base, base
@@ -221,7 +223,9 @@ def fill_size_cache(models_dir: Path) -> None:
                 if asset is not None:
                     break
         else:
-            for pattern in ("*.pth", "*.pt", "*.bin", "*.onnx", "*.safetensors", "*.ckpt"):
+            for pattern in (
+                "*.pth", "*.pt", "*.bin", "*.onnx", "*.safetensors", "*.ckpt", "*.gguf",
+            ):
                 if next(base.rglob(pattern), None) is not None:
                     asset = base
                     break
