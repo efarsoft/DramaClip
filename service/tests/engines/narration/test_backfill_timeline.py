@@ -190,28 +190,31 @@ def test_script_plan_stays_renderable_after_voicing(
     assert voiced.timeline[-1].start >= voiced.timeline[-2].end
 
 
-def test_backfill_past_the_source_end_is_rejected_not_truncated(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_backfill_past_the_source_end_drops_the_segment_with_ledger(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """回填把段尾推出源片末尾、且前伸和收口都救不动：这条方案必须失败。
+    """回填把段尾推出源片末尾、且前伸和收口都救不动：该段弃用留痕、成片继续。
 
     真机实测（bundled ffmpeg 8.1.1，源 6.mp4=76.86s、9s 干音）：窗口 70.86→79.86
     退码 **0**，产物视频 6.07s / 音频 6.03s——9 秒旁白被从中间掐掉；窗口
-    76.86→82.86（起点即 EOF）退码仍 0，产物 262 字节、无流。渲染层既不会报错也不
-    会警告，所以唯一的拦截点在这里（业主裁决：改所见所闻的一律失败，不截断）。
+    76.86→82.86（起点即 EOF）退码仍 0，产物 262 字节、无流。渲染层既不报错也不
+    警告，所以越界窗口绝不能渲染——业主裁决 2026-10-26 升级处置：不再整条方案
+    判失败，而是装不下的段弃用留痕（不裁音、不重播），其余照常出片。
     """
+    import logging
+
     plan = _plan(("ep1", 186.0, 192.0, "ducked"), ("ep1", 192.0, 197.0, "ducked"))
-    with pytest.raises(
-        RuntimeError,
-        match=r"越过源集末尾.*197\.00.*192\.20.*超出 4\.80.*止于 192\.00s.*重播画面",
-    ):
-        _voice(
+    with caplog.at_level(logging.WARNING, logger="dramaclip.engines.narration.synthesis"):
+        result = _voice(
             monkeypatch,
             tmp_path,
             plan,
             {"n0": 6.2, "n1": 5.0},
             {"ep1": 192.2},
         )
+    assert _windows(result) == [("ep1", 185.8, 192.0)]  # n0 头部扩展保计划尾，n1 弃用
+    joined = "\n".join(record.getMessage() for record in caplog.records)
+    assert "实测 5.00s" in joined and "弃用" in joined
 
 
 def test_narration_overrun_extends_backwards_and_keeps_the_payoff_in_place(
@@ -246,13 +249,85 @@ def test_backwards_extension_stops_at_the_previous_segment(
     assert [(s.start, s.end) for s in result.timeline] == [(0.0, 8.0), (10.0, 18.0)]
 
 
-def test_a_narration_longer_than_the_whole_episode_says_so(
+def test_a_narration_longer_than_the_whole_episode_is_dropped_with_ledger(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """没有空隙可放时弃段留痕、成片继续（业主裁决 2026-10-26「重新选取而非失败」）：
+    原因要说清（实测 vs 空隙），别赖回填。"""
+    import logging
+
+    plan = _plan(("ep1", 0.0, 1.0, "ducked"))
+    with caplog.at_level(logging.WARNING, logger="dramaclip.engines.narration.synthesis"):
+        result = _voice(monkeypatch, tmp_path, plan, {"n0": 30.0}, {"ep1": 26.0})
+    assert result.timeline == []  # 方案里只有这一段，弃用后时间轴为空
+    joined = "\n".join(record.getMessage() for record in caplog.records)
+    assert "实测 30.00s" in joined and "弃用" in joined
+
+
+def test_rewrite_round_shrinks_overlong_narration_into_its_gap(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """没有上一段可撞时，越界只可能是文案比整集还长：原因要说清，别赖回填。"""
-    plan = _plan(("ep1", 0.0, 1.0, "ducked"))
-    with pytest.raises(RuntimeError, match=r"越过源集末尾.*比整集素材还长"):
-        _voice(monkeypatch, tmp_path, plan, {"n0": 30.0}, {"ep1": 26.0})
+    """定向重写路径：实测装不下 → 按实测语速算目标字数收短 → 重合成 → 重回排落位。"""
+    plan = _plan(("ep1", 20.0, 21.0, "narration"))
+    seen: dict[str, float] = {}
+
+    def probe(path: Path) -> float:
+        stem = Path(path).stem
+        if stem not in seen:  # 首个内容寻址文件=原文案 30s，重写后的新文件=10s
+            seen[stem] = 30.0 if not seen else 10.0
+        return seen[stem]
+
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
+
+    def rewrite(text: str, target_chars: int) -> str | None:
+        # 目标字数按本段实测语速推：len("旁白0")=3 / 30s → 26s 空隙 × 0.1 → 8 字下限
+        assert target_chars == 8
+        return "收短版"
+
+    result = pipeline.synthesize_narration_texts(
+        plan,
+        {"tts.engine": "edge"},
+        tmp_path,
+        source_durations={"ep1": 26.0},
+        rewrite_for_fit=rewrite,
+    )
+    # 收短后 10s：头部扩展保计划尾（21s），起点前伸到 11s
+    assert _windows(result) == [("ep1", 11.0, 21.0)]
+    assert result.narration_texts[0].text == "收短版"
+
+
+def test_unrewriteable_overflow_drops_after_first_round(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """重写出口给不出新文案：一轮无进展即停（不做满两轮空转），弃段留痕成片继续。"""
+    import logging
+
+    plan = _plan(("ep1", 20.0, 21.0, "narration"))
+
+    def probe(path: Path) -> float:
+        return 30.0
+
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
+    calls: list[int] = []
+
+    def rewrite(text: str, target_chars: int) -> str | None:
+        calls.append(target_chars)
+        return None
+
+    with caplog.at_level(logging.WARNING, logger="dramaclip.engines.narration.synthesis"):
+        result = pipeline.synthesize_narration_texts(
+            plan,
+            {"tts.engine": "edge"},
+            tmp_path,
+            source_durations={"ep1": 26.0},
+            rewrite_for_fit=rewrite,
+        )
+    assert result.timeline == []
+    assert len(calls) == 1
+    joined = "\n".join(record.getMessage() for record in caplog.records)
+    assert "实测 30.00s" in joined and "弃用" in joined
 
 
 def test_an_original_segment_pushed_past_the_source_is_rejected_too(

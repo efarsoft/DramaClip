@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -296,6 +297,63 @@ def _assert_within_source(
         )
 
 
+def _rewrite_and_resynth(
+    unplaced: list[dict[str, Any]],
+    voiced: dict[str, tuple[str, str, float]],
+    plan: PlanData,
+    pool: _EnginePool,
+    settings: dict[str, str],
+    speed: str,
+    work_dir: Path,
+    cache_dir: Path,
+    rewrite_for_fit: Callable[[str, int], str | None],
+    log: LogFn | None,
+) -> bool:
+    """对放不下的段做一轮定向收短＋重新合成；至少一段成功更新才返回 True。
+
+    目标字数按本段实测语速推（字/秒 × 空隙秒），不另设语速常量。重写或重合成
+    单段失败都只留痕跳过（该段走弃段路径），绝不牵连整条方案。
+    """
+    items = {item.id: item for item in plan.narration_texts}
+    progressed = False
+    for entry in unplaced:
+        slot = str(entry["slot"])
+        text = str(entry["text"])
+        duration = float(entry["duration"])
+        gap_s = float(entry["gap_s"])
+        cps = len(text) / duration if duration > 0 else 4.0
+        target_chars = max(8, int(gap_s * cps))
+        try:
+            new_text = rewrite_for_fit(text, target_chars)
+        except Exception as exc:  # noqa: BLE001 - LLM 失败不致命：该段回退弃段路径
+            _emit(log, f"旁白 {slot} 收短重写失败（{type(exc).__name__}: {exc}）", "warn")
+            continue
+        if not new_text or new_text.strip() == text.strip():
+            continue
+        new_text = new_text.strip()
+        item = items.get(slot)
+        voice = (item.voice if item is not None else "") or pool.voice_for(settings)
+        if item is not None and item.voice and not pool.accepts_voice(item.voice):
+            voice = pool.voice_for(settings)
+        try:
+            audio_path = pool.synthesize_item(slot, new_text, voice, speed, work_dir, cache_dir)
+            new_dur = tts_base.audio_duration_s(audio_path)
+        except Exception as exc:  # noqa: BLE001 - 重合成失败不致命：该段回退弃段路径
+            _emit(log, f"旁白 {slot} 收短后重新合成失败（{exc}），保留原音频", "warn")
+            continue
+        if not new_dur or new_dur <= 0:
+            continue
+        audio_path, new_dur = _align_to_hook_slot(slot, audio_path, float(new_dur), log)
+        voiced[slot] = (str(audio_path), new_text, float(new_dur))
+        progressed = True
+        _emit(
+            log,
+            f"旁白 {slot} 实测 {duration:.2f}s 超出 {gap_s:.2f}s 空隙，已收短至 "
+            f"{len(new_text)} 字（目标 ≤{target_chars}）重新合成，实测 {float(new_dur):.2f}s",
+        )
+    return progressed
+
+
 def synthesize_narration_texts(
     plan: PlanData,
     settings: dict[str, str],
@@ -306,6 +364,7 @@ def synthesize_narration_texts(
     log: LogFn | None = None,
     on_progress: Callable[[int, int], None] | None = None,
     data_dir: Path | None = None,
+    rewrite_for_fit: Callable[[str, int], str | None] | None = None,
 ) -> PlanData:
     """逐段合成旁白并按 narration_id 回填时长与解说字幕。
 
@@ -321,6 +380,12 @@ def synthesize_narration_texts(
     `data_dir` 是设备解析入口（给工厂读运行环境安装态），没有它引擎按自身的 auto
     语义走。不从 `models_dir.parent` 反推：`models_dir` 是调用方给的，测试里常是
     tmp_path，猜出来的目录读 marker 会把「测试目录没装运行环境」读成「本机没装」。
+
+    `rewrite_for_fit(text, target_chars) -> 新文案 | None`：实测时长装不进画面空隙时
+    的定向收短出口（api 层接 LLM）。不传或重写无效时，放不下的段两轮后直接弃段
+    留痕——业主裁决 2026-10-26：素材时长不够或太长应重新选取判断，而不是整条
+    方案判失败。`_assert_within_source` 收窄为最终防线：重排与弃段消化后仍越界
+    只可能是代码不变量被破坏。
     """
     _assert_voiceable(plan)
     if not plan.narration_texts:
@@ -373,16 +438,57 @@ def synthesize_narration_texts(
     # 实测时长到手后按模式规则**整体重铺**；其余模式（intro/full/ducker/对谈/
     # 独白/剧本驱动）时间轴承载语义（闪前预告、ASR 吸附、台词对位），走下方的
     # 游标修补——修补的头部扩展/尾部收口对所有模式仍是兜底。
-    if plan.mode == "ultra_short_hook" and plan.scene_pool:
-        timeline = _layout_ultra_short(plan, voiced, source_durations, log)
-    elif plan.mode == "cross_narration":
-        timeline = _layout_cross(plan, voiced, source_durations, log)
-    else:
-        timeline = _patch_timeline(plan, voiced, source_durations)
+    #
+    # 装不下的段不再判死（业主裁决 2026-10-26「素材时长不够，或者太长，应该重新
+    # 选取判断，而不是失败」）：重排 → 定向收短重写 → 重合成 → 重回排，至多两轮；
+    # 仍放不下的段弃用留痕，成片继续。超短模式自带候选池全量重选与如实报错语义，
+    # 不进重写循环。
+    timeline: list[dict[str, Any]] = []
+    unplaced: list[dict[str, Any]] = []
+    for attempt in range(3):
+        if plan.mode == "ultra_short_hook" and plan.scene_pool:
+            timeline = _layout_ultra_short(plan, voiced, source_durations, log)
+            unplaced = []
+            break
+        if plan.mode == "cross_narration":
+            timeline, unplaced = _layout_cross(plan, voiced, source_durations, log)
+        else:
+            timeline, unplaced = _patch_timeline(plan, voiced, source_durations)
+        if not unplaced or rewrite_for_fit is None or attempt >= 2:
+            break
+        if not _rewrite_and_resynth(
+            unplaced,
+            voiced,
+            plan,
+            pool,
+            settings,
+            speed,
+            work_dir,
+            cache_dir,
+            rewrite_for_fit,
+            log,
+        ):
+            break
+    for entry in unplaced:
+        _emit(
+            log,
+            f"旁白 {entry['slot']} 实测 {entry['duration']:.2f}s，最大可用空隙只有 "
+            f"{entry['gap_s']:.2f}s，收短重写后仍放不下——该段弃用，成片继续"
+            f"（不裁音、不重播）：{entry['text'][:24]}…",
+            "warn",
+        )
+    if unplaced:
+        _emit(log, f"共 {len(unplaced)} 段旁白放不进画面空隙被弃用", "warn")
     _assert_within_source(timeline, source_durations)
     updated = [
         item.model_copy(
-            update={"audio_path": voiced[item.id][0], "duration": voiced[item.id][2]}
+            update={
+                "audio_path": voiced[item.id][0],
+                "duration": voiced[item.id][2],
+                # 定向重写后文案已换血（voiced 里存的是实际配音文本），方案里的
+                # narration_texts 必须同步，否则详情页展示的还是收短前的旧稿。
+                "text": voiced[item.id][1],
+            }
         )
         for item in plan.narration_texts
     ]
@@ -484,83 +590,196 @@ def _layout_ultra_short(
     )
 
 
+_BRIDGE_ID_RE = re.compile(r"^cross-\d+$")
+
+
+def _bridge_entry(
+    episode_id: str, slot: str, text: str, duration: float, start: float
+) -> dict[str, Any]:
+    """旁白时间轴条目（纯函数：`_layout_cross` 循环内不定义闭包绑循环变量）。"""
+    return {
+        "episode_id": episode_id,
+        "start": round(start, 3),
+        "end": round(start + duration, 3),
+        "audio": "narration",
+        "narration_id": slot,
+        "subtitle_text": text,
+    }
+
+
 def _layout_cross(
     plan: PlanData,
     voiced: dict[str, tuple[str, str, float]],
     source_durations: dict[str, float],
     log: LogFn | None,
-) -> list[dict[str, Any]]:
-    """交叉解说桥段落位：场景原声窗原封不动，桥段旁白放进场景间空隙。
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """交叉解说桥段落位：场景原声窗原封不动，旁白按实测时长装进场景间空隙。
 
     旧布局把桥段叠在下个场景开头（与场景窗设计性重叠），IndexTTS 实测一超长
     就把场景顶出集尾（真机 2026-10-06：cross-3 差 0.16s 整条判死）。场景窗吸附
-    过最强台词 span，挪了就不是那句台词——所以桥段改为收尾锚在下个场景开头、
-    向前伸进空隙；末段桥（没有下一场景）接在自己场景窗之后。空隙放不下如实报错。
+    过最强台词 span，挪了就不是那句台词——所以旁白改为收尾锚在下个场景开头、
+    向前伸进空隙。
+
+    空隙放不下**不再判死**（业主裁决 2026-10-26：素材不 fit 应重新选取而不是失败）：
+    每集建空隙模型（原声窗钉死，多个空隙可从右往左共享装填），首选空隙装不下时
+    桥段（cross-N）依次尝试同集后续更大的空隙；全都放不下的段进 `unplaced` 交
+    上层定向重写（收短→重合成→重回排），两轮后仍放不下才弃段留痕。
 
     桥段落位后 **re-stamp 成锚点集号**：build_cross 给桥段盖的是当前场景的集
     （旁白压刚看过画面的延续帧），但空隙锚位算的是**下一场景**的集内时钟——
     跨集方案里两件事不同集：保留旧集号会让 start=下一集时钟−时长 落进本集的
     错误位置（本集场景起点普遍 ≈0，直接负起点误报判死），encoder 还会按旧集号
     从错误集取画面。布局语义＝桥段属于下一集时间轴，落位即改章。
+
+    返回 `(timeline, unplaced)`；`unplaced` 元素含 slot/text/duration/episode_id/gap_s。
     """
     segments = plan.timeline
+    anchors: dict[str, list[tuple[float, float]]] = {}
+    for segment in segments:
+        if segment.audio != "narration":
+            anchors.setdefault(segment.episode_id, []).append(
+                (float(segment.start), float(segment.end))
+            )
+    for window_list in anchors.values():
+        window_list.sort()
+
+    def _gap_floor(episode_id: str, before: float) -> float:
+        """空隙下限：该集里右沿之前的最近原声窗的 end（没有则 0）。"""
+        floor = 0.0
+        for a_start, a_end in anchors.get(episode_id, []):
+            if a_start < before - 1e-6:
+                floor = max(floor, a_end)
+        return floor
+
+    # 同一空隙（集, 右沿）可能被多段共享：从右往左装填，记录剩余右沿。
+    gap_ceil: dict[tuple[str, float], float] = {}
+    # 尾隙（末段桥）沿用旧游标语义：左对齐接在最后一个原声窗之后。
+    tail_cursor: dict[str, float] = {}
     timeline: list[dict[str, Any]] = []
-    cursor: dict[str, float] = {}
+    # 旁白条目不即时追加：挂到锚点原声段的序号上，装配到原声窗前按时序插入——
+    # 时间轴列表序＝播放序，桥段改锚后若留在迭代位置会让画面倒放。
+    entries_by_anchor: dict[int, list[dict[str, Any]]] = {}
+    unplaced: list[dict[str, Any]] = []
+    moved_bridges = 0
     for index, segment in enumerate(segments):
         if segment.audio != "narration":
-            entry = segment.model_dump()
-            timeline.append(entry)
-            cursor[segment.episode_id] = float(entry["end"])
+            for entry in sorted(
+                entries_by_anchor.pop(index, []), key=lambda item: item["start"]
+            ):
+                timeline.append(entry)
+            timeline.append(segment.model_dump())
             continue
         slot = str(segment.narration_id or "")
         voiced_entry = voiced.get(slot)
         if voiced_entry is None:
             raise RuntimeError(f"交叉桥段 {slot} 没有实测音频，无法布局")
         _audio_path, text, duration = voiced_entry
-        next_original = next(
-            (s for s in segments[index + 1 :] if s.audio != "narration"), None
+        next_index = next(
+            (
+                j
+                for j in range(index + 1, len(segments))
+                if segments[j].audio != "narration"
+            ),
+            None,
         )
+        next_original = segments[next_index] if next_index is not None else None
         anchor_episode = (
             next_original.episode_id if next_original is not None else segment.episode_id
         )
+        limit = source_durations.get(anchor_episode, 0.0)
+        if limit <= 0:
+            # 与 `_assert_within_source` 同口径：拿不到源长＝无法证明不越界，判失败。
+            raise RuntimeError(
+                f"无法核对画面窗口是否越过源集末尾：桥段 {slot} 锚定的集 "
+                f"{anchor_episode} 没有源集时长（未入库或为 0）"
+            )
+
+        placed = False
         if next_original is None:
-            start = cursor.get(segment.episode_id, float(segment.start))
-        else:
-            start = float(next_original.start) - duration
-            floor = cursor.get(anchor_episode, 0.0)
-            if start < floor:
-                raise RuntimeError(
-                    f"交叉桥段 {slot} 实测 {duration:.2f}s，但 "
-                    f"{next_original.episode_id} 场景 {next_original.start:.2f}s 前的"
-                    f"空隙只有 {float(next_original.start) - floor:.2f}s——"
-                    "空隙放不下，这条方案判失败（不裁音、不重播）"
+            # 末段桥：接在本集最后一个原声窗之后（左对齐，沿用旧游标语义）。
+            start = max(
+                _gap_floor(anchor_episode, float("inf")),
+                tail_cursor.get(anchor_episode, 0.0),
+            )
+            if start + duration <= limit + _SOURCE_FIT_TOL_S:
+                entries_by_anchor.setdefault(len(segments), []).append(
+                    _bridge_entry(anchor_episode, slot, text, duration, start)
                 )
-        end = start + duration
-        timeline.append(
-            {
-                "episode_id": anchor_episode,
-                "start": round(start, 3),
-                "end": round(end, 3),
-                "audio": "narration",
-                "narration_id": slot,
-                "subtitle_text": text,
-            }
-        )
-        cursor[anchor_episode] = end
+                tail_cursor[anchor_episode] = start + duration
+                placed = True
+        else:
+            # 候选空隙：首选位（下一场景前的空隙，右对齐收尾锚在场景开头），
+            # 桥段再补同集后续场景空隙（依次尝试更大空隙）。
+            candidates: list[tuple[str, float, int]] = [
+                (anchor_episode, float(next_original.start), int(next_index or 0))
+            ]
+            if _BRIDGE_ID_RE.match(slot):
+                assert next_index is not None  # next_original 非 None 蕴含
+                for j in range(next_index + 1, len(segments)):
+                    later = segments[j]
+                    if (
+                        later.audio != "narration"
+                        and later.episode_id == anchor_episode
+                        and float(later.start) > float(next_original.start) + 1e-6
+                    ):
+                        candidates.append((anchor_episode, float(later.start), j))
+            for gap_episode, gap_right, anchor_index in candidates:
+                floor = _gap_floor(gap_episode, gap_right)
+                ceil_remaining = gap_ceil.get((gap_episode, gap_right), gap_right)
+                if duration <= ceil_remaining - floor + _SOURCE_FIT_TOL_S:
+                    entries_by_anchor.setdefault(anchor_index, []).append(
+                        _bridge_entry(gap_episode, slot, text, duration, ceil_remaining - duration)
+                    )
+                    gap_ceil[(gap_episode, gap_right)] = ceil_remaining - duration
+                    placed = True
+                    if (gap_episode, gap_right) != candidates[0][:2]:
+                        moved_bridges += 1
+                        _emit(
+                            log,
+                            f"桥段 {slot} 实测 {duration:.2f}s 超出场景 "
+                            f"{candidates[0][1]:.2f}s 前的空隙，改锚到场景 "
+                            f"{gap_right:.2f}s 前的更大空隙",
+                        )
+                    break
+        if not placed:
+            gap_right = (
+                limit
+                if next_original is None
+                else float(next_original.start)
+            )
+            first_floor = _gap_floor(anchor_episode, gap_right)
+            unplaced.append(
+                {
+                    "slot": slot,
+                    "text": text,
+                    "duration": duration,
+                    "episode_id": anchor_episode,
+                    "gap_s": max(gap_right - first_floor, 0.0),
+                }
+            )
+    for entry in sorted(
+        entries_by_anchor.pop(len(segments), []), key=lambda item: item["start"]
+    ):
+        timeline.append(entry)
     _emit(
         log,
         f"交叉布局按实测时长把 {sum(1 for s in timeline if s['audio'] == 'narration')}"
-        "段桥旁白放进场景间空隙，场景原声窗原样保留",
+        f"段旁白放进场景间空隙（{moved_bridges} 段改锚更大空隙），场景原声窗原样保留",
     )
-    return timeline
+    return timeline, unplaced
 
 
 def _patch_timeline(
     plan: PlanData,
     voiced: dict[str, tuple[str, str, float]],
     source_durations: dict[str, float],
-) -> list[dict[str, Any]]:
-    """游标修补（既有回填语义）：旁白段长=实测音频，头部扩展→尾部收口→守卫。"""
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """游标修补（既有回填语义）：旁白段长=实测音频，头部扩展→尾部收口。
+
+    两处都放不下的段不再原样交给 `_assert_within_source` 判死（业主裁决
+    2026-10-26：素材不 fit 应重新选取而不是失败）：进 `unplaced` 交上层定向
+    重写（收短→重合成→重回排），两轮后仍放不下弃段留痕。返回 `(timeline, unplaced)`。
+    """
     timeline = [segment.model_dump() for segment in plan.timeline]
     # 实测音频时长 ≠ 编排期的估计时长：把 end 直接改成 start + 实测，前一段就会
     # 盖住后一段的源素材区间，成片演到第 6 秒又倒回第 1 秒重播同一段画面（业主
@@ -587,6 +806,7 @@ def _patch_timeline(
             for index, segment in enumerate(timeline[1:], start=1)
         )
     cursor: dict[str, float] = {}
+    unplaced: list[dict[str, Any]] = []
     for index, segment in enumerate(timeline):
         episode_id = str(segment["episode_id"])
         floor = cursor.get(episode_id, 0.0)
@@ -624,12 +844,39 @@ def _patch_timeline(
         # 收口损失的只有"这一段配哪几秒画面"，没有一帧声音被丢掉。
         elif 0 < limit < start + length and limit - length >= floor:
             start = limit - length
+        elif (
+            segment["audio"] in ("narration", "ducked")
+            and limit > 0
+            and start + length > limit + _SOURCE_FIT_TOL_S
+        ):
+            # 头部扩展与尾部收口都伸不动：不原样留给守卫判死，转 unplaced 让上层
+            # 先定向重写、两轮后仍放不下再弃段。该段不入时间轴，后续段的游标floor
+            # 停在前一段——它的窗口自然让位。
+            unplaced.append(
+                {
+                    "slot": str(segment["narration_id"]),
+                    "text": voiced[str(segment["narration_id"])][1],
+                    "duration": length,
+                    "episode_id": episode_id,
+                    "gap_s": max(limit - floor, 0.0),
+                }
+            )
+            continue
         end = start + length
         segment["start"] = round(start, 3)
         segment["end"] = round(end, 3)
         if index == 0 and _intro_teaser:
             continue  # 闪前预告不推进游标：正文从自己的计划起点起算（见上方判据注释）
         cursor[episode_id] = end
-    return timeline
+    # 弃段不在时间轴里留影子：timeline 是预构建的原地改写列表，unplaced 的段
+    # 没经过落位改写，必须摘掉，否则成片按编排期估计窗渲染一段没有配音的旁白。
+    dropped_slots = {str(entry["slot"]) for entry in unplaced}
+    if dropped_slots:
+        timeline = [
+            segment
+            for segment in timeline
+            if str(segment.get("narration_id") or "") not in dropped_slots
+        ]
+    return timeline, unplaced
 
 

@@ -21,7 +21,7 @@ from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration import styles as styles_lib
 from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
-from dramaclip.engines.semantic.llm_client import LlmUnavailable
+from dramaclip.engines.semantic.llm_client import LlmUnavailable, client_or_none
 from dramaclip.infra import config
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
@@ -250,6 +250,32 @@ def _excluded_angle_names(context: AppContext, exclude_plan_ids: list[str]) -> l
     return names
 
 
+def _fit_rewriter(settings: dict[str, str]) -> Callable[[str, int], str | None] | None:
+    """装不下画面空隙时的定向收短出口（业主裁决 2026-10-26：重新选取而非判失败）。
+
+    LLM 未配置返回 None——回填侧收到 None 就跳过重写直接走弃段留痕，配音链路
+    不因 LLM 缺席而阻断。回调内异常由回填侧逐段兜住（留痕后回退弃段），这里不吞。
+    """
+    client = client_or_none(settings)
+    if client is None:
+        return None
+
+    def rewrite(text: str, target_chars: int) -> str | None:
+        result = client.chat_json(
+            "你是短剧解说编剧。把给定的解说段收短到指定字数以内，"
+            "只输出 JSON：{\"text\": \"成稿正文\"}。",
+            f"收短到不超过 {target_chars} 字：保留悬念与主要信息，删形容词、"
+            "重复与次要细节，不得新增剧情，不得改口吻。\n"
+            f"原文：{text}",
+        )
+        if isinstance(result, dict):
+            new_text = str(result.get("text") or "").strip()
+            return new_text or None
+        return None
+
+    return rewrite
+
+
 def _voice(
     context: AppContext,
     plan: PlanData,
@@ -275,6 +301,7 @@ def _voice(
         log=context.notifier.log,
         on_progress=on_progress,
         data_dir=context.data_dir,
+        rewrite_for_fit=_fit_rewriter(settings),
     )
 
 

@@ -163,10 +163,13 @@ def test_cross_bridges_land_in_the_gaps_between_scenes(
     ]
 
 
-def test_cross_bridge_that_does_not_fit_the_gap_fails_loudly(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_cross_bridge_that_does_not_fit_the_gap_is_dropped_with_ledger(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """空隙放不下桥段实测时长：如实报错（不裁音、不重播），不说含糊的越界。"""
+    """空隙放不下桥段实测时长：弃段留痕、成片继续（业主裁决 2026-10-26
+    「素材时长不够或太长应重新选取判断，而不是失败」），不裁音、不重播。"""
+    import logging
+
     plan = PlanData(
         mode="cross_narration",
         timeline=[
@@ -179,8 +182,41 @@ def test_cross_bridge_that_does_not_fit_the_gap_fails_loudly(
         ],
         narration_texts=[NarrationText(id="cross-1", text="承接上一幕")],
     )
-    with pytest.raises(RuntimeError, match=r"cross-1 实测 6\.00s.*空隙只有 2\.00s"):
-        _voice_slots(monkeypatch, tmp_path, plan, {"cross": 6.0}, {"ep1": 90.0})
+    with caplog.at_level(logging.WARNING, logger="dramaclip.engines.narration.synthesis"):
+        result = _voice_slots(monkeypatch, tmp_path, plan, {"cross": 6.0}, {"ep1": 90.0})
+    assert [(s.start, s.end, s.audio) for s in result.timeline] == [
+        (10.0, 18.0, "original"),
+        (20.0, 26.0, "original"),
+    ]
+    joined = "\n".join(record.getMessage() for record in caplog.records)
+    assert "cross-1" in joined and "弃用" in joined
+
+
+def test_cross_bridge_too_long_for_its_gap_moves_to_a_later_bigger_gap(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """桥段实测超首选空隙：依次尝试同集后续更大空隙（业主裁决「重新选取」），
+    改锚后仍 re-stamp 成锚点集号。"""
+    plan = PlanData(
+        mode="cross_narration",
+        timeline=[
+            TimelineSegment(episode_id="ep1", start=10.0, end=18.0, audio="original"),
+            TimelineSegment(
+                episode_id="ep1", start=18.0, end=22.0,
+                audio="narration", narration_id="cross-1",  # type: ignore[arg-type]
+            ),
+            TimelineSegment(episode_id="ep1", start=20.0, end=26.0, audio="original"),
+            TimelineSegment(episode_id="ep1", start=60.0, end=70.0, audio="original"),
+        ],
+        narration_texts=[NarrationText(id="cross-1", text="承接上一幕")],
+    )
+    result = _voice_slots(monkeypatch, tmp_path, plan, {"cross": 12.0}, {"ep1": 90.0})
+    assert [(s.start, s.end, s.audio) for s in result.timeline] == [
+        (10.0, 18.0, "original"),
+        (20.0, 26.0, "original"),
+        (48.0, 60.0, "narration"),  # 首选空隙只有 2s，改锚到 60s 场景前的 34s 空隙
+        (60.0, 70.0, "original"),
+    ]
 
 
 def test_cross_bridge_into_another_episode_needs_no_gap_partner(
