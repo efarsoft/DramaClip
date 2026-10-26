@@ -125,8 +125,12 @@ def install(
         tts_runtime._run_uv(uv, venv, "venv", str(venv), "--python", "3.11")
     _check_cancel()
 
-    # ③ torch：变体判据与双栈同一份（算力 <7.0 装 CPU 轮的裁决同 tts_runtime）
+    # ③ torch：变体判据与双栈同一份；xpu 主机（Intel Arc/Ultra）降装 CPU 轮——
+    #    ACE-Step 在 XPU 后端的算子覆盖未验证，不给用户拉一份用不上的 2.5GB 轮
     variant = tts_runtime._gpu_variant()
+    if variant == "xpu":
+        print("[music-runtime] XPU 主机：ACE-Step 未验证，music-venv 装 CPU 轮")
+        variant = "cpu"
     variant_label = "CUDA 12.8" if variant == "cuda" else "CPU"
     _pct(18, f"安装 torch（{variant_label} 变体，约 0.2-2.5GB）")
     _install_torch(uv, venv, variant)

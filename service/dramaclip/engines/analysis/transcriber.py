@@ -182,7 +182,9 @@ class _FunasrWorker:
         except RuntimeError as exc:
             # worker 进程死亡（原生崩溃/OOM）不该连坐本批剩余每一集：
             # 就地重生一次再试；再挂如实上抛（那时的错误仍是可读的人话）。
-            if "意外退出" not in str(exc) or self._inner.proc is not None:
+            # 重生以「意外退出」错误为唯一触发——每次调用至多重生一次，
+            # 重试再挂就按单集失败上报，不在同一请求里无限循环。
+            if "意外退出" not in str(exc):
                 raise
             _LOGGER.warning("funasr worker 已退出，重启后重试本次请求")
             self._inner.close()

@@ -43,6 +43,16 @@ class FakeJobStore:
         self.jobs[job_id]["status"] = "failed"
         self.jobs[job_id]["error"] = message
 
+    def list_recent(self, limit: int = 50, active_only: bool = False) -> list[dict[str, str]]:
+        rows = [
+            {"id": jid, **job, "active": job["status"] in ("pending", "running")}
+            for jid, job in self.jobs.items()
+        ]
+        return [
+            r for r in rows
+            if not active_only or r["status"] in ("pending", "running")
+        ][:limit]
+
 
 class FakeEngine:
     """is_available/generate 的替身：generate 按 script 逐次出牌（异常或产 wav）。"""
@@ -137,6 +147,34 @@ def test_generate_full_chain_lands_library_track(
     assert row["duration_s"] > 0
     # 产物 wav 已被转码清理
     assert not list((tmp_path / "cache" / "bgm-gen").glob("*.wav"))
+
+
+def test_generate_two_successes_land_two_files(
+    memory_db: sqlite3.Connection, tmp_path: Path, fake_data_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """per_emotion=2 双成功 → 两个不同文件两行入库（自增序号 bug 回归钉）。"""
+    engine = FakeEngine()
+    _register_engine(monkeypatch, engine)
+    context = _context(memory_db, tmp_path, engine)
+    router = _router(memory_db)
+    bgm_api.register(router, context)
+    result = router.dispatch(
+        RpcRequest(id=1, method="bgm.generate",
+                   params={"emotions": ["suspense"], "per_emotion": 2}),
+    ).result
+    job_id = str(result["job_id"])
+    import time
+
+    for _ in range(200):
+        if context.job_store.jobs[job_id]["status"] in ("completed", "failed"):
+            break
+        time.sleep(0.05)
+    assert context.job_store.jobs[job_id]["status"] == "completed"
+    rows = bgm_repo.list_all(memory_db)
+    assert len(rows) == 2
+    names = {Path(r["file_path"]).name for r in rows}
+    assert names == {"acestep_suspense_01.ogg", "acestep_suspense_02.ogg"}
 
 
 def test_generate_partial_failure_continues(

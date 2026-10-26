@@ -34,13 +34,18 @@ def _engine(context: Any) -> AceStepEngine:
 
 
 def _next_index(directory: Path, emotion: str) -> int:
-    """曲库文件自增序号（tools_bgm_import 同款语义）：acestep_<emotion>_NN.ogg。"""
+    """曲库文件自增序号：只认自家产物前缀 acestep_<emotion>_NN.ogg。
+
+    扫描前缀必须与写入文件名同构——早先扫 `{emotion}_` 会看不见自己的
+    acestep_ 前缀产物，per_emotion≥2 时序号永远算 1，同路径静默互相覆盖。
+    """
+    prefix = f"acestep_{emotion}_"
     highest = 0
     if directory.is_dir():
         for f in directory.iterdir():
             stem = f.stem.lower()
-            if stem.startswith(f"{emotion}_") and stem.split("_")[-1].isdigit():
-                highest = max(highest, int(stem.split("_")[-1]))
+            if stem.startswith(prefix) and stem[len(prefix):].isdigit():
+                highest = max(highest, int(stem[len(prefix):]))
     return highest + 1
 
 
@@ -53,7 +58,10 @@ def _transcode_to_library(
     index = _next_index(directory, emotion)
     dest = directory / f"acestep_{emotion}_{index:02d}.ogg"
     result = subprocess_run_ffmpeg(wav_path, dest)
-    if not dest.is_file():
+    if not dest.is_file() or dest.stat().st_size == 0:
+        # 半截 ogg 不许留在曲库目录：重扫会跳过但试听会 403/静音，当场清掉
+        dest.unlink(missing_ok=True)
+        wav_path.unlink(missing_ok=True)
         raise RuntimeError(f"ffmpeg 转码失败：{result}")
     wav_path.unlink(missing_ok=True)
     duration, bpm = bgm_library.measure_track(dest)
@@ -120,11 +128,20 @@ def _generate_worker(context: Any, job_id: str, payload: dict[str, Any]) -> None
                     "info", f"BGM 生成进度 {done}/{total}",
                 )
         if done and len(failures) == done:
-            context.job_store.mark_failed(job_id, "；".join(failures[:3]))
+            detail = ""
+            job = context.job_store.get(job_id)
+            if job is not None:
+                detail = str(job.get("error") or "")
+            context.job_store.mark_failed(
+                job_id, f"全部 {total} 首生成失败" + (f"：{detail}" if detail else "")
+            )
         else:
             if failures:
                 context.notifier.log("warn", f"BGM 生成部分失败（{len(failures)}/{done}）")
             context.job_store.mark_completed(job_id)
+    except Exception as exc:  # noqa: BLE001 - 任务体任何意外都必须落终态，不留 running
+        context.job_store.mark_failed(job_id, f"BGM 生成任务失败: {exc}")
+        context.notifier.log("error", f"BGM 生成任务失败: {exc}")
     finally:
         context.cancel_events.pop(job_id, None)
 
@@ -141,6 +158,14 @@ def register(router: Any, context: Any) -> None:
         available, reason = engine.is_available()
         if not available:
             raise ValueError(reason)
+        active = [
+            j for j in context.job_store.list_recent(limit=50, active_only=True)
+            if j.get("type") == "bgm_generate"
+        ]
+        if active:
+            raise ValueError(
+                "已有 BGM 生成任务进行中，请等待完成后再发起（并发写同一目录会互相覆盖）"
+            )
         job_id = context.job_store.create("bgm_generate", ref_id=",".join(emotions))
         context.job_store.mark_running(job_id)
         context.cancel_events[job_id] = threading.Event()

@@ -19,6 +19,8 @@ export const JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   model_import: '模型导入',
   cuda_runtime: 'CUDA 环境安装',
   indextts_runtime: '配音环境安装',
+  music_runtime: '配乐环境安装',
+  bgm_generate: '配乐生成',
   voice_clean: '参考清洗',
   tools_extract: '文案提取',
   tools_asr: '语音转文字',

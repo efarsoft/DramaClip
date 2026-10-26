@@ -64,7 +64,11 @@ function useBgmPlayer(onStop: (message: string) => void): {
         audioRef.current.pause();
       }
       const element = new Audio(mediaUrl(path));
+      // 身份守卫：切曲/暂停会让旧元素的 pending play() 以 AbortError 迟到失败——
+      // 只有当前元素仍是活跃元素时才清理状态，否则孤儿化新曲/误报失败。
+      const mine = (): boolean => audioRef.current === element;
       element.onended = () => {
+        if (!mine()) return;
         audioRef.current = null;
         playingRef.current = null;
         setPlayingPath(null);
@@ -73,6 +77,7 @@ function useBgmPlayer(onStop: (message: string) => void): {
       playingRef.current = path;
       setPlayingPath(path);
       element.play().catch(() => {
+        if (!mine()) return;
         audioRef.current = null;
         playingRef.current = null;
         setPlayingPath(null);
