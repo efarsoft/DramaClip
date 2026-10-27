@@ -72,6 +72,53 @@ def test_raw_clip_all_original_audio() -> None:
     assert all(seg.audio == "original" for seg in plan.timeline)
 
 
+def test_raw_clip_window_boundaries_snap_to_sentence_bounds() -> None:
+    """剪口不落在句子中间（业主 2026-10-27 立案：成品 14 窗 7 切句，还在说话就跳场）。
+
+    止点切句收进整句（把话说完再跳）；起点切句退到句首（从话头听起）。
+    """
+    from dramaclip.engines.analysis.models import AsrSegment
+    from dramaclip.engines.narration.casting import EpisodeMaterial
+
+    scenes = [
+        ConflictScore(scene_index=0, start=6.0, end=12.0, score=90),
+        ConflictScore(scene_index=1, start=18.0, end=24.0, score=85),
+    ]
+    material = {
+        "ep1": EpisodeMaterial(
+            number=1,
+            asr=[
+                AsrSegment(start=8.0, end=12.9, text="止点切句：收进整句"),
+                AsrSegment(start=17.2, end=21.0, text="起点切句：退到句首"),
+            ],
+        )
+    }
+    plan = build_raw_clip(stamp([(1, "ep1", scenes)]), [], _STRATEGY, material)
+    assert [(seg.start, seg.end) for seg in plan.timeline] == [
+        (6.0, 12.9),  # 止点 12.0 切在 [8.0,12.9] 句中 → 延到句尾
+        (17.2, 24.0),  # 起点 18.0 切在 [17.2,21.0] 句中 → 退到句首
+    ]
+
+
+def test_raw_clip_snap_yields_when_extension_hits_next_window() -> None:
+    """收进整句会撞下一窗起点：止点退到句前（不切句也不侵占下一窗）。"""
+    from dramaclip.engines.analysis.models import AsrSegment
+    from dramaclip.engines.narration.casting import EpisodeMaterial
+
+    scenes = [
+        ConflictScore(scene_index=0, start=6.0, end=12.0, score=90),
+        ConflictScore(scene_index=1, start=14.2, end=19.0, score=85),
+    ]
+    material = {
+        "ep1": EpisodeMaterial(
+            number=1,
+            asr=[AsrSegment(start=8.0, end=14.5, text="收进整句会撞下一窗")],
+        )
+    }
+    plan = build_raw_clip(stamp([(1, "ep1", scenes)]), [], _STRATEGY, material)
+    assert (plan.timeline[0].start, plan.timeline[0].end) == (6.0, 8.0)
+
+
 def test_intro_marks_first_segment_as_narration() -> None:
     plan = build_intro(stamp([(1, "ep1", _scenes())]), _STRATEGY)
     assert plan.mode == "intro_narration"

@@ -140,7 +140,66 @@ def build_raw_clip(
     # 邻接合并：相邻高分场景合成连续块播放，减少时间轴反复横跳
     ordered = _merge_adjacent(ordered)
     timeline = _fit_duration(ordered, strategy)
+    timeline = _snap_windows_to_dialogue(timeline, material)
     return PlanData(mode="raw_clip", timeline=timeline, strategy=strategy)
+
+
+_DIALOGUE_SNAP_EPS_S = 0.35  # 边界离句边界比这近就不算切句（字级时间戳的正常抖动）
+
+
+def _snap_windows_to_dialogue(
+    timeline: list[TimelineSegment],
+    material: MaterialByEpisode | None,
+) -> list[TimelineSegment]:
+    """原声窗边界吸附台词句边界：剪口不落在句子中间（业主 2026-10-27 实测立案）。
+
+    raw_clip 的卖点是「原声台词高光合集」，窗口止在句中=话说到一半跳场（真机
+    2026-10-27 成品 3a83fc98：14 窗 7 窗切句，开头 3.2s 窗拦腰切断一句台词）。
+    止点切在句中：优先收进整句（延到句尾），会撞下一窗起点就退到句前；起点切在
+    句中：优先退到句首，会撞上一窗止点就进到句后。两侧都让不动时保持原值——
+    吸附是增强不是义务；无原料（material 缺该集）原样通过。
+    """
+    if material is None or not timeline:
+        return timeline
+    by_episode: dict[str, list[int]] = {}
+    for index, segment in enumerate(timeline):
+        by_episode.setdefault(segment.episode_id, []).append(index)
+    updated = list(timeline)
+    eps = _DIALOGUE_SNAP_EPS_S
+    for indices in by_episode.values():
+        for position, index in enumerate(indices):
+            segment = updated[index]
+            entry = material.get(segment.episode_id)
+            if entry is None:
+                continue
+            prev_end = (
+                updated[indices[position - 1]].end if position > 0 else None
+            )
+            next_start = (
+                updated[indices[position + 1]].start
+                if position + 1 < len(indices)
+                else None
+            )
+            start, end = segment.start, segment.end
+            for s0, s1 in ((seg.start, seg.end) for seg in entry.asr):
+                if s0 + eps < end < s1 - eps:  # 止点切在句中
+                    if next_start is None or s1 <= next_start:
+                        end = s1  # 收进整句：把话说完再跳
+                    elif s0 >= start + eps:
+                        end = s0  # 撞下一窗：退到句前
+                    break
+            for s0, s1 in ((seg.start, seg.end) for seg in entry.asr):
+                if s0 + eps < start < s1 - eps:  # 起点切在句中
+                    if (prev_end is None or s0 >= prev_end) and s0 <= end - eps:
+                        start = s0  # 退到句首：从话头听起
+                    elif s1 < end - eps:
+                        start = s1  # 撞上一窗：进到句后
+                    break
+            if (start, end) != (segment.start, segment.end):
+                updated[index] = segment.model_copy(
+                    update={"start": round(start, 3), "end": round(end, 3)}
+                )
+    return updated
 
 
 def _has_dialogue(material: MaterialByEpisode, scene: EpisodeScene) -> bool:
