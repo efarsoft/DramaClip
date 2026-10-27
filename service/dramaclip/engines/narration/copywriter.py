@@ -104,9 +104,15 @@ def _slot_block(
             seg for seg in pool if seg.start < segment.end and seg.end > segment.start
         ]
         if inside:
-            lines.append("  区间内台词：")
+            # 声纹标签随行（多人对手戏引原话不张冠李戴）；无分离数据时照旧
+            tagged = any(seg.speaker for seg in inside)
+            lines.append(
+                "  区间内台词（[角色X] 是声纹标签，同一标签即同一人，"
+                "写文案换成你推断的真名）：" if tagged else "  区间内台词："
+            )
             lines.extend(
-                f"    {scriptwriter.clock(seg.start)}-{scriptwriter.clock(seg.end)} "
+                f"    {f'[{seg.speaker}] ' if seg.speaker else ''}"
+                f"{scriptwriter.clock(seg.start)}-{scriptwriter.clock(seg.end)} "
                 f"{seg.text.strip()}"
                 for seg in inside
             )

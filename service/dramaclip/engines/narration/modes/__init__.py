@@ -190,6 +190,11 @@ def _snap_windows_to_dialogue(
             entry = material.get(segment.episode_id)
             if entry is None:
                 continue
+            # 吸附循环取「首个满足条件」的句子，隐含台词升序前提：库内 JSON 无
+            # 排序契约（手工改库/上游变化都可能乱序），这里排序一次保住前提
+            spans = sorted(
+                ((seg.start, seg.end) for seg in entry.asr), key=lambda pair: pair[0]
+            )
             prev_end = (
                 updated[indices[position - 1]].end if position > 0 else None
             )
@@ -199,14 +204,14 @@ def _snap_windows_to_dialogue(
                 else None
             )
             start, end = segment.start, segment.end
-            for s0, s1 in ((seg.start, seg.end) for seg in entry.asr):
+            for s0, s1 in spans:
                 if s0 + eps < end < s1 - eps:  # 止点切在句中
                     if next_start is None or s1 <= next_start:
                         end = s1  # 收进整句：把话说完再跳
                     elif s0 >= start + keep:
                         end = s0  # 撞下一窗：退到句前
                     break
-            for s0, s1 in ((seg.start, seg.end) for seg in entry.asr):
+            for s0, s1 in spans:
                 if s0 + eps < start < s1 - eps:  # 起点切在句中
                     if (prev_end is None or s0 >= prev_end) and s0 <= end - keep:
                         start = s0  # 退到句首：从话头听起
