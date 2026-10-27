@@ -109,10 +109,10 @@ def test_g2_mode_gate_tables_derive_from_production_mode_list() -> None:
     assert gate._mode_table_drift() == []
 
     # 点名历史上漂过的那档与唯一的手写例外，证明值不是全表落在同一个默认上
-    assert gate.EXPECT_NARRATION["highlight_cut"] == "none", "纯剪辑模式被判成了要有旁白"
+    # highlight_cut 已合并退役（原 highlight_cut 档的点名改用同为零旁白的金句流）
+    assert gate.EXPECT_NARRATION["subtitle_flow"] == "none", "纯剪辑模式被判成了要有旁白"
     assert gate.EXPECT_NARRATION["intro_narration"] == "one", "片头解说只有一段引子旁白"
     assert sorted(m for m, want in gate.EXPECT_NARRATION.items() if want == "none") == [
-        "highlight_cut",
         "raw_clip",
         "subtitle_flow",
     ]

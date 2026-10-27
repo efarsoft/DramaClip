@@ -10,11 +10,13 @@
   .venv/Scripts/python scripts/verify_modes.py --modes all --write-baseline   # 全绿跑后建立基线
 
 隔离：用 sqlite 备份 API 把 data/data.db 快照进临时目录再跑（源库只读打开），产物写临时
-目录，绝不写开发者的真实 data/。
+目录，绝不写开发者的真实 data/。副本只带库：`models`/`runtimes` 用目录联接指回真实数据根，
+`DRAMACLIP_DATA_DIR` 同时改指副本（TTS 引擎按这个进程级真相找隔离 venv），并补一次
+`db.migrate`——副本抄自开发者此刻运行中的库，schema 天生落后 HEAD 一个提交。
 
 基线（同机同素材的渲染管线漂移对比）：门禁断言量的是"这片过没过规格"，基线量的是
 "同一素材同一管线，这次跟上次比变了多少"——规格内的慢漂移（响度还达标但比上次差 1 LU）
-断言看不见，基线看得见。只收渲染管线指标（LUFS/真峰/均量/冻结/压底残差）；段数、时长、
+断言看不见，基线看得见。只收渲染管线指标（LUFS/真峰/均量/冻结/压底残差/天花板削底）；段数、时长、
 跨集数随 LLM 编排逐次波动，进基线只会假红。基线文件默认 data/baseline/verify_modes.json
 （素材与模型都不入库，基线是同机同素材的产物：换机器、换素材必须重写）。漂移超容差计
 失败（退出码 1）；--write-baseline 只落无失败模式（红灯跑不许毒化参照系）。
@@ -93,13 +95,16 @@ DURATION_RECONCILE_TOL_S = 0.10
 ALL_DUCKED_MODES = {"full_narration"}
 
 # 语音避让的段级声学判据（业主立案④「解说与原声同音量叠放」）：混音段的实测响度与
-# 「旁白 + 按声明音量压底的原声」两者功率相加的**预测值**之差（下称残差），允许偏离这么多 dB。
-# 两侧都是真机量的（素材：小小球神不好惹；TTS=kokoro；full_narration 全部 8 段，
-# 干音 ≈−25 LUFS、源窗口 −10.8…−5.2 LUFS，正是"原声比解说响 15–20 dB"的难素材）：
+# 「旁白过完段级天花板 + 按声明音量压底的原声」两者功率相加的**预测值**之差（下称残差），
+# 允许偏离这么多 dB。两侧都是真机量的（素材：小小球神不好惹；TTS=kokoro；full_narration
+# 全部 8 段，干音 ≈−25 LUFS、源窗口 −10.8…−5.2 LUFS，正是"原声比解说响 15–20 dB"的难素材）：
 #   · 压底按声明生效（volume=0.08）：残差 −0.87 … −0.05 dB；换一版重新生成的 8 段方案
 #     独立复跑，落 −0.92 … −0.17 dB（门禁表格里那一列就是它的带符号最大值）；
 #   · 压底彻底失效（同一条生产命令，只把 volume=0.08 换成 1.0）：残差 +8.83 … +9.91 dB。
 # 阈值取 2.0：两轮合格侧最差 0.92 之上留一倍余量，失效侧最近 8.83 之下还有 6.8 dB。
+# 换更响的引擎（indextts2，干音 −13.6 LUFS / 真峰 +0.7 dBTP，被天花板削掉 3.2–3.6 dB）时
+# 这个数**不必放宽**：预测吃的是削底之后的干音，八段里量到的三段残差 −0.08/−0.19/−0.22 dB，
+# 与 kokoro 带同量级；旧模型漏算那一级时才炸出 −4.62 dB。
 # 为什么不用"混音段比干音响多少 dB"当判据：同一批段实测 0.50…2.00 dB，而它的上界完全由
 # 素材热度决定（源越响、干音越轻，压底完全正确也能顶过 3 dB）——换个剧就假红。参照物带上
 # 源窗口才与素材无关，这也是 `_check_ducking` 要量第三个数的唯一理由。
@@ -199,7 +204,7 @@ def mean_volume_db(video: Path) -> float | None:
     return None
 
 
-def ebur128(video: Path) -> tuple[float | None, float | None]:
+def ebur128(video: Path, pre_filters: str = "") -> tuple[float | None, float | None]:
     """(integrated LUFS, true peak dBFS)；解析不出返回 (None, None)。
 
     为什么要另开一测：`volumedetect` 的 mean_volume 只是平均样本幅值，与 R128 的
@@ -238,9 +243,16 @@ def ebur128(video: Path) -> tuple[float | None, float | None]:
     静音片实测（`anullsrc` 造的 5 s 纯静音）：`I: -70.0 LUFS`、`Peak: -inf dBFS`。
     两个都能被 float() 解析，于是响度窗口那条必然变红（−70 对 −14 差 56 LU），
     真峰那条对静音天然通过——静音由响度窗口和 MIN_MEAN_VOLUME_DB 负责判，不需要特例。
+
+    `pre_filters` 给"量同一份音频过某一级滤镜之后有多响"留口子（压底判据用它单独跑一遍
+    段级天花板，见 `_limiter_probe_filters`）：默认的整片量法不带任何前置滤镜，行为不变。
     """
+    audio_filter = (
+        "ebur128=peak=true:framelog=quiet"
+        if not pre_filters else f"{pre_filters},ebur128=peak=true:framelog=quiet"
+    )
     proc = sh([FFMPEG, "-hide_banner", "-nostats", "-i", str(video), "-map", "0:a:0",
-               "-af", "ebur128=peak=true:framelog=quiet", "-f", "null", "-"])
+               "-af", audio_filter, "-f", "null", "-"])
     lines = proc.stderr.splitlines()
     integrated: float | None = None
     peak: float | None = None
@@ -291,6 +303,34 @@ def power_sum_db(*levels: float) -> float:
     return 10.0 * math.log10(sum(10.0 ** (level / 10.0) for level in levels))
 
 
+def _limiter_probe_filters() -> str:
+    """探针遍的滤镜串：逐字复用生产的格式统一 + 真峰天花板两级。
+
+    把那条 alimiter 串抄一遍只能证明门禁跟自己一致，证明不了它量的是生产那条链——而
+    `limit` / `level=disabled` / `latency=true` 任一项不同都会削出不同的量。
+    """
+    return f"{encoder._audio_format_filter()},{encoder._peak_ceiling_filter()}"
+
+
+def _expected_mixed_lufs(dry_lufs: float, limiter_cut_db: float,
+                         bed_lufs: float, bed_gain_db: float) -> float:
+    """混音段应有的响度：干音先被段级天花板削掉 `limiter_cut_db`，再与压底后的原声功率相加。
+
+    限幅这一级必须算进来：`alimiter` 在 amix **之后**（`encoder._peak_ceiling_filter()`），
+    所以进 AAC 的整段都被它的增益包络乘过一遍；出厂就热的干音（真峰高于天花板）会带着
+    整段一起降，实测 indextts2 的段削掉 3.2–3.6 dB，而 kokoro 那轮 ≈0 dB——旧算式把这级
+    漏了，判据就从"压底失灵"的形状变成"换个响引擎即假红"的形状。
+
+    `limiter_cut_db` 只能量不能推：LUFS 降多少与峰值超出天花板多少没有函数关系（alimiter
+    是带 attack/release 的包络，且平顶后的波形峰均比会变），所以同一条滤镜单独跑一遍干音。
+
+    原声那一侧不需要过限幅：`volume=` 声明值 ≤0.1 让床的真峰最多约 −20 dBFS，离 −9 dBFS
+    天花板还差一档，它自己碰不到限幅；与干音同相叠加时也只把削峰深度推进 ~0.4 dB（两侧
+    实测残差 −0.08…−0.22 dB，落在容差内）。
+    """
+    return power_sum_db(dry_lufs + limiter_cut_db, bed_lufs + bed_gain_db)
+
+
 def _fmt(value: Any, digits: int = 1) -> str:
     """表格数值列：没测出来打 `-`，绝不拿 0 冒充测量结果。
 
@@ -338,6 +378,10 @@ def has_audio_stream(video: Path) -> bool:
 
 def build_context(data_dir: Path, models_dir: Path) -> tuple[AppContext, ThreadPoolExecutor]:
     conn = db.connect(data_dir / "data.db")
+    # 门禁的代码是 HEAD、库是开发者此刻那份副本，两者的 schema 天生会错开一个提交
+    # （桌面端只在 `service_app` 启动时迁移，所以库里可能还停在上一版）。不补这一刀，
+    # 新加的列在门禁里恒读不到——被测的功能整条静默旁路，报表照样全绿。
+    db.migrate(conn)
     settings = config.load(conn)
     store = jobs_mod.JobStore(conn)
     executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="verify")
@@ -390,8 +434,17 @@ def _mode_table_drift() -> list[str]:
     for name, table in (
         ("ALL_MODES", ALL_MODES),
         ("EXPECT_NARRATION", EXPECT_NARRATION),
-        ("pipeline.MODE_LABELS", narration_pipeline.MODE_LABELS),
+        # MODE_LABELS 是渲染兼容面：合并退役的模式（highlight_cut）保留标签供旧方案
+        # 出片，标签集 ⊇ 入口集是合法态（2026-10-27 审计修复契约），只查缺不查多
+        ("pipeline.MODE_LABELS", None),
     ):
+        if table is None:
+            missing = authoritative - set(narration_pipeline.MODE_LABELS)
+            if missing:
+                problems.append(
+                    f"{name} 与 SUPPORTED_MODES 不一致：缺 {sorted(missing)}"
+                )
+            continue
         missing = authoritative - set(table)
         extra = set(table) - authoritative
         if missing or extra:
@@ -415,14 +468,18 @@ def _check_ducking(mode: str, captured: list[dict[str, Any]]) -> tuple[list[str]
       音量真的写进了那条命令"。音量常量在 encoder 只定义一次、这里按名字读，所以它抓的是
       滤镜少没少，而不是数值对不对——变异实测把 ducked 音量改成 1.0 时这一道照样绿，
       那种失效只有声学道抓得住。
-    · 声学道——每段量三个真数：该段自己的 TTS 干音 N、该段**源窗口**的 R128 S（压底之前的
-      原声有多响）、混音产物 M。压底按声明生效时 M 应当等于 `power_sum_db(N, S + 20·lg v)`；
+    · 声学道——每段量四个真数：该段自己的 TTS 干音 N、同一份干音**过完段级天花板**之后的
+      N′（`_limiter_probe_filters` 那一遍）、该段**源窗口**的 R128 S（压底之前的原声有多响）、
+      混音产物 M。压底按声明生效时 M 应当等于 `_expected_mixed_lufs(N, N′−N, S, 20·lg v)`；
       实测与它的差超过 `DUCK_RESIDUAL_TOL_DB` 就是压底没照声明做事。只查命令不够：volume=
-      写了但挂错链路、限幅器把整段钳了、amix 又偷偷归一化，都是听得见的事故、看不见的红。
-      参照物必须带上 S：单拿 M−N 当判据的话，它的上界由素材热度决定而不是由压底决定。
+      写了但挂错链路、amix 又偷偷归一化，都是听得见的事故、看不见的红。参照物必须带上 S：
+      单拿 M−N 当判据的话，它的上界由素材热度决定而不是由压底决定。N′ 也必须有：限幅器挂在
+      amix 之后、对整段生效，漏掉这一级的判据在响引擎上必假红——补法只能是把它量进来，
+      不是放宽容差。
 
-    量不到一律算红、不算通过：段文件、干音与源窗口都在本次渲染摸得着的地方，读不到就是
-    判据覆盖为 0——那正是本门禁历史上「零值空转通过」的形状。
+    量不到一律算红、不算通过：段文件、干音、源窗口与干音的天花板探针遍都在本次渲染摸得着
+    的地方，读不到就是判据覆盖为 0——那正是本门禁历史上「零值空转通过」的形状。探针遍量不到
+    尤其不许退回"拿没过限幅的干音算"，那等于把响引擎那一档永远判不出来。
     """
     bed_volumes = {
         "narration": encoder._NARRATION_BED_VOLUME,
@@ -437,6 +494,7 @@ def _check_ducking(mode: str, captured: list[dict[str, Any]]) -> tuple[list[str]
         )
     mixed = [c for c in captured if c["mixed"] and c["has_tts_input"]]
     residuals: list[float] = []
+    limiter_cuts: list[float] = []
     for record in mixed:
         segment = Path(str(record["out_path"]))
         declared = bed_volumes.get(str(record["audio"]))
@@ -462,26 +520,43 @@ def _check_ducking(mode: str, captured: list[dict[str, Any]]) -> tuple[list[str]
             failures.append(f"{mode}: {segment.name} 角色 {record['audio']} 没有声明压底音量，"
                             "压底判据量不了它")
             continue
+        # 干音再过一遍生产天花板：预测混音段响度要用的是限幅**之后**的那一份
+        limited_lufs, _ = ebur128(dry, pre_filters=_limiter_probe_filters())
+        if limited_lufs is None:
+            failures.append(
+                f"{mode}: {segment.name} 的干音没过成天花板探针（实测 {limited_lufs}）——"
+                "限幅那一级的削底量不出来，不许退回按干音原样预测"
+            )
+            continue
+        limiter_cut = limited_lufs - dry_lufs
+        limiter_cuts.append(limiter_cut)
         bed_gain = 20.0 * math.log10(float(declared))
-        residuals.append(voiced - power_sum_db(dry_lufs, bed_lufs + bed_gain))
+        residuals.append(
+            voiced - _expected_mixed_lufs(dry_lufs, limiter_cut, bed_lufs, bed_gain)
+        )
     if mixed and not residuals:
         failures.append(f"{mode}: {len(mixed)} 段混音一段都没量到 —— 本行压底结论无效")
     worst = max(residuals, key=abs) if residuals else None
+    worst_cut = min(limiter_cuts) if limiter_cuts else None
     if worst is not None and abs(worst) > DUCK_RESIDUAL_TOL_DB:
-        # 不拿方向当诊断写进结论：正残差实测是压底失效（+8.83…+9.91），但负残差既可能是
-        # amix 偷偷归一化、也可能是这条段本来就热到撞上限幅器——三种都是听得见的事故，
-        # 区分它们要看的不是符号而是 `duck_residuals` 逐段值（全体一致 = 命令级问题，
-        # 个别段炸开 = 素材级）。这里只负责把"偏离了声明"报出来。
+        # 不拿方向当诊断写进结论：正残差实测是压底失效（+8.83…+9.91），但负残差还有 amix
+        # 偷偷归一化、探针遍与生产滤镜不一致两种形状——都是听得见的事故，区分它们要看的不是
+        # 符号而是 `duck_residuals` 逐段值（全体一致 = 命令级问题，个别段炸开 = 素材级）。
+        # 这里只负责把"偏离了声明"报出来。
         failures.append(
-            f"{mode}: 混音段实测响度与「干音 + 按声明音量压底的原声」的预测值最大偏差 "
-            f"{worst:+.2f} dB（容差 ±{DUCK_RESIDUAL_TOL_DB} dB，两侧实测值见该常量注释）"
-            " —— 压底没照声明做事"
+            f"{mode}: 混音段实测响度与「过完段级天花板的干音 + 按声明音量压底的原声」的"
+            f"预测值最大偏差 {worst:+.2f} dB（容差 ±{DUCK_RESIDUAL_TOL_DB} dB，两侧实测值见"
+            "该常量注释） —— 压底没照声明做事"
         )
     return failures, {
         "duck_segments": len(mixed),
         "duck_measured": len(residuals),
         "duck_residuals": [round(r, 2) for r in residuals],
         "duck_max_residual_db": None if worst is None else round(worst, 2),
+        # 削底幅度单独上账：残差按 N′ 算之后就"应该恒等于零"，引擎出厂电平变响这件事
+        # 只剩这一列看得见（#36 的探针读数，基线按 `duck_worst_limiter_db` 跟它的漂移）。
+        "duck_limiter_cuts": [round(c, 2) for c in limiter_cuts],
+        "duck_worst_limiter_db": None if worst_cut is None else round(worst_cut, 2),
     }
 
 
@@ -629,6 +704,10 @@ _BASELINE_FLOAT_METRICS: dict[str, float] = {
     "true_peak_dbtp": 1.0,
     "mean_volume_db": 2.0,
     "duck_max_residual_db": 1.5,
+    # 干音过段级天花板的削底幅度。修好预测模型之后残差恒等于零，「引擎出厂电平变响」
+    # 这件事只剩这一列能报漂移（indextts2 真机 −3.6 dB / kokoro ≈0 dB）。容差取 1.5：
+    # 比这两个引擎的真实差小，换电平必报；比同一条 ebur128 量法的自复现抖动（≤0.2）大。
+    "duck_worst_limiter_db": 1.5,
 }
 _FREEZE_DRIFT_S = 0.5
 
@@ -781,17 +860,30 @@ def main() -> int:
         src_conn.backup(sqlite3.connect(work / "data.db"))
     finally:
         src_conn.close()
-    # 模型目录必须是 <data_dir>/models —— _generate_one 就是这么拼路径的。
-    # 用目录联接（mklink /J）而非符号链接：后者在 Windows 需要管理员特权。
-    models_dir = (REPO / "data" / "models").resolve()
+    # 隔离副本光有 data.db 不够：模型和 TTS 运行环境都按 <data_dir>/… 拼路径
+    # （`_generate_one` 取 models，`tts_runtime` 取 runtimes/tts-venv），少联一个就是
+    # "TTS 静默全批失败"或"运行环境未就绪"。用目录联接（mklink /J）而非符号链接：
+    # 后者在 Windows 需要管理员特权。真没装过那一层（例如只用云端 TTS）就跳过，
+    # 让预检去说"未就绪"，而不是门禁替它编一个环境问题。
+    data_root = (REPO / "data").resolve()
     link = work / "models"
-    made_link = subprocess.run(
-        ["cmd", "/c", "mklink", "/J", str(link), str(models_dir)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
-    ).returncode == 0
-    if not made_link and not link.exists():
-        print(f"无法建立模型联接，TTS 会静默全批失败：{models_dir} -> {link}", file=sys.stderr)
-        return 2
+    for subdir in ("models", "runtimes"):
+        origin = data_root / subdir
+        if not origin.is_dir():
+            continue
+        target = work / subdir
+        made = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(target), str(origin)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+        ).returncode == 0
+        if not made and not target.exists():
+            print(f"无法建立 {subdir} 联接，TTS 读不到模型：{origin} -> {target}", file=sys.stderr)
+            return 2
+    # 数据根必须同时告诉**进程级**的解析器：TTS 引擎找隔离 venv 走的是
+    # `paths.resolve_data_dir()`（读这个环境变量），不是 AppContext 里那个 data_dir。
+    # 不设它，上面联好的 runtimes 联接没人读，配了 indextts2/cosyvoice 的机器上
+    # 门禁一律判「未装运行环境」而以退出码 2 收场——桌面端启动服务时也设了这个变量。
+    os.environ["DRAMACLIP_DATA_DIR"] = str(work)
 
     media = Path(args.media)
     if not media.is_dir():
@@ -799,19 +891,25 @@ def main() -> int:
         return 2
 
     ctx, executor = build_context(work, link)
-    # 预检：先确认 TTS 真能出声，否则后面所有"零旁白"都可能是脚手架问题而不是产品缺陷
+    # 预检：先确认 TTS 真能出声，否则后面所有"零旁白"都可能是脚手架问题而不是产品缺陷。
+    # 音色按生产侧同一口径取（`tts.voice.<engine>` 优先，兼容只存全局 `tts.voice` 的旧库）：
+    # 写死 "zf_001" 只有 kokoro 认——配 indextts2/cosyvoice 的机器上它把参考音频路径该坐的
+    # 位子塞了个音色名，环境明明就绪也报退出码 2。
+    engine_name = str(ctx.settings.get("tts.engine", "edge"))
+    probe_voice = (
+        str(ctx.settings.get(f"tts.voice.{engine_name}") or "").strip()
+        or str(ctx.settings.get("tts.voice") or "").strip()
+    )
     try:
-        probe_engine = create_tts(ctx.settings.get("tts.engine", "edge"), link)
-        sample = probe_engine.synthesize(
-            "预检", "zf_001", work / "preflight.mp3"
-        )
+        probe_engine = create_tts(engine_name, link)
+        sample = probe_engine.synthesize("预检", probe_voice, work / "preflight.mp3")
         if not sample.is_file() or sample.stat().st_size == 0:
             print("预检失败：TTS 未产出音频，环境未就绪", file=sys.stderr)
             return 2
     except Exception as exc:  # noqa: BLE001 - 预检就是要吞下一切环境问题
         print(f"预检失败：TTS 不可用（{type(exc).__name__}: {exc}），环境未就绪", file=sys.stderr)
         return 2
-    print(f"预检通过：TTS={ctx.settings.get('tts.engine', 'edge')} 可出声")
+    print(f"预检通过：TTS={engine_name} 可出声")
     # 预检 LLM（与上面 TTS 预检同构，同为"环境未就绪"= 退出码 2）。
     # P-1.5 之后解说文案只有 LLM 一条路：copywriter 未配置就抛，不再有模板兜底。
     # 少了这道预检，"七个解说模式全红"会被读成产品崩了，而真实原因可能只是没配模型——
@@ -1111,6 +1209,13 @@ def main() -> int:
         ))
         if r.get("audio_roles"):
             print(f"{'':<29}音频角色：{r['audio_roles']}")
+        # 干音过段级天花板的削底幅度：预测吃掉这一级之后，「压底残差」列才与引擎电平无关。
+        # 它要单独报数——残差被修成恒等零之后，"引擎交付的干音越来越热"这件事（立案 #36）
+        # 在这一列上完全隐形，只有这里看得见它往负方向走。
+        if r.get("duck_limiter_cuts"):
+            print(f"{'':<29}段级天花板削底：最差 {r.get('duck_worst_limiter_db')} dB（"
+                  f"{len(r['duck_limiter_cuts'])}/{r.get('duck_segments', 0)} 段量到）"
+                  "——越负＝干音出厂越接近或超过天花板")
         # 源越界那一列是负数=窗口离集尾还留着这么多秒；>0 直接判红。贴源末尾的段数
         # 单独报：它证明回填的尾部收口在生产路径上真的动过（负得越深越说明没走到边界）。
         if r.get("source_flush_tails"):

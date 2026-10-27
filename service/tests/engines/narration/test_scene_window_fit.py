@@ -150,8 +150,10 @@ def test_cross_original_window_follows_the_line() -> None:
     originals = [s for s in plan.timeline if s.audio == "original"]
     assert (originals[0].start, originals[0].end) == (0.1, 3.6)
     narrations = [s for s in plan.timeline if s.audio == "narration"]
-    assert (narrations[0].start, narrations[0].end) == (8.0, 12.0), (
-        "旁白画面锚当前场景尾部（场景 0-12s 的尾 4s）；长度归 TTS 实测回填"
+    # 占位窗按渲染同口径（提示词#2）：末段桥接在**吸附后**的场景窗之后
+    # （原声窗 [0.1,3.6] 的实尾 3.6 起播 +4s 占位），长度归 TTS 实测回填
+    assert (narrations[0].start, narrations[0].end) == (3.6, 7.6), (
+        f"旁白占位窗该接吸附后场景窗之后，实得 {(narrations[0].start, narrations[0].end)}"
     )
 
 

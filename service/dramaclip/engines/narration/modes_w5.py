@@ -124,13 +124,26 @@ def build_cross(
                 "一句指向看全集，禁止关注/点赞"
             )
         texts.append(NarrationText(id=slot_id, brief=brief, char_budget=char_budget))
-        # 旁白画面：当前场景尾部（收尾旁白=末场景自己的尾巴）
-        tail_start = round(max(scene.start, scene.end - narration_seconds), 3)
+        # 桥段占位窗按渲染同口径（2026-10-27 提示词#2）：填词实据（区间内台词/画面轨）
+        # 从这个窗切片——占位窗必须就是渲染期旁白实际压的画面，否则实据是对着别处
+        # 做保证（改锚/跨集后尤其是别集画面）。渲染期 _layout_cross 把桥段收尾锚在
+        # 下场景开头、向前伸进空隙、落位改章到锚点集；编排期同样 re-stamp 到锚点集、
+        # 占位窗取整个空隙（末段桥接自己场景窗之后）。
+        if index + 1 < len(picked):
+            anchor_episode = nxt.episode_id
+            win_start = round(cursor.get(anchor_episode, 0.0), 3)
+            win_end = round(float(nxt.start), 3)
+        else:
+            anchor_episode = scene.episode_id
+            # 末段桥接在**吸附后**的场景窗之后（cursor 持原声窗实尾，与渲染期
+            # _gap_floor 用锚点窗同口径），不是场景原始边界
+            win_start = round(cursor.get(scene.episode_id, float(scene.end)), 3)
+            win_end = round(win_start + narration_seconds, 3)
         segments.append(
             TimelineSegment(
-                episode_id=scene.episode_id,
-                start=tail_start,
-                end=round(scene.end, 3),
+                episode_id=anchor_episode,
+                start=win_start,
+                end=win_end,
                 audio="narration",
                 narration_id=slot_id,
             )
@@ -210,7 +223,8 @@ def build_ultra_short(
         NarrationText(
             id="hook-1",
             brief=(
-                "开场钩子：把最炸的反差放在第一句且写进同一句里"
+                "开场钩子（画面可能从候选池换景，别写只属于某一镜的镜头时序细节）："
+                "把最炸的反差放在第一句且写进同一句里"
                 "（「全城最怂的会计，却是黑帮最怕的杀手」式一句内对撞；"
                 "身份错位/生死局/具体数字冲击，如「花几百万两杀妻」），"
                 "随后每一句都把冲突往前推一层——句句有信息增量，"

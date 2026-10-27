@@ -212,9 +212,10 @@ def test_cross_narration_segment_carries_the_anchor_episode() -> None:
     assert narration_segments, "夹具前提塌了：交叉解说必须有旁白段"
     for segment in narration_segments:
         assert segment.episode_id in {"ep1", "ep2"}
-    # picked 按播出序是 [ep1@0, ep2@0]，旁白压当前场景尾部——第一个旁白段盖 ep1 的画面
-    assert narration_segments[0].episode_id == "ep1", (
-        f"旁白段该盖当前场景（ep1）的画面，实得 {narration_segments[0].episode_id}"
+    # picked 按播出序是 [ep1@0, ep2@0]：占位窗按渲染同口径（提示词#2）re-stamp 到
+    # 锚点集——第一个桥段锚 ep2 场景前的空隙，盖 ep2 的画面（docstring 与断言自此一致）
+    assert narration_segments[0].episode_id == "ep2", (
+        f"桥段该盖锚点集（ep2）的画面，实得 {narration_segments[0].episode_id}"
     )
 
 

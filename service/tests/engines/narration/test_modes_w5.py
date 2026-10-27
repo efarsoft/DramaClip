@@ -83,14 +83,14 @@ def test_cross_original_ends_snap_but_narration_ends_do_not() -> None:
     assert [seg.end for seg in originals] == _BEATS_NEAR_ORIGINAL_ENDS
     # 起点是镜头边界，不吸附
     assert [seg.start for seg in originals] == [0.0, 20.0, 60.0, 80.0, 100.0, 140.0]
-    # 旁白画面=当前场景尾 4s：六个桥接段各自压本场景 [end-4, end]
+    # 占位窗按渲染同口径（提示词#2）：每段取「本场景尾→下场景头」的整个空隙
     assert [(seg.start, seg.end) for seg in narrations] == [
-        (11.0, 15.0),
-        (31.0, 35.0),
-        (71.0, 75.0),
-        (91.0, 95.0),
-        (111.0, 115.0),
-        (151.0, 155.0),
+        (7.9, 20.0),  # 空隙下限=吸附后的原声窗尾（镜像渲染期 _gap_floor 口径）
+        (27.9, 60.0),
+        (67.9, 80.0),
+        (87.9, 100.0),
+        (107.9, 140.0),
+        (147.9, 151.9),  # 末段桥：接自己场景窗之后（+4s 占位）
     ]
 
 
