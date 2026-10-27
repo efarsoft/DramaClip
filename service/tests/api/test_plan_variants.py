@@ -163,7 +163,12 @@ def test_every_supported_mode_has_a_chinese_label() -> None:
     是本文件能到的两处；`desktop/src/components/modeMeta.ts` 的 `MODE_INFO` 是第三面
     镜子，service 侧够不着（已在计划里记为 P-3 已知接受项）。
     """
-    assert set(pipeline.MODE_LABELS) == set(narration_api.SUPPORTED_MODES)
+    # 2026-10-27 起两集合一朝「入口⊆标签」演化：SUPPORTED_MODES 是新产入口
+    # （合并退役的模式摘除），MODE_LABELS 是人读标签（保留退役模式供旧方案渲染）。
+    assert set(narration_api.SUPPORTED_MODES) <= set(pipeline.MODE_LABELS)
+    assert "highlight_cut" in set(pipeline.MODE_LABELS) - set(
+        narration_api.SUPPORTED_MODES
+    ), "已退役模式必须有标签：队列页旧方案不得露出英文模式名"
 
 
 _PLANTED_STYLE_ID = "i2-style"

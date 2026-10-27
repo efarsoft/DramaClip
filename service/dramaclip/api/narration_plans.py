@@ -40,7 +40,10 @@ from dramaclip.infra.storage.repos import projects as projects_repo
 
 SUPPORTED_MODES = (
     "raw_clip",
-    "highlight_cut",
+    # highlight_cut 已合并退役（2026-10-27 业主裁决：以纯原片剪辑为主，5 秒均切
+    # 取消）：原声形态收敛到 raw_clip 单入口。渲染链保留（_NO_TTS_MODES/build 分支
+    # /BGM 门禁不动），库里旧高光方案照常出片。
+
     "intro_narration",
     "cross_narration",
     "ultra_short_hook",

@@ -10,7 +10,6 @@ export interface ModeInfoItem {
 
 export const MODE_INFO: readonly ModeInfoItem[] = [
   { mode: 'raw_clip', label: '纯原片剪辑', desc: '保留原声台词的高光合集：长度跟剧情走，BGM 关', needs: [] },
-  { mode: 'highlight_cut', label: '高光混剪', desc: '5 秒快切 + 情绪配乐的预告片：不给结局只给瘾，BGM 主导', needs: [] },
   { mode: 'intro_narration', label: '片头解说', desc: '最炸场面前置当钩子，正片跟原剧走——像正式预告片', needs: ['copy', 'voice'] },
   { mode: 'cross_narration', label: '交叉解说', desc: '解说串场 + 原声高光交替，节奏感强', needs: ['copy', 'voice'] },
   { mode: 'ultra_short_hook', label: '超短悬念版', desc: '信息流短平快款：开场钩子 + 最高冲突 + 悬念收尾，时长由冲突决定', needs: ['copy', 'voice'] },
