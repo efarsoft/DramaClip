@@ -102,8 +102,8 @@ def build_cross(
             if cap < 60:
                 char_budget = cap
                 bridge += (
-                    f"（本段旁白的空隙约 {gap:.0f} 秒，"
-                    f"文案控制在 {cap} 字内，超了出不了片）"
+                    f"（本段旁白的画面空隙约 {gap:.0f} 秒（编排期估算，渲染期按实测"
+                    f"微调），目标 ≤{cap} 字——写超会被强制收短或挪去别的空隙，观感变差）"
                 )
             brief = bridge
         else:

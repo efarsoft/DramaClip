@@ -277,13 +277,22 @@ def _fit_rewriter(settings: dict[str, str]) -> Callable[[str, int], str | None] 
         return None
 
     def rewrite(text: str, target_chars: int) -> str | None:
-        result = client.chat_json(
+        system = (
             "你是短剧解说编剧。把给定的解说段收短到指定字数以内，"
-            "只输出 JSON：{\"text\": \"成稿正文\"}。",
+            '只输出 JSON：{"text": "成稿正文"}。'
+            "数字一律写中文；禁元叙述（「画面里」「镜头」「素材」「第X集」一个不许有）。"
+        )
+        user = (
             f"收短到不超过 {target_chars} 字：保留悬念与主要信息，删形容词、"
             "重复与次要细节，不得新增剧情，不得改口吻。\n"
-            f"原文：{text}",
+            f"原文：{text}"
         )
+        result = client.chat_json(system, user)
+        if not (isinstance(result, dict) and str(result.get("text") or "").strip()):
+            # 带格式强化重问一次：收短是保段最后一道闸，格式手滑不该直接升级成弃段。
+            result = client.chat_json(
+                system + "只输出 JSON 对象，不要任何多余文字、不要代码围栏。", user
+            )
         if isinstance(result, dict):
             new_text = str(result.get("text") or "").strip()
             return new_text or None

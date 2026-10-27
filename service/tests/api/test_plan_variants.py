@@ -570,9 +570,9 @@ def _stub_language_and_tts(
                     f"{slot} 的解说：沈修远买凶杀妻，八年后她以龙王之尊归来"
                     "揭穿杀局——点击左下角，免费观看全集。"
                 )[:60]  # prompt 硬性要求每条不超过 60 字；「看全集」必须留在截断后
-                # cross 桥位带空隙预算（brief 里的「控制在 N 字内」）：桩模型与真模型
+                # cross 桥位带空隙预算（brief 里的「目标 ≤N 字」）：桩模型与真模型
                 # 同责——不按预算交稿就会在填词期被逐槽帽拦下（char_budget 是闸）。
-                budget = re.search(r"控制在 (\d+) 字内", block)
+                budget = re.search(r"目标 ≤(\d+) 字", block)
                 if budget:
                     cap = int(budget.group(1))
                     body = body[: cap - 1].rstrip("，、；—-") + "。"

@@ -23,22 +23,9 @@ RULE_TEXTS: dict[str, str] = {
     'slot_contract': '文案必须完成该槽位的「要做的事」，不得答非所问；',
 }
 
-# 交稿前自检（与 audit 硬规则镜像的散文版；由 _FUND_BASE 的 {checklist_block} 装配）
-CHECKLIST_JOIN = chr(10)
-CHECKLIST_BLOCK = CHECKLIST_JOIN.join([
-    '交稿前自检（逐条过完再交，任何一条不过先改完再交）：',
-    '一、通篇搜一遍：没有「第X集」「画面里」「镜头」「素材」这类字眼；',
-    '二、正文没有两位以上的阿拉伯数字，金额年份都是中文；',
-    '三、结尾没有「关注/点赞/收藏」这类号召；',
-    '四、人称从头到尾一个立场，没有中途切换；',
-    '五、每段时间起止真实递增、互不重叠，段数达到要求下限；',
-    '六、最后一段停在最高潮的半拍上，不是把故事讲圆。',
-])
-
 
 def assemble(template: str) -> str:
-    """{key} 占位 → 规则原文（含自检块）。不用 str.format：提示词含字面花括号。"""
-    replacements: dict[str, str] = {**RULE_TEXTS, "checklist_block": CHECKLIST_BLOCK}
-    for key, text in replacements.items():
+    """{key} 占位 → 规则原文。不用 str.format：提示词含字面花括号。"""
+    for key, text in RULE_TEXTS.items():
         template = template.replace("{" + key + "}", text)
     return template

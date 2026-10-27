@@ -24,6 +24,7 @@ from dramaclip.engines.narration.models import (
     StrategySpec,
     TimelineSegment,
 )
+from dramaclip.engines.narration.numerals import to_chinese_numerals
 from dramaclip.engines.narration.scriptwriter import Script, estimate_duration
 from dramaclip.engines.narration.synthesis import (
     _CACHE_MAX_BYTES,
@@ -330,7 +331,17 @@ def _rewrite_and_resynth(
             continue
         if not new_text or new_text.strip() == text.strip():
             continue
-        new_text = new_text.strip()
+        # 收短产出过全链同款两道零容忍出口：数字中文化（「2,000斤」配音全毁）与
+        # 元叙述硬闸（「画面里」进 TTS=零容忍破防）。命中元叙述弃用重写结果，
+        # 该段回退弃段路径——收短是增强，不能成为病灶入口。
+        new_text = to_chinese_numerals(new_text.strip())
+        from dramaclip.engines.narration.audit import (  # noqa: PLC0415 - 防 import 环
+            _METANARRATIVE_RE,
+        )
+
+        if _METANARRATIVE_RE.search(new_text):
+            _emit(log, f"旁白 {slot} 收短稿含元叙述字眼，弃用重写结果", "warn")
+            continue
         item = items.get(slot)
         voice = (item.voice if item is not None else "") or pool.voice_for(settings)
         if item is not None and item.voice and not pool.accepts_voice(item.voice):
