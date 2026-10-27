@@ -2,8 +2,10 @@
  *  挑方案列表与规划队列共用——队列里完成的行就是这张卡的实时形态。
  *  另带排期预估（时间轴画面窗之和）与文案全文查看（旁白逐段拼读）。 */
 import { Button, Card, Modal, Tag } from 'antd';
-import { useState, type ReactElement } from 'react';
-import type { NarrationPlan } from '@dramaclip/protocol';
+import { useEffect, useState, type ReactElement } from 'react';
+import type { AnalysisResults, NarrationPlan } from '@dramaclip/protocol';
+import { analysisApi } from '../../services/client';
+import { copyRowsOf } from './copyRows';
 import { modeLabel } from '../../components/modeMeta';
 import { tokens } from '../../styles/theme';
 import { planCardView, type PlanCardView } from './planCards';
@@ -179,8 +181,38 @@ function PlanCopyButton({ plan }: { plan: NarrationPlan }): ReactElement {
   );
 }
 
+function clockOf(t: number): string {
+  const minutes = Math.floor(t / 60);
+  const seconds = t - minutes * 60;
+  return minutes > 0 ? `${String(minutes)}分${seconds.toFixed(1)}秒` : `${seconds.toFixed(1)}秒`;
+}
+
 function PlanCopyModal({ plan, open, onClose }: { plan: NarrationPlan; open: boolean; onClose: () => void }): ReactElement {
-  const copy = plan.plan_data.narration_texts.map((item) => item.text).join('\n\n');
+  const [results, setResults] = useState<AnalysisResults | null>(null);
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    let alive = true;
+    analysisApi
+      .results(plan.project_id)
+      .then((r) => {
+        if (alive) {
+          setResults(r);
+        }
+      })
+      .catch(() => {
+        /* 分析数据取不到就退化为纯旁白视图（旧行为），弹窗不该因此报错 */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open, plan.project_id]);
+
+  const rows = results
+    ? copyRowsOf(plan.plan_data, results.episodes, results.asr_segments)
+    : copyRowsOf(plan.plan_data, []);
+
   return (
     <Modal
       title="完整文案"
@@ -190,18 +222,33 @@ function PlanCopyModal({ plan, open, onClose }: { plan: NarrationPlan; open: boo
       width={680}
       styles={{ body: { maxHeight: '60vh', overflow: 'auto' } }}
     >
-      <pre
-        style={{
-          margin: 0,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-all',
-          fontSize: tokens.text.body.size,
-          lineHeight: tokens.text.body.leading,
-          color: tokens.textPrimary,
-        }}
-      >
-        {copy}
-      </pre>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {rows.map((row, index) => (
+          <div key={index}>
+            <div style={{ marginBottom: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
+              <Tag color={row.kind === 'original' ? 'gold' : 'blue'}>
+                {row.kind === 'original' ? '原声' : '旁白'}
+              </Tag>
+              {row.episodeNumber !== null && (
+                <span style={{ color: tokens.textSecondary, fontSize: tokens.text.badge.size }}>
+                  第{row.episodeNumber}集 {clockOf(row.start)}-{clockOf(row.end)}
+                </span>
+              )}
+            </div>
+            <div
+              style={{
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+                fontSize: tokens.text.body.size,
+                lineHeight: tokens.text.body.leading,
+                color: row.kind === 'original' ? tokens.textSecondary : tokens.textPrimary,
+              }}
+            >
+              {row.text}
+            </div>
+          </div>
+        ))}
+      </div>
     </Modal>
   );
 }
