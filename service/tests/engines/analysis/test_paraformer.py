@@ -105,6 +105,53 @@ def test_timestamp_shortfall_keeps_all_text(
     assert (segments[0].start, segments[0].end) == (0.0, 0.6)
 
 
+def test_one_bad_clip_skipped_not_fatal(
+    tmp_path: Path, fake_funasr: type[_FakeAutoModel], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """切片级隔离（真机 2026-10-27 大明第8集立案）：funasr 上游 token/时间戳
+    不齐时 IndexError（sentence_postprocess `time_stamp[i][0]`），一个坏切片
+    跳过留痕、其余照常出词；全部失败才诚实失败。"""
+    from dramaclip.engines.analysis import pause_split
+
+    engine = ParaformerEngine(models_dir=tmp_path / "nope")
+    model = engine._ensure_model()
+    calls = {"n": 0}
+
+    def generate(**kw: Any) -> list[dict[str, Any]]:
+        calls["n"] += 1
+        if calls["n"] == 2:  # 第二个切片命中上游 bug
+            raise IndexError("list index out of range")
+        return [{"text": "你好", "timestamp": [[0, 500]]}]
+
+    model.generate = generate
+    clips = [
+        pause_split.Clip(start=0.0, end=5.0),
+        pause_split.Clip(start=5.0, end=10.0),
+    ]
+    monkeypatch.setattr(pause_split, "speech_clips", lambda *_a, **_k: clips)
+    monkeypatch.setattr(pause_split, "fill_degenerate", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        pause_split,
+        "split_wav",
+        lambda wav, cl, work: [
+            (c, Path(f"{wav.stem}-clip{i}.wav")) for i, c in enumerate(cl, 1)
+        ],
+    )
+
+    segments = engine.transcribe(Path("a.wav"))
+
+    assert calls["n"] == 2, "坏切片之后的切片仍被转写"
+    assert [(s.start, s.end, s.text) for s in segments] == [(0.0, 0.5, "你好")]
+
+    # 全部切片都失败：最后的错误如实出去，不静默出空转写
+    def always_boom(**kw: Any) -> list[dict[str, Any]]:
+        raise IndexError("list index out of range")
+
+    model.generate = always_boom
+    with pytest.raises(RuntimeError, match="全部 2 个切片转写失败"):
+        engine.transcribe(Path("a.wav"))
+
+
 def test_unexpected_pause_analysis_error_propagates(
     tmp_path: Path,
     fake_funasr: type[_FakeAutoModel],

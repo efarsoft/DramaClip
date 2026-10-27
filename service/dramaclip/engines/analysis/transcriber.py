@@ -622,9 +622,35 @@ class ParaformerEngine:
             # 时间戳以片段起点为锚（真实切分位置），并句/串音物理消失。
             work = wav_path.parent / f"{wav_path.stem}-clips"
             segments: list[AsrSegment] = []
+            failures: list[str] = []
             try:
-                for clip, clip_path in pause_split.split_wav(wav_path, clips, work):
-                    for seg in self._transcribe_one(model, clip_path, language, hotwords):
+                for index, (clip, clip_path) in enumerate(
+                    pause_split.split_wav(wav_path, clips, work)
+                ):
+                    # 切片级隔离（真机 2026-10-27 大明第8集立案）：funasr 上游
+                    # sentence_postprocess 在 token 与时间戳列表不齐时 IndexError
+                    # （`time_stamp[i][0]`，VAD 报 speech 的 BGM 退化切片易触发），
+                    # 一个坏切片曾连坐整集。跳过该切片留痕，其余照常出词——
+                    # 全部切片都失败才让最后的错误出去（诚实失败，不静默出空转写）。
+                    try:
+                        clip_segments = self._transcribe_one(
+                            model, clip_path, language, hotwords
+                        )
+                    except Exception as exc:  # noqa: BLE001 - 上游天书在切片级收口
+                        failures.append(
+                            f"clip{index:02d}@{clip.start:.1f}s: "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+                        _LOGGER.warning(
+                            "切片 %02d（%.1f-%.1fs）转写失败，跳过（%s: %s）",
+                            index,
+                            clip.start,
+                            clip.end,
+                            type(exc).__name__,
+                            exc,
+                        )
+                        continue
+                    for seg in clip_segments:
                         # 词级时间戳同样是 clip 相对值：只平移 start/end 会把词锚留在
                         # 片段内——refine 字流按词取时间，整份时间轴就会坍缩到首个
                         # clip 的跨度（真机第1集实锤：46 段全挤 0-11.58s）。
@@ -646,6 +672,17 @@ class ParaformerEngine:
                                 }
                             )
                         )
+                if failures and not segments:
+                    raise RuntimeError(
+                        f"全部 {len(failures)} 个切片转写失败，首个原因：{failures[0]}"
+                    )
+                if failures:
+                    _LOGGER.warning(
+                        "停顿切分转写 %d/%d 个切片失败被跳过：%s",
+                        len(failures),
+                        len(failures) + len(segments),
+                        "；".join(failures[:3]),
+                    )
             finally:
                 shutil.rmtree(work, ignore_errors=True)
             segments.sort(key=lambda s: s.start)
