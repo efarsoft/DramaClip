@@ -83,7 +83,7 @@ def _slot_block(
     segments: list[TimelineSegment],
     material: casting.MaterialByEpisode,
 ) -> str:
-    """每个槽位一段：职责 + 它压在的画面区间 + **它那一集**区间内的台词。
+    """每个槽位一段：职责 + 它压在的画面区间 + **它那一集**区间内的台词与画面实据。
     """
     by_id = {segment.narration_id: segment for segment in segments if segment.narration_id}
     lines: list[str] = []
@@ -112,6 +112,17 @@ def _slot_block(
             )
         else:
             lines.append("    （该区间无台词转写：只按职责与前后槽位写，不得编造具体情节）")
+        # 语义层声画对位（P2c·文画咬合）：区间内的画面轨帧逐条给到该槽位——
+        # 文案说的画面必须是这几帧里的实据，不是全集画面轨里模型自己挑。
+        # 缺集在上方 dialogue_of 已点名抛错，这里键必在。
+        frames = material[segment.episode_id].frames_in(segment.start, segment.end)
+        if frames:
+            lines.append("  区间内画面轨（画面描写必须与这些实据一致）：")
+            lines.extend(
+                f"    {scriptwriter.format_frame_line(frame)}" for frame in frames
+            )
+        else:
+            lines.append("    （该区间无画面轨：画面描写维持台词锚定，不得编造镜头细节）")
     return "\n".join(lines)
 
 

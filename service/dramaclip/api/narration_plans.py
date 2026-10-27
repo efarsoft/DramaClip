@@ -682,6 +682,9 @@ def _casting_for(
             number=number,
             asr=narration_pipeline.parse_asr_segments(record["asr_segments"]),
             beats=_parse_beats(record["audio_features"]),
+            # 语义层声画对位：画面轨帧进逐段填词（_slot_block 按取材区间切片消费）；
+            # 未跑视觉轨的集空元组，槽位块落到「无画面轨」分档，行为不变。
+            frames=tuple(_visual_frames_of(record.get("visual_track"))),
         )
     return casting.stamp(scenes_by_episode), highlights, material
 

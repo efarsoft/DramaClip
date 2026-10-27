@@ -377,6 +377,29 @@ def format_transcript_episodes(
     return "\n".join(lines)
 
 
+def format_frame_line(frame: dict[str, Any]) -> str:
+    """单帧画面实据 → 一行紧凑文本：「2.1s 中景 宫殿内厅：帝王坐龙椅（庄重）」。
+
+    帧时间=该集相对秒，与台词转写同一时间轴；镜头/场景/人物/动作/情绪逐维拼装，
+    缺维跳过。逐段填词与剧本链的画面实据共用这一格式。
+    """
+    t_label = f"{float(frame.get('t') or 0.0):.1f}s"
+    body = " ".join(
+        str(frame.get(key, "")).strip() for key in ("shot", "scene")
+        if str(frame.get(key, "")).strip()
+    )
+    people = str(frame.get("people", "")).strip()
+    if people:
+        body += ("：" if body else "") + people
+    action = str(frame.get("action", "")).strip()
+    if action:
+        body += "，" + action
+    mood = str(frame.get("mood", "")).strip()
+    if mood:
+        body += f"（{mood}）"
+    return f"{t_label} {body}".strip()
+
+
 def format_visual_tracks(episode_inputs: list[dict[str, Any]]) -> str:
     """有画面轨的集各拼一段紧凑画面实据；无画面的集不出现（分档语义，P2c）。
 
@@ -388,23 +411,7 @@ def format_visual_tracks(episode_inputs: list[dict[str, Any]]) -> str:
         frames = episode.get("visual_track") or []
         if not frames:
             continue
-        lines: list[str] = []
-        for frame in frames:
-            t_label = f"{float(frame.get('t') or 0.0):.1f}s"
-            body = " ".join(
-                str(frame.get(key, "")).strip() for key in ("shot", "scene")
-                if str(frame.get(key, "")).strip()
-            )
-            people = str(frame.get("people", "")).strip()
-            if people:
-                body += ("：" if body else "") + people
-            action = str(frame.get("action", "")).strip()
-            if action:
-                body += "，" + action
-            mood = str(frame.get("mood", "")).strip()
-            if mood:
-                body += f"（{mood}）"
-            lines.append(f"{t_label} {body}".strip())
+        lines = [format_frame_line(frame) for frame in frames]
         if lines:
             blocks.append(f"【第{int(episode['number'])}集·画面轨】\n" + "\n".join(lines))
     if not blocks:

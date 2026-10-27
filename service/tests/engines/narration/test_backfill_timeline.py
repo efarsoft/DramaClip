@@ -330,6 +330,28 @@ def test_unrewriteable_overflow_drops_after_first_round(
     assert "实测 30.00s" in joined and "弃用" in joined
 
 
+def test_head_extension_start_snaps_to_nearest_scene_cut(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """结构层音画同步：头部扩展把起点伸进空闲素材后，吸附回最近的视觉切点。"""
+    plan = _plan(("ep1", 20.0, 21.0, "narration"))
+
+    def probe(path: Path) -> float:
+        return 10.0
+
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
+    result = pipeline.synthesize_narration_texts(
+        plan,
+        {"tts.engine": "edge"},
+        tmp_path,
+        source_durations={"ep1": 26.0},
+        scene_cuts={"ep1": [10.7, 21.0]},
+    )
+    # 头部扩展落位 11.0-21.0，吸附到 0.3s 外的切点 10.7（10.7+10=20.7 ≤ 计划尾 21）
+    assert _windows(result) == [("ep1", 10.7, 20.7)]
+
+
 def test_an_original_segment_pushed_past_the_source_is_rejected_too(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

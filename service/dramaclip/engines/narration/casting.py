@@ -31,11 +31,24 @@ class EpisodeMaterial:
     `beats`（B9）是该集音频的拍点时刻（秒，升序），供编排层把任意切点吸附到
     节拍上（engines/narration/beat_align）。默认空元组：旧库分析记录没有拍点、
     或装配层拿不到 audio_features 时，编排行为与 B9 之前逐字节一致。
+
+    `frames`（P2c·文画咬合）是该集画面轨逐帧实据（{t,shot,scene,people,action,mood}），
+    供逐段填词按取材区间切片消费。默认空元组：未跑视觉轨的集、或装配层拿不到
+    visual_track 时逐段行为与之前逐字节一致（分档语义，不报错）。
     """
 
     number: int
     asr: list[AsrSegment]
     beats: tuple[float, ...] = ()
+    frames: tuple[dict[str, str], ...] = ()
+
+    def frames_in(self, start: float, end: float) -> list[dict[str, str]]:
+        """取材区间 [start, end] 内的画面轨帧（t 落在区间内，按时间升序）。"""
+        return [
+            frame
+            for frame in self.frames
+            if start - 1e-6 <= float(frame.get("t") or 0.0) <= end + 1e-6
+        ]
 
     @property
     def label(self) -> str:

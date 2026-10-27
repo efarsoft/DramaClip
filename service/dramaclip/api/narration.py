@@ -14,6 +14,7 @@ from dramaclip.api.narration_plans import (  # noqa: F401 - _NO_TTS_MODES 供测
     _NO_TTS_MODES,
     SUPPORTED_MODES,
     _run_plan_variants,
+    _scene_cuts_of,
     expected_copy_source,
 )
 from dramaclip.engines.narration import mode_recommend, variant_scoring
@@ -23,6 +24,7 @@ from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.semantic.llm_client import LlmUnavailable, client_or_none
 from dramaclip.infra import config
+from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
@@ -250,6 +252,20 @@ def _excluded_angle_names(context: AppContext, exclude_plan_ids: list[str]) -> l
     return names
 
 
+def _scene_cuts_for(context: AppContext, plan: PlanData) -> dict[str, list[float]]:
+    """按方案涉及的集收镜头切点表（结构层音画同步：实测重排后段界回吸切点）。
+
+    缺分析记录/坏 scene_data 的集空表——吸附是增强不是义务，与编排层同款分档
+    语义（缺切点原值返回），不为它付「出不了片」的代价。
+    """
+    cuts: dict[str, list[float]] = {}
+    for episode_id in sorted({str(seg.episode_id) for seg in plan.timeline}):
+        record = analysis_repo.get(context.conn, episode_id)
+        if record is not None:
+            cuts[episode_id] = _scene_cuts_of(record.get("scene_data"))
+    return cuts
+
+
 def _fit_rewriter(settings: dict[str, str]) -> Callable[[str, int], str | None] | None:
     """装不下画面空隙时的定向收短出口（业主裁决 2026-10-26：重新选取而非判失败）。
 
@@ -302,6 +318,7 @@ def _voice(
         on_progress=on_progress,
         data_dir=context.data_dir,
         rewrite_for_fit=_fit_rewriter(settings),
+        scene_cuts=_scene_cuts_for(context, plan),
     )
 
 

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -34,6 +35,7 @@ def _voice_slots(
     plan: PlanData,
     durations: dict[str, float],
     source_durations: dict[str, float],
+    **kwargs: Any,
 ) -> PlanData:
     """按槽位给实测时长并跑完整合成+布局。探针键 = 内容寻址文件名首段（槽位前缀）。"""
 
@@ -43,7 +45,11 @@ def _voice_slots(
     monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
     return pipeline.synthesize_narration_texts(
-        plan, {"tts.engine": "edge"}, tmp_path, source_durations=source_durations
+        plan,
+        {"tts.engine": "edge"},
+        tmp_path,
+        source_durations=source_durations,
+        **kwargs,
     )
 
 
@@ -190,6 +196,64 @@ def test_cross_bridge_that_does_not_fit_the_gap_is_dropped_with_ledger(
     ]
     joined = "\n".join(record.getMessage() for record in caplog.records)
     assert "cross-1" in joined and "弃用" in joined
+
+
+def test_cross_bridge_start_snaps_to_nearest_scene_cut(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """结构层音画同步：实测重排后的段起点吸附回 ±0.5s 内最近的视觉切点——
+    剪口落在换镜头处，旁白不从镜头中段起播。"""
+    plan = PlanData(
+        mode="cross_narration",
+        timeline=[
+            TimelineSegment(episode_id="ep1", start=10.0, end=18.0, audio="original"),
+            TimelineSegment(
+                episode_id="ep1", start=18.0, end=22.0,
+                audio="narration", narration_id="cross-1",  # type: ignore[arg-type]
+            ),
+            TimelineSegment(episode_id="ep1", start=40.0, end=47.0, audio="original"),
+        ],
+        narration_texts=[NarrationText(id="cross-1", text="承接上一幕")],
+    )
+    result = _voice_slots(
+        monkeypatch,
+        tmp_path,
+        plan,
+        {"cross": 6.0},
+        {"ep1": 90.0},
+        scene_cuts={"ep1": [33.7, 40.0]},
+    )
+    bridge = next(s for s in result.timeline if s.audio == "narration")
+    # 右对齐落位在 34.0，吸附到 0.3s 外的切点 33.7（33.7+6=39.7 仍在空隙内）
+    assert (bridge.start, bridge.end) == (33.7, 39.7)
+
+
+def test_cross_bridge_snap_rejected_when_it_breaks_the_gap(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """吸附会把段尾顶出空隙右沿时放弃吸附：吸附是增强不是义务。"""
+    plan = PlanData(
+        mode="cross_narration",
+        timeline=[
+            TimelineSegment(episode_id="ep1", start=10.0, end=18.0, audio="original"),
+            TimelineSegment(
+                episode_id="ep1", start=18.0, end=22.0,
+                audio="narration", narration_id="cross-1",  # type: ignore[arg-type]
+            ),
+            TimelineSegment(episode_id="ep1", start=40.0, end=47.0, audio="original"),
+        ],
+        narration_texts=[NarrationText(id="cross-1", text="承接上一幕")],
+    )
+    result = _voice_slots(
+        monkeypatch,
+        tmp_path,
+        plan,
+        {"cross": 6.0},
+        {"ep1": 90.0},
+        scene_cuts={"ep1": [34.4]},  # 吸附后 34.4+6=40.4 > 40 破坏空隙右沿 → 原值
+    )
+    bridge = next(s for s in result.timeline if s.audio == "narration")
+    assert (bridge.start, bridge.end) == (34.0, 40.0)
 
 
 def test_cross_bridge_too_long_for_its_gap_moves_to_a_later_bigger_gap(

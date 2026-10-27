@@ -365,6 +365,7 @@ def synthesize_narration_texts(
     on_progress: Callable[[int, int], None] | None = None,
     data_dir: Path | None = None,
     rewrite_for_fit: Callable[[str, int], str | None] | None = None,
+    scene_cuts: dict[str, list[float]] | None = None,
 ) -> PlanData:
     """逐段合成旁白并按 narration_id 回填时长与解说字幕。
 
@@ -451,9 +452,13 @@ def synthesize_narration_texts(
             unplaced = []
             break
         if plan.mode == "cross_narration":
-            timeline, unplaced = _layout_cross(plan, voiced, source_durations, log)
+            timeline, unplaced = _layout_cross(
+                plan, voiced, source_durations, log, scene_cuts
+            )
         else:
-            timeline, unplaced = _patch_timeline(plan, voiced, source_durations)
+            timeline, unplaced = _patch_timeline(
+                plan, voiced, source_durations, scene_cuts
+            )
         if not unplaced or rewrite_for_fit is None or attempt >= 2:
             break
         if not _rewrite_and_resynth(
@@ -592,6 +597,34 @@ def _layout_ultra_short(
 
 _BRIDGE_ID_RE = re.compile(r"^cross-\d+$")
 
+# 结构层音画同步：实测重排把段界挪离编排位后，起点吸附回最近的视觉切点——
+# 剪口落在换镜头处=画面不撕裂。只吸附起点（终点本来就锚在场景边界或集尾）。
+_SCENE_SNAP_TOL_S = 0.5
+
+
+def _snap_start(
+    start: float,
+    duration: float,
+    floor: float,
+    ceil: float,
+    cuts: list[float],
+) -> float:
+    """把旁白窗口起点吸附到 ±0.5s 内最近的视觉切点；不破坏空隙约束才生效。
+
+    `floor`/`ceil` 是该段实际可用的窗口边界（共享空隙的剩余右沿也算 ceil）：
+    吸附后仍须 `floor <= start` 且 `start + duration <= ceil`，否则原值返回。
+    无切点、区间内没有候选、吸附会撞界——三种情况都安静回退，吸附是增强不是义务。
+    """
+    if not cuts:
+        return start
+    near = [cut for cut in cuts if abs(cut - start) <= _SCENE_SNAP_TOL_S]
+    if not near:
+        return start
+    snapped = min(near, key=lambda cut: (abs(cut - start), cut))
+    if snapped >= floor - 1e-6 and snapped + duration <= ceil + _SOURCE_FIT_TOL_S:
+        return snapped
+    return start
+
 
 def _bridge_entry(
     episode_id: str, slot: str, text: str, duration: float, start: float
@@ -612,6 +645,7 @@ def _layout_cross(
     voiced: dict[str, tuple[str, str, float]],
     source_durations: dict[str, float],
     log: LogFn | None,
+    scene_cuts: dict[str, list[float]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """交叉解说桥段落位：场景原声窗原封不动，旁白按实测时长装进场景间空隙。
 
@@ -701,6 +735,13 @@ def _layout_cross(
                 _gap_floor(anchor_episode, float("inf")),
                 tail_cursor.get(anchor_episode, 0.0),
             )
+            start = _snap_start(
+                start,
+                duration,
+                _gap_floor(anchor_episode, float("inf")),
+                limit,
+                (scene_cuts or {}).get(anchor_episode, []),
+            )
             if start + duration <= limit + _SOURCE_FIT_TOL_S:
                 entries_by_anchor.setdefault(len(segments), []).append(
                     _bridge_entry(anchor_episode, slot, text, duration, start)
@@ -727,8 +768,15 @@ def _layout_cross(
                 floor = _gap_floor(gap_episode, gap_right)
                 ceil_remaining = gap_ceil.get((gap_episode, gap_right), gap_right)
                 if duration <= ceil_remaining - floor + _SOURCE_FIT_TOL_S:
+                    start = _snap_start(
+                        ceil_remaining - duration,
+                        duration,
+                        floor,
+                        ceil_remaining,
+                        (scene_cuts or {}).get(gap_episode, []),
+                    )
                     entries_by_anchor.setdefault(anchor_index, []).append(
-                        _bridge_entry(gap_episode, slot, text, duration, ceil_remaining - duration)
+                        _bridge_entry(gap_episode, slot, text, duration, start)
                     )
                     gap_ceil[(gap_episode, gap_right)] = ceil_remaining - duration
                     placed = True
@@ -773,6 +821,7 @@ def _patch_timeline(
     plan: PlanData,
     voiced: dict[str, tuple[str, str, float]],
     source_durations: dict[str, float],
+    scene_cuts: dict[str, list[float]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """游标修补（既有回填语义）：旁白段长=实测音频，头部扩展→尾部收口。
 
@@ -834,6 +883,13 @@ def _patch_timeline(
             and planned_end - length >= floor
         ):
             start = planned_end - length
+            start = _snap_start(
+                start,
+                length,
+                floor,
+                planned_end,
+                (scene_cuts or {}).get(episode_id, []),
+            )
         # 尾部收口：实测比剩余素材长时，整段往前挪到贴着集尾——这段的文案与长度都不动，
         # 换的只是压在它下面的画面。挪不动（再往前就和上一段重叠=画面重播）就照原样
         # 交给 `_assert_within_source` 判死，不截音也不截画面。
@@ -844,6 +900,13 @@ def _patch_timeline(
         # 收口损失的只有"这一段配哪几秒画面"，没有一帧声音被丢掉。
         elif 0 < limit < start + length and limit - length >= floor:
             start = limit - length
+            start = _snap_start(
+                start,
+                length,
+                floor,
+                limit,
+                (scene_cuts or {}).get(episode_id, []),
+            )
         elif (
             segment["audio"] in ("narration", "ducked")
             and limit > 0

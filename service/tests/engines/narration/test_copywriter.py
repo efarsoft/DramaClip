@@ -133,6 +133,31 @@ def test_slot_without_transcript_forbids_invention(llm: Any) -> None:
     assert prompt.count("（该区间无台词转写") == len(_SCENES), "每个空区间槽位都要有禁止编造的提示"
 
 
+def test_slot_block_carries_in_window_visual_frames(llm: Any) -> None:
+    """语义层声画对位：取材区间内的画面轨帧逐条进该槽位块；区间外的不许串槽。"""
+    framed = {
+        "ep1": casting.EpisodeMaterial(
+            number=1,
+            asr=_SEGMENTS,
+            frames=(
+                {"t": "5.0", "shot": "中景", "scene": "破庙", "people": "主角",
+                 "action": "擦锅", "mood": "隐忍"},
+                {"t": "15.0", "shot": "特写", "scene": "桌案", "people": "反派",
+                 "action": "摔杯", "mood": "暴怒"},
+                {"t": "40.0", "shot": "远景", "scene": "山门", "action": "下雪"},
+            ),
+        )
+    }
+    llm.queue = [_lines()]
+    copywriter.write_plan_copy(
+        _plan(), framed, _SETTINGS, mode_label=_MODE_LABEL, angle_block=""
+    )
+    prompt = llm.calls[0]
+    block = prompt.split("[full-2]")[1].split("[full-3]")[0]
+    assert "区间内画面轨" in block and "15.0s 特写" in block, "区间内帧必须进本槽位块"
+    assert "40.0s 远景" not in block and "5.0s 中景" not in block, "区间外帧不许串槽位"
+
+
 def test_missing_slot_raises(llm: Any) -> None:
     llm.queue = [{"lines": [{"id": "full-1", "text": "只写了一条"}]}]
     with pytest.raises(ValueError, match="漏了 3 个槽位"):
