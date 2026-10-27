@@ -57,6 +57,20 @@ class EpisodeMaterial:
         return f"第{self.number}集"
 
 
+def has_dialogue(material: MaterialByEpisode, scene: EpisodeScene) -> bool:
+    """场景窗口与该集任一台词段相交才算「有声可放」；缺该集原料不误杀。
+
+    原声窗的哑段过滤口径（raw_clip 先例，2026-10-27 审计后推广到全模式）：
+    「原声台词」卖点里混进整段无声动作戏，比少一段更伤。
+    """
+    entry = material.get(scene.episode_id)
+    if entry is None:
+        return True
+    return any(
+        seg.end > scene.start and seg.start < scene.end for seg in entry.asr
+    )
+
+
 def episode_order(scene: EpisodeScene) -> tuple[int, float, int]:
     """跨集叙事顺序：集号（播出序）→ 集内起点 → scene_index。
     """

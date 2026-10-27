@@ -10,6 +10,7 @@ from dramaclip.engines.narration.casting import (
     beats_of,
     episode_order,
     fit_scene_window,
+    has_dialogue,
     score_order,
     strongest_span_of,
 )
@@ -48,6 +49,12 @@ def build_cross(
     ±0.3s（台词保护 > 节拍，见 beat_align 模块 docstring）。
     """
     ranked = sorted(scenes, key=score_order)
+    if material is not None:
+        # 哑段过滤（2026-10-27 审计）：原声拍整段无声=观众看哑 8 秒；
+        # 过滤后不足三条回退全候选（可用性优先，对齐 raw_clip 口径）。
+        voiced = [scene for scene in ranked if has_dialogue(material, scene)]
+        if len(voiced) >= 3:
+            ranked = voiced
     picked = sorted(ranked[:6], key=episode_order)  # 取 top 6 按叙事顺序
     if not picked:
         return PlanData(mode="cross_narration", strategy=strategy)
@@ -155,6 +162,10 @@ def build_ultra_short(
     # 而输入顺序来自 episodes_repo.list_by_project，没有契约（活库实测 333 个场景只有
     # 19 个不同分值）。score_order 已带 (集号, 起点, scene_index) 三个次键。
     ranked = sorted(scenes, key=score_order)
+    if material is not None:
+        voiced = [scene for scene in ranked if has_dialogue(material, scene)]
+        if voiced:  # 唯一的冲突拍不能是无声动作戏；全哑才回退全候选
+            ranked = voiced
 
     def _conflict_window(scene: EpisodeScene) -> tuple[float, float]:
         """场景 → 冲突窗（最强台词 span 收缩 + 节拍吸附）。布局与候选池共用一处真相。"""

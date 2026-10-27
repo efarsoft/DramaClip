@@ -9,6 +9,7 @@ from dramaclip.engines.narration.casting import (
     EpisodeScene,
     episode_order,
     fit_scene_window,
+    has_dialogue,
     score_order,
     strongest_line,
 )
@@ -42,7 +43,12 @@ def build_subtitle_flow(
     收进 [2, 8]，不超场景边界；无台词保持 8s 满窗）。**B9 吸附排在收缩之后**——
     吸附是对最终 end 的微调，顺序颠倒会让卡点失效。
     """
-    ranked = sorted(scenes, key=score_order)[:_MAX_SCENES]
+    ranked = sorted(scenes, key=score_order)
+    if material is not None:
+        voiced = [scene for scene in ranked if has_dialogue(material, scene)]
+        if len(voiced) >= 3:  # 金句流里混哑段=字幕放空炮；不足三条回退全候选
+            ranked = voiced
+    ranked = ranked[:_MAX_SCENES]
     picked = sorted(ranked, key=episode_order)
 
     segments: list[TimelineSegment] = []

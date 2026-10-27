@@ -7,6 +7,7 @@ from dramaclip.engines.narration.casting import (
     EpisodeScene,
     MaterialByEpisode,
     episode_order,
+    has_dialogue,
     score_order,
 )
 from dramaclip.engines.narration.models import (
@@ -21,6 +22,7 @@ from dramaclip.engines.semantic.models import HighlightSegment
 RAW_CLIP_MIN_SCORE = 70
 _RAW_CLIP_MIN_S = 3.0
 _RAW_CLIP_MAX_S = 25.0
+_RAW_CLIP_FALLBACK_COUNT = 6  # 门槛放宽兜底的条数上限（不再借 len(highlights) 张冠李戴）
 _INTRO_MAX_S = 30.0  # 片头段保守时长（TTS 实际时长在导出时回填）
 _INTRO_SLOT_ID = "intro-1"
 _CTA_SLOT_ID = "cta-1"
@@ -67,6 +69,7 @@ def _merge_adjacent(ordered: list[EpisodeScene]) -> list[EpisodeScene]:
 def build_highlight_cut(
     scenes: list[EpisodeScene],
     strategy: StrategySpec,
+    material: MaterialByEpisode | None = None,
 ) -> PlanData:
     """高光混剪（预告形态）：全剧最高冲突场景 × 5 秒快切 + 配乐床，零解说。
 
@@ -75,10 +78,16 @@ def build_highlight_cut(
     「配乐床」目前是占位描述：engines/bgm/selector.py 尚未接线（生产零调用），
     接线前成片没有 BGM——W7 落地时替换此句。
     邻接合并不适用于此模式：快切本身就是节奏，碎片化是设计意图而非缺陷。
+    `material` 可选：给到时过滤哑段（原声快切里混 5 秒无声动作戏=白剪）、
+    窗口边界吸附台词句边界（与 raw_clip 同款纪律，2026-10-27 审计立案）。
     """
     if not scenes:
         return PlanData(mode="highlight_cut", strategy=strategy)
     ranked = sorted(scenes, key=score_order)[:_HIGHLIGHT_MAX_CLIPS]
+    if material is not None:
+        voiced = [scene for scene in ranked if has_dialogue(material, scene)]
+        if len(voiced) >= 3:
+            ranked = voiced
     ordered = sorted(ranked, key=episode_order)
     best = max(ordered, key=lambda s: s.score)
     if ordered[0] is not best:
@@ -102,6 +111,7 @@ def build_highlight_cut(
                 audio="original",
             )
         )
+    timeline = _snap_windows_to_dialogue(timeline, material)
     return PlanData(mode="highlight_cut", timeline=timeline, strategy=strategy)
 
 
@@ -128,13 +138,17 @@ def build_raw_clip(
         and _RAW_CLIP_MIN_S <= scene.end - scene.start <= _RAW_CLIP_MAX_S
     ]
     if material is not None:
-        voiced = [scene for scene in candidates if _has_dialogue(material, scene)]
+        voiced = [scene for scene in candidates if has_dialogue(material, scene)]
         if len(voiced) >= 3:
             candidates = voiced
-    # 分数不足时放宽到全部场景（按冲突分取头部，保证可用性）
+    # 分数不足时放宽到全部场景（按冲突分取头部，保证可用性）；**台词过滤不放宽**：
+    # 「原声台词高光合集」混进哑段比少一段更伤（真机 2026-10-20 教训）。条数用
+    # 常量不借 len(highlights)——那是另一个模式的输入量，张冠李戴（2026-10-27 审计）。
     if len(candidates) < 3:
-        ranked = sorted(scenes, key=score_order)[: max(3, len(highlights))]
-        candidates = ranked
+        ranked = sorted(scenes, key=score_order)
+        if material is not None:
+            ranked = [scene for scene in ranked if has_dialogue(material, scene)]
+        candidates = ranked[:_RAW_CLIP_FALLBACK_COUNT] or ranked
 
     ordered = sorted(candidates, key=episode_order)
     # 邻接合并：相邻高分场景合成连续块播放，减少时间轴反复横跳
@@ -145,6 +159,7 @@ def build_raw_clip(
 
 
 _DIALOGUE_SNAP_EPS_S = 0.35  # 边界离句边界比这近就不算切句（字级时间戳的正常抖动）
+_DIALOGUE_SNAP_MIN_KEEP_S = 2.0  # 让位吸附后窗口至少保住的时长（防 1 秒碎窗）
 
 
 def _snap_windows_to_dialogue(
@@ -166,9 +181,12 @@ def _snap_windows_to_dialogue(
         by_episode.setdefault(segment.episode_id, []).append(index)
     updated = list(timeline)
     eps = _DIALOGUE_SNAP_EPS_S
+    keep = _DIALOGUE_SNAP_MIN_KEEP_S
     for indices in by_episode.values():
         for position, index in enumerate(indices):
             segment = updated[index]
+            if segment.audio != "original":
+                continue  # 旁白段的编排期窗口是占位（渲染期实测重排），不吸台词
             entry = material.get(segment.episode_id)
             if entry is None:
                 continue
@@ -185,14 +203,14 @@ def _snap_windows_to_dialogue(
                 if s0 + eps < end < s1 - eps:  # 止点切在句中
                     if next_start is None or s1 <= next_start:
                         end = s1  # 收进整句：把话说完再跳
-                    elif s0 >= start + eps:
+                    elif s0 >= start + keep:
                         end = s0  # 撞下一窗：退到句前
                     break
             for s0, s1 in ((seg.start, seg.end) for seg in entry.asr):
                 if s0 + eps < start < s1 - eps:  # 起点切在句中
-                    if (prev_end is None or s0 >= prev_end) and s0 <= end - eps:
+                    if (prev_end is None or s0 >= prev_end) and s0 <= end - keep:
                         start = s0  # 退到句首：从话头听起
-                    elif s1 < end - eps:
+                    elif s1 <= end - keep:
                         start = s1  # 撞上一窗：进到句后
                     break
             if (start, end) != (segment.start, segment.end):
@@ -202,19 +220,10 @@ def _snap_windows_to_dialogue(
     return updated
 
 
-def _has_dialogue(material: MaterialByEpisode, scene: EpisodeScene) -> bool:
-    """场景窗口与该集任一台词段相交才算「有声可放」；缺该集原料不误杀。"""
-    entry = material.get(scene.episode_id)
-    if entry is None:
-        return True
-    return any(
-        seg.end > scene.start and seg.start < scene.end for seg in entry.asr
-    )
-
-
 def build_intro(
     body_scenes: list[EpisodeScene],
     strategy: StrategySpec,
+    material: MaterialByEpisode | None = None,
 ) -> PlanData:
     """片头解说编排（原案 6.4）：引子旁白段（画面为**最高冲突镜**）+ 正片高光（原声）。
 
@@ -225,8 +234,14 @@ def build_intro(
     `scene_index`：scene_index 只在一集内唯一，跨集时按 index 判会误认「开场已是
     最高冲突」而不前置。
     全等分（max 取首个）时不前置，保持原时间序。
+    `material` 可选：给到时正片哑段过滤（片头 3 秒后的第一段正片是观感最贵的位置，
+    混进无声动作戏代价最高）+ 原声窗台词句边界吸附（与 raw_clip 同款纪律）。
     """
     ordered = sorted(body_scenes, key=episode_order)
+    if material is not None:
+        voiced = [scene for scene in ordered if has_dialogue(material, scene)]
+        if len(voiced) >= 2:
+            ordered = voiced
     if ordered:
         best = max(ordered, key=lambda s: s.score)
         if ordered[0] is not best:
@@ -235,6 +250,7 @@ def build_intro(
     timeline = _fit_duration(ordered, strategy, intro_first=True)
     if not timeline:
         return PlanData(mode="intro_narration", timeline=timeline, strategy=strategy)
+    timeline = _snap_windows_to_dialogue(timeline, material)
     timeline[0] = timeline[0].model_copy(update={"narration_id": _INTRO_SLOT_ID})
     last = timeline[-1]
     cta_start = round(max(last.start, last.end - _CTA_FALLBACK_S), 3)

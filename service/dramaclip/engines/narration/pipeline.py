@@ -72,9 +72,9 @@ def build_plan(
     if mode == "raw_clip":
         return apply_transitions(modes.build_raw_clip(scenes, highlights, strategy, material))
     if mode == "highlight_cut":
-        return apply_transitions(modes.build_highlight_cut(scenes, strategy))
+        return apply_transitions(modes.build_highlight_cut(scenes, strategy, material))
     if mode == "intro_narration":
-        return apply_transitions(modes.build_intro(scenes, strategy))
+        return apply_transitions(modes.build_intro(scenes, strategy, material))
     if mode == "cross_narration":
         return apply_transitions(modes_w5.build_cross(scenes, strategy, material))
     if mode == "ultra_short_hook":

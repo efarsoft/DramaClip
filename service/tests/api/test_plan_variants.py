@@ -1185,7 +1185,8 @@ def test_get_plan_returns_row_and_cost(
     assert detail["plan"]["id"] == plan_id
     assert detail["plan"]["angle"] == "角度1"
     plan = PlanData.model_validate(detail["plan"]["plan_data"])
-    assert len(plan.timeline) == 7 and len(plan.narration_texts) == 2
+    # 正片段经哑段过滤（2026-10-27 审计）：种子 6 场景里 4 个与台词无交集被滤掉
+    assert len(plan.timeline) == 3 and len(plan.narration_texts) == 2
     assert detail["cost"] == {"copy_llm_calls": 1, "tts_calls": 2}
 
 

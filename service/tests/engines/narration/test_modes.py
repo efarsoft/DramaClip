@@ -7,7 +7,7 @@ import pytest
 from dramaclip.engines.narration import pipeline
 from dramaclip.engines.narration.casting import stamp
 from dramaclip.engines.narration.models import StrategySpec
-from dramaclip.engines.narration.modes import build_intro, build_raw_clip
+from dramaclip.engines.narration.modes import build_highlight_cut, build_intro, build_raw_clip
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from tests.engines.narration.conftest import assert_slots_paired
 
@@ -117,6 +117,61 @@ def test_raw_clip_snap_yields_when_extension_hits_next_window() -> None:
     }
     plan = build_raw_clip(stamp([(1, "ep1", scenes)]), [], _STRATEGY, material)
     assert (plan.timeline[0].start, plan.timeline[0].end) == (6.0, 8.0)
+
+
+def test_highlight_cut_filters_mutes_and_snaps_to_sentences() -> None:
+    """高光混剪同款纪律（2026-10-27 审计）：哑段过滤 + 5 秒窗界吸附台词句边界。"""
+    from dramaclip.engines.analysis.models import AsrSegment
+    from dramaclip.engines.narration.casting import EpisodeMaterial
+
+    scenes = [
+        ConflictScore(scene_index=0, start=0.0, end=6.0, score=95),  # 哑段
+        ConflictScore(scene_index=1, start=6.0, end=12.0, score=80),
+        ConflictScore(scene_index=2, start=12.0, end=18.0, score=75),
+        ConflictScore(scene_index=3, start=18.0, end=24.0, score=70),
+    ]
+    material = {
+        "ep1": EpisodeMaterial(
+            number=1,
+            asr=[
+                AsrSegment(start=6.0, end=11.0, text="甲"),
+                AsrSegment(start=11.5, end=17.0, text="乙"),
+                AsrSegment(start=17.5, end=23.0, text="丙"),
+            ],
+        )
+    }
+    plan = build_highlight_cut(stamp([(1, "ep1", scenes)]), _STRATEGY, material)
+    spans = [(seg.start, seg.end) for seg in plan.timeline]
+    assert (0.0, 6.0) not in spans, "有声候选 ≥3 时哑段不得入选"
+    # 几何取中窗 [6.5,11.5]… 起点 全部退到句首，剪口不切句
+    assert spans == [(6.0, 11.5), (11.5, 17.5), (17.5, 23.5)]
+
+
+def test_intro_filters_mute_body_scenes() -> None:
+    """片头正片哑段过滤：最高冲突是无声动作戏也不得占黄金 3 秒后的第一段正片。"""
+    from dramaclip.engines.analysis.models import AsrSegment
+    from dramaclip.engines.narration.casting import EpisodeMaterial
+
+    scenes = [
+        ConflictScore(scene_index=0, start=0.0, end=6.0, score=95),  # 哑段
+        ConflictScore(scene_index=1, start=6.0, end=12.0, score=80),
+        ConflictScore(scene_index=2, start=12.0, end=18.0, score=75),
+    ]
+    material = {
+        "ep1": EpisodeMaterial(
+            number=1,
+            asr=[
+                AsrSegment(start=6.0, end=11.0, text="甲"),
+                AsrSegment(start=12.0, end=17.0, text="乙"),
+            ],
+        )
+    }
+    plan = build_intro(stamp([(1, "ep1", scenes)]), _STRATEGY, material)
+    assert plan.timeline[0].audio == "narration"
+    assert (plan.timeline[0].start, plan.timeline[0].end) == (6.0, 12.0), (
+        "哑段被过滤后片头旁白落在第一个有声场景，不吸台词（渲染期实测重排）"
+    )
+    assert (plan.timeline[1].start, plan.timeline[1].end) == (12.0, 18.0)
 
 
 def test_intro_marks_first_segment_as_narration() -> None:

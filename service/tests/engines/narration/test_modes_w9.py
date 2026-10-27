@@ -49,7 +49,7 @@ def test_cta_card_appended() -> None:
     plan = build_subtitle_flow(stamp([(1, "ep1", _scenes())]), _material(), _STRATEGY)
     cta = plan.timeline[-1]
     assert cta.subtitle_text is not None and "全集" in cta.subtitle_text
-    assert cta.start == 59.0 and cta.end == 62.0, "CTA 复用最后场景尾部"
+    assert cta.start == 69.0 and cta.end == 72.0, "CTA 复用最后场景尾部（哑段过滤后末场景=69-72）"
 
 def test_scene_cap_and_original_audio() -> None:
     plan = build_subtitle_flow(stamp([(1, "ep1", _scenes())]), _material(), _STRATEGY)
