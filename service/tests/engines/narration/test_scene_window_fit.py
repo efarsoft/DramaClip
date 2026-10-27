@@ -81,17 +81,17 @@ def test_subtitle_flow_window_follows_the_line() -> None:
     plan = build_subtitle_flow(_one_scene(), _material([_line(0.5, 3.5)]), _STRATEGY)
     body = plan.timeline[0]
     # 台词 3s → 段长 3.5s（3s+尾垫）；窗口锚到台词（0.5-0.4 头垫起播）
-    assert (body.start, body.end) == (0.1, 3.6)
+    # 窗长=场景自然边界（2026-10-27 业主实锤后金句流退出收缩公式），起点仍跟台词
+    assert (body.start, body.end) == (0.1, 12.0)
     assert body.subtitle_text == "你给我滚出去！骗子！", "字幕仍是那句最强金句"
 
 
-def test_subtitle_flow_caps_and_floors() -> None:
-    capped = build_subtitle_flow(_one_scene(20.0), _material([_line(0.0, 10.0)]), _STRATEGY)
-    assert capped.timeline[0].end == 8.0, "台词 10s → 仍取 8.0 上限"
-    floored = build_subtitle_flow(_one_scene(), _material([_line(0.2, 1.2)]), _STRATEGY)
-    assert floored.timeline[0].end == 2.0, "台词 1s → 取 2.0 下限"
-    short_scene = build_subtitle_flow(_one_scene(2.5), _material([_line(0.0, 2.4)]), _STRATEGY)
-    assert short_scene.timeline[0].end == 2.5, "场景边界 > 台词收缩"
+def test_subtitle_flow_no_more_shrink_caps() -> None:
+    """金句流不再收缩：台词再长也只取场景自然边界，8s 上限与 2s 下限不复存在。"""
+    plan = build_subtitle_flow(
+        _one_scene(20.0), _material([_line(0.0, 10.0)]), _STRATEGY
+    )
+    assert (plan.timeline[0].start, plan.timeline[0].end) == (0.0, 20.0)
 
 
 def test_subtitle_flow_scene_without_dialogue_keeps_full_window() -> None:
@@ -110,29 +110,26 @@ def test_subtitle_flow_scene_without_dialogue_keeps_full_window() -> None:
     )
     plan = build_subtitle_flow(scenes, _material([_line(0.5, 3.5)]), _STRATEGY)
     body = plan.timeline[:-1]
-    assert [(s.start, s.end) for s in body] == [(0.1, 3.6), (20.0, 28.0)]
+    # 金句流窗长=场景自然边界（2026-10-27 退出收缩公式），起点仍跟台词
+    assert [(s.start, s.end) for s in body] == [(0.1, 12.0), (20.0, 32.0)]
 
 
-def test_subtitle_flow_no_dialogue_is_byte_identical_to_the_fixed_window() -> None:
-    """硬验收：dialogue 为空时计划与现状逐字节一致（含 B9 吸附结果）。
-
-    固定 8s 时代的输出：end=8.0；beat 7.9 在容差内 → 吸附为 7.9。两者都必须原样。
-    """
+def test_subtitle_flow_no_dialogue_keeps_scene_bounds() -> None:
+    """无台词场景：窗=场景自然边界（旧固定 8s 时代的 8.0/7.9 吸附随收缩公式一并退役）。"""
     with_beat = build_subtitle_flow(_one_scene(), _material([], (7.9,)), _STRATEGY)
     without_beat = build_subtitle_flow(_one_scene(), _material([]), _STRATEGY)
-    assert (with_beat.timeline[0].start, with_beat.timeline[0].end) == (0.0, 7.9)
-    assert (without_beat.timeline[0].start, without_beat.timeline[0].end) == (0.0, 8.0)
+    assert (with_beat.timeline[0].start, with_beat.timeline[0].end) == (0.0, 12.0)
+    assert (without_beat.timeline[0].start, without_beat.timeline[0].end) == (0.0, 12.0)
     assert (with_beat.timeline[-1].start, with_beat.timeline[-1].end) == (9.0, 12.0)
 
 
-def test_subtitle_flow_snap_happens_after_shrink() -> None:
-    """吸附在收缩之后的可执行证据：拍点 3.4 距收缩后的 end 3.5 只有 0.1s（容差内），
-    距收缩前的 end 8.0 却有 4.6s（容差外）。先吸附再收缩 → 3.5（卡点失效）；
-    先收缩再吸附 → 3.4（落在拍上）。"""
+def test_subtitle_flow_beat_snap_only_within_tolerance() -> None:
+    """金句流退出收缩公式后：窗长=场景自然边界，B9 吸附只做容差内微调——
+    拍点 3.4 距场景 end 12.0 在容差外，end 保持场景边界不动。"""
     plan = build_subtitle_flow(
         _one_scene(), _material([_line(0.0, 3.0)], (3.4,)), _STRATEGY
     )
-    assert plan.timeline[0].end == 3.4, "end 必须落在拍点上——吸附排在收缩之后"
+    assert (plan.timeline[0].start, plan.timeline[0].end) == (0.0, 12.0)
 
 
 def test_subtitle_flow_cta_card_is_untouched() -> None:
@@ -205,7 +202,10 @@ def test_ultra_short_snap_happens_after_shrink() -> None:
 
 # ---- 三模式口径一致 ----------------------------------------------------------
 
-def test_three_modes_share_one_duration_rule() -> None:
+def test_cross_and_ultra_share_one_duration_rule_flow_is_scene_bounds() -> None:
+    """交叉原声拍与超短冲突窗仍共用台词收缩公式（治空挂）；金句流已于
+    2026-10-27 退出（窗=场景自然边界，业主实锤 2-4s 幻灯片快切）。"""
+    asr = [_line(0.5, 3.5)]
     """同一场景 + 同一句台词：三个模式的原声窗长必须逐一相等（口径只有一处真相）。"""
     asr = [_line(0.5, 3.5)]
     flow = build_subtitle_flow(_one_scene(), _material(asr), _STRATEGY)
@@ -214,7 +214,8 @@ def test_three_modes_share_one_duration_rule() -> None:
     flow_len = flow.timeline[0].end - flow.timeline[0].start
     cross_len = cross.timeline[0].end - cross.timeline[0].start
     ultra_len = ultra.timeline[1].end - ultra.timeline[1].start
-    assert flow_len == cross_len == ultra_len == 3.5
+    assert cross_len == ultra_len == 3.5
+    assert flow_len == 11.9  # 金句流：场景 0-12s 全长 − 0.1s 头垫
 
 
 # ---- 转化门禁：收缩不得新增缺陷 ----------------------------------------------

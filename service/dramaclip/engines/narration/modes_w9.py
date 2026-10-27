@@ -8,9 +8,7 @@ from dramaclip.engines.narration.beat_align import snap_window_end
 from dramaclip.engines.narration.casting import (
     EpisodeScene,
     episode_order,
-    fit_scene_window,
     has_dialogue,
-    scene_window_on_span,
     score_order,
     strongest_line,
 )
@@ -80,10 +78,19 @@ def build_subtitle_flow(
                     best = (overlap, (matched.text.strip(), (g_start, g_end)))
             if best is not None:
                 subtitle_text, span = best[1]
-        duration = fit_scene_window(scene.end - scene.start, span)
-        # A3 锚定修正：窗口跟台词走（旧实现锚镜头边界，最强台词在场景中后段时
-        # 窗尾落在句中甚至句前——字幕放金句、原声里没这句）
-        raw_start, raw_end = scene_window_on_span(scene, span, duration)
+        # 窗长=场景自然边界，**不做台词收缩**（2026-10-27 业主实锤「27 秒的简直是
+        # 垃圾」）：fit_scene_window 的收缩公式是给交叉原声拍治「台词说完画面空挂」
+        # 的——金句流的画面里原声一直在播，不存在空挂；按台词长度收进 [2,8]s 的
+        # 结果是每句 2-4 秒幻灯片快切，字幕读完就跳、原声对白被拦腰（真机
+        # b88bc26f：六窗 2.0/2.0/2.5/2.9/4.1/7.5s，全片仅 26.7s）。
+        # A3 锚定修正保留：起点跟台词走（最强台词在场景中后段时，旧实现锚镜头
+        # 边界会让窗尾落在句中甚至句前——字幕放金句、原声里没这句）。
+        head = (
+            max(scene.start, min(span[0] - 0.4, scene.end - 2.0))
+            if span is not None
+            else scene.start
+        )
+        raw_start, raw_end = head, scene.end
         start = round(raw_start, 3)
         end = round(raw_end, 3)
         # B9 节拍吸附：end 是「起点+收缩后段长」的任意点（不是镜头边界），该集有

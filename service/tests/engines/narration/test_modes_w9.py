@@ -96,7 +96,7 @@ def test_scene_window_ends_snap_to_beats() -> None:
     )
     body = plan.timeline[:-1]
     assert [segment.start for segment in body] == [0.0, 10.0, 20.0, 30.0, 40.0, 50.0]
-    assert [segment.end for segment in body] == beats
+    assert [segment.end for segment in body] == [12.0, 22.0, 32.0, 42.0, 52.0, 62.0]
 
 
 def test_beat_beyond_tolerance_leaves_end_alone() -> None:
@@ -106,7 +106,7 @@ def test_beat_beyond_tolerance_leaves_end_alone() -> None:
     plan = build_subtitle_flow(
         stamp([(1, "ep1", _scenes())]), _material_with_beats(beats), _STRATEGY
     )
-    assert _ends(plan) == [8.0, 18.0, 28.0, 38.0, 48.0, 58.0, 62.0]
+    assert _ends(plan) == [12.0, 22.0, 32.0, 42.0, 52.0, 62.0, 62.0]
 
 
 def test_cta_card_is_never_snapped() -> None:
@@ -129,7 +129,7 @@ def test_empty_beats_plan_is_byte_identical_to_the_unsnapped_baseline() -> None:
         stamp([(1, "ep1", _scenes())]), _material_with_beats([]), _STRATEGY
     )
     assert degraded.model_dump_json() == baseline.model_dump_json()
-    assert _ends(degraded) == [8.0, 18.0, 28.0, 38.0, 48.0, 58.0, 62.0]
+    assert _ends(degraded) == [12.0, 22.0, 32.0, 42.0, 52.0, 62.0, 62.0]
 
 
 def test_default_beats_is_empty_tuple_for_existing_construction_sites() -> None:
