@@ -227,3 +227,23 @@ def test_cross_bridge_slots_carry_char_budget_and_no_dead_floor() -> None:
         assert bridge.char_budget is not None and 0 < bridge.char_budget < 60, (
             f"小空隙桥段应拿到紧预算，实得 {bridge.char_budget}"
         )
+
+
+def test_build_plan_snaps_cross_original_windows_to_sentences() -> None:
+    """全模式收口（业主 2026-10-27 策略：对话必须自然说完再转场）：cross 原声窗
+    尾切在台词中段时，编排出口统一收进整句——不再只靠 raw_clip 自己的吸附。"""
+    from dramaclip.engines.analysis.models import AsrSegment
+    from dramaclip.engines.narration.pipeline import build_plan
+
+    scenes = stamp([(1, "ep1", [ConflictScore(scene_index=0, start=0.0, end=15.0, score=90)])])
+    material = {
+        "ep1": casting.EpisodeMaterial(
+            number=1,
+            asr=[AsrSegment(start=5.0, end=17.0, text="一句越过场景尾的台词")],
+        )
+    }
+    plan = build_plan("cross_narration", scenes, [], material, _STRATEGY)
+    original = next(seg for seg in plan.timeline if seg.audio == "original")
+    assert (original.start, original.end) == (4.6, 17.0), (
+        f"窗尾 12.6 切在句中，该收进整句到 17.0；实得 {(original.start, original.end)}"
+    )

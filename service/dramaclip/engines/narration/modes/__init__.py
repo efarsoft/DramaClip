@@ -176,17 +176,23 @@ def _snap_windows_to_dialogue(
     """
     if material is None or not timeline:
         return timeline
+    # 邻窗索引只收**原声窗**：旁白占位窗渲染期整体重铺，不构成原声窗的让位边界
+    # （cross 桥段占位在空隙里，会假栅栏挡住「收进整句」——真机对拍抓回）
     by_episode: dict[str, list[int]] = {}
     for index, segment in enumerate(timeline):
-        by_episode.setdefault(segment.episode_id, []).append(index)
+        if (
+            segment.audio == "original"
+            and str(segment.narration_id or "") != "cta-1"
+        ):
+            by_episode.setdefault(segment.episode_id, []).append(index)
     updated = list(timeline)
     eps = _DIALOGUE_SNAP_EPS_S
     keep = _DIALOGUE_SNAP_MIN_KEEP_S
     for indices in by_episode.values():
         for position, index in enumerate(indices):
             segment = updated[index]
-            if segment.audio != "original":
-                continue  # 旁白段的编排期窗口是占位（渲染期实测重排），不吸台词
+            if segment.audio != "original" or str(segment.narration_id or "") == "cta-1":
+                continue  # 旁白占位窗（渲染期实测重排）与金句流重播卡（设计性重叠）不吸
             entry = material.get(segment.episode_id)
             if entry is None:
                 continue
@@ -315,3 +321,7 @@ def _fit_duration(
             update={"end": round(min(first.end, first.start + _INTRO_MAX_S), 3)}
         )
     return segments
+
+
+# 公开别名：pipeline.build_plan 全模式收口用（原声窗台词句边界吸附）
+snap_windows_to_dialogue = _snap_windows_to_dialogue

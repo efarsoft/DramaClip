@@ -69,16 +69,26 @@ def build_plan(
     钩子/CTA 的画面预算要在规划期就知道放不放得下，不能等 TTS 实测才爆。
     """
     strategy = StrategySpec(platform="douyin")
+
+    def _finish(plan: PlanData) -> PlanData:
+        # 原声窗台词句边界吸附全模式收口（业主 2026-10-27 策略：对话必须自然说完
+        # 再转场）：装得下收进整句、撞邻窗退到句前/句后。raw_clip 系在各自 build
+        # 内已吸过（幂等）；旁白占位窗与金句流重播卡由函数内跳过。
+        plan = plan.model_copy(
+            update={"timeline": modes.snap_windows_to_dialogue(plan.timeline, material)}
+        )
+        return apply_transitions(plan)
+
     if mode == "raw_clip":
-        return apply_transitions(modes.build_raw_clip(scenes, highlights, strategy, material))
+        return _finish(modes.build_raw_clip(scenes, highlights, strategy, material))
     if mode == "highlight_cut":
-        return apply_transitions(modes.build_highlight_cut(scenes, strategy, material))
+        return _finish(modes.build_highlight_cut(scenes, strategy, material))
     if mode == "intro_narration":
-        return apply_transitions(modes.build_intro(scenes, strategy, material))
+        return _finish(modes.build_intro(scenes, strategy, material))
     if mode == "cross_narration":
-        return apply_transitions(modes_w5.build_cross(scenes, strategy, material))
+        return _finish(modes_w5.build_cross(scenes, strategy, material))
     if mode == "ultra_short_hook":
-        return apply_transitions(
+        return _finish(
             modes_w5.build_ultra_short(scenes, strategy, material, source_durations)
         )
     if mode == "dialogue_narration":
@@ -86,15 +96,15 @@ def build_plan(
             "剧情解说为剧本驱动，不经规则编排（走 script_driver.script_dialogue_plan）"
         )
     if mode == "full_narration":
-        return apply_transitions(modes_w8.build_full(scenes, strategy))
+        return _finish(modes_w8.build_full(scenes, strategy))
     if mode == "subtitle_flow":
-        return apply_transitions(
+        return _finish(
             modes_w9.build_subtitle_flow(scenes, material, strategy, golden_lines)
         )
     if mode == "dual_host_chat":
-        return apply_transitions(modes_p2.build_dual_host(scenes, strategy))
+        return _finish(modes_p2.build_dual_host(scenes, strategy))
     if mode == "inner_monologue":
-        return apply_transitions(modes_p2.build_monologue(scenes, strategy))
+        return _finish(modes_p2.build_monologue(scenes, strategy))
     raise ValueError(f"模式暂未支持: {mode}（{MODE_LABELS.get(mode, mode)} 将随后续阶段启用）")
 
 
