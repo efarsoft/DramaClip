@@ -253,12 +253,14 @@ def build_intro(
     timeline = _snap_windows_to_dialogue(timeline, material)
     timeline[0] = timeline[0].model_copy(update={"narration_id": _INTRO_SLOT_ID})
     last = timeline[-1]
-    cta_start = round(max(last.start, last.end - _CTA_FALLBACK_S), 3)
+    # CTA 非重叠接在末场景之后（2026-10-27 审计 C8）：旧占位「重叠末场景尾部 2s」
+    # 会被渲染期游标修补顶到场景后（floor=末段 end），「压尾帧」语义必然落空——
+    # 不如编排期就按非重叠写，渲染期旁白消化链（头部扩展/尾部收口/弃段留痕）全适配。
     timeline.append(
         TimelineSegment(
             episode_id=last.episode_id,
-            start=cta_start,
-            end=round(last.end, 3),
+            start=round(last.end, 3),
+            end=round(last.end + _CTA_FALLBACK_S, 3),
             audio="narration",
             narration_id=_CTA_SLOT_ID,
         )

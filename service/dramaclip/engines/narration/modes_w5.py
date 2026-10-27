@@ -91,9 +91,10 @@ def build_cross(
             )
         )
         cursor[scene.episode_id] = end
-        # 场景间插入旁白段（画面锚**当前场景尾部**——旁白压在刚看过画面的延续帧上，
-        # 下一场景原声出场时是全新画面。旧实现锚下一场景开头：旁白预览+原声重播
-        # 同一段画面连放两遍，业主实测=重复/闪烁）
+        # 场景间插入旁白段（编排期只写占位窗；渲染期 _layout_cross 按实测把旁白
+        # 收尾锚在**下一场景开头**、向前伸进场景间空隙——空隙画面是刚看过场景的
+        # 延续帧，下一场景原声出场时是全新画面。2026-10-27 注释归真：本处注释曾写
+        # 「锚当前场景尾部」，与渲染落位相反，以 _layout_cross 为准）
         narration_seconds = _HOOK_TTS_FALLBACK_S
         slot_id = f"cross-{index + 1}"
         bridge = "原声片段之间的串联：承接上一幕，可用一句内反差点透两幕落差，给下一幕留半句钩"
@@ -235,7 +236,8 @@ def build_ultra_short(
             # 有集时长时避开这种场景，这里是无时长兜底）。
             start=(
                 round(conflict_start - _HOOK_BUDGET_S, 3)
-                if conflict_start >= _HOOK_TTS_FALLBACK_S
+                # 门槛=能否容纳整段预算：4s 门槛会写出 conflict_start-30 的负起点占位
+                if conflict_start >= _HOOK_BUDGET_S
                 else conflict_start
             ),
             end=(

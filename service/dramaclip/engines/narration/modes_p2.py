@@ -56,7 +56,9 @@ def build_dual_host(
                 episode_id=scene.episode_id,
                 start=round(scene.start, 3),
                 end=end,
-                audio="narration",
+                # ducked=原声压低混音（兑现 docstring 承诺；narration 会整段丢弃
+                # 原声——对谈成片里没有一句原声台词，2026-10-27 审计 C9 立案）
+                audio="ducked",
                 narration_id=slot_id,
             )
         )

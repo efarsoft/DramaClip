@@ -23,7 +23,9 @@ def test_dual_host_alternates_voices() -> None:
     voices = [text.voice for text in plan.narration_texts]
     assert voices[0] != voices[1], "双音色应交替"
     assert voices[0] == voices[2], "同主持人的音色一致"
-    assert all(segment.audio == "narration" for segment in plan.timeline)
+    assert all(segment.audio == "ducked" for segment in plan.timeline), (
+        "对谈承诺原声压低：ducked 混音，narration 会整段丢弃原声"
+    )
     assert_slots_paired(plan, "dual_host_chat")
     assert "主持人 A" in plan.narration_texts[0].brief, "编剧要知道这句该谁开口"
     assert "嘉宾 B" in plan.narration_texts[1].brief

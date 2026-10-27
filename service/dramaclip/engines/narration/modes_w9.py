@@ -111,6 +111,8 @@ def build_subtitle_flow(
 
     # 结尾 CTA 卡片段（复用最后场景尾部画面，climax 居中字幕）。
     # CTA 不吸附、不随台词收缩：收尾引导有自己的节奏（定长卡），不跟音乐拍走。
+    # narration_id="cta-1" 是渲染期「重播白名单」标记（pipeline._patch_timeline）：
+    # 设计语义=复用末场景尾帧压 CTA 字幕，占位重叠窗按原样保留、不被游标顶走。
     if picked:
         last = picked[-1]
         segments.append(
@@ -119,6 +121,7 @@ def build_subtitle_flow(
                 start=round(max(last.end - _CTA_FALLBACK_S, last.start), 3),
                 end=round(last.end, 3),
                 audio="original",
+                narration_id="cta-1",
                 subtitle_text=_CTA_TEXT,
             )
         )

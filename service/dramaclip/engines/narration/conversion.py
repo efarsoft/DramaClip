@@ -111,5 +111,7 @@ def _cta_text(plan: PlanData) -> str:
         for item in plan.narration_texts:
             if item.id == last.narration_id:
                 return item.text.strip()
-        return ""
+        # 原声收尾卡（金句流 CTA：original + narration_id=cta-1，无旁白槽位）
+        # 回退字幕文本——收尾文案在字幕上，不在旁白列表里
+        return (last.subtitle_text or "").strip()
     return (last.subtitle_text or "").strip()

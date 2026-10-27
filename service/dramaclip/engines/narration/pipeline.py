@@ -517,9 +517,9 @@ def synthesize_narration_texts(
             "compute": [report.to_dict() for report in pool.compute_reports()],
         }
     )
-    if plan.mode in ("ultra_short_hook", "cross_narration"):
-        # 重铺改变了相邻关系，规划期的转场判定过期：按新窗口重算 fade/cut
-        laid = apply_transitions(laid)
+    # 转场判定按最终窗口重算：此前只有超短/交叉重铺后重算，走游标修补的模式
+    # 段界被挪后 fade/cut 判定失真（该 cut 处叠 fade，2026-10-27 审计）。
+    laid = apply_transitions(laid)
     return laid
 
 
@@ -868,6 +868,15 @@ def _patch_timeline(
     cursor: dict[str, float] = {}
     unplaced: list[dict[str, Any]] = []
     for index, segment in enumerate(timeline):
+        # CTA 重播白名单（w9 金句流收尾卡，audio=original + narration_id=cta-1）：
+        # 设计语义=复用末场景尾帧压 CTA 字幕，占位重叠窗按原样保留——游标 clamp 会
+        # 把它顶到场景后的未取材画面，末场景贴集尾时甚至原样越界判死（2026-10-27
+        # 审计 C8）。场景末≤源长 ⇒ 窗口恒在源内；恒为末段，不推进游标。
+        if (
+            segment["audio"] == "original"
+            and str(segment.get("narration_id") or "") == "cta-1"
+        ):
+            continue
         episode_id = str(segment["episode_id"])
         floor = cursor.get(episode_id, 0.0)
         planned_start = float(segment["start"])
