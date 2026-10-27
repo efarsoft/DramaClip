@@ -80,7 +80,8 @@ def test_fit_never_exceeds_the_scene() -> None:
 def test_subtitle_flow_window_follows_the_line() -> None:
     plan = build_subtitle_flow(_one_scene(), _material([_line(0.5, 3.5)]), _STRATEGY)
     body = plan.timeline[0]
-    assert (body.start, body.end) == (0.0, 3.5), "台词 3s → 段长 3.5s（3s + 尾垫）"
+    # 台词 3s → 段长 3.5s（3s+尾垫）；窗口锚到台词（0.5-0.4 头垫起播）
+    assert (body.start, body.end) == (0.1, 3.6)
     assert body.subtitle_text == "你给我滚出去！骗子！", "字幕仍是那句最强金句"
 
 
@@ -109,7 +110,7 @@ def test_subtitle_flow_scene_without_dialogue_keeps_full_window() -> None:
     )
     plan = build_subtitle_flow(scenes, _material([_line(0.5, 3.5)]), _STRATEGY)
     body = plan.timeline[:-1]
-    assert [(s.start, s.end) for s in body] == [(0.0, 3.5), (20.0, 28.0)]
+    assert [(s.start, s.end) for s in body] == [(0.1, 3.6), (20.0, 28.0)]
 
 
 def test_subtitle_flow_no_dialogue_is_byte_identical_to_the_fixed_window() -> None:
@@ -147,7 +148,7 @@ def test_subtitle_flow_cta_card_is_untouched() -> None:
 def test_cross_original_window_follows_the_line() -> None:
     plan = build_cross(_one_scene(), _STRATEGY, _material([_line(0.5, 3.5)]))
     originals = [s for s in plan.timeline if s.audio == "original"]
-    assert (originals[0].start, originals[0].end) == (0.0, 3.5)
+    assert (originals[0].start, originals[0].end) == (0.1, 3.6)
     narrations = [s for s in plan.timeline if s.audio == "narration"]
     assert (narrations[0].start, narrations[0].end) == (8.0, 12.0), (
         "旁白画面锚当前场景尾部（场景 0-12s 的尾 4s）；长度归 TTS 实测回填"
@@ -177,9 +178,11 @@ def test_cross_snap_happens_after_shrink() -> None:
 def test_ultra_short_conflict_window_follows_the_line() -> None:
     plan = build_ultra_short(_one_scene(), _STRATEGY, _material([_line(0.5, 3.5)]))
     hook, conflict, cta = plan.timeline
-    assert (conflict.start, conflict.end) == (0.0, 3.5)
-    assert (hook.start, hook.end) == (0.0, 4.0), "hook 旁白占位段不收缩"
-    assert (cta.start, cta.end) == (3.5, 18.5), "CTA 接在冲突窗后按预算留画面，不受收缩影响"
+    assert (conflict.start, conflict.end) == (0.1, 3.6)
+    # hook 旁白占位段随冲突窗起点（占位，渲染期整体重铺）
+    assert (hook.start, hook.end) == (0.1, 4.1)
+    # CTA 接在冲突窗后按预算留画面（随锚定后的冲突窗起点）
+    assert (cta.start, cta.end) == (3.6, 18.6)
 
 
 def test_ultra_short_no_dialogue_is_byte_identical() -> None:

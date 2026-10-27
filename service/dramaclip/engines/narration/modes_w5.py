@@ -11,6 +11,7 @@ from dramaclip.engines.narration.casting import (
     episode_order,
     fit_scene_window,
     has_dialogue,
+    scene_window_on_span,
     score_order,
     strongest_span_of,
 )
@@ -68,11 +69,14 @@ def build_cross(
         duration = fit_scene_window(
             scene.end - scene.start, strongest_span_of(material, scene)
         )
-        start = round(scene.start, 3)
+        raw_start, raw_end = scene_window_on_span(
+            scene, strongest_span_of(material, scene), duration
+        )
+        start = round(raw_start, 3)
         end = round(
             snap_window_end(
                 start,
-                round(scene.start + duration, 3),
+                raw_end,
                 beats_of(material, scene.episode_id),
                 min_len=_SNAP_MIN_LEN_S,
             ),
@@ -170,11 +174,14 @@ def build_ultra_short(
     def _conflict_window(scene: EpisodeScene) -> tuple[float, float]:
         """场景 → 冲突窗（最强台词 span 收缩 + 节拍吸附）。布局与候选池共用一处真相。"""
         span = fit_scene_window(scene.end - scene.start, strongest_span_of(material, scene))
-        start = round(scene.start, 3)
+        raw_start, raw_end = scene_window_on_span(
+            scene, strongest_span_of(material, scene), span
+        )
+        start = round(raw_start, 3)
         end = round(
             snap_window_end(
                 start,
-                round(scene.start + span, 3),
+                raw_end,
                 beats_of(material, scene.episode_id),
                 min_len=_SNAP_MIN_LEN_S,
             ),

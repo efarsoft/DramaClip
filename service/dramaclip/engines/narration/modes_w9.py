@@ -10,6 +10,7 @@ from dramaclip.engines.narration.casting import (
     episode_order,
     fit_scene_window,
     has_dialogue,
+    scene_window_on_span,
     score_order,
     strongest_line,
 )
@@ -80,8 +81,11 @@ def build_subtitle_flow(
             if best is not None:
                 subtitle_text, span = best[1]
         duration = fit_scene_window(scene.end - scene.start, span)
-        start = round(scene.start, 3)
-        end = round(scene.start + duration, 3)
+        # A3 锚定修正：窗口跟台词走（旧实现锚镜头边界，最强台词在场景中后段时
+        # 窗尾落在句中甚至句前——字幕放金句、原声里没这句）
+        raw_start, raw_end = scene_window_on_span(scene, span, duration)
+        start = round(raw_start, 3)
+        end = round(raw_end, 3)
         # B9 节拍吸附：end 是「起点+收缩后段长」的任意点（不是镜头边界），该集有
         # 拍点就微调到最近拍上（卡点优先质量线）。start 不动——它是镜头切换语义点。
         # 导出层 jitter.safe_times 为避台词还可能再挪 ±0.3s：台词保护 > 节拍，

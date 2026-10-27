@@ -203,3 +203,28 @@ def fit_scene_window(
         SCENE_WINDOW_MIN_S, min(line_s + DIALOGUE_TAIL_PAD_S, SCENE_WINDOW_MAX_S)
     )
     return min(scene_len_s, fitted)
+
+
+_SPAN_HEAD_PAD_S = 0.4  # 台词起播前留一口气（呼吸头垫，与尾垫对称）
+
+
+def scene_window_on_span(
+    scene: EpisodeScene,
+    dialogue_span: tuple[float, float] | None,
+    duration: float,
+) -> tuple[float, float]:
+    """窗口锚到台词 span（A3 锚定修正，2026-10-27 审计）：窗长已按 span 收缩，
+    锚点也要跟着台词走，不能继续钉在镜头边界上。
+
+    旧实现锚 scene.start：最强台词在场景中后段时窗尾落在句中甚至句前——金句流
+    「字幕放空炮」（字幕是金句、原声里没这句）、交叉原声拍错过台词。有 span 时
+    从台词前 0.4s 起播（钳进场景边界）；无 span 满窗回退镜头边界（与旧行为
+    逐字节一致）。返回 (start, end)，调用方随后对 end 做 B9 节拍吸附。
+    """
+    if dialogue_span is None:
+        start = scene.start
+    else:
+        start = max(
+            scene.start, min(dialogue_span[0] - _SPAN_HEAD_PAD_S, scene.end - duration)
+        )
+    return start, min(start + duration, scene.end)
