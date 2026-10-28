@@ -33,6 +33,11 @@ from dramaclip.transport.rpc import (
 _STOP_POLL_SECONDS = 1.0
 
 
+
+def _is_light_query(method: str) -> bool:
+    """轻量查询走专用小池：任务列表/状态类永不因长任务占满工作池而饿死。"""
+    return method.startswith(("jobs.", "system.")) or method.endswith(".status")
+
 class ServiceApp:
     """单实例服务。run() 阻塞直到 shutdown/EOF/SIGTERM，返回进程退出码。"""
 
@@ -82,9 +87,12 @@ class ServiceApp:
         notifier = Notifier(self._send)
         work_dir = data_dir / "cache" / "analysis"
         work_dir.mkdir(parents=True, exist_ok=True)
-        # +2 余量：长任务占满并发额度时，status/ping 类查询仍可执行
+        # +2 余量：长任务占满并发额度时，status/ping 类查询仍可执行；查询另走
+        # 专用小池（2026-10-28 实测立案：批量重掷时规划链分钟级同步调用把池占满，
+        # jobs.list 排队到客户端超时——「任务状态取不到」）
         workers = config.get_int(settings, "hardware.max_parallel_jobs") + 2
         executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="rpc")
+        query_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="rpc-query")
         context = AppContext(
             conn=conn,
             settings=settings,
@@ -103,7 +111,7 @@ class ServiceApp:
             print(f"[agent-gateway] {state}")
         self._install_signal_handlers()
         try:
-            self._serve(router, executor)
+            self._serve(router, executor, query_executor)
             if interrupted or stale_episodes or stale_exports:
                 notifier.log(
                     "warn",
@@ -127,10 +135,15 @@ class ServiceApp:
             conn.close()
         return 0
 
-    def _serve(self, router: Router, executor: ThreadPoolExecutor) -> None:
+    def _serve(
+        self,
+        router: Router,
+        executor: ThreadPoolExecutor,
+        query_executor: ThreadPoolExecutor,
+    ) -> None:
         self._connection = ServiceConnection(
             self._address,
-            on_message=lambda payload: self._on_message(payload, router, executor),
+            on_message=lambda payload: self._on_message(payload, router, executor, query_executor),
             on_disconnect=self._shutdown,
         )
         self._connection.send(self._hello_payload())
@@ -153,7 +166,11 @@ class ServiceApp:
             self._shutdown()  # 下行失败视为连接已死，退出由主进程重新拉起
 
     def _on_message(
-        self, payload: dict[str, Any], router: Router, executor: ThreadPoolExecutor
+        self,
+        payload: dict[str, Any],
+        router: Router,
+        executor: ThreadPoolExecutor,
+        query_executor: ThreadPoolExecutor,
     ) -> None:
         if payload.get("type") == "hello-ack":
             return  # 主进程对握手的确认
@@ -170,7 +187,8 @@ class ServiceApp:
             # Electron 会因心跳饿死判失联并 kill 本进程（真实事故）。
             self._send(router.dispatch(request).model_dump(exclude_none=True))
             return
-        executor.submit(self._dispatch_and_reply, router, request)
+        pool = query_executor if _is_light_query(request.method) else executor
+        pool.submit(self._dispatch_and_reply, router, request)
 
     def _dispatch_and_reply(self, router: Router, request: RpcRequest) -> None:
         response = router.dispatch(request)
