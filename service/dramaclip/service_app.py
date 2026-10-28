@@ -34,9 +34,17 @@ _STOP_POLL_SECONDS = 1.0
 
 
 
+_QUERY_PREFIXES = ("jobs.", "system.", "models.")
+
+
 def _is_light_query(method: str) -> bool:
-    """轻量查询走专用小池：任务列表/状态类永不因长任务占满工作池而饿死。"""
-    return method.startswith(("jobs.", "system.")) or method.endswith(".status")
+    """轻量查询走专用小池：任务列表/状态类永不因长任务占满工作池而饿死。
+
+    models.* 全域都是快查询（下载/安装是 job 线程慢活，RPC 本身只报名）——
+    引擎中心列表（models.list）曾被批量长任务饿死，「加载中」永不落地。
+    """
+    return method.startswith(_QUERY_PREFIXES) or method.endswith(".status")
+
 
 class ServiceApp:
     """单实例服务。run() 阻塞直到 shutdown/EOF/SIGTERM，返回进程退出码。"""
