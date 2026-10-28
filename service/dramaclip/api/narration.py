@@ -266,6 +266,20 @@ def _scene_cuts_for(context: AppContext, plan: PlanData) -> dict[str, list[float
     return cuts
 
 
+def _dialogue_spans_for(
+    context: AppContext, plan: PlanData
+) -> dict[str, list[tuple[float, float]]]:
+    """按方案涉及的集收台词句区间（渲染期挪窗后的句界回吸，与切点吸附同管道）。"""
+    spans: dict[str, list[tuple[float, float]]] = {}
+    for episode_id in sorted({str(seg.episode_id) for seg in plan.timeline}):
+        record = analysis_repo.get(context.conn, episode_id)
+        if record is None:
+            continue
+        segs = narration_pipeline.parse_asr_segments(str(record.get("asr_segments") or ""))
+        spans[episode_id] = [(float(a.start), float(a.end)) for a in segs]
+    return spans
+
+
 def _fit_rewriter(settings: dict[str, str]) -> Callable[[str, int], str | None] | None:
     """装不下画面空隙时的定向收短出口（业主裁决 2026-10-26：重新选取而非判失败）。
 
@@ -328,6 +342,7 @@ def _voice(
         data_dir=context.data_dir,
         rewrite_for_fit=_fit_rewriter(settings),
         scene_cuts=_scene_cuts_for(context, plan),
+        dialogue_spans=_dialogue_spans_for(context, plan),
     )
 
 

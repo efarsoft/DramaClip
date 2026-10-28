@@ -387,6 +387,7 @@ def synthesize_narration_texts(
     data_dir: Path | None = None,
     rewrite_for_fit: Callable[[str, int], str | None] | None = None,
     scene_cuts: dict[str, list[float]] | None = None,
+    dialogue_spans: dict[str, list[tuple[float, float]]] | None = None,
 ) -> PlanData:
     """逐段合成旁白并按 narration_id 回填时长与解说字幕。
 
@@ -474,11 +475,11 @@ def synthesize_narration_texts(
             break
         if plan.mode == "cross_narration":
             timeline, unplaced = _layout_cross(
-                plan, voiced, source_durations, log, scene_cuts
+                plan, voiced, source_durations, log, scene_cuts, dialogue_spans
             )
         else:
             timeline, unplaced = _patch_timeline(
-                plan, voiced, source_durations, scene_cuts
+                plan, voiced, source_durations, scene_cuts, dialogue_spans
             )
         if not unplaced or rewrite_for_fit is None or attempt >= 2:
             break
@@ -647,6 +648,26 @@ def _snap_start(
     return start
 
 
+def _fit_start_to_dialogue(
+    start: float,
+    length: float,
+    floor: float,
+    ceil: float,
+    spans: list[tuple[float, float]],
+) -> float:
+    """渲染期让位把起点挪进台词句中时回吸句界（业主 2026-10-27 策略全链延伸：
+    对话必须自然说完再转场，渲染期挪窗不得把窗沿挪回句中）。退到句首优先
+    （窗仍 ≤ ceil），否则进到句尾之后；两头都不容才保持原值。"""
+    for s0, s1 in sorted(spans):
+        if s0 + 0.2 < start < s1 - 0.2:
+            if s0 >= floor - 1e-6 and s0 + length <= ceil + _SOURCE_FIT_TOL_S:
+                return s0
+            if s1 >= floor - 1e-6 and s1 + length <= ceil + _SOURCE_FIT_TOL_S:
+                return s1
+            return start
+    return start
+
+
 def _bridge_entry(
     episode_id: str, slot: str, text: str, duration: float, start: float
 ) -> dict[str, Any]:
@@ -667,6 +688,7 @@ def _layout_cross(
     source_durations: dict[str, float],
     log: LogFn | None,
     scene_cuts: dict[str, list[float]] | None = None,
+    dialogue_spans: dict[str, list[tuple[float, float]]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """交叉解说桥段落位：场景原声窗原封不动，旁白按实测时长装进场景间空隙。
 
@@ -763,6 +785,13 @@ def _layout_cross(
                 limit,
                 (scene_cuts or {}).get(anchor_episode, []),
             )
+            start = _fit_start_to_dialogue(
+                start,
+                duration,
+                _gap_floor(anchor_episode, float("inf")),
+                limit,
+                (dialogue_spans or {}).get(anchor_episode, []),
+            )
             if start + duration <= limit + _SOURCE_FIT_TOL_S:
                 entries_by_anchor.setdefault(len(segments), []).append(
                     _bridge_entry(anchor_episode, slot, text, duration, start)
@@ -795,6 +824,13 @@ def _layout_cross(
                         floor,
                         ceil_remaining,
                         (scene_cuts or {}).get(gap_episode, []),
+                    )
+                    start = _fit_start_to_dialogue(
+                        start,
+                        duration,
+                        floor,
+                        ceil_remaining,
+                        (dialogue_spans or {}).get(gap_episode, []),
                     )
                     entries_by_anchor.setdefault(anchor_index, []).append(
                         _bridge_entry(gap_episode, slot, text, duration, start)
@@ -843,6 +879,7 @@ def _patch_timeline(
     voiced: dict[str, tuple[str, str, float]],
     source_durations: dict[str, float],
     scene_cuts: dict[str, list[float]] | None = None,
+    dialogue_spans: dict[str, list[tuple[float, float]]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """游标修补（既有回填语义）：旁白段长=实测音频，头部扩展→尾部收口。
 
@@ -920,6 +957,13 @@ def _patch_timeline(
                 planned_end,
                 (scene_cuts or {}).get(episode_id, []),
             )
+            start = _fit_start_to_dialogue(
+                start,
+                length,
+                floor,
+                planned_end,
+                (dialogue_spans or {}).get(episode_id, []),
+            )
         # 尾部收口：实测比剩余素材长时，整段往前挪到贴着集尾——这段的文案与长度都不动，
         # 换的只是压在它下面的画面。挪不动（再往前就和上一段重叠=画面重播）就照原样
         # 交给 `_assert_within_source` 判死，不截音也不截画面。
@@ -936,6 +980,13 @@ def _patch_timeline(
                 floor,
                 limit,
                 (scene_cuts or {}).get(episode_id, []),
+            )
+            start = _fit_start_to_dialogue(
+                start,
+                length,
+                floor,
+                limit,
+                (dialogue_spans or {}).get(episode_id, []),
             )
         elif (
             segment["audio"] in ("narration", "ducked")

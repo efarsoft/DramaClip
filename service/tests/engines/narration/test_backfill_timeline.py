@@ -401,6 +401,29 @@ def test_rewrite_output_passes_numerals_and_metanarrative_gates(
     assert "元叙述" in joined
 
 
+def test_render_moved_start_snaps_back_to_sentence_bound(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """对话完整转场策略全链延伸（业主 2026-10-27）：渲染期头部扩展把起点挪进
+    台词句中时回吸句首——编排期干净的窗，渲染期挪完仍不切句。"""
+    plan = _plan(("ep1", 20.0, 21.0, "narration"))
+
+    def probe(path: Path) -> float:
+        return 10.0
+
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
+    result = pipeline.synthesize_narration_texts(
+        plan,
+        {"tts.engine": "edge"},
+        tmp_path,
+        source_durations={"ep1": 26.0},
+        # 头部扩展落位 11-21：起点 11 在句 (5,13) 中段 → 回吸句首 5（窗 5-15 仍 ≤ 源长）
+        dialogue_spans={"ep1": [(5.0, 13.0)]},
+    )
+    assert _windows(result) == [("ep1", 5.0, 15.0)]
+
+
 def test_an_original_segment_pushed_past_the_source_is_rejected_too(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -10,8 +10,9 @@ from typing import Any
 
 from dramaclip.engines import llm_prompts
 from dramaclip.engines.analysis.models import AsrSegment
+from dramaclip.engines.narration import casting, scriptwriter, styles
+from dramaclip.engines.narration import modes as narration_modes
 from dramaclip.engines.narration import pipeline as narration_pipeline
-from dramaclip.engines.narration import scriptwriter, styles
 from dramaclip.engines.narration.models import PlanData, StrategySpec
 from dramaclip.engines.semantic.llm_client import client_for
 
@@ -127,6 +128,19 @@ def script_dialogue_plan(
     }
     plan = narration_pipeline.build_from_script_episodes(
         episode_map, durations, script, strategy, scene_cuts=scene_cuts
+    )
+    # 对话完整转场全模式收口（业主 2026-10-27 策略）：剧本驱动的原声窗同样过
+    # 台词句边界吸附——LLM 选段的 start/end 允许近似句界，收口保证窗沿不切句。
+    plan = plan.model_copy(
+        update={
+            "timeline": narration_modes.snap_windows_to_dialogue(
+                plan.timeline,
+                {
+                    episode_id: casting.EpisodeMaterial(number=number, asr=segments)
+                    for number, (episode_id, segments) in episode_map.items()
+                },
+            )
+        }
     )
     # 清洗吃掉了几段随方案落库：方案卡据此说"剧本丢弃 N 段"（规格 §4.3 卡片可见性）
     plan = plan.model_copy(update={"dropped_segments": script.dropped_segments})
