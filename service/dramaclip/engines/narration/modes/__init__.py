@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import re
+
 from dramaclip.engines.narration.casting import (
     EpisodeScene,
     MaterialByEpisode,
@@ -112,6 +114,7 @@ def build_highlight_cut(
             )
         )
     timeline = _snap_windows_to_dialogue(timeline, material)
+    timeline = extend_openings_over_connectives(timeline, material)
     return PlanData(mode="highlight_cut", timeline=timeline, strategy=strategy)
 
 
@@ -155,6 +158,7 @@ def build_raw_clip(
     ordered = _merge_adjacent(ordered)
     timeline = _fit_duration(ordered, strategy)
     timeline = _snap_windows_to_dialogue(timeline, material)
+    timeline = extend_openings_over_connectives(timeline, material)
     return PlanData(mode="raw_clip", timeline=timeline, strategy=strategy)
 
 
@@ -262,6 +266,7 @@ def build_intro(
     if not timeline:
         return PlanData(mode="intro_narration", timeline=timeline, strategy=strategy)
     timeline = _snap_windows_to_dialogue(timeline, material)
+    timeline = extend_openings_over_connectives(timeline, material)
     timeline[0] = timeline[0].model_copy(update={"narration_id": _INTRO_SLOT_ID})
     last = timeline[-1]
     # CTA 非重叠接在末场景之后（2026-10-27 审计 C8）：旧占位「重叠末场景尾部 2s」
@@ -325,3 +330,64 @@ def _fit_duration(
 
 # 公开别名：pipeline.build_plan 全模式收口用（原声窗台词句边界吸附）
 snap_windows_to_dialogue = _snap_windows_to_dialogue
+
+
+# 话语连接词：窗首句以此开头说明它的前因在被跳过的对白里（业主 2026-10-28 实锤：
+# 「没有原因，就到所以了么」——句子完整性之外还有因果连贯性）
+_DISCOURSE_CONNECTIVE_RE = re.compile(
+    r"^(所以|因此|为此|但是|但|可是|不过|然而|原来|结果|于是|然后|难怪|就这样|这下)"
+)
+_OPENING_EXTEND_CAP_S = 12.0  # 前因回溯的单窗扩幅上限（防一路连到集头）
+
+
+def extend_openings_over_connectives(
+    timeline: list[TimelineSegment],
+    material: MaterialByEpisode | None,
+) -> list[TimelineSegment]:
+    """窗首句以话语连接词开头时，向前扩窗把前因句包进来（因果接缝的剪辑版）。
+
+    句子完整性（不切半）之外的第二层：两个被选窗之间跳过的对白若正好是下一窗
+    首句的语义前提（「所以…」「原来…」），观众听得没头没脑。回溯沿台词链逐句
+    前扩，遇到非连接词开头的句子即停；受前一窗止点与扩幅上限双重约束——
+    无原料/无连接词/扩不动都安静保持原值（增强不是义务）。
+    """
+    if material is None or not timeline:
+        return timeline
+    by_episode: dict[str, list[int]] = {}
+    for index, segment in enumerate(timeline):
+        if segment.audio == "original" and str(segment.narration_id or "") != "cta-1":
+            by_episode.setdefault(segment.episode_id, []).append(index)
+    updated = list(timeline)
+    for indices in by_episode.values():
+        for position, index in enumerate(indices):
+            segment = updated[index]
+            entry = material.get(segment.episode_id)
+            if entry is None or not entry.asr:
+                continue
+            prev_end = updated[indices[position - 1]].end if position > 0 else None
+            lines = sorted(entry.asr, key=lambda seg: seg.start)
+            inside = [
+                line
+                for line in lines
+                if line.start >= segment.start - 1e-6 and line.end <= segment.end + 1e-6
+            ]
+            if not inside or not _DISCOURSE_CONNECTIVE_RE.match(inside[0].text.strip()):
+                continue
+            new_start = segment.start
+            for line in reversed(lines):
+                if line.end > segment.start - 1e-6:
+                    continue  # 只回溯窗前的句子
+                if prev_end is not None and line.end <= prev_end + 1e-6:
+                    break  # 撞上一窗止点：让位保边界
+                if segment.start - line.start > _OPENING_EXTEND_CAP_S:
+                    break  # 扩幅上限
+                if new_start - line.end > 2.0:
+                    break  # 台词链断了（间隔超 2s）：不是同一番对话
+                new_start = line.start
+                if not _DISCOURSE_CONNECTIVE_RE.match(line.text.strip()):
+                    break  # 非连接词开头的句子=前因本体：包进来即停
+            if new_start < segment.start - 1e-6:
+                updated[index] = segment.model_copy(
+                    update={"start": round(new_start, 3)}
+                )
+    return updated

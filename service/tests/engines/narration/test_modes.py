@@ -315,3 +315,37 @@ def test_raw_clip_merges_adjacent_high_scores_into_one_block() -> None:
         (20.0, 26.0),
     ], "相邻高分合并成块，块内零跳场；真间隙处保留分段节奏"
     assert len(plan.timeline) == 2, "三条候选合并为两块，选中集一秒不少"
+
+
+def test_raw_clip_extends_openings_over_discourse_connectives() -> None:
+    """因果接缝的剪辑版（业主 2026-10-28 实锤「没有原因，就到所以了么」）：
+    下一窗首句以「所以」开头时，向前扩窗把前因句包进来，非连接词句即停。"""
+    from dramaclip.engines.analysis.models import AsrSegment
+    from dramaclip.engines.narration.casting import EpisodeMaterial
+
+    scenes = [
+        ConflictScore(scene_index=0, start=30.0, end=35.0, score=90),
+        ConflictScore(scene_index=1, start=38.0, end=44.0, score=85),
+    ]
+    material = {
+        "ep1": EpisodeMaterial(
+            number=1,
+            asr=[
+                AsrSegment(start=30.7, end=31.5, text="首富之子汪大少要结婚了"),
+                AsrSegment(start=31.6, end=34.5, text="我作为未婚妻，不该过来看看吗"),
+                AsrSegment(start=35.0, end=36.5, text="你猜他为了谁悔婚"),
+                AsrSegment(start=36.6, end=38.5, text="就是为了我们家的生意"),
+                AsrSegment(
+                    start=38.8, end=40.9,
+                    text="所以，跟你这位江城第一总裁的婚约，也自动取消了",
+                ),
+            ],
+        )
+    }
+    plan = build_raw_clip(stamp([(1, "ep1", scenes)]), [], _STRATEGY, material)
+    windows = [(seg.start, seg.end) for seg in plan.timeline if seg.audio == "original"]
+    assert windows[1][0] == 36.6, (
+        f"「所以」窗该回溯前因到 36.6s（非连接词句「就是为了…」包进来即停），"
+        f"实得 {windows}"
+    )
+    assert windows[1][1] == 44.0  # 窗尾=场景自然边界，不随台词收缩
