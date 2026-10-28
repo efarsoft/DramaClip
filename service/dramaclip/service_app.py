@@ -36,14 +36,45 @@ _STOP_POLL_SECONDS = 1.0
 
 _QUERY_PREFIXES = ("jobs.", "system.", "models.")
 
+# 纯读查询显式清单（DB/内存级耗时）：专用小池成员，新增 RPC 必须二选一归类——
+# tests/test_service_app_pool.py 用协议全覆盖钉死分类不缺号。
+EXPLICIT_LIGHT_QUERIES = frozenset(
+    {
+        "analysis.results",
+        "bgm.library",
+        "bgm.runtime_status",
+        "engine_configs.list",
+        "export.get",
+        "export.list",
+        "export.list_works",
+        "log.append",
+        "narration.get_plan",
+        "narration.list_plans",
+        "narration.list_styles",
+        "narration.llm_traces",
+        "narration.plan_trace",
+        "progress.update",
+        "project.dashboard_summary",
+        "project.get",
+        "project.list",
+        "prompts.list",
+        "settings.get",
+        "subtitle.list_presets",
+    }
+)
+
 
 def _is_light_query(method: str) -> bool:
-    """轻量查询走专用小池：任务列表/状态类永不因长任务占满工作池而饿死。
+    """轻量查询走专用小池：列表/状态/get 类永不因长任务占满工作池而饿死。
 
-    models.* 全域都是快查询（下载/安装是 job 线程慢活，RPC 本身只报名）——
-    引擎中心列表（models.list）曾被批量长任务饿死，「加载中」永不落地。
+    两次实锤（jobs.list、models.list 被批量长任务饿到客户端超时）后改为
+    显式清单+模式兜底；新 RPC 未归类会被协议全覆盖测试拦下。
     """
-    return method.startswith(_QUERY_PREFIXES) or method.endswith(".status")
+    return (
+        method in EXPLICIT_LIGHT_QUERIES
+        or method.startswith(_QUERY_PREFIXES)
+        or method.endswith(".status")
+    )
 
 
 class ServiceApp:
