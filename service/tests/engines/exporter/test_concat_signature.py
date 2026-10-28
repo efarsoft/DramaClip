@@ -66,6 +66,13 @@ def _stub(
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
+    def fake_heartbeat(cmd: list[str], **_kwargs: Any) -> None:
+        calls.append([str(part) for part in cmd])
+        Path(cmd[-1]).write_bytes(b"")
+
+    # 心跳封装接管长 ffmpeg：记录同一形状的调用并把暂存产物写出来供 os.replace
+    monkeypatch.setattr(encoder, "_run_ffmpeg_with_heartbeat", fake_heartbeat)
+
     def fake_probe(path: Path) -> Any:
         # 段各 10s；成片时长默认取各段实测和，让时长闸在纯形状测试里保持放行
         return encoder.ffprobe_mod.MediaInfo(
@@ -163,7 +170,7 @@ def test_duration_audit_fails_on_large_drift(
 
     def fake_probe(path: Path) -> Any:
         return encoder.ffprobe_mod.MediaInfo(
-            duration_s=durations["out" if path.name == "out.mp4" else "seg"],
+            duration_s=durations["out" if path.name.startswith("out") else "seg"],
             width=1080, height=1920, fps=30.0, has_audio=True,
         )
 
@@ -181,7 +188,8 @@ def test_duration_audit_boundary_is_the_shared_tolerance(
 
     def fake_probe(path: Path) -> Any:
         return encoder.ffprobe_mod.MediaInfo(
-            duration_s=20.5 if path.name == "out.mp4" else 10.0,
+            # 原子交付后审计跑在 .part 暂存名上：out 前缀（含 part）都按成片档
+            duration_s=20.5 if path.name.startswith("out") else 10.0,
             width=1080, height=1920, fps=30.0, has_audio=True,
         )
 
@@ -235,7 +243,7 @@ def test_concat_list_removed_when_ffmpeg_fails(
     def boom(cmd: list[str], **_kwargs: Any) -> Any:
         raise subprocess.CalledProcessError(1, [str(part) for part in cmd])
 
-    monkeypatch.setattr(subprocess, "run", boom)
+    monkeypatch.setattr(encoder, "_run_ffmpeg_with_heartbeat", boom)
     with pytest.raises(subprocess.CalledProcessError):
         encoder._concat(_segments(tmp_path), tmp_path / "out.mp4")
     assert [p.name for p in tmp_path.iterdir() if "concat" in p.name] == [], (
@@ -254,3 +262,53 @@ def test_concat_list_escapes_single_quotes_in_paths(tmp_path: Path) -> None:
     body = line[len("file '") : -len("'\n")]
     assert "'\\''" in body, f"单引号未按 ffmpeg 约定转义：{body}"
     assert "'" not in body.replace("'\\''", ""), f"残留裸单引号会提前终结字符串：{body}"
+
+
+def test_concat_publishes_atomically_and_never_touches_old_film(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """原子交付（T0）：concat 失败时旧成片原样保留、.part 收走、不产生半成品成片。"""
+    import dramaclip.engines.exporter.encoder as encoder
+
+    old_film = tmp_path / "film.mp4"
+    old_film.write_bytes(b"OLD")
+    seg_a = tmp_path / "seg-a.mp4"
+    seg_b = tmp_path / "seg-b.mp4"
+    for seg in (seg_a, seg_b):
+        seg.write_bytes(b"X" * 64)
+    _SIG = ("h264", "High", 40, "yuv420p", 8, 1080, "1:1")
+    monkeypatch.setattr(encoder, "_video_signature", lambda _p: _SIG)
+    monkeypatch.setattr(encoder, "_audit_film_duration", lambda _p, _s: None)
+
+    def boom(cmd, **kw):  # noqa: ANN001, ANN003
+        raise RuntimeError("ffmpeg 失败（code=1）：mock")
+
+    monkeypatch.setattr(encoder, "_run_ffmpeg_with_heartbeat", boom)
+    with pytest.raises(RuntimeError):
+        encoder._concat([seg_a, seg_b], old_film)
+    assert old_film.read_bytes() == b"OLD", "旧成片不得被半成品覆盖"
+    assert not (tmp_path / "film.part.mp4").exists(), "失败 .part 必须收走"
+
+
+def test_concat_success_replaces_via_staged_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dramaclip.engines.exporter.encoder as encoder
+
+    seg_a = tmp_path / "seg-a.mp4"
+    seg_b = tmp_path / "seg-b.mp4"
+    for seg in (seg_a, seg_b):
+        seg.write_bytes(b"X" * 64)
+    out = tmp_path / "film.mp4"
+    _SIG = ("h264", "High", 40, "yuv420p", 8, 1080, "1:1")
+    monkeypatch.setattr(encoder, "_video_signature", lambda _p: _SIG)
+    monkeypatch.setattr(encoder, "_audit_film_duration", lambda _p, _s: None)
+
+    def fake_run(cmd, **kw):  # noqa: ANN001, ANN003
+        staged = Path(cmd[-1])
+        staged.write_bytes(b"NEWFILM")
+
+    monkeypatch.setattr(encoder, "_run_ffmpeg_with_heartbeat", fake_run)
+    encoder._concat([seg_a, seg_b], out)
+    assert out.read_bytes() == b"NEWFILM"
+    assert not (tmp_path / "film.part.mp4").exists()

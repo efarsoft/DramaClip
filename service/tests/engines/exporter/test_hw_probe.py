@@ -73,7 +73,7 @@ def test_probe_params_identical_to_cut_params(codec: str) -> None:
     prod = cut[cut.index("-c:v") + 1 : cut.index("-c:a")]
     probe = encoder._hw_probe_args(codec)
     tail = probe[probe.index("-c:v") + 1 :]
-    assert prod == [codec, *encoder._video_codec_params(codec)]
+    assert prod == [codec, *encoder._video_codec_params(codec), *encoder._COLOR_ARGS]
     assert tail[: len(prod)] == prod, f"{codec} 探针参数与正式合成不同形状"
 
 

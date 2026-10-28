@@ -179,3 +179,18 @@ def test_genre_trace_exposes_the_silent_fallback(tmp_path: Path) -> None:
     blob = _read(trace)
     assert blob["raw"] == {"genre": "武侠"}
     assert blob["matched"] is False and blob["degraded"] is True
+
+
+def test_parse_json_blob_strips_reasoning_blocks() -> None:
+    """reasoning 模型的 <think> 块整块清除：块内花括号样本不得被嵌入式提取捞到。"""
+    from dramaclip.engines.semantic.llm_client import parse_json_blob
+
+    closed = parse_json_blob(
+        '<think>用户想要JSON，比如 {"wrong": 1} 这样的形状。</think>{"ok": 1}'
+    )
+    assert closed == {"ok": 1}
+    # 未闭合 <think> 吞掉全部内容=模型推理未终止：如实判失败而非拿残渣当正文
+    from dramaclip.engines.semantic.llm_client import LlmUnavailable
+
+    with pytest.raises(LlmUnavailable):
+        parse_json_blob('<think>推理到一半没完 {"bad": 2}')

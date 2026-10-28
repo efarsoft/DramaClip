@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import urllib.error
 import urllib.request
@@ -160,8 +161,16 @@ class LlmClient:
         raise LlmUnavailable("LLM 请求失败: 重试耗尽")
 
 
+def _strip_reasoning_blocks(text: str) -> str:
+    """reasoning 模型把推理过程包在 <think> 块里输出：块内常含花括号样本，
+    嵌入式 JSON 提取会捞到推理残渣而非正文——解析前整块清除（含未闭合块）。"""
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    text = re.sub(r"<think>.*\Z", "", text, flags=re.DOTALL)
+    return text.replace("</think>", "")
+
+
 def parse_json_blob(content: str) -> dict[str, Any] | list[Any]:
-    text = content.strip()
+    text = _strip_reasoning_blocks(content.strip())
     for candidate in _json_candidates(text):
         try:
             parsed = json.loads(candidate)

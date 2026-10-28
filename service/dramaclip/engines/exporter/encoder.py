@@ -19,6 +19,7 @@ import shutil
 import subprocess  # noqa: S404 - 参数为受控列表
 import sys
 import threading
+import time
 import uuid
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -411,6 +412,7 @@ def cut_segment_args(
         "-c:v",
         video_codec,
         *_video_codec_params(video_codec),
+        *_COLOR_ARGS,
         "-c:a",
         "aac",
         "-b:a",
@@ -465,6 +467,15 @@ _HW_CANDIDATES_BY_PLATFORM: dict[str, tuple[str, ...]] = {
     "win32": ("h264_nvenc", "h264_amf", "h264_qsv"),
     "darwin": ("h264_videotoolbox",),
 }
+# 输出色彩统一打 BT.709 标签：短剧源（网络片源）几乎全为 BT.709，无标签流的
+# 播放器/平台各自猜矩阵（BT.601 vs 709）是跨平台偏色投诉的来源。重编码段与
+# 重编码 concat 都注入；流复制分支保留源标签不动。
+_COLOR_ARGS = [
+    "-colorspace", "bt709",
+    "-color_primaries", "bt709",
+    "-color_trc", "bt709",
+]
+
 _HW_CANDIDATES_LINUX: tuple[str, ...] = ("h264_nvenc", "h264_qsv")
 
 # 驱动挂起兜底：探测真编不许拖住导出超过 15s（正式段编码仍走 _run_cut 默认 600s）。
@@ -505,6 +516,8 @@ def _hw_probe_args(video_codec: str) -> list[str]:
     return [
         "-f", "lavfi", "-i", "color=black:s=256x256:d=0.1",
         "-c:v", video_codec, *_video_codec_params(video_codec),
+        # 色彩参数与正式段同形状（探针验证的是同一输出形状）
+        *_COLOR_ARGS,
         "-f", "null", "-",
     ]
 
@@ -641,7 +654,7 @@ class _SegmentArtifact(NamedTuple):
     序号跟着路径一起走，偏移才不必靠「两处各自排序再指望它们对齐」——清单序＝拼接序。
     """
 
-    index: int
+    seq: int
     path: Path
 
 
@@ -1318,7 +1331,7 @@ def _segment_offsets(manifest: list[_SegmentArtifact]) -> list[tuple[int, float]
     cursor = 0.0
     try:
         for item in manifest:
-            offsets.append((item.index, cursor))
+            offsets.append((item.seq, cursor))
             cursor += ffprobe_mod.probe(item.path).duration_s
     except Exception as exc:  # noqa: BLE001 - 测不出就不交付，别拿半截偏移冒充
         _LOGGER.warning("段偏移测量失败（%s）：本条成片不产出逐句时间轴", str(exc)[:200])
@@ -1363,6 +1376,51 @@ def _concat_list_line(path: Path) -> str:
     return f"file '{quoted}'\n"
 
 
+_HEARTBEAT_INTERVAL_S = 30.0
+
+
+def _staged_path(out_path: Path) -> Path:
+    """同目录 .part 暂存名：与最终产物同分区，os.replace 才是原子改名而非跨盘复制。"""
+    return out_path.with_name(f"{out_path.stem}.part{out_path.suffix}")
+
+
+def _run_ffmpeg_with_heartbeat(
+    cmd: list[str], *, timeout: float, watch: Path
+) -> None:
+    """长 ffmpeg 执行带心跳日志：每 30s 记一次已耗时与暂存产物体积——
+    「编码中还在长大」与「进程僵死」从此在日志里可分辨（排查不再靠猜）。"""
+    import subprocess  # noqa: PLC0415 - 模块顶部已间接依赖；保持函数自包含
+
+    started = time.monotonic()
+    proc = subprocess.Popen(  # noqa: S603
+        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+    )
+
+    def _beat() -> None:
+        while proc.poll() is None:
+            time.sleep(_HEARTBEAT_INTERVAL_S)
+            if proc.poll() is not None:
+                return
+            size = watch.stat().st_size if watch.is_file() else 0
+            _LOGGER.info(
+                "ffmpeg 仍在编码：已 %.0fs，产物 %.1f MB（超时预算 %.0fs）",
+                time.monotonic() - started,
+                size / 1e6,
+                timeout,
+            )
+
+    beat = threading.Thread(target=_beat, name="ffmpeg-heartbeat", daemon=True)
+    beat.start()
+    try:
+        _, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        proc.kill()
+        raise subprocess.TimeoutExpired(cmd, timeout) from exc
+    if proc.returncode != 0:
+        # 异常类型与旧 subprocess.run 语义一致：调用方按类型处理，不因心跳封装而变
+        raise subprocess.CalledProcessError(proc.returncode, cmd, stderr=stderr)
+
+
 def _concat(segment_files: list[Path], out_path: Path) -> None:
     """Phase B：concat demuxer 拼接 + 元数据擦除。
 
@@ -1372,8 +1430,10 @@ def _concat(segment_files: list[Path], out_path: Path) -> None:
     拼完做时长审计（实测 vs 各段实测和，超阈值抛错不出片；测不出只 warn 留痕）。
     """
     if len(segment_files) == 1:
-        shutil.copyfile(segment_files[0], out_path)
-        _audit_film_duration(out_path, segment_files)
+        tmp = _staged_path(out_path)
+        shutil.copyfile(segment_files[0], tmp)
+        _audit_film_duration(tmp, segment_files)
+        os.replace(tmp, out_path)
         return
     signatures = [_video_signature(segment) for segment in segment_files]
     uniform = signatures[0] is not None and all(sig == signatures[0] for sig in signatures)
@@ -1391,12 +1451,14 @@ def _concat(segment_files: list[Path], out_path: Path) -> None:
         if uniform
         else [
             "-c:v", _FALLBACK_CODEC, "-preset", "veryfast", "-crf", "20",
+            *_COLOR_ARGS,
             "-c:a", "aac", "-b:a", "128k", "-ar", str(_SEGMENT_SAMPLE_RATE),
         ]
     )
+    tmp = _staged_path(out_path)
     try:
         list_file.write_text(lines, encoding="utf-8")
-        subprocess.run(  # noqa: S603
+        _run_ffmpeg_with_heartbeat(
             [
                 resolve_ffmpeg(),
                 "-hide_banner",
@@ -1412,17 +1474,20 @@ def _concat(segment_files: list[Path], out_path: Path) -> None:
                 *codec_args,
                 "-map_metadata",
                 "-1",
-                str(out_path),
+                str(tmp),
             ],
-            check=True,
-            capture_output=True,
             # 重编码 concat 是整片再编一遍，预算要比流复制宽（300s 对长片不够）
             timeout=300 if uniform else 3600,
+            watch=tmp,
         )
+        _audit_film_duration(tmp, segment_files)
+        # 原子交付：半成品/编码失败的文件对下载接口不可见（.part 永不冒充成片）
+        os.replace(tmp, out_path)
     finally:
         # 超时/check=True 抛错时也要收走：留在成片目录里的是一个指向已失效段的垃圾文件
         list_file.unlink(missing_ok=True)
-    _audit_film_duration(out_path, segment_files)
+        if not out_path.is_file():
+            Path(tmp).unlink(missing_ok=True)  # 失败路径收走 .part，旧成片原样保留
 
 
 def _video_signature(path: Path) -> tuple[str, str, int, str, int, int, str] | None:
