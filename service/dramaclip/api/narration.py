@@ -99,11 +99,21 @@ def generate_titles(context: AppContext, params: dict[str, Any]) -> dict[str, An
     row = plans_repo.get(context.conn, plan_id)
     if row is None:
         raise RpcDomainError(_ERR_PLAN_NOT_FOUND, f"编排方案不存在: {plan_id}")
+    plan_data = json.loads(row["plan_data"])
+    project_row = projects_repo.get(context.conn, str(row["project_id"]))
+    drama_name = str(project_row["name"]) if project_row is not None else ""
+    episode_span = "、".join(str(e) for e in (row["episode_ids"] or []))
+    brief = (
+        f"剧名：{drama_name}\n"
+        f"取材角度：{row['angle'] or '全剧高光'}\n"
+        f"取材集：第 {episode_span} 集"
+    )
     try:
         result = titles_engine.generate(
-            row["plan_data"],
+            plan_data,
             context.settings,
             trace_path=llm_trace_dir(context) / f"llm_titles_{plan_id}.json",
+            project_brief=brief,
         )
     except LlmUnavailable as exc:
         raise RpcDomainError(_ERR_LLM, str(exc)) from exc
