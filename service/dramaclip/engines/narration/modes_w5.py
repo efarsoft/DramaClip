@@ -36,6 +36,10 @@ _ULTRA_POOL_SIZE = 6
 _SNAP_MIN_LEN_S = 2.0
 
 
+_BRIDGE_MIN_GAP_S = 0.5  # 零空隙桥不设位的门槛：空隙不足 0.5s 结构上无旁白容身之处
+_BRIDGE_CAP_FLOOR_CHARS = 6  # 预算下限（≈1.5s 最短连接句）：cap=0 曾让任何文案都判超限
+
+
 def build_cross(
     scenes: list[EpisodeScene],
     strategy: StrategySpec,
@@ -99,6 +103,7 @@ def build_cross(
         slot_id = f"cross-{index + 1}"
         bridge = "原声片段之间的串联：承接上一幕，可用一句内反差点透两幕落差，给下一幕留半句钩"
         char_budget: int | None = None
+        emit_slot = True
         if index + 1 < len(picked):
             # 空隙预算（真机 2026-10-20：cross-2 文案 48 字实测 10.74s > 9.70s
             # 空隙整条判死）：导出时桥段旁白收尾锚下场景开头、向前伸进空隙——
@@ -110,44 +115,52 @@ def build_cross(
             nxt = picked[index + 1]
             floor = cursor.get(nxt.episode_id, 0.0)
             gap = max(0.0, float(nxt.start) - floor)
-            cap = min(60, int(gap * 4.0))  # indextts2 实测 ≈4.5 字/秒，留 12% 裕量
-            if cap < 60:
-                char_budget = cap
-                bridge += (
-                    f"（本段旁白的画面空隙约 {gap:.0f} 秒（编排期估算，渲染期按实测"
-                    f"微调），目标 ≤{cap} 字——写超会被强制收短或挪去别的空隙，观感变差）"
-                )
+            if gap < _BRIDGE_MIN_GAP_S:
+                # 零空隙桥不设位（真机 2026-10-29「5 字超过上限 0 字」）：跨集跳进
+                # 0 起点的场景，空隙=0 结构上没有旁白容身之处——预算帽算出 0 字，
+                # 任何文案都判超限、规划直接死。不产槽位：跳集因果由前后场景的
+                # 画面序列自明，渲染期无桥可弃。
+                emit_slot = False
+            else:
+                cap = min(60, int(gap * 4.0))  # indextts2 实测 ≈4.5 字/秒，留 12% 裕量
+                if cap < 60:
+                    char_budget = max(_BRIDGE_CAP_FLOOR_CHARS, cap)
+                    bridge += (
+                        f"（本段旁白的画面空隙约 {gap:.0f} 秒（编排期估算，渲染期按实测"
+                        f"微调），目标 ≤{cap} 字——写超会被强制收短或挪去别的空隙，观感变差）"
+                    )
             brief = bridge
         else:
             brief = (
                 "收尾：留缺口（可加退出代价——暗示不看完的损失，禁止编造情节），"
                 "一句指向看全集，禁止关注/点赞"
             )
-        texts.append(NarrationText(id=slot_id, brief=brief, char_budget=char_budget))
-        # 桥段占位窗按渲染同口径（2026-10-27 提示词#2）：填词实据（区间内台词/画面轨）
-        # 从这个窗切片——占位窗必须就是渲染期旁白实际压的画面，否则实据是对着别处
-        # 做保证（改锚/跨集后尤其是别集画面）。渲染期 _layout_cross 把桥段收尾锚在
-        # 下场景开头、向前伸进空隙、落位改章到锚点集；编排期同样 re-stamp 到锚点集、
-        # 占位窗取整个空隙（末段桥接自己场景窗之后）。
-        if index + 1 < len(picked):
-            anchor_episode = nxt.episode_id
-            win_start = round(cursor.get(anchor_episode, 0.0), 3)
-            win_end = round(float(nxt.start), 3)
-        else:
-            anchor_episode = scene.episode_id
-            # 末段桥接在**吸附后**的场景窗之后（cursor 持原声窗实尾，与渲染期
-            # _gap_floor 用锚点窗同口径），不是场景原始边界
-            win_start = round(cursor.get(scene.episode_id, float(scene.end)), 3)
-            win_end = round(win_start + narration_seconds, 3)
-        segments.append(
-            TimelineSegment(
-                episode_id=anchor_episode,
-                start=win_start,
-                end=win_end,
-                audio="narration",
-                narration_id=slot_id,
+        if emit_slot:
+            texts.append(NarrationText(id=slot_id, brief=brief, char_budget=char_budget))
+            # 桥段占位窗按渲染同口径（2026-10-27 提示词#2）：填词实据（区间内台词/画面轨）
+            # 从这个窗切片——占位窗必须就是渲染期旁白实际压的画面，否则实据是对着别处
+            # 做保证（改锚/跨集后尤其是别集画面）。渲染期 _layout_cross 把桥段收尾锚在
+            # 下场景开头、向前伸进空隙、落位改章到锚点集；编排期同样 re-stamp 到锚点集、
+            # 占位窗取整个空隙（末段桥接自己场景窗之后）。
+            if index + 1 < len(picked):
+                anchor_episode = nxt.episode_id
+                win_start = round(cursor.get(anchor_episode, 0.0), 3)
+                win_end = round(float(nxt.start), 3)
+            else:
+                anchor_episode = scene.episode_id
+                # 末段桥接在**吸附后**的场景窗之后（cursor 持原声窗实尾，与渲染期
+                # _gap_floor 用锚点窗同口径），不是场景原始边界
+                win_start = round(cursor.get(scene.episode_id, float(scene.end)), 3)
+                win_end = round(win_start + narration_seconds, 3)
+            segments.append(
+                TimelineSegment(
+                    episode_id=anchor_episode,
+                    start=win_start,
+                    end=win_end,
+                    audio="narration",
+                    narration_id=slot_id,
+                )
             )
-        )
     return PlanData(
         mode="cross_narration", timeline=segments, narration_texts=texts, strategy=strategy
     )

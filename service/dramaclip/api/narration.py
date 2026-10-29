@@ -99,7 +99,11 @@ def generate_titles(context: AppContext, params: dict[str, Any]) -> dict[str, An
     row = plans_repo.get(context.conn, plan_id)
     if row is None:
         raise RpcDomainError(_ERR_PLAN_NOT_FOUND, f"编排方案不存在: {plan_id}")
-    plan_data = json.loads(row["plan_data"])
+    plan_data = (
+        json.loads(row["plan_data"])
+        if isinstance(row["plan_data"], str)
+        else row["plan_data"]
+    )
     project_row = projects_repo.get(context.conn, str(row["project_id"]))
     drama_name = str(project_row["name"]) if project_row is not None else ""
     episode_span = "、".join(str(e) for e in (row["episode_ids"] or []))

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from dramaclip.engines.narration import casting, pipeline
 from dramaclip.engines.narration.casting import stamp
 from dramaclip.engines.narration.models import StrategySpec
@@ -246,4 +248,45 @@ def test_build_plan_snaps_cross_original_windows_to_sentences() -> None:
     original = next(seg for seg in plan.timeline if seg.audio == "original")
     assert (original.start, original.end) == (4.6, 17.0), (
         f"窗尾 12.6 切在句中，该收进整句到 17.0；实得 {(original.start, original.end)}"
+    )
+
+
+def test_cross_zero_gap_bridge_slot_is_skipped_not_doomed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """零空隙桥不设位（真机 2026-10-29「5 字超过上限 0 字」）：跨集跳进 0 起点的
+    场景空隙=0，预算帽算出 0 字让任何文案都判超限、规划直接死——不产槽位，
+    场景窗照常出轴，渲染期无桥可弃。小空隙（≥0.5s）保槽位但预算有 6 字下限。"""
+    from dramaclip.engines.narration.modes_w5 import build_cross
+    from dramaclip.engines.semantic.models import ConflictScore
+
+    scenes = stamp(
+        [
+            (
+                1,
+                "ep1",
+                [
+                    ConflictScore(scene_index=0, start=10.0, end=25.0, score=90),
+                    ConflictScore(scene_index=1, start=50.0, end=65.0, score=80),
+                ],
+            ),
+            (
+                2,
+                "ep2",
+                [
+                    ConflictScore(scene_index=0, start=0.0, end=20.0, score=95),
+                    ConflictScore(scene_index=1, start=30.0, end=45.0, score=70),
+                ],
+            ),
+        ]
+    )
+    plan = build_cross(scenes, _STRATEGY)
+    slots = [t.id for t in plan.narration_texts]
+    # 5 个场景按集序连播：ep1 两场 + 跨集桥 + ep2 两场——跨进 0 起点场景的桥
+    # （空隙=0）不设位，其余桥照常
+    assert "cross-2" not in slots, f"零空隙桥不得设位：{slots}"
+    assert len(slots) == 3, f"五场景应产出 3 个桥位（跨集桥被跳过）：{slots}"
+    budgets = {t.id: t.char_budget for t in plan.narration_texts}
+    assert all(b is None or b >= 6 for b in budgets.values()), (
+        f"预算下限 6 字，不得出现 0 字死槽：{budgets}"
     )
