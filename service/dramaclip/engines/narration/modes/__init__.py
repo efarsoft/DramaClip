@@ -159,6 +159,7 @@ def build_raw_clip(
     timeline = _fit_duration(ordered, strategy)
     timeline = _snap_windows_to_dialogue(timeline, material)
     timeline = extend_openings_over_connectives(timeline, material)
+    timeline = _retract_unanswered_questions(timeline, material)
     return PlanData(mode="raw_clip", timeline=timeline, strategy=strategy)
 
 
@@ -192,6 +193,15 @@ def _snap_windows_to_dialogue(
     updated = list(timeline)
     eps = _DIALOGUE_SNAP_EPS_S
     keep = _DIALOGUE_SNAP_MIN_KEEP_S
+
+    def _to_silence(boundary: float, silences: tuple[tuple[float, float], ...]) -> float:
+        """句界精修：±0.35s 内有声学静音区间就吸到区间中点（剪口落在真实停顿上）。
+        无静音图/无命中原值返回——声学精修是增强不是义务。"""
+        for g0, g1 in silences:
+            if g0 - eps <= boundary <= g1 + eps:
+                return (g0 + g1) / 2
+        return boundary
+
     for indices in by_episode.values():
         for position, index in enumerate(indices):
             segment = updated[index]
@@ -228,6 +238,17 @@ def _snap_windows_to_dialogue(
                     elif s1 <= end - keep:
                         start = s1  # 撞上一窗：进到句后
                     break
+            # 声学精修（T1 质批）：句界 ±0.35s 内有真实静音区间就吸到区间中点，
+            # 精修不得越邻窗栅栏；相向挤压夹没窗则整体弃精修保窗。
+            refined_start = _to_silence(start, entry.silences)
+            refined_end = _to_silence(end, entry.silences)
+            if prev_end is not None and refined_start < prev_end:
+                refined_start = start
+            if next_start is not None and refined_end > next_start:
+                refined_end = end
+            if refined_start >= refined_end - eps:
+                refined_start, refined_end = segment.start, segment.end
+            start, end = refined_start, refined_end
             if (start, end) != (segment.start, segment.end):
                 updated[index] = segment.model_copy(
                     update={"start": round(start, 3), "end": round(end, 3)}
@@ -391,3 +412,54 @@ def extend_openings_over_connectives(
                     update={"start": round(new_start, 3)}
                 )
     return updated
+
+
+def _retract_unanswered_questions(
+    timeline: list[TimelineSegment],
+    material: MaterialByEpisode | None,
+) -> list[TimelineSegment]:
+    """去尾问（T1 质批）：窗尾切在悬念问句上、而答案在窗外=许诺不兑现，观众体感
+    是「吊胃口吊得莫名其妙」。回答完整在窗内不处理；回答被切则退到问句前剪——
+    宁可不问，不可问而不答。受最小窗长与前一窗止点约束，退不动保持原值。"""
+    if material is None or not timeline:
+        return timeline
+    updated = list(timeline)
+    min_len = _RAW_CLIP_MIN_S
+    for indices in by_episode_originals(timeline).values():
+        for position, index in enumerate(indices):
+            segment = updated[index]
+            entry = material.get(segment.episode_id)
+            if entry is None or not entry.asr:
+                continue
+            lines = sorted(entry.asr, key=lambda seg: seg.start)
+            inside = [
+                line
+                for line in lines
+                if line.start >= segment.start - 1e-6 and line.end <= segment.end + 1e-6
+            ]
+            if not inside:
+                continue
+            last = inside[-1]
+            if not last.text.strip().endswith(("？", "?")):
+                continue  # 窗尾不是问句
+            answer = next((line for line in lines if line.start >= last.end - 1e-6), None)
+            if answer is None or answer.end <= segment.end + 1e-6:
+                continue  # 答案完整在窗内（或没有答案）：问而不吊
+            prev_end = updated[indices[position - 1]].end if position > 0 else None
+            new_end = last.start
+            if prev_end is not None and new_end - prev_end < min_len:
+                continue  # 退到问前会把窗剪没：保持原值（连接词扩展已尽力）
+            updated[index] = segment.model_copy(update={"end": round(new_end, 3)})
+    return updated
+
+
+def by_episode_originals(timeline: list[TimelineSegment]) -> dict[str, list[int]]:
+    """原声窗（剔除金句流重播卡）按集分组的序号表——吸附/扩展/去尾问共用的骨架。"""
+    grouped: dict[str, list[int]] = {}
+    for index, segment in enumerate(timeline):
+        if (
+            segment.audio == "original"
+            and str(segment.narration_id or "") != "cta-1"
+        ):
+            grouped.setdefault(segment.episode_id, []).append(index)
+    return grouped

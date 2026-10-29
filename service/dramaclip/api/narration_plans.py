@@ -681,6 +681,7 @@ def _casting_for(
             )
         scenes_by_episode.append((number, episode_id, conflicts))
         highlights.extend(_parse_highlights(record["highlights"]))
+        audio = _audio_of(record.get("audio_features"))
         material[episode_id] = casting.EpisodeMaterial(
             number=number,
             asr=narration_pipeline.parse_asr_segments(record["asr_segments"]),
@@ -688,8 +689,42 @@ def _casting_for(
             # 语义层声画对位：画面轨帧进逐段填词（_slot_block 按取材区间切片消费）；
             # 未跑视觉轨的集空元组，槽位块落到「无画面轨」分档，行为不变。
             frames=tuple(_visual_frames_of(record.get("visual_track"))),
+            # 声学静音图（T1 质批）：语音区间补集，句界吸附的精修依据
+            silences=_silences_of(audio),
         )
     return casting.stamp(scenes_by_episode), highlights, material
+
+
+def _audio_of(raw: Any) -> Any:
+    """audio_features JSON → AudioFeatures（坏形归空，与 beats 同款宽容）。"""
+    try:
+        from dramaclip.engines.analysis.models import AudioFeatures  # noqa: PLC0415
+
+        return AudioFeatures.model_validate(json.loads(raw) if raw else {})
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+
+
+def _silences_of(audio: Any) -> tuple[tuple[float, float], ...]:
+    """speech_zones 的补集=声学静音区间：句界吸附的精修依据（T1 质批）。
+
+    解析失败/字段缺失返回空元组——静音精修是增强不是义务，不为它重分析。
+    """
+    zones = getattr(audio, "speech_zones", None) or []
+    spans = [
+        (float(zone.start), float(zone.end))
+        for zone in zones
+        if float(zone.end) > float(zone.start)
+    ]
+    if not spans:
+        return ()
+    silences: list[tuple[float, float]] = []
+    if spans[0][0] > 0.0:
+        silences.append((0.0, spans[0][0]))
+    for (_, prev_end), (next_start, _) in zip(spans, spans[1:], strict=False):
+        if next_start - prev_end > 1e-6:
+            silences.append((prev_end, next_start))
+    return tuple(silences)
 
 
 def _parse_beats(raw: str | None) -> tuple[float, ...]:

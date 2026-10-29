@@ -349,3 +349,59 @@ def test_raw_clip_extends_openings_over_discourse_connectives() -> None:
         f"实得 {windows}"
     )
     assert windows[1][1] == 44.0  # 窗尾=场景自然边界，不随台词收缩
+
+
+def test_raw_clip_dialogue_snap_refines_to_acoustic_silence() -> None:
+    """声学精修（T1 质批）：句界 ±0.35s 内有真实静音区间就吸到区间中点——
+    剪口落在真实停顿上，句尾拖音不进下一窗。"""
+    from dramaclip.engines.analysis.models import AsrSegment
+    from dramaclip.engines.narration.casting import EpisodeMaterial
+
+    scenes = [
+        ConflictScore(scene_index=0, start=30.0, end=35.0, score=90),
+        ConflictScore(scene_index=1, start=42.0, end=50.0, score=85),
+    ]
+    material = {
+        "ep1": EpisodeMaterial(
+            number=1,
+            asr=[
+                AsrSegment(start=30.7, end=31.5, text="首富之子汪大少要结婚了"),
+                AsrSegment(start=31.6, end=34.5, text="我作为未婚妻，不该过来看看吗"),
+                AsrSegment(start=43.0, end=46.0, text="他红着眼吼"),
+            ],
+            silences=((34.7, 35.4),),  # 句界 35.0 落在静音区间 ±0.35s 内
+        )
+    }
+    plan = build_raw_clip(stamp([(1, "ep1", scenes)]), [], _STRATEGY, material)
+    windows = [(seg.start, seg.end) for seg in plan.timeline if seg.audio == "original"]
+    assert windows[0] == (30.0, 35.05), (
+        f"窗尾吸到静音中点 35.05；起点 30.0 不在句中不吸：{windows}"
+    )
+
+
+def test_raw_clip_retracts_unanswered_question_endings() -> None:
+    """去尾问（业主体感「吊胃口吊得莫名其妙」）：窗尾切在悬念问句上、答案在
+    窗外=问而不答，退到问句前剪——宁可不问，不可问而不答。"""
+    from dramaclip.engines.analysis.models import AsrSegment
+    from dramaclip.engines.narration.casting import EpisodeMaterial
+
+    scenes = [
+        ConflictScore(scene_index=0, start=30.0, end=35.0, score=90),
+        ConflictScore(scene_index=1, start=60.0, end=68.0, score=85),
+    ]
+    material = {
+        "ep1": EpisodeMaterial(
+            number=1,
+            asr=[
+                AsrSegment(start=30.7, end=31.5, text="首富之子汪大少要结婚了"),
+                AsrSegment(start=33.0, end=34.8, text="她到底想干什么？"),
+                AsrSegment(start=35.4, end=37.0, text="凭什么，就凭我们家的生意"),
+                AsrSegment(start=61.0, end=66.0, text="后来的事谁都没想到"),
+            ],
+        )
+    }
+    plan = build_raw_clip(stamp([(1, "ep1", scenes)]), [], _STRATEGY, material)
+    windows = [(seg.start, seg.end) for seg in plan.timeline if seg.audio == "original"]
+    # 窗1 尾 35.0 落在答句（35.4 起）之前的空档：问句 33.0-34.8 的答案被切在
+    # 窗外且句界吸附够不着 → 退到问句前（33.0），宁可不问不吊胃口
+    assert windows[0] == (30.0, 33.0), f"问而不答须退到问句前：{windows}"

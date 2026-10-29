@@ -41,6 +41,10 @@ class EpisodeMaterial:
     asr: list[AsrSegment]
     beats: tuple[float, ...] = ()
     frames: tuple[dict[str, str], ...] = ()
+    # 声学静音区间（秒，升序，互不重叠）：由分析层 speech_zones 的补集导出，
+    # 供台词句边界吸附做「句界落在真实停顿上」的声学精修。默认空：旧库记录
+    # 无 speech_zones 或装配层拿不到 audio_features 时行为与之前一致。
+    silences: tuple[tuple[float, float], ...] = ()
 
     def frames_in(self, start: float, end: float) -> list[dict[str, str]]:
         """取材区间 [start, end] 内的画面轨帧（t 落在区间内，按时间升序）。"""
