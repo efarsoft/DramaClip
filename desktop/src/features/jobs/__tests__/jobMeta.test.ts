@@ -43,6 +43,8 @@ describe('类型词与路由', () => {
     'export',
     'export_selfcheck',
     'narration',
+    'music_runtime',
+    'bgm_generate',
     'model_download',
     'model_import',
     'cuda_runtime',

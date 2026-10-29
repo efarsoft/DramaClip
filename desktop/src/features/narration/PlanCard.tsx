@@ -222,10 +222,10 @@ function PlanCopyModal({ plan, open, onClose }: { plan: NarrationPlan; open: boo
       width={680}
       styles={{ body: { maxHeight: '60vh', overflow: 'auto' } }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceMd }}>
         {rows.map((row, index) => (
           <div key={index}>
-            <div style={{ marginBottom: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ marginBottom: tokens.spaceXs, display: 'flex', gap: tokens.spaceSm, alignItems: 'center' }}>
               <Tag color={row.kind === 'original' ? 'gold' : 'blue'}>
                 {row.kind === 'original' ? '原声' : '旁白'}
               </Tag>
