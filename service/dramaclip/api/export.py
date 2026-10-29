@@ -408,6 +408,21 @@ def _load_plan_data(context: AppContext, plan_id: Any) -> PlanData | None:
         return None
 
 
+def _episode_paths_of(
+    context: AppContext, plan_data: PlanData | None
+) -> dict[str, str]:
+    """方案涉及集的源文件路径表（avsync 互相关的源侧抽取数据面）。"""
+    if plan_data is None:
+        return {}
+    paths: dict[str, str] = {}
+    for episode_id in sorted({str(seg.episode_id) for seg in plan_data.timeline}):
+        row = episodes_repo.get(context.conn, episode_id)
+        if row is not None and row.get("source_path"):
+            paths[episode_id] = str(row["source_path"])
+    return paths
+
+
+
 def _film_ending_of(
     context: AppContext, plan_data: PlanData | None
 ) -> tuple[float | None, list[tuple[float, float, str]] | None]:
@@ -449,6 +464,9 @@ def _selfcheck_one(context: AppContext, export_id: str) -> bool:
     media = probe.probe(out_path)
     plan_data = _load_plan_data(context, row.get("narration_plan_id"))
     ending_end_s, ending_lines = _film_ending_of(context, plan_data)
+    avsync_samples = (
+        selfcheck.avsync_sample_points(plan_data.timeline) if plan_data is not None else None
+    )
     payload = selfcheck.run(
         out_path,
         measured_s=media.duration_s,
@@ -461,6 +479,8 @@ def _selfcheck_one(context: AppContext, export_id: str) -> bool:
         work_dir=context.work_dir,
         ending_end_s=ending_end_s,
         ending_lines=ending_lines,
+        avsync_samples=avsync_samples,
+        episode_paths=_episode_paths_of(context, plan_data),
     )
     exports_repo.set_selfcheck(
         context.conn,

@@ -196,6 +196,153 @@ def measure_caption_band(
         return None
 
 
+# avsync 采样参数：三点位（15%/50%/80%）、窗口 2s（成片）/3s（源）、采样率 16k
+_AVSYNC_FRACTIONS = (0.15, 0.5, 0.85)
+_AVSYNC_SAMPLE_RATE = 16000
+_AVSYNC_FILM_WIN_S = 2.0
+_AVSYNC_SOURCE_WIN_S = 3.0
+_AVSYNC_TOL_S = 0.04  # 中位偏移与离散度阈值（互相关实测口径）
+
+
+def avsync_sample_points(
+    timeline: list[Any],
+    duration_fractions: tuple[float, ...] = _AVSYNC_FRACTIONS,
+) -> list[tuple[float, str, float]]:
+    """按成片时间轴选 avsync 采样点（纯函数）：(成片时刻, 集 id, 源时刻)。
+
+    只采 **原声段**：旁白段的声音是 TTS（原声被删/压底），互相关对不上源。
+    源时刻 = 段源起点 +（成片时刻 − 段成片起点），时间轴顺序累加成片起点。
+    """
+    points: list[tuple[float, str, float]] = []
+    film_cursor = 0.0
+    spans: list[tuple[float, float, str, float]] = []
+    for segment in timeline:
+        length = float(segment.end) - float(segment.start)
+        spans.append(
+            (film_cursor, film_cursor + length, str(segment.episode_id), float(segment.start))
+        )
+        film_cursor += length
+    for fraction in duration_fractions:
+        film_t = film_cursor * fraction
+        span = next((s for s in spans if s[0] <= film_t <= s[1]), None)
+        if span is None:
+            continue
+        film_start, film_end, episode_id, source_start = span
+        segment = next(
+            (
+                seg
+                for seg in timeline
+                if str(seg.episode_id) == episode_id and seg.audio == "original"
+                and film_start <= film_t <= film_end
+            ),
+            None,
+        )
+        if segment is None:
+            continue  # 采样点落在旁白段：跳过（TTS 音轨对不上源）
+        source_t = source_start + (film_t - film_start)
+        points.append((film_t, episode_id, round(source_t, 3)))
+    return points
+
+
+def _extract_pcm_window(path: Any, start_s: float, duration_s: float) -> Any | None:
+    """ffmpeg 抽单声道 16k s16le PCM 窗口；失败返回 None（测量是增强不是义务）。"""
+    import subprocess  # noqa: PLC0415
+
+    from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg  # noqa: PLC0415
+
+    try:
+        result = subprocess.run(  # noqa: S603
+            [
+                resolve_ffmpeg(),
+                "-v", "error",
+                "-ss", f"{max(0.0, start_s):.3f}",
+                "-t", f"{duration_s:.3f}",
+                "-i", str(path),
+                "-ac", "1",
+                "-ar", str(_AVSYNC_SAMPLE_RATE),
+                "-f", "s16le",
+                "-",
+            ],
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0 or not result.stdout:
+        return None
+    import numpy as np  # noqa: PLC0415 - ml extras 懒加载
+
+    return np.frombuffer(result.stdout, dtype=np.int16).astype(np.float64)
+
+
+def _correlation_lag_s(film: Any, source: Any) -> float | None:
+    """FFT 互相关求 film 窗在 source 窗中的偏移（秒，正=film 滞后）。窗口无相关峰
+    （能量过低）返回 None。"""
+    import numpy as np  # noqa: PLC0415
+
+    film_n = film - film.mean()
+    source_n = source - source.mean()
+    film_norm = np.sqrt(np.sum(film_n**2))
+    source_norm = np.sqrt(np.sum(source_n**2))
+    if film_norm < 1e-9 or source_norm < 1e-9:
+        return None
+    size = 1
+    while size < len(source_n) + len(film_n) - 1:
+        size *= 2
+    corr = np.fft.irfft(
+        np.fft.rfft(film_n, size) * np.conjugate(np.fft.rfft(source_n, size)), size
+    )
+    peak = int(np.argmax(corr))
+    if peak > size // 2:
+        peak -= size  # 负滞后回卷
+    # 该相关序号是「film 相对 source 的提前量」的相反数：取负得滞后偏移（秒）
+    return -peak / _AVSYNC_SAMPLE_RATE
+
+
+def check_avsync(offsets_ms: list[float] | None) -> dict[str, Any]:
+    """音画同步（T1 质批）：三点互相关偏移的中位数与离散度均 ≤40ms 才算过。
+
+    信息项不改四项徽章口径（影子模式起步）；样本不足两点归 null——「—」，不猜。
+    """
+    if not offsets_ms or len(offsets_ms) < 2:
+        return {"pass": None}
+    offsets = sorted(offsets_ms)
+    median = offsets[len(offsets) // 2]
+    dispersion = max(offsets) - min(offsets)
+    return {
+        "pass": abs(median) <= _AVSYNC_TOL_S * 1000 and dispersion <= _AVSYNC_TOL_S * 1000,
+        "median_ms": round(median, 1),
+        "dispersion_ms": round(dispersion, 1),
+        "samples": len(offsets_ms),
+    }
+
+
+def measure_avsync_offsets(
+    video: Path,
+    samples: list[tuple[float, str, float]],
+    episode_paths: dict[str, str],
+) -> list[float] | None:
+    """逐采样点抽成片/源音频窗做互相关；少于两个有效偏移返回 None（诚实灰）。
+    任一集源文件不在盘上同样降级——测量是增强不是义务。"""
+    offsets: list[float] = []
+    for film_t, episode_id, source_t in samples:
+        source_path = episode_paths.get(episode_id)
+        if not source_path or not Path(source_path).is_file():
+            continue
+        film_win = _extract_pcm_window(video, film_t - _AVSYNC_FILM_WIN_S / 2, _AVSYNC_FILM_WIN_S)
+        source_win = _extract_pcm_window(
+            Path(source_path), source_t - _AVSYNC_SOURCE_WIN_S / 2, _AVSYNC_SOURCE_WIN_S
+        )
+        if film_win is None or source_win is None:
+            continue
+        lag = _correlation_lag_s(film_win, source_win)
+        if lag is None:
+            continue
+        offsets.append(round(lag * 1000, 1))
+    return offsets if len(offsets) >= 2 else None
+
+
 def check_ending(
     end_s: float | None,
     lines: list[tuple[float, float, str]] | None,
@@ -301,6 +448,8 @@ def run(
     work_dir: Path | None = None,
     ending_end_s: float | None = None,
     ending_lines: list[tuple[float, float, str]] | None = None,
+    avsync_samples: list[tuple[float, str, float]] | None = None,
+    episode_paths: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """四项全测 + 画面侧落位实测，返回落库形状的成绩单（json.dumps 后进 export_jobs.selfcheck）。
 
@@ -327,5 +476,10 @@ def run(
         "freeze": check_freeze(max_freeze_s),
         "caption_placement": check_caption_placement(measured_caption, caption_band),
         "ending": check_ending(ending_end_s, ending_lines),
+        "avsync": check_avsync(
+            measure_avsync_offsets(video, avsync_samples or [], episode_paths or {})
+            if avsync_samples and episode_paths
+            else None
+        ),
     }
     return payload
