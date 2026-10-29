@@ -38,6 +38,7 @@ from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.bgm import library as bgm_library
 from dramaclip.engines.bgm import selector as bgm_selector
 from dramaclip.engines.exporter import ai_label, encoder, loudness, selfcheck
+from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle import presets as subtitle_presets
@@ -407,6 +408,33 @@ def _load_plan_data(context: AppContext, plan_id: Any) -> PlanData | None:
         return None
 
 
+def _film_ending_of(
+    context: AppContext, plan_data: PlanData | None
+) -> tuple[float | None, list[tuple[float, float, str]] | None]:
+    """成片最后一刀的源切点与该集台词句表（结尾出点检查的数据面）。
+
+    取**最后一个原声段**：旁白/CTA 收尾不切源素材，词级出点对它无意义。
+    集无分析记录/无台词 → (None, None)，检查归灰。
+    """
+    if plan_data is None:
+        return None, None
+    originals = [seg for seg in plan_data.timeline if seg.audio == "original"]
+    if not originals:
+        return None, None
+    last = originals[-1]
+    record = analysis_repo.get(context.conn, str(last.episode_id))
+    if record is None:
+        return None, None
+    lines = [
+        (float(a.start), float(a.end), str(a.text))
+        for a in narration_pipeline.parse_asr_segments(
+            str(record.get("asr_segments") or "")
+        )
+    ]
+    return float(last.end), lines or None
+
+
+
 def _selfcheck_one(context: AppContext, export_id: str) -> bool:
     """单条成片自检并落库；行不在/未完成/产物不在盘上返回 False（保持 NULL，诚实）。
 
@@ -420,6 +448,7 @@ def _selfcheck_one(context: AppContext, export_id: str) -> bool:
         return False
     media = probe.probe(out_path)
     plan_data = _load_plan_data(context, row.get("narration_plan_id"))
+    ending_end_s, ending_lines = _film_ending_of(context, plan_data)
     payload = selfcheck.run(
         out_path,
         measured_s=media.duration_s,
@@ -430,6 +459,8 @@ def _selfcheck_one(context: AppContext, export_id: str) -> bool:
         segment_count=0 if plan_data is None else len(plan_data.timeline),
         caption_band=_plan_cover_promise(context, plan_data),
         work_dir=context.work_dir,
+        ending_end_s=ending_end_s,
+        ending_lines=ending_lines,
     )
     exports_repo.set_selfcheck(
         context.conn,

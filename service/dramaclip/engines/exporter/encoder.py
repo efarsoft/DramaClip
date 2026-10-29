@@ -1437,10 +1437,16 @@ def _concat(segment_files: list[Path], out_path: Path) -> None:
         return
     signatures = [_video_signature(segment) for segment in segment_files]
     uniform = signatures[0] is not None and all(sig == signatures[0] for sig in signatures)
+    audio_signatures = [_audio_signature(segment) for segment in segment_files]
+    audio_uniform = audio_signatures[0] is not None and all(
+        sig == audio_signatures[0] for sig in audio_signatures
+    )
     if not uniform:
         _LOGGER.warning(
-            "段视频流签名不齐或不可测（%s）：concat 整体重编码而非流复制",
+            "段视频流签名不齐或不可测（%s）：concat 整体重编码而非流复制"
+            "（音频%s）",
             signatures,
+            "流复制（一次 AAC）" if audio_uniform else "重编码",
         )
     # 清单名跟着 out_path 走而非固定名：out_path 落在 `data/outputs/<project>/`，同项目的
     # K 条方案并发导出时固定 `concat.txt` 会被后写者顶掉——A 拼出 B 的段。
@@ -1452,7 +1458,13 @@ def _concat(segment_files: list[Path], out_path: Path) -> None:
         else [
             "-c:v", _FALLBACK_CODEC, "-preset", "veryfast", "-crf", "20",
             *_COLOR_ARGS,
-            "-c:a", "aac", "-b:a", "128k", "-ar", str(_SEGMENT_SAMPLE_RATE),
+            # 一次 AAC：切段时音频已统一编码，非一致分支只重编视频；
+            # 音频签名不齐才降级重编（AAC 逐段重编会累积编码延迟）
+            *(
+                ("-c:a", "copy")
+                if audio_uniform
+                else ("-c:a", "aac", "-b:a", "128k", "-ar", str(_SEGMENT_SAMPLE_RATE))
+            ),
         ]
     )
     tmp = _staged_path(out_path)
@@ -1488,6 +1500,44 @@ def _concat(segment_files: list[Path], out_path: Path) -> None:
         list_file.unlink(missing_ok=True)
         if not out_path.is_file():
             Path(tmp).unlink(missing_ok=True)  # 失败路径收走 .part，旧成片原样保留
+
+
+def _audio_signature(path: Path) -> tuple[str, int, int] | None:
+    """段音频流签名（codec/采样率/声道）：全部段 AAC 已在切段时统一编码
+    （48k/立体声），concat 非一致分支只需重编视频——音频流复制即「AAC 只编
+    一次」，逐段 AAC 重编会累积编码延迟（真机口径：音频时长逐段双倍的事故
+    与此同源）。签名不齐或测不出 → 保守重编音频。"""
+    try:
+        result = subprocess.run(  # noqa: S603
+            [
+                resolve_ffprobe(),
+                "-v", "error",
+                "-print_format", "json",
+                "-select_streams", "a:0",
+                "-show_streams",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        payload = json.loads(result.stdout)
+        stream = payload["streams"][0]
+        return (
+            str(stream["codec_name"]),
+            int(stream["sample_rate"]),
+            int(stream["channels"]),
+        )
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError):
+        return None
 
 
 def _video_signature(path: Path) -> tuple[str, str, int, str, int, int, str] | None:

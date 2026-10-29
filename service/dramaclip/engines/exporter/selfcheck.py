@@ -196,6 +196,39 @@ def measure_caption_band(
         return None
 
 
+def check_ending(
+    end_s: float | None,
+    lines: list[tuple[float, float, str]] | None,
+) -> dict[str, Any]:
+    """结尾词级出点（T1 质批）：成片最后一刀切在**原声对白**的什么位置。
+
+    出点落在句内=话被拦腰（mid_line）；末句非句末标点且下一句 0.6s 内接上=
+    悬念问句切在问前答没录进来（mid_sentence）。信息项不改四项徽章；
+    无时间轴/无台词数据的集归 null——「—」，不猜。
+    """
+    if end_s is None or not lines:
+        return {"pass": None}
+    ordered = sorted(lines)
+    for s0, s1, text in ordered:
+        if s0 < end_s < s1:
+            return {
+                "pass": False,
+                "reason": "mid_line",
+                "end_s": round(end_s, 2),
+                "line": (text or "").strip()[:20],
+            }
+    before = [item for item in ordered if item[1] <= end_s]
+    if not before:
+        return {"pass": None}
+    last = before[-1]
+    tail = (last[2] or "").strip()
+    if tail and tail[-1] not in "。！？…」』”）":
+        after = [item for item in ordered if item[0] > last[1]]
+        if after and after[0][0] - last[1] <= 0.6:
+            return {"pass": False, "reason": "mid_sentence", "end_s": round(end_s, 2)}
+    return {"pass": True}
+
+
 def check_caption_placement(
     measured: tuple[float, float] | None,
     expected: tuple[float, float] | None,
@@ -266,6 +299,8 @@ def run(
     segment_count: int = 0,
     caption_band: tuple[float, float] | None = None,
     work_dir: Path | None = None,
+    ending_end_s: float | None = None,
+    ending_lines: list[tuple[float, float, str]] | None = None,
 ) -> dict[str, Any]:
     """四项全测 + 画面侧落位实测，返回落库形状的成绩单（json.dumps 后进 export_jobs.selfcheck）。
 
@@ -291,5 +326,6 @@ def run(
         "silence": check_silence(mean_volume_db, has_audio),
         "freeze": check_freeze(max_freeze_s),
         "caption_placement": check_caption_placement(measured_caption, caption_band),
+        "ending": check_ending(ending_end_s, ending_lines),
     }
     return payload
