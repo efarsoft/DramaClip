@@ -143,9 +143,8 @@ class ServiceApp:
         def _thread_watchdog() -> None:
             import sys as _sys
             while not _wd_stop.wait(60):
-                buf = io.StringIO()
-                faulthandler.dump_traceback(file=buf)
-                print(f"[watchdog] thread dump:\n{buf.getvalue()}", file=_sys.stderr, flush=True)
+                faulthandler.dump_traceback(file=_sys.stderr)
+                print("[watchdog] --- thread dump above ---", file=_sys.stderr, flush=True)
 
         _wd_thread = threading.Thread(target=_thread_watchdog, name="thread-watchdog", daemon=True)
         _wd_thread.start()
