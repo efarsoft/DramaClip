@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import socket
 from pathlib import Path
+from typing import Any
 
-from dramaclip.engines.tts.base import DEFAULT_VOICE, EngineCaps
+from dramaclip.engines.tts.base import DEFAULT_VOICE, EngineCaps, audio_duration_s
 from dramaclip.engines.tts.text_split import split_long_text
 from dramaclip.infra import compute
 
@@ -29,6 +31,11 @@ def _cloud_reachable() -> bool:
             return True
     except OSError:
         return False
+
+
+def _cues_path(audio_path: Path) -> Path:
+    """词界 cue sidecar 约定路径（与 synthesis._cues_sidecar 同一约定）。"""
+    return audio_path.with_name(audio_path.stem + ".cues.json")
 
 
 class EdgeTtsTimeout(TimeoutError):
@@ -68,31 +75,92 @@ class EdgeTtsEngine:
         return compute.cloud("tts.edge")
 
     def synthesize(self, text: str, voice: str, out_path: Path) -> Path:
+
         import edge_tts  # 可选依赖懒加载
 
         async def _save(communicate: edge_tts.Communicate, path: Path) -> None:
             await asyncio.wait_for(communicate.save(str(path)), timeout=SYNTH_TIMEOUT_S)
+
+        async def _stream_with_cues(
+            communicate: edge_tts.Communicate, path: Path
+        ) -> None:
+            """stream 协议合成：音频块落文件、词界事件顺手收成 cue sidecar——
+            解说字幕的真实词级时间从这里来（T1 字幕批）。offset/duration 单位是
+            100ns ticks（除以 1e7 得秒）。cues 是增强产物：写失败不影响音频。"""
+
+            cues: list[dict[str, Any]] = []
+            audio = bytearray()
+
+            async def _consume() -> None:
+                nonlocal cues, audio
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        audio.extend(chunk["data"])
+                    elif chunk["type"] == "WordBoundary":
+                        cues.append(
+                            {
+                                "text": str(chunk["text"]),
+                                "start": round(chunk["offset"] / 1e7, 3),
+                                "end": round(
+                                    (chunk["offset"] + chunk["duration"]) / 1e7, 3
+                                ),
+                            }
+                        )
+
+            await asyncio.wait_for(_consume(), timeout=SYNTH_TIMEOUT_S)
+            path.write_bytes(bytes(audio))
+            if cues:
+                _cues_path(path).write_text(
+                    json.dumps(cues, ensure_ascii=False), encoding="utf-8"
+                )
 
         async def _run() -> None:
             # 非 Edge 音色名（如升级前全局键残留的 Kokoro 名）回退默认，避免云端报错
             safe_voice = voice if voice.startswith("zh-") else DEFAULT_VOICE
             chunks, dropped = split_long_text(text)
             if len(chunks) <= 1:
-                # 单块（含 dropped=1 的全空白文本）：整段一次请求，走旧路径
-                await _save(edge_tts.Communicate(text, safe_voice), out_path)
+                # 单块（含 dropped=1 的全空白文本）：整段一次请求，走词界流路径
+                await _stream_with_cues(
+                    edge_tts.Communicate(text, safe_voice), out_path
+                )
                 return
             # 多块：逐块合成到临时目录，按序字节拼接——对调用方仍是单文件契约
             # （缓存 key 用切分前整段原文，见 base.TtsEngine.synthesize docstring）。
+            # 各块 cue 随块偏移（块实测时长）合并成整段 sidecar。
             parts_dir = out_path.parent / f".{out_path.stem}.parts"
             parts_dir.mkdir(parents=True, exist_ok=True)
             try:
                 pieces: list[bytes] = []
+                merged_cues: list[dict[str, Any]] = []
+                block_offset = 0.0
                 for index, chunk in enumerate(chunks):
                     part = parts_dir / f"part-{index:04d}.mp3"
-                    await _save(edge_tts.Communicate(chunk, safe_voice), part)
-                    pieces.append(part.read_bytes())
+                    await _stream_with_cues(
+                        edge_tts.Communicate(chunk, safe_voice), part
+                    )
+                    block_cues = _cues_path(part)
+                    if block_cues.is_file():
+                        for cue in json.loads(block_cues.read_text(encoding="utf-8")):
+                            merged_cues.append(
+                                {
+                                    "text": cue["text"],
+                                    "start": round(cue["start"] + block_offset, 3),
+                                    "end": round(cue["end"] + block_offset, 3),
+                                }
+                            )
+                    piece = part.read_bytes()
+                    pieces.append(piece)
+                    try:
+                        block_offset += audio_duration_s(part)
+                    except Exception:  # noqa: BLE001 - 探测失败按码率估（48kbit≈6KB/s）
+                        block_offset += len(piece) / 6000.0
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 out_path.write_bytes(b"".join(pieces))
+                if merged_cues:
+                    _cues_path(out_path).write_text(
+                        json.dumps(merged_cues, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
             finally:
                 for part in parts_dir.glob("*"):
                     part.unlink(missing_ok=True)

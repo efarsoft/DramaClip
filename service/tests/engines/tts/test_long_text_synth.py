@@ -38,6 +38,24 @@ class _FakeCommunicate:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         Path(path).write_bytes(self.text.encode("utf-8"))
 
+    async def stream(self) -> Any:  # T1 字幕批：engine 走 stream 词界协议
+        data = self.text.encode("utf-8")
+        mid = max(1, len(data) // 2)
+        yield {"type": "audio", "data": data[:mid]}
+        yield {
+            "type": "WordBoundary",
+            "text": self.text[: max(1, len(self.text) // 2)],
+            "offset": 0,
+            "duration": int(0.5 * 1e7),
+        }
+        yield {"type": "audio", "data": data[mid:]}
+        yield {
+            "type": "WordBoundary",
+            "text": self.text[max(1, len(self.text) // 2) :],
+            "offset": int(0.5 * 1e7),
+            "duration": int(0.5 * 1e7),
+        }
+
 
 @pytest.fixture
 def fake_edge_tts(monkeypatch: pytest.MonkeyPatch) -> type[_FakeCommunicate]:
@@ -244,3 +262,54 @@ def test_kokoro_worker_branch_synthesizes_via_venv(
     engine.synthesize("第一块。第二块足够长触发切分。" * 8, "zf_001", out)
     assert out.read_bytes() == b"wav"
     worker_bridge.shutdown_venv_workers()
+
+
+# ---- T1 字幕批：edge stream 词界 cue sidecar -------------------------------
+
+
+class _StreamFakeCommunicate:
+    """stream 协议替身：音频块 + 词界事件（offset/duration=100ns ticks）。"""
+
+    calls: list[str] = []
+
+    def __init__(self, text: str, voice: str, **kwargs: Any) -> None:
+        _StreamFakeCommunicate.calls.append(text)
+        self.text = text
+
+    async def stream(self) -> Any:
+        for index, char in enumerate(self.text):
+            yield {
+                "type": "audio",
+                "data": ("A" * 16).encode("utf-8"),
+            }
+            yield {
+                "type": "WordBoundary",
+                "text": char,
+                "offset": int((index * 0.5) * 1e7),
+                "duration": int(0.5 * 1e7),
+            }
+
+
+@pytest.fixture
+def fake_edge_stream(monkeypatch: pytest.MonkeyPatch) -> type[_StreamFakeCommunicate]:
+    _StreamFakeCommunicate.calls = []
+    monkeypatch.setitem(
+        sys.modules, "edge_tts", type("m", (), {"Communicate": _StreamFakeCommunicate})
+    )
+    return _StreamFakeCommunicate
+
+
+def test_edge_writes_cue_sidecar_with_word_times(
+    tmp_path: Path, fake_edge_stream: type
+) -> None:
+    """stream 协议的词界事件收成 cue sidecar（真实词时），音频照常落盘。"""
+    import json
+
+    from dramaclip.engines.tts.engines.edge import _cues_path
+
+    engine = EdgeTtsEngine()
+    out = tmp_path / "n0.mp3"
+    engine.synthesize("你好再见", "zh-CN-YunxiNeural", out)
+    cues = json.loads(_cues_path(out).read_text(encoding="utf-8"))
+    assert [c["text"] for c in cues] == ["你", "好", "再", "见"]
+    assert cues[0]["start"] == 0.0 and cues[1]["start"] == 0.5

@@ -18,6 +18,7 @@ from pathlib import Path
 from dramaclip.engines.narration import modes
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.tts import base as tts_base
+from dramaclip.engines.tts import level_fix
 from dramaclip.engines.tts.factory import create as create_tts
 from dramaclip.infra.compute import ComputeReport
 from dramaclip.infra.ffmpeg import runner as ffmpeg_runner
@@ -67,6 +68,15 @@ def _content_addressed_audio(
 _CACHE_MAX_BYTES = 2 * 1024**3  # 2GB 容量上限（治理是 best-effort，永不 raise）
 
 
+def _cues_sidecar(audio_path: Path) -> Path:
+    """词界 cue sidecar 约定路径：与音频同目录同名，扩展名前加 .cues.json。
+
+    有词界的引擎（edge stream 协议）合成时顺带写出；无词界引擎不产出——
+    解说字幕计时按「有 cue 用真实词时、无 cue 字符比例」分档消费。
+    """
+    return audio_path.with_name(audio_path.stem + ".cues.json")
+
+
 def _cache_key(text: str, engine_name: str, voice: str, speed: str) -> str:
     return hashlib.sha256(f"{text}|{engine_name}|{voice}|{speed}".encode()).hexdigest()
 
@@ -93,6 +103,9 @@ def _store_in_cache(
         cache_dir.mkdir(parents=True, exist_ok=True)
         key = _cache_key(text, engine_name, voice, speed)
         shutil.copyfile(source, cache_dir / f"{key}{source.suffix}")
+        cues = _cues_sidecar(source)
+        if cues.is_file():
+            shutil.copyfile(cues, cache_dir / f"{key}.cues.json")
     except OSError as exc:
         logger.debug("TTS 缓存写入失败（忽略）: %s", exc)
 
@@ -165,6 +178,9 @@ def _synthesize_into(
         try:
             shutil.copyfile(cache_entry, tmp)
             os.replace(tmp, final_path)
+            cache_cues = cache_dir / f"{_cache_key(text, engine_name, voice, speed)}.cues.json"
+            if cache_cues.is_file():
+                shutil.copyfile(cache_cues, _cues_sidecar(final_path))
             return False
         finally:
             tmp.unlink(missing_ok=True)
@@ -179,10 +195,16 @@ def _synthesize_into(
         produced = engine.synthesize(text, voice, staging)
         _store_in_cache(produced, cache_dir, text, engine_name, voice, speed)
         os.replace(produced, final_path)
+        produced_cues = _cues_sidecar(produced)
+        if produced_cues.is_file():
+            os.replace(produced_cues, _cues_sidecar(final_path))
     finally:
         staging.unlink(missing_ok=True)
         if produced != staging:
             produced.unlink(missing_ok=True)  # 成功时已被搬走，这里只收失败残留
+        _cues_sidecar(staging).unlink(missing_ok=True)
+        if produced != staging:
+            _cues_sidecar(produced).unlink(missing_ok=True)
     return True
 
 
@@ -396,6 +418,14 @@ class _EnginePool:
                 f"旁白 {item_id} 语音合成: engine_requested={self._requested}"
                 f" engine_used={name} fallback_used={fallback_used}"
                 f" fallback_reason={'; '.join(reasons)}",
+            )
+            # 干音电平契约收在唯一的落位出口：`_synthesize_into` 三条路里只有真合成经过
+            # 引擎，缓存命中与工作目录复用那两条的带外干音也得进带。失败只上屏，不判死。
+            report = level_fix.normalize_dry_level(target)
+            _emit(
+                self._log,
+                f"旁白 {item_id} {report.log_line()}",
+                "warn" if (not report.measured or report.note) else "info",
             )
             return target
         raise RuntimeError(f"auto 回退链全员失败: {'; '.join(reasons)}")

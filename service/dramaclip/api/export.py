@@ -423,6 +423,79 @@ def _episode_paths_of(
 
 
 
+def _narration_lines_from_cues(
+    plan_data: PlanData, segment_index: int, cap: int
+) -> list[dict[str, Any]] | None:
+    """词界 cue → 解说字幕行（T1 字幕批）：真实词时替代字符比例分配。
+
+    段落配音旁有 .cues.json（edge stream 词界，与 synthesis 缓存同约定）时，
+    按词累计到行字数上限封行、行时间=首词起点→末词终点；无 cue/坏数据返回
+    None（回退字符比例分配，逐字节兼容旧行为）。
+    """
+    if not (0 <= segment_index < len(plan_data.timeline)):
+        return None
+    segment = plan_data.timeline[segment_index]
+    slot = segment.narration_id
+    if not slot:
+        return None
+    item = next((t for t in plan_data.narration_texts if t.id == slot), None)
+    if item is None or not item.audio_path:
+        return None
+    audio = Path(str(item.audio_path))
+    cue_path = audio.with_name(audio.stem + ".cues.json")
+    if not cue_path.is_file():
+        return None
+    try:
+        cues = json.loads(cue_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(cues, list):
+        return None
+    lines: list[dict[str, Any]] = []
+    buf_text = ""
+    buf_start: float | None = None
+    buf_end: float | None = None
+    for cue in cues:
+        if not isinstance(cue, dict):
+            continue
+        word = str(cue.get("text") or "")
+        if not word:
+            continue
+        start = float(cue.get("start") or 0.0)
+        end = float(cue.get("end") or 0.0)
+        if (
+            buf_text
+            and buf_start is not None
+            and buf_end is not None
+            and len(buf_text) + len(word) > cap
+        ):
+            lines.append(
+                {
+                    "start": round(buf_start, 3),
+                    "end": round(buf_end, 3),
+                    "text": buf_text,
+                    "emotion_label": segment.emotion_label,
+                }
+            )
+            buf_text = ""
+        if not buf_text:
+            buf_text, buf_start = word, start
+        else:
+            buf_text += word
+        buf_end = end
+    if buf_text and buf_start is not None and buf_end is not None:
+        lines.append(
+            {
+                "start": round(buf_start, 3),
+                "end": round(buf_end, 3),
+                "text": buf_text,
+                "emotion_label": segment.emotion_label,
+            }
+        )
+    return lines or None
+
+
+
 def _film_ending_of(
     context: AppContext, plan_data: PlanData | None
 ) -> tuple[float | None, list[tuple[float, float, str]] | None]:
@@ -737,24 +810,32 @@ def render_export(
         ass_dir = context.work_dir / "export" / export_id
         ass_dir.mkdir(parents=True, exist_ok=True)
         ass_path = ass_dir / f"seg_{segment_index:03d}.ass"
-        chunks = split_subtitle_text(text, line_char_cap(preset, ass_canvas))
-        total_chars = sum(len(c) for c in chunks)
-        emotion = None
-        if 0 <= segment_index < len(plan_data.timeline):
-            emotion = plan_data.timeline[segment_index].emotion_label
-        lines: list[dict[str, Any]] = []
-        cursor = 0.0
-        for chunk in chunks:
-            span = duration_s * len(chunk) / total_chars
-            lines.append(
-                {
-                    "start": cursor,
-                    "end": cursor + span,
-                    "text": chunk,
-                    "emotion_label": emotion,
-                }
-            )
-            cursor += span
+        cap = line_char_cap(preset, ass_canvas)
+        # 词界 cue 优先（T1 字幕批）：段落配音旁有 .cues.json（edge stream 词界）
+        # 时按真实词时切行；无 cue（indextts2/kokoro 等引擎）回退标点断句+字符比例。
+        cue_lines = _narration_lines_from_cues(plan_data, segment_index, cap)
+        if cue_lines is not None:
+            lines = cue_lines
+        else:
+            chunks = split_subtitle_text(text, cap)
+            total_chars = sum(len(c) for c in chunks)
+            emotion = None
+            if 0 <= segment_index < len(plan_data.timeline):
+                emotion = plan_data.timeline[segment_index].emotion_label
+            lines = []
+            cursor = 0.0
+            for chunk in chunks:
+                span = duration_s * len(chunk) / total_chars
+                lines.append(
+                    {
+                        "start": cursor,
+                        "end": cursor + span,
+                        "text": chunk,
+                        "emotion_label": emotion,
+                    }
+                )
+                cursor += span
+
         burned_lines[segment_index] = [
             (float(line["start"]), float(line["end"]), str(line["text"])) for line in lines
         ]
