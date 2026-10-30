@@ -5,6 +5,9 @@ from __future__ import annotations
 import signal
 import sqlite3
 import threading
+import faulthandler
+import io
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -132,6 +135,20 @@ class ServiceApp:
         workers = config.get_int(settings, "hardware.max_parallel_jobs") + 2
         executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="rpc")
         query_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="rpc-query")
+
+        # 线程看门狗（T1 诊断）：每 60s 把全线程调用栈写入 stderr——服务僵死时
+        # 栈转储直接在客户端日志里可读，不再需要外部调试器附加。
+        _wd_stop = threading.Event()
+
+        def _thread_watchdog() -> None:
+            import sys as _sys
+            while not _wd_stop.wait(60):
+                buf = io.StringIO()
+                faulthandler.dump_traceback(file=buf)
+                print(f"[watchdog] thread dump:\n{buf.getvalue()}", file=_sys.stderr, flush=True)
+
+        _wd_thread = threading.Thread(target=_thread_watchdog, name="thread-watchdog", daemon=True)
+        _wd_thread.start()
         context = AppContext(
             conn=conn,
             settings=settings,
