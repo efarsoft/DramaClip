@@ -51,6 +51,7 @@ def generate(
     min_timeout_s: float = TITLES_LLM_TIMEOUT_S,
     trace_path: Path | None = None,
     project_brief: str | None = None,
+    visual_hooks: list[str] | None = None,
 ) -> dict[str, Any]:
     """返回 {titles: [{text, selected}], caption, tags}；LLM 未配置或标题为空时抛异常，
     由调用方转译。caption/tags 是同一往返顺带产出的发布物料，缺了不挡标题。
@@ -60,6 +61,10 @@ def generate(
     零文案模式（纯原片剪辑/金句流）没有 narration_texts：内容依据退到时间轴
     金句字幕（金句流）与 project_brief（剧名/角度，api 层组装）——标题规则
     与解说链完全一致，只换内容依据。两头都空仍然抛（此前行为）。
+
+    `visual_hooks`：VL 高 watch_score 帧的画面描述（api 层从 visual_track 收集），
+    标题生成注入画面亮点——标题可以具体到画面（"她把婚书扔进火里的那一刻"），
+    不再纯文字抽象悬念。
     """
     client = client_for(settings, min_timeout_s=min_timeout_s, site="候选标题")
     texts = [str(t.get("text", "")) for t in plan_data.get("narration_texts", []) if t.get("text")]
@@ -73,21 +78,29 @@ def generate(
     ]
     if not texts and not golden and not project_brief:
         raise ValueError("该方案没有解说文案，无需生成标题")
+    visual_block = ""
+    if visual_hooks:
+        visual_block = (
+            "\n画面亮点（VL 看到的最有冲击力的画面——标题若能具体到这些画面，点击率更高）：\n"
+            + "\n".join(f"- {line}" for line in visual_hooks)
+        )
     system = llm_prompts.system_override(settings, "prompt.titles_system") or _SYSTEM_PROMPT
     if texts:
-        user = "解说文案：\n" + "\n".join(texts)
+        user = "解说文案：\n" + "\n".join(texts) + visual_block
     elif golden:
         user = (
             "这是一条**原声金句合集**推广视频（无解说，画面配原声台词字幕）。"
             "标题与发布文案从这些金句的冲突与情绪出发，"
             "忠于台词呈现的剧情，禁止编造台词之外的情节。\n金句台词：\n"
             + "\n".join(f"- {line}" for line in golden[:12])
+            + visual_block
         )
     else:
         user = (
             "这是一条**纯原片高光合集**推广视频（无解说无字幕，只有原声对白画面）。"
             "标题与发布文案从剧名与取材角度出发：忠于给定信息，"
             "禁止编造具体桥段与台词。\n影片信息：\n" + (project_brief or "")
+            + visual_block
         )
     data = client.chat_json(system, user, temperature=0.75)
     raw = data.get("titles", []) if isinstance(data, dict) else []

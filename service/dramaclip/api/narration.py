@@ -112,12 +112,41 @@ def generate_titles(context: AppContext, params: dict[str, Any]) -> dict[str, An
         f"取材角度：{row['angle'] or '全剧高光'}\n"
         f"取材集：第 {episode_span} 集"
     )
+    # 标题视觉维度（T2 VL 主线）：从涉及集的 visual_track 收 watch_score 最高的
+    # 前 5 帧画面描述，注入标题 prompt——标题可以具体到画面，不再纯文字抽象悬念。
+    visual_hooks: list[str] = []
+    scored: list[tuple[int, str]] = []
+    for eid in sorted({str(seg.get("episode_id") or "") for seg in plan_data.get("timeline", [])}):
+        if not eid:
+            continue
+        rec = analysis_repo.get(context.conn, eid)
+        if rec is None or not rec.get("visual_track"):
+            continue
+        try:
+            vt = json.loads(str(rec["visual_track"]))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for frame in vt.get("frames") or []:
+            try:
+                w = int(frame.get("watch_score") or 0)
+            except (TypeError, ValueError):
+                continue
+            desc = " ".join(
+                str(frame.get(k) or "").strip()
+                for k in ("action", "mood")
+                if str(frame.get(k) or "").strip()
+            )
+            if w > 0 and desc:
+                scored.append((w, desc))
+    scored.sort(key=lambda pair: (-pair[0], pair[1]))
+    visual_hooks = [f"{desc}" for _w, desc in scored[:5]]
     try:
         result = titles_engine.generate(
             plan_data,
             context.settings,
             trace_path=llm_trace_dir(context) / f"llm_titles_{plan_id}.json",
             project_brief=brief,
+            visual_hooks=visual_hooks or None,
         )
     except LlmUnavailable as exc:
         raise RpcDomainError(_ERR_LLM, str(exc)) from exc
