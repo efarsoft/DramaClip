@@ -196,6 +196,8 @@ class ServiceApp:
         executor: ThreadPoolExecutor,
         query_executor: ThreadPoolExecutor,
     ) -> None:
+        import logging as _lm
+        _lm.getLogger("dramaclip.ipc").info("服务进入 _serve：addr=%s", address)
         self._connection = ServiceConnection(
             self._address,
             on_message=lambda payload: self._on_message(payload, router, executor, query_executor),

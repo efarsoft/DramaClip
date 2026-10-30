@@ -70,6 +70,8 @@ class ServiceConnection:
         return self._address
 
     def start_reader(self) -> None:
+        import logging as _lm
+        _lm.getLogger("dramaclip.ipc").info("TCP 已连接到 %s，ipc-reader 启动", address)
         threading.Thread(target=self._read_loop, name="ipc-reader", daemon=True).start()
 
     def send(self, payload: dict[str, Any]) -> None:
