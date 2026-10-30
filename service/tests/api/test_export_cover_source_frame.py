@@ -251,7 +251,7 @@ def test_cover_idempotent_when_file_exists(
 
 def test_source_frame_none_when_timeline_empty(tmp_path: Path) -> None:
     plan = PlanData(mode="raw_clip", timeline=[])
-    assert export_covers._cover_source_frame(plan, {}, (1080, 1920)) is None
+    assert export_covers._cover_source_frame(None, plan, {}, (1080, 1920)) is None
 
 
 def test_source_frame_none_when_episode_unmapped(tmp_path: Path) -> None:
@@ -259,7 +259,10 @@ def test_source_frame_none_when_episode_unmapped(tmp_path: Path) -> None:
         mode="raw_clip",
         timeline=[TimelineSegment(episode_id="ep-x", start=0.0, end=5.0, audio="original")],
     )
-    assert export_covers._cover_source_frame(plan, {"other": str(tmp_path)}, (1080, 1920)) is None
+    assert (
+        export_covers._cover_source_frame(None, plan, {"other": str(tmp_path)}, (1080, 1920))
+        is None
+    )
 
 
 def test_source_frame_none_when_source_file_gone(tmp_path: Path) -> None:
@@ -269,7 +272,7 @@ def test_source_frame_none_when_source_file_gone(tmp_path: Path) -> None:
     )
     missing = tmp_path / "gone.mp4"
     assert (
-        export_covers._cover_source_frame(plan, {"ep-1": str(missing)}, (1080, 1920)) is None
+        export_covers._cover_source_frame(None, plan, {"ep-1": str(missing)}, (1080, 1920)) is None
     )
 
 
@@ -284,7 +287,7 @@ def test_source_frame_maps_first_segment(tmp_path: Path) -> None:
             TimelineSegment(episode_id="ep-1", start=30.0, end=40.0, audio="original"),
         ],
     )
-    frame = export_covers._cover_source_frame(plan, {"ep-1": str(source)}, (1080, 1920))
+    frame = export_covers._cover_source_frame(None, plan, {"ep-1": str(source)}, (1080, 1920))
     assert frame is not None
     frame_path, seek_s, composition = frame
     assert frame_path == source

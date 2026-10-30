@@ -195,25 +195,26 @@ def _cover_source_frame(
     # 最高的帧的时刻，不再固定 1.5s——「情绪最炸的那一帧」才是好封面。
     # 无画面轨/无 watch_score 回退 1.5s（旧行为）。
     seek_s = first.start + 1.5
-    try:
-        analysis = analysis_repo.get(conn, str(first.episode_id))
-        if analysis is not None and analysis.get("visual_track"):
-            vt = json.loads(str(analysis["visual_track"]))
-            best_s, best_w = None, 0
-            for frame in vt.get("frames") or []:
-                w = int(frame.get("watch_score") or 0)
-                ft = float(frame.get("t") or 0)
-                if first.start - 1e-6 <= ft <= first.end + 1e-6 and w > best_w:
-                    best_w = w
-                    best_s = float(frame.get("t") or 0)
-            if best_s is not None:
-                seek_s = round(best_s, 3)
-    except (json.JSONDecodeError, TypeError, KeyError, ValueError):
-        pass  # 坏数据回退固定偏移
     composition = (
         f"scale={out_size[0]}:{out_size[1]}:force_original_aspect_ratio=decrease,"
         f"pad={out_size[0]}:{out_size[1]}:(ow-iw)/2:(oh-ih)/2:color=black"
     )
+    if conn is not None:
+        try:
+            analysis = analysis_repo.get(conn, str(first.episode_id))
+            if analysis is not None and analysis.get("visual_track"):
+                vt = json.loads(str(analysis["visual_track"]))
+                best_s, best_w = None, 0
+                for frame in vt.get("frames") or []:
+                    w = int(frame.get("watch_score") or 0)
+                    ft = float(frame.get("t") or 0)
+                    if first.start - 1e-6 <= ft <= first.end + 1e-6 and w > best_w:
+                        best_w = w
+                        best_s = float(frame.get("t") or 0)
+                if best_s is not None:
+                    seek_s = round(best_s, 3)
+        except (json.JSONDecodeError, TypeError, KeyError, ValueError):
+            pass  # 坏数据回退固定偏移
     return source, seek_s, composition
 
 
