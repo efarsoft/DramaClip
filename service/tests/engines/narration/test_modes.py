@@ -405,3 +405,31 @@ def test_raw_clip_retracts_unanswered_question_endings() -> None:
     # 窗1 尾 35.0 落在答句（35.4 起）之前的空档：问句 33.0-34.8 的答案被切在
     # 窗外且句界吸附够不着 → 退到问句前（33.0），宁可不问不吊胃口
     assert windows[0] == (30.0, 33.0), f"问而不答须退到问句前：{windows}"
+
+
+def test_raw_clip_extends_endings_over_dialogue_chains() -> None:
+    """对话链完整（T1 质批延续）：窗尾之后 0.6s 内下一句接上=同一番对话没说完，
+    沿台词链延窗到真停顿为止——话不说一半换画面。"""
+    from dramaclip.engines.analysis.models import AsrSegment
+    from dramaclip.engines.narration.casting import EpisodeMaterial
+
+    scenes = [
+        ConflictScore(scene_index=0, start=30.0, end=36.0, score=90),
+        ConflictScore(scene_index=1, start=60.0, end=70.0, score=85),
+    ]
+    material = {
+        "ep1": EpisodeMaterial(
+            number=1,
+            asr=[
+                AsrSegment(start=31.0, end=33.0, text="她把婚书拍在桌上"),
+                AsrSegment(start=33.2, end=35.0, text="这婚我不结了"),  # 窗尾 36 之后 0.2s 接上
+                AsrSegment(start=35.3, end=38.0, text="汪家必须给个说法"),  # 链继续
+                # 38.0 之后到下一场景 60s 是 >0.6s 的真停顿：话说完了
+            ],
+        )
+    }
+    plan = build_raw_clip(stamp([(1, "ep1", scenes)]), [], _STRATEGY, material)
+    windows = [(seg.start, seg.end) for seg in plan.timeline if seg.audio == "original"]
+    assert windows[0] == (30.0, 38.0), (
+        f"窗尾 36.0 切在对话链中段，该延到 38.0（真停顿）；实得 {windows}"
+    )

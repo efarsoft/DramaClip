@@ -159,6 +159,7 @@ def build_raw_clip(
     timeline = _fit_duration(ordered, strategy)
     timeline = _snap_windows_to_dialogue(timeline, material)
     timeline = extend_openings_over_connectives(timeline, material)
+    timeline = extend_endings_over_dialogue_chains(timeline, material)
     timeline = _retract_unanswered_questions(timeline, material)
     return PlanData(mode="raw_clip", timeline=timeline, strategy=strategy)
 
@@ -463,3 +464,77 @@ def by_episode_originals(timeline: list[TimelineSegment]) -> dict[str, list[int]
         ):
             grouped.setdefault(segment.episode_id, []).append(index)
     return grouped
+
+
+_DIALOGUE_CHAIN_GAP_S = 0.6  # 句间隙 ≤ 此值=同一番对话还在继续（去尾问同源口径）
+_ENDING_CHAIN_CAP_S = 12.0  # 对话链延尾的单窗扩幅上限（与开头前因回溯对称）
+
+
+def extend_endings_over_dialogue_chains(
+    timeline: list[TimelineSegment],
+    material: MaterialByEpisode | None,
+) -> list[TimelineSegment]:
+    """对话链完整（T1 字幕批同源纪律的窗尾版）：窗尾之后台词链还在继续
+    （下一句 ≤0.6s 接上），成片在此切=话说一半换画面。沿台词链向后逐句
+    延窗，直到某句之后出现 >0.6s 的真停顿（话说完了）为止；受下一窗止点
+    与扩幅上限双重约束，延不动保持原值。首句进入窗内的 Chain 才延——
+    窗尾本来就在停顿上的不处理。"""
+    if material is None or not timeline:
+        return timeline
+    updated = list(timeline)
+    for indices in by_episode_originals(timeline).values():
+        for position, index in enumerate(indices):
+            segment = updated[index]
+            entry = material.get(segment.episode_id)
+            if entry is None or not entry.asr:
+                continue
+            lines = sorted(entry.asr, key=lambda seg: seg.start)
+            inside = [
+                line
+                for line in lines
+                if line.start >= segment.start - 1e-6 and line.end <= segment.end + 1e-6
+            ]
+            if not inside:
+                continue
+            next_start = (
+                updated[indices[position + 1]].start
+                if position + 1 < len(indices)
+                else None
+            )
+            fence = (
+                min(next_start, segment.start + _ENDING_CHAIN_CAP_S)
+                if next_start is not None
+                else segment.start + _ENDING_CHAIN_CAP_S
+            )
+            new_end = segment.end
+            last_end = inside[-1].end
+            cursor_line = inside[-1]
+            while True:
+                following = [
+                    line
+                    for line in lines
+                    if line.start > cursor_line.end + 1e-6
+                    and line.end <= fence + 1e-6
+                ]
+                if not following:
+                    break
+                nxt = following[0]  # 窗外紧接着的下一句
+                if nxt.start - last_end > _DIALOGUE_CHAIN_GAP_S:
+                    break  # 台词链断了：话说完了
+                if nxt.end > fence + 1e-6:
+                    break  # 这句会越过栅栏/上限
+                new_end = nxt.end
+                last_end = nxt.end
+                cursor_line = nxt
+                nxt_after = [
+                    line
+                    for line in lines
+                    if line.start > cursor_line.end + 1e-6 and line.end <= fence + 1e-6
+                ]
+                if not nxt_after or nxt_after[0].start - cursor_line.end > _DIALOGUE_CHAIN_GAP_S:
+                    break  # 这句之后是真停顿：话说完了
+            if new_end > segment.end + 1e-6:
+                updated[index] = segment.model_copy(
+                    update={"end": round(new_end, 3)}
+                )
+    return updated
