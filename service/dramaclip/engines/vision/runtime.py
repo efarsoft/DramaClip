@@ -108,6 +108,11 @@ def parse_descriptions(
         if not isinstance(item, dict) or "index" not in item:
             continue
         index = int(item["index"])
+        try:
+            watch = int(item["watch_score"])
+        except (KeyError, TypeError, ValueError):
+            watch = 5
+        watch = max(1, min(10, watch))
         frames.append({
             "t": round((offset + index - 0.5) * step, 2),
             "shot": str(item.get("shot", "")),
@@ -115,6 +120,7 @@ def parse_descriptions(
             "people": str(item.get("people", "")),
             "action": str(item.get("action", "")),
             "mood": str(item.get("mood", "")),
+            "watch_score": watch,
         })
     return frames
 
@@ -124,7 +130,10 @@ def _prompt_for(count: int) -> str:
         f"上面按顺序给了 {count} 张独立的剧照（第 1~{count} 张，来自同一部剧的不同时刻）。"
         "请对每张图分别输出一行 JSON：",
         '{"index": 1, "shot": "景别", "scene": "场景", "people": "人物外观",'
-        ' "action": "动作", "mood": "情绪"}',
+        ' "action": "动作", "mood": "情绪", "watch_score": 7},'
+        ' 其中 watch_score 是这张图作为短视频封面的视觉冲击力评分（1~10 整数）：'
+        '10=极具张力（激烈动作/极端表情/强反差构图），1=平淡（站桩/过场/空景）；'
+        '按画面本身的动作幅度与情绪浓度打分，不受台词影响。',
         f"要求：每张图单独观察、分别描述，{count} 张内容必须互不相同；",
         "只描述画面本身，图中出现的任何文字（底部烧录字幕、角落人名字条、书法题字）"
         "都是视频叠加物，不是画面内容，禁止写进任何字段；",

@@ -61,6 +61,29 @@ class EpisodeMaterial:
         return f"第{self.number}集"
 
 
+def scene_visual_score(
+    material: MaterialByEpisode | None, scene: EpisodeScene
+) -> float:
+    """场景窗口内画面轨帧的平均 watch_score（1~10），无帧返回 5.0（中性）。
+
+    VL prompt 的 watch_score = 视觉冲击力（动作幅度/情绪浓度/反差构图），
+    与台词冲突分（ConflictScore.score）正交——开场选段用两者的乘积
+    取最优，不再让「画面平淡但台词猛」的场景霸占黄金 3 秒。
+    """
+    if material is None:
+        return 5.0
+    entry = material.get(scene.episode_id)
+    if entry is None or not entry.frames:
+        return 5.0
+    inside = [
+        float(frame.get("watch_score") or 5)
+        for frame in entry.frames
+        if float(frame.get("t") or 0) >= scene.start - 1e-6
+        and float(frame.get("t") or 0) <= scene.end + 1e-6
+    ]
+    return sum(inside) / len(inside) if inside else 5.0
+
+
 def has_dialogue(material: MaterialByEpisode, scene: EpisodeScene) -> bool:
     """场景窗口与该集任一台词段相交才算「有声可放」；缺该集原料不误杀。
 

@@ -10,6 +10,7 @@ from dramaclip.engines.narration.casting import (
     MaterialByEpisode,
     episode_order,
     has_dialogue,
+    scene_visual_score,
     score_order,
 )
 from dramaclip.engines.narration.models import (
@@ -280,7 +281,12 @@ def build_intro(
         if len(voiced) >= 2:
             ordered = voiced
     if ordered:
-        best = max(ordered, key=lambda s: s.score)
+        # 开场选段双因子（2026-10-28 VL 主线）：台词冲突 × 视觉冲击力——
+        # 「画面平淡但台词猛」的场景不再霸占片头黄金 3 秒。无画面数据时
+        # scene_visual_score 归 5.0（中性），退化为纯冲突分排序。
+        best = max(
+            ordered, key=lambda s: s.score * scene_visual_score(material, s)
+        )
         if ordered[0] is not best:
             ordered.remove(best)
             ordered.insert(0, best)
