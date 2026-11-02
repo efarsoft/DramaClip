@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,9 @@ from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import prescreen as prescreen_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
 from dramaclip.transport.rpc import Router, RpcDomainError
+
+# 全局分析并发闸：同时最多 2 个分析任务（多项目并发时防 GIL/CPU 争抢）
+_analysis_semaphore = threading.Semaphore(2)
 
 _ERR_PROJECT_NOT_FOUND = -32101
 _ERR_JOB_NOT_FOUND = -32201
@@ -227,12 +231,35 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         episodes_repo.set_status(context.conn, str(episode["id"]), "analyzing")
     cancel_event = threading.Event()
     context.cancel_events[job_id] = cancel_event
+    if not _analysis_semaphore.acquire(blocking=False):
+        context.cancel_events.pop(job_id, None)
+        for episode in targets:
+            episodes_repo.set_status(context.conn, str(episode["id"]), "pending")
+        raise RpcDomainError(-32206, "已有分析任务在跑（并发上限 2），请等待完成后再发起")
     context.executor.submit(
         context.notifier.tracked(
-            job_id, _run_job, context, job_id, project_id, targets, cancel_event
+            job_id,
+            lambda: _analysis_gate_wrap(context, job_id, project_id, targets, cancel_event),
+            job_id,
         )
     )
     return {"job_id": job_id}
+
+
+def _analysis_gate_wrap(
+    context: AppContext,
+    job_id: str,
+    project_id: str,
+    targets: list[dict[str, Any]],
+    cancel_event: threading.Event,
+) -> Callable[[], None]:
+    """semaphore 包装：分析完成后释放并发闸。"""
+    def wrap() -> None:
+        try:
+            _run_job(context, job_id, project_id, targets, cancel_event)
+        finally:
+            _analysis_semaphore.release()
+    return wrap
 
 
 def status(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:

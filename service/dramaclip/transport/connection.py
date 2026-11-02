@@ -61,6 +61,12 @@ class ServiceConnection:
         self._write_lock = threading.Lock()
         self._closed = False
         self._sock = socket.create_connection(parse_address(address), timeout=_CONNECT_TIMEOUT_S)
+        # TCP keepalive：连接静默断裂（防火墙/NAT/端口回收）30s 内可检测并触发
+        # on_disconnect → 主进程重生服务。此前无 keepalive，断管后 ipc-reader
+        # 永远阻塞在 readinto、RPC 全超时、进程活着但完全不响应（py-spy 实锤）。
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        keepalive_vals = getattr(socket.socket, "SIO_KEEPALIVE_VALS", 0x98000004)
+        self._sock.ioctl(keepalive_vals, (1, 10_000, 3_000))
         self._sock.settimeout(None)
         self._reader = self._sock.makefile("rb", buffering=0)
         self._writer = self._sock.makefile("wb", buffering=0)
