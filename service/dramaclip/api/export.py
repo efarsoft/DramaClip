@@ -672,6 +672,39 @@ def delete_export(context: AppContext, params: dict[str, Any]) -> dict[str, Any]
     return {"ok": True, "trashed": trashed, "missing": missing}
 
 
+_VL_MOOD_TO_BGM: dict[str, str] = {
+    "紧张": "suspense", "惊悚": "suspense", "压迫": "suspense", "恐惧": "suspense",
+    "愤怒": "anger", "暴怒": "anger", "仇恨": "anger",
+    "胜利": "triumph", "爽": "triumph", "热血": "triumph", "畅快": "triumph", "狂喜": "triumph",
+    "悲伤": "sadness", "痛苦": "sadness", "绝望": "sadness", "心酸": "sadness", "崩溃": "sadness",
+}
+
+
+def _vl_dominant_mood(context: AppContext, plan_data: PlanData) -> str | None:
+    """VL 画面轨 mood 众数 → BGM 情绪键；无数据/映射不足半数返回 None（不硬校准）。"""
+    moods: list[str] = []
+    for eid in sorted({str(seg.episode_id) for seg in plan_data.timeline}):
+        record = analysis_repo.get(context.conn, eid)
+        if record is None or not record.get("visual_track"):
+            continue
+        try:
+            vt = json.loads(str(record["visual_track"]))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for frame in vt.get("frames") or []:
+            mood = str(frame.get("mood") or "").strip()
+            if mood:
+                moods.append(mood)
+    if len(moods) < 3:
+        return None
+    mapped = [m for m in moods if m in _VL_MOOD_TO_BGM]
+    if len(mapped) < len(moods) / 2:
+        return None
+    from collections import Counter
+    return Counter(mapped).most_common(1)[0][0]
+
+
+
 def _pick_bgm_track(context: AppContext, plan_data: PlanData) -> Path | None:
     """BGM 床选曲（C 项接线层唯一入口）：设置/曲库两层门禁（模式门禁在 selector 内）。
 
@@ -687,7 +720,10 @@ def _pick_bgm_track(context: AppContext, plan_data: PlanData) -> Path | None:
         _note_degraded(context, "BGM 曲库读取", "本条成片不铺 BGM 床", exc)
         return None
     tracks = [bgm_library.track_from_row(row) for row in rows]
-    track = bgm_selector.select_bgm(plan_data, tracks)
+    # BGM 情绪校准（T2 VL 主线）：VL 画面轨 mood 众数覆盖台词情绪——观众看到
+    # 什么就配什么。无画面数据回退台词情绪。
+    vl_mood_emotion = _vl_dominant_mood(context, plan_data)
+    track = bgm_selector.select_bgm(plan_data, tracks, emotion_override=vl_mood_emotion)
     if track is None:
         return None
     if not track.file.is_file():

@@ -95,12 +95,30 @@ def pick_track(
     return min(by_emotion, key=lambda t: t.file.name)
 
 
-def select_bgm(plan: PlanData, tracks: Iterable[BgmTrack]) -> BgmTrack | None:
+_VL_MOOD_TO_BGM: dict[str, str] = {
+    "紧张": "suspense", "惊悚": "suspense", "压迫": "suspense", "恐惧": "suspense",
+    "愤怒": "anger", "暴怒": "anger", "仇恨": "anger",
+    "胜利": "triumph", "爽": "triumph", "热血": "triumph", "畅快": "triumph", "狂喜": "triumph",
+    "悲伤": "sadness", "痛苦": "sadness", "绝望": "sadness", "心酸": "sadness", "崩溃": "sadness",
+}
+
+
+def select_bgm(
+    plan: PlanData,
+    tracks: Iterable[BgmTrack],
+    *,
+    emotion_override: str | None = None,
+) -> BgmTrack | None:
     """端到端选曲（接线层唯一入口）：模式门禁 → 主导情绪 → 选曲。
+
+    `material` 可选：给到时从 VL 画面轨 mood 校准情绪（画面与配乐情绪一致）。
+    VL 情绪与台词情绪不一致时以画面为准（观众看到什么就配什么）；VL 数据缺席
+    时回退台词情绪。
 
     返回 None 的所有情形都是合法态（模式不该铺 / 库空 / 情绪无曲且 default 也无），
     渲染层收到 None 必须走现状路径——「无曲可用 = 现状逐字节一致」是硬验收。
     """
     if not should_add_bgm(plan.mode):
         return None
-    return pick_track(list(tracks), dominant_emotion(plan))
+    emotion = emotion_override or dominant_emotion(plan)
+    return pick_track(list(tracks), emotion)
