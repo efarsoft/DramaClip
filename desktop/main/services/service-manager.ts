@@ -144,11 +144,13 @@ export class ServiceManager {
         resolve();
         return;
       }
+      // 不立即 killChild：给 system.shutdown 留真宽限——Python 侧的优雅收尾
+      // （executor 收尾/venv worker 回收）只在进程自然退出时落地，立即强杀
+      // 会让 3s 宽限形同虚设；宽限到点仍活着才强杀（killChild 已带进程树收割）。
       child.once('exit', () => {
         clearTimeout(grace);
         resolve();
       });
-      this.killChild();
     });
     await this.pipeServer?.close();
   }
@@ -254,9 +256,17 @@ export class ServiceManager {
   }
 
   private killChild(): void {
-    if (this.child !== null && this.child.exitCode === null) {
-      this.child.kill();
+    const child = this.child;
+    if (child?.exitCode !== null) return; // child 为 null 或已退出：无需收割
+    if (process.platform === 'win32' && child.pid !== undefined) {
+      // Windows 上 child.kill()=TerminateProcess 只杀直接子进程：Python 服务
+      // 派生的 llama-server / venv worker / ffmpeg 孙进程会留下来占显存与
+      // 句柄（llama-server 孤儿实锤）。taskkill /T 连进程树收割，兜住强杀
+      // 路径；优雅路径仍由 Python 侧 shutdown 钩子先行。
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+      return;
     }
+    child.kill();
   }
 
   private clearTimers(): void {

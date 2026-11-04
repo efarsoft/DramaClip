@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
+import faulthandler
 import signal
 import sqlite3
-import threading
-import faulthandler
-import io
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -27,6 +25,7 @@ from dramaclip.infra.storage.repos import projects as projects_repo
 from dramaclip.transport.connection import ServiceConnection
 from dramaclip.transport.notify import Notifier
 from dramaclip.transport.rpc import (
+    INTERNAL_ERROR,
     PARSE_ERROR,
     Router,
     RpcRequest,
@@ -197,7 +196,7 @@ class ServiceApp:
         query_executor: ThreadPoolExecutor,
     ) -> None:
         import logging as _lm
-        _lm.getLogger("dramaclip.ipc").info("服务进入 _serve：addr=%s", address)
+        _lm.getLogger("dramaclip.ipc").info("服务进入 _serve：addr=%s", self._address)
         self._connection = ServiceConnection(
             self._address,
             on_message=lambda payload: self._on_message(payload, router, executor, query_executor),
@@ -249,7 +248,24 @@ class ServiceApp:
 
     def _dispatch_and_reply(self, router: Router, request: RpcRequest) -> None:
         response = router.dispatch(request)
-        self._send(response.model_dump(exclude_none=True))
+        connection = self._connection
+        if connection is None:
+            return
+        try:
+            # 响应走直连而非 _send：_send 会把超限 ValueError 当连接死亡触发
+            # _shutdown——单条响应超 16MB（大剧全量 analysis.results）是数据
+            # 问题不是连接问题，一次查询杀掉整个服务、在跑作业陪葬是炸弹。
+            connection.send(response.model_dump(exclude_none=True))
+        except ValueError:
+            self._send(
+                error_response(
+                    request.id,
+                    INTERNAL_ERROR,
+                    "响应超过 16MB 传输上限，请缩小查询范围（如按集分页）后重试",
+                ).model_dump(exclude_none=True)
+            )
+        except OSError:
+            self._shutdown()  # 下行失败视为连接已死，退出由主进程重新拉起
 
     def _shutdown(self) -> None:
         self._stop.set()

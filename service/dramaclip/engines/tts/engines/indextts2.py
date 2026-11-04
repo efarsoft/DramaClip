@@ -269,7 +269,7 @@ class IndexTts2Engine:
                 raise RuntimeError("worker 进程管道不可用")
             hello = _HELLO.get(proc)
             if hello is None:
-                line = proc.stdout.readline()
+                line = _readline_with_watchdog(proc, _LAUNCH_TIMEOUT_S, "就绪握手")
                 try:
                     hello = json.loads(line)
                 except ValueError as exc:
@@ -280,9 +280,40 @@ class IndexTts2Engine:
             job = {"id": "0", "text": text, "voice": ref, "out": str(out_path)}
             proc.stdin.write(json.dumps(job, ensure_ascii=False) + "\n")
             proc.stdin.flush()
-            reply = json.loads(proc.stdout.readline())
+            reply = json.loads(_readline_with_watchdog(proc, _SYNTH_TIMEOUT_S, "合成应答"))
             if not reply.get("ok"):
                 raise RuntimeError(f"IndexTTS 合成失败：{reply.get('error', '未知错误')}")
+
+
+def _readline_with_watchdog(
+    proc: subprocess.Popen[str], timeout_s: float, what: str
+) -> str:
+    """带看门狗的应答读取：worker 卡死（GPU stall / OOM 挂起不退出）时，超时杀
+    进程让阻塞中的 readline 以 EOF 返回——_IO_LOCK 得以释放、下一位调用者经
+    _ensure_worker 自动重建。此前两处 readline 均无超时：一次挂死 = 合成/试听
+    全链在锁上永久排队，服务 ping 正常却不可用，只能重启进程。
+    """
+    timed_out = threading.Event()
+
+    def _kill() -> None:
+        timed_out.set()
+        proc.kill()
+
+    timer = threading.Timer(timeout_s, _kill)
+    timer.daemon = True
+    timer.start()
+    try:
+        stdout = proc.stdout
+        assert stdout is not None
+        line = stdout.readline()
+    finally:
+        timer.cancel()
+    if timed_out.is_set() or not line:
+        raise RuntimeError(
+            f"IndexTTS worker {what}超时/无应答"
+            f"（{timeout_s:.0f}s 看门狗已杀进程，下次合成自动重建）"
+        )
+    return line
 
 
 def _concat_wav(parts: list[Path], out_path: Path) -> None:

@@ -18,6 +18,11 @@ from typing import Any
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
+#: 就绪握手含模型加载（funasr/kokoro 冷启实测数十秒），与 indextts2 同宽。
+_LAUNCH_TIMEOUT_S = 600.0
+#: 单请求应答看门狗：CPU 档长音频推理可达分钟级；超时杀进程而非永久持锁。
+_REQUEST_TIMEOUT_S = 900.0
+
 _ACTIVE_WORKERS: list[VenvWorker] = []
 _ACTIVE_LOCK = threading.Lock()
 
@@ -57,7 +62,11 @@ class VenvWorker:
             )
         except OSError as exc:
             raise RuntimeError(f"运行环境 worker 启动失败（可重装修复）: {exc}") from exc
-        ready = self._readline()
+        try:
+            ready = self._readline(_LAUNCH_TIMEOUT_S)
+        except RuntimeError:
+            self.close()
+            raise
         if ready is None or not ready.get("ready"):
             self.close()
             detail = str((ready or {}).get("error") or "").strip()
@@ -68,9 +77,34 @@ class VenvWorker:
         self.ready = ready
         return ready
 
-    def _readline(self) -> dict[str, Any] | None:
-        assert self._proc is not None and self._proc.stdout is not None
-        line = self._proc.stdout.readline()
+    def _readline(self, timeout_s: float) -> dict[str, Any] | None:
+        """带看门狗的行读取：worker 卡死时超时杀进程，锁与调用链得以释放。
+
+        此前 readline 无超时：一次推理挂死 = 所有后续请求在 self._lock 上
+        永久排队、分析闸位被占死，服务 ping 正常却不可用。报错文案必须带
+        「意外退出」——transcriber 的就地重生以该子串为唯一触发，改措辞会
+        断掉 ASR 的自愈链。
+        """
+        proc = self._proc
+        assert proc is not None and proc.stdout is not None
+        timed_out = threading.Event()
+
+        def _kill() -> None:
+            timed_out.set()
+            proc.kill()  # 阻塞中的 readline 以 EOF 返回，request() 的锁不永久持有
+
+        timer = threading.Timer(timeout_s, _kill)
+        timer.daemon = True
+        timer.start()
+        try:
+            line = proc.stdout.readline()
+        finally:
+            timer.cancel()
+        if timed_out.is_set():
+            raise RuntimeError(
+                f"worker 应答超时（意外退出：{timeout_s:.0f}s 看门狗已杀进程，"
+                "消费方可就地重生重试）"
+            )
         if not line:
             return None
         try:
@@ -92,7 +126,7 @@ class VenvWorker:
             )
             self._proc.stdin.flush()
             while True:
-                msg = self._readline()
+                msg = self._readline(_REQUEST_TIMEOUT_S)
                 if msg is None:
                     raise RuntimeError("worker 意外退出（可重装修复运行环境）")
                 if msg.get("id") != req_id:
