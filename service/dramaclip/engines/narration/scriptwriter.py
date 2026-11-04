@@ -378,12 +378,17 @@ def format_transcript_episodes(
 
 
 def format_frame_line(frame: dict[str, Any]) -> str:
-    """单帧画面实据 → 一行紧凑文本：「2.1s 中景 宫殿内厅：帝王坐龙椅（庄重）」。
+    """单帧画面实据 → 一行紧凑文本：「2.1s〔视觉9〕中景 宫殿内厅：帝王坐龙椅（庄重）」。
 
     帧时间=该集相对秒，与台词转写同一时间轴；镜头/场景/人物/动作/情绪逐维拼装，
-    缺维跳过。逐段填词与剧本链的画面实据共用这一格式。
+    缺维跳过。〔视觉N〕=VL 评的 watch_score（1~10 视觉冲击力），有分才出现。
+    逐段填词与剧本链的画面实据共用这一格式。
     """
     t_label = f"{float(frame.get('t') or 0.0):.1f}s"
+    score = frame.get("watch_score")
+    score_tag = ""
+    if isinstance(score, (int, float)) and not isinstance(score, bool) and score:
+        score_tag = f"〔视觉{round(float(score))}〕"
     body = " ".join(
         str(frame.get(key, "")).strip() for key in ("shot", "scene")
         if str(frame.get(key, "")).strip()
@@ -397,30 +402,45 @@ def format_frame_line(frame: dict[str, Any]) -> str:
     mood = str(frame.get("mood", "")).strip()
     if mood:
         body += f"（{mood}）"
-    return f"{t_label} {body}".strip()
+    return f"{t_label} {score_tag}{body}".strip()
+
+
+#: 画面轨每集注入上限：VL 每集采 16 帧，全量倾倒会把冲击位稀释成均匀背景
+#: 噪声——按 watch_score 取头部，编剧才知道哪几帧最炸。
+_VISUAL_TRACK_TOP_K = 8
 
 
 def format_visual_tracks(episode_inputs: list[dict[str, Any]]) -> str:
     """有画面轨的集各拼一段紧凑画面实据；无画面的集不出现（分档语义，P2c）。
 
-    输出行形如「2.1s 中景 宫殿内厅：帝王坐龙椅，红袍官员侍立（庄重）」——
-    帧时间是该集相对秒，与台词转写的「开始-结束」同一时间轴，编剧可对位取用。
+    每集按 watch_score 取 top-K（帧数不足 K 全保留），再按时间回排——锚定
+    属性不丢（行序仍是时间序），密度砍半把注意力让给高冲击帧。
+    输出行形如「2.1s〔视觉9〕中景 宫殿内厅：帝王坐龙椅，红袍官员侍立（庄重）」。
     """
     blocks: list[str] = []
     for episode in episode_inputs:
         frames = episode.get("visual_track") or []
         if not frames:
             continue
+        if len(frames) > _VISUAL_TRACK_TOP_K:
+            picked = sorted(
+                frames,
+                key=lambda frame: float(frame.get("watch_score") or 0),
+                reverse=True,
+            )[:_VISUAL_TRACK_TOP_K]
+            frames = sorted(picked, key=lambda frame: float(frame.get("t") or 0.0))
         lines = [format_frame_line(frame) for frame in frames]
         if lines:
             blocks.append(f"【第{int(episode['number'])}集·画面轨】\n" + "\n".join(lines))
     if not blocks:
         return ""
     return (
-        "画面轨（每集按时间均采的画面实据，时间=该集相对秒，与台词时间轴同源）：\n"
+        "画面轨（每集视觉冲击力最高的画面实据，时间=该集相对秒，与台词时间轴同源，"
+        "〔视觉N〕=冲击力 1~10）：\n"
         + "\n".join(blocks)
         + "\n画面轨用法：写某段的画面描写必须与该段取材区间内的画面轨条目一致——"
-        "台词说到的画面在画面轨里有实据；无画面轨的集维持纯台词锚定；"
+        "台词说到的画面在画面轨里有实据；优先把高视觉分的帧安排成段内锚点或开场；"
+        "无画面轨的集维持纯台词锚定；"
         "画面轨里出现的任何文字（人名字条/题字）是视频叠加物，不得当台词或人名引用。"
     )
 

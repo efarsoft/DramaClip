@@ -255,9 +255,10 @@ def write_plan_copy(
     )
     attempts: list[dict[str, Any]] = []
     filled: dict[str, str] | None = None
+    round_prompt = user_prompt
     for round_index in range(_ATTEMPTS):
         try:
-            raw = llm.chat_json(system, user_prompt, temperature=0.75)
+            raw = llm.chat_json(system, round_prompt, temperature=0.75)
             filled = _sanitize(
                 raw, plan.narration_texts, int(line_cap * _OVERSIZE_TOLERANCE)
             )
@@ -271,6 +272,16 @@ def write_plan_copy(
                     "LLM 网络类失败，%.0fs 后重试 (%d/%d)", delay, round_index + 1, _ATTEMPTS
                 )
                 time.sleep(delay)
+            elif isinstance(exc, ValueError) and round_index < _ATTEMPTS - 1:
+                # 违例反馈注入（编剧链 _FORMAT_REINFORCEMENT 同款纪律）：原样
+                # 重发同一 prompt 等于期待模型原样再犯——超长/漏槽/元叙述这些
+                # _sanitize 硬闸的具体违例必须喂回去，第二轮才有得改。
+                round_prompt = user_prompt + (
+                    f"\n\n【上一稿被判无效，原因】{exc}\n"
+                    "这一稿必须避开该问题：超长的槽位删到字数上限内、漏掉的槽位"
+                    "补齐、元叙述词（镜头/画面/素材类）换成故事内的表述；"
+                    "按原要求完整输出全部槽位。"
+                )
             continue
         attempts.append({"raw": raw, "accepted": True})
         break
@@ -281,7 +292,9 @@ def write_plan_copy(
     stamp_time = time.strftime("%m%d_%H%M%S")
     dump_trace(
         trace_path(trace_dir, f"llm_copy_{plan.mode}_{stamp_time}.json"),
-        {"system": system, "user": user_prompt, "attempts": attempts},
+        # user 记最后一轮实际发出的 prompt：违例反馈注入后与首轮不同，
+        # 审计/回放要看到真实发出去的版本（build_copy_request 契约同义）。
+        {"system": system, "user": round_prompt, "attempts": attempts},
     )
     if filled is None:
         detail = "；".join(str(item["error"]) for item in attempts)

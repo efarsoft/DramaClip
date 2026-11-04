@@ -39,6 +39,26 @@ def cta_missing(text: str) -> bool:
     return not any(token in text for token in _CTA_OK)
 
 
+def structural_defects(plan: PlanData) -> list[str]:
+    """渲染不可容忍的结构缺陷：负起点 / 结束不晚于开始。
+
+    这两条是与模式设计无关的硬不变量（任何成片时间轴都不许有）；同集重叠
+    另论——多数规则模式的重叠是设计行为（见 _timeline_defects docstring），
+    不在这层。配音后重铺链（_layout_cross/_patch_timeline 产出的最终时间轴）
+    用这层做最终防线：重铺产物不回写 plan_data，export 门的 defects 查的
+    仍是占位时间轴，结构坏窗若不在这一步拦下就直接进 ffmpeg。
+    """
+    issues: list[str] = []
+    for index, segment in enumerate(plan.timeline):
+        if segment.start < 0:
+            issues.append(f"第 {index + 1} 段起点为负（{segment.start:g}s）")
+        if segment.end <= segment.start:
+            issues.append(
+                f"第 {index + 1} 段结束不晚于开始（{segment.start:g}s → {segment.end:g}s）"
+            )
+    return issues
+
+
 def _timeline_defects(plan: PlanData) -> list[str]:
     """纯 plan 数据可判的时间轴合法性：负起点、结束不晚于开始、同集区间重叠。
 
@@ -64,15 +84,9 @@ def _timeline_defects(plan: PlanData) -> list[str]:
     规则模式的 planner 早已不是 "rule"。
     raw_clip 同样受查——它豁免的是 CTA 文案（无旁白），不是时间轴本身。
     """
-    issues: list[str] = []
+    issues = structural_defects(plan)
     by_episode: dict[str, list[tuple[float, float]]] = {}
-    for index, segment in enumerate(plan.timeline):
-        if segment.start < 0:
-            issues.append(f"第 {index + 1} 段起点为负（{segment.start:g}s）")
-        if segment.end <= segment.start:
-            issues.append(
-                f"第 {index + 1} 段结束不晚于开始（{segment.start:g}s → {segment.end:g}s）"
-            )
+    for segment in plan.timeline:
         by_episode.setdefault(segment.episode_id, []).append((segment.start, segment.end))
     if plan.mode == "ultra_short_hook":
         # 超短的命就是密度：全稿 60 字 ≈ 14 秒以下，钩子没展开就收尾

@@ -853,7 +853,12 @@ def _scored_windows_of(raw: Any) -> list[dict[str, Any]]:
 
 
 def _visual_frames_of(raw: Any) -> list[dict[str, Any]]:
-    """visual_track JSON → 紧凑画面轨条目；缺失/坏数据 → 空表（分档，不报错）。"""
+    """visual_track JSON → 紧凑画面轨条目；缺失/坏数据 → 空表（分档，不报错）。
+
+    保留判据是任一描述维非空（scene/shot/people/action）——此前只认 scene，
+    特写类帧常无场景词（scene 空、shot=特写），整条被丢弃的同时把
+    scene_visual_score 的 watch_score 平均也一起带漏（三消费面共享此漏点）。
+    """
     try:
         track = json.loads(str(raw)) if raw else {}
     except (json.JSONDecodeError, TypeError):
@@ -861,7 +866,14 @@ def _visual_frames_of(raw: Any) -> list[dict[str, Any]]:
     frames = track.get("frames") if isinstance(track, dict) else None
     if not isinstance(frames, list):
         return []
-    return [frame for frame in frames if isinstance(frame, dict) and frame.get("scene")]
+
+    def _describable(frame: dict[str, Any]) -> bool:
+        return any(
+            str(frame.get(key, "")).strip()
+            for key in ("scene", "shot", "people", "action")
+        )
+
+    return [frame for frame in frames if isinstance(frame, dict) and _describable(frame)]
 
 
 def _parse_conflicts(raw: str | None) -> list[ConflictScore]:

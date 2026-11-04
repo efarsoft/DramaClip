@@ -30,7 +30,7 @@ def _answer(**overrides: Any) -> dict[str, Any]:
         "retell": "男主想为女儿筹钱，被卷入铸钱大案，最后沉冤得雪。",
         "confusions": [],
         "has_goal": True,
-        "has_ending": True,
+        "has_suspense": True,
     }
     base.update(overrides)
     return base
@@ -46,13 +46,18 @@ def test_retell_pass_on_clean_answer() -> None:
     assert "普通观众" in client.calls[0][0]
 
 
-def test_retell_fails_on_missing_goal_or_ending() -> None:
+def test_retell_fails_on_missing_goal_or_suspense() -> None:
     report = retell_check("稿子", _StubClient(_answer(has_goal=False)))  # type: ignore[arg-type]
     assert report.passed is False
     assert "主角目标不明" in report.reasons
-    report = retell_check("稿子", _StubClient(_answer(has_ending=False)))  # type: ignore[arg-type]
+    report = retell_check("稿子", _StubClient(_answer(has_suspense=False)))  # type: ignore[arg-type]
     assert report.passed is False
-    assert "结局不明" in report.reasons
+    assert "结尾处境与悬念不明" in report.reasons
+    # 旧键回退仅在缺 has_suspense 键时生效（历史 trace 回放/模型手滑输出旧形态）
+    legacy_answer = {k: v for k, v in _answer().items() if k != "has_suspense"}
+    legacy_answer["has_ending"] = False
+    legacy = retell_check("稿子", _StubClient(legacy_answer))  # type: ignore[arg-type]
+    assert legacy.passed is False
 
 
 def test_retell_fails_when_confusions_reach_threshold() -> None:

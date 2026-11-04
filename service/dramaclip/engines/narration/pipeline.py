@@ -18,6 +18,7 @@ from dramaclip.engines.narration import (
     modes_w9,
 )
 from dramaclip.engines.narration.casting import EpisodeScene, MaterialByEpisode
+from dramaclip.engines.narration.conversion import structural_defects
 from dramaclip.engines.narration.models import (
     NarrationText,
     PlanData,
@@ -531,6 +532,16 @@ def synthesize_narration_texts(
     # 转场判定按最终窗口重算：此前只有超短/交叉重铺后重算，走游标修补的模式
     # 段界被挪后 fade/cut 判定失真（该 cut 处叠 fade，2026-10-27 审计）。
     laid = apply_transitions(laid)
+    # 结构最终防线：重铺产物不回写 plan_data，export 门的 defects 查的还是
+    # 占位时间轴——负起点/非正窗若不在这一步拦下就直接进 ffmpeg（静默截断或
+    # 坏片）。与「素材不 fit 重新选取而非失败」不冲突：那是间隙预算问题（上面
+    # 已由重写循环+弃段留痕消化），这里是布局代码必须保证的硬不变量。
+    structural = structural_defects(laid)
+    if structural:
+        raise RuntimeError(
+            "配音后重铺产出结构缺陷（布局 bug，请反馈日志）："
+            + "；".join(structural)
+        )
     return laid
 
 

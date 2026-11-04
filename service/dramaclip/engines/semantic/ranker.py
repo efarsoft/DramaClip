@@ -44,6 +44,13 @@ def rank_highlights(
     scored.sort(key=lambda pair: (-pair[0], pair[1].scene_index))
 
     keep = max(1, int(round(len(scored) * top_ratio)))
+    top = scored[:keep]
+    # 分数地板真生效：top 比例内混着的平庸段（综合 10~20 分）不再照单全收——
+    # 此前 `or value > 0` 让地板对全体短路，任何正分段都能进成片。
+    # 兜底语义保留 docstring 承诺：无一段过线时至少保 1 个非零分场景。
+    passing = [pair for pair in top if pair[0] >= min_score]
+    if not passing:
+        passing = [pair for pair in top if pair[0] > 0][:1]
     return [
         HighlightSegment(
             start=item.start,
@@ -51,9 +58,8 @@ def rank_highlights(
             score=round(value, 1),
             reason=item.reason or f"综合分 {value:.0f}",
         )
-        for value, item in scored[:keep]
-        if value >= min_score or value > 0
-    ][:keep]
+        for value, item in passing
+    ]
 
 
 def _energy_lookup(audio: AudioFeatures) -> SpanScorer:
