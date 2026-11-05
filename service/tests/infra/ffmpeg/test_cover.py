@@ -18,7 +18,7 @@ def _vf(args: list[str]) -> str:
 
 def _drawtext_options(vf: str) -> dict[str, str]:
     """按未被单引号包住的 ':' 切 drawtext 选项（路径值带引号且盘符转义为 \\:）。"""
-    marker = "scale=480:-2,drawtext="
+    marker = f"{cover_engine._COVER_THUMB_VF},drawtext="  # noqa: SLF001 - 测试读模块常量
     assert vf.startswith(marker), vf
     body = vf[len(marker) :]
     parts: list[str] = []
@@ -120,7 +120,7 @@ def test_title_none_command_identical_to_legacy_shape(
         "-vframes",
         "1",
         "-vf",
-        "scale=480:-2",
+        cover_engine._COVER_THUMB_VF,  # noqa: SLF001
         "-q:v",
         "4",
         "-strict",
@@ -148,13 +148,13 @@ def test_title_burns_drawtext_with_bundled_font_and_textfile(
     opts = _drawtext_options(_vf(calls[0]))
     assert _unfilter_path(opts["fontfile"]) == bundled_font.as_posix()
     assert contents == ["她的反击"]
-    # 底部居中、白字黑描边、字号按 480 宽算出的数值（9:16 下 h/12 会横向爆宽）
+    # 底部居中、白字黑描边、字号按出图宽算出的数值（9:16 下 h/12 会横向爆宽）
     assert opts["fontcolor"] == "white"
     assert opts["bordercolor"] == "black@0.9"
     assert int(opts["borderw"]) >= 3
     assert opts["x"] == "(w-text_w)/2"
     assert opts["y"] == "h-text_h-h/16"
-    assert 20 <= int(opts["fontsize"]) <= 64
+    assert cover_engine._FONT_MIN <= int(opts["fontsize"]) <= cover_engine._FONT_MAX  # noqa: SLF001
     # 临时 textfile 用完即删
     assert not list(tmp_path.glob(".cover-title-*"))
 
@@ -208,7 +208,7 @@ def test_drawtext_failure_falls_back_to_plain_frame(
     with caplog.at_level(logging.WARNING, logger="dramaclip.infra.ffmpeg.cover"):
         assert cover_engine.extract_cover(tmp_path / "film.mp4", out, title="她的反击") is True
     assert any("drawtext" in _vf(args) for args in calls)
-    assert _vf(calls[-1]) == "scale=480:-2"
+    assert _vf(calls[-1]) == cover_engine._COVER_THUMB_VF  # noqa: SLF001
     assert "标题" in caplog.text
     assert not list(tmp_path.glob(".cover-title-*"))
 

@@ -74,7 +74,7 @@ def test_composition_chain_prepended_without_title(
         "-vframes",
         "1",
         "-vf",
-        _COMPOSITION + ",scale=480:-2",
+        _COMPOSITION + "," + cover_engine._COVER_THUMB_VF,  # noqa: SLF001
         "-q:v",
         "4",
         "-strict",
@@ -97,7 +97,7 @@ def test_composition_chain_keeps_three_stages(
     vf = _vf(calls[0])
     assert vf.startswith("scale=1080:1920:force_original_aspect_ratio=increase,")
     assert "crop=1080:1920:max(0\\,min(iw-1080\\,iw*0.2500-(1080/2))):(ih-1920)/2" in vf
-    assert ",scale=1080:1920,scale=480:-2" in vf
+    assert ",scale=1080:1920," + cover_engine._COVER_THUMB_VF in vf  # noqa: SLF001
     assert "eq=" not in vf and "fade" not in vf and "setpts" not in vf
 
 
@@ -112,7 +112,7 @@ def test_composition_chain_with_title(
         tmp_path / "ep1.mp4", out, seek_s=21.5, title="她的反击", composition_vf=_COMPOSITION
     )
     vf = _vf(calls[0])
-    assert vf.startswith(_COMPOSITION + ",scale=480:-2,drawtext=")
+    assert vf.startswith(_COMPOSITION + "," + cover_engine._COVER_THUMB_VF + ",drawtext=")  # noqa: SLF001
     assert "textfile=" in vf and "fontfile=" in vf
     assert not list(tmp_path.glob(".cover-title-*"))
 
@@ -134,7 +134,7 @@ def test_composition_none_default_shape_unchanged(
         "-vframes",
         "1",
         "-vf",
-        "scale=480:-2",
+        cover_engine._COVER_THUMB_VF,  # noqa: SLF001
         "-q:v",
         "4",
         "-strict",

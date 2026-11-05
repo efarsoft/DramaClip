@@ -89,7 +89,7 @@ def test_hw_failure_cleans_partial_and_retries_with_libx264(
         assert len(seg_attempts) == 2, f"每段恰好两次尝试：{seg_attempts}"
         retry = " ".join(seg_attempts[1])
         assert "-c:v libx264" in retry, f"重跑必须换 libx264：{retry}"
-        assert "-crf 20" in retry and "-preset veryfast" in retry, "重跑带软编质量参数"
+        assert "-crf 20" in retry and "-preset medium" in retry, "重跑带软编质量参数"
         assert "-c:v h264_nvenc" in " ".join(seg_attempts[0])
     assert cleaned_at_retry == [True, True], "重跑前必须清掉半成品 seg_NNN.mp4"
     messages = [r.getMessage() for r in caplog.records]
@@ -239,6 +239,6 @@ def test_args_with_codec_splices_params_only() -> None:
     )
     swapped = encoder._args_with_codec(args, "libx264")
     joined = " ".join(swapped)
-    assert "-c:v libx264 -preset veryfast -crf 20 -c:a aac" in joined
+    assert "-c:v libx264 -preset medium -crf 20 -c:a aac" in joined
     assert "h264_nvenc" not in joined and "-cq 22" not in joined
     assert swapped[0] == args[0] and swapped[-1] == args[-1], "只动 -c:v..-c:a 之间"

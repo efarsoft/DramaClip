@@ -203,6 +203,28 @@ def resolve_canvas(episode_paths: dict[str, str], cap: tuple[int, int]) -> tuple
     return (width, height)
 
 
+# 常见帧率白名单：probe 报出奇异值（坏容器/可变帧率均值）时回退 30 而不是
+# 把怪数钉进全批段的签名——段签名一致是 -c copy 拼接的前置。
+_KNOWN_FPS = (23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 60.0)
+_FALLBACK_FPS = 30.0
+
+
+def resolve_output_fps(episode_paths: dict[str, str]) -> float:
+    """成片帧率跟随首个源集（与 resolve_canvas 同款纪律：批内一致、以首集为准）。
+
+    此前恒 -r 30：25/24fps 源靠补帧/丢帧凑 30，摇移镜头顿挫。混帧率批次以
+    首集为准（与画幅同一裁决面），探测失败/奇异值回退 30=旧行为。
+    """
+    try:
+        first = probe(Path(next(iter(episode_paths.values()))))
+        fps = first.fps
+    except Exception:  # noqa: BLE001 - 探测失败回默认帧率，不让导出开天窗
+        return _FALLBACK_FPS
+    if fps <= 0:
+        return _FALLBACK_FPS
+    return min(_KNOWN_FPS, key=lambda known: abs(known - fps))
+
+
 # 擦除时间窗的收口常量：短于 50ms 的一闪不值得挂 delogo（它在邻帧间做插值，
 # 闪一帧只会让补丁边缘抖）；间隙 ≤200ms 的两段并成一段——同一句台词的 OCR 条
 # 在采样边界上常被劈成两条，enable 碎片化不改变画面却增加解析成本。
@@ -271,6 +293,7 @@ def cut_segment_args(
     erase_rects: list[tuple[float, float]] | None = None,
     erase_windows: list[tuple[float, float]] | None = None,
     ai_label_vf: str | None = None,
+    fps: float = _FALLBACK_FPS,
 ) -> list[str]:
     """构建单段切割命令（Phase A）。
 
@@ -429,8 +452,14 @@ def cut_segment_args(
         "aac",
         "-b:a",
         "128k",
+        # 帧率跟源（resolve_output_fps 批内一致）：恒 30 对 25/24fps 源靠补帧/
+        # 丢帧凑数，摇移镜头顿挫；混合批次以首集为准，探测失败回退 30=旧行为
         "-r",
-        "30",
+        f"{fps:g}",
+        # 像素格式钉 8bit 4:2:0：10-bit 源会编出 High 10 profile，部分平台/
+        # 播放器不收；显式落 yuv420p 也让全批段签名在这一维恒一致
+        "-pix_fmt",
+        "yuv420p",
         # 音频采样率统一 48k：TTS（24k）与源素材（48k）混流后 concat 流复制
         # 以首段采样率解读全部包，采样率不一致会把时长/语速翻倍或减半。
         # 与 `_audio_format_filter()` 里的 `sample_rates` 同源读一个常量：滤镜侧钉 48k
@@ -520,7 +549,9 @@ def _video_codec_params(video_codec: str) -> list[str]:
         return ["-preset", "medium", "-global_quality", "22"]
     if video_codec == "h264_videotoolbox":
         return ["-q:v", "55"]
-    return ["-preset", "veryfast", "-crf", "20"]
+    # medium：交付场景同 CRF 画质明显优于 veryfast（编码时间约两倍，段级
+    # 并行下可接受）；探针真试编与正式段读同一处，签名天然一致。
+    return ["-preset", "medium", "-crf", "20"]
 
 
 def _hw_probe_args(video_codec: str) -> list[str]:
@@ -958,6 +989,7 @@ def _export_plan_once(
     # 画布跟随首个源集画幅（16:9 进→16:9 出，不裁不拉；异画幅补黑），全片统一——
     # Phase B -c copy 拼接要求段段几何一致，逐集各画各的会拼出变换静默。
     out_size = resolve_canvas(episode_paths, out_size)
+    output_fps = resolve_output_fps(episode_paths)
     # 字号/边距由**解析后的画布**决定，不能用调用方传的上限猜；字体缺失在这里
     # 硬失败（早于任何段编码），不给「跑了半小时才说标不了」的路径。
     label_spec = ai_label.prepare(work_dir, out_size) if burn_ai_label else None
@@ -1088,6 +1120,7 @@ def _export_plan_once(
                     ass_path=ass_path,
                     out_size=out_size,
                     video_codec=video_codec,
+                    fps=output_fps,
                     fade_in_s=vin,
                     fade_out_s=vout,
                     afade_in_s=ain,
@@ -1551,7 +1584,7 @@ def _concat(segment_files: list[Path], out_path: Path) -> None:
         ["-c", "copy"]
         if uniform
         else [
-            "-c:v", _FALLBACK_CODEC, "-preset", "veryfast", "-crf", "20",
+            "-c:v", _FALLBACK_CODEC, "-preset", "medium", "-crf", "20",
             *_COLOR_ARGS,
             # 一次 AAC：切段时音频已统一编码，非一致分支只重编视频；
             # 音频签名不齐才降级重编（AAC 逐段重编会累积编码延迟）

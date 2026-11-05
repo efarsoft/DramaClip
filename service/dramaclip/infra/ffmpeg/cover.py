@@ -25,7 +25,13 @@ from dramaclip.infra.ffmpeg import runner
 
 _LOGGER = logging.getLogger(__name__)
 
-_COVER_WIDTH = 480  # 与 scale=480:-2 同源：字号按宽反推，不按高（9:16 下 h/12 会横向爆宽）
+# 封面出图宽度：1080（信息流实际展示 720-1080 级，480 会糊）；字号按宽反推，
+# 不按高（9:16 下 h/12 会横向爆宽）。缩略与字层共用这一个常量。
+_COVER_WIDTH = 1080
+_COVER_THUMB_VF = f"scale={_COVER_WIDTH}:-2"
+# 字号边界随宽度等比（480 时代的 20-64 × 2.25）：CJK 全角字宽≈fontsize，留 10% 边距
+_FONT_MIN = int(_COVER_WIDTH * 0.9 / 21.6)  # ≈45
+_FONT_MAX = int(_COVER_WIDTH * 0.9 / 6.75)  # ≈144
 _WRAP_AT_CHARS = 14  # 超过则拆两行（drawtext 不自动折行）
 _MAX_TITLE_CHARS = 28  # 超过则截断加「…」
 _SPLIT_PUNCTUATION = "，。！？；：、,.!?;:"
@@ -61,7 +67,7 @@ def extract_cover(
             except OSError:
                 pass  # 连临时 textfile 都写不出：同样降级
             _LOGGER.warning("封面标题字层烧制失败，降级无字层截帧：%r", title)
-    vf = _compose_vf("scale=480:-2", composition_vf)
+    vf = _compose_vf(_COVER_THUMB_VF, composition_vf)
     return _seek_and_grab(video_path, out_path, seek_s, vf)
 
 
@@ -126,9 +132,9 @@ def _wrap_title(title: str) -> list[str] | None:
 
 
 def _fontsize_for(lines: list[str]) -> int:
-    """按 480 宽反推字号：CJK 全角字宽≈fontsize，留 10% 边距，钉在 20–64。"""
+    """按出图宽反推字号：CJK 全角字宽≈fontsize，留 10% 边距，边界随宽度等比。"""
     longest = max(len(line) for line in lines)
-    return max(20, min(64, int(_COVER_WIDTH * 0.9 / longest)))
+    return max(_FONT_MIN, min(_FONT_MAX, int(_COVER_WIDTH * 0.9 / longest)))
 
 
 def bundled_font_face() -> Path | None:
@@ -170,7 +176,7 @@ def _drawtext_vf(
         "y=h-text_h-h/16",
         "line_spacing=8",
     ]
-    return _compose_vf("scale=480:-2,drawtext=" + ":".join(opts), composition_vf)
+    return _compose_vf(f"{_COVER_THUMB_VF},drawtext=" + ":".join(opts), composition_vf)
 
 
 def _try_titled_cover(
