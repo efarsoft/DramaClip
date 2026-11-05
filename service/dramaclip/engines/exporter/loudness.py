@@ -346,6 +346,15 @@ def _measure_staged(staged: Path) -> LoudnessMeasurement:
     return parse_gate_reading(_run(measure_gate_args(str(staged))))
 
 
+def measure_integrated_lufs(path: Path) -> LoudnessMeasurement:
+    """单文件完整测量（门禁量法 ebur128）——BGM 床增益等消费方用。
+
+    与 normalize_in_place 的决策遍同一条命令、同一个解析器；失败如实抛
+    （调用方决定降级），不静默给假数。
+    """
+    return parse_gate_reading(_run(measure_gate_args(str(path))))
+
+
 def normalize_in_place(
     file_path: Path, *, target: LoudnessTarget, work_dir: Path
 ) -> LoudnessMeasurement:
