@@ -34,6 +34,38 @@ def test_sample_points_pick_original_segments_only() -> None:
     assert not any(40.0 <= p[0] <= 48.0 for p in points), "旁白段不得采样"
 
 
+def test_measured_spans_use_actual_cut_points_not_declared() -> None:
+    """实测刻度（批5）：film_start/source 锚都来自渲染层记录，不读声明窗口。
+
+    声明窗口不含 jitter/保护区/atempo——多段累积漂移会吃掉互相关搜索窗，
+    这是 avsync 影子检查系统性失真的根。旁白段照旧跳过。
+    """
+    timeline = [_Seg("ep1", 30.0, 40.0, "original")]  # 声明窗口只作回退，不参与
+    measured = [
+        # 两段实测：0-9.6s 原声（实际切点 30.4s，比声明晚 0.4s）；
+        # 9.6-20s 旁白（跳过）
+        {"seq": 0, "film_start": 0.0, "episode_id": "ep1", "audio": "original",
+         "source_start": 30.4, "source_end": 40.0},
+        {"seq": 1, "film_start": 9.6, "episode_id": "ep1", "audio": "narration",
+         "source_start": 40.0, "source_end": 48.0},
+    ]
+    points = avsync_sample_points(
+        timeline, (0.3, 0.6), measured_spans=measured, film_duration_s=20.0
+    )
+    # 0.3→6.0s 落原声段：source = 30.4 + (6.0-0.0) = 36.4（不是声明的 30+6=36）
+    assert points == [(6.0, "ep1", 36.4)]
+    # 0.6→12.0s 落旁白段：不采样
+
+
+def test_measured_spans_absent_falls_back_to_declared() -> None:
+    """旧片重测（无对照边车）：回退声明窗口映射＝历史行为。"""
+    timeline = [
+        _Seg("ep1", 30.0, 40.0, "original"),
+    ]
+    fallback = avsync_sample_points(timeline, (0.5,))
+    assert fallback == [(5.0, "ep1", 35.0)]
+
+
 def test_correlation_lag_recovers_known_shift() -> None:
     rng = np.random.default_rng(7)
     source = rng.standard_normal(_avsync_sample_rate * 3) * 1000

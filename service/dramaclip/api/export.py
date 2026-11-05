@@ -496,12 +496,49 @@ def _narration_lines_from_cues(
 
 
 
+def _write_film_map(
+    context: AppContext,
+    out_path: Path,
+    film_map: list[dict[str, float | int | str]] | None,
+) -> None:
+    """成片↔源实测对照边车（.filmmap.json）：avsync/ending 自检的刻度来源。
+
+    声明时间轴不含 jitter/保护区/atempo，互相关映射与词级出点检查吃它失真；
+    渲染层实测对照落边车，重测（不再有内存里的 offsets）也能用同一刻度。
+    量不到不落盘（旧片回退声明映射=旧行为）；成片删除移 .trash 时边车可能
+    残留——只读产物，残留无害。
+    """
+    if not film_map:
+        return
+    try:
+        out_path.with_suffix(".filmmap.json").write_text(
+            json.dumps(film_map, ensure_ascii=False), encoding="utf-8"
+        )
+    except OSError as exc:
+        _note_degraded(context, "成片对照边车", "自检将回退声明时间轴（精度降级）", exc)
+
+
+def _load_film_map(out_path: Path) -> list[dict[str, float | int | str]] | None:
+    sidecar = out_path.with_suffix(".filmmap.json")
+    if not sidecar.is_file():
+        return None
+    try:
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, list) and data else None
+
+
 def _film_ending_of(
-    context: AppContext, plan_data: PlanData | None
+    context: AppContext,
+    plan_data: PlanData | None,
+    film_map: list[dict[str, float | int | str]] | None = None,
 ) -> tuple[float | None, list[tuple[float, float, str]] | None]:
     """成片最后一刀的源切点与该集台词句表（结尾出点检查的数据面）。
 
     取**最后一个原声段**：旁白/CTA 收尾不切源素材，词级出点对它无意义。
+    film_map（批5）：有实测对照边车时出点用渲染层记录的 jitter 后安全窗
+    终点——声明 end 与实际末刀差 ±0.3s+，词级判 mid_line 的精度被它吞掉。
     集无分析记录/无台词 → (None, None)，检查归灰。
     """
     if plan_data is None:
@@ -510,7 +547,15 @@ def _film_ending_of(
     if not originals:
         return None, None
     last = originals[-1]
-    record = analysis_repo.get(context.conn, str(last.episode_id))
+    ending_episode, ending_end = str(last.episode_id), float(last.end)
+    if film_map:
+        actual = [
+            rec for rec in film_map if str(rec.get("audio")) == "original"
+        ]
+        if actual:
+            ending_episode = str(actual[-1].get("episode_id") or ending_episode)
+            ending_end = float(actual[-1].get("source_end") or ending_end)
+    record = analysis_repo.get(context.conn, ending_episode)
     if record is None:
         return None, None
     lines = [
@@ -519,7 +564,7 @@ def _film_ending_of(
             str(record.get("asr_segments") or "")
         )
     ]
-    return float(last.end), lines or None
+    return ending_end, lines or None
 
 
 
@@ -536,9 +581,16 @@ def _selfcheck_one(context: AppContext, export_id: str) -> bool:
         return False
     media = probe.probe(out_path)
     plan_data = _load_plan_data(context, row.get("narration_plan_id"))
-    ending_end_s, ending_lines = _film_ending_of(context, plan_data)
+    film_map = _load_film_map(out_path)
+    ending_end_s, ending_lines = _film_ending_of(context, plan_data, film_map)
     avsync_samples = (
-        selfcheck.avsync_sample_points(plan_data.timeline) if plan_data is not None else None
+        selfcheck.avsync_sample_points(
+            plan_data.timeline,
+            measured_spans=film_map,
+            film_duration_s=media.duration_s,
+        )
+        if plan_data is not None
+        else None
     )
     payload = selfcheck.run(
         out_path,
@@ -939,7 +991,7 @@ def render_export(
     # export_jobs 与 jobs 两处同写，界面读哪张表都不会各说各话。
     reports: list[compute.ComputeReport] = []
     # 拼接清单上的实测偏移（成片逐句时间轴的刻度来源）；成功轮只会到一份，取最后一条
-    offsets_emitted: list[Sequence[tuple[int, float]]] = []
+    offsets_emitted: list[Sequence[dict[str, float | int | str]]] = []
     encoder.export_plan(
         plan_data,
         episode_paths,
@@ -975,10 +1027,14 @@ def render_export(
         context.job_store.set_compute(job_id, receipt)
     _log_clock_audit(context, clock_stats)
     exports_repo.mark_completed(context.conn, export_id, str(out_path))
+    film_map = list(offsets_emitted[-1]) if offsets_emitted else None
     _write_film_srt(
         context, out_path, burned_lines,
-        dict(offsets_emitted[-1]) if offsets_emitted else None,
+        {int(rec["seq"]): float(rec["film_start"]) for rec in film_map}
+        if film_map
+        else None,
     )
+    _write_film_map(context, out_path, film_map)
     try:
         media = probe.probe(out_path)
         exports_repo.set_meta(

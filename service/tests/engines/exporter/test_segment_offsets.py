@@ -85,16 +85,22 @@ def test_sink_receives_cumulative_measured_offsets_in_manifest_order(
     外层只准有一次回调：统一重跑（`_UniformCodecRetry`）在 concat 前就抛，
     成功轮只跑一次——多交一份会让上层写出两遍时间轴。
     """
-    seen: list[list[tuple[int, float]]] = []
+    seen: list[list[dict[str, float | int | str]]] = []
     _export(monkeypatch, tmp_path, sink=seen.append)
-    assert seen == [[(0, 0.0), (1, 10.0), (2, 15.5)]], f"实测偏移不对：{seen}"
+    # 批5 起记录富化：film_start 之外带 episode/audio/源侧安全窗——avsync 映射
+    # 与 ending 词级出点检查的刻度来源；偏移语义本身不变（前序段实测和）。
+    assert [rec["film_start"] for rec in seen[0]] == [0.0, 10.0, 15.5], (
+        f"实测偏移不对：{seen}"
+    )
+    assert {rec["seq"] for rec in seen[0]} == {0, 1, 2}
+    assert all(rec["episode_id"] == "ep1" for rec in seen[0])
 
 
 def test_probe_failure_yields_no_offsets_rather_than_guessed_ones(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """量不到＝不回调：偏移缺失由上层记成允许型降级，绝不拿声明时长凑一份假账。"""
-    seen: list[list[tuple[int, float]]] = []
+    seen: list[list[dict[str, float | int | str]]] = []
     _export(monkeypatch, tmp_path, sink=seen.append, probe_raises=True)
     assert seen == [], f"探测失败时不许交出偏移：{seen}"
 

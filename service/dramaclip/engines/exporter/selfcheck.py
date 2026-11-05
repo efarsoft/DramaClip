@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 import subprocess  # noqa: S404 - 参数为受控列表
 import time
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -207,12 +208,23 @@ _AVSYNC_TOL_S = 0.04  # 中位偏移与离散度阈值（互相关实测口径�
 def avsync_sample_points(
     timeline: list[Any],
     duration_fractions: tuple[float, ...] = _AVSYNC_FRACTIONS,
+    *,
+    measured_spans: Sequence[Mapping[str, Any]] | None = None,
+    film_duration_s: float | None = None,
 ) -> list[tuple[float, str, float]]:
     """按成片时间轴选 avsync 采样点（纯函数）：(成片时刻, 集 id, 源时刻)。
 
     只采 **原声段**：旁白段的声音是 TTS（原声被删/压底），互相关对不上源。
     源时刻 = 段源起点 +（成片时刻 − 段成片起点），时间轴顺序累加成片起点。
+
+    measured_spans（批5）：渲染层实测段对照（encoder._segment_offsets 的记录：
+    film_start/episode_id/audio/source_start）。给了就用实测刻度——声明窗口
+    不含 jitter/保护区/atempo，多段累积漂移可吃掉整个互相关搜索窗（漂移
+    <窗时算进 lag 假红、>窗时样本被丢归灰，两个方向都失真）。缺席（旧片
+    重测/无对照边车）回退声明窗口映射＝旧行为。
     """
+    if measured_spans:
+        return _avsync_points_measured(measured_spans, duration_fractions, film_duration_s)
     points: list[tuple[float, str, float]] = []
     film_cursor = 0.0
     spans: list[tuple[float, float, str, float]] = []
@@ -241,6 +253,52 @@ def avsync_sample_points(
             continue  # 采样点落在旁白段：跳过（TTS 音轨对不上源）
         source_t = source_start + (film_t - film_start)
         points.append((film_t, episode_id, round(source_t, 3)))
+    return points
+
+
+def _avsync_points_measured(
+    measured: Sequence[Mapping[str, Any]],
+    duration_fractions: tuple[float, ...],
+    film_duration_s: float | None,
+) -> list[tuple[float, str, float]]:
+    """实测刻度版采样：段长=相邻实测起点的差（尾段用成片实测总长补齐）。
+
+    源锚=渲染层记录的 jitter 后安全窗起点（source_start），不是声明 start——
+    两个值差着 ±0.3s/段的保护区外扩，累积起来正是互相关假红/丢样的来源。
+    """
+    ordered = sorted(measured, key=lambda rec: float(rec.get("film_start") or 0.0))
+    if not ordered:
+        return []
+    total = (
+        film_duration_s
+        if film_duration_s is not None and film_duration_s > 0
+        else float(ordered[-1].get("film_start") or 0.0)
+    )
+    spans: list[tuple[float, float, str, float, str]] = []
+    for pos, rec in enumerate(ordered):
+        start = float(rec.get("film_start") or 0.0)
+        end = (
+            float(ordered[pos + 1].get("film_start") or 0.0)
+            if pos + 1 < len(ordered)
+            else max(total, start)
+        )
+        spans.append(
+            (
+                start,
+                end,
+                str(rec.get("episode_id") or ""),
+                float(rec.get("source_start") or 0.0),
+                str(rec.get("audio") or ""),
+            )
+        )
+    points: list[tuple[float, str, float]] = []
+    for fraction in duration_fractions:
+        film_t = total * fraction
+        span = next((item for item in spans if item[0] <= film_t <= item[1]), None)
+        if span is None or span[4] != "original":
+            continue  # 采样点落在旁白段：跳过（TTS 音轨对不上源）
+        film_start, _film_end, episode_id, source_start, _audio = span
+        points.append((film_t, episode_id, round(source_start + (film_t - film_start), 3)))
     return points
 
 

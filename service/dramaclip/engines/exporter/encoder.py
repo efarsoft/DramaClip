@@ -692,13 +692,19 @@ class _SegmentJob:
 
 
 class _SegmentArtifact(NamedTuple):
-    """Phase A 交给 Phase B 的一份产物：时间轴序号 + 盘上路径。
+    """Phase A 交给 Phase B 的一份产物：序号 + 路径 + film map 所需源侧信息。
 
     序号跟着路径一起走，偏移才不必靠「两处各自排序再指望它们对齐」——清单序＝拼接序。
+    episode/audio/safe 窗供 _segment_offsets 产出成片↔源实测对照（avsync/ending
+    检查的刻度来源，见 selfcheck）。
     """
 
     seq: int
     path: Path
+    episode_id: str
+    audio: str
+    safe_start: float
+    safe_end: float
 
 
 def _sig_path_for(seg_path: Path) -> Path:
@@ -858,7 +864,7 @@ def export_plan(
     burn_ai_label: bool = False,
     compute_sink: Callable[[compute.ComputeReport], None] | None = None,
     encoder_requested: str = "",
-    segment_offsets_sink: Callable[[Sequence[tuple[int, float]]], None] | None = None,
+    segment_offsets_sink: Callable[[Sequence[dict[str, float | int | str]]], None] | None = None,
     bgm_track: Path | None = None,
 ) -> Path:
     """执行两阶段导出，返回成片路径。
@@ -966,7 +972,7 @@ def _export_plan_once(
     subtitle_erase_rects: dict[str, list[tuple[float, float]]] | None = None,
     subtitle_erase_windows: dict[str, list[tuple[float, float]]] | None = None,
     burn_ai_label: bool = False,
-    segment_offsets_sink: Callable[[Sequence[tuple[int, float]]], None] | None = None,
+    segment_offsets_sink: Callable[[Sequence[dict[str, float | int | str]]], None] | None = None,
     bgm_track: Path | None = None,
     _allow_uniform_retry: bool = True,
     _report_state: dict[str, Any] | None = None,
@@ -1077,10 +1083,15 @@ def _export_plan_once(
             )
         ):
             reused_count += 1
+            recorded = existing["recorded"]
             jobs.append(
                 _SegmentJob(
                     index=index, args=[], seg_path=seg_path, inputs=inputs,
-                    safe_start=0.0, safe_end=0.0, progress_duration=0.05,
+                    # 复用段接受上次的实际切点：film map（成片↔源对照）对复用段
+                    # 也要给实测值，0.0/0.0 会把 avsync 映射带回声明值时代。
+                    safe_start=float(recorded.get("safe_start") or segment.start),
+                    safe_end=float(recorded.get("safe_end") or segment.end),
+                    progress_duration=0.05,
                     burner_duration=0.0, subtitle_source=subtitle_source,
                     ass_sha256=None, reuse=True,
                 )
@@ -1448,18 +1459,30 @@ def _mix_bgm_bed(
     return mixed
 
 
-def _segment_offsets(manifest: list[_SegmentArtifact]) -> list[tuple[int, float]] | None:
-    """各段起点（秒）＝按拼接序累加**实测**段长；测不出返回 None，调用方据此不产出时间轴。
+def _segment_offsets(manifest: list[_SegmentArtifact]) -> list[dict[str, float | int | str]] | None:
+    """各段实测记录＝按拼接序累加**实测**段长 + 源侧实际切点；测不出返回 None。
 
     成片逐句时间轴只有这一个诚实来源：`timeline[].start/end` 是源片坐标，观众看到的
     是切完拼接后的成片坐标，两者差着 jitter 与保护区外扩。拿计划声明值凑一份等于把
     误差固化成"看起来精确"的假账，所以宁可不给。
+    记录含 (seq, film_start, episode_id, audio, source_start, source_end)——
+    source_* 是 jitter 后的安全窗实际值：avsync 成片→源映射与 ending 词级出点
+    检查都靠它对齐（此前用声明窗映射，多段累积漂移轻松吃掉互相关搜索窗）。
     """
-    offsets: list[tuple[int, float]] = []
+    offsets: list[dict[str, float | int | str]] = []
     cursor = 0.0
     try:
         for item in manifest:
-            offsets.append((item.seq, cursor))
+            offsets.append(
+                {
+                    "seq": item.seq,
+                    "film_start": round(cursor, 3),
+                    "episode_id": item.episode_id,
+                    "audio": item.audio,
+                    "source_start": round(item.safe_start, 3),
+                    "source_end": round(item.safe_end, 3),
+                }
+            )
             cursor += ffprobe_mod.probe(item.path).duration_s
     except Exception as exc:  # noqa: BLE001 - 测不出就不交付，别拿半截偏移冒充
         _LOGGER.warning("段偏移测量失败（%s）：本条成片不产出逐句时间轴", str(exc)[:200])
@@ -1484,7 +1507,14 @@ def _concat_manifest(jobs: list[_SegmentJob]) -> list[_SegmentArtifact]:
         except OSError:  # 缺盘/目录/权限问题一律按"这块产物不可信"
             usable = False
         if usable:
-            items.append(_SegmentArtifact(job.index, job.seg_path))
+            items.append(
+                _SegmentArtifact(
+                    job.index, job.seg_path,
+                    episode_id=str(job.inputs.get("episode_id") or ""),
+                    audio=str(job.inputs.get("audio") or ""),
+                    safe_start=job.safe_start, safe_end=job.safe_end,
+                )
+            )
         else:
             broken.append(f"第 {job.index + 1} 段（{job.seg_path.name}）")
     if broken:
