@@ -13,6 +13,7 @@ from dramaclip.engines.llm_trace import dump_trace, trace_path
 from dramaclip.engines.narration import casting, conversion, scriptwriter
 from dramaclip.engines.narration.models import NarrationText, PlanData, TimelineSegment
 from dramaclip.engines.narration.numerals import to_chinese_numerals
+from dramaclip.engines.narration.prompt_rules import RULE_TEXTS
 from dramaclip.engines.narration.prompt_rules import assemble as _assemble_rules
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable, client_for
 
@@ -136,8 +137,8 @@ def _slot_block(
         if frames:
             lines.append(
                 "  区间内画面轨（画面描写必须与这些实据一致；"
-                "轨内出现的任何文字如人名字条/题字是视频叠加物，"
-                "不得当台词或人名引用）："
+                + RULE_TEXTS["visual_text_overlay"]
+                + "）："
             )
             lines.extend(
                 f"    {scriptwriter.format_frame_line(frame)}" for frame in frames
