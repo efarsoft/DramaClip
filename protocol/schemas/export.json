@@ -551,6 +551,38 @@
       }
     },
     {
+      "name": "export.platform_covers",
+      "summary": "逐平台封面重裁（小红书 3:4/B站 16:10/视频号 6:7）：源素材重截帧→成片回退，失败进 skipped 不挡发布",
+      "params": {
+        "type": "object",
+        "required": [
+          "export_id"
+        ],
+        "properties": {
+          "export_id": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["ok", "covers", "skipped"],
+        "properties": {
+          "ok": { "type": "boolean" },
+          "covers": {
+            "type": "object",
+            "description": "平台名 → 已生成封面绝对路径",
+            "additionalProperties": { "type": "string" }
+          },
+          "skipped": {
+            "type": "object",
+            "description": "平台名 → 未生成原因（截帧失败）",
+            "additionalProperties": { "type": "string" }
+          }
+        }
+      }
+    },
+    {
       "name": "export.get",
       "summary": "单条导出记录（成片详情页数据源）",
       "params": {

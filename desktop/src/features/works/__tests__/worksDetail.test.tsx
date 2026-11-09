@@ -19,13 +19,15 @@ const api = vi.hoisted(() => ({
   generate: vi.fn(),
   update: vi.fn(),
   save: vi.fn(),
+  publishPack: vi.fn(),
+  platformCovers: vi.fn(),
 }));
 
 vi.mock('../../../services/client', () => ({
-  exportApi: { get: api.get, selfcheck: api.selfcheck },
+  exportApi: { get: api.get, selfcheck: api.selfcheck, platformCovers: api.platformCovers },
   projectApi: { get: api.projectGet },
   rpc: api.rpc,
-  titlesApi: { generate: api.generate, update: api.update },
+  titlesApi: { generate: api.generate, update: api.update, publishPack: api.publishPack },
   mediaUrl: (path: string) => `dramaclip://local/${path}`,
   revealInFolder: vi.fn().mockResolvedValue({ ok: true }),
   pickFolder: vi.fn().mockResolvedValue(null),
@@ -123,6 +125,9 @@ beforeEach(() => {
     },
   });
   api.selfcheck.mockResolvedValue({ ok: true, job_id: 'j1', queued: 1 });
+  // 逐平台发布包分区挂载即发 RPC：给空包/空封面，详情页其余用例不被新分区刷屏
+  api.publishPack.mockResolvedValue({ title: '', caption: null, tags: [], platforms: {} });
+  api.platformCovers.mockResolvedValue({ ok: true, covers: {}, skipped: {} });
   // 旁挂时间轴默认「文件不在」：详情页其余用例不该被一次真实的读盘失败刷屏
   stubSrtFetch({ ok: false, status: 404 });
 });

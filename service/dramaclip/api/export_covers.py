@@ -26,6 +26,7 @@ from dramaclip.engines.subtitle.ass_generator import (
 )
 from dramaclip.infra.ffmpeg import cover as ffmpeg_cover
 from dramaclip.infra.storage.repos import analysis as analysis_repo
+from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import exports as exports_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
 
@@ -436,6 +437,76 @@ def _plan_cover_promise(
         return None
     union = (min(rect[0] for rect in rects), max(rect[1] for rect in rects))
     return union if coverage_promised(union) else None
+
+
+def generate_platform_covers(
+    context: AppContext, export_id: str, row: dict[str, Any]
+) -> dict[str, Any]:
+    """逐平台封面重裁（增强项永不 raise）：源素材重截帧 → 成片回退 → skipped。
+
+    不裁现有封面：基础封面字层在底部（cover.py y=h-text_h-h/16），居中裁切
+    会把字切掉——从源按目标画幅 increase 填充 + 居中裁切重截，字层重烧。
+    9:16 平台（抖音/快手）直接用基础封面，不进重裁。
+    """
+    from dramaclip.engines.narration.publish_pack import PLATFORM_ORDER, PLATFORM_SPECS
+
+    out_path = Path(str(row.get("output_path") or ""))
+    covers_dir = context.data_dir / "covers" / "exports"
+    covers_dir.mkdir(parents=True, exist_ok=True)
+    title: str | None = None
+    plan_data: PlanData | None = None
+    episode_paths: dict[str, str] = {}
+    plan_id = str(row.get("narration_plan_id") or "")
+    if plan_id:
+        plan_row = plans_repo.get(context.conn, plan_id)
+        if plan_row is not None:
+            title = _cover_title(context, plan_row)
+            try:
+                plan_data = PlanData.model_validate(plan_row["plan_data"])
+            except ValidationError:
+                plan_data = None
+    if plan_data is not None:
+        episode_paths = {
+            str(ep["id"]): str(ep["source_path"])
+            for ep in episodes_repo.list_by_project(context.conn, str(row["project_id"]))
+        }
+    covers: dict[str, str] = {}
+    skipped: dict[str, str] = {}
+    for name in PLATFORM_ORDER:
+        ratio = PLATFORM_SPECS[name]["cover_ratio"]
+        if tuple(ratio) == (9, 16):
+            continue
+        width = 1080
+        height = round(width * ratio[1] / ratio[0])
+        target = covers_dir / f"{export_id}.{name}.jpg"
+        if target.is_file():
+            covers[name] = str(target)
+            continue
+        composition = (
+            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height}"
+        )
+        ok = False
+        if plan_data is not None:
+            try:
+                frame = _cover_source_frame(context.conn, plan_data, episode_paths, (width, height))
+            except Exception as exc:  # noqa: BLE001 - 增强项自诊断失败退回成片截
+                _note_degraded(context, "平台封面源截帧", f"{name} 封面改从成片截", exc)
+                frame = None
+            if frame is not None:
+                source, seek_s, _base = frame
+                ok = ffmpeg_cover.extract_cover(
+                    source, target, seek_s=seek_s, title=title, composition_vf=composition
+                )
+        if not ok and out_path.is_file():
+            ok = ffmpeg_cover.extract_cover(
+                out_path, target, title=title, composition_vf=composition
+            )
+        if ok:
+            covers[name] = str(target)
+        else:
+            skipped[name] = "截帧失败"
+    return {"ok": True, "covers": covers, "skipped": skipped}
 
 
 def ensure_covers(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:

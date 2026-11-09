@@ -53,6 +53,7 @@ def register(router: Router, context: AppContext) -> None:
     router.register("narration.plan_trace", lambda params: plan_trace(context, params))
     router.register("narration.generate_titles", lambda params: generate_titles(context, params))
     router.register("narration.update_titles", lambda params: update_titles(context, params))
+    router.register("narration.publish_pack", lambda params: publish_pack(context, params))
 
 
 def list_plans(context: AppContext, params: dict[str, Any]) -> list[dict[str, Any]]:
@@ -165,6 +166,20 @@ def generate_titles(context: AppContext, params: dict[str, Any]) -> dict[str, An
         "caption": result["caption"],
         "tags": result["tags"],
     }
+
+
+def publish_pack(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """逐平台发布包（只读）：标题/文案/标签与详情页同一份库快照。"""
+    from dramaclip.engines.narration import publish_pack as pack_engine
+
+    plan_id = str(params.get("plan_id", ""))
+    row = plans_repo.get(context.conn, plan_id)
+    if row is None:
+        raise RpcDomainError(_ERR_PLAN_NOT_FOUND, f"编排方案不存在: {plan_id}")
+    meta = row.get("publish_meta") or {}
+    return pack_engine.build_pack(
+        row.get("titles") or [], meta.get("caption"), meta.get("tags") or []
+    )
 
 
 def update_titles(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:

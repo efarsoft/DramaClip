@@ -434,6 +434,40 @@
           "content": { "type": "string" }
         }
       }
+    },
+    {
+      "name": "narration.publish_pack",
+      "summary": "逐平台发布包（只读）：标题/文案/标签与详情页同一份库快照，画幅/字数适配与实测话题注入在服务端",
+      "params": {
+        "type": "object",
+        "required": ["plan_id"],
+        "properties": { "plan_id": { "type": "string" } }
+      },
+      "result": {
+        "type": "object",
+        "required": ["title", "caption", "tags", "platforms"],
+        "properties": {
+          "title": { "type": "string", "description": "选用标题（无选用取第一条）" },
+          "caption": { "type": ["string", "null"] },
+          "tags": { "type": "array", "items": { "type": "string" }, "description": "注入实测高频话题后的标签（不带 # 号）" },
+          "platforms": {
+            "type": "object",
+            "description": "平台名 → 逐平台条目",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["title", "title_fits", "caption", "tags", "cover_ratio", "ai_declaration"],
+              "properties": {
+                "title": { "type": "string" },
+                "title_fits": { "type": "boolean", "description": "标题是否在该平台字数上限内（校验而非截断）" },
+                "caption": { "type": ["string", "null"] },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "cover_ratio": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+                "ai_declaration": { "type": "string", "description": "逐平台 AI 声明指引（运营建议，法定隐式标识另走 export.aigc_metadata）" }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

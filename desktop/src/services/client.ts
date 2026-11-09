@@ -4,7 +4,7 @@ import type {
   BgmRuntimeStatus, CopyFilesResult, DashboardSummary, DataPaths, DramaClipBridge,
   EngineConfig, ExportJob, ExportSubmitResult, ExportTranscriptsResult, HealthResult, ImportInspection,
   ImportRecord, JobInfo, JobsListResult, LlmTraceListResult, ModeRecommendation, ModelInfo, NarrationMode,
-  NarrationPlan, OrphanCopy, PingResult, PlanDetail, PlanTraceResult, PlanVariantsResult, Project,
+  NarrationPlan, OrphanCopy, PingResult, PlanDetail, PlanTraceResult, PlanVariantsResult, PlatformPack, Project,
   ProjectGetResult, PromptsListResult, RevealResult, RelayoutResult, SafeZoneMask, ScannedEpisode, SelftestResult,
   SelftestResults, ServiceEvent, StyleInfo, SubtitlePresetInfo, TitleCandidate, TtsAutoVoiceResult,
   ToolsExtractStartResult, ToolsGetResultResult, ToolsRewriteResult, ToolsTtsResult,
@@ -212,6 +212,12 @@ export const exportApi = {
     rpc<ExportJob[]>('export.list', { project_id: projectId }),
   ensureCovers: (limit = 200): Promise<{ ok: boolean; generated: number }> =>
     rpc<{ ok: boolean; generated: number }>('export.ensure_covers', { limit }),
+  /** 逐平台封面重裁（小红书 3:4/B站 16:10/视频号 6:7）；失败进 skipped 不挡发布。 */
+  platformCovers: (
+    exportId: string,
+  ): Promise<{ ok: boolean; covers: Record<string, string>; skipped: Record<string, string> }> =>
+    rpc<{ ok: boolean; covers: Record<string, string>; skipped: Record<string, string> }>(
+      'export.platform_covers', { export_id: exportId }),
   get: (exportId: string): Promise<ExportJob> =>
     rpc<ExportJob>('export.get', { export_id: exportId }),
   /** 删除成片（§3.4）：服务端把文件移入 .trash/<日期>/ 后删记录；missing=盘上已缺的文件。 */
@@ -251,6 +257,8 @@ export const titlesApi = {
       'narration.generate_titles', { plan_id: planId }),
   update: (planId: string, titles: TitleCandidate[]): Promise<{ titles: TitleCandidate[] }> =>
     rpc<{ titles: TitleCandidate[] }>('narration.update_titles', { plan_id: planId, titles }),
+  publishPack: (planId: string): Promise<PlatformPack> =>
+    rpc<PlatformPack>('narration.publish_pack', { plan_id: planId }),
 } as const;
 
 export const runtimeApi = {

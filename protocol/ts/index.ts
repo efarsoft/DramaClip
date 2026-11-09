@@ -282,6 +282,24 @@ export interface SafeZoneMask {
   readonly bottom: number;
   readonly note: string;
 }
+
+/** 逐平台发布包条目（narration.publish_pack）：规格与话题注入在服务端单持。 */
+export interface PlatformPackEntry {
+  readonly title: string;
+  readonly title_fits: boolean;
+  readonly caption: string | null;
+  readonly tags: string[];
+  readonly cover_ratio: readonly [number, number];
+  readonly ai_declaration: string;
+}
+
+export interface PlatformPack {
+  readonly title: string;
+  readonly caption: string | null;
+  readonly tags: string[];
+  readonly platforms: Record<string, PlatformPackEntry>;
+}
+
 export interface JobsListResult {
   readonly jobs: JobInfo[];
   readonly server_time_ms: number;
@@ -952,6 +970,7 @@ export const METHOD_NAMES = [
   'export.list',
   'export.list_works',
   'export.ensure_covers',
+  'export.platform_covers',
   'export.delete',
   'export.selfcheck',
   'export.set_publish_data',
@@ -968,6 +987,7 @@ export const METHOD_NAMES = [
   'bgm.runtime_status',
   'narration.generate_titles',
   'narration.update_titles',
+  'narration.publish_pack',
   'export.get',
   'jobs.list',
   'jobs.get',

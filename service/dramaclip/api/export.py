@@ -33,6 +33,7 @@ from dramaclip.api.export_covers import (
     _subtitle_cover,
     crop_dialogue_lines,
     ensure_covers,
+    generate_platform_covers,
 )
 from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.bgm import library as bgm_library
@@ -98,6 +99,7 @@ def register(router: Router, context: AppContext) -> None:
     router.register("export.list_works", lambda params: list_works(context, params))
     router.register("export.get", lambda params: get_export(context, params))
     router.register("export.ensure_covers", lambda params: ensure_covers(context, params))
+    router.register("export.platform_covers", lambda params: platform_covers(context, params))
     router.register("export.delete", lambda params: delete_export(context, params))
     router.register("export.selfcheck", lambda params: selfcheck_batch(context, params))
     router.register("export.set_publish_data", lambda params: set_publish_data(context, params))
@@ -305,6 +307,15 @@ def get_export(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     if row is None:
         raise RpcDomainError(_ERR_EXPORT_NOT_FOUND, f"导出记录不存在: {export_id}")
     return _decode_json_columns(row, ("selfcheck",))
+
+
+def platform_covers(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """逐平台封面重裁：记录不存在拒收；截帧失败进 skipped（增强项不挡发布）。"""
+    export_id = str(params.get("export_id", ""))
+    row = exports_repo.get(context.conn, export_id)
+    if row is None:
+        raise RpcDomainError(_ERR_EXPORT_NOT_FOUND, f"导出记录不存在: {export_id}")
+    return generate_platform_covers(context, export_id, row)
 
 
 def set_publish_data(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
