@@ -18,6 +18,7 @@ import { mixins } from '../../styles/mixins';
 import { layout, tokens } from '../../styles/theme';
 import { SelfCheckSection } from './SelfCheckSection';
 import { PlatformPackSection } from './PlatformPackSection';
+import { PublishChecklistSection } from './PublishChecklistSection';
 import { TitlesSection } from './TitlesSection';
 import { useWorkDetail } from './useWorkDetail';
 import { episodeLabel } from './worksView';
@@ -113,6 +114,7 @@ export function WorksDetailPage(): ReactElement {
               onSelect={detail.onSelectTitles}
             />
             <PlatformPackSection planId={detail.planId} exportId={detail.job.id} titles={detail.titles} />
+            <PublishChecklistSection titles={detail.titles} publish={detail.publish} />
             <PublishDataSection job={detail.job} onReload={detail.reload} />
           </div>
         </div>
