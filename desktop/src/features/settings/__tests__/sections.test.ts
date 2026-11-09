@@ -23,6 +23,7 @@ const KNOWN_KEYS = new Set([
   'export.ai_label',
   'export.aigc_metadata',
   'export.aigc_producer_code',
+  'export.drama_name_layer',
   'agent_gateway.enabled',
   'agent_gateway.port',
   'agent_gateway.token',

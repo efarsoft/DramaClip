@@ -31,7 +31,7 @@ from typing import Any, NamedTuple
 from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.dedup import jitter
 from dramaclip.engines.dedup import params as dedup_params
-from dramaclip.engines.exporter import ai_label, aigc_metadata, loudness
+from dramaclip.engines.exporter import ai_label, aigc_metadata, drama_name_layer, loudness
 from dramaclip.engines.narration.models import PlanData, TimelineSegment
 from dramaclip.engines.subtitle import caption_font
 from dramaclip.infra import compute, config
@@ -293,6 +293,7 @@ def cut_segment_args(
     erase_rects: list[tuple[float, float]] | None = None,
     erase_windows: list[tuple[float, float]] | None = None,
     ai_label_vf: str | None = None,
+    drama_name_vf: str | None = None,
     fps: float = _FALLBACK_FPS,
 ) -> list[str]:
     """构建单段切割命令（Phase A）。
@@ -370,6 +371,9 @@ def cut_segment_args(
             f"ass={_escape_filter_path(ass_path)}"
             f":{caption_font.fontsdir_option(caption_font.caption_font())}"
         )
+    if drama_name_vf:
+        # 剧名层在 AI 标注之前挂（左上/右上各占一角，顺序稳定供单测钉形状）。
+        filters.append(drama_name_vf)
     if ai_label_vf:
         # AI 标注在每段烧一次：Phase B 流复制拼接，硬编成果不再整片重编。
         # 失败即该段失败，交给现有段级回退/整片统一重跑——不允许无标注成片。
@@ -867,6 +871,7 @@ def export_plan(
     segment_offsets_sink: Callable[[Sequence[dict[str, float | int | str]]], None] | None = None,
     bgm_track: Path | None = None,
     aigc_stamp: tuple[str, str] | None = None,
+    burn_drama_name: str | None = None,
 ) -> Path:
     """执行两阶段导出，返回成片路径。
 
@@ -904,6 +909,7 @@ def export_plan(
             segment_offsets_sink=segment_offsets_sink,
             bgm_track=bgm_track,
             aigc_stamp=aigc_stamp,
+            burn_drama_name=burn_drama_name,
             _allow_uniform_retry=True,
             _report_state=state,
         )
@@ -937,6 +943,7 @@ def export_plan(
             segment_offsets_sink=segment_offsets_sink,
             bgm_track=bgm_track,
             aigc_stamp=aigc_stamp,
+            burn_drama_name=burn_drama_name,
             _allow_uniform_retry=False,
             _report_state=state,
         )
@@ -978,6 +985,7 @@ def _export_plan_once(
     segment_offsets_sink: Callable[[Sequence[dict[str, float | int | str]]], None] | None = None,
     bgm_track: Path | None = None,
     aigc_stamp: tuple[str, str] | None = None,
+    burn_drama_name: str | None = None,
     _allow_uniform_retry: bool = True,
     _report_state: dict[str, Any] | None = None,
 ) -> Path:
@@ -1003,6 +1011,11 @@ def _export_plan_once(
     # 字号/边距由**解析后的画布**决定，不能用调用方传的上限猜；字体缺失在这里
     # 硬失败（早于任何段编码），不给「跑了半小时才说标不了」的路径。
     label_spec = ai_label.prepare(work_dir, out_size) if burn_ai_label else None
+    drama_spec = (
+        drama_name_layer.prepare(work_dir, out_size, burn_drama_name)
+        if burn_drama_name
+        else None
+    )
     _prune_stale_segments(work_dir, total)
 
     # Phase A：构建每段命令参数（含台词保护区安全切点、字幕、混音）；
@@ -1072,6 +1085,9 @@ def _export_plan_once(
         if label_spec is not None:
             # 只在开启时入签名：关闭标注的旧缓存逐字节兼容（键缺席 == 未开启）。
             inputs["ai_label"] = label_spec.fingerprint
+        if drama_spec is not None:
+            # 只在开启时入签名：关闭的旧缓存逐字节兼容（键缺席 == 未开启）。
+            inputs["drama_name"] = drama_spec.fingerprint
         existing = _read_sig(seg_path)
         if (
             existing is not None
@@ -1158,6 +1174,7 @@ def _export_plan_once(
                     # OCR 条按帧拼接整行文本，行级时间没有落库。
                     erase_windows=(subtitle_erase_windows or {}).get(segment.episode_id),
                     ai_label_vf=None if label_spec is None else label_spec.vf,
+                    drama_name_vf=None if drama_spec is None else drama_spec.vf,
                 ),
                 seg_path=seg_path,
                 inputs=inputs,

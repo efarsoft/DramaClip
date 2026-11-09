@@ -38,7 +38,14 @@ from dramaclip.api.export_covers import (
 from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.bgm import library as bgm_library
 from dramaclip.engines.bgm import selector as bgm_selector
-from dramaclip.engines.exporter import ai_label, aigc_metadata, encoder, loudness, selfcheck
+from dramaclip.engines.exporter import (
+    ai_label,
+    aigc_metadata,
+    drama_name_layer,
+    encoder,
+    loudness,
+    selfcheck,
+)
 from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
@@ -1049,6 +1056,10 @@ def render_export(
         loudness_target=loudness.LoudnessTarget.from_settings(context.settings),
         # AI 生成标注（业主裁决 2026-10-15：用户开关、默认关闭；键名由 ai_label 模块单持）
         burn_ai_label=ai_label.enabled(context.settings),
+        # 剧名常驻层（业主裁决 2026-11-09：默认关、用户可开）：剧名取项目名。
+        burn_drama_name=(
+            project_name if drama_name_layer.enabled(context.settings) else None
+        ),
         compute_sink=reports.append,
         encoder_requested=codec_setting,
         segment_offsets_sink=offsets_emitted.append,

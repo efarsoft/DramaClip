@@ -102,6 +102,9 @@ DEFAULTS: dict[str, str] = {
     # 提供者编码是法定必填项，空值在 submit 即拒。
     "export.aigc_metadata": "false",
     "export.aigc_producer_code": "",
+    # 剧名常驻层（业主裁决 2026-11-09）：默认关、用户可开；开启后每段左上角
+    # 烧剧名（项目名），与右上角 AI 标注避让。出品方要求推广切片全程带剧名。
+    "export.drama_name_layer": "false",
     # BGM 床总开关（C 项接线，默认开）：曲库空/该模式不该铺时自动无 BGM＝现状出片，
     # 开着不改变无曲用户的行为——「无曲可用＝逐字节一致」是 selector 的硬验收。
     "export.bgm": "1",
