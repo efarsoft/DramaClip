@@ -54,10 +54,11 @@ def _structure_prompt(mode: str) -> str:
             "硬性要求（一字不差）：{lines_cover_all_slots}"
             f"每条不超过 {_line_cap_of(mode)} 字；"
             "{slot_contract}"
-            "情节、细节、称谓只能来自给定台词与区间内画面轨实据，禁止编造两者之外的事件。"
+            # 编造禁令/条尾半句钩/「念着拗口」三簇已由基本功层（FUND_BASE
+            # 纪律 + SLOT 手艺卡）逐字承担——同一指令在一份 system 里出现
+            # 两三遍不提高遵从率，只摊薄其它规则的注意力（2026-11-04 审查 #8）。
             "写法（稀疏用，别每段齐备——真人有偏科）：开场可引区内最冲突原话、"
-            "条尾可留半句钩勾住下一条；口语短句，转折只用结果/谁知/哪成想；"
-            "念着拗口就重写，这段要被配音念出来，不是给人看的文章。"
+            "口语短句，转折只用结果/谁知/哪成想。"
             "全篇手艺（本次调用看得到全部槽位，这两条做得到）：{no_same_ending_adjacent}；{core_motif_cap}"
 
     )
@@ -75,6 +76,16 @@ def system_prompt(settings: dict[str, str], mode: str = "") -> str:
     """
     overrides = llm_prompts.overrides_from(settings)
     structure = overrides.get("prompt.copywriter_system") or _structure_prompt(mode)
+    if overrides.get("prompt.copywriter_system") and mode:
+        # 覆盖文本是 60 字档缺省的快照：编辑过的 system 不再随模式重拼，超短
+        # 的 240 字帽会静默失效（6 秒残件教训倒放）——覆盖之上补一行模式帽并
+        # 声明优先级，覆盖自由度与模式安全两全（2026-11-04 审查 #6）。
+        structure = (
+            structure
+            + "\n（当前模式 "
+            + mode
+            + f"：每条不超过 {_line_cap_of(mode)} 字——若与上文行帽冲突，以本行为准。）"
+        )
     return structure + scriptwriter.fundamentals_layer(overrides, scope="slot")
 
 
@@ -286,7 +297,7 @@ def write_plan_copy(
         attempts.append({"raw": raw, "accepted": True})
         break
     if filled is not None:
-        filled, repair = _repair_closing(plan, filled, llm, system, line_cap)
+        filled, repair = _repair_closing(plan, filled, llm)
         if repair is not None:
             attempts.append(repair)
     stamp_time = time.strftime("%m%d_%H%M%S")
@@ -307,8 +318,14 @@ def write_plan_copy(
     })
 
 
+_CLOSING_REPAIR_SYSTEM = (
+    "你是短剧解说收尾修写器：只重写给定的一句收尾，保留其悬念缺口与信息，"
+    "结尾补上指向看全集的转化引导。只输出 JSON，不要其他文字。"
+)
+
+
 def _repair_closing(
-    plan: PlanData, filled: dict[str, str], llm: LlmClient, system: str, line_cap: int
+    plan: PlanData, filled: dict[str, str], llm: LlmClient
 ) -> tuple[dict[str, str], dict[str, Any] | None]:
     """收尾槽缺「看全集」转化指令时定向重写一次（落库前代码兜底）。
 
@@ -324,20 +341,31 @@ def _repair_closing(
     original = filled[closing_id]
     if not conversion.cta_missing(original):
         return filled, None
+    # 单句定向任务不背整套成稿 system（结构指令+FUND 全卡稀释焦点也费 token）；
+    # 行帽取该槽 char_budget（收尾 brief 常为 15 字档），不再用全局 60 字帽
+    # ——修复产物比 brief 允许的长 4 倍就失去了修复意义（2026-11-04 审查 #7）。
+    closing_text = next(
+        (item for item in plan.narration_texts if item.id == closing_id), None
+    )
+    budget = (
+        int(closing_text.char_budget)
+        if closing_text is not None and closing_text.char_budget
+        else 15
+    )
     prompt = (
         f"你写的收尾文案缺「指向看全集」的转化引导。原稿：{original}\n"
         f"重写这一句：保留悬念缺口与既有的冲突信息，结尾必须包含「全集」或「点进去」"
-        f"字样（如「想看这笔账怎么算清，点击左下角看全集」）；不超过 {line_cap} 字；"
+        f"字样（如「想看这笔账怎么算清，点击左下角看全集」）；不超过 {budget} 字；"
         "禁「关注/点赞/二维码」；不得编造转写外情节。"
         '只输出 JSON：{"text": "重写后的收尾"}'
     )
     try:
-        raw = llm.chat_json(system, prompt, temperature=0.75)
+        raw = llm.chat_json(_CLOSING_REPAIR_SYSTEM, prompt, temperature=0.75)
         text_raw = raw.get("text") if isinstance(raw, dict) else None
         text = to_chinese_numerals(str(text_raw or "").strip())
     except (LlmUnavailable, ValueError, TypeError, KeyError):
         return filled, {"closing_repair_failed": original}
-    oversize_cap = int(line_cap * _OVERSIZE_TOLERANCE)
+    oversize_cap = int(budget * _OVERSIZE_TOLERANCE)
     if text and len(text) <= oversize_cap and not conversion.cta_missing(text):
         return {**filled, closing_id: text}, {
             "closing_repair": {"original": original, "repaired": text}

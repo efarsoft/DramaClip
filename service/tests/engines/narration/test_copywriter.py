@@ -460,7 +460,7 @@ def test_closing_without_cta_gets_one_targeted_rewrite(llm: Any) -> None:
     """
     llm.queue = [
         _bad_closing_lines(),
-        {"text": "锅一脱修为当场解封，想看这笔账怎么算清，点击左下角看全集"},
+        {"text": "这笔账怎么算清？点击左下角看全集"},  # 16字：批B起修复帽=槽位budget(15)×1.2
     ]
     plan = copywriter.write_plan_copy(
         _plan(), _MATERIAL, _SETTINGS, mode_label=_MODE_LABEL, angle_block=""
