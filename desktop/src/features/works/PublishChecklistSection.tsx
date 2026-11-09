@@ -19,7 +19,7 @@ export function PublishChecklistSection({
   const copy = (): void => {
     void navigator.clipboard.writeText(buildPublishCopy(titles, publish)).then(() => {
       message.success('发布包与自查清单已复制');
-    });
+    }).catch(() => message.error('复制到剪贴板失败'));
   };
   return (
     <PageSection

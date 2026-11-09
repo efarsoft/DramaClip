@@ -1,4 +1,4 @@
-/** 成片详情·自检四项分区：徽章三态 + 度量原文整段上屏（不截断），未检可补测、跑完可刷新。 */
+/** 成片详情·成片自检分区：徽章三态 + 度量原文整段上屏（不截断），未检可补测、跑完可刷新。 */
 import type { ReactElement } from 'react';
 import { Button } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
@@ -20,7 +20,7 @@ export function SelfCheckSection({
   const badges = selfCheckBadges(selfcheck);
   return (
     <PageSection
-      title="自检四项"
+      title="成片自检"
       extra={
         <span style={{ display: 'flex', gap: tokens.spaceSm }}>
           <Button size="small" icon={<ReloadOutlined />} onClick={onReload}>

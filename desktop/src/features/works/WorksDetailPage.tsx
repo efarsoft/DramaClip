@@ -1,4 +1,4 @@
-/** 成片详情页：预览 + 文件（完整路径）+ 追溯（角度·取材集·方案区）+ 自检四项 + 逐句核对与标题。 */
+/** 成片详情页：预览 + 文件（完整路径）+ 追溯（角度·取材集·方案区）+ 成片自检 + 逐句核对与标题。 */
 import { CopyOutlined, DownloadOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button, DatePicker, Empty, InputNumber, Select, Tag } from 'antd';
 import type { ReactElement, RefObject } from 'react';
