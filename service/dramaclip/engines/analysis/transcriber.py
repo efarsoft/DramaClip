@@ -1062,21 +1062,50 @@ class DashscopeCloudAsrEngine:
                 )
         return chunks
 
+    _NET_BACKOFF = (5.0, 15.0)  # SDK 网络类异常短退避：抖动型故障两轮内多数自愈
+
     def _call(
         self, client: Any, clip_path: Path, sample_rate: int
     ) -> list[dict[str, Any]]:
-        """单片同步转写，返回 sentences 列表（字级 words 含 speaker_id）。"""
+        """单片同步转写，返回 sentences 列表（字级 words 含 speaker_id）。
+
+        SDK 网络类异常短退避重试（一次抖动不该让整片切片连坐跳过）；业务
+        响应（status_code != 200：配额/参数/模型错）不重试如实上抛。
+        """
+        import time  # noqa: PLC0415
+
         kwargs: dict[str, Any] = {}
         if self._diarization:
             kwargs["speaker_diarization_enabled"] = True
-        rsp = client.call(
-            model=self._model,
-            messages=[{"role": "user", "content": [{"audio": f"file://{clip_path}"}]}],
-            format="wav",
-            sample_rate=str(sample_rate),
-            api_key=self._api_key,  # 逐请求带：SDK 的模块级 api_key 会被并发任务互覆
-            **kwargs,
-        )
+        rsp = None
+        last_exc: Exception | None = None
+        for attempt in range(len(self._NET_BACKOFF) + 1):
+            try:
+                rsp = client.call(
+                    model=self._model,
+                    messages=[{"role": "user", "content": [{"audio": f"file://{clip_path}"}]}],
+                    format="wav",
+                    sample_rate=str(sample_rate),
+                    api_key=self._api_key,  # 逐请求带：SDK 的模块级 api_key 会被并发任务互覆
+                    **kwargs,
+                )
+                last_exc = None
+                break
+            except Exception as exc:  # noqa: BLE001 - SDK 网络层异常类型不承诺，宽捕
+                last_exc = exc
+                if attempt >= len(self._NET_BACKOFF):
+                    break
+                pause = self._NET_BACKOFF[attempt]
+                _LOGGER.warning(
+                    "云端转写网络类失败（%s），%.0fs 后重试 (%d/%d)",
+                    exc, pause, attempt + 1, len(self._NET_BACKOFF),
+                )
+                time.sleep(pause)
+        if last_exc is not None:
+            raise RuntimeError(
+                f"云端转写失败（{self._model}，已重试 {len(self._NET_BACKOFF)} 次）: {last_exc}"
+            ) from last_exc
+        assert rsp is not None
         if rsp.status_code != 200:
             raise RuntimeError(
                 f"云端转写失败（{self._model}）: {rsp.code} {rsp.message}"

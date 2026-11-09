@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 _REQUEST_TIMEOUT_S = 60
+_NET_RETRY_BACKOFF = (5.0, 15.0)  # 网络类失败短退避：抖动型故障两轮内多数自愈
 _429_BACKOFF = [30, 60, 120]
 
 logger = logging.getLogger(__name__)
@@ -137,7 +138,14 @@ class LlmClient:
     def _urlopen_with_429_backoff(
         self, headers: dict[str, str], data: bytes
     ) -> dict[str, Any]:
-        for attempt, wait in enumerate(_429_BACKOFF):
+        """网络类失败（连接重置/超时）短退避重试后才认输——一次抖动不该炸整条任务。
+
+        非 429 的 HTTP 错误（鉴权/参数/模型名）仍立即上抛：那类重试没有意义。
+        """
+        net_failures = 0
+        rate_failures = 0
+        wait: float = 0.0
+        while True:
             req = urllib.request.Request(
                 f"{self._config.base_url}/chat/completions",
                 data=data,
@@ -149,16 +157,27 @@ class LlmClient:
                     raw = json.loads(resp.read().decode("utf-8"))
                     return dict(raw)
             except urllib.error.HTTPError as exc:
-                if exc.code == 429 and attempt < len(_429_BACKOFF) - 1:
-                    logger.warning(
-                        "LLM 429 限流，%ds 后重试 (%d/%d)", wait, attempt + 1, len(_429_BACKOFF)
-                    )
-                    time.sleep(wait)
-                    continue
-                raise LlmUnavailable(f"LLM 请求失败: {exc}") from exc
-            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
-                raise LlmUnavailable(f"LLM 请求失败: {exc}") from exc
-        raise LlmUnavailable("LLM 请求失败: 重试耗尽")
+                if exc.code != 429:
+                    raise LlmUnavailable(f"LLM 请求失败: {exc}") from exc
+                rate_failures += 1
+                if rate_failures >= len(_429_BACKOFF):
+                    raise LlmUnavailable("LLM 请求失败: 429 重试耗尽") from exc
+                wait = _429_BACKOFF[rate_failures - 1]
+                logger.warning(
+                    "LLM 429 限流，%ds 后重试 (%d/%d)",
+                    wait, rate_failures, len(_429_BACKOFF),
+                )
+                time.sleep(wait)
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                net_failures += 1
+                if net_failures > len(_NET_RETRY_BACKOFF):
+                    raise LlmUnavailable(f"LLM 请求失败: {exc}") from exc
+                wait = _NET_RETRY_BACKOFF[net_failures - 1]
+                logger.warning(
+                    "LLM 网络类失败（%s），%.0fs 后重试 (%d/%d)",
+                    exc, wait, net_failures, len(_NET_RETRY_BACKOFF),
+                )
+                time.sleep(wait)
 
 
 def _strip_reasoning_blocks(text: str) -> str:

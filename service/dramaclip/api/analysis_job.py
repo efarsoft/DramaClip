@@ -392,6 +392,8 @@ def _run_job(
         bars_by_episode, bands_by_episode, lines_by_episode, hotwords = _mine_hotwords(
             context, targets, cancel_event, on_episode=mining_report
         )
+        # 精炼熔断计数（稳定收尾批）：连续 2 集调用失败后跳过 LLM 精炼
+        refine_state = {"failures": 0, "tripped": False}
         for index, episode in enumerate(targets):
             if cancel_event.is_set():
                 context.job_store.mark_cancelled(job_id)
@@ -407,6 +409,7 @@ def _run_job(
                 language,
                 cancel_event,
                 vision=vision,
+                refine_state=refine_state,
                 ocr_bars=bars,
                 ocr_lines=lines_by_episode.get(episode_id),
                 ocr_band=bands_by_episode.get(episode_id),
@@ -449,6 +452,7 @@ def _analyze_one(
     cancel_event: threading.Event,
     *,
     vision: vision_engine.VisionSession | vision_engine.CloudVisionSession | None = None,
+    refine_state: dict[str, int | bool] | None = None,
     ocr_bars: list[OcrSegment] | None = None,
     ocr_band: tuple[float, float] | None = None,
     ocr_lines: list[tuple[float, float]] | None = None,
@@ -549,14 +553,36 @@ def _analyze_one(
                 episodes_repo.set_source_signature(context.conn, episode_id, signature)
             # 转写精炼（LLM 断句+语境校对）：本地 ASR 完成后、语义前——下游全线吃到干净文本。
             # 分档：LLM 未配置/护栏拒绝/调用失败都回退融合产物，不挡分析。
-            refine_outcome = llm_refine.refine_segments(
-                asr_segments,
-                ocr_segments=ocr_segments,
-                project_name=_project_name_of(context, episode),
-                hotwords=hotwords,
-                settings=context.settings,
-            )
-            if refine_outcome.applied:
+            # 连续失败熔断（稳定收尾批）：端点挂死时每集要吃满重试+超时（240s 档
+            # 连乘下 30 集批可拖数小时且占着分析闸）——连续 2 集「调用失败」后，
+            # 本任务后续集跳过精炼直接用融合分段，留痕一次。
+            tripped = bool(refine_state.get("tripped")) if refine_state else False
+            if tripped:
+                refine_outcome = None
+            else:
+                refine_outcome = llm_refine.refine_segments(
+                    asr_segments,
+                    ocr_segments=ocr_segments,
+                    project_name=_project_name_of(context, episode),
+                    hotwords=hotwords,
+                    settings=context.settings,
+                )
+            if refine_outcome is not None and refine_state is not None:
+                failed = (
+                    not refine_outcome.applied and "attempt" in refine_outcome.detail
+                )
+                refine_state["failures"] = (
+                    int(refine_state.get("failures", 0)) + 1 if failed else 0
+                )
+                if refine_state["failures"] >= 2 and not refine_state.get("tripped"):
+                    refine_state["tripped"] = True
+                    context.notifier.log(
+                        "warning",
+                        "转写精炼连续失败，本任务后续集跳过精炼（产物为融合分段）；"
+                        "端点恢复后重跑分析即可补上",
+                        job_id=job_id,
+                    )
+            if refine_outcome is not None and refine_outcome.applied:
                 asr_segments = refine_outcome.segments
                 # 回写这一列：上面的 upsert 存的是融合分段，只改内存变量的话
                 # narration/auto_voice 读到的仍是精炼前文本，本层等于白跑。
@@ -571,7 +597,7 @@ def _analyze_one(
                     f"{label} 转写精炼：{len(asr_segments)} 句（{refine_outcome.detail}）",
                     job_id=job_id,
                 )
-            elif refine_outcome.detail not in ("LLM 未配置",):
+            elif refine_outcome is not None and refine_outcome.detail not in ("LLM 未配置",):
                 context.notifier.log(
                     "warn",
                     f"{label} 转写精炼未生效（{refine_outcome.detail}）；产物为融合分段",

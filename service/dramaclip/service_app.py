@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import faulthandler
+import shutil
 import signal
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 from dramaclip import PROTOCOL_VERSION, __version__
@@ -55,6 +57,8 @@ EXPLICIT_LIGHT_QUERIES = frozenset(
         "narration.list_styles",
         "narration.llm_traces",
         "narration.plan_trace",
+        "narration.publish_pack",
+        "subtitle.safe_zone",
         "progress.update",
         "project.dashboard_summary",
         "project.get",
@@ -64,6 +68,26 @@ EXPLICIT_LIGHT_QUERIES = frozenset(
         "subtitle.list_presets",
     }
 )
+
+
+def _purge_trash(trash_dir: Path, *, keep_days: int) -> None:
+    """回收站按目录日期轮转：早于 keep_days 天的日期目录整目录删除。"""
+    import time
+
+    try:
+        cutoff = time.time() - keep_days * 86400
+        removed = 0
+        for entry in trash_dir.iterdir():
+            try:
+                if entry.is_dir() and entry.stat().st_mtime < cutoff:
+                    shutil.rmtree(entry, ignore_errors=True)
+                    removed += 1
+            except OSError:
+                continue  # 单目录失败不挡其他目录与启动
+        if removed:
+            print(f"[trash] 回收站轮转：清理 {removed} 个超过 {keep_days} 天的目录")
+    except OSError:
+        pass  # 回收站不存在（从未删除过成片）= 正常
 
 
 def _is_light_query(method: str) -> bool:
@@ -112,6 +136,9 @@ class ServiceApp:
                 f"分析中集 {stale_episodes} 个，未完成导出 {stale_exports} 个，"
                 f"分析中项目 {stale_projects} 个"
             )
+        # 回收站轮转（稳定收尾批）：删除的成片按日期暂存 .trash/<日期>/，30 天
+        # 前的自动清——此前永不清理，磁盘单调涨满。删不动（占用中）静默留给下轮。
+        _purge_trash(data_dir / ".trash", keep_days=30)
         gpu.prefetch()  # GPU 探测慢（nvidia-smi），启动即后台预热，health 不阻塞
         # 模型库状态/体积缓存预热（同 gpu.prefetch 模式）：placement 树首触扫描在冷盘
         # 环境是十秒级（真机 2026-10-19），不预热则引擎中心首开必等一次

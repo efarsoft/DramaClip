@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -405,8 +406,14 @@ def synthesize_narration_texts(
     rewrite_for_fit: Callable[[str, int], str | None] | None = None,
     scene_cuts: dict[str, list[float]] | None = None,
     dialogue_spans: dict[str, list[tuple[float, float]]] | None = None,
+    cancel: threading.Event | None = None,
 ) -> PlanData:
     """逐段合成旁白并按 narration_id 回填时长与解说字幕。
+
+    `cancel`（稳定收尾批）：段循环头逐段检查——IndexTTS CPU 档单段 2~3 分钟，
+    此前取消只在导出入口查一次、配音循环内无效，取消一个几十段的配音导出
+    会白跑小时级（白占 worker 与云端费用）。取消异常上抛由外层按
+    cancel_event 判 cancelled 落账。
 
     `source_durations` 是 {集 id: 源片秒数}，必填而非可选：回填会把段尾改成
     `start + 实测音频时长`，只有拿到源长才知道这个窗口还在不在素材里。给默认值
@@ -447,6 +454,8 @@ def synthesize_narration_texts(
     voiced: dict[str, tuple[str, str, float]] = {}  # id → (audio_path, text, duration)
     total_segments = len(plan.narration_texts)
     for item in plan.narration_texts:
+        if cancel is not None and cancel.is_set():
+            raise RuntimeError("导出已取消：配音在段间中断")
         # 段级 voice 优先（双人对谈的双音色）——但仅当它对当前引擎有意义：
         # 双人/独白槽位硬编码的是 Edge 音色名，引擎切到克隆系后名字不再是文件，
         # 必须回退引擎默认音色（voice_for），否则克隆引擎拿名字当路径报错。

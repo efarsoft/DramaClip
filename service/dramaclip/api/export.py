@@ -158,6 +158,20 @@ def submit(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, list) or not raw:
         raise RpcDomainError(_ERR_NO_PLANS, "plan_ids 必须是非空数组")
     plan_ids = list(dict.fromkeys(str(item) for item in raw))
+    # 低盘留痕（稳定收尾批）：剩余 <5GB 记允许型降级——不拦导出（用户自担），
+    # 但「盘要满了」必须进任务详情与日志，不能等 sqlite 写炸才发现。
+    try:
+        import shutil
+
+        free_gb = shutil.disk_usage(context.data_dir).free / 1024**3
+        if free_gb < 5.0:
+            context.notifier.log(
+                "warning",
+                f"数据盘剩余仅 {free_gb:.1f}GB（<5GB）：导出可能中途写满失败，"
+                "建议清理成品回收站或迁移数据目录（设置 → 存储）",
+            )
+    except OSError:
+        pass  # 探不到不装死：留痕是增强不是义务
     if aigc_metadata.missing_producer(context.settings):
         raise RpcDomainError(_ERR_AIGC_CONFIG, _AIGC_MISSING_PRODUCER_MSG)
     accepted: list[dict[str, str]] = []
@@ -1153,6 +1167,7 @@ def _ensure_voiced(
     plan_data: PlanData,
     report: Callable[[float, str], None] | None = None,
     voice_reports: list[dict[str, Any]] | None = None,
+    cancel: threading.Event | None = None,
 ) -> PlanData:
     """勾选导出时才配音：规划阶段故意不合成。克隆引擎没有参考音色时，
     先**自动从剧集提取**（主角最清晰的 4~10s 台词段，人声分离去 BGM）——
@@ -1179,7 +1194,10 @@ def _ensure_voiced(
         if report is not None:
             report(round(35 * done / total, 1), f"配音合成 {done}/{total} 段")
 
-    voiced = narration_api._voice(context, plan_data, settings, durations, on_progress=tts_progress)
+    voiced = narration_api._voice(
+        context, plan_data, settings, durations,
+        on_progress=tts_progress, cancel=cancel,
+    )
     plans_repo.update_plan_data(context.conn, str(plan_row["id"]), voiced.model_dump())
     if _needs_voice(voiced):
         raise ValueError("旁白音频合成失败，不能用原声顶替")
@@ -1290,6 +1308,7 @@ def _run_export(context: AppContext, job_id: str, run: ExportRun) -> None:
                 context, run.plan_row, run.plan_data,
                 report=report if tts_needed else None,
                 voice_reports=voice_reports,
+                cancel=run.cancel_event,
             ),
             cancel_event=run.cancel_event,
             voice_reports=voice_reports,

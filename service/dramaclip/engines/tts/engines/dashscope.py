@@ -62,6 +62,8 @@ class DashscopeCosyVoiceEngine:
 
     def synthesize(self, text: str, voice: str, out_path: Path) -> Path:
         import json
+        import logging
+        import time
         import urllib.error
         import urllib.request
 
@@ -82,17 +84,40 @@ class DashscopeCosyVoiceEngine:
                 "Content-Type": "application/json",
             },
         )
+
+        def fetch(request: urllib.request.Request, what: str) -> bytes:
+            # 网络类失败（连接重置/超时）短退避重试：一次抖动不该炸掉整段配音
+            # ——导出链一段失败即整条导出失败（_ensure_voiced 不容降级）。
+            # HTTPError 原样上抛：响应体带业务细节（配额/参数错），重试没有意义。
+            backoff = (3.0, 8.0)
+            for attempt in range(len(backoff) + 1):
+                try:
+                    with urllib.request.urlopen(request, timeout=120) as resp:
+                        return bytes(resp.read())
+                except urllib.error.HTTPError:
+                    raise
+                except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                    if attempt >= len(backoff):
+                        raise RuntimeError(f"{what}网络失败（已重试 {attempt} 次）: {exc}") from exc
+                    pause = backoff[attempt]
+                    logging.getLogger(__name__).warning(
+                        "%s 网络类失败（%s），%.0fs 后重试 (%d/%d)",
+                        what, exc, pause, attempt + 1, len(backoff),
+                    )
+                    time.sleep(pause)
+            raise RuntimeError(f"{what}网络失败: 不可达路径")
+
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
+            body = json.loads(fetch(req, "CosyVoice 云端合成").decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:300]
             raise RuntimeError(f"CosyVoice 云端合成失败: {detail}") from exc
         audio_url = ((body.get("output") or {}).get("audio") or {}).get("url")
         if not audio_url:
             raise RuntimeError(f"CosyVoice 云端合成未返回音频地址: {str(body)[:200]}")
-        with urllib.request.urlopen(audio_url, timeout=120) as audio_resp:
-            audio = audio_resp.read()
+        audio = fetch(
+            urllib.request.Request(audio_url), "CosyVoice 音频下载"
+        )
         if not audio:
             raise RuntimeError("CosyVoice 云端合成返回空音频")
         out_path.parent.mkdir(parents=True, exist_ok=True)

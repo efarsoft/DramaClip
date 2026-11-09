@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import threading
 import wave
@@ -119,6 +120,11 @@ def analyze_episode(
     _emit(0.75, "音频特征")
     audio = audio_analyzer.analyze_audio(wav_path)
     _emit(1.0, "分析完成")
+    # 分析 wav 用完即删（稳定收尾批）：整集 16k wav 每集几十 MB，剧集越多
+    # 积得越快——磁盘单调涨满后 sqlite 全线炸。下游（转写/特征/坍缩检测）
+    # 此处已全部消费完，产物在 DB 里，盘上这份没有复用价值（重跑会重抽）。
+    with contextlib.suppress(OSError):
+        wav_path.unlink(missing_ok=True)
     return EpisodeRawAnalysis(
         asr_segments=asr_segments, scenes=scenes, audio=audio, warnings=warnings
     )

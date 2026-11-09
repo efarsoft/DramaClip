@@ -216,6 +216,14 @@ export class ServiceManager {
   }
 
   private fail(reason: string): void {
+    // 双计去重（M5）：一次进程死亡会先后触发 disconnect→fail 与 exit→fail 两条
+    // 路径，各记一次失败账——快速崩溃时 3 次容忍被吃成 2 次即 give-up。
+    // 已在退避定时器上=本轮失败已入账，只补 kill 收尾不再计数。
+    if (this.restartTimer !== null) {
+      console.warn(`[ServiceManager] ${reason}（已在退避中，不重复计数）`);
+      this.killChild();
+      return;
+    }
     this.stopHeartbeat();
     this.killChild();
     const decision = this.policy.onFailure();

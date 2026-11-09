@@ -379,6 +379,7 @@ def _voice(
     settings: dict[str, str],
     source_durations: dict[str, float],
     on_progress: Callable[[int, int], None] | None = None,
+    cancel: threading.Event | None = None,
 ) -> PlanData:
     """出片前配音出口：规划阶段不调用。负责给出 tts 目录与 models 目录。
 
@@ -401,6 +402,7 @@ def _voice(
         rewrite_for_fit=_fit_rewriter(settings),
         scene_cuts=_scene_cuts_for(context, plan),
         dialogue_spans=_dialogue_spans_for(context, plan),
+        cancel=cancel,
     )
 
 

@@ -1329,9 +1329,18 @@ def _export_plan_once(
             staged_bed = _mix_bgm_bed(
                 out_path, bgm_track, work_dir / "bgm", lossless_intermediate=True
             )
-        except Exception as exc:  # noqa: BLE001 - 增强项失败不挡已拼好的成片（进程日志是底账）
-            _LOGGER.warning("BGM 床混音失败（%s）：本条成片不带 BGM 出片", str(exc)[:200])
-        else:
+        except Exception as exc:  # noqa: BLE001 - 网络型/瞬时型失败重试一次再降级
+            _LOGGER.warning("BGM 床混音失败（%s），重试一次", str(exc)[:200])
+            try:
+                staged_bed = _mix_bgm_bed(
+                    out_path, bgm_track, work_dir / "bgm", lossless_intermediate=True
+                )
+            except Exception as exc2:  # noqa: BLE001 - 增强项失败不挡已拼好的成片
+                _LOGGER.warning(
+                    "BGM 床混音重试仍失败（%s）：本条成片不带 BGM 出片", str(exc2)[:200]
+                )
+                staged_bed = None
+        if staged_bed is not None:
             loudness.normalize_in_place(
                 staged_bed, target=loudness_target, work_dir=work_dir / "loudnorm"
             )
