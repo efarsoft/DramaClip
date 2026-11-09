@@ -419,3 +419,30 @@ def test_ensure_voiced_fails_when_synthesis_leaves_a_slot_silent(
     monkeypatch.setattr(narration_api, "_voice", lambda _c, data, _s, _d, **_k: data)
     with pytest.raises(ValueError, match="旁白音频合成失败"):
         export_api._ensure_voiced(harness.context, plan_row, plan)  # type: ignore[arg-type]
+
+
+def test_submit_rejects_aigc_without_producer_code(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """开启隐式标识但编码为空：submit 即拒（早于渲染），不跑半小时才报错。"""
+    monkeypatch.setattr(export_api, "_run_export", lambda *_a, **_k: None)
+    _project_id, plan_id = _seed_plan(memory_db, tmp_path, _voiced_plan(tmp_path))
+    harness = _harness(memory_db, tmp_path)
+    harness.context.settings = {"export.aigc_metadata": "true"}
+    response = _dispatch(harness, "export.submit", {"plan_ids": [plan_id]})
+    assert response.error is not None
+    assert "提供者编码" in response.error.message
+
+
+def test_submit_accepts_aigc_with_producer_code(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(export_api, "_run_export", lambda *_a, **_k: None)
+    _project_id, plan_id = _seed_plan(memory_db, tmp_path, _voiced_plan(tmp_path))
+    harness = _harness(memory_db, tmp_path)
+    harness.context.settings = {
+        "export.aigc_metadata": "true",
+        "export.aigc_producer_code": "001191330106MA2C91330100Y43",
+    }
+    result = _rpc(harness, "export.submit", {"plan_ids": [plan_id]})
+    assert len(result["exports"]) == 1

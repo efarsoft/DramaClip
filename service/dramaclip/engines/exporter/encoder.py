@@ -31,7 +31,7 @@ from typing import Any, NamedTuple
 from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.dedup import jitter
 from dramaclip.engines.dedup import params as dedup_params
-from dramaclip.engines.exporter import ai_label, loudness
+from dramaclip.engines.exporter import ai_label, aigc_metadata, loudness
 from dramaclip.engines.narration.models import PlanData, TimelineSegment
 from dramaclip.engines.subtitle import caption_font
 from dramaclip.infra import compute, config
@@ -866,6 +866,7 @@ def export_plan(
     encoder_requested: str = "",
     segment_offsets_sink: Callable[[Sequence[dict[str, float | int | str]]], None] | None = None,
     bgm_track: Path | None = None,
+    aigc_stamp: tuple[str, str] | None = None,
 ) -> Path:
     """执行两阶段导出，返回成片路径。
 
@@ -902,6 +903,7 @@ def export_plan(
             burn_ai_label=burn_ai_label,
             segment_offsets_sink=segment_offsets_sink,
             bgm_track=bgm_track,
+            aigc_stamp=aigc_stamp,
             _allow_uniform_retry=True,
             _report_state=state,
         )
@@ -934,6 +936,7 @@ def export_plan(
             burn_ai_label=burn_ai_label,
             segment_offsets_sink=segment_offsets_sink,
             bgm_track=bgm_track,
+            aigc_stamp=aigc_stamp,
             _allow_uniform_retry=False,
             _report_state=state,
         )
@@ -974,6 +977,7 @@ def _export_plan_once(
     burn_ai_label: bool = False,
     segment_offsets_sink: Callable[[Sequence[dict[str, float | int | str]]], None] | None = None,
     bgm_track: Path | None = None,
+    aigc_stamp: tuple[str, str] | None = None,
     _allow_uniform_retry: bool = True,
     _report_state: dict[str, Any] | None = None,
 ) -> Path:
@@ -1344,6 +1348,10 @@ def _export_plan_once(
             loudness.normalize_in_place(
                 out_path, target=loudness_target, work_dir=work_dir / "loudnorm"
             )
+    if aigc_stamp is not None:
+        # 隐式标识走最终交付遍：concat 单段 copyfile 分支不经过 ffmpeg，
+        # BGM/响度再 mux 的元数据存活性各分支不一——这里写一次覆盖所有路径。
+        aigc_metadata.stamp(out_path, producer=aigc_stamp[0], content_id=aigc_stamp[1])
     if segment_offsets_sink is not None:
         offsets = _segment_offsets(manifest)
         if offsets is not None:

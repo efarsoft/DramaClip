@@ -184,6 +184,21 @@ const EXPORT_SECTION: SectionSpec = {
       type: 'switch',
       help: '开启后成片右上角烧制「AI 生成」字样；部分平台对 AI 合成内容有标注要求。默认关闭，由你按发布平台自行决定',
     },
+    // AIGC 隐式标识（业主裁决 2026-11-09）：默认关、用户可开——与显式烧录独立，
+    // 写法定元数据（生成合成属性/提供者编码/内容编号）进成片文件。
+    {
+      key: 'export.aigc_metadata',
+      label: 'AIGC 隐式标识',
+      type: 'switch',
+      help: '开启后在成片文件元数据写入 AI 生成合成标识（擦源元数据、留标识信息）；需填写下方服务提供者编码。默认关闭，由你按发布平台自行决定',
+    },
+    {
+      key: 'export.aigc_producer_code',
+      label: 'AIGC 服务提供者编码',
+      type: 'text',
+      placeholder: '22 位提供者编码',
+      help: '在全国人工智能生成合成内容标识服务平台注册获取；开启隐式标识时必填',
+    },
   ],
 };
 

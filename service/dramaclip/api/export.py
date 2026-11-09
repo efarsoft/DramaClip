@@ -37,7 +37,7 @@ from dramaclip.api.export_covers import (
 from dramaclip.engines.analysis.models import SpeechZone
 from dramaclip.engines.bgm import library as bgm_library
 from dramaclip.engines.bgm import selector as bgm_selector
-from dramaclip.engines.exporter import ai_label, encoder, loudness, selfcheck
+from dramaclip.engines.exporter import ai_label, aigc_metadata, encoder, loudness, selfcheck
 from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
@@ -70,6 +70,7 @@ _ERR_EXPORT_NOT_RETRYABLE = -32405  # 导出域 -32400~-32499（见 common.json 
 _ERR_TRASH_FENCE = -32408  # 产物不在数据目录内，拒绝搬移（models.delete 围栏的同款规矩）
 _ERR_TRASH_MOVE = -32409  # 移入回收失败（OSError）：宁留记录，不产无法追溯的孤儿文件
 _ERR_PUBLISH_DATA = -32410  # 发布数据录入不合法（W8）：宁拒收，不存脏数据污染回流账
+_ERR_AIGC_CONFIG = -32411  # 隐式标识开启但提供者编码未填：submit 即拒，不待渲染半途失败
 
 _PUBLISH_PLATFORMS = ("抖音", "快手", "视频号", "小红书", "B站", "其他")
 
@@ -151,6 +152,15 @@ def submit(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, list) or not raw:
         raise RpcDomainError(_ERR_NO_PLANS, "plan_ids 必须是非空数组")
     plan_ids = list(dict.fromkeys(str(item) for item in raw))
+    if (
+        aigc_metadata.enabled(context.settings)
+        and not aigc_metadata.producer_code(context.settings)
+    ):
+        raise RpcDomainError(
+            _ERR_AIGC_CONFIG,
+            "AIGC 隐式标识已开启但未填写服务提供者编码：请在设置「出片」分区填写"
+            "（全国人工智能生成合成内容标识服务平台注册获取），或关闭隐式标识开关",
+        )
     accepted: list[dict[str, str]] = []
     rejected: list[dict[str, str]] = []
     for plan_id in plan_ids:
@@ -1019,6 +1029,13 @@ def render_export(
         # BGM 床（C 项接线）：设置/模式/曲库三层门禁在 _pick_bgm 内，任一层不过
         # 返回 None＝现状出片。混音失败在 encoder 层向上抛，这里降级留痕不挡导出。
         bgm_track=_pick_bgm_track(context, plan_data),
+        # AIGC 隐式标识（业主裁决 2026-11-09：默认关、用户可开）：内容编号用 export_id，
+        # 与回流账同一标识符；编码在 submit 已验非空。
+        aigc_stamp=(
+            (aigc_metadata.producer_code(context.settings), export_id)
+            if aigc_metadata.enabled(context.settings)
+            else None
+        ),
     )
     # 清洗在前、编码在后：读账的人按时间顺序看（规格 §3.5）
     receipt = [*run.voice_reports, *(item.to_dict() for item in reports)]

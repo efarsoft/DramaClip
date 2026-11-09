@@ -97,6 +97,11 @@ DEFAULTS: dict[str, str] = {
     # 字样（engines/exporter/ai_label.py，loudness 之后的独立 drawtext 遍）。
     # 平台标注要求因平台而异，是否标注由使用者按发布平台自行决定——不强制、不代决。
     "export.ai_label": "false",
+    # AIGC 隐式标识（业主裁决 2026-11-09）：默认关、用户可开，与显式烧录各自开关。
+    # 开启后最终交付遍写 GB 45438-2025 元数据（属性/提供者编码/内容编号）进 comment；
+    # 提供者编码是法定必填项，空值在 submit 即拒。
+    "export.aigc_metadata": "false",
+    "export.aigc_producer_code": "",
     # BGM 床总开关（C 项接线，默认开）：曲库空/该模式不该铺时自动无 BGM＝现状出片，
     # 开着不改变无曲用户的行为——「无曲可用＝逐字节一致」是 selector 的硬验收。
     "export.bgm": "1",
