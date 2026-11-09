@@ -9,7 +9,7 @@ import type {
   SelftestResults, ServiceEvent, StyleInfo, SubtitlePresetInfo, TitleCandidate, TtsAutoVoiceResult,
   ToolsExtractStartResult, ToolsGetResultResult, ToolsRewriteResult, ToolsTtsResult,
   TtsCleanReferenceResult, TtsPreviewResult, VerifyReport, WorkItem as WorksItem,
-  PublishData } from '@dramaclip/protocol';
+  PublishData, StorageInfo, MigrationResult } from '@dramaclip/protocol';
 
 function bridge(): DramaClipBridge {
   return window.dramaclip;
@@ -29,6 +29,22 @@ export function appPaths(): Promise<DataPaths> {
 
 export function restartService(): Promise<void> {
   return bridge().restartService();
+}
+
+export function storageInfo(): Promise<StorageInfo> {
+  return bridge().storageInfo();
+}
+
+export function migrateDataDir(target: string): Promise<MigrationResult> {
+  return bridge().migrateDataDir(target);
+}
+
+export function dismissStorageHint(): Promise<void> {
+  return bridge().dismissStorageHint();
+}
+
+export function relaunchApp(): Promise<void> {
+  return bridge().relaunchApp();
 }
 
 export function pickFolder(): Promise<string | null> {

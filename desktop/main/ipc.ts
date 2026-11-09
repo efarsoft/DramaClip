@@ -1,5 +1,5 @@
 /** ipcMain 通道唯一登记处（docs/desktop/00 §3）。 */
-import { BrowserWindow, ipcMain, shell } from 'electron';
+import { BrowserWindow, app, ipcMain, shell } from 'electron';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -7,9 +7,19 @@ import {
   METHOD_NAMES,
   type CopyFilesResult,
   type DataPaths,
+  type MigrationResult,
   type RevealResult,
   type ServiceEvent,
+  type StorageInfo,
 } from '@dramaclip/protocol';
+import {
+  freeBytes,
+  loadAppConfig,
+  lowDiskHintActive,
+  migrateDataDir,
+  saveAppConfig,
+  storageUsage,
+} from './services/storage';
 import { pickAudioFile, pickFolder, pickVideoFile, saveTextFile } from './services/dialog';
 
 export interface IpcContext {
@@ -108,6 +118,66 @@ export function registerIpc(context: IpcContext): void {
   });
   ipcMain.handle('service:restart', () => {
     context.restartService();
+    return { ok: true };
+  });
+  ipcMain.handle('storage:info', async (): Promise<StorageInfo> => {
+    const dataDir = context.dataPaths().root;
+    const config = loadAppConfig(app.getPath('userData'));
+    const defaultDataDir = path.join(app.getPath('userData'), 'data');
+    const customized = config.dataDir !== undefined && config.dataDir === dataDir;
+    const free = await freeBytes(dataDir);
+    return {
+      dataDir,
+      defaultDataDir,
+      customized,
+      // 开发态数据目录由 DRAMACLIP_DATA_DIR 决定，配置重定向不参与：迁移不可用
+      migrationAvailable: app.isPackaged,
+      usage: await storageUsage(dataDir),
+      freeBytes: free ?? 0,
+      lowDiskHint: lowDiskHintActive(
+        dataDir,
+        customized,
+        config.storageHintDismissed === true,
+        free,
+      ),
+    };
+  });
+  ipcMain.handle('storage:migrate', async (_event, target: unknown): Promise<MigrationResult> => {
+    if (typeof target !== 'string' || target.length === 0) {
+      return { ok: false, reason: '目标目录参数不合法' };
+    }
+    const ensureIdle = async (): Promise<boolean> => {
+      try {
+        const result = (await context.rpc('jobs.list', {}, 10_000)) as {
+          jobs?: { status?: string }[];
+        };
+        const active = (result.jobs ?? []).filter(
+          (job) => job.status === 'pending' || job.status === 'running',
+        );
+        return active.length === 0;
+      } catch {
+        return false; // 服务无响应时不迁移（宁可拒绝不可带任务搬家）
+      }
+    };
+    const migrated = await migrateDataDir(
+      app.getPath('userData'),
+      context.dataPaths().root,
+      target,
+      { ensureIdle },
+    );
+    return migrated.ok
+      ? { ok: true, backupDir: migrated.backupDir }
+      : { ok: false, reason: migrated.reason };
+  });
+  ipcMain.handle('storage:dismissHint', async () => {
+    const config = loadAppConfig(app.getPath('userData'));
+    await saveAppConfig(app.getPath('userData'), { ...config, storageHintDismissed: true });
+  });
+  ipcMain.handle('app:relaunch', () => {
+    // 迁移成功后的归零动作：dataDir 锚点分散在 Electron 三处闭包，
+    // 只重启 Python 服务不够——整应用重启让所有消费点重读 app-config。
+    app.relaunch();
+    app.exit(0);
     return { ok: true };
   });
   ipcMain.handle('window:control', (event, action: unknown) => {

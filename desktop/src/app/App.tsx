@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { AppLayout } from '../components/layout/AppLayout';
+import { StorageHintGate } from './StorageHintGate';
 import { JobsFeed } from '../features/jobs/JobsFeed';
 import { onServiceEvent, systemApi } from '../services/client';
 import { subscribeAnalysisProgress, subscribeModelDownloadProgress, useUiStore } from '../stores/ui';
@@ -35,6 +36,7 @@ export function App() {
     <>
       <AppLayout />
       <JobsFeed />
+      <StorageHintGate />
     </>
   );
 }

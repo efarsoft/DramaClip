@@ -3,6 +3,7 @@ import { app, BrowserWindow, nativeTheme, protocol, screen, shell } from 'electr
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { registerIpc, broadcastEvent, resolveDataPaths, type IpcContext } from './ipc';
+import { loadAppConfig, resolveDataDir } from './services/storage';
 import { createPreviewHandler, createPreviewRoots } from './services/preview-protocol';
 import { ServiceManager, type ServiceManagerOptions } from './services/service-manager';
 
@@ -89,10 +90,18 @@ function devDataDir(): string {
   return override === '' ? path.join(REPO_ROOT, 'data') : override;
 }
 
+/** 生效数据目录唯一求值点：打包态读 app-config.json 重定向（存储迁移），dev 态不变。
+ * 迁移成功后整应用 relaunch——dataDir 锚点分散在 preview 协议/服务 spawn/IPC 三处，
+ * 只重启 Python 服务会让 Electron 侧锚点滞留旧目录。 */
+function effectiveDataDir(): string {
+  if (!app.isPackaged) return devDataDir();
+  const userData = app.getPath('userData');
+  const defaultDir = path.join(userData, 'data');
+  return resolveDataDir(userData, defaultDir, loadAppConfig(userData)).dataDir;
+}
+
 function buildIpcContext(managerInstance: ServiceManager): IpcContext {
-  const dataDir = app.isPackaged
-    ? path.join(app.getPath('userData'), 'data')
-    : devDataDir();
+  const dataDir = effectiveDataDir();
   return {
     rpc: (method, params) => managerInstance.rpc(method, params),
     restartService: () => { managerInstance.restart(); },
@@ -113,9 +122,7 @@ async function bootstrap(): Promise<void> {
     repoRoot: REPO_ROOT,
     resourcesDir,
     cwd: app.isPackaged ? process.resourcesPath : REPO_ROOT,
-    dataDir: app.isPackaged
-      ? path.join(app.getPath('userData'), 'data')
-      : devDataDir(),
+    dataDir: effectiveDataDir(),
     appVersion: app.getVersion(),
     isPackaged: app.isPackaged,
     onStateChange: (state) => { console.log(`[ServiceManager] state=${state}`); },
@@ -133,9 +140,7 @@ async function bootstrap(): Promise<void> {
 void app.whenReady().then(() => {
   // 本地媒体预览协议：dramaclip://local/<encodeURIComponent(绝对路径)>
   // video 元素要求 Range/206 分段响应；路径/类型/内存三重围栏见 preview-protocol.ts
-  const previewDataRoot = app.isPackaged
-    ? path.join(app.getPath('userData'), 'data')
-    : devDataDir();
+  const previewDataRoot = effectiveDataDir();
   const getPreviewRoots = createPreviewRoots(async () => {
     if (manager === null) return [];
     const projects = (await manager.rpc('project.list', {})) as readonly {

@@ -834,6 +834,14 @@ export interface DramaClipBridge {
   appVersion(): Promise<string>;
   /** 本地数据目录锚点（关于页「本地数据」入口）。 */
   appPaths(): Promise<DataPaths>;
+  /** 数据目录存储画像（设置-存储卡数据面）。 */
+  storageInfo(): Promise<StorageInfo>;
+  /** 数据目录迁移（复制→校验→写配置；服务重启由调用方随后触发）。 */
+  migrateDataDir(target: string): Promise<MigrationResult>;
+  /** 关闭 C 盘低空间首启引导（「不再提醒」）。 */
+  dismissStorageHint(): Promise<void>;
+  /** 整应用重启（数据目录迁移后的归零动作：锚点分散在 Electron 三处闭包）。 */
+  relaunchApp(): Promise<void>;
   restartService(): Promise<void>;
   /** 原生目录选择；用户取消返回 null。 */
   pickFolder(): Promise<string | null>;
@@ -871,6 +879,32 @@ export interface DataPaths {
   readonly logs: string;
   /** 已删除成片的暂存目录（<root>/.trash/<日期>/，§3.4 危险操作规矩）。 */
   readonly trash: string;
+}
+
+/** 数据目录存储画像：当前目录、子目录占用、目标候选盘剩余（存储迁移卡数据面）。 */
+export interface StorageInfo {
+  /** 当前生效数据目录（自定义配置或默认 userData/data）。 */
+  readonly dataDir: string;
+  /** 未配置自定义时的默认目录（迁移的典型源）。 */
+  readonly defaultDataDir: string;
+  /** 是否用户自定义（app-config.json 配置生效中）。 */
+  readonly customized: boolean;
+  /** 开发态数据目录由 DRAMACLIP_DATA_DIR 决定：迁移不可用，卡片只读展示。 */
+  readonly migrationAvailable: boolean;
+  /** 各子目录字节数（models/runtimes/outputs/bgm/covers/cache/logs…在则计）。 */
+  readonly usage: readonly { readonly name: string; readonly bytes: number }[];
+  /** 当前目录所在盘剩余字节（预检与引导共用）。 */
+  readonly freeBytes: number;
+  /** C 盘空间告警（首启引导）：目录在 C 盘且剩余 < 20GB 且未配置自定义目录。 */
+  readonly lowDiskHint: boolean;
+}
+
+/** 数据目录迁移结果：失败 ok=false + 人话原因；成功带旧目录备份名。 */
+export interface MigrationResult {
+  readonly ok: boolean;
+  readonly reason?: string;
+  /** 成功后旧目录改名（.bak-日期，不自动删，用户确认后自行清理）。 */
+  readonly backupDir?: string;
 }
 
 export const METHOD_NAMES = [

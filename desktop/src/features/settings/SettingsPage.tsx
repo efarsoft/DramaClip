@@ -18,6 +18,7 @@ import {
   type SectionSpec,
   type SettingsMap,
 } from './sections';
+import { StorageCard } from './StorageCard';
 
 const PAGE_DESC = '分析阈值、字幕与出片参数；LLM/ASR/TTS 引擎配置在「引擎中心」管理。';
 
@@ -147,6 +148,7 @@ function SettingsView(props: {
     <PageShell>
       <PageHeader title="偏好设置" desc={PAGE_DESC} />
       <SettingsBody draft={props.draft} sections={props.sections} onPatch={patchDraft} />
+      <StorageCard />
       {/* 吸底保存栏：仅在存在改动时出现，长表单滚动到底也能看见动作 */}
       {changedKeys.length > 0 && (
         <div

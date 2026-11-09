@@ -1,12 +1,19 @@
 /** preload：contextBridge 暴露 window.dramaclip（渲染层唯一入口，docs/desktop/00 §3）。 */
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { CopyFilesResult, DataPaths, DramaClipBridge, RevealResult, ServiceEvent } from '@dramaclip/protocol';
+import type { CopyFilesResult, DataPaths, DramaClipBridge, MigrationResult, RevealResult, ServiceEvent, StorageInfo } from '@dramaclip/protocol';
 
 const api = {
   rpc: (method: string, params: Record<string, unknown> = {}): Promise<unknown> =>
     ipcRenderer.invoke('rpc', method, params),
   appVersion: (): Promise<string> => ipcRenderer.invoke('app:version') as Promise<string>,
   appPaths: (): Promise<DataPaths> => ipcRenderer.invoke('app:paths') as Promise<DataPaths>,
+  storageInfo: (): Promise<StorageInfo> =>
+    ipcRenderer.invoke('storage:info') as Promise<StorageInfo>,
+  migrateDataDir: (target: string): Promise<MigrationResult> =>
+    ipcRenderer.invoke('storage:migrate', target) as Promise<MigrationResult>,
+  dismissStorageHint: (): Promise<void> =>
+    ipcRenderer.invoke('storage:dismissHint') as Promise<void>,
+  relaunchApp: (): Promise<void> => ipcRenderer.invoke('app:relaunch') as Promise<void>,
   restartService: (): Promise<void> => ipcRenderer.invoke('service:restart') as Promise<void>,
   pickFolder: (): Promise<string | null> =>
     ipcRenderer.invoke('dialog:pickFolder') as Promise<string | null>,
