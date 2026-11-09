@@ -27,7 +27,8 @@ def _thousands(num: int) -> str:
         if q:
             if need_zero:
                 parts.append("零")
-            parts.append(("两" if q == 2 and value == 1000 else _DIGITS[q]) + name)
+            # 「两百」与「两千」同一口语惯例（千位已有）；十位个位保持「二」
+            parts.append(("两" if q == 2 and value in (1000, 100) else _DIGITS[q]) + name)
         elif parts and num > 0:
             need_zero = True
     q, num = divmod(num, 10)
@@ -90,6 +91,10 @@ def _sub(match: re.Match[str]) -> str:
     if match.group("neg"):
         # int_to_cn 对负数自带「负」前缀：这里再手写一个就产出「负负五」（实测）。
         return int_to_cn(int(match.group("neg")))
+    # 已知边界（2026-11-04 审查 #20，评估后不动）：5-8 位无分隔数字串（如热线
+    # 550300）按数量读成「五十五万零三百」——号码型误读。解说文案中出现频率
+    # 极低；无分隔写法与真实大数无法在无上下文时区分，硬启发式（固定位数判
+    # 号码）会把十万级金额误伤成不转换，比现状更糟。真出现时靠重掷反馈改写。
     return int_to_cn(int(match.group("int").replace(",", "")))
 
 

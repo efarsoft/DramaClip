@@ -75,7 +75,11 @@ class ReviewReport:
 _METANARRATIVE_RE = re.compile(
     r"第[零〇一二三四五六七八九十百千两\d]+\s*集|画面里|镜头|素材|转写|台词前|字幕"
 )
-_ARABIC_NUM_RE = re.compile(r"\d{2,}")          # 两位及以上阿拉伯数字（应写中文）
+# 两位及以上阿拉伯数字（应写中文）。date/range 形态（2026-10-22 / 3-4集）是
+# numerals 的**故意放行**（读法不确定整串放过），audit 若仍按它们出「应写中文」
+# 的修法提示，审查建议与代码设计打架——搜索前剔除放行形态（#19）。
+_PASSTHROUGH_TOKEN_RE = re.compile(r"\d{4}-\d{1,2}-\d{1,2}|\d+-\d+|\d{4}\s*年")
+_ARABIC_NUM_RE = re.compile(r"\d{2,}")
 _PERSON_FIRST = ("我", "咱们", "咱")
 _PERSON_SECOND = ("你", "你们", "您")
 _SPEAKER_LABEL_RE = re.compile(r"\[角色[^\]]*\]")
@@ -442,7 +446,7 @@ def _numerals_and_person_findings(
     arabic_in_text = []
     for i, s in enumerate(segs):
         t = s.get("text", "") or ""
-        if _ARABIC_NUM_RE.search(t):
+        if _ARABIC_NUM_RE.search(_PASSTHROUGH_TOKEN_RE.sub("", t)):
             arabic_in_text.append(i)
     findings.append(Finding(
         "FUND_NUMERALS_CN", "fund_base", "soft",
