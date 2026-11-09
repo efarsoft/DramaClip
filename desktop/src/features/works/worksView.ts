@@ -104,7 +104,7 @@ export const WORKS_FILTERS: readonly { key: WorksFilterKey; label: string }[] = 
 
 /** 徽章三态（意见08）：✓ 实底绿 / ✕ 红带度量原文 / — 灰描边空心。「—」与绿勾是两种视觉。 */
 export interface SelfCheckBadge {
-  readonly key: 'duration' | 'narration' | 'silence' | 'freeze';
+  readonly key: 'duration' | 'narration' | 'silence' | 'freeze' | 'safe_zone';
   readonly tone: 'ok' | 'fail' | 'none';
   readonly text: string;
   /** 度量原文（tooltip 与详情页「看度量原文」）；未检时说明量不到的原因。 */

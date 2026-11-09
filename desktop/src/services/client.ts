@@ -5,7 +5,7 @@ import type {
   EngineConfig, ExportJob, ExportSubmitResult, ExportTranscriptsResult, HealthResult, ImportInspection,
   ImportRecord, JobInfo, JobsListResult, LlmTraceListResult, ModeRecommendation, ModelInfo, NarrationMode,
   NarrationPlan, OrphanCopy, PingResult, PlanDetail, PlanTraceResult, PlanVariantsResult, Project,
-  ProjectGetResult, PromptsListResult, RevealResult, RelayoutResult, ScannedEpisode, SelftestResult,
+  ProjectGetResult, PromptsListResult, RevealResult, RelayoutResult, SafeZoneMask, ScannedEpisode, SelftestResult,
   SelftestResults, ServiceEvent, StyleInfo, SubtitlePresetInfo, TitleCandidate, TtsAutoVoiceResult,
   ToolsExtractStartResult, ToolsGetResultResult, ToolsRewriteResult, ToolsTtsResult,
   TtsCleanReferenceResult, TtsPreviewResult, VerifyReport, WorkItem as WorksItem,
@@ -199,6 +199,8 @@ export const subtitleApi = {
   /** 内封字幕预设目录（subtitle.list_presets）：设置页「字幕」分区的选项源。 */
   listPresets: (): Promise<SubtitlePresetInfo[]> =>
     rpc<SubtitlePresetInfo[]>('subtitle.list_presets', {}),
+  /** 平台 UI 安全区遮罩几何（推断值，待真机校验）：预览叠层的唯一数据源。 */
+  safeZone: (): Promise<SafeZoneMask> => rpc<SafeZoneMask>('subtitle.safe_zone', {}),
 } as const;
 
 export const exportApi = {

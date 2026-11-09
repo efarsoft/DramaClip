@@ -20,6 +20,27 @@
           }
         }
       }
+    },
+    {
+      "name": "subtitle.safe_zone",
+      "summary": "平台 UI 安全区遮罩几何（推断值，待真机校验）：预览叠层的唯一数据源",
+      "params": {},
+      "result": {
+        "type": "object",
+        "required": ["reference", "top", "right", "bottom", "note"],
+        "properties": {
+          "reference": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "top": { "type": "number" },
+          "right": { "type": "number" },
+          "bottom": { "type": "number" },
+          "note": { "type": "string" }
+        }
+      }
     }
   ]
 }

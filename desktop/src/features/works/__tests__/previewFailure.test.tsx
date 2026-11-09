@@ -5,6 +5,11 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { WorkItem } from '@dramaclip/protocol';
 import { PreviewModal } from '../PreviewModal';
 
+vi.mock('../../../services/client', () => ({
+  mediaUrl: (path: string) => `dramaclip://local/${path}`,
+  subtitleApi: { safeZone: () => Promise.resolve(null) },
+}));
+
 beforeAll(() => {
   window.matchMedia = ((query: string) => ({
     matches: false,

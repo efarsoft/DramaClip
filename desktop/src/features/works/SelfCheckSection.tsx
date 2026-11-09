@@ -47,6 +47,21 @@ export function SelfCheckSection({
             </span>
           </div>
         ))}
+        {selfcheck?.safe_zone !== undefined && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceMd }}>
+            <SelfCheckChip
+              badge={{
+                key: 'safe_zone',
+                tone: selfcheck.safe_zone.pass === true ? 'ok' : 'none',
+                text: selfcheck.safe_zone.pass === true ? '✓ 安全区无风险' : '— 安全区劝告',
+                detail: '',
+              }}
+            />
+            <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
+              {selfcheck.safe_zone.reason ?? ''}
+            </span>
+          </div>
+        )}
         <span
           style={{
             fontSize: tokens.text.badge.size,

@@ -44,6 +44,9 @@ export const tokens = {
   posterCaption: 'rgba(0,0,0,0.72)',
   /** 压在海报上的浮板（集数芯片、更多按钮）：原先 0.55 / 0.45 两档表达同一件语义。 */
   posterPlate: 'rgba(0,0,0,0.55)',
+  /** 平台 UI 安全区预览遮罩（推断值，待真机校验）：填充与框线两档，只供 PreviewModal 叠层。 */
+  safeZoneFill: 'rgba(255, 77, 79, 0.28)',
+  safeZoneBorder: 'rgba(255, 77, 79, 0.9)',
   gradientAccent: 'linear-gradient(135deg, #6D9BFF 0%, #9B7BFF 100%)',
   textPrimary: '#F0F4FF',
   textSecondary: '#A8B4CE',

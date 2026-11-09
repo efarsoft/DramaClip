@@ -273,6 +273,15 @@ export interface PublishMeta {
   readonly caption: string | null;
   readonly tags: string[];
 }
+
+/** 平台 UI 安全区遮罩（subtitle.safe_zone）：比例相对 reference 画布，推断值待真机校验。 */
+export interface SafeZoneMask {
+  readonly reference: readonly [number, number];
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly note: string;
+}
 export interface JobsListResult {
   readonly jobs: JobInfo[];
   readonly server_time_ms: number;
@@ -448,6 +457,7 @@ export interface SelfCheck {
   readonly silence: SelfCheckItem;
   readonly freeze: SelfCheckItem;
   readonly caption_placement?: SelfCheckItem;
+  readonly safe_zone?: SelfCheckItem;
 }
 
 /** 自检汇总态：passed 四项全绿 / failed 任一红 / partial 有灰无红；null = 从未自检。 */
@@ -964,6 +974,7 @@ export const METHOD_NAMES = [
   'jobs.cancel',
   'jobs.clear_finished',
   'subtitle.list_presets',
+  'subtitle.safe_zone',
   'models.list',
   'models.download',
   'models.clean_residue',

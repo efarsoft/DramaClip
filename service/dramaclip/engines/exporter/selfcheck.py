@@ -24,6 +24,7 @@ from typing import Any
 
 from dramaclip.engines.analysis import subtitle_ocr
 from dramaclip.engines.exporter import encoder
+from dramaclip.engines.subtitle.safe_zone import check_safe_zone
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 
 # 与 verify_modes.py 同源的阈值初值（那边 L83-84）；时长容差不在此定义——
@@ -533,6 +534,7 @@ def run(
         "silence": check_silence(mean_volume_db, has_audio),
         "freeze": check_freeze(max_freeze_s),
         "caption_placement": check_caption_placement(measured_caption, caption_band),
+        "safe_zone": check_safe_zone(caption_band),
         "ending": check_ending(ending_end_s, ending_lines),
         "avsync": check_avsync(
             measure_avsync_offsets(video, avsync_samples or [], episode_paths or {})

@@ -30,6 +30,7 @@ vi.mock('../services/client', () => ({
   listWorks: api.listWorks,
   projectApi: { list: api.projectList },
   exportApi: { selfcheck: vi.fn(), delete: vi.fn() },
+  subtitleApi: { safeZone: () => Promise.resolve(null) },
   revealInFolder: vi.fn(),
   pickFolder: vi.fn(),
   copyFiles: vi.fn(),
