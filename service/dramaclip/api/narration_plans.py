@@ -455,7 +455,7 @@ def _plan_one(
         # 只留痕不自动重写：整稿重写＝与首稿同价的 LLM 往返（逐槽族「改写若干槽」
         # 的 economics 在剧本链不成立），是否自动换血等不达标率数据说话（数据反馈
         # harness）——卡点进通知面与 trace，人工裁决「重掷此条」。
-        _retell_gate(plan, settings, trace_dir, context.notifier)
+        _retell_gate(plan, settings, trace_dir, context.notifier, context=context)
         return plan.model_copy(update={"arc": variant.arc}), used_ids
 
     scenes, highlights, material = _casting_for(context, episodes, variant)
@@ -565,7 +565,9 @@ def _rewrite_copy_until_retellable(
     重写走同一 copywriter 链，feedback 只喂复述卡点与缺失项——让模型知道哪里
     听不懂，而不是让它自由发挥。
     """
-    first_report = _retell_gate(plan, settings, trace_dir, context.notifier)
+    first_report = _retell_gate(
+        plan, settings, trace_dir, context.notifier, context=context, round_index=1
+    )
     if first_report is None or first_report.passed:
         return plan
     if settings.get("narration.rewrite_loop", "1") != "1":
@@ -605,12 +607,61 @@ def _rewrite_copy_until_retellable(
         context.notifier.log("warning", f"重写失败保留原稿：{str(exc)[:120]}")
         return plan
 
-    second_report = _retell_gate(rewritten, settings, trace_dir, context.notifier)
+    second_report = _retell_gate(
+        rewritten, settings, trace_dir, context.notifier, context=context, round_index=2
+    )
     if second_report is not None and second_report.passed:
         context.notifier.log("info", "重写稿复述达标，采用重写稿")
         return rewritten
+    if (
+        second_report is not None
+        and first_report is not None
+        and len(second_report.confusions) < len(first_report.confusions)
+        and len(second_report.reasons) < len(first_report.reasons)
+    ):
+        # 严格更优也换血：卡点 6→2 的重写稿比原稿真实进步，全有全无会把
+        # 真改进丢掉白付一轮 LLM（2026-11-04 审查 #4）。
+        context.notifier.log(
+            "info",
+            f"重写稿未达标但严格更优（卡点 {len(first_report.confusions)}→"
+            f"{len(second_report.confusions)}，理由 {len(first_report.reasons)}→"
+            f"{len(second_report.reasons)}），采用重写稿",
+        )
+        return rewritten
     context.notifier.log("warning", "重写稿复述仍未达标，保留原稿")
     return plan
+
+
+def _original_dialogue_annex(context: AppContext, plan: PlanData) -> str:
+    """原声窗台词摘录：观众听到的另一半剧情，给复述裁判当上下文。
+
+    每个原声段抽窗内 ASR 行（至多 6 行），标注时间窗——旁白仍是主体（卡点
+    quote 定位以旁白为锚），原声做补充；集无分析记录/窗内无台词则该段跳过。
+    """
+    lines: list[str] = []
+    for segment in plan.timeline:
+        if segment.audio != "original":
+            continue
+        try:
+            record = analysis_repo.get(context.conn, str(segment.episode_id))
+        except Exception:  # noqa: BLE001 - 软质检的增益输入，坏行跳过
+            continue
+        if record is None:
+            continue
+        rows = [
+            item
+            for item in narration_pipeline.parse_asr_segments(
+                str(record.get("asr_segments") or "")
+            )
+            if float(segment.start) - 1e-6 <= item.start < float(segment.end)
+        ]
+        texts = [row.text for row in rows if str(row.text).strip()][:6]
+        if texts:
+            lines.append(
+                f"〔原声 {float(segment.start):.0f}s-{float(segment.end):.0f}s〕"
+                + " ".join(str(t) for t in texts)
+            )
+    return "\n".join(lines)
 
 
 def _retell_gate(
@@ -618,9 +669,16 @@ def _retell_gate(
     settings: dict[str, str],
     trace_dir: Path | None,
     notifier: Any,
+    *,
+    context: AppContext | None = None,
+    round_index: int = 1,
 ) -> Any | None:
     """复述测试（软质检）：无上下文观众闭卷复述，结论进 trace 供审计；失败不阻塞出片。
 
+    裁判读的文本=旁白全文+原声窗台词摘录（context 可得时）：cross/对谈等
+    模式剧情大量由原声对白承载，只听旁白必然误报 jump/人物记混，卡点定位
+    失真（2026-11-04 审查 #2）。trace 按轮次落盘 retell_N.json——重写循环
+    的改前/改后对比证据不再被第二轮覆盖（#3）。
     返回 RetellReport 供重写循环取卡点；关闭/跳过/失败返回 None——retell 走
     真实 LLM 客户端，桩覆盖不到就别让它等（如测试桩环境）。
     """
@@ -630,6 +688,9 @@ def _retell_gate(
     if settings.get("narration.retell_check", "1") != "1":
         return None
     text = "\n".join(item.text for item in plan.narration_texts)
+    annex = _original_dialogue_annex(context, plan) if context is not None else ""
+    if annex:
+        text = f"{text}\n\n{annex}" if text.strip() else annex
     if not text.strip():
         return None
     try:
@@ -640,7 +701,7 @@ def _retell_gate(
         return None
     if trace_dir is not None:
         trace_dir.mkdir(parents=True, exist_ok=True)
-        (trace_dir / "retell.json").write_text(
+        (trace_dir / f"retell_{round_index}.json").write_text(
             json.dumps(report.to_json(), ensure_ascii=False, indent=1), encoding="utf-8"
         )
     notifier.log(

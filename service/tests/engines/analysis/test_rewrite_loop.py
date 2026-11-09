@@ -57,8 +57,8 @@ def test_gate_returns_report_and_writes_trace(tmp_path, monkeypatch):
         _plan("文本"), {"narration.retell_check": "1"}, tmp_path, _FakeNotifier()
     )
     assert report is not None and report.passed is False
-    assert (tmp_path / "retell.json").is_file()
-    saved = json.loads((tmp_path / "retell.json").read_text(encoding="utf-8"))
+    assert (tmp_path / "retell_1.json").is_file()
+    saved = json.loads((tmp_path / "retell_1.json").read_text(encoding="utf-8"))
     assert saved["confusions"][0]["note"] == "没听懂"
 
 
@@ -70,7 +70,7 @@ def test_rewrite_loop_adopts_passing_rewrite(tmp_path, monkeypatch):
     reports = iter([_report(4), _report(1, passed=True)])
     copies = iter(["重写稿文本"])
 
-    def fake_gate(_plan, _settings, _trace, _notifier):
+    def fake_gate(_plan, _settings, _trace, _notifier, *, context=None, round_index=1):
         return next(reports)
 
     def fake_write(_plan, _material, _settings, *, mode_label, angle_block,
@@ -98,7 +98,7 @@ def test_rewrite_loop_injects_scoring_suggestion(tmp_path, monkeypatch):
     reports = iter([_report(4), _report(1, passed=True)])
     copies = iter(["重写稿文本"])
 
-    def fake_gate(_plan, _settings, _trace, _notifier):
+    def fake_gate(_plan, _settings, _trace, _notifier, *, context=None, round_index=1):
         return next(reports)
 
     def fake_write(_plan, _material, _settings, *, mode_label, angle_block,
@@ -133,7 +133,7 @@ def test_rewrite_loop_survives_scoring_failure(tmp_path, monkeypatch):
     copies = iter(["重写稿文本"])
     seen_notes: list[str] = []
 
-    def fake_gate(_plan, _settings, _trace, _notifier):
+    def fake_gate(_plan, _settings, _trace, _notifier, *, context=None, round_index=1):
         return next(reports)
 
     def fake_write(_plan, _material, _settings, *, mode_label, angle_block,
@@ -166,7 +166,7 @@ def test_rewrite_loop_keeps_original_when_rewrite_worse(tmp_path, monkeypatch):
     reports = iter([_report(1), _report(6)])
     writes = iter(["重写稿文本"])
 
-    def fake_gate(_plan, _settings, _trace, _notifier):
+    def fake_gate(_plan, _settings, _trace, _notifier, *, context=None, round_index=1):
         return next(reports)
 
     def fake_write(_plan, _material, _settings, *, mode_label, angle_block,

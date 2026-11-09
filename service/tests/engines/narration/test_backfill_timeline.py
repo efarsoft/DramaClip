@@ -371,7 +371,7 @@ def test_rewrite_output_passes_numerals_and_metanarrative_gates(
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
 
     def rewrite(text: str, target_chars: int) -> str | None:
-        return "他拿走了2000斤玄铁锅"
+        return "拿走2000斤锅"  # 7字：批A起收短稿须≤目标(8)字过长度验收
 
     result = pipeline.synthesize_narration_texts(
         plan,
@@ -380,11 +380,11 @@ def test_rewrite_output_passes_numerals_and_metanarrative_gates(
         source_durations={"ep1": 26.0},
         rewrite_for_fit=rewrite,
     )
-    assert result.narration_texts[0].text == "他拿走了两千斤玄铁锅"
+    assert result.narration_texts[0].text == "拿走两千斤锅"
 
     # 元叙述命中：重写结果弃用，该段走弃段路径
     def bad_rewrite(text: str, target_chars: int) -> str | None:
-        return "画面里他拿走了玄铁锅"
+        return "画面里拿锅"
 
     plan2 = _plan(("ep1", 20.0, 21.0, "narration"))
     seen.clear()

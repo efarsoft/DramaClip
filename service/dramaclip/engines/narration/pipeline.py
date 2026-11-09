@@ -320,14 +320,17 @@ def _rewrite_and_resynth(
     cache_dir: Path,
     rewrite_for_fit: Callable[[str, int], str | None],
     log: LogFn | None,
-) -> bool:
-    """对放不下的段做一轮定向收短＋重新合成；至少一段成功更新才返回 True。
+) -> dict[str, int]:
+    """对放不下的段做一轮定向收短＋重新合成；返回本轮统计（accepted=0 即无进展）。
 
-    目标字数按本段实测语速推（字/秒 × 空隙秒），不另设语速常量。重写或重合成
-    单段失败都只留痕跳过（该段走弃段路径），绝不牵连整条方案。
+    目标字数按本段实测语速推（字/秒 × 空隙秒），不另设语速常量。收短结果
+    必须过长度验收（≤目标字数，#16）：删两三个字的「伪收短」重合成后大概率
+    仍放不下，白付一轮 TTS+回排。重写或重合成单段失败都只留痕跳过（该段走
+    弃段路径），绝不牵连整条方案。
     """
+    stats = {"rewritten": 0, "accepted": 0, "rejected_same": 0, "rejected_long": 0,
+             "resynth_fail": 0}
     items = {item.id: item for item in plan.narration_texts}
-    progressed = False
     for entry in unplaced:
         slot = str(entry["slot"])
         text = str(entry["text"])
@@ -341,6 +344,17 @@ def _rewrite_and_resynth(
             _emit(log, f"旁白 {slot} 收短重写失败（{type(exc).__name__}: {exc}）", "warn")
             continue
         if not new_text or new_text.strip() == text.strip():
+            stats["rejected_same"] += 1
+            continue
+        stats["rewritten"] += 1
+        if len(new_text.strip()) > target_chars:
+            stats["rejected_long"] += 1
+            _emit(
+                log,
+                f"旁白 {slot} 收短稿 {len(new_text.strip())} 字仍超目标 "
+                f"≤{target_chars}，弃用重写结果（免白付一轮 TTS）",
+                "warn",
+            )
             continue
         # 收短产出过全链同款两道零容忍出口：数字中文化（「2,000斤」配音全毁）与
         # 元叙述硬闸（「画面里」进 TTS=零容忍破防）。命中元叙述弃用重写结果，
@@ -361,19 +375,21 @@ def _rewrite_and_resynth(
             audio_path = pool.synthesize_item(slot, new_text, voice, speed, work_dir, cache_dir)
             new_dur = tts_base.audio_duration_s(audio_path)
         except Exception as exc:  # noqa: BLE001 - 重合成失败不致命：该段回退弃段路径
+            stats["resynth_fail"] += 1
             _emit(log, f"旁白 {slot} 收短后重新合成失败（{exc}），保留原音频", "warn")
             continue
         if not new_dur or new_dur <= 0:
+            stats["resynth_fail"] += 1
             continue
         audio_path, new_dur = _align_to_hook_slot(slot, audio_path, float(new_dur), log)
         voiced[slot] = (str(audio_path), new_text, float(new_dur))
-        progressed = True
+        stats["accepted"] += 1
         _emit(
             log,
             f"旁白 {slot} 实测 {duration:.2f}s 超出 {gap_s:.2f}s 空隙，已收短至 "
             f"{len(new_text)} 字（目标 ≤{target_chars}）重新合成，实测 {float(new_dur):.2f}s",
         )
-    return progressed
+    return stats
 
 
 def synthesize_narration_texts(
@@ -469,6 +485,11 @@ def synthesize_narration_texts(
     # 不进重写循环。
     timeline: list[dict[str, Any]] = []
     unplaced: list[dict[str, Any]] = []
+    # 跨轮最大空隙账（#16）：桥段改锚后空隙变化，本轮首选空隙小于历史最大时
+    # 收短目标会被压得过狠——按每槽历史最大空隙定目标，改锚腾出的空间用得上。
+    gap_best: dict[str, float] = {}
+    fit_stats = {"rewritten": 0, "accepted": 0, "rejected_same": 0, "rejected_long": 0,
+                 "resynth_fail": 0, "rounds": 0}
     for attempt in range(3):
         if plan.mode == "ultra_short_hook" and plan.scene_pool:
             timeline = _layout_ultra_short(plan, voiced, source_durations, log)
@@ -484,8 +505,20 @@ def synthesize_narration_texts(
             )
         if not unplaced or rewrite_for_fit is None or attempt >= 2:
             break
-        if not _rewrite_and_resynth(
-            unplaced,
+        for entry in unplaced:
+            gap_best[str(entry["slot"])] = max(
+                gap_best.get(str(entry["slot"]), 0.0), float(entry["gap_s"])
+            )
+        enriched = [
+            {
+                **entry,
+                "gap_s": max(float(entry["gap_s"]), gap_best.get(str(entry["slot"]), 0.0)),
+            }
+            for entry in unplaced
+        ]
+        fit_stats["rounds"] += 1
+        stats = _rewrite_and_resynth(
+            enriched,
             voiced,
             plan,
             pool,
@@ -495,7 +528,10 @@ def synthesize_narration_texts(
             cache_dir,
             rewrite_for_fit,
             log,
-        ):
+        )
+        for key in ("rewritten", "accepted", "rejected_same", "rejected_long", "resynth_fail"):
+            fit_stats[key] += stats[key]
+        if stats["accepted"] == 0:
             break
     for entry in unplaced:
         _emit(
@@ -507,6 +543,14 @@ def synthesize_narration_texts(
         )
     if unplaced:
         _emit(log, f"共 {len(unplaced)} 段旁白放不进画面空隙被弃用", "warn")
+    # fit 遥测（#17）：空转与否不再靠翻日志——一轮汇总进任务详情，喂持续优化。
+    if fit_stats["rounds"] > 0:
+        _emit(
+            log,
+            "fit 重排循环：{rounds} 轮，重写 {rewritten} 段（采纳 {accepted}，"
+            "原文打回 {rejected_same}，超目标打回 {rejected_long}，合成失败 "
+            "{resynth_fail}），最终弃段 {dropped}".format(dropped=len(unplaced), **fit_stats),
+        )
     _assert_within_source(timeline, source_durations)
     updated = [
         item.model_copy(
