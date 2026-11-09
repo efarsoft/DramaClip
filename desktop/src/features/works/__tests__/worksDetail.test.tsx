@@ -319,3 +319,64 @@ describe('成片逐句核对', () => {
     expect(screen.getByText('成片文件还不在盘上（未完成或已删除）')).toBeTruthy();
   });
 });
+
+describe('逐平台发布包', () => {
+  /** 服务端 publish_pack 的最小真实形状：默认平台「抖音」有条目即可上屏。 */
+  const packWith = (title: string) => ({
+    title,
+    caption: null,
+    tags: [],
+    platforms: {
+      抖音: {
+        title,
+        title_fits: true,
+        caption: null,
+        tags: [],
+        cover_ratio: [9, 16],
+        ai_declaration: '发布页勾选 AI 生成声明',
+      },
+    },
+  });
+
+  it('标题选用后发布包随之重拉：不再展示旧标题（planId 没变也要刷新）', async () => {
+    api.rpc.mockResolvedValue({
+      plan: {
+        titles: [{ text: '旧标题', selected: false }],
+        angle: '替身真相',
+        episode_ids: [],
+        plan_data: { narration_texts: [] },
+      },
+    });
+    // 服务端语义：publish_pack 与详情页读同一份库快照——update_titles 落库后重拉必得新标题
+    api.publishPack.mockImplementation(() =>
+      Promise.resolve(packWith(api.update.mock.calls.length > 0 ? '新标题' : '旧标题')),
+    );
+    api.update.mockResolvedValue({ titles: [{ text: '新标题', selected: true }] });
+    page();
+    // 标题区与发布包各渲染一份「旧标题」（发布包 RPC 晚一步到，等到两份齐）
+    await vi.waitFor(async () => {
+      expect(await screen.findAllByText('旧标题')).toHaveLength(2);
+    });
+    const callsBefore = api.publishPack.mock.calls.length;
+    const titleRow = screen.getAllByText('旧标题').at(0);
+    if (titleRow === undefined) throw new Error('候选标题行不在场');
+    fireEvent.click(titleRow);
+    await vi.waitFor(() => {
+      expect(api.publishPack.mock.calls.length).toBeGreaterThan(callsBefore);
+    });
+    await vi.waitFor(async () => {
+      expect(await screen.findAllByText('新标题')).toHaveLength(2);
+    });
+  });
+
+  it('RPC 失败：常驻「加载失败」与重试，不永久加载中；重试成功恢复', async () => {
+    api.publishPack.mockRejectedValue(new Error('服务未就绪'));
+    page();
+    expect(await screen.findByText(/发布包加载失败/)).toBeTruthy();
+    expect(screen.queryByText(/发布包加载中/)).toBeNull();
+    api.publishPack.mockResolvedValue(packWith('恢复后的标题'));
+    fireEvent.click(screen.getByRole('button', { name: /重试/ }));
+    expect(await screen.findByText('恢复后的标题')).toBeTruthy();
+    expect(screen.queryByText(/发布包加载失败/)).toBeNull();
+  });
+});

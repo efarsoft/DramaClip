@@ -112,7 +112,7 @@ export function WorksDetailPage(): ReactElement {
               onGenerate={detail.onGenerate}
               onSelect={detail.onSelectTitles}
             />
-            <PlatformPackSection planId={detail.planId} exportId={detail.job.id} />
+            <PlatformPackSection planId={detail.planId} exportId={detail.job.id} titles={detail.titles} />
             <PublishDataSection job={detail.job} onReload={detail.reload} />
           </div>
         </div>

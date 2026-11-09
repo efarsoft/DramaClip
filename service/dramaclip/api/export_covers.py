@@ -25,6 +25,7 @@ from dramaclip.engines.subtitle.ass_generator import (
     split_subtitle_text,
 )
 from dramaclip.infra.ffmpeg import cover as ffmpeg_cover
+from dramaclip.infra.ffmpeg.cover import _COVER_WIDTH
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import exports as exports_repo
@@ -152,16 +153,20 @@ def _cover_title(context: AppContext, plan_row: dict[str, Any]) -> str | None:
     """封面字层用标题：取方案的第一条候选标题。
 
     plan_row 自带 titles 优先；为空时回库重读——`_ensure_titles` 可能刚生成完，
-    而 render_export 手里的 plan_row 是提交时的旧快照。封面属增强项：任何异常
-    都退回无字层，绝不挡导出。
+    而 render_export 手里的 plan_row 是提交时的旧快照。候选为 dict（{text, selected}，
+    update_titles 落库形状）时取 text；字符串候选原样（旧库兼容）。封面属增强项：
+    任何异常都退回无字层，绝不挡导出。
     """
     try:
         titles = plan_row.get("titles") or []
         if not titles:
             row = plans_repo.get(context.conn, str(plan_row["id"]))
             titles = (row or {}).get("titles") or []
-        first = str(titles[0]).strip() if titles else ""
-        return first or None
+        first = titles[0] if titles else ""
+        # 真实方案的 titles 是 dict：直接 str 会把 dict repr 烧上封面
+        if isinstance(first, dict):
+            first = first.get("text") or ""
+        return str(first).strip() or None
     except Exception as exc:  # noqa: BLE001 - 增强项失败退回无字层截帧
         _note_degraded(context, "封面字层标题", "封面出无字层", exc)
         return None
@@ -450,62 +455,76 @@ def generate_platform_covers(
     """
     from dramaclip.engines.narration.publish_pack import PLATFORM_ORDER, PLATFORM_SPECS
 
-    out_path = Path(str(row.get("output_path") or ""))
-    covers_dir = context.data_dir / "covers" / "exports"
-    covers_dir.mkdir(parents=True, exist_ok=True)
-    title: str | None = None
-    plan_data: PlanData | None = None
-    episode_paths: dict[str, str] = {}
-    plan_id = str(row.get("narration_plan_id") or "")
-    if plan_id:
-        plan_row = plans_repo.get(context.conn, plan_id)
-        if plan_row is not None:
-            title = _cover_title(context, plan_row)
-            try:
-                plan_data = PlanData.model_validate(plan_row["plan_data"])
-            except ValidationError:
-                plan_data = None
-    if plan_data is not None:
-        episode_paths = {
-            str(ep["id"]): str(ep["source_path"])
-            for ep in episodes_repo.list_by_project(context.conn, str(row["project_id"]))
-        }
     covers: dict[str, str] = {}
     skipped: dict[str, str] = {}
-    for name in PLATFORM_ORDER:
-        ratio = PLATFORM_SPECS[name]["cover_ratio"]
-        if tuple(ratio) == (9, 16):
-            continue
-        width = 1080
-        height = round(width * ratio[1] / ratio[0])
-        target = covers_dir / f"{export_id}.{name}.jpg"
-        if target.is_file():
-            covers[name] = str(target)
-            continue
-        composition = (
-            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height}"
-        )
-        ok = False
+    # 9:16 平台（抖音/快手）直接用基础封面，不进重裁
+    platforms = [
+        name for name in PLATFORM_ORDER
+        if tuple(PLATFORM_SPECS[name]["cover_ratio"]) != (9, 16)
+    ]
+    try:
+        out_path = Path(str(row.get("output_path") or ""))
+        covers_dir = context.data_dir / "covers" / "exports"
+        covers_dir.mkdir(parents=True, exist_ok=True)
+        title: str | None = None
+        plan_data: PlanData | None = None
+        episode_paths: dict[str, str] = {}
+        plan_id = str(row.get("narration_plan_id") or "")
+        if plan_id:
+            plan_row = plans_repo.get(context.conn, plan_id)
+            if plan_row is not None:
+                title = _cover_title(context, plan_row)
+                try:
+                    plan_data = PlanData.model_validate(plan_row["plan_data"])
+                except ValidationError:
+                    plan_data = None
         if plan_data is not None:
-            try:
-                frame = _cover_source_frame(context.conn, plan_data, episode_paths, (width, height))
-            except Exception as exc:  # noqa: BLE001 - 增强项自诊断失败退回成片截
-                _note_degraded(context, "平台封面源截帧", f"{name} 封面改从成片截", exc)
-                frame = None
-            if frame is not None:
-                source, seek_s, _base = frame
-                ok = ffmpeg_cover.extract_cover(
-                    source, target, seek_s=seek_s, title=title, composition_vf=composition
-                )
-        if not ok and out_path.is_file():
-            ok = ffmpeg_cover.extract_cover(
-                out_path, target, title=title, composition_vf=composition
+            episode_paths = {
+                str(ep["id"]): str(ep["source_path"])
+                for ep in episodes_repo.list_by_project(context.conn, str(row["project_id"]))
+            }
+    except Exception as exc:  # noqa: BLE001 - 增强项永不 raise：准备失败逐平台进 skipped
+        for name in platforms:
+            skipped[name] = f"准备失败：{exc}"
+        return {"ok": True, "covers": covers, "skipped": skipped}
+    for name in platforms:
+        try:
+            ratio = PLATFORM_SPECS[name]["cover_ratio"]
+            width = _COVER_WIDTH
+            height = round(width * ratio[1] / ratio[0])
+            height += height % 2  # ffmpeg scale=-2 强制偶数：奇数高进位（B站 675→676）
+            target = covers_dir / f"{export_id}.{name}.jpg"
+            if target.is_file():
+                covers[name] = str(target)
+                continue
+            composition = (
+                f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+                f"crop={width}:{height}"
             )
-        if ok:
-            covers[name] = str(target)
-        else:
-            skipped[name] = "截帧失败"
+            ok = False
+            if plan_data is not None:
+                try:
+                    frame = _cover_source_frame(
+                        context.conn, plan_data, episode_paths, (width, height)
+                    )
+                except Exception as exc:  # noqa: BLE001 - 增强项自诊断失败退回成片截
+                    _note_degraded(context, "平台封面源截帧", f"{name} 封面改从成片截", exc)
+                    frame = None
+                if frame is not None:
+                    source, seek_s, _base = frame
+                    ok = ffmpeg_cover.extract_cover(
+                        source, target, seek_s=seek_s, title=title, composition_vf=composition
+                    )
+            if not ok and out_path.is_file():
+                ok = ffmpeg_cover.extract_cover(
+                    out_path, target, title=title, composition_vf=composition
+                )
+            if ok:
+                covers[name] = str(target)
+            else:
+                skipped[name] = "截帧失败"
+        except Exception as exc:  # noqa: BLE001 - 增强项永不 raise：截帧异常（如 ffmpeg 缺失）进 skipped
+            skipped[name] = f"截帧失败：{exc}"
     return {"ok": True, "covers": covers, "skipped": skipped}
 
 
