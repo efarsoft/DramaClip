@@ -70,7 +70,11 @@ _ERR_EXPORT_NOT_RETRYABLE = -32405  # 导出域 -32400~-32499（见 common.json 
 _ERR_TRASH_FENCE = -32408  # 产物不在数据目录内，拒绝搬移（models.delete 围栏的同款规矩）
 _ERR_TRASH_MOVE = -32409  # 移入回收失败（OSError）：宁留记录，不产无法追溯的孤儿文件
 _ERR_PUBLISH_DATA = -32410  # 发布数据录入不合法（W8）：宁拒收，不存脏数据污染回流账
-_ERR_AIGC_CONFIG = -32411  # 隐式标识开启但提供者编码未填：submit 即拒，不待渲染半途失败
+_ERR_AIGC_CONFIG = -32411  # 隐式标识开启但编码未填：submit 早拒＋渲染遍硬失败（retry/竞态同拒）
+_AIGC_MISSING_PRODUCER_MSG = (
+    "AIGC 隐式标识已开启但未填写服务提供者编码：请在设置「出片」分区填写"
+    "（全国人工智能生成合成内容标识服务平台注册获取），或关闭隐式标识开关"
+)
 
 _PUBLISH_PLATFORMS = ("抖音", "快手", "视频号", "小红书", "B站", "其他")
 
@@ -152,15 +156,8 @@ def submit(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, list) or not raw:
         raise RpcDomainError(_ERR_NO_PLANS, "plan_ids 必须是非空数组")
     plan_ids = list(dict.fromkeys(str(item) for item in raw))
-    if (
-        aigc_metadata.enabled(context.settings)
-        and not aigc_metadata.producer_code(context.settings)
-    ):
-        raise RpcDomainError(
-            _ERR_AIGC_CONFIG,
-            "AIGC 隐式标识已开启但未填写服务提供者编码：请在设置「出片」分区填写"
-            "（全国人工智能生成合成内容标识服务平台注册获取），或关闭隐式标识开关",
-        )
+    if aigc_metadata.missing_producer(context.settings):
+        raise RpcDomainError(_ERR_AIGC_CONFIG, _AIGC_MISSING_PRODUCER_MSG)
     accepted: list[dict[str, str]] = []
     rejected: list[dict[str, str]] = []
     for plan_id in plan_ids:
@@ -809,6 +806,10 @@ def render_export(
 ) -> Path:
     """渲染核心：剪辑→字幕→编码→写成品记录（失败抛异常，不管理 job）。
     """
+    # 渲染遍自守提供者编码（审查 Important#1）：retry 不经 submit、排队期间编码也可能
+    # 被清空——凡开启而编码空，构造 aigc_stamp 之前硬失败，绝不静默交付法定无效标。
+    if aigc_metadata.missing_producer(context.settings):
+        raise RpcDomainError(_ERR_AIGC_CONFIG, _AIGC_MISSING_PRODUCER_MSG)
     export_id = run.export_id
     project_id = run.project_id
     plan_row = run.plan_row
@@ -1030,7 +1031,7 @@ def render_export(
         # 返回 None＝现状出片。混音失败在 encoder 层向上抛，这里降级留痕不挡导出。
         bgm_track=_pick_bgm_track(context, plan_data),
         # AIGC 隐式标识（业主裁决 2026-11-09：默认关、用户可开）：内容编号用 export_id，
-        # 与回流账同一标识符；编码在 submit 已验非空。
+        # 与回流账同一标识符；编码非空由本函数入口的渲染遍守卫保证（retry/排队竞态同拒）。
         aigc_stamp=(
             (aigc_metadata.producer_code(context.settings), export_id)
             if aigc_metadata.enabled(context.settings)

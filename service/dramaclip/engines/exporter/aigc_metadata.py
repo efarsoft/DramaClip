@@ -30,8 +30,17 @@ def enabled(settings: config.Settings) -> bool:
 
 
 def producer_code(settings: config.Settings) -> str:
-    """服务提供者编码（法定必填；空 = 未填，submit 守卫据此拒收）。"""
+    """服务提供者编码（法定必填；空 = 未填，submit 与渲染遍守卫据此拒收）。"""
     return str(settings.get("export.aigc_producer_code", "") or "").strip()
+
+
+def missing_producer(settings: config.Settings) -> bool:
+    """开启隐式标识但提供者编码空/纯空白＝缺失（法定必填项缺位）。
+
+    submit 早拒与渲染遍硬失败共用此谓词（同一真相源）：渲染遍据此兜住 retry
+    绕过 submit、以及 submit→渲染之间清空编码的排队竞态——绝不静默交付缺标成片。
+    """
+    return enabled(settings) and not producer_code(settings)
 
 
 def payload(producer: str, content_id: str) -> str:

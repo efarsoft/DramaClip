@@ -446,3 +446,42 @@ def test_submit_accepts_aigc_with_producer_code(
     }
     result = _rpc(harness, "export.submit", {"plan_ids": [plan_id]})
     assert len(result["exports"]) == 1
+
+
+def test_retry_with_empty_aigc_producer_hard_fails_before_render(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """retry 绕过 submit 守卫：渲染遍必须自守（审查 Important#1）。
+
+    开启隐式标识但编码空时重试一条失败导出——retry 不经 submit，若渲染遍不守卫，
+    就会把 ContentProducer="" 的法定无效标静默交付。钉住：encoder.export_plan 绝不
+    被触达，导出落 failed 且账面带 AIGC 提供者编码提示（同一守卫也兜 submit→渲染
+    之间清空编码的排队竞态）。
+    """
+    plan = _voiced_plan(tmp_path)
+    project_id, plan_id = _seed_plan(memory_db, tmp_path, plan)
+    export_id = exports_repo.create(memory_db, project_id, plan_id, "full_narration")
+    exports_repo.mark_failed(memory_db, export_id, "上一轮渲染失败")
+    harness = _harness(memory_db, tmp_path)
+    harness.context.settings = {"export.aigc_metadata": "true"}  # 编码空
+
+    reached: list[int] = []
+
+    def must_not_render(*_a: object, **_k: object) -> None:
+        reached.append(1)
+        raise AssertionError("encoder.export_plan 不该被触达：AIGC 守卫应先硬失败")
+
+    monkeypatch.setattr(export_api.encoder, "export_plan", must_not_render)
+    # 渲染前置（硬编探测/标题生成）打桩保密闭——本用例测的是 AIGC 守卫，不是这些增强项。
+    monkeypatch.setattr(export_api.encoder, "pick_hw_encoder", lambda: None)
+    monkeypatch.setattr(export_api, "_ensure_titles", lambda *_a, **_k: None)
+
+    result = _rpc(harness, "export.retry", {"export_id": export_id})
+    harness.context.executor.shutdown(wait=True)  # 等执行池把这条 retry 跑成终态
+
+    assert reached == [], "渲染缝被触达：空编码守卫没拦住 retry"
+    row = exports_repo.get(memory_db, export_id)
+    assert row is not None and row["status"] == exports_repo.STATUS_FAILED
+    assert "提供者编码" in str(row["error"]), f"失败理由不是 AIGC 守卫：{row['error']}"
+    job = harness.context.job_store.get(str(result["job_id"]))
+    assert job is not None and job["status"] == "failed"

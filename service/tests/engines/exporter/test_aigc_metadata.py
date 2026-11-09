@@ -25,6 +25,22 @@ def test_default_is_off() -> None:
     assert aigc_metadata.enabled({"export.aigc_metadata": "true"}) is True
 
 
+def test_missing_producer_predicate() -> None:
+    """共享谓词（submit 与渲染遍同一真相源）：仅「开启且编码空/纯空白」判缺失。"""
+    assert aigc_metadata.missing_producer({}) is False  # 默认关
+    assert aigc_metadata.missing_producer({"export.aigc_metadata": "false"}) is False
+    assert aigc_metadata.missing_producer(
+        {"export.aigc_metadata": "true", "export.aigc_producer_code": "P"}
+    ) is False
+    assert aigc_metadata.missing_producer({"export.aigc_metadata": "true"}) is True
+    assert aigc_metadata.missing_producer(
+        {"export.aigc_metadata": "true", "export.aigc_producer_code": ""}
+    ) is True
+    assert aigc_metadata.missing_producer(
+        {"export.aigc_metadata": "true", "export.aigc_producer_code": "   "}
+    ) is True
+
+
 def test_payload_roundtrip() -> None:
     value = aigc_metadata.payload("001191330106MA2C91330100Y43", "export-123")
     decoded = base64.b64decode(value).decode("utf-8")
