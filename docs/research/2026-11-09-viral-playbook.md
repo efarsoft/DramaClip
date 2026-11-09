@@ -54,7 +54,7 @@
 - 【事实·二手】片头 LOGO、冗余开场信息被明确列为降低完播的反面做法（首帧即冲突）。来源：https://www.chanmama.com/yunyingquan/article/1242.html
 - 【事实·二手】「无授权搬运切片」「擦边」「一稿多投」是当前红线；出品方对二创有明确规范（时长区间+全程剧名），纯搬运不挂链接/不带剧名的旧打法不可行。来源：https://www.hailuoshe.com/blog/short-drama-promotion-how-to 、https://paper.people.com.cn/zgjjzk/pc/content/202511/13/content_30119319.html
 - 【事实·二手】付费 CPS 切片推广整体收益大幅下滑（从业者称单条收益「两块五」「赚不了多少钱」），靠铺量吃付费佣金的旧模式失效中，行业转向广告回收（IAA）与精品化。来源：https://paper.people.com.cn/zgjjzk/pc/content/202511/13/content_30119319.html
-- 【推断】结合本项目样本（头部被 AI 漫剧/AI 短剧占据）：真人短剧切片的同质化竞争已极度内卷，「AI 生成内容+推广」混合形态是当前增量；同时 AI 内容必须按第三节所述打标，「假装真人实拍」的 AI 内容打法有合规风险。
+- 【推断】结合本项目样本（头部被 AI 漫剧/AI 短剧占据）：真人短剧切片的同类内容竞争已极度内卷，「AI 生成内容+推广」混合形态是当前增量；同时 AI 内容必须按第三节所述打标，「假装真人实拍」的 AI 内容打法有合规风险。
 
 ### 对 DramaClip 的启示（第一节）
 

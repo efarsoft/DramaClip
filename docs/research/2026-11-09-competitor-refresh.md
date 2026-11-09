@@ -91,7 +91,7 @@ README 常驻能力（发布日均已存在，具体落地版本未逐一核实�
 | 推剧助手-AI短剧解说智能体 | 上传素材一键生成解说/配音/字幕、内置爆款风格、三步操作；订阅制（月 78 元档）；Android 版官方描述另有「一键去重、视频去字幕、视频提取文案」工具箱 | 【一手】https://apps.apple.com/us/app/id6786110530 （1.1.1，9-22 更新）；【一手】应用宝官方页 https://sj.qq.com/appdetail/com.startupcloud.filmhelper 。访问 2026-11-09 |
 | 剧说-AI短剧解说智能体 | 一键生成解说、内置爆款风格、极简操作；月卡+积分制 | 【一手】https://apps.apple.com/cn/app/id6760341675 。访问 2026-11-09 |
 | 剧小通 | 现名「剧小通-AI剪辑短剧影视二创解说」：短剧数据分析（热门趋势/潜力爆款）+ **短剧挂载变现** + 智能剪辑，一站式短剧变现服务 | 【一手】https://apps.apple.com/cn/app/id6740080788 （描述从页面内嵌 JSON 提取）。访问 2026-11-09 |
-| 智剪-视频一键去重 等 | 去重/抗比对卖点工具 | 仅商店 listings 线索；**撞锁不追**，不展开 |
+| 智剪-视频一键去重 等 | 去重/规避重复判定类卖点工具 | 仅商店 listings 线索；**撞锁不追**，不展开 |
 | 剪映草稿 Agent 生态 | jianying-editor-skill（MIT，UI 自动化读写剪映，文案→配音→字幕→音乐→导出全流程）；jianying-headless（2026-09-15 出现，剪映专业版 macOS 无界面自动化，JSON 剪辑计划→原生草稿→本机引擎导出）；pyJianYingDraft（草稿生成库） | 【一手】https://github.com/isYangs/jianying-editor-skill 、https://github.com/GdLinkLock/jianying-headless （标注 Private source preview，源码完整性未核实）、https://github.com/GuanYixuan/pyJianYingDraft ；热度背景【二手】https://zhuanlan.zhihu.com/p/2085294953937246000 。访问 2026-11-09。**草稿路线整体撞锁**，但其「Agent 一句话驱动剪辑」的产品形态是趋势信号（对应 G8） |
 | 红果/抖音解说漫剧新政周边 | 解说漫剧类型系数提升、60 分钟 AI 剧保底，催生「解说剧一键成片」生产工具（如巨日禄AI） | 【二手】https://www.pingwest.com/a/317444 （2026-09-15）、https://www.csdn.net/article/2026-08-02/163399833 。属**制作端**（AI生成漫剧）非推广剪辑端，与 DramaClip 相邻不重叠，仅记市场信号。未核实一手 |
 
@@ -216,7 +216,7 @@ README 常驻能力（发布日均已存在，具体落地版本未逐一核实�
 |---|---|---|
 | 剪映草稿导出 | HotClip/NarratoAI/JJYB/jianying-editor-skill/jianying-headless/pyJianYingDraft（一手见 §1/§3） | 「永不导出草稿，只交成品」 |
 | EDL/时间线工程交接（DaVinci/PR 重链精修） | HotClip README（一手） | 同上精神：只交成品 |
-| 去重/抗比对：变形度评分、多版反指纹、一键去重 | HotClip README；推剧助手应用宝描述；智剪 App（一手/线索） | 「不做消重/抗比对卖点」 |
+| 去重/规避重复判定：变形度评分、多版差异化处理、一键去重 | HotClip README；推剧助手应用宝描述；智剪 App（一手/线索） | 「不做消重/规避重复判定类卖点」 |
 | 关键帧对齐流复制切片提速 | HotClip README（一手） | 切点精度质量锁（旧调研 C 档已拒 `-c copy` 切片；DramaClip 重编码两阶段勿倒退） |
 | 多语翻译/阿拉伯文 shaping/印尼语等 | VideoLingo、MPT v1.3.10（一手） | 「不做多语翻译」 |
 | yt-dlp 下载/代理 | VideoLingo v3.0.4（一手） | 「不做视频下载器」 |

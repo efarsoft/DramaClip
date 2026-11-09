@@ -21,6 +21,8 @@ const KNOWN_KEYS = new Set([
   'export.width',
   'export.height',
   'export.ai_label',
+  'export.aigc_metadata',
+  'export.aigc_producer_code',
   'agent_gateway.enabled',
   'agent_gateway.port',
   'agent_gateway.token',
