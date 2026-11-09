@@ -90,7 +90,16 @@ def _load_mode_gate():
     assert spec is not None and spec.loader is not None
     gate = importlib.util.module_from_spec(spec)
     sys.modules["verify_modes"] = gate
-    spec.loader.exec_module(gate)
+    # verify_modes 在 import 时永久替换 encoder.cut_segment_args 为捕获包装；
+    # 本文件只内省门禁的表、不跑渲染，exec 后立即还原——否则同进程后续测试
+    # 内省该签名看到的是 (*args, **kw)（test_drama_name_layer 曾因此假红）。
+    from dramaclip.engines.exporter import encoder
+
+    original = encoder.cut_segment_args
+    try:
+        spec.loader.exec_module(gate)
+    finally:
+        encoder.cut_segment_args = original
     return gate
 
 
