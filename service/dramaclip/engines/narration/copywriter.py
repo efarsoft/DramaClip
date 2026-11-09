@@ -13,7 +13,6 @@ from dramaclip.engines.llm_trace import dump_trace, trace_path
 from dramaclip.engines.narration import casting, conversion, scriptwriter
 from dramaclip.engines.narration.models import NarrationText, PlanData, TimelineSegment
 from dramaclip.engines.narration.numerals import to_chinese_numerals
-from dramaclip.engines.narration.prompt_rules import RULE_TEXTS
 from dramaclip.engines.narration.prompt_rules import assemble as _assemble_rules
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable, client_for
 
@@ -87,7 +86,7 @@ def system_prompt(settings: dict[str, str], mode: str = "") -> str:
             + mode
             + f"：每条不超过 {_line_cap_of(mode)} 字——若与上文行帽冲突，以本行为准。）"
         )
-    return structure + scriptwriter.fundamentals_layer(overrides, scope="slot")
+    return structure + scriptwriter.fundamentals_layer(overrides, scope="slot", mode=mode)
 
 
 def _slot_block(
@@ -137,7 +136,7 @@ def _slot_block(
         if frames:
             lines.append(
                 "  区间内画面轨（画面描写必须与这些实据一致；"
-                + RULE_TEXTS["visual_text_overlay"]
+                + scriptwriter.VISUAL_TEXT_OVERLAY_RULE
                 + "）："
             )
             lines.extend(

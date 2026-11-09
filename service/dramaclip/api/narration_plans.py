@@ -418,7 +418,7 @@ def _angle_variants(
             episode_numbers=brief.episode_numbers,
             angle_block=(
                 "" if zero_copy
-                else angles.prompt_block(brief, include_style=include_style)
+                else angles.prompt_block(brief, include_style=include_style, mode=mode)
             ),
             arc=brief.arc,
         )

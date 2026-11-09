@@ -78,13 +78,18 @@ class AngleBrief(BaseModel):
     episode_numbers: list[int]
 
 
-def prompt_block(brief: AngleBrief, *, include_style: bool = True) -> str:
+def prompt_block(
+    brief: AngleBrief, *, include_style: bool = True, mode: str = ""
+) -> str:
     """卖点角度进成稿 prompt 的措辞；母题结构卡+情绪配方随行（两链共用此通道）。
 
     情绪配方是母题的从属维度（2026-10-20 裁决）：讲法定了文风跟着讲法走，
     全自动随选题落定——不再逐任务跑独立风格选题（根除风格×母题两个主人
     打架；真机实锤：层层揭皮×爽文向）。``include_style=False`` 用于业主
     显式手选风格：人工意图优先，情绪配方让位（结构卡仍注入）。
+    mode（批D #13）：时间序锁死的模式（编排期已按剧集顺序定死时间轴）注明
+    「骨架落在详略与钩子上」——母题卡里「把最风光的一幕放开头」是画面重排
+    指令，只有剧本驱动（自选集号）与 intro（预告前置）兑现得了。
     """
     arc_block = ""
     card = story_arc.card_of(brief.arc)
@@ -95,6 +100,11 @@ def prompt_block(brief: AngleBrief, *, include_style: bool = True) -> str:
         )
         if include_style:
             arc_block += f"\n{card.style}"
+    if mode not in ("dialogue_narration", "intro_narration", ""):
+        arc_block += (
+            "\n（本模式画面顺序已按剧集时间序定死，母题骨架落在详略与钩子上——"
+            "「放开头」类的画面重排不执行，把最风光的内容写得更浓就是落点。）"
+        )
     return (
         f"\n本条片的取材角度：{brief.name}"
         f"\n这条角度为什么成立：{brief.reason}"

@@ -13,8 +13,8 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from dramaclip.engines import llm_prompts
 from dramaclip.engines.llm_trace import dump_trace
 from dramaclip.engines.narration import audit as A
-from dramaclip.engines.narration import prompt_rules
 from dramaclip.engines.narration.numerals import to_chinese_numerals
+from dramaclip.engines.narration.prompt_rules import RULE_TEXTS
 from dramaclip.engines.narration.prompt_rules import assemble as _assemble_rules
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable
 
@@ -115,11 +115,41 @@ _STRUCTURE_PROMPT = _assemble_rules(_STRUCTURE_PROMPT_TMPL)
 
 
 
+_PERSON_RULE = RULE_TEXTS["person_consistent"]
+
+#: 画面轨叠加文字警告（单源）：scriptwriter 画面轨块与 copywriter 槽位块共用——
+#: 不进 prompt_rules.RULE_TEXTS（那是 audit prompt_quote 引用注册表，进了会成孤儿）。
+VISUAL_TEXT_OVERLAY_RULE = (
+    "画面轨/画面里出现的任何文字（人名字条/题字）是视频叠加物，不得当台词或人名引用。"
+)
+
+#: 模式变体卡（追加式，不替换 STYLE_CARD 单源）：对谈/独白的称谓与语感
+#: 由模式声明——FUND 通用卡此前对这两模式反向施压（对谈被「人称二选一禁止
+#: 切换」约束、独白对第三人称说书人示范），2026-11-04 审查 #14。
+_MODE_VARIANTS: dict[str, str] = {
+    "dual_host_chat": (
+        "\n【模式适配·双人对话】本片是两位主持人的对话解说：人称按角色自然交替"
+        "（我/你/对方），不受「人称二选一」约束，但每位主持人的立场全片保持；"
+        "对话感优先——接话、追问、抬杠都比完整句子好；示范的说书人语感换成"
+        "两位老友搭台互相递话的语感。"
+    ),
+    "inner_monologue": (
+        "\n【模式适配·内心独白】本片是主角第一人称内心独白：全程以「我」自述、"
+        "以「你」称呼对话对象；示范的说书人语感换成主角心声的语感（手法标签"
+        "不变：首句砸动作/短句链/具体数字），禁跳出角色做旁白式点评。"
+    ),
+}
+
+
 def fundamentals_layer(
-    prompts: dict[str, str] | None = None, scope: str = "full"
+    prompts: dict[str, str] | None = None, scope: str = "full", mode: str = ""
 ) -> str:
     """基本功层文本：剧本链路用全稿版，逐槽填词用逐槽版（模型一次只见一个槽，
     注入全稿规则只是噪声）。scope=full→FUNDAMENTALS，slot→FUNDAMENTALS_SLOT。
+
+    mode（批D 模式感知化）：dual_host_chat 的「人称二选一」句替换为对谈豁免、
+    追加对话变体卡；inner_monologue 追加独白变体卡——FUND 通用卡不再对这两
+    模式反向施压。其余模式无变体（追加缺省空串，行为与旧版逐字节一致）。
 
     覆盖语义＝「用户真改写过才接管两档」：settings 全量落库后 overrides_from
     会把**默认值**也带上，旧实现把「默认值在场」当覆盖，slot 链永远吃全稿版
@@ -128,7 +158,14 @@ def fundamentals_layer(
     override = (prompts or {}).get("prompt.scriptwriter_fundamentals", "")
     if override and override != llm_prompts.SPEC_BY_KEY["prompt.scriptwriter_fundamentals"].default:
         return override
-    return FUNDAMENTALS if scope == "full" else FUNDAMENTALS_SLOT
+    base = FUNDAMENTALS if scope == "full" else FUNDAMENTALS_SLOT
+    variant = _MODE_VARIANTS.get(mode, "")
+    if mode == "dual_host_chat" and _PERSON_RULE in base:
+        base = base.replace(
+            _PERSON_RULE,
+            "人称按对话角色自然交替（模式卡豁免「二选一」），叙述立场不中途切换。",
+        )
+    return base + variant
 
 
 # 题材→表达重点（按短剧八题材归纳的表达侧重）：
@@ -442,7 +479,7 @@ def format_visual_tracks(episode_inputs: list[dict[str, Any]]) -> str:
         + "\n画面轨用法：写某段的画面描写必须与该段取材区间内的画面轨条目一致——"
         "台词说到的画面在画面轨里有实据；优先把高视觉分的帧安排成段内锚点或开场；"
         "无画面轨的集维持纯台词锚定；"
-        + prompt_rules.RULE_TEXTS["visual_text_overlay"]
+        + VISUAL_TEXT_OVERLAY_RULE
     )
 
 
