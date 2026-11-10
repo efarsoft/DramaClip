@@ -106,7 +106,7 @@ describe('PublishReportDrawer', () => {
     await waitFor(() => { expect(screen.getByText(/暂无回流数据/)).toBeTruthy(); });
   });
 
-  it('对照实验页渲染四态与领先方说明', async () => {
+  it('对照实验页渲染方向性领先态与说明', async () => {
     api.publishReport.mockResolvedValue(REPORT);
     api.abReport.mockResolvedValue({
       pairs: [{

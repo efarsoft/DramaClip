@@ -56,7 +56,9 @@ const columns = [
 ];
 
 /** 对照实验页（批二#6）：四态保守读数——方向性≠统计显著，本页只渲染服务端算好的事实。 */
-function AbPairsPane({ ab, abError }: { ab: AbReport | null; abError: string }): ReactElement {
+function AbPairsPane({ ab, abError, abLoading }: {
+  ab: AbReport | null; abError: string; abLoading: boolean;
+}): ReactElement {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
       <div style={{ fontSize: tokens.text.meta.size, color: tokens.textTertiary }}>
@@ -64,9 +66,9 @@ function AbPairsPane({ ab, abError }: { ab: AbReport | null; abError: string }):
         {ab !== null && ab.unpaired > 0 ? ` 未成对 ${String(ab.unpaired)} 条（缺发布日期或无同组对照）。` : ''}
       </div>
       {abError !== '' && <Alert type="error" showIcon title={`对照读数加载失败：${abError}`} />}
-      {ab === null || ab.pairs.length === 0 ? (
+      {abLoading ? <Spin /> : abError === '' && (ab === null || ab.pairs.length === 0) ? (
         <Empty description="暂无可对照的组——同剧同平台发两条以上并录入发布日期后开始读数" />
-      ) : (
+      ) : ab !== null ? (
         <Table
           size="small"
           rowKey={(row) => `${row.a}-${row.b}`}
@@ -96,7 +98,7 @@ function AbPairsPane({ ab, abError }: { ab: AbReport | null; abError: string }):
             { title: '说明', dataIndex: 'note', key: 'note' },
           ]}
         />
-      )}
+      ) : null}
     </div>
   );
 }
@@ -114,14 +116,18 @@ export function PublishReportDrawer({
   const [loading, setLoading] = useState(false);
   const [ab, setAb] = useState<AbReport | null>(null);
   const [abError, setAbError] = useState('');
+  const [abLoading, setAbLoading] = useState(false);
   useEffect(() => {
     if (!open) return;
     let active = true;
+    setAbLoading(true);
     setAbError('');
+    setAb(null); // 先清旧对照：重开失败时不拿上次的配对冒充本次读数
     void exportApi
       .abReport()
       .then((result) => { if (active) setAb(result); })
-      .catch((e: unknown) => { if (active) setAbError(errorText(e, '对照读数加载失败')); });
+      .catch((e: unknown) => { if (active) setAbError(errorText(e, '对照读数加载失败')); })
+      .finally(() => { if (active) setAbLoading(false); });
     return () => { active = false; };
   }, [open]);
   useEffect(() => {
@@ -198,7 +204,7 @@ export function PublishReportDrawer({
         {
           key: 'ab',
           label: '对照实验',
-          children: <AbPairsPane ab={ab} abError={abError} />,
+          children: <AbPairsPane ab={ab} abError={abError} abLoading={abLoading} />,
         }]}
       />
     </Drawer>

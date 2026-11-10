@@ -252,3 +252,37 @@ def test_ab_pairing_rules() -> None:
     rows = [_dated("i1", old), _entry("i2")]
     result = export_report.ab_pairs(rows, now_ms=_NOW_MS)
     assert result["pairs"] == [] and result["unpaired"] == 2
+
+
+def test_ab_inclusive_boundaries() -> None:
+    """三处含边界锚点：plays=500、Δ=5.0pp、发布差=3 天——达到即过，不得因边界被排除。
+
+    专杀门槛 `<`→`<=` 与窗口 `>`→`>=` 变异体；排除侧（400 播放 / Δ3pp / 差 10 天）
+    已由 test_ab_four_states / test_ab_pairing_rules 钉住，此处只钉含边界。
+    """
+    from datetime import date, timedelta
+    today = date.fromtimestamp(_NOW_MS / 1000)
+    old = (today - timedelta(days=10)).isoformat()
+    # plays 恰 500：达门槛不判证据不足，Δ8pp → 方向性领先，leader 指向高完播
+    rows = [_dated("m1", old, plays=500, retention_pct=30.0),
+            _dated("m2", old, plays=500, retention_pct=38.0)]
+    result = export_report.ab_pairs(rows, now_ms=_NOW_MS)
+    assert len(result["pairs"]) == 1 and result["unpaired"] == 0
+    pair = result["pairs"][0]
+    assert pair["state"] == "方向性领先", "plays=500 含边界；<=500 变异即红"
+    assert pair["leader"] == "m2"
+    # Δ 恰 5.0pp：达差异阈值 → 方向性领先，不是差异不明显
+    rows = [_dated("n1", old, retention_pct=30.0),
+            _dated("n2", old, retention_pct=35.0)]
+    result = export_report.ab_pairs(rows, now_ms=_NOW_MS)
+    assert len(result["pairs"]) == 1 and result["unpaired"] == 0
+    pair = result["pairs"][0]
+    assert pair["delta_pp"] == -5.0
+    assert pair["state"] == "方向性领先" and pair["leader"] == "n2", "<5.0 变异成 <=5.0 即红"
+    # 发布日期差恰 3 天：窗口含边界仍成对；双方满 72h、Δ0 → 差异不明显
+    rows = [_dated("o1", old),
+            _dated("o2", (today - timedelta(days=7)).isoformat())]
+    result = export_report.ab_pairs(rows, now_ms=_NOW_MS)
+    assert len(result["pairs"]) == 1 and result["unpaired"] == 0, ">3 变异成 >=3 即红"
+    pair = result["pairs"][0]
+    assert pair["state"] == "差异不明显" and pair["leader"] is None
