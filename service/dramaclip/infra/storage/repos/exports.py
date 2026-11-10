@@ -367,7 +367,10 @@ def list_publish_entries(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         data = _parse_publish(row[5])
         if data is None:
             continue
-        plan = json.loads(row[7]) if row[7] else {}
+        try:
+            plan = json.loads(row[7]) if row[7] else {}
+        except json.JSONDecodeError:
+            plan = {}  # 脏 plan_data 不挡只读报告：arc=None → 不可考，与 LEFT JOIN 断链同义
         out.append({
             "export_id": str(row[0]),
             "project_id": str(row[1]),

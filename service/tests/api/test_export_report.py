@@ -28,13 +28,29 @@ def test_median_not_mean() -> None:
     # n=5 时单点 z 上界 √(n-1)=2，触不到严格 >2σ——离群用例必须 9 点
     rows = [
         _entry(f"e{i}", retention_pct=v)
-        for i, v in enumerate([10, 12, 14, 16, 18, 20, 22, 24, 200])
+        for i, v in enumerate([10, 12, 14, 16, 18, 20, 22, 26, 200])
     ]
-    # 200 离群 >2σ：点名且不进中位数
+    # 200 离群 >2σ：点名且不进中位数。保留集 [10,12,14,16,18,20,22,26] 中位数 17.0、
+    # 均值 17.25≠17.0——mean 变异体即红（末位 24→26 破等差，否则 mean==median 漏杀）
     result = export_report.aggregate(rows, "mode")
     row = result["rows"][0]
-    assert row["median_retention_pct"] == 17.0, "中位数抗爆款绑架；均值 37.33 即红"
+    assert row["median_retention_pct"] == 17.0, "中位数抗爆款绑架；保留集均值 17.25 即红"
     assert row["outliers"] == ["e8"]
+
+
+def test_median_rate_skewed_multi_entry() -> None:
+    # 偏态点赞/分享率专杀 _median_rate 的 mean 变异体：_entry 基线 plays=1000、
+    # retention_pct=30 → pstdev=0 无离群。like 率 [0.01,0.02,0.09] 中位 0.02≠均值 0.04；
+    # share 率 [0.005,0.01,0.06] 中位 0.01≠均值 0.025（率是比值，round 4 位）
+    rows = [
+        _entry("e0", likes=10, shares=5),
+        _entry("e1", likes=20, shares=10),
+        _entry("e2", likes=90, shares=60),
+    ]
+    row = export_report.aggregate(rows, "mode")["rows"][0]
+    assert row["like_rate"] == 0.02, "点赞率中位数 0.02；均值 0.04 即红"
+    assert row["share_rate"] == 0.01, "分享率中位数 0.01；均值 0.025 即红"
+    assert row["outliers"] == [], "retention_pct 全 30 → pstdev=0，无离群"
 
 
 def test_signal_boundaries() -> None:
@@ -143,3 +159,45 @@ def test_rpc_roundtrip(memory_db, tmp_path) -> None:
     with pytest.raises(RpcDomainError) as exc_info:
         export_api.publish_report(context, {"dimension": "watch_score"})
     assert exc_info.value.code == -32412
+
+
+def test_rpc_corrupt_plan_data_untraceable(memory_db, tmp_path) -> None:
+    """脏 plan_data 一行不让整个只读报告 500：arc 归不可考（F-T2-2）。"""
+    from types import SimpleNamespace
+
+    from dramaclip.api import export as export_api
+    from dramaclip.infra.storage.repos import episodes as episodes_repo
+    from dramaclip.infra.storage.repos import exports as exports_repo
+    from dramaclip.infra.storage.repos import plans as plans_repo
+    from dramaclip.infra.storage.repos import projects as projects_repo
+
+    source = tmp_path / "ep1.mp4"
+    source.write_bytes(b"x")
+    project_id = str(projects_repo.create(memory_db, "脏方案剧", str(tmp_path))["id"])
+    episodes_repo.replace_all(
+        memory_db, project_id,
+        [{"episode_number": 1, "source_path": str(source), "duration": 120.0}],
+    )
+    episode_id = str(episodes_repo.list_by_project(memory_db, project_id)[0]["id"])
+    plans_repo.create(
+        memory_db, project_id, "full_narration", [episode_id],
+        {"mode": "full_narration", "arc": "triumph", "timeline": []}, status="ready",
+    )
+    plan_id = str(plans_repo.list_by_project(memory_db, project_id)[0]["id"])
+    export_id = str(exports_repo.create(memory_db, project_id, plan_id, "full_narration"))
+    memory_db.execute(
+        "UPDATE export_jobs SET status = 'completed', output_path = ?, duration_s = 75.0"
+        " WHERE id = ?",
+        (str(source), export_id),
+    )
+    # 绕过 repo 的 json.dumps，直接写非 JSON 文本制造脏行
+    memory_db.execute(
+        "UPDATE narration_plans SET plan_data = 'not-json' WHERE id = ?", (plan_id,)
+    )
+    memory_db.commit()
+    context = SimpleNamespace(conn=memory_db)
+    export_api.set_publish_data(context, {"export_id": export_id, "data": {
+        "platform": "抖音", "plays": 2000, "retention_pct": 40.0,
+    }})
+    report = export_api.publish_report(context, {"dimension": "arc"})
+    assert report["rows"][0]["value"] == "不可考", "脏 plan_data → arc=None → 不可考，报告不 500"
