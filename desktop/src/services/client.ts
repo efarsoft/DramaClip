@@ -9,7 +9,7 @@ import type {
   SelftestResults, ServiceEvent, StyleInfo, SubtitlePresetInfo, TitleCandidate, TtsAutoVoiceResult,
   ToolsExtractStartResult, ToolsGetResultResult, ToolsRewriteResult, ToolsTtsResult,
   TtsCleanReferenceResult, TtsPreviewResult, VerifyReport, WorkItem as WorksItem,
-  PublishData, StorageInfo, MigrationResult } from '@dramaclip/protocol';
+  PublishData, PublishReport, StorageInfo, MigrationResult } from '@dramaclip/protocol';
 
 function bridge(): DramaClipBridge {
   return window.dramaclip;
@@ -241,6 +241,9 @@ export const exportApi = {
       export_id: exportId,
       data,
     }),
+  /** harness 只读聚合报告（批二）：维度聚合 + 健康线。 */
+  publishReport: (dimension: string): Promise<PublishReport> =>
+    rpc<PublishReport>('export.publish_report', { dimension }),
   /** 历史成片补测四项自检（job 化）；给 exportIds 则重测指定条目。 */
   selfcheck: (
     exportIds?: string[],

@@ -4,7 +4,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Alert, Button, Card, Empty } from 'antd';
-import { SafetyCertificateOutlined } from '@ant-design/icons';
+import { BarChartOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import type { WorkItem } from '@dramaclip/protocol';
 import { dramaProducePath } from '../../app/routes';
 import { mixins } from '../../styles/mixins';
@@ -12,6 +12,7 @@ import { tokens } from '../../styles/theme';
 import { PageHeader, PageSection, PageShell } from '../../components/layout/PageKit';
 import { BatchBar } from './BatchBar';
 import { PreviewModal } from './PreviewModal';
+import { PublishReportDrawer } from './PublishReportDrawer';
 import { WorkCard } from './WorkCard';
 import { useWorksBatch } from './useWorksBatch';
 import { useWorksLoad, useWorksPageActions } from './useWorksData';
@@ -22,6 +23,7 @@ export function WorksPage(): React.ReactElement {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<WorksFilterKey>('all');
   const [preview, setPreview] = useState<WorkItem | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
   const { works, error, covers, load } = useWorksLoad(filter);
   const { onSelfcheck, onFolder } = useWorksPageActions();
   const batch = useWorksBatch(works ?? [], () => {
@@ -35,9 +37,14 @@ export function WorksPage(): React.ReactElement {
         chip={`共 ${String(works?.length ?? 0)} 个`}
         desc="按剧分组的全部成片：质检挑片、批量整理、追溯回方案"
         actions={
-          <Button icon={<SafetyCertificateOutlined />} onClick={onSelfcheck}>
-            补测自检
-          </Button>
+          <span style={{ display: 'flex', gap: tokens.spaceSm }}>
+            <Button icon={<BarChartOutlined />} onClick={() => { setReportOpen(true); }}>
+              数据报告
+            </Button>
+            <Button icon={<SafetyCertificateOutlined />} onClick={onSelfcheck}>
+              补测自检
+            </Button>
+          </span>
         }
       />
       <FilterRow filter={filter} onChange={setFilter} />
@@ -65,6 +72,7 @@ export function WorksPage(): React.ReactElement {
         }}
       />
       <PreviewModal work={preview} onClose={() => { setPreview(null); }} />
+      <PublishReportDrawer open={reportOpen} onClose={() => { setReportOpen(false); }} />
     </PageShell>
   );
 }
