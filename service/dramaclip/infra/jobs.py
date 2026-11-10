@@ -10,6 +10,11 @@ from uuid import uuid4
 
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
+#: 进度 DB 写节流窗口（读写分离批①）：窗口内只更新内存缓存，不拿 _call_lock。
+#: UI 通知（notifier.progress）不受影响——它不走 DB。2s 是任务详情页刷新的
+#: 典型间隔，进度在 UI 上不会可见地滞后。
+_PROGRESS_WRITE_INTERVAL_S = 2.0
+
 # 两个非终态值的唯一拼写源：写 pending 的是 create，写 running 的是 mark_running；
 # 比它们的是启动清扫的 SQL（两者同为崩溃残留）与 api/models.py 的下载看门狗（只认
 # running 才收尾）。三处必须同值——看门狗据此判断该不该收尾，启动清扫据此判定哪些是
@@ -48,6 +53,8 @@ class JobStore:
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
+        # 进度写节流缓存：job_id → (monotonic 时刻, percent, label)
+        self._progress_cache: dict[str, tuple[float, float, str | None]] = {}
 
     def create(self, job_type: str, ref_id: str | None = None) -> str:
         job_id = uuid4().hex
@@ -93,9 +100,26 @@ class JobStore:
         >=100 的写入钳到 _PROGRESS_CAP（99）：100 是终态语义，只由 mark_completed
         迁移写入；运行中的任务自报 100 会造出「进度满了但没完成」的假状态。
         (99, 100) 区间的真实值原样保留——只钳「报满」，不压中间进度。
+
+        DB 写节流（读写分离批）：分析/导出任务的进度回调每秒多次，每次都
+        拿 _call_lock 写库+commit——查询池的读全在排队（「服务查询经常卡死」
+        的根因）。改为最密 _PROGRESS_WRITE_INTERVAL_S 秒落盘一次，被跳过的
+        值缓存在内存，下次落盘或任务终态时最终写入。UI 通知不受影响
+        （notifier.progress 直接推送不走 DB）。
         """
         if percent >= 100.0:
             percent = _PROGRESS_CAP
+        now = time.monotonic()
+        cached = self._progress_cache.get(job_id)
+        if cached is not None and now - cached[0] < _PROGRESS_WRITE_INTERVAL_S:
+            # 节流窗口内：只更新内存缓存，不拿锁写库
+            self._progress_cache[job_id] = (now, percent, label)
+            return
+        self._progress_cache[job_id] = (now, percent, label)
+        self._flush_progress(job_id, percent, label)
+
+    def _flush_progress(self, job_id: str, percent: float, label: str | None) -> None:
+        """实际写库（set_progress 的非节流路径 + flush_stale 的调用点）。"""
         if label is None:
             self._conn.execute(
                 "UPDATE jobs SET progress = ?, updated_at = ? WHERE id = ?",
@@ -107,6 +131,18 @@ class JobStore:
                 (percent, label, _now_ms(), job_id),
             )
         self._conn.commit()
+
+    def flush_stale_progress(self) -> None:
+        """把节流缓存里超过窗口的进度刷进库（终态迁移前调用，防尾值丢失）。"""
+        now = time.monotonic()
+        stale = [
+            (jid, pct, lbl)
+            for jid, (ts, pct, lbl) in self._progress_cache.items()
+            if now - ts >= _PROGRESS_WRITE_INTERVAL_S
+        ]
+        for jid, pct, lbl in stale:
+            self._flush_progress(jid, pct, lbl)
+            self._progress_cache.pop(jid, None)
 
     def set_compute(self, job_id: str, reports: list[dict[str, Any]]) -> None:
         self._conn.execute(
@@ -137,6 +173,13 @@ class JobStore:
         )
         record = dict(zip(keys, row, strict=True))
         record["compute"] = _parse_compute(record["compute"])
+        # 读己之写（读写分离批①）：节流窗口内的最新进度可能在缓存还没落盘
+        # ——get() 先查缓存合并，保证调用方看到的是最新值而不是 2s 前的。
+        cached = self._progress_cache.get(job_id)
+        if cached is not None:
+            record["progress"] = cached[1]
+            if cached[2] is not None:
+                record["label"] = cached[2]
         return record
 
     _LIST_COLUMNS = (
@@ -189,6 +232,9 @@ class JobStore:
     def _transition(
         self, job_id: str, status: str, error: str | None = None, progress: float | None = None
     ) -> None:
+        # 终态迁移前清节流缓存：进度回调的最后几拍可能在缓存里没落盘，
+        # 这里刷出去再迁移——终态行带的 progress 才是真实终值。
+        self._progress_cache.pop(job_id, None)
         current = self.get(job_id)
         if current is None:
             raise ValueError(f"任务不存在: {job_id}")

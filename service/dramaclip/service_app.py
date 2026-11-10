@@ -187,6 +187,14 @@ class ServiceApp:
             data_dir=data_dir,
         )
         router = build_router(context, self._shutdown)
+        # 读写分离（批②）：轻量查询走独立只读连接（WAL 下读写天然并发），
+        # 完全绕开 SerializedConnection 的 _call_lock——分析/导出高频写进度
+        # 时查询不再被卡（「服务查询经常卡死」的根治）。
+        read_conn = db.connect_readonly(paths.db_path(data_dir))
+        import dataclasses
+
+        read_context = dataclasses.replace(context, conn=read_conn)
+        read_router = build_router(read_context, self._shutdown)
         # Agent 网关：agent_gateway.enabled=true 时随服务常驻本机端口；settings.update 热生效
         gateway = AgentGateway(conn, trace_dir=llm_trace_dir(context))
         context.gateway = gateway
@@ -194,7 +202,7 @@ class ServiceApp:
             print(f"[agent-gateway] {state}")
         self._install_signal_handlers()
         try:
-            self._serve(router, executor, query_executor)
+            self._serve(router, read_router, executor, query_executor)
             if interrupted or stale_episodes or stale_exports:
                 notifier.log(
                     "warn",
@@ -215,12 +223,14 @@ class ServiceApp:
             gateway.stop()
             if self._connection is not None:
                 self._connection.close()
+            read_conn.close()
             conn.close()
         return 0
 
     def _serve(
         self,
         router: Router,
+        read_router: Router,
         executor: ThreadPoolExecutor,
         query_executor: ThreadPoolExecutor,
     ) -> None:
@@ -228,7 +238,9 @@ class ServiceApp:
         _lm.getLogger("dramaclip.ipc").info("服务进入 _serve：addr=%s", self._address)
         self._connection = ServiceConnection(
             self._address,
-            on_message=lambda payload: self._on_message(payload, router, executor, query_executor),
+            on_message=lambda payload: self._on_message(
+                payload, router, read_router, executor, query_executor
+            ),
             on_disconnect=self._shutdown,
         )
         self._connection.send(self._hello_payload())
@@ -254,6 +266,7 @@ class ServiceApp:
         self,
         payload: dict[str, Any],
         router: Router,
+        read_router: Router,
         executor: ThreadPoolExecutor,
         query_executor: ThreadPoolExecutor,
     ) -> None:
@@ -272,8 +285,10 @@ class ServiceApp:
             # Electron 会因心跳饿死判失联并 kill 本进程（真实事故）。
             self._send(router.dispatch(request).model_dump(exclude_none=True))
             return
-        pool = query_executor if _is_light_query(request.method) else executor
-        pool.submit(self._dispatch_and_reply, router, request)
+        if _is_light_query(request.method):
+            query_executor.submit(self._dispatch_and_reply, read_router, request)
+        else:
+            executor.submit(self._dispatch_and_reply, router, request)
 
     def _dispatch_and_reply(self, router: Router, request: RpcRequest) -> None:
         response = router.dispatch(request)

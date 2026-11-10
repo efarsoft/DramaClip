@@ -167,6 +167,21 @@ def connect(db_file: Path) -> sqlite3.Connection:
     return conn
 
 
+def connect_readonly(db_file: Path) -> sqlite3.Connection:
+    """打开只读连接（读写分离批②）：WAL 模式下读写天然并发，绕开
+    SerializedConnection 的 _call_lock——轻量查询永不被写事务卡住。
+
+    与 connect() 的差异：
+    - 裸 sqlite3.Connection（无 SerializedConnection 包装）——读不需要串行化
+    - URI 模式 readonly=True：驱动层保证不会意外写入
+    - 不需要 busy_timeout：WAL 读不碰写锁
+    """
+    uri = f"file:{db_file.as_posix()}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
+
+
 def migrate(conn: sqlite3.Connection) -> list[str]:
     """按文件名序号执行增量迁移（幂等），返回本次应用的迁移名列表。"""
     conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY)")
