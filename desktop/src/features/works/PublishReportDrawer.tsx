@@ -41,6 +41,7 @@ export function PublishReportDrawer({
     let active = true;
     setLoading(true);
     setError('');
+    setReport(null); // 先清旧表：切换维度失败时不拿上一维度的数据冒充
     void exportApi
       .publishReport(dimension)
       .then((result) => { if (active) setReport(result); })

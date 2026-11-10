@@ -93,6 +93,7 @@ describe('PublishReportDrawer', () => {
     api.publishReport.mockRejectedValue(new Error('boom'));
     renderDrawer();
     await waitFor(() => { expect(screen.getByText(/报告加载失败：boom/)).toBeTruthy(); });
+    expect(screen.queryByText(/暂无回流数据/)).toBeNull();
   });
 
   it('空账如实提示去录入', async () => {
