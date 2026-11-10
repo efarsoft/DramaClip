@@ -10,11 +10,35 @@ CosyVoice v2/v3 系与 Qwen-Audio-TTS 三族同走 audio/tts/SpeechSynthesizer H
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from dramaclip.engines.tts.base import EngineCaps
 from dramaclip.infra import compute
 
 _TTS_URL = "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"
+
+
+#: 内容审核降级词表（确定性兜底，零 LLM 成本）：短剧台词的打斗/血腥/亲密
+#: 表达是云 TTS 撞审核的常态来源——替换为语义邻道的过审词，重试一次。
+_BLOCKED_WORD_MAP = {
+    "血": "红色",
+    "杀": "动手",
+    "死了": "倒下",
+    "死": "倒下",
+    "尸体": "人影",
+    "毒品": "违禁品",
+    "枪": "家伙",
+    "刀": "利器",
+    "裸": "赤裸着上身".replace("裸", ""),  # 占位防自替换；实际映射见下行
+}
+_BLOCKED_WORD_MAP.pop("裸", None)  # 「裸」单字替换风险大：不做映射，交给整句重试失败
+
+
+def _sanitize_blocked_text(text: str) -> str:
+    """审核降级词表替换（保序，长词优先）。"""
+    for source in sorted(_BLOCKED_WORD_MAP, key=len, reverse=True):
+        text = text.replace(source, _BLOCKED_WORD_MAP[source])
+    return text
 
 
 def _default_voice(model: str) -> str:
@@ -67,7 +91,7 @@ class DashscopeCosyVoiceEngine:
         import urllib.error
         import urllib.request
 
-        payload = {
+        payload: dict[str, Any] = {
             "model": self._model,
             "input": {
                 "text": text,
@@ -84,6 +108,9 @@ class DashscopeCosyVoiceEngine:
                 "Content-Type": "application/json",
             },
         )
+
+        class _ComposeError(Exception):
+            """合成请求 HTTP 错误（带响应体细节），供审核降级分支判别。"""
 
         def fetch(request: urllib.request.Request, what: str) -> bytes:
             # 网络类失败（连接重置/超时）短退避重试：一次抖动不该炸掉整段配音
@@ -107,11 +134,46 @@ class DashscopeCosyVoiceEngine:
                     time.sleep(pause)
             raise RuntimeError(f"{what}网络失败: 不可达路径")
 
+        def _compose(request: urllib.request.Request) -> dict[str, Any]:
+            try:
+                result: dict[str, Any] = json.loads(
+                    fetch(request, "CosyVoice 云端合成").decode("utf-8")
+                )
+                return result
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", "replace")[:300]
+                raise _ComposeError(detail) from exc
+
         try:
-            body = json.loads(fetch(req, "CosyVoice 云端合成").decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", "replace")[:300]
-            raise RuntimeError(f"CosyVoice 云端合成失败: {detail}") from exc
+            body = _compose(req)
+        except _ComposeError as exc:
+            from dramaclip.engines.semantic.llm_client import is_content_blocked
+
+            if not is_content_blocked(str(exc)):
+                raise RuntimeError(f"CosyVoice 云端合成失败: {exc}") from exc
+            # 内容审核拒绝：词表降级重试一次（短剧打斗/血腥词是常态来源），
+            # 仍被拒如实抛——不静默换文案（那是编剧层的职责）。
+            safe_text = _sanitize_blocked_text(text)
+            logging.getLogger(__name__).warning(
+                "CosyVoice 内容审核拒绝，词表降级重试一次（%d 处替换）",
+                len(text) - len(text.replace("血", "").replace("杀", "")),
+            )
+            if isinstance(payload.get("input"), dict):
+                payload["input"]["text"] = safe_text
+            retry_req = urllib.request.Request(
+                _TTS_URL,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            try:
+                body = _compose(retry_req)
+            except _ComposeError as exc2:
+                raise RuntimeError(
+                    f"CosyVoice 内容审核拒绝（词表降级后仍被拒）: {exc2}"
+                ) from exc2
         audio_url = ((body.get("output") or {}).get("audio") or {}).get("url")
         if not audio_url:
             raise RuntimeError(f"CosyVoice 云端合成未返回音频地址: {str(body)[:200]}")

@@ -49,6 +49,7 @@ from dramaclip.engines.exporter import (
 from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
+from dramaclip.engines.semantic import llm_budget
 from dramaclip.engines.subtitle import presets as subtitle_presets
 from dramaclip.engines.subtitle.ass_generator import (
     Canvas,
@@ -71,6 +72,7 @@ from dramaclip.infra.storage.repos import projects as projects_repo
 from dramaclip.transport.rpc import Router, RpcDomainError
 
 _ERR_PLAN_NOT_FOUND = -32401
+_LLM_WAIT_BUDGET_S = 30 * 60  # 任务级 LLM 等待预算（只计云端等待，渲染段冻结）
 _ERR_NO_PLANS = -32406
 _ERR_PLAN_NOT_RENDERABLE = -32407
 _ERR_EXPORT_NOT_FOUND = -32404
@@ -1087,45 +1089,47 @@ def render_export(
     reports: list[compute.ComputeReport] = []
     # 拼接清单上的实测偏移（成片逐句时间轴的刻度来源）；成功轮只会到一份，取最后一条
     offsets_emitted: list[Sequence[dict[str, float | int | str]]] = []
-    encoder.export_plan(
-        plan_data,
-        episode_paths,
-        out_path,
-        context.work_dir / "export" / export_id,
-        video_codec=video_codec,
-        tts_audio_by_segment=tts_segments or None,
-        cancel=cancel_event,
-        on_progress=report,
-        subtitle_burner=burn_subtitle if plan_data.mode != "raw_clip" else None,
-        original_subtitle_provider=(
-            dialogue_subtitle if plan_data.mode != "raw_clip" else None
-        ),
-        dialogue_zones=dialogue_zones,
-        subtitle_bands=subtitle_bands,
-        subtitle_erase_rects=subtitle_line_rects,
-        subtitle_erase_windows=subtitle_erase_windows,
-        out_size=out_size,
-        loudness_target=loudness.LoudnessTarget.from_settings(context.settings),
-        # AI 生成标注（业主裁决 2026-10-15：用户开关、默认关闭；键名由 ai_label 模块单持）
-        burn_ai_label=ai_label.enabled(context.settings),
-        # 剧名常驻层（业主裁决 2026-11-09：默认关、用户可开）：剧名取项目名。
-        burn_drama_name=(
-            project_name if drama_name_layer.enabled(context.settings) else None
-        ),
-        compute_sink=reports.append,
-        encoder_requested=codec_setting,
-        segment_offsets_sink=offsets_emitted.append,
-        # BGM 床（C 项接线）：设置/模式/曲库三层门禁在 _pick_bgm 内，任一层不过
-        # 返回 None＝现状出片。混音失败在 encoder 层向上抛，这里降级留痕不挡导出。
-        bgm_track=_pick_bgm_track(context, plan_data),
-        # AIGC 隐式标识（业主裁决 2026-11-09：默认关、用户可开）：内容编号用 export_id，
-        # 与回流账同一标识符；编码非空由本函数入口的渲染遍守卫保证（retry/排队竞态同拒）。
-        aigc_stamp=(
-            (aigc_metadata.producer_code(context.settings), export_id)
-            if aigc_metadata.enabled(context.settings)
-            else None
-        ),
-    )
+    # 渲染核心全本地 ffmpeg：预算冻结计时（只计等云端响应的时间）
+    with llm_budget.paused():
+        encoder.export_plan(
+            plan_data,
+            episode_paths,
+            out_path,
+            context.work_dir / "export" / export_id,
+            video_codec=video_codec,
+            tts_audio_by_segment=tts_segments or None,
+            cancel=cancel_event,
+            on_progress=report,
+            subtitle_burner=burn_subtitle if plan_data.mode != "raw_clip" else None,
+            original_subtitle_provider=(
+                dialogue_subtitle if plan_data.mode != "raw_clip" else None
+            ),
+            dialogue_zones=dialogue_zones,
+            subtitle_bands=subtitle_bands,
+            subtitle_erase_rects=subtitle_line_rects,
+            subtitle_erase_windows=subtitle_erase_windows,
+            out_size=out_size,
+            loudness_target=loudness.LoudnessTarget.from_settings(context.settings),
+            # AI 生成标注（业主裁决 2026-10-15：用户开关、默认关闭；键名由 ai_label 模块单持）
+            burn_ai_label=ai_label.enabled(context.settings),
+            # 剧名常驻层（业主裁决 2026-11-09：默认关、用户可开）：剧名取项目名。
+            burn_drama_name=(
+                project_name if drama_name_layer.enabled(context.settings) else None
+            ),
+            compute_sink=reports.append,
+            encoder_requested=codec_setting,
+            segment_offsets_sink=offsets_emitted.append,
+            # BGM 床（C 项接线）：设置/模式/曲库三层门禁在 _pick_bgm 内，任一层不过
+            # 返回 None＝现状出片。混音失败在 encoder 层向上抛，这里降级留痕不挡导出。
+            bgm_track=_pick_bgm_track(context, plan_data),
+            # AIGC 隐式标识（业主裁决 2026-11-09：默认关、用户可开）：内容编号用 export_id，
+            # 与回流账同一标识符；编码非空由本函数入口的渲染遍守卫保证（retry/排队竞态同拒）。
+            aigc_stamp=(
+                (aigc_metadata.producer_code(context.settings), export_id)
+                if aigc_metadata.enabled(context.settings)
+                else None
+            ),
+        )
     # 清洗在前、编码在后：读账的人按时间顺序看（规格 §3.5）
     receipt = [*run.voice_reports, *(item.to_dict() for item in reports)]
     exports_repo.set_compute(context.conn, export_id, receipt)
@@ -1348,6 +1352,10 @@ def _run_export(context: AppContext, job_id: str, run: ExportRun) -> None:
     """执行池入口：把一次 ExportRun 跑成 jobs 表里的一条终态记录。
     """
     context.job_store.mark_running(job_id)
+    # 任务级 LLM 等待预算（第一梯队⑤）：30 分钟只计等云端响应的时间（渲染
+    # 段在 render_export 内 paused 冻结）——端点慢死时任务在预算内失败并
+    # 明说「LLM 等待预算耗尽」，而不是小时级磨完占着执行池。
+    budget_saved = llm_budget.open_budget(_LLM_WAIT_BUDGET_S)
 
     def report(percent: float, message: str) -> None:
         context.job_store.set_progress(job_id, round(percent, 1), message)
@@ -1398,5 +1406,6 @@ def _run_export(context: AppContext, job_id: str, run: ExportRun) -> None:
             context.job_store.mark_failed(job_id, str(exc))
             context.notifier.log("error", f"导出失败: {exc}")
     finally:
+        llm_budget.close_budget(budget_saved)
         # 与 analysis/narration/models 一致：注册的取消事件必须回收，否则字典无界增长
         context.cancel_events.pop(job_id, None)

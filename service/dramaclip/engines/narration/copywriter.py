@@ -203,6 +203,8 @@ def build_copy_request(
     mode_label: str,
     angle_block: str,
     rewrite_notes: str = "",
+    variant_hint: str = "",
+    past_copies: list[str] | None = None,
 ) -> tuple[str, str]:
     """纯函数：组装逐槽文案链路的 (system, user) 提示词，不调用 LLM。
 
@@ -238,6 +240,8 @@ def write_plan_copy(
     plan: PlanData,
     material: casting.MaterialByEpisode,
     settings: dict[str, str],
+    variant_hint: str = "",
+    past_copies: list[str] | None = None,
     *,
     mode_label: str,
     angle_block: str,
@@ -263,6 +267,8 @@ def write_plan_copy(
         mode_label=mode_label,
         angle_block=angle_block,
         rewrite_notes=rewrite_notes,
+        variant_hint=variant_hint,
+        past_copies=past_copies,
     )
     attempts: list[dict[str, Any]] = []
     filled: dict[str, str] | None = None

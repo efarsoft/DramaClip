@@ -11,6 +11,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from dramaclip.engines.semantic import llm_budget
+
 _REQUEST_TIMEOUT_S = 60
 _NET_RETRY_BACKOFF = (5.0, 15.0)  # 网络类失败短退避：抖动型故障两轮内多数自愈
 _429_BACKOFF = [30, 60, 120]
@@ -18,8 +20,47 @@ _429_BACKOFF = [30, 60, 120]
 logger = logging.getLogger(__name__)
 
 
+class _StreamUnavailable(Exception):
+    """网关不支持 SSE 流（返回普通 JSON）或流全程无 content 帧的回退标记。"""
+
+
 class LlmUnavailable(Exception):
     """LLM 未配置或不可达（调用方降级）。"""
+
+
+class LlmContentBlocked(LlmUnavailable):
+    """内容审核拒绝（区别于网络/限流/鉴权）：调用方可针对性降级而非烧重试。"""
+
+
+#: 云厂商内容审核拒绝的典型标识（错误体/消息关键词，小写匹配）
+_CONTENT_BLOCKED_MARKERS = (
+    "datainspectionfailed",
+    "risk control",
+    "riskcontrol",
+    "content inspection",
+    "content filter",
+    "content management",
+    "sensitive content",
+    "内容审核",
+    "敏感内容",
+)
+
+
+def is_content_blocked(message: str) -> bool:
+    """错误文本是否命中内容审核类拒绝——调用方据此走降级而非重试。"""
+    lowered = message.lower()
+    return any(marker in lowered for marker in _CONTENT_BLOCKED_MARKERS)
+
+
+def _classify_http_error(exc: urllib.error.HTTPError) -> LlmUnavailable:
+    """非 429 HTTP 错误分类：审核拒绝 → LlmContentBlocked，其余 → LlmUnavailable。"""
+    try:
+        detail = exc.read().decode("utf-8", "replace")[:300]
+    except OSError:
+        detail = str(exc)
+    if is_content_blocked(detail):
+        return LlmContentBlocked(f"LLM 内容审核拒绝: {detail}")
+    return LlmUnavailable(f"LLM 请求失败: {exc.code} {detail}")
 
 
 @dataclass(frozen=True)
@@ -129,16 +170,105 @@ class LlmClient:
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if self._config.api_key:
             headers["Authorization"] = f"Bearer {self._config.api_key}"
-        body = self._urlopen_with_429_backoff(headers, json.dumps(payload).encode("utf-8"))
+        # 流式优先（第一梯队②）：SSE 边生成边读——socket 超时语义从「整包最长
+        # 等待」变成「两行之间最长等待」，长思考/长文案的静默连接不再被网关
+        # 从中间掐断（urlopen timeout 在两次 read 间自动重置）。空产物自动
+        # 回退非流式：不支持 stream 的网关返回普通 JSON，旧路径原样兼容。
         try:
-            return str(body["choices"][0]["message"]["content"])
-        except (KeyError, IndexError, TypeError) as exc:
-            raise LlmUnavailable(f"LLM 响应格式异常: {exc}") from exc
+            return self._stream_chat(headers, payload)
+        except _StreamUnavailable:
+            body = self._urlopen_with_429_backoff(
+                headers, json.dumps(payload).encode("utf-8")
+            )
+            try:
+                return str(body["choices"][0]["message"]["content"])
+            except (KeyError, IndexError, TypeError) as exc:
+                raise LlmUnavailable(f"LLM 响应格式异常: {exc}") from exc
+
+    def _stream_chat(
+        self, headers: dict[str, str], payload: dict[str, Any]
+    ) -> str:
+        """SSE 流式聚合（429 长退避 + 网络短退避与非流式同款分类）。"""
+        net_failures = 0
+        rate_failures = 0
+        wait: float = 0.0
+        while True:
+            req = urllib.request.Request(
+                f"{self._config.base_url}/chat/completions",
+                data=json.dumps({**payload, "stream": True}).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(
+                    req, timeout=llm_budget.check_and_timeout(self._timeout_s)
+                ) as resp:
+                    return self._read_sse(resp)
+            except urllib.error.HTTPError as exc:
+                if exc.code != 429:
+                    raise _classify_http_error(exc) from exc
+                rate_failures += 1
+                if rate_failures >= len(_429_BACKOFF):
+                    raise LlmUnavailable("LLM 请求失败: 429 重试耗尽") from exc
+                wait = _429_BACKOFF[rate_failures - 1]
+                logger.warning(
+                    "LLM 429 限流，%ds 后重试 (%d/%d)",
+                    wait, rate_failures, len(_429_BACKOFF),
+                )
+                time.sleep(wait)
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                net_failures += 1
+                if net_failures > len(_NET_RETRY_BACKOFF):
+                    raise LlmUnavailable(f"LLM 请求失败: {exc}") from exc
+                wait = _NET_RETRY_BACKOFF[net_failures - 1]
+                logger.warning(
+                    "LLM 网络类失败（%s），%.0fs 后重试 (%d/%d)",
+                    exc, wait, net_failures, len(_NET_RETRY_BACKOFF),
+                )
+                time.sleep(wait)
+            except _StreamUnavailable:
+                raise  # 网关不支持流：交给 _post 回退非流式，不计失败账
+
+    def _read_sse(self, resp: Any) -> str:
+        """消费 SSE 响应体，聚合 delta.content；空产物抛回退标记。"""
+        pieces: list[str] = []
+        saw_data = False
+        for raw_line in resp:
+            line = raw_line.decode("utf-8", "replace").strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if not data:
+                continue
+            if data == "[DONE]":
+                break
+            saw_data = True
+            try:
+                obj = json.loads(data)
+            except ValueError:
+                continue  # 坏行跳过：SSE 心跳/注释行不是致命错误
+            if isinstance(obj.get("error"), dict):
+                raise LlmUnavailable(
+                    f"LLM 流式响应报错: {obj['error'].get('message') or obj['error']}"
+                )
+            try:
+                delta = obj["choices"][0]["delta"].get("content")
+            except (KeyError, IndexError, TypeError):
+                continue  # 无 delta 的帧（角色帧/用量帧/keep-alive）跳过
+            if delta:
+                pieces.append(str(delta))
+        if not pieces:
+            # 全程无 content 帧两种可能：网关忽略 stream 返回了普通 JSON（首块
+            # 不带 data: 前缀），或确实空回答——都回退非流式路径裁决。
+            if not saw_data:
+                raise _StreamUnavailable()
+            raise _StreamUnavailable()
+        return "".join(pieces)
 
     def _urlopen_with_429_backoff(
         self, headers: dict[str, str], data: bytes
     ) -> dict[str, Any]:
-        """网络类失败（连接重置/超时）短退避重试后才认输——一次抖动不该炸整条任务。
+        """非流式底座（网络类失败短退避重试后才认输——一次抖动不该炸整条任务）。
 
         非 429 的 HTTP 错误（鉴权/参数/模型名）仍立即上抛：那类重试没有意义。
         """
@@ -153,7 +283,9 @@ class LlmClient:
                 method="POST",
             )
             try:
-                with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:
+                with urllib.request.urlopen(
+                    req, timeout=llm_budget.check_and_timeout(self._timeout_s)
+                ) as resp:
                     raw = json.loads(resp.read().decode("utf-8"))
                     return dict(raw)
             except urllib.error.HTTPError as exc:

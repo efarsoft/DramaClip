@@ -174,9 +174,33 @@ class EdgeTtsEngine:
                 )
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            asyncio.run(_run())
-        except TimeoutError as exc:
-            out_path.unlink(missing_ok=True)
-            raise EdgeTtsTimeout(f"edge-tts 合成超时({SYNTH_TIMEOUT_S:.0f}s)") from exc
-        return out_path
+        # 免费云接口的批量限流退避（第一梯队④）：指数退避 + jitter 封顶 10s，
+        # 每次尝试前再加 0~0.8s 随机前置延迟——批量出片多段并发齐射同一免费
+        # 端点会被聚合限流，错开一点就少撞一轮。超时与网络类异常同款退避
+        # （NoAudioReceived 是 edge-tts 被限流的典型症状，属通用异常分支）。
+        import logging
+        import random
+        import time
+
+        logger = logging.getLogger(__name__)
+        last_exc: Exception | None = None
+        for attempt in range(4):
+            if attempt:
+                pause = min(1.5 * 2 ** (attempt - 1) + random.random(), 10.0)
+                logger.warning(
+                    "edge-tts 合成失败（%s），%.1fs 后重试 (%d/3)", last_exc, pause, attempt
+                )
+                time.sleep(pause)
+            time.sleep(random.random() * 0.8)
+            try:
+                asyncio.run(_run())
+                return out_path
+            except Exception as exc:  # noqa: BLE001 - 超时/网络/限流统一退避重试
+                last_exc = exc
+                out_path.unlink(missing_ok=True)
+        if isinstance(last_exc, TimeoutError):
+            raise EdgeTtsTimeout(
+                f"edge-tts 合成超时({SYNTH_TIMEOUT_S:.0f}s，已重试 3 次)"
+            ) from last_exc
+        assert last_exc is not None
+        raise last_exc

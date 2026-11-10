@@ -583,7 +583,16 @@ def _stub_language_and_tts(
                     body = body[: cap - 1].rstrip("，、；—-") + "。"
                 return {"id": slot, "text": body}
 
-            return {"lines": [_line(slot, block) for slot, block in slot_blocks]}
+            # 变异三件套（第一梯队①）：桩与真模型同责——收到策略卡就该按
+            # 策略名产出不同表达，否则相似度闸门（与真链同款）会多付一次
+            # 避重重写、成稿调用计数漂移。
+            strategy = re.search(r"【本稿表达策略：(.+?)——", user)
+            tag = f"{strategy.group(1)}：" if strategy else ""
+            lines_out = [_line(slot, block) for slot, block in slot_blocks]
+            if tag:
+                for item in lines_out:
+                    item["text"] = tag + str(item["text"])
+            return {"lines": lines_out}
 
     patch_client_for(monkeypatch, angles, _Llm)
     patch_client_for(monkeypatch, copywriter, _Llm)
@@ -939,6 +948,12 @@ def test_post_copy_overlap_gate_still_guards_cross_episode_modes(
     _stub_language_and_tts(monkeypatch, calls)
 
     monkeypatch.setattr(overlap, "overlap", lambda _left, _right: 0.9)
+    # 本用例聚焦成稿后重叠闸门：隔离变异三件套的相似度闸门（桩文案是同文
+    # 模板，真跑会多付一次避重重写、成稿计数 2→3）——变异链自身由
+    # test_diversity 与真机验收覆盖。
+    monkeypatch.setattr(
+        narration_plans.diversity, "too_similar", lambda *_a, **_k: False
+    )
     monkeypatch.setattr(
         angles,
         "select_angles",

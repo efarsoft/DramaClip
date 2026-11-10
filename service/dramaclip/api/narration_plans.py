@@ -21,6 +21,7 @@ from dramaclip.engines.narration import (
     angles,
     casting,
     copywriter,
+    diversity,
     overlap,
     script_driver,
     scriptwriter,
@@ -177,6 +178,10 @@ def _run_plan_variants(
             if cancel_event.is_set():
                 break
             label = narration_pipeline.MODE_LABELS.get(mode, mode)
+            # 批量变异三件套（第一梯队①）：策略卡队列随模式重洗（同模式 K 版
+            # 表达骨架错开）；past_copies 攒本模式已产文案做避重与闸门基准。
+            strategy_cards = diversity.strategy_queue(k)
+            past_copies: list[str] = []
             try:
                 if mode in _ZERO_COPY_MODES:
                     try:
@@ -234,7 +239,10 @@ def _run_plan_variants(
                         settings["_style_directives"] = ""
                     try:
                         plan, used_ids = _plan_one(
-                            context, mode, episodes, episode_inputs, settings, variant
+                            context, mode, episodes, episode_inputs, settings, variant,
+                            variant_hint=_card_hint(strategy_cards, index - 1),
+                            next_hint=_card_hint(strategy_cards, index),
+                            past_copies=past_copies or None,
                         )
                     finally:
                         if suppress_directives:
@@ -262,6 +270,9 @@ def _run_plan_variants(
                         batch_id=job_id,
                     )
                     accepted.append((variant, plan))
+                    past_copies.append(
+                        "\n".join(item.text for item in plan.narration_texts)
+                    )
                 except Exception as exc:  # noqa: BLE001 - 单条方案失败不中断兄弟与其他模式
                     failures.append(f"{tag}: {exc}")
                     context.job_store.append_detail(job_id, failures[-1])
@@ -424,6 +435,14 @@ def _angle_variants(
         )
         for brief in briefs
     ]
+def _card_hint(cards: list[dict[str, str]], position: int) -> str:
+    """策略卡 → 注入文案链的一行提示；越界（变体数多于卡数）给空串。"""
+    if 0 <= position < len(cards):
+        card = cards[position]
+        return f"{card['name']}——{card['hint']}"
+    return ""
+
+
 def _plan_one(
     context: AppContext,
     mode: str,
@@ -431,6 +450,10 @@ def _plan_one(
     episode_inputs: list[dict[str, Any]],
     settings: dict[str, str],
     variant: _Variant,
+    *,
+    variant_hint: str = "",
+    next_hint: str = "",
+    past_copies: list[str] | None = None,
 ) -> tuple[PlanData, list[str]]:
     """按取材意图产出一条方案（未配音、未落库）。返回 (方案, **实际用到**的集 id)。
     """
@@ -495,14 +518,48 @@ def _plan_one(
         # 规则类两个模式走不到这里（它们的编排器不产槽位），故 angle_block 恒为空串
         # 也不会被任何人读到——这不是"悄悄留了个空值"，是两族的会合点本来就用不上它。
         # material 按集分开传：跨集时间轴上每个槽位只能读它自己那一集的台词（Task 4 Step 3b）。
+        mode_label = narration_pipeline.MODE_LABELS.get(mode, mode)
         plan = copywriter.write_plan_copy(
             plan,
             material,
             settings,
-            mode_label=narration_pipeline.MODE_LABELS.get(mode, mode),
+            mode_label=mode_label,
             angle_block=variant.angle_block,
             trace_dir=trace_dir,
+            variant_hint=variant_hint,
+            past_copies=past_copies,
         )
+        # 相似度闸门（第一梯队①）：新稿与同模式已产稿高相似 → 换下一张策略卡
+        # 避重重写一次 → 取相似度更低者（不新增时间预算，换血不换故事）。
+        if past_copies:
+            first_text = "\n".join(item.text for item in plan.narration_texts)
+            if diversity.too_similar(first_text, past_copies):
+                context.notifier.log(
+                    "info",
+                    f"{variant.name} 文案与已产稿过似（3-gram 相似度超阈），"
+                    "换策略卡避重重写一次",
+                )
+                try:
+                    alt = copywriter.write_plan_copy(
+                        plan,
+                        material,
+                        settings,
+                        mode_label=mode_label,
+                        angle_block=variant.angle_block,
+                        trace_dir=trace_dir,
+                        variant_hint=next_hint or variant_hint,
+                        past_copies=past_copies,
+                        rewrite_notes="与旧稿表达过似：换开头方式与组织结构重写，"
+                        "事实与取材不变",
+                    )
+                    alt_text = "\n".join(item.text for item in alt.narration_texts)
+                    picked = diversity.least_similar(first_text, alt_text, past_copies)
+                    if picked is alt_text:
+                        plan = alt
+                except Exception as exc:  # noqa: BLE001 - 避重重写失败保首稿
+                    context.notifier.log(
+                        "warning", f"避重重写失败保留首稿：{str(exc)[:100]}"
+                    )
         plan = _rewrite_copy_until_retellable(
             context,
             plan,
