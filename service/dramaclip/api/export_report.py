@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import statistics
+from datetime import date
 from typing import Any
 
 DIMENSIONS = ("mode", "arc", "angle", "platform", "duration_bucket")
@@ -110,4 +111,73 @@ def health(entries: list[dict[str, Any]]) -> dict[str, Any]:
         "line_retention": HEALTH_RETENTION,
         "note": HEALTH_NOTE,
         "below": below,
+    }
+
+
+AB_WINDOW_DAYS = 3  # published_at 只录到日：72h 按 3 天计
+AB_MIN_PLAYS = 500
+AB_DIFF_PP = 5.0  # 初始值，回流数据足够后校准（P-R4）
+
+
+def ab_pairs(entries: list[dict[str, Any]], *, now_ms: int) -> dict[str, Any]:
+    """同项目同平台对照组（批二#6）：四态保守读数，方向性≠统计显著。"""
+    dated: list[tuple[dict[str, Any], date]] = []
+    for row in entries:
+        raw = row.get("published_at")
+        try:
+            parsed = date.fromisoformat(str(raw)) if raw else None
+        except ValueError:
+            parsed = None
+        if parsed is not None:
+            dated.append((row, parsed))
+    groups: dict[tuple[str, str], list[tuple[dict[str, Any], date]]] = {}
+    for row, day in dated:
+        groups.setdefault((str(row["project_id"]), str(row["platform"])), []).append((row, day))
+    today = date.fromtimestamp(now_ms / 1000)
+    pairs: list[dict[str, Any]] = []
+    unpaired = len(entries) - len(dated)
+    for (project_id, platform), members in sorted(groups.items()):
+        members.sort(key=lambda m: (m[1], str(m[0]["export_id"])))
+        matched: set[int] = set()
+        for i in range(len(members)):
+            for j in range(i + 1, len(members)):
+                ri, di = members[i]
+                rj, dj = members[j]
+                if abs((di - dj).days) > AB_WINDOW_DAYS:
+                    continue
+                matched.add(i)
+                matched.add(j)
+                delta = round(float(ri["retention_pct"]) - float(rj["retention_pct"]), 2)
+                if (today - di).days < AB_WINDOW_DAYS or (today - dj).days < AB_WINDOW_DAYS:
+                    state, leader, note = "等待", None, "发布未满72h，数据仍在累积"
+                elif ri["plays"] < AB_MIN_PLAYS or rj["plays"] < AB_MIN_PLAYS:
+                    state, leader, note = "证据不足", None, "播放量不足500，样本未达门槛"
+                elif abs(delta) < AB_DIFF_PP:
+                    state, leader, note = (
+                        "差异不明显", None, "完播差不足5个百分点（初始阈值，待校准）"
+                    )
+                else:
+                    state = "方向性领先"
+                    leader = str(ri["export_id"] if delta > 0 else rj["export_id"])
+                    note = "方向性读数，非统计显著；建议复跑验证"
+                pairs.append({
+                    "project_id": project_id,
+                    "project_name": str(ri["project_name"]),
+                    "platform": platform,
+                    "a": str(ri["export_id"]),
+                    "b": str(rj["export_id"]),
+                    "retention_a": float(ri["retention_pct"]),
+                    "retention_b": float(rj["retention_pct"]),
+                    "delta_pp": delta,
+                    "state": state,
+                    "leader": leader,
+                    "note": note,
+                })
+        unpaired += len(members) - len(matched)
+    return {
+        "pairs": pairs,
+        "unpaired": unpaired,
+        "window_days": AB_WINDOW_DAYS,
+        "min_plays": AB_MIN_PLAYS,
+        "diff_pp": AB_DIFF_PP,
     }

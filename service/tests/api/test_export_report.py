@@ -201,3 +201,54 @@ def test_rpc_corrupt_plan_data_untraceable(memory_db, tmp_path) -> None:
     }})
     report = export_api.publish_report(context, {"dimension": "arc"})
     assert report["rows"][0]["value"] == "不可考", "脏 plan_data → arc=None → 不可考，报告不 500"
+
+
+_NOW_MS = 1_800_000_000_000  # 2027-01-15 前后，固定钟
+
+
+def _dated(export_id: str, published: str, **over: Any) -> dict[str, Any]:
+    return _entry(export_id, published_at=published, **over)
+
+
+def test_ab_four_states() -> None:
+    from datetime import date, timedelta
+    today = date.fromtimestamp(_NOW_MS / 1000)
+    old = (today - timedelta(days=10)).isoformat()
+    young = (today - timedelta(days=1)).isoformat()
+    # 等待：一方发布未满 72h（配对窗 ≤3 天：a1 取 4 天前才与 a2 成对）
+    rows = [_dated("a1", (today - timedelta(days=4)).isoformat(), plays=9000),
+            _dated("a2", young, plays=9000)]
+    pair = export_report.ab_pairs(rows, now_ms=_NOW_MS)["pairs"][0]
+    assert pair["state"] == "等待"
+    # 证据不足：都满 72h 但播放不足 500
+    rows = [_dated("b1", old, plays=400), _dated("b2", old, plays=9000)]
+    assert export_report.ab_pairs(rows, now_ms=_NOW_MS)["pairs"][0]["state"] == "证据不足"
+    # 差异不明显：Δ3pp < 5pp
+    rows = [_dated("c1", old, plays=9000, retention_pct=30.0),
+            _dated("c2", old, plays=9000, retention_pct=33.0)]
+    assert export_report.ab_pairs(rows, now_ms=_NOW_MS)["pairs"][0]["state"] == "差异不明显"
+    # 方向性领先：Δ8pp，leader 指向高完播
+    rows = [_dated("d1", old, plays=9000, retention_pct=30.0),
+            _dated("d2", old, plays=9000, retention_pct=38.0)]
+    pair = export_report.ab_pairs(rows, now_ms=_NOW_MS)["pairs"][0]
+    assert pair["state"] == "方向性领先" and pair["leader"] == "d2"
+    assert pair["delta_pp"] == -8.0
+
+
+def test_ab_pairing_rules() -> None:
+    from datetime import date, timedelta
+    today = date.fromtimestamp(_NOW_MS / 1000)
+    old = (today - timedelta(days=10)).isoformat()
+    far = (today - timedelta(days=20)).isoformat()
+    # 发布日期差 >3 天：不成对
+    rows = [_dated("f1", old), _dated("f2", far)]
+    assert export_report.ab_pairs(rows, now_ms=_NOW_MS)["pairs"] == []
+    # 跨平台 / 跨项目：不成对
+    rows = [_dated("g1", old), _dated("g2", old, platform="快手")]
+    assert export_report.ab_pairs(rows, now_ms=_NOW_MS)["pairs"] == []
+    rows = [_dated("h1", old), _dated("h2", old, project_id="p2")]
+    assert export_report.ab_pairs(rows, now_ms=_NOW_MS)["pairs"] == []
+    # 无发布日期：进 unpaired，不演成可对账
+    rows = [_dated("i1", old), _entry("i2")]
+    result = export_report.ab_pairs(rows, now_ms=_NOW_MS)
+    assert result["pairs"] == [] and result["unpaired"] == 2

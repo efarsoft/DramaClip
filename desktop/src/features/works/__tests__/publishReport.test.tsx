@@ -5,15 +5,15 @@
  * mock 手法仿 worksDetail.test.tsx（vi.hoisted + vi.mock client）；
  * 断言用 toBeTruthy()——仓库未装 jest-dom，与 worksDetail/worksPage 同口径。
  */
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App as AntdApp } from 'antd';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PublishReport } from '@dramaclip/protocol';
 import { PublishReportDrawer } from '../PublishReportDrawer';
 
-const api = vi.hoisted(() => ({ publishReport: vi.fn() }));
+const api = vi.hoisted(() => ({ publishReport: vi.fn(), abReport: vi.fn() }));
 vi.mock('../../../services/client', () => ({
-  exportApi: { publishReport: api.publishReport },
+  exportApi: { publishReport: api.publishReport, abReport: api.abReport },
 }));
 
 const REPORT: PublishReport = {
@@ -65,7 +65,11 @@ beforeAll(() => {
   globalThis.ResizeObserver = NoResizeObserver;
 });
 
-beforeEach(() => { vi.clearAllMocks(); });
+beforeEach(() => {
+  vi.clearAllMocks();
+  // 抽屉打开即调 abReport：不给默认空报告，undefined.then 直接炸（既有 4 用例同受其害）
+  api.abReport.mockResolvedValue({ pairs: [], unpaired: 0, window_days: 3, min_plays: 500, diff_pp: 5 });
+});
 
 afterEach(() => { cleanup(); });
 
@@ -100,5 +104,23 @@ describe('PublishReportDrawer', () => {
     api.publishReport.mockResolvedValue({ ...REPORT, rows: [], recorded: 0 });
     renderDrawer();
     await waitFor(() => { expect(screen.getByText(/暂无回流数据/)).toBeTruthy(); });
+  });
+
+  it('对照实验页渲染四态与领先方说明', async () => {
+    api.publishReport.mockResolvedValue(REPORT);
+    api.abReport.mockResolvedValue({
+      pairs: [{
+        project_id: 'p1', project_name: '剧一', platform: '抖音',
+        a: 'aaaaaaaa-1', b: 'bbbbbbbb-2', retention_a: 30, retention_b: 38,
+        delta_pp: -8, state: '方向性领先', leader: 'bbbbbbbb-2',
+        note: '方向性读数，非统计显著；建议复跑验证',
+      }],
+      unpaired: 1, window_days: 3, min_plays: 500, diff_pp: 5,
+    });
+    renderDrawer();
+    fireEvent.click(screen.getByText('对照实验'));
+    await waitFor(() => { expect(screen.getByText('方向性领先')).toBeTruthy(); });
+    expect(screen.getByText(/非统计显著/)).toBeTruthy();
+    expect(screen.getByText(/未成对 1 条/)).toBeTruthy();
   });
 });

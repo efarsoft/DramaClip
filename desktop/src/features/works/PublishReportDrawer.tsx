@@ -2,7 +2,7 @@
  *  聚合口径在服务端 export_report 单持，本组件只渲染与搬运。 */
 import { Alert, Drawer, Empty, Select, Spin, Table, Tabs, Tag } from 'antd';
 import { useEffect, useState, type ReactElement } from 'react';
-import type { PublishReport, PublishReportRow } from '@dramaclip/protocol';
+import type { AbPair, AbReport, PublishReport, PublishReportRow } from '@dramaclip/protocol';
 import { exportApi } from '../../services/client';
 import { errorText } from '../engines/errorText';
 import { tokens } from '../../styles/theme';
@@ -25,6 +25,82 @@ function rate(value: number | null): string {
   return value === null ? '—' : `${(value * 100).toFixed(2)}%`;
 }
 
+const columns = [
+  { title: '维度值', dataIndex: 'value', key: 'value' },
+  { title: '样本', dataIndex: 'n', key: 'n' },
+  {
+    title: '中位完播', key: 'ret',
+    render: (_: unknown, row: PublishReportRow) => pct(row.median_retention_pct),
+  },
+  {
+    title: '点赞率', key: 'like',
+    render: (_: unknown, row: PublishReportRow) => rate(row.like_rate),
+  },
+  {
+    title: '分享率', key: 'share',
+    render: (_: unknown, row: PublishReportRow) => rate(row.share_rate),
+  },
+  {
+    title: '信号', key: 'signal',
+    render: (_: unknown, row: PublishReportRow) => (
+      <Tag color={row.signal === 'gray' ? 'default' : row.signal === 'yellow' ? 'warning' : 'success'}>
+        {SIGNAL_LABEL[row.signal]}
+      </Tag>
+    ),
+  },
+  {
+    title: '离群点名', key: 'outliers',
+    render: (_: unknown, row: PublishReportRow) =>
+      row.outliers.length === 0 ? '—' : row.outliers.map((id) => id.slice(0, 8)).join('、'),
+  },
+];
+
+/** 对照实验页（批二#6）：四态保守读数——方向性≠统计显著，本页只渲染服务端算好的事实。 */
+function AbPairsPane({ ab, abError }: { ab: AbReport | null; abError: string }): ReactElement {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceSm }}>
+      <div style={{ fontSize: tokens.text.meta.size, color: tokens.textTertiary }}>
+        同项目同平台、发布日期差≤72h 成对；双方发布满72h 且播放≥500 才比较。
+        {ab !== null && ab.unpaired > 0 ? ` 未成对 ${String(ab.unpaired)} 条（缺发布日期或无同组对照）。` : ''}
+      </div>
+      {abError !== '' && <Alert type="error" showIcon title={`对照读数加载失败：${abError}`} />}
+      {ab === null || ab.pairs.length === 0 ? (
+        <Empty description="暂无可对照的组——同剧同平台发两条以上并录入发布日期后开始读数" />
+      ) : (
+        <Table
+          size="small"
+          rowKey={(row) => `${row.a}-${row.b}`}
+          dataSource={ab.pairs}
+          pagination={false}
+          columns={[
+            { title: '项目', dataIndex: 'project_name', key: 'project' },
+            { title: '平台', dataIndex: 'platform', key: 'platform' },
+            {
+              title: '对照', key: 'pair',
+              render: (_: unknown, row: AbPair) =>
+                `${row.a.slice(0, 8)} ${String(row.retention_a)}% vs ${row.b.slice(0, 8)} ${String(row.retention_b)}%`,
+            },
+            {
+              title: 'Δ完播', key: 'delta',
+              render: (_: unknown, row: AbPair) =>
+                `${row.delta_pp > 0 ? '+' : ''}${String(row.delta_pp)}pp`,
+            },
+            {
+              title: '状态', key: 'state',
+              render: (_: unknown, row: AbPair) => (
+                <Tag color={row.state === '方向性领先' ? 'success' : row.state === '证据不足' ? 'warning' : 'default'}>
+                  {row.state}
+                </Tag>
+              ),
+            },
+            { title: '说明', dataIndex: 'note', key: 'note' },
+          ]}
+        />
+      )}
+    </div>
+  );
+}
+
 export function PublishReportDrawer({
   open,
   onClose,
@@ -36,6 +112,18 @@ export function PublishReportDrawer({
   const [report, setReport] = useState<PublishReport | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [ab, setAb] = useState<AbReport | null>(null);
+  const [abError, setAbError] = useState('');
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setAbError('');
+    void exportApi
+      .abReport()
+      .then((result) => { if (active) setAb(result); })
+      .catch((e: unknown) => { if (active) setAbError(errorText(e, '对照读数加载失败')); });
+    return () => { active = false; };
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     let active = true;
@@ -49,36 +137,6 @@ export function PublishReportDrawer({
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [open, dimension]);
-
-  const columns = [
-    { title: '维度值', dataIndex: 'value', key: 'value' },
-    { title: '样本', dataIndex: 'n', key: 'n' },
-    {
-      title: '中位完播', key: 'ret',
-      render: (_: unknown, row: PublishReportRow) => pct(row.median_retention_pct),
-    },
-    {
-      title: '点赞率', key: 'like',
-      render: (_: unknown, row: PublishReportRow) => rate(row.like_rate),
-    },
-    {
-      title: '分享率', key: 'share',
-      render: (_: unknown, row: PublishReportRow) => rate(row.share_rate),
-    },
-    {
-      title: '信号', key: 'signal',
-      render: (_: unknown, row: PublishReportRow) => (
-        <Tag color={row.signal === 'gray' ? 'default' : row.signal === 'yellow' ? 'warning' : 'success'}>
-          {SIGNAL_LABEL[row.signal]}
-        </Tag>
-      ),
-    },
-    {
-      title: '离群点名', key: 'outliers',
-      render: (_: unknown, row: PublishReportRow) =>
-        row.outliers.length === 0 ? '—' : row.outliers.map((id) => id.slice(0, 8)).join('、'),
-    },
-  ];
 
   return (
     <Drawer title="数据报告" size={780} open={open} onClose={onClose}>
@@ -136,6 +194,11 @@ export function PublishReportDrawer({
               </div>
             </div>
           ),
+        },
+        {
+          key: 'ab',
+          label: '对照实验',
+          children: <AbPairsPane ab={ab} abError={abError} />,
         }]}
       />
     </Drawer>

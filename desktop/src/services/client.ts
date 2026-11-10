@@ -1,6 +1,6 @@
 /** 渲染层唯一 IPC 出口（docs/desktop/01 §4）。组件禁止直接调 window.dramaclip。 */
 import type {
-  AnalysisJobStatus, AnalysisResults, BgmGenerateRequest, BgmLibrary, BgmRescanResult,
+  AbReport, AnalysisJobStatus, AnalysisResults, BgmGenerateRequest, BgmLibrary, BgmRescanResult,
   BgmRuntimeStatus, CopyFilesResult, DashboardSummary, DataPaths, DramaClipBridge,
   EngineConfig, ExportJob, ExportSubmitResult, ExportTranscriptsResult, HealthResult, ImportInspection,
   ImportRecord, JobInfo, JobsListResult, LlmTraceListResult, ModeRecommendation, ModelInfo, NarrationMode,
@@ -244,6 +244,9 @@ export const exportApi = {
   /** harness 只读聚合报告（批二）：维度聚合 + 健康线。 */
   publishReport: (dimension: string): Promise<PublishReport> =>
     rpc<PublishReport>('export.publish_report', { dimension }),
+  /** A/B 对照组四态（批二#6）。 */
+  abReport: (projectId?: string): Promise<AbReport> =>
+    rpc<AbReport>('export.ab_report', projectId === undefined ? {} : { project_id: projectId }),
   /** 历史成片补测四项自检（job 化）；给 exportIds 则重测指定条目。 */
   selfcheck: (
     exportIds?: string[],

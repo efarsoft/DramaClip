@@ -112,6 +112,7 @@ def register(router: Router, context: AppContext) -> None:
     router.register("export.selfcheck", lambda params: selfcheck_batch(context, params))
     router.register("export.set_publish_data", lambda params: set_publish_data(context, params))
     router.register("export.publish_report", lambda params: publish_report(context, params))
+    router.register("export.ab_report", lambda params: ab_report(context, params))
 
 
 @dataclass(frozen=True)
@@ -422,6 +423,17 @@ def publish_report(context: AppContext, params: dict[str, Any]) -> dict[str, Any
         )
     entries = exports_repo.list_publish_entries(context.conn)
     return {**export_report.aggregate(entries, dimension), "health": export_report.health(entries)}
+
+
+def ab_report(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """A/B 对照组四态（批二#6）：同项目同平台/72h/≥500 播放，保守读数。"""
+    from dramaclip.api import export_report
+
+    entries = exports_repo.list_publish_entries(context.conn)
+    project_id = str(params.get("project_id") or "").strip()
+    if project_id:
+        entries = [r for r in entries if r["project_id"] == project_id]
+    return export_report.ab_pairs(entries, now_ms=_now_ms())
 
 
 def _decode_json_columns(row: dict[str, Any], columns: tuple[str, ...]) -> dict[str, Any]:

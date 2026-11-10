@@ -815,6 +815,15 @@
         }
       },
       "result": { "type": "object" }
+    },
+    {
+      "name": "export.ab_report",
+      "summary": "A/B 对照组四态：同项目同平台/72h/≥500 播放，等待/证据不足/差异不明显/方向性领先",
+      "params": {
+        "type": "object",
+        "properties": { "project_id": { "type": "string" } }
+      },
+      "result": { "type": "object" }
     }
   ]
 }

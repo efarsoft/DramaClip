@@ -585,6 +585,29 @@ export interface PublishReport {
   readonly health: PublishHealth;
 }
 
+/** A/B 对照对（export.ab_report）：四态保守读数，方向性≠统计显著。 */
+export interface AbPair {
+  readonly project_id: string;
+  readonly project_name: string;
+  readonly platform: string;
+  readonly a: string;
+  readonly b: string;
+  readonly retention_a: number;
+  readonly retention_b: number;
+  readonly delta_pp: number;
+  readonly state: '等待' | '证据不足' | '差异不明显' | '方向性领先';
+  readonly leader: string | null;
+  readonly note: string;
+}
+
+export interface AbReport {
+  readonly pairs: AbPair[];
+  readonly unpaired: number;
+  readonly window_days: number;
+  readonly min_plays: number;
+  readonly diff_pp: number;
+}
+
 /** 模型下载源（kind ∈ modelscope | hf_mirror | huggingface）。 */
 export interface ModelSource {
   readonly kind: string;
@@ -1015,6 +1038,7 @@ export const METHOD_NAMES = [
   'export.selfcheck',
   'export.set_publish_data',
   'export.publish_report',
+  'export.ab_report',
   'models.runtime_status',
   'models.install_runtime',
   'models.indextts_status',
