@@ -1,6 +1,6 @@
 /** 成片详情页：预览 + 文件（完整路径）+ 追溯（角度·取材集·方案区）+ 成片自检 + 逐句核对与标题。 */
 import { CopyOutlined, DownloadOutlined, FolderOpenOutlined } from '@ant-design/icons';
-import { App as AntdApp, Button, DatePicker, Empty, InputNumber, Select, Tag } from 'antd';
+import { App as AntdApp, Button, DatePicker, Empty, Input, InputNumber, Select, Tag } from 'antd';
 import type { ReactElement, RefObject } from 'react';
 import { useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -369,7 +369,7 @@ const PUBLISH_PLATFORMS = ['抖音', '快手', '视频号', '小红书', 'B站',
 const PLATFORM_MEMORY_KEY = 'dramaclip.publish-platform';
 
 /** 发布数据回流（W8）：完播率是系统唯一的外部真相源——录一次十秒，攒的是自进化的原料。
- * 低摩擦口径：平台/播放量/完播率三项必填，点赞与发布日期可选；平台记住上次选择。 */
+ * 低摩擦口径：平台/播放量/完播率三项必填，点赞/分享/前3秒留存/作品ID/发布日期可选；平台记住上次选择。 */
 function PublishDataSection({ job, onReload }: { job: ExportJob; onReload: () => void }): ReactElement {
   const { message } = AntdApp.useApp();
   const existing = job.publish_data ?? null;
@@ -379,6 +379,9 @@ function PublishDataSection({ job, onReload }: { job: ExportJob; onReload: () =>
   const [plays, setPlays] = useState<number | null>(existing?.plays ?? null);
   const [retention, setRetention] = useState<number | null>(existing?.retention_pct ?? null);
   const [likes, setLikes] = useState<number | null>(existing?.likes ?? null);
+  const [shares, setShares] = useState<number | null>(existing?.shares ?? null);
+  const [retention3s, setRetention3s] = useState<number | null>(existing?.retention_3s ?? null);
+  const [videoId, setVideoId] = useState(existing?.video_id ?? '');
   const [publishedAt, setPublishedAt] = useState<dayjs.Dayjs | null>(
     existing?.published_at ? dayjs(existing.published_at) : null,
   );
@@ -396,6 +399,9 @@ function PublishDataSection({ job, onReload }: { job: ExportJob; onReload: () =>
         plays,
         retention_pct: retention,
         likes,
+        shares,
+        retention_3s: retention3s,
+        video_id: videoId.trim() === '' ? null : videoId.trim(),
         published_at: publishedAt !== null ? publishedAt.format('YYYY-MM-DD') : null,
       })
       .then(() => {
@@ -466,6 +472,31 @@ function PublishDataSection({ job, onReload }: { job: ExportJob; onReload: () =>
           value={likes}
           onChange={(value) => { setLikes(typeof value === 'number' ? value : null); }}
           style={{ width: 112 }}
+        />
+        <InputNumber
+          size="small"
+          min={0}
+          placeholder="分享(选填)"
+          value={shares}
+          onChange={(value) => { setShares(typeof value === 'number' ? value : null); }}
+          style={{ width: 112 }}
+        />
+        <InputNumber
+          size="small"
+          min={0}
+          max={100}
+          placeholder="前3秒留存(选填)"
+          value={retention3s}
+          onChange={(value) => { setRetention3s(typeof value === 'number' ? value : null); }}
+          suffix="%"
+          style={{ width: 160 }}
+        />
+        <Input
+          size="small"
+          placeholder="作品ID/链接(选填)"
+          value={videoId}
+          onChange={(event) => { setVideoId(event.target.value); }}
+          style={{ width: 180 }}
         />
         <DatePicker
           size="small"

@@ -337,3 +337,16 @@ def get(conn: sqlite3.Connection, export_id: str) -> dict[str, Any] | None:
         f"SELECT {', '.join(_COLUMNS)} FROM export_jobs WHERE id = ?", (export_id,)
     ).fetchone()
     return _row(row) if row else None
+
+
+def find_video_id_conflict(
+    conn: sqlite3.Connection, platform: str, video_id: str, *, exclude_id: str
+) -> str | None:
+    """对账保守（P-R6）：同平台同作品 ID 已绑别的成片 → 返回其 id；排除自身重录。"""
+    row = conn.execute(
+        "SELECT id FROM export_jobs WHERE id != ?"
+        " AND json_extract(publish_data, '$.platform') = ?"
+        " AND json_extract(publish_data, '$.video_id') = ? LIMIT 1",
+        (exclude_id, platform, video_id),
+    ).fetchone()
+    return str(row[0]) if row is not None else None

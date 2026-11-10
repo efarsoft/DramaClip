@@ -231,6 +231,9 @@ export const exportApi = {
       plays: number;
       retention_pct: number;
       likes?: number | null;
+      shares?: number | null;
+      retention_3s?: number | null;
+      video_id?: string | null;
       published_at?: string | null;
     } | null,
   ): Promise<{ ok: boolean; publish_data: PublishData | null }> =>

@@ -116,3 +116,71 @@ def test_missing_export_is_404_style(memory_db: sqlite3.Connection, tmp_path: Pa
             _context(memory_db), {"export_id": "nope", "data": _valid_data()}
         )
     assert exc_info.value.code == -32404
+
+
+def test_extended_fields_roundtrip(memory_db: sqlite3.Connection, tmp_path: Path) -> None:
+    export_id = _seed(memory_db, tmp_path)
+    result = export_api.set_publish_data(
+        _context(memory_db),
+        {"export_id": export_id, "data": {
+            **_valid_data(), "shares": 45, "retention_3s": 41.256,
+            "video_id": "https://v.douyin.com/abc/",
+        }},
+    )
+    stored = result["publish_data"]
+    assert stored["shares"] == 45
+    assert stored["retention_3s"] == 41.26, "与 retention_pct 同口径 round 2"
+    assert stored["video_id"] == "https://v.douyin.com/abc/"
+
+
+def test_extended_fields_default_none(memory_db: sqlite3.Connection, tmp_path: Path) -> None:
+    export_id = _seed(memory_db, tmp_path)
+    result = export_api.set_publish_data(
+        _context(memory_db), {"export_id": export_id, "data": _valid_data()}
+    )
+    stored = result["publish_data"]
+    assert stored["shares"] is None and stored["retention_3s"] is None
+    assert stored["video_id"] is None, "可选字段缺省为 None，不编 0/空串"
+
+
+def test_rejects_bad_extended_fields(memory_db: sqlite3.Connection, tmp_path: Path) -> None:
+    export_id = _seed(memory_db, tmp_path)
+    context = _context(memory_db)
+    bad = [
+        {"shares": -1}, {"shares": "abc"}, {"retention_3s": 101},
+        {"retention_3s": -0.5}, {"retention_3s": "x"}, {"video_id": "字" * 201},
+    ]
+    for extra in bad:
+        with pytest.raises(RpcDomainError) as exc_info:
+            export_api.set_publish_data(
+                context, {"export_id": export_id, "data": {**_valid_data(), **extra}}
+            )
+        assert exc_info.value.code == -32410, extra
+    row = exports_repo.get(memory_db, export_id)
+    assert row is not None and row["publish_data"] is None, "拒收的脏数据一个都不落库"
+
+
+def test_video_id_conflict_conservative(memory_db: sqlite3.Connection, tmp_path: Path) -> None:
+    # projects.source_path 有 UNIQUE 约束：两条独立成片须用不同源目录
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    export_a = _seed(memory_db, tmp_path / "a")
+    export_b = _seed(memory_db, tmp_path / "b")
+    context = _context(memory_db)
+    data = {**_valid_data(), "video_id": "douyin-123"}
+    export_api.set_publish_data(context, {"export_id": export_a, "data": data})
+    # 同平台同作品 ID 绑另一条成片 → 宁拒不错配
+    with pytest.raises(RpcDomainError) as exc_info:
+        export_api.set_publish_data(context, {"export_id": export_b, "data": data})
+    assert exc_info.value.code == -32410
+    assert exports_repo.get(memory_db, export_b)["publish_data"] is None
+    # 同一条成片重录同 ID → 覆盖（W8 现状），排除自身不算冲突
+    export_api.set_publish_data(
+        context, {"export_id": export_a, "data": {**data, "plays": 999}}
+    )
+    assert exports_repo.get(memory_db, export_a)["publish_data"]["plays"] == 999
+    # 跨平台同 ID → 不冲突（平台各自编号）
+    export_api.set_publish_data(
+        context, {"export_id": export_b, "data": {**data, "platform": "快手"}}
+    )
+    assert exports_repo.get(memory_db, export_b)["publish_data"]["video_id"] == "douyin-123"

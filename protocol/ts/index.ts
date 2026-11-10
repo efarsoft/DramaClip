@@ -489,6 +489,12 @@ export interface PublishData {
   /** 完播率百分数 0-100（创作者后台展示口径，免换算）。 */
   readonly retention_pct: number;
   readonly likes?: number | null;
+  /** 分享数（可选；视频号社交裂变主指标，报告批二#8）。 */
+  readonly shares?: number | null;
+  /** 前 3 秒留存百分数 0-100（可选；健康线判据，报告批二#7）。 */
+  readonly retention_3s?: number | null;
+  /** 平台作品 ID/链接（可选；同平台唯一，对账拒配，报告批二#6）。 */
+  readonly video_id?: string | null;
   /** 发布日期（YYYY-MM-DD，可选）。 */
   readonly published_at?: string | null;
   /** 录入时刻（毫秒，服务端记录）。 */

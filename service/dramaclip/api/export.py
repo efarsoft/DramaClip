@@ -343,8 +343,8 @@ def set_publish_data(context: AppContext, params: dict[str, Any]) -> dict[str, A
     """发布数据录入（W8·MVP）：观众投票是唯一的外部真相源，代理指标全是猜测。
 
     低摩擦口径：platform/plays/retention_pct 三项必填（十秒填完），likes/
-    published_at 可选；键白名单收口，多余键丢弃不存。retention_pct 用 0-100
-    的百分数（创作者后台的展示口径，免换算）。data=None 清除录入。
+    shares/retention_3s/video_id/published_at 可选；键白名单收口，多余键丢弃不存。
+    retention_pct 用 0-100 的百分数（创作者后台的展示口径，免换算）。data=None 清除录入。
     """
     export_id = str(params.get("export_id", ""))
     if exports_repo.get(context.conn, export_id) is None:
@@ -363,20 +363,45 @@ def set_publish_data(context: AppContext, params: dict[str, Any]) -> dict[str, A
     try:
         plays = int(str(raw.get("plays")))
         retention = float(str(raw.get("retention_pct")))
+        shares = None if raw.get("shares") in (None, "") else int(str(raw.get("shares")))
+        retention_3s = (
+            None if raw.get("retention_3s") in (None, "") else float(str(raw.get("retention_3s")))
+        )
     except (TypeError, ValueError) as exc:
-        raise RpcDomainError(_ERR_PUBLISH_DATA, f"plays/retention_pct 必填且为数字: {exc}") from exc
+        raise RpcDomainError(
+            _ERR_PUBLISH_DATA,
+            f"plays/retention_pct 必填且为数字（shares/retention_3s 选填数字）: {exc}",
+        ) from exc
     if plays < 0 or not 0 <= retention <= 100:
         raise RpcDomainError(_ERR_PUBLISH_DATA, "plays ≥ 0 且 retention_pct ∈ [0, 100]")
     likes_raw = raw.get("likes")
     likes = None if likes_raw in (None, "") else int(str(likes_raw))
     if likes is not None and likes < 0:
         raise RpcDomainError(_ERR_PUBLISH_DATA, "likes ≥ 0")
+    if shares is not None and shares < 0:
+        raise RpcDomainError(_ERR_PUBLISH_DATA, "shares ≥ 0")
+    if retention_3s is not None and not 0 <= retention_3s <= 100:
+        raise RpcDomainError(_ERR_PUBLISH_DATA, "retention_3s ∈ [0, 100]")
+    video_id = str(raw.get("video_id") or "").strip() or None
+    if video_id is not None:
+        if len(video_id) > 200:
+            raise RpcDomainError(_ERR_PUBLISH_DATA, "video_id 过长（≤200 字符）")
+        conflict = exports_repo.find_video_id_conflict(
+            context.conn, platform, video_id, exclude_id=export_id
+        )
+        if conflict is not None:
+            raise RpcDomainError(
+                _ERR_PUBLISH_DATA, f"作品 ID 已绑定另一条成片 {conflict}：宁拒录，不错配"
+            )
     published_at = str(raw.get("published_at") or "").strip() or None
     data = {
         "platform": platform,
         "plays": plays,
         "retention_pct": round(retention, 2),
         "likes": likes,
+        "shares": shares,
+        "retention_3s": None if retention_3s is None else round(retention_3s, 2),
+        "video_id": video_id,
         "published_at": published_at,
         "recorded_at": _now_ms(),
     }

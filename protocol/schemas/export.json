@@ -394,6 +394,31 @@
           ],
           "minimum": 0
         },
+        "shares": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "分享数（可选；视频号社交裂变主指标）"
+        },
+        "retention_3s": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100,
+          "description": "前 3 秒留存百分数（可选；健康线判据）"
+        },
+        "video_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 200,
+          "description": "平台作品 ID/链接（可选；同平台唯一，对账拒配）"
+        },
         "published_at": {
           "type": [
             "string",
@@ -734,6 +759,9 @@
                     ],
                     "minimum": 0
                   },
+                  "shares": { "type": ["integer", "null"], "minimum": 0 },
+                  "retention_3s": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+                  "video_id": { "type": ["string", "null"], "maxLength": 200 },
                   "published_at": {
                     "type": [
                       "string",
