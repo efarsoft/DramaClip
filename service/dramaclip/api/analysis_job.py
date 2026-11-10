@@ -77,11 +77,41 @@ def _ocr_channel_available(context: AppContext) -> bool:
     return True
 
 
+def _llm_stamp(settings: dict[str, str]) -> str:
+    """语义层配置指纹（模型+提示词当前值）——换配置后签名失配，语义自动重跑。
+
+    提示词取 llm_prompts 注册表而非裸 settings 键（settings 扫描器会报
+    未登记读键）：注册表的 default/override 就是语义层实际吃到的文本。
+    """
+    import hashlib
+
+    from dramaclip.engines import llm_prompts
+
+    def _prompt_text(key: str) -> str:
+        spec = llm_prompts.SPEC_BY_KEY.get(key)
+        if spec is None:
+            return ""
+        override = str(settings.get(key, "")).strip()
+        return override if override and override != spec.default else spec.default
+
+    basis = "|".join([
+        str(settings.get("llm.model", "")),
+        _prompt_text("prompt.conflict_system"),
+        _prompt_text("prompt.genre_system"),
+    ])
+    return hashlib.md5(basis.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+
+
 def _current_signature(context: AppContext, episode: dict[str, Any]) -> str | None:
-    return pipeline.source_signature(
+    base = pipeline.source_signature(
         Path(str(episode["source_path"])),
         ocr_channel=_ocr_channel_available(context),
     )
+    if base is None:
+        return None
+    # 语义 stamp 拼尾：源指纹相同时 LLM 配置变化也会让签名失配——语义列
+    # （冲突分/高光/题材）按新配置重跑，转写/OCR/场景保留（不依赖 LLM）。
+    return f"{base}|{_llm_stamp(context.settings)}"
 
 
 def _source_stale(context: AppContext, episode: dict[str, Any]) -> bool:
@@ -478,6 +508,9 @@ def _analyze_one(
 
     # 分析开始前取签名：产物对应的是这份源；分析中途源被换则存的是旧签名，
     # 下轮判定必然失配重算——宁多算一轮，不把新签名盖在旧源产物上。
+    # 语义层 stamp（第二梯队③）：签名末尾拼 LLM 模型+提示词覆盖指纹——
+    # 换模型或改提示词后语义产物（冲突分/高光/题材）自动失效重跑，
+    # 转写/OCR/场景等贵步骤保留（它们不依赖 LLM 配置）。
     signature = _current_signature(context, episode)
     if (
         episode["status"] == "done"

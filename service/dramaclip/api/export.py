@@ -184,6 +184,20 @@ def submit(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
             )
     except OSError:
         pass  # 探不到不装死：留痕是增强不是义务
+    # LLM 额度预检（第二梯队①）：New API 系中转站 3s 探一次余额，
+    # 不足留痕警告（fail-open 不拦——充值提示是增强不是义务）。
+    try:
+        from dramaclip.engines.semantic import llm_quota
+        from dramaclip.engines.semantic.llm_client import LlmConfig
+
+        llm_cfg = LlmConfig.from_settings(context.settings)
+        if llm_cfg.configured:
+            llm_quota.precheck_or_warn(
+                llm_cfg,
+                lambda msg: context.notifier.log("warning", msg),
+            )
+    except Exception:  # noqa: BLE001 - 预检自身失败不挡提交
+        pass
     if aigc_metadata.missing_producer(context.settings):
         raise RpcDomainError(_ERR_AIGC_CONFIG, _AIGC_MISSING_PRODUCER_MSG)
     accepted: list[dict[str, str]] = []

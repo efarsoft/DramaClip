@@ -32,6 +32,10 @@ class LlmContentBlocked(LlmUnavailable):
     """内容审核拒绝（区别于网络/限流/鉴权）：调用方可针对性降级而非烧重试。"""
 
 
+class LlmQuotaExceeded(LlmUnavailable):
+    """今日/总额度耗尽（PerDay 配额类 429）：重试必然再败，任务层应停批提示充值。"""
+
+
 #: 云厂商内容审核拒绝的典型标识（错误体/消息关键词，小写匹配）
 _CONTENT_BLOCKED_MARKERS = (
     "datainspectionfailed",
@@ -50,6 +54,35 @@ def is_content_blocked(message: str) -> bool:
     """错误文本是否命中内容审核类拒绝——调用方据此走降级而非重试。"""
     lowered = message.lower()
     return any(marker in lowered for marker in _CONTENT_BLOCKED_MARKERS)
+
+
+#: 429 响应体里的「今日/总额度耗尽」标识——这类重试必然再败，直接停批
+_PERDAY_QUOTA_MARKERS = (
+    "per day",
+    "daily quota",
+    "monthly quota",
+    "insufficient quota",
+    "额度不足",
+    "余额不足",
+    "quota exceeded",
+)
+
+
+_KEY_RE = re.compile(
+        r"(sk-[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9_.-]{8,}|api[_-]?key[=:\s]+[\S]{8,})",
+        re.IGNORECASE,
+)
+
+
+def redact_secrets(message: str) -> str:
+    """错误消息离开引擎层前擦除密钥——用户随手把日志贴进 issue 不该泄 key。"""
+    return _KEY_RE.sub("[REDACTED]", message)
+
+
+def is_perday_quota(message: str) -> bool:
+    """429 响应体是否为「今日/总额度耗尽」类——是则不重试直接停批提示充值。"""
+    lowered = message.lower()
+    return any(marker in lowered for marker in _PERDAY_QUOTA_MARKERS)
 
 
 def _classify_http_error(exc: urllib.error.HTTPError) -> LlmUnavailable:
@@ -207,6 +240,16 @@ class LlmClient:
             except urllib.error.HTTPError as exc:
                 if exc.code != 429:
                     raise _classify_http_error(exc) from exc
+                # PerDay 配额类不重试（重试必然再败）：读体判「额度耗尽」标识
+                # → 直接抛 LlmQuotaExceeded，任务层停批提示充值（第二梯队①）。
+                try:
+                    body_429 = exc.read().decode("utf-8", "replace")[:300]
+                except OSError:
+                    body_429 = str(exc)
+                if is_perday_quota(body_429):
+                    raise LlmQuotaExceeded(
+                        f"LLM 额度耗尽（充值后重跑）：{redact_secrets(body_429)}"
+                    ) from exc
                 rate_failures += 1
                 if rate_failures >= len(_429_BACKOFF):
                     raise LlmUnavailable("LLM 请求失败: 429 重试耗尽") from exc
@@ -219,7 +262,7 @@ class LlmClient:
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 net_failures += 1
                 if net_failures > len(_NET_RETRY_BACKOFF):
-                    raise LlmUnavailable(f"LLM 请求失败: {exc}") from exc
+                    raise LlmUnavailable(redact_secrets(f"LLM 请求失败: {exc}")) from exc
                 wait = _NET_RETRY_BACKOFF[net_failures - 1]
                 logger.warning(
                     "LLM 网络类失败（%s），%.0fs 后重试 (%d/%d)",

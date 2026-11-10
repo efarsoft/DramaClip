@@ -33,7 +33,7 @@ from dramaclip.engines.narration import styles as styles_lib
 from dramaclip.engines.narration.casting import EpisodeScene, MaterialByEpisode
 from dramaclip.engines.narration.conversion import grade
 from dramaclip.engines.narration.models import PlanData
-from dramaclip.engines.semantic.llm_client import is_configured
+from dramaclip.engines.semantic.llm_client import LlmQuotaExceeded, is_configured
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
@@ -174,6 +174,10 @@ def _run_plan_variants(
         total = len(modes) * k
         done_count = 0
         failures: list[str] = []
+        # 规划熔断（第二梯队②）：连续 3 条方案失败 → 停批（费钱的 LLM 调用
+        # 不再逐条烧完 K 条变体）；鉴权/额度耗尽/磁盘满类不可恢复 → 第一条
+        # 失败就停（重试没有意义）。ASR/TTS 域外错误照旧逐条跳过。
+        consecutive_failures = 0
         for mode in modes:
             if cancel_event.is_set():
                 break
@@ -277,6 +281,31 @@ def _run_plan_variants(
                     failures.append(f"{tag}: {exc}")
                     context.job_store.append_detail(job_id, failures[-1])
                     context.notifier.log("error", f"{tag} 方案失败: {exc}")
+                    consecutive_failures += 1
+                    _msg = str(exc)
+                    _fatal = (
+                        isinstance(exc, LlmQuotaExceeded)
+                        or "401" in _msg
+                        or "403" in _msg
+                        or "磁盘" in _msg
+                        or "disk" in _msg.lower()
+                    )
+                    if _fatal:
+                        context.notifier.log(
+                            "error",
+                            "不可恢复错误（鉴权/额度/磁盘），规划停批——"
+                            "修复配置后重新规划",
+                        )
+                        raise
+                    if consecutive_failures >= 3:
+                        context.notifier.log(
+                            "error",
+                            f"连续 {consecutive_failures} 条方案失败，规划停批"
+                            "——检查网络/模型配置后重新规划",
+                        )
+                        raise
+                else:
+                    consecutive_failures = 0
                 done_count += 1
                 context.job_store.set_progress(
                     job_id, round(done_count / total * 100, 1), tag

@@ -557,9 +557,13 @@ def _force_mtime(path: Path, seconds: int = 1_800_000_000) -> None:
 
 
 def _expected_signature(harness: Harness, source: Path) -> str | None:
-    return pipeline.source_signature(
+    base = pipeline.source_signature(
         source, ocr_channel=analysis_job._ocr_channel_available(harness.context)
     )
+    if base is None:
+        return None
+    # 语义层 stamp 拼尾（第二梯队③）：换 LLM 模型/提示词时签名失配重跑语义
+    return f"{base}|{analysis_job._llm_stamp(harness.context.settings)}"
 
 
 def test_changed_source_forces_reanalysis_of_done_episode(
@@ -644,7 +648,9 @@ def test_ocr_capability_change_invalidates_done_episode(
     assert harness.wait_done(str(first["job_id"]))["status"] == "completed"
     episode = episodes_repo.list_by_project(memory_db, project_id)[0]
     source = Path(str(episode["source_path"]))
-    assert episode["source_signature"] == pipeline.source_signature(source, ocr_channel=False)
+    _base = pipeline.source_signature(source, ocr_channel=False)
+    _stamp = analysis_job._llm_stamp(harness.context.settings)
+    assert episode["source_signature"] == f"{_base}|{_stamp}"
     logs = [m["params"]["message"] for m in harness.sent if m["method"] == "log.append"]
     assert any("降级" in message for message in logs), "降级产物必须打标留痕"
     calls_before = harness.transcriber.calls
@@ -654,7 +660,8 @@ def test_ocr_capability_change_invalidates_done_episode(
     assert harness.wait_done(str(second["job_id"]))["status"] == "completed"
     assert harness.transcriber.calls > calls_before, "OCR 就绪后纯 ASR 降级产物必须重算"
     refreshed = episodes_repo.list_by_project(memory_db, project_id)[0]
-    assert refreshed["source_signature"] == pipeline.source_signature(source, ocr_channel=True)
+    _base2 = pipeline.source_signature(source, ocr_channel=True)
+    assert refreshed["source_signature"] == f"{_base2}|{_stamp}"
 
 
 def test_prescreen_repcreens_done_episode_with_changed_source(
