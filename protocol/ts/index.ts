@@ -551,6 +551,40 @@ export interface WorkItem {
   readonly publish_data?: PublishData | null;
 }
 
+/** harness 聚合行（export.publish_report）：灰 <10 / 黄 10-30 / ok ≥30；离群点名不进中位。 */
+export interface PublishReportRow {
+  readonly value: string;
+  readonly n: number;
+  readonly median_retention_pct: number | null;
+  readonly like_rate: number | null;
+  readonly share_rate: number | null;
+  readonly signal: 'gray' | 'yellow' | 'ok';
+  readonly outliers: string[];
+}
+
+export interface PublishHealthItem {
+  readonly export_id: string;
+  readonly project_name: string;
+  readonly metric: 'retention_3s' | 'retention_pct';
+  readonly value: number;
+  readonly suggestion: string;
+}
+
+export interface PublishHealth {
+  readonly line_3s: number;
+  readonly line_retention: number;
+  readonly note: string;
+  readonly below: PublishHealthItem[];
+}
+
+export interface PublishReport {
+  readonly dimension: string;
+  readonly rows: PublishReportRow[];
+  readonly recorded: number;
+  readonly zero_plays_excluded: number;
+  readonly health: PublishHealth;
+}
+
 /** 模型下载源（kind ∈ modelscope | hf_mirror | huggingface）。 */
 export interface ModelSource {
   readonly kind: string;
@@ -980,6 +1014,7 @@ export const METHOD_NAMES = [
   'export.delete',
   'export.selfcheck',
   'export.set_publish_data',
+  'export.publish_report',
   'models.runtime_status',
   'models.install_runtime',
   'models.indextts_status',

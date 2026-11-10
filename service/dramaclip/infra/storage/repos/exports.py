@@ -350,3 +350,39 @@ def find_video_id_conflict(
         (exclude_id, platform, video_id),
     ).fetchone()
     return str(row[0]) if row is not None else None
+
+
+def list_publish_entries(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """harness 聚合原料：有回流账的已完成成片 + 方案归因（LEFT JOIN 断链标不可考）。"""
+    rows = conn.execute(
+        "SELECT e.id, e.project_id, p.name, e.narration_mode, e.duration_s,"
+        " e.publish_data, np.angle, np.plan_data"
+        " FROM export_jobs e JOIN projects p ON p.id = e.project_id"
+        " LEFT JOIN narration_plans np ON np.id = e.narration_plan_id"
+        " WHERE e.status = ? AND e.publish_data IS NOT NULL",
+        (STATUS_COMPLETED,),
+    ).fetchall()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        data = _parse_publish(row[5])
+        if data is None:
+            continue
+        plan = json.loads(row[7]) if row[7] else {}
+        out.append({
+            "export_id": str(row[0]),
+            "project_id": str(row[1]),
+            "project_name": str(row[2]),
+            "mode": row[3],
+            "duration_s": row[4],
+            "angle": row[6],
+            "arc": plan.get("arc") if isinstance(plan, dict) else None,
+            "platform": data.get("platform"),
+            "plays": int(data.get("plays") or 0),
+            "retention_pct": float(data.get("retention_pct") or 0),
+            "likes": data.get("likes"),
+            "shares": data.get("shares"),
+            "retention_3s": data.get("retention_3s"),
+            "published_at": data.get("published_at"),
+            "video_id": data.get("video_id"),
+        })
+    return out

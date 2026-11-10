@@ -79,6 +79,7 @@ _ERR_TRASH_FENCE = -32408  # 产物不在数据目录内，拒绝搬移（models
 _ERR_TRASH_MOVE = -32409  # 移入回收失败（OSError）：宁留记录，不产无法追溯的孤儿文件
 _ERR_PUBLISH_DATA = -32410  # 发布数据录入不合法（W8）：宁拒收，不存脏数据污染回流账
 _ERR_AIGC_CONFIG = -32411  # 隐式标识开启但编码未填：submit 早拒＋渲染遍硬失败（retry/竞态同拒）
+_ERR_REPORT_PARAM = -32412  # 报告维度词表外（harness）
 _AIGC_MISSING_PRODUCER_MSG = (
     "AIGC 隐式标识已开启但未填写服务提供者编码：请在设置「出片」分区填写"
     "（全国人工智能生成合成内容标识服务平台注册获取），或关闭隐式标识开关"
@@ -110,6 +111,7 @@ def register(router: Router, context: AppContext) -> None:
     router.register("export.delete", lambda params: delete_export(context, params))
     router.register("export.selfcheck", lambda params: selfcheck_batch(context, params))
     router.register("export.set_publish_data", lambda params: set_publish_data(context, params))
+    router.register("export.publish_report", lambda params: publish_report(context, params))
 
 
 @dataclass(frozen=True)
@@ -407,6 +409,19 @@ def set_publish_data(context: AppContext, params: dict[str, Any]) -> dict[str, A
     }
     exports_repo.set_publish_data(context.conn, export_id, data)
     return {"ok": True, "publish_data": data}
+
+
+def publish_report(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """harness 只读报告：聚合事实摆出来，调权永远人拍板（规格 §5）。"""
+    from dramaclip.api import export_report
+
+    dimension = str(params.get("dimension") or "mode")
+    if dimension not in export_report.DIMENSIONS:
+        raise RpcDomainError(
+            _ERR_REPORT_PARAM, f"dimension 必须是 {'/'.join(export_report.DIMENSIONS)} 之一"
+        )
+    entries = exports_repo.list_publish_entries(context.conn)
+    return {**export_report.aggregate(entries, dimension), "health": export_report.health(entries)}
 
 
 def _decode_json_columns(row: dict[str, Any], columns: tuple[str, ...]) -> dict[str, Any]:

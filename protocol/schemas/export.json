@@ -801,6 +801,20 @@
           }
         }
       }
+    },
+    {
+      "name": "export.publish_report",
+      "summary": "harness 只读聚合报告：维度中位完播/点赞率/分享率 + 灰黄信号 + 健康线",
+      "params": {
+        "type": "object",
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "enum": ["mode", "arc", "angle", "platform", "duration_bucket"]
+          }
+        }
+      },
+      "result": { "type": "object" }
     }
   ]
 }
