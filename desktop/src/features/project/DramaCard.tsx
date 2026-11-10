@@ -5,7 +5,8 @@
  */
 import { PlayCircleFilled } from '@ant-design/icons';
 import { Card, Dropdown } from 'antd';
-import type { ReactElement } from 'react';
+import { memo, type ReactElement } from 'react';
+import { useUiStore } from '../../stores/ui';
 import type { Project } from '@dramaclip/protocol';
 import { mediaUrl } from '../../services/client';
 import { mixins } from '../../styles/mixins';
@@ -24,8 +25,22 @@ export interface DramaCardProps extends MenuHandlers {
   readonly onGoto: (route: string, project: Project) => void;
 }
 
-export function DramaCard({ row, factsMissing, onOpen, onGoto, onRename, onDuplicate, onDelete }: DramaCardProps): ReactElement {
+/** 渲染层优化（UI 批③）：memo 防父组件状态变化时列表卡片级联重渲——
+ * props 不变（同 row 同回调）时跳过整个卡片树的 reconciliation。 */
+export const DramaCard = memo(function DramaCard({ row, factsMissing, onOpen, onGoto, onRename, onDuplicate, onDelete }: DramaCardProps): ReactElement {
   const { project } = row;
+  const analysisPercent = useUiStore(
+    (state) =>
+      state.currentProjectId === project.id && state.analysisProgress !== null
+        ? state.analysisProgress.percent
+        : null,
+  );
+  const analysisLabel = useUiStore(
+    (state) =>
+      state.currentProjectId === project.id && state.analysisProgress !== null
+        ? state.analysisProgress.message
+        : '',
+  );
   return (
     <Card
       hoverable
@@ -36,7 +51,59 @@ export function DramaCard({ row, factsMissing, onOpen, onGoto, onRename, onDupli
     >
       <CoverArea project={project} handlers={{ onRename, onDuplicate, onDelete }} />
       <CardBody row={row} factsMissing={factsMissing} onGoto={onGoto} />
+      {analysisPercent !== null && (
+        <CardProgress percent={analysisPercent} label={analysisLabel} />
+      )}
     </Card>
+  );
+});
+
+/** 迷你进度条（🟡批②）：分析任务进行中，项目卡上内嵌当前进度与阶段文字——
+ * 不用切到任务页就能看到「跑到哪了」。 */
+function CardProgress({ percent, label }: { percent: number; label: string }): ReactElement {
+  return (
+    <div
+      style={{
+        padding: `${tokens.spaceXs} ${tokens.spaceSm}`,
+        borderTop: `1px solid ${tokens.border}`,
+        display: 'flex',
+        alignItems: 'center',
+        gap: tokens.spaceSm,
+      }}
+    >
+      <div
+        style={{
+          flex: 1,
+          height: 4,
+          borderRadius: tokens.radiusDot,
+          background: tokens.border,
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            width: `${String(Math.min(percent, 100))}%`,
+            height: '100%',
+            borderRadius: tokens.radiusDot,
+            background: tokens.colorPrimary,
+            transition: 'width 0.3s ease',
+          }}
+        />
+      </div>
+      <span
+        style={{
+          fontSize: tokens.text.meta.size,
+          lineHeight: tokens.text.meta.leading,
+          color: tokens.textSecondary,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          maxWidth: 120,
+        }}
+      >
+        {label !== '' ? label : `${String(Math.round(percent))}%`}
+      </span>
+    </div>
   );
 }
 

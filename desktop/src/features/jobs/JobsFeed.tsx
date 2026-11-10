@@ -4,6 +4,7 @@ import { jobsApi } from '../../services/client';
 import { useJobsStore } from '../../stores/jobs';
 import { useUiStore } from '../../stores/ui';
 import { JobDrawer } from './JobDrawer';
+import { ExportToast } from './ExportToast';
 
 /** 抽屉开着看进度走 2s；关着只养状态栏角标，10s 足够（卷三意见 09：事件驱动是 backlog）。 */
 const OPEN_INTERVAL_MS = 2_000;
@@ -39,5 +40,10 @@ export function JobsFeed(): ReactElement {
     };
   }, [serviceState, drawerOpen, fast]);
 
-  return <JobDrawer />;
+  return (
+    <>
+      <JobDrawer />
+      <ExportToast />
+    </>
+  );
 }
