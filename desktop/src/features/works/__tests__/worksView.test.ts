@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { Episode, SelfCheck, WorkItem } from '@dramaclip/protocol';
 import {
   episodeLabel,
+  formatDate,
   formatTotalGb,
   formatWhen,
   groupWorks,
@@ -91,6 +92,11 @@ describe('时间与体积', () => {
     const label = formatWhen(new Date(2026, 8, 23, 9, 5).getTime());
     expect(label).toBe('9/23 09:05');
     expect(formatWhen(undefined)).toBe('');
+  });
+
+  it('日期是绝对 YYYY/MM/DD（只到日）；缺失报「—」——与 formatWhen 语义不同', () => {
+    expect(formatDate(new Date(2026, 8, 23, 9, 5).getTime())).toBe('2026/09/23');
+    expect(formatDate(undefined)).toBe('—');
   });
 
   it('合计体积 GB 两位小数（量化确认的数据源）', () => {

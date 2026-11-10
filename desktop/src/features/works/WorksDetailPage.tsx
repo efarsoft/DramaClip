@@ -20,7 +20,7 @@ import { PublishChecklistSection } from './PublishChecklistSection';
 import { PublishDataSection } from './PublishDataSection';
 import { TitlesSection } from './TitlesSection';
 import { useWorkDetail } from './useWorkDetail';
-import { episodeLabel } from './worksView';
+import { episodeLabel, formatDate } from './worksView';
 
 /** §1.4 诚实边界：这份时间轴记录的是字幕烧上去的时刻，不是音节出声的时刻——不得写「精确到语音」。 */
 const TIMELINE_PROVENANCE = '时间轴取自烧录字幕的分行时刻，非语音对齐';
@@ -34,12 +34,6 @@ function formatDuration(s: number | undefined): string {
 function formatSize(bytes: number | undefined): string {
   if (bytes === undefined || bytes <= 0) return '—';
   return `${(bytes / 1048576).toFixed(1)} MB`;
-}
-
-function formatDate(ms: number | undefined): string {
-  if (ms === undefined) return '—';
-  const d = new Date(ms);
-  return `${String(d.getFullYear())}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
 }
 
 export function WorksDetailPage(): ReactElement {

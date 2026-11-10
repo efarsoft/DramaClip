@@ -44,6 +44,13 @@ export function formatWhen(ms: number | undefined): string {
   return `${String(date.getMonth() + 1)}/${String(date.getDate())} ${hh}:${mm}`;
 }
 
+/** 日期（完成/录入）：绝对 YYYY/MM/DD，只到日；缺失如实报「—」。与 formatWhen（M/D HH:mm）语义不同，不复用。 */
+export function formatDate(ms: number | undefined): string {
+  if (ms === undefined) return '—';
+  const d = new Date(ms);
+  return `${String(d.getFullYear())}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export interface WorkGroup {
   readonly projectId: string;
   readonly name: string;
