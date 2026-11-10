@@ -233,9 +233,9 @@ data 字典改为：
 `protocol/schemas/export.json` set_publish_data 的 data.properties 加：
 
 ```json
-                  "shares": { "type": "integer", "minimum": 0 },
-                  "retention_3s": { "type": "number", "minimum": 0, "maximum": 100 },
-                  "video_id": { "type": "string", "maxLength": 200 }
+                  "shares": { "type": ["integer", "null"], "minimum": 0 },
+                  "retention_3s": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+                  "video_id": { "type": ["string", "null"], "maxLength": 200 }
 ```
 
 `desktop/src/services/client.ts` setPublishData 的 data 类型加 `shares?: number | null; retention_3s?: number | null; video_id?: string | null;`。
@@ -340,12 +340,13 @@ def _entry(export_id: str, **over: Any) -> dict[str, Any]:
 
 
 def test_median_not_mean() -> None:
-    rows = [_entry(f"e{i}", retention_pct=v) for i, v in enumerate([10, 12, 14, 16, 200])]
+    # n=5 时单点 z 上界 √(n-1)=2，触不到严格 >2σ——离群用例必须 9 点
+    rows = [_entry(f"e{i}", retention_pct=v) for i, v in enumerate([10, 12, 14, 16, 18, 20, 22, 24, 200])]
     # 200 离群 >2σ：点名且不进中位数
     result = export_report.aggregate(rows, "mode")
     row = result["rows"][0]
-    assert row["median_retention_pct"] == 13.0, "中位数抗爆款绑架；均值 50.4 即红"
-    assert row["outliers"] == ["e4"]
+    assert row["median_retention_pct"] == 17.0, "中位数抗爆款绑架；均值 37.33 即红"
+    assert row["outliers"] == ["e8"]
 
 
 def test_signal_boundaries() -> None:
@@ -775,7 +776,7 @@ describe('PublishReportDrawer', () => {
     await waitFor(() => { expect(screen.getByText('full_narration')).toBeInTheDocument(); });
     expect(screen.getByText('35.5%')).toBeInTheDocument();
     expect(screen.getByText(/趋势参考/)).toBeInTheDocument();
-    expect(screen.getByText(/e-outlier/)).toBeInTheDocument();
+    expect(screen.getByText(/e-outlie/)).toBeInTheDocument();
     expect(api.publishReport).toHaveBeenCalledWith('mode');
   });
 
@@ -942,7 +943,7 @@ export function PublishReportDrawer({
                 />
               )}
               {error !== '' && <Alert type="error" showIcon message={`报告加载失败：${error}`} />}
-              {loading ? <Spin /> : report === null || report.rows.length === 0 ? (
+              {loading ? <Spin /> : error === '' && (report === null || report.rows.length === 0) ? (
                 <Empty description="暂无回流数据——在成片详情页「发布数据」录入后这里开始累积" />
               ) : (
                 <Table
@@ -1028,12 +1029,13 @@ def _dated(export_id: str, published: str, **over: Any) -> dict[str, Any]:
 
 
 def test_ab_four_states() -> None:
-    from datetime import date
+    from datetime import date, timedelta
     today = date.fromtimestamp(_NOW_MS / 1000)
-    old = (today - __import__("datetime").timedelta(days=10)).isoformat()
-    young = (today - __import__("datetime").timedelta(days=1)).isoformat()
-    # 等待：一方发布未满 72h
-    rows = [_dated("a1", old, plays=9000), _dated("a2", young, plays=9000)]
+    old = (today - timedelta(days=10)).isoformat()
+    young = (today - timedelta(days=1)).isoformat()
+    # 等待：一方发布未满 72h（配对窗 ≤3 天：a1 取 4 天前才与 a2 成对）
+    rows = [_dated("a1", (today - timedelta(days=4)).isoformat(), plays=9000),
+            _dated("a2", young, plays=9000)]
     pair = export_report.ab_pairs(rows, now_ms=_NOW_MS)["pairs"][0]
     assert pair["state"] == "等待"
     # 证据不足：都满 72h 但播放不足 500
@@ -1327,27 +1329,25 @@ git commit -m "feat(harness): A/B 对照组四态——同项目同平台/72h/�
 
 **Files:**
 - Modify: `service/dramaclip/engines/narration/variant_scoring.py`（_SYSTEM_PROMPT 的 cta_pull 锚点，现 60–63 行）
-- Test: `service/tests/engines/narration/test_variant_scoring.py`（若不存在则新建；先跑 `ls service/tests/engines/narration/` 确认）
+- Test: `service/tests/engines/narration/test_variant_scoring.py`（已存在，追加两函数——勿覆盖既有夹具与用例）
 
 **Interfaces:**
 - Consumes: 现状 WEIGHTS 六键（hook_power/rhythm/emotion_curve/conflict_clarity/cta_pull/visual_potential）。
 - Produces: 仅 prompt 文案变化；WEIGHTS/DIMENSIONS/函数签名一字不动。
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: 写失败测试（追加到既有 test_variant_scoring.py 尾部，用其既有 `variant_scoring` 导入名）**
 
 ```python
-"""#8 分享判据：锚点补转发语，六维结构与权重不动（变异锚点：改权重即红）。"""
-
-from dramaclip.engines.narration import variant_scoring as vs
+# ── 批二#8：锚点补转发语判据，六维结构与权重冻结 ─────────────────────────────
 
 
 def test_cta_anchor_mentions_share_worthiness() -> None:
-    prompt = vs._SYSTEM_PROMPT
+    prompt = variant_scoring._SYSTEM_PROMPT
     assert "转发语" in prompt and "名场面共鸣" in prompt
 
 
 def test_six_dimensions_and_weights_frozen() -> None:
-    assert vs.WEIGHTS == {
+    assert variant_scoring.WEIGHTS == {
         "hook_power": 0.25, "rhythm": 0.12, "emotion_curve": 0.12,
         "conflict_clarity": 0.16, "cta_pull": 0.25, "visual_potential": 0.10,
     }, "先数据验证再决定是否独立成维——本批不动六维结构"
@@ -1355,8 +1355,8 @@ def test_six_dimensions_and_weights_frozen() -> None:
 
 - [ ] **Step 2: 跑测试确认红**
 
-Run: `../.venv/Scripts/python -m pytest tests/engines/narration/test_variant_scoring.py -v`（cwd=service；若文件已存在则跑该文件全量）
-Expected: 锚点用例 FAIL（转发语不在 prompt）。
+Run: `../.venv/Scripts/python -m pytest tests/engines/narration/test_variant_scoring.py -v`（cwd=service）
+Expected: 锚点用例 FAIL（转发语不在 prompt）；权重冻结与既有用例 PASS。
 
 - [ ] **Step 3: 改锚点**
 
@@ -1830,7 +1830,7 @@ export function buildPublishCopy(pack: PlatformPack): string {
 
 Button 加 `loading={copying}`。
 
-`WorksDetailPage.tsx` 挂载处（现 118 行附近区域）：`<PublishChecklistSection titles={...} publish={...} />` 改 `<PublishChecklistSection planId={detail.job.narration_plan_id ?? ''} />`（以现场实际 props 为准；planId 空串时 copy 按钮应禁用——Button 加 `disabled={planId === ''}`）。
+`WorksDetailPage.tsx` 挂载处（现 117 行）：`<PublishChecklistSection titles={detail.titles} publish={detail.publish} />` 改 `<PublishChecklistSection planId={detail.planId} />`（detail.planId 已是 ''-归一化的单一来源，与 PlatformPackSection 同源；planId 空串时 copy 按钮禁用——Button 加 `disabled={planId === ''}`）。
 
 `worksDetail.test.tsx`：清单复制相关用例改为 mock publishPack 返回新形状（含 cta_id/cta_line/cta_options——可给 null/null/[]）；原 buildPublishCopy 双参调用点全改。
 
