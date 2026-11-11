@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.engines.analysis import subtitle_ocr
-from dramaclip.engines.exporter import encoder
+from dramaclip.engines.exporter import film_assembly
 from dramaclip.engines.subtitle.safe_zone import check_safe_zone
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 
@@ -128,8 +128,8 @@ def check_duration(
     if measured_s is None or budget_s is None or budget_s <= 0:
         return {"pass": None}
     tolerance = max(
-        budget_s * encoder.AUDIT_DURATION_REL_TOLERANCE,
-        encoder.AUDIT_DURATION_ABS_TOLERANCE_S,
+        budget_s * film_assembly.AUDIT_DURATION_REL_TOLERANCE,
+        film_assembly.AUDIT_DURATION_ABS_TOLERANCE_S,
         segment_count * _SEGMENT_PROTECT_SLACK_S,
     )
     return {

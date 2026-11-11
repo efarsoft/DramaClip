@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from dramaclip.engines.exporter import encoder
+from dramaclip.engines.exporter import encoder, film_assembly
 
 
 class _FakeCompleted:
@@ -45,8 +45,8 @@ def _stub(
     film_duration: float = 20.0,
 ) -> list[list[str]]:
     """桩掉 resolve_ffmpeg/ffprobe/subprocess.run/probe.probe，返回 ffmpeg 调用命令。"""
-    monkeypatch.setattr(encoder, "resolve_ffmpeg", lambda: "ffmpeg")
-    monkeypatch.setattr(encoder, "resolve_ffprobe", lambda: "ffprobe")
+    monkeypatch.setattr(film_assembly, "resolve_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(film_assembly, "resolve_ffprobe", lambda: "ffprobe")
     calls: list[list[str]] = []
 
     def fake_run(cmd: list[str], **_kwargs: Any) -> _FakeCompleted:
@@ -71,16 +71,16 @@ def _stub(
         Path(cmd[-1]).write_bytes(b"")
 
     # 心跳封装接管长 ffmpeg：记录同一形状的调用并把暂存产物写出来供 os.replace
-    monkeypatch.setattr(encoder, "_run_ffmpeg_with_heartbeat", fake_heartbeat)
+    monkeypatch.setattr(film_assembly, "_run_ffmpeg_with_heartbeat", fake_heartbeat)
 
     def fake_probe(path: Path) -> Any:
         # 段各 10s；成片时长默认取各段实测和，让时长闸在纯形状测试里保持放行
-        return encoder.ffprobe_mod.MediaInfo(
+        return film_assembly.ffprobe_mod.MediaInfo(
             duration_s=10.0 if path.name.startswith("seg_") else film_duration,
             width=1080, height=1920, fps=30.0, has_audio=True,
         )
 
-    monkeypatch.setattr(encoder.ffprobe_mod, "probe", fake_probe)
+    monkeypatch.setattr(film_assembly.ffprobe_mod, "probe", fake_probe)
     return calls
 
 
@@ -99,7 +99,7 @@ def test_uniform_signatures_keep_stream_copy(
     calls = _stub(monkeypatch)
     segments = _segments(tmp_path)
     out = tmp_path / "out.mp4"
-    encoder._concat(segments, out)
+    film_assembly._concat(segments, out)
     ffmpeg_call = next(c for c in calls if c[0] == "ffmpeg")
     assert "-c" in ffmpeg_call and "copy" in ffmpeg_call, "签名齐必须保持 -c copy"
     assert "-crf" not in ffmpeg_call, "不许顺手重编码"
@@ -113,7 +113,7 @@ def test_mixed_signatures_force_reencode_concat(
     sig = {segments[0]: "h264", segments[1]: "mpeg4"}  # 模拟一段换了编码器
     calls = _stub(monkeypatch, signature_by_path=sig)
     caplog.set_level(logging.WARNING, logger="dramaclip.engines.exporter.encoder")
-    encoder._concat(segments, tmp_path / "out.mp4")
+    film_assembly._concat(segments, tmp_path / "out.mp4")
     ffmpeg_call = next(c for c in calls if c[0] == "ffmpeg")
     assert "copy" not in ffmpeg_call, "签名不齐不许流复制"
     assert "-c:v" in ffmpeg_call and "libx264" in ffmpeg_call, "整体重编码用 libx264"
@@ -130,7 +130,7 @@ def test_mixed_pixel_aspect_forces_reencode_concat(
     """
     segments = _segments(tmp_path)
     calls = _stub(monkeypatch, sar_by_path={segments[0]: "4:3", segments[1]: "1:1"})
-    encoder._concat(segments, tmp_path / "out.mp4")
+    film_assembly._concat(segments, tmp_path / "out.mp4")
     ffmpeg_call = next(c for c in calls if c[0] == "ffmpeg")
     assert "copy" not in ffmpeg_call, "像素比不齐不许流复制"
     assert "-c:v" in ffmpeg_call and "libx264" in ffmpeg_call
@@ -141,7 +141,7 @@ def test_probe_failure_falls_back_to_reencode(
 ) -> None:
     """签名探测自身失败（ffprobe 挂）→保守走重编码，绝不因探测失败挡导出。"""
     calls = _stub(monkeypatch, probe_fail=True)
-    encoder._concat(_segments(tmp_path), tmp_path / "out.mp4")
+    film_assembly._concat(_segments(tmp_path), tmp_path / "out.mp4")
     ffmpeg_call = next(c for c in calls if c[0] == "ffmpeg")
     assert "copy" not in ffmpeg_call and "libx264" in ffmpeg_call
 
@@ -152,7 +152,7 @@ def test_single_segment_copy_bytes_still_audits(
     calls = _stub(monkeypatch, film_duration=10.0)
     seg = _segments(tmp_path, 1)[0]
     out = tmp_path / "out.mp4"
-    encoder._concat([seg], out)
+    film_assembly._concat([seg], out)
     assert out.read_bytes() == b"seg", "单段仍直接 copy bytes"
     assert not [c for c in calls if c[0] == "ffmpeg"], "单段不该起 ffmpeg"
 
@@ -169,14 +169,14 @@ def test_duration_audit_fails_on_large_drift(
     durations = {"seg": 10.0, "out": 60.0}
 
     def fake_probe(path: Path) -> Any:
-        return encoder.ffprobe_mod.MediaInfo(
+        return film_assembly.ffprobe_mod.MediaInfo(
             duration_s=durations["out" if path.name.startswith("out") else "seg"],
             width=1080, height=1920, fps=30.0, has_audio=True,
         )
 
-    monkeypatch.setattr(encoder.ffprobe_mod, "probe", fake_probe)
+    monkeypatch.setattr(film_assembly.ffprobe_mod, "probe", fake_probe)
     with pytest.raises(encoder.FilmIntegrityError, match="时长审计"):
-        encoder._concat(_segments(tmp_path), tmp_path / "out.mp4")  # 各段和 20s，成片 60s
+        film_assembly._concat(_segments(tmp_path), tmp_path / "out.mp4")  # 各段和 20s，成片 60s
 
 
 def test_duration_audit_boundary_is_the_shared_tolerance(
@@ -187,14 +187,14 @@ def test_duration_audit_boundary_is_the_shared_tolerance(
     caplog.set_level(logging.WARNING, logger="dramaclip.engines.exporter.encoder")
 
     def fake_probe(path: Path) -> Any:
-        return encoder.ffprobe_mod.MediaInfo(
+        return film_assembly.ffprobe_mod.MediaInfo(
             # 原子交付后审计跑在 .part 暂存名上：out 前缀（含 part）都按成片档
             duration_s=20.5 if path.name.startswith("out") else 10.0,
             width=1080, height=1920, fps=30.0, has_audio=True,
         )
 
-    monkeypatch.setattr(encoder.ffprobe_mod, "probe", fake_probe)
-    encoder._concat(_segments(tmp_path), tmp_path / "out.mp4")
+    monkeypatch.setattr(film_assembly.ffprobe_mod, "probe", fake_probe)
+    film_assembly._concat(_segments(tmp_path), tmp_path / "out.mp4")
     assert not [r for r in caplog.records if "时长审计" in r.getMessage()]
 
 
@@ -208,8 +208,8 @@ def test_duration_audit_probe_crash_leaves_a_trace(
     def boom(_path: Path) -> Any:
         raise ValueError("ffprobe 挂了")
 
-    monkeypatch.setattr(encoder.ffprobe_mod, "probe", boom)
-    encoder._concat(_segments(tmp_path), tmp_path / "out.mp4")  # 不抛即过
+    monkeypatch.setattr(film_assembly.ffprobe_mod, "probe", boom)
+    film_assembly._concat(_segments(tmp_path), tmp_path / "out.mp4")  # 不抛即过
     messages = [r.getMessage() for r in caplog.records]
     assert any("未能测量" in m for m in messages), f"测不出必须留痕：{messages}"
 
@@ -226,7 +226,7 @@ def test_concat_list_file_is_per_output(tmp_path: Path, monkeypatch: pytest.Monk
     """
     calls = _stub(monkeypatch)
     out = tmp_path / "projA_full_narration_ab12cd.mp4"
-    encoder._concat(_segments(tmp_path), out)
+    film_assembly._concat(_segments(tmp_path), out)
     ffmpeg_call = next(c for c in calls if c[0] == "ffmpeg")
     list_path = Path(ffmpeg_call[ffmpeg_call.index("-i") + 1])
     assert list_path.name.startswith(out.stem), f"清单必须按产物命名：{list_path}"
@@ -243,9 +243,9 @@ def test_concat_list_removed_when_ffmpeg_fails(
     def boom(cmd: list[str], **_kwargs: Any) -> Any:
         raise subprocess.CalledProcessError(1, [str(part) for part in cmd])
 
-    monkeypatch.setattr(encoder, "_run_ffmpeg_with_heartbeat", boom)
+    monkeypatch.setattr(film_assembly, "_run_ffmpeg_with_heartbeat", boom)
     with pytest.raises(subprocess.CalledProcessError):
-        encoder._concat(_segments(tmp_path), tmp_path / "out.mp4")
+        film_assembly._concat(_segments(tmp_path), tmp_path / "out.mp4")
     assert [p.name for p in tmp_path.iterdir() if "concat" in p.name] == [], (
         "失败路径漏在盘上=下次渲染的幽灵输入"
     )
@@ -257,7 +257,7 @@ def test_concat_list_escapes_single_quotes_in_paths(tmp_path: Path) -> None:
     quoted_dir.mkdir()
     segment = quoted_dir / "seg_000.mp4"
     segment.write_bytes(b"seg")
-    line = encoder._concat_list_line(segment)
+    line = film_assembly._concat_list_line(segment)
     assert line.startswith("file '") and line.endswith("'\n"), line
     body = line[len("file '") : -len("'\n")]
     assert "'\\''" in body, f"单引号未按 ffmpeg 约定转义：{body}"
@@ -283,9 +283,9 @@ def test_concat_publishes_atomically_and_never_touches_old_film(
     def boom(cmd, **kw):  # noqa: ANN001, ANN003
         raise RuntimeError("ffmpeg 失败（code=1）：mock")
 
-    monkeypatch.setattr(encoder, "_run_ffmpeg_with_heartbeat", boom)
+    monkeypatch.setattr(film_assembly, "_run_ffmpeg_with_heartbeat", boom)
     with pytest.raises(RuntimeError):
-        encoder._concat([seg_a, seg_b], old_film)
+        film_assembly._concat([seg_a, seg_b], old_film)
     assert old_film.read_bytes() == b"OLD", "旧成片不得被半成品覆盖"
     assert not (tmp_path / "film.part.mp4").exists(), "失败 .part 必须收走"
 
@@ -308,7 +308,7 @@ def test_concat_success_replaces_via_staged_file(
         staged = Path(cmd[-1])
         staged.write_bytes(b"NEWFILM")
 
-    monkeypatch.setattr(encoder, "_run_ffmpeg_with_heartbeat", fake_run)
-    encoder._concat([seg_a, seg_b], out)
+    monkeypatch.setattr(film_assembly, "_run_ffmpeg_with_heartbeat", fake_run)
+    film_assembly._concat([seg_a, seg_b], out)
     assert out.read_bytes() == b"NEWFILM"
     assert not (tmp_path / "film.part.mp4").exists()
