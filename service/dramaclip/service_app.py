@@ -105,6 +105,37 @@ def _is_light_query(method: str) -> bool:
     )
 
 
+_WAL_CHECK_INTERVAL_S = 300  # 5 分钟查一次：无任务时 checkpoint，每日 ANALYZE
+
+
+def _wal_maintenance(conn: sqlite3.Connection, job_store: jobs.JobStore) -> None:
+    """WAL 定期维护：空闲 checkpoint(TRUNCATE) + 每日 ANALYZE。
+
+    WAL 只增不清时几百 MB 膨胀会让读也变慢（Python 层锁分离了但文件系统
+    层没分离）。checkpoint 必须在无写事务时做（TRUNCATE 要独占写锁），所以
+    挂在「无在跑任务」的窗口上。ANALYZE 更新查询计划统计，删过大量行后
+    不做会走错索引。
+    """
+    import time as _time
+
+    last_analyze = 0.0
+    while True:
+        _time.sleep(_WAL_CHECK_INTERVAL_S)
+        try:
+            active = conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE status IN ('running', 'pending')"
+            ).fetchone()
+            if active is not None and int(active[0]) > 0:
+                continue  # 有任务在跑：checkpoint 会等写锁，反而添堵
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            now = _time.monotonic()
+            if now - last_analyze > 86400:  # 每日一次
+                conn.execute("ANALYZE")
+                last_analyze = now
+        except sqlite3.Error:
+            continue  # 维护失败不挡服务：下轮再试
+
+
 class ServiceApp:
     """单实例服务。run() 阻塞直到 shutdown/EOF/SIGTERM，返回进程退出码。"""
 
@@ -141,6 +172,15 @@ class ServiceApp:
         # 回收站轮转（稳定收尾批）：删除的成片按日期暂存 .trash/<日期>/，30 天
         # 前的自动清——此前永不清理，磁盘单调涨满。删不动（占用中）静默留给下轮。
         _purge_trash(data_dir / ".trash", keep_days=30)
+        # WAL 定期维护（长跑稳定性①）：长分析跑几小时 WAL 只增不清，膨胀到
+        # 几百 MB 后读也会变慢。每 5 分钟查一次：无在跑任务时做 checkpoint
+        # TRUNCATE（WAL 归零）；每日首次做 ANALYZE（查询计划优化）。
+        threading.Thread(
+            target=_wal_maintenance,
+            args=(conn, job_store),
+            name="wal-maintenance",
+            daemon=True,
+        ).start()
         gpu.prefetch()  # GPU 探测慢（nvidia-smi），启动即后台预热，health 不阻塞
         # 模型库状态/体积缓存预热（同 gpu.prefetch 模式）：placement 树首触扫描在冷盘
         # 环境是十秒级（真机 2026-10-19），不预热则引擎中心首开必等一次
@@ -196,7 +236,12 @@ class ServiceApp:
         read_context = dataclasses.replace(context, conn=read_conn)
         read_router = build_router(read_context, self._shutdown)
         # Agent 网关：agent_gateway.enabled=true 时随服务常驻本机端口；settings.update 热生效
-        gateway = AgentGateway(conn, trace_dir=llm_trace_dir(context))
+        # 生产链端点（B3-14）注入 router：复用与桌面端同一份 RPC 库函数（契约零漂移）
+        gateway = AgentGateway(
+            conn,
+            trace_dir=llm_trace_dir(context),
+            router_provider=lambda: router,
+        )
         context.gateway = gateway
         if (state := gateway.sync(settings)) is not None:
             print(f"[agent-gateway] {state}")
@@ -291,7 +336,18 @@ class ServiceApp:
             executor.submit(self._dispatch_and_reply, router, request)
 
     def _dispatch_and_reply(self, router: Router, request: RpcRequest) -> None:
+        import time as _time
+
+        start = _time.monotonic()
         response = router.dispatch(request)
+        elapsed = _time.monotonic() - start
+        if elapsed > 5.0:
+            import logging as _logging
+
+            _logging.getLogger("dramaclip.ipc").warning(
+                "慢查询 %.1fs: %s（读连接已分离，此处 >5s 说明查询本身重或 DB 大）",
+                elapsed, request.method,
+            )
         connection = self._connection
         if connection is None:
             return

@@ -1,8 +1,16 @@
-"""服务端通知：progress.update / log.append / models.download_progress。"""
+"""服务端通知：progress.update / log.append / models.download_progress。
+
+通知层节流（长跑稳定性②）：progress.update 在分析/导出期间每秒多次，
+每次一条 TCP 写——50 集批量分析时 IPC 开销放大。改为按 job_id 缓冲
+最新值，500ms 窗口合并发送（跳过的中间值取最新，UI 不丢帧感）。
+非 progress 类通知不受节流（log.append / download_progress 即时发）。
+"""
 
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from collections.abc import Callable
 from contextvars import ContextVar, Token
 from typing import Any, TypeVar
@@ -14,11 +22,14 @@ _T = TypeVar("_T")
 
 _LEVELS = {"info": logging.INFO, "warn": logging.WARNING, "error": logging.ERROR}
 
-# 当前作业 id：并发任务下每条业务日志都要能归到一条任务上。
+# 当前作业 id：并发任务下每条业务日志都要能能归到一条任务上。
 # 线程池会复用工作线程，所以绑定必须随任务体开始/结束成对发生（见 tracked）。
 _JOB_ID: ContextVar[str | None] = ContextVar("dramaclip_job_id", default=None)
 
 logger = logging.getLogger("dramaclip.job")
+
+#: progress 类通知的合并窗口：窗口内的多次更新只发最后一条
+_PROGRESS_FLUSH_INTERVAL_S = 0.5
 
 
 def current_job_id() -> str | None:
@@ -31,6 +42,9 @@ class Notifier:
 
     def __init__(self, send: Sender) -> None:
         self._send = send
+        # progress 节流缓存：job_id → (上次发送时刻, 最新 params)
+        self._progress_buffer: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._progress_lock = threading.Lock()
 
     def progress(
         self,
@@ -42,6 +56,14 @@ class Notifier:
         params: dict[str, Any] = {"job_id": job_id, "percent": percent, "message": message}
         if detail is not None:
             params["detail"] = detail
+        # 节流：同 job 500ms 内多次更新只发最后一条——TCP 写次数降一个量级
+        now = time.monotonic()
+        with self._progress_lock:
+            cached = self._progress_buffer.get(job_id)
+            if cached is not None and now - cached[0] < _PROGRESS_FLUSH_INTERVAL_S:
+                self._progress_buffer[job_id] = (cached[0], params)  # 只更新值不重置时钟
+                return
+            self._progress_buffer[job_id] = (now, params)
         self._emit("progress.update", params)
 
     def tracked(self, job_id: str, fn: Callable[..., _T], *args: Any) -> Callable[[], _T]:
@@ -53,6 +75,11 @@ class Notifier:
                 return fn(*args)
             finally:
                 _JOB_ID.reset(token)
+                # 任务结束：把节流缓存里的尾值立即发出去（不等下个窗口）
+                with self._progress_lock:
+                    cached = self._progress_buffer.pop(job_id, None)
+                if cached is not None:
+                    self._emit("progress.update", cached[1])
 
         return run
 

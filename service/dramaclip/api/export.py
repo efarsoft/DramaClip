@@ -1362,6 +1362,39 @@ def _ensure_titles(context: AppContext, plan_row: dict[str, Any]) -> None:
         _note_degraded(context, "候选标题生成", "封面没有字层标题、列表也无候选可选", exc)
 
 
+def _cleanup_export_segments(context: AppContext, export_id: str) -> None:
+    """导出成功后收走段文件（长跑稳定性④）：seg_*.mp4 + concat.txt 占大头，
+    留着没有复用价值（成片已交付、sig 签名供断点续跑判定保留）。
+    清理失败不挡成功——磁盘上多留几 GB 比误报导出失败好。
+    """
+    import shutil as _shutil
+
+    work = context.work_dir / "export" / export_id
+    try:
+        if not work.is_dir():
+            return
+        removed = 0
+        freed = 0
+        for item in work.iterdir():
+            if item.name.startswith("seg_") and item.suffix == ".mp4":
+                freed += item.stat().st_size
+                item.unlink(missing_ok=True)
+                removed += 1
+            elif item.name.endswith(".concat.txt"):
+                item.unlink(missing_ok=True)
+        # bgm/loudness 中间件目录也一并收
+        for subdir in ("bgm", "loudnorm"):
+            child = work / subdir
+            if child.is_dir():
+                _shutil.rmtree(child, ignore_errors=True)
+        if removed > 0:
+            context.notifier.log(
+                "info", f"导出工作目录清理：收走 {removed} 个段文件（{freed // 1024 // 1024}MB）"
+            )
+    except OSError:
+        pass  # 清理是增强不是义务
+
+
 def _run_export(context: AppContext, job_id: str, run: ExportRun) -> None:
     """执行池入口：把一次 ExportRun 跑成 jobs 表里的一条终态记录。
     """
@@ -1408,6 +1441,10 @@ def _run_export(context: AppContext, job_id: str, run: ExportRun) -> None:
             (lambda pct, label: report(35 + pct * 0.65, label)) if tts_needed else report
         )
         out_path = render_export(context, voiced, report=render_report, job_id=job_id)
+        # 导出成功后收走段文件（长跑稳定性④）：每条导出在 work/export/<id>/
+        # 留 seg_*.mp4 + concat.txt，几十条后 GB 级——成功即清（sig 签名保留
+        # 供断点续跑判定，只有几百字节）。
+        _cleanup_export_segments(context, str(run.export_id))
         context.job_store.mark_completed(job_id)
         context.notifier.log("info", f"导出完成: {out_path.name}")
     except Exception as exc:
