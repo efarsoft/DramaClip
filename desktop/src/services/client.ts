@@ -140,6 +140,14 @@ export const analysisApi = {
     }),
   results: (projectId: string): Promise<AnalysisResults> =>
     rpc<AnalysisResults>('analysis.results', { project_id: projectId }),
+  /** 按集分拆：集列表摘要（只拉数字不拉台词，首屏毫秒级）。 */
+  episodes: (projectId: string): Promise<Pick<AnalysisResults, 'episodes'>> =>
+    rpc<Pick<AnalysisResults, 'episodes'>>('analysis.episodes', {
+      project_id: projectId,
+    }),
+  /** 按集分拆：单集详情（ASR/高光/冲突/画面轨）——点开才拉，KB 级。 */
+  episodeDetail: (episodeId: string): Promise<AnalysisResults> =>
+    rpc<AnalysisResults>('analysis.episode_detail', { episode_id: episodeId }),
   /** 全部已分析集一次性导出：逐集 SRT + 合并全剧台词 TXT，产物在 data/exports/transcripts/。 */
   exportTranscripts: (projectId: string): Promise<ExportTranscriptsResult> =>
     rpc<ExportTranscriptsResult>('analysis.export_transcripts', { project_id: projectId }),

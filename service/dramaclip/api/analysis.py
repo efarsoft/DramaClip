@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import re
 import threading
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +51,10 @@ def register(router: Router, context: AppContext) -> None:
     router.register("analysis.status", lambda params: status(context, params))
     router.register("analysis.cancel", lambda params: cancel(context, params))
     router.register("analysis.results", lambda params: results(context, params))
+    router.register("analysis.episodes", lambda params: episodes(context, params))
+    router.register(
+        "analysis.episode_detail", lambda params: episode_detail(context, params)
+    )
     router.register(
         "analysis.export_transcripts", lambda params: export_transcripts(context, params)
     )
@@ -239,27 +242,36 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     context.executor.submit(
         context.notifier.tracked(
             job_id,
-            lambda: _analysis_gate_wrap(context, job_id, project_id, targets, cancel_event),
+            _run_analysis_gated,
+            context,
             job_id,
+            project_id,
+            targets,
+            cancel_event,
         )
     )
     return {"job_id": job_id}
 
 
-def _analysis_gate_wrap(
+def _run_analysis_gated(
     context: AppContext,
     job_id: str,
     project_id: str,
     targets: list[dict[str, Any]],
     cancel_event: threading.Event,
-) -> Callable[[], None]:
-    """semaphore 包装：分析完成后释放并发闸。"""
-    def wrap() -> None:
-        try:
-            _run_job(context, job_id, project_id, targets, cancel_event)
-        finally:
-            _analysis_semaphore.release()
-    return wrap
+) -> None:
+    """semaphore 包装：分析完成后释放并发闸。
+
+    直接作为 `notifier.tracked` 的任务体（而非返回一个待调用的闭包）：
+    `tracked` 的契约是 `fn(*args)` 一步执行完，经它投递的任务必须自己跑完，
+    不能在返回值里再藏一层——76600ce 把 `tracked` 从「收无参 lambda」改成
+    「收 fn + *args」后，旧写法 `lambda: _analysis_gate_wrap(...)` 会因多传
+    一个 job_id 直接 TypeError，分析任务在启动瞬间就崩（40 条测试转红）。
+    """
+    try:
+        _run_job(context, job_id, project_id, targets, cancel_event)
+    finally:
+        _analysis_semaphore.release()
 
 
 def status(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -537,6 +549,74 @@ def results(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         "highlights": highlights_map,
         "conflict_scores": conflict_map,
         "prescreen": prescreen_map,
+    }
+
+
+def episodes(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """集列表摘要（按集分拆批）：只回集号/状态/计数——页面首屏毫秒级。
+
+    全量 `results` 一次性拖回全剧 ASR/高光/冲突/画面轨，50 集动辄几 MB——
+    首屏只需要知道每集的基本面（多少段/多少高光/推荐与否），点开某集
+    才走 `episode_detail` 拉该集详情。
+    """
+    project_id = str(params.get("project_id", ""))
+    if projects_repo.get(context.conn, project_id) is None:
+        raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
+    rows = episodes_repo.list_by_project(context.conn, project_id)
+    summary: list[dict[str, Any]] = []
+    for episode in rows:
+        episode_id = str(episode["id"])
+        record = analysis_repo.get(context.conn, episode_id)
+        segments = _loads_list(record["asr_segments"]) if record else []
+        highlights = _loads_list(record["highlights"]) if record else []
+        prescreen = prescreen_repo.get(context.conn, episode_id)
+        entry: dict[str, Any] = {
+            "episode_id": episode_id,
+            "episode_number": episode["episode_number"],
+            "status": episode["status"],
+            "asr_segment_count": len(segments),
+            "scene_count": _scene_count(record),
+            "highlight_count": len(highlights),
+            "prescreen_score": prescreen["prescreen_score"] if prescreen else None,
+            "recommended": bool(prescreen["recommended"]) if prescreen else None,
+        }
+        genre = record["genre"] if record else None
+        if genre:
+            entry["genre"] = str(genre)
+        peak_dbfs, clipping = _audio_peak(record)
+        if clipping:
+            entry["clipping"] = True
+            if peak_dbfs is not None:
+                entry["peak_dbfs"] = peak_dbfs
+        summary.append(entry)
+    return {"episodes": summary}
+
+
+def episode_detail(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """单集详情（按集分拆批）：ASR 台词/高光/冲突分/画面轨——点开才拉。
+
+    只要一个集的数据，KB 级——16MB 传输上限和「全量 results 卡首屏」
+    两个问题都从根上消掉。
+    """
+    episode_id = str(params.get("episode_id", ""))
+    episode = episodes_repo.get(context.conn, episode_id)
+    if episode is None:
+        raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"集不存在: {episode_id}")
+    record = analysis_repo.get(context.conn, episode_id)
+    prescreen = prescreen_repo.get(context.conn, episode_id)
+    visual = None
+    if record and record["visual_track"]:
+        try:
+            visual = json.loads(record["visual_track"])
+        except (TypeError, json.JSONDecodeError, ValueError):
+            visual = None
+    return {
+        "episode_id": episode_id,
+        "asr_segments": _loads_list(record["asr_segments"]) if record else [],
+        "highlights": _loads_list(record["highlights"]) if record else [],
+        "conflict_scores": _loads_list(record["conflict_scores"]) if record else [],
+        "prescreen": prescreen,
+        "visual_track": visual if isinstance(visual, dict) and visual.get("frames") else None,
     }
 
 

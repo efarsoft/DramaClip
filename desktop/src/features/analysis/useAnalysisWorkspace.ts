@@ -117,10 +117,26 @@ export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
 
   const loadAll = useCallback(async (): Promise<void> => {
     applyDetail(await projectApi.get(projectId));
-    setResults(await analysisApi.results(projectId));
+    // 按集分拆（analysis 分批）：首屏只拉集列表摘要（纯数字），不拖全剧
+    // 台词——50 集的全量 results 一口气几 MB JSON，首屏等它就是「卡死」。
+    const summary = await analysisApi.episodes(projectId);
+    setResults({ episodes: summary.episodes });
     const active = await fetchActiveJob(projectId);
     if (active !== null) setJob(active);
   }, [applyDetail, projectId]);
+
+  /** 点开某集时才拉该集详情（ASR 台词/高光/冲突/画面轨），KB 级。 */
+  const loadEpisodeDetail = useCallback(async (episodeId: string): Promise<void> => {
+    const detail = await analysisApi.episodeDetail(episodeId);
+    setResults((prev) => ({
+      episodes: prev?.episodes ?? [],
+      asr_segments: { ...prev?.asr_segments, ...detail.asr_segments },
+      highlights: { ...prev?.highlights, ...detail.highlights },
+      conflict_scores: { ...prev?.conflict_scores, ...detail.conflict_scores },
+      prescreen: { ...prev?.prescreen, ...detail.prescreen },
+      visual_tracks: { ...prev?.visual_tracks, ...detail.visual_tracks },
+    }));
+  }, []);
 
   // 服务就绪前 RPC 会失败；ready 后（重）加载一次
   useEffect(() => {
@@ -181,7 +197,13 @@ export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
       toggleEpisode(projectId, episodeId, checked);
     },
     activeEpisodeId,
-    setActiveEpisodeId,
+    setActiveEpisodeId: (id: string | null) => {
+      setActiveEpisodeId(id);
+      // 点开某集时按需拉详情（按集分拆）：不在首屏拖全剧台词
+      if (id !== null && results?.asr_segments?.[id] === undefined) {
+        void loadEpisodeDetail(id);
+      }
+    },
     results,
     job,
     start,

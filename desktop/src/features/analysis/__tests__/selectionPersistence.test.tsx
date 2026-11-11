@@ -11,13 +11,15 @@ import { useUiStore } from '../../../stores/ui';
 import { useAnalysisWorkspace } from '../useAnalysisWorkspace';
 
 const projectApiGet = vi.fn<() => Promise<ProjectGetResult>>();
-const analysisResults = vi.fn<() => Promise<{ episodes: never[] }>>();
+const analysisEpisodes = vi.fn<() => Promise<{ episodes: never[] }>>();
 const jobsList = vi.fn<() => Promise<{ jobs: never[] }>>();
 
 vi.mock('../../../services/client', () => ({
   projectApi: { get: () => projectApiGet() },
   analysisApi: {
-    results: () => analysisResults(),
+    results: () => analysisEpisodes(),
+    episodes: () => analysisEpisodes(),
+    episodeDetail: () => Promise.resolve({ episodes: [], asr_segments: {}, highlights: {}, conflict_scores: {}, prescreen: {}, visual_tracks: {} }),
     status: vi.fn(),
   },
   jobsApi: { list: () => jobsList() },
@@ -54,7 +56,7 @@ beforeEach(() => {
   useDramaSelectionStore.setState({ projectId: null, episodeIds: [] });
   useUiStore.setState({ serviceState: 'ready' });
   projectApiGet.mockResolvedValue(detail([episode('a', 'pending'), episode('b', 'done')]));
-  analysisResults.mockResolvedValue({ episodes: [] });
+  analysisEpisodes.mockResolvedValue({ episodes: [] });
   jobsList.mockResolvedValue({ jobs: [] });
 });
 

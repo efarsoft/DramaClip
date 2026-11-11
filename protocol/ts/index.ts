@@ -293,11 +293,20 @@ export interface PlatformPackEntry {
   readonly ai_declaration: string;
 }
 
+/** 发布前自查动作项：label 已带 ☑/☐ 前缀（服务端单持），satisfied 判满足，note 未满足时补充说明。 */
+export interface ChecklistItem {
+  readonly label: string;
+  readonly satisfied: boolean;
+  readonly note: string;
+}
+
 export interface PlatformPack {
   readonly title: string;
   readonly caption: string | null;
   readonly tags: string[];
   readonly platforms: Record<string, PlatformPackEntry>;
+  /** 发布前自查五动作（服务端必带；授权/挂载/标题封面恒 satisfied=false，剧名层/话题组依配置如实判）。 */
+  readonly checklist: readonly ChecklistItem[];
 }
 
 export interface JobsListResult {
@@ -1020,6 +1029,8 @@ export const METHOD_NAMES = [
   'analysis.status',
   'analysis.cancel',
   'analysis.results',
+  'analysis.episodes',
+  'analysis.episode_detail',
   'analysis.export_transcripts',
   'narration.plan_variants',
   'narration.recommend_modes',
