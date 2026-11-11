@@ -39,10 +39,6 @@ const BACKGROUNDS: Readonly<Record<string, string>> = {
   bgInput: tokens.bgInput,
 };
 
-for (const value of [...Object.values(TEXT_TIERS), ...Object.values(BACKGROUNDS)]) {
-  if (value === undefined) throw new Error('对比度矩阵引用了不存在的 token');
-}
-
 describe('W2·2 对比度矩阵（从 theme 实读，底色五档全组合）', () => {
   it('正文档三档对每档底色 ≥4.5:1', () => {
     for (const [fgName, fg] of Object.entries(TEXT_TIERS)) {

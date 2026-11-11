@@ -62,7 +62,11 @@ def setup(cfg: dict[str, Any]) -> dict[str, Any]:
     os.environ["ACESTEP_DISABLE_TQDM"] = "1"
 
     from acestep.handler import AceStepHandler  # noqa: PLC0415
-    from acestep.inference import GenerationConfig, GenerationParams, generate_music  # noqa: PLC0415,F401
+    from acestep.inference import (  # noqa: PLC0415,F401
+        GenerationConfig,
+        GenerationParams,
+        generate_music,
+    )
     from acestep.llm_inference import LLMHandler  # noqa: PLC0415
 
     device, probe_reason = _probe_device(requested)
@@ -108,7 +112,11 @@ def setup(cfg: dict[str, Any]) -> dict[str, Any]:
 
 def generate_one(ctx: dict[str, Any], kwargs: dict[str, Any]) -> dict[str, Any]:
     """单曲生成：caption+时长+bpm → wav 落盘。返回 {"path", "device"}。"""
-    from acestep.inference import GenerationConfig, GenerationParams, generate_music  # noqa: PLC0415
+    from acestep.inference import (  # noqa: PLC0415
+        GenerationConfig,
+        GenerationParams,
+        generate_music,
+    )
 
     lm_ready = bool(ctx.get("llm_ready"))
     out_dir = Path(str(kwargs["out_dir"]))

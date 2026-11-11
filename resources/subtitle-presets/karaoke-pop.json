@@ -1,7 +1,7 @@
 {
   "preset_id": "karaoke-pop",
   "preset_name": "卡拉OK金句",
-  "description": "逐字高亮填充，居中大字，适合字幕金句流与高潮台词。",
+  "description": "逐字高亮填充，居中大字，适合字幕金句流与高潮台词。逐字节奏三档可切（rhythm.type）：karaoke=逐字高亮填充（卡拉OK灯，本预设默认）、char_reveal=逐字淡入揭示、whole_line=整行淡入；animation.entrance 独立控制进场动效（bounce/fade）。",
   "dimensions": {
     "rhythm": {
       "type": "karaoke"

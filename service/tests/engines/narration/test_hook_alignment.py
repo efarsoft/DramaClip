@@ -75,6 +75,15 @@ def _install(
     monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
     monkeypatch.setattr(synthesis.ffmpeg_runner, "run", recorder)
+    # 桩 TTS 写的是文案字节、量不出电平，会在 warn 里多插一条，把「拒绝档恰好一条
+    # warn」的判据搅浑；电平契约自己有用例，这里只把边界钉成带内不动。
+    monkeypatch.setattr(
+        synthesis.level_fix,
+        "normalize_dry_level",
+        lambda path: synthesis.level_fix.DryLevelReport(
+            path.name, True, -13.0, -13.0, -13.0, -13.0
+        ),
+    )
     return recorder
 
 

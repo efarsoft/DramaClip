@@ -60,7 +60,9 @@ export function CloudNudgeCard({
         const reason = cause instanceof Error ? cause.message : String(cause);
         setConnectError(reason);
       })
-      .finally(() => setConnecting(false));
+      .finally(() => {
+        setConnecting(false);
+      });
   };
 
   return (
@@ -83,7 +85,9 @@ export function CloudNudgeCard({
           size="small"
           placeholder={COPY[domain].placeholder}
           value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
+          onChange={(e) => {
+            setApiKey(e.target.value);
+          }}
           style={{ maxWidth: 320 }}
           disabled={connecting}
         />

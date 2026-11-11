@@ -99,6 +99,12 @@ curl -s -X POST http://127.0.0.1:8340/tools/draft_titles \
 - 网关只绑 127.0.0.1 回环 + Bearer token；token 不要写进任何文件或提交。
 - 端口被占换端口：`--port 8341`。Git Bash 下 curl 发中文 body 是本地码页编码，服务端会
   拒绝非 UTF-8——中文请求体写成 UTF-8 文件用 `--data-binary @file` 发送。
+- **端点面分两档**：文本工具面（audit/draft/retell）独立 CLI 即可全功能；
+  生产链面（`/tools/produce_chain`、`/tools/export_status`、`/tools/job_status`，B3-14
+  无人值守全链）复用服务内 RPC Router，需生产运行时——独立 CLI 起则**如实 501**
+  （`reason: not_implemented_in_this_gateway`），不静默假绿。要跑全链起桌面内建网关
+  （偏好设置 → Agent 网关，`router_provider` 自动注入），或扩展 `tools/agent_server.py`
+  注入 `router_provider`。端点详情见 [references/api.md](references/api.md)。
 - 文案规则的单一真相源在引擎常量；`skills/dramaclip-narration/` 是给本项目内 agent 的
   方法论 skill（规则快照自动导出，漂移有测试守卫）。改规则改常量，勿改文档。
 - 仅供学习研究；遵守目标平台条款，控制请求频率。

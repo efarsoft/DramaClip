@@ -2,7 +2,7 @@
 import { Button, Empty, Tag, Tooltip } from 'antd';
 import { PageSection } from '../../components/layout/PageKit';
 import { useNavigate } from 'react-router-dom';
-import { useState, type ReactElement } from 'react';
+import { useState } from 'react';
 import type { ExportJob } from '@dramaclip/protocol';
 import { modeLabel } from '../../components/modeMeta';
 import { computeLabel } from '../engines/assetState';
@@ -49,11 +49,15 @@ function ExportRow({ job, onRefresh }: { job: ExportJob; onRefresh: () => void }
     setRetryProblem('');
     exportApi
       .retry(job.id)
-      .then(() => onRefresh())
+      .then(() => {
+        onRefresh();
+      })
       .catch((error: unknown) => {
         setRetryProblem(errorText(error, '服务端未给出原因'));
       })
-      .finally(() => setRetrying(false));
+      .finally(() => {
+        setRetrying(false);
+      });
   };
 
   // 详情页要播成片、读旁挂时间轴，未成功的行里这两样都还没有——点进去是黑房子（规格 §1.6）。
@@ -120,7 +124,7 @@ function ExportRow({ job, onRefresh }: { job: ExportJob; onRefresh: () => void }
       {degraded.length > 0 ? (
         <Tooltip
           title={degraded.map((note, index) => (
-            <div key={note.at + String(index)}>
+            <div key={`${String(note.at)}-${String(index)}`}>
               {note.subject}：{note.outcome}
             </div>
           ))}

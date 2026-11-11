@@ -36,7 +36,8 @@ def test_every_protocol_rpc_is_classified() -> None:
         pytest.skip("协议文件不在（非仓库运行）")
     names = set(re.findall(r"'([a-z_]+\.[a-z_0-9]+)'", protocol.read_text(encoding='utf-8')))
     known_long = {
-        "analysis.cancel", "analysis.export_transcripts", "analysis.prescreen",
+        "analysis.cancel", "analysis.episodes", "analysis.episode_detail",
+        "analysis.export_transcripts", "analysis.prescreen",
         "analysis.start", "analysis.resync_semantic", "analysis.update_asr",
         "bgm.generate", "bgm.rescan",
         "engine_configs.create", "engine_configs.delete", "engine_configs.enable",

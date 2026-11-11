@@ -126,7 +126,10 @@ beforeEach(() => {
   });
   api.selfcheck.mockResolvedValue({ ok: true, job_id: 'j1', queued: 1 });
   // 逐平台发布包分区挂载即发 RPC：给空包/空封面，详情页其余用例不被新分区刷屏
-  api.publishPack.mockResolvedValue({ title: '', caption: null, tags: [], platforms: {} });
+  // checklist 必带（协议 v0.2.5 起 result 必含五动作项），空包时给空数组
+  api.publishPack.mockResolvedValue({
+    title: '', caption: null, tags: [], platforms: {}, checklist: [],
+  });
   api.platformCovers.mockResolvedValue({ ok: true, covers: {}, skipped: {} });
   // 旁挂时间轴默认「文件不在」：详情页其余用例不该被一次真实的读盘失败刷屏
   stubSrtFetch({ ok: false, status: 404 });
@@ -321,8 +324,11 @@ describe('成片逐句核对', () => {
 });
 
 describe('逐平台发布包', () => {
-  /** 服务端 publish_pack 的最小真实形状：默认平台「抖音」有条目即可上屏。 */
-  const packWith = (title: string) => ({
+  /** 逐平台发布包分区的最小真实形状：默认平台「抖音」有条目即可上屏。 */
+  const packWith = (
+    title: string,
+    checklist: { label: string; satisfied: boolean; note: string }[] = [],
+  ) => ({
     title,
     caption: null,
     tags: [],
@@ -336,7 +342,17 @@ describe('逐平台发布包', () => {
         ai_declaration: '发布页勾选 AI 生成声明',
       },
     },
+    checklist,
   });
+
+  /** 服务端 build_checklist 的形状：五动作项，前 3 项恒人工，后 2 项依配置判满足。 */
+  const sampleChecklist = [
+    { label: '☐ 授权覆盖：确认本剧推广链接在你的授权范围内，工具不代为证明授权', satisfied: false, note: '需人工确认，工具不代为证明授权' },
+    { label: '☐ 挂载链接：发布前点进挂载链接/小程序确认可正常打开并落到本剧，防死链', satisfied: false, note: '需人工点验，工具不代查' },
+    { label: '☐ 标题封面相符：核对发布页标题与封面与成片内容一致，悬念可以、标题党不行', satisfied: false, note: '需人工核对' },
+    { label: '☑ 全程剧名：推广切片出品方要求全程带剧名——开启「出片 → 剧名常驻层」', satisfied: true, note: '' },
+    { label: '☑ 话题组：发布时带上实测高频话题（#好剧推荐 #短剧推荐 #因为一个片段看了整部剧 #短剧）', satisfied: true, note: '' },
+  ];
 
   it('标题选用后发布包随之重拉：不再展示旧标题（planId 没变也要刷新）', async () => {
     api.rpc.mockResolvedValue({
@@ -378,5 +394,38 @@ describe('逐平台发布包', () => {
     fireEvent.click(screen.getByRole('button', { name: /重试/ }));
     expect(await screen.findByText('恢复后的标题')).toBeTruthy();
     expect(screen.queryByText(/发布包加载失败/)).toBeNull();
+  });
+
+  it('发布前自查清单上屏：五动作项 + 满足项前缀☑/未满足项带补充说明 + 一键复制', async () => {
+    api.publishPack.mockResolvedValue(packWith('当选标题', sampleChecklist));
+    page();
+    // 分区标题「发布前自查」上屏，五项 label 全在场（waitFor 等 React 更新落地，
+    // 不靠 publishPack Promise 解析与同步断言的时序对齐——并发跑时那会 flaky）
+    expect(await screen.findByText('发布前自查')).toBeTruthy();
+    for (const item of sampleChecklist) {
+      await vi.waitFor(() => {
+        expect(screen.getAllByText(item.label).length).toBeGreaterThan(0);
+      });
+    }
+    // 满足项（☑）不渲染 note；未满足项（☐）的 note 渲染在「（…）」内——按包含匹配
+    const unsatisfied = sampleChecklist.find((i) => !i.satisfied && i.note !== '');
+    if (unsatisfied !== undefined) {
+      await vi.waitFor(() => {
+        const notes = screen.getAllByText(unsatisfied.note, { exact: false });
+        expect(notes.length).toBeGreaterThan(0);
+      });
+    }
+    // 「复制清单」按钮在场且未禁用（checklist 非空）
+    await vi.waitFor(() => {
+      expect(screen.getByRole('button', { name: /复制清单/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /复制清单/ }).hasAttribute('disabled')).toBe(false);
+    });
+  });
+
+  it('checklist 为空时：复制清单按钮禁用（如实不假绿）', async () => {
+    api.publishPack.mockResolvedValue(packWith('当选标题', []));
+    page();
+    expect(await screen.findByText('当选标题')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /复制清单/ }).hasAttribute('disabled')).toBe(true);
   });
 });

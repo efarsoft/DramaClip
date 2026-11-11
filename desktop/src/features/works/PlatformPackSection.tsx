@@ -3,7 +3,7 @@
 import { CopyOutlined, PictureOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button, Select } from 'antd';
 import { useEffect, useState, type ReactElement } from 'react';
-import type { PlatformPack, TitleCandidate } from '@dramaclip/protocol';
+import type { ChecklistItem, PlatformPack, TitleCandidate } from '@dramaclip/protocol';
 import { PageSection } from '../../components/layout/PageKit';
 import { exportApi, mediaUrl, titlesApi } from '../../services/client';
 import { errorText } from '../engines/errorText';
@@ -125,9 +125,52 @@ export function PlatformPackSection({
               style={{ maxWidth: 240, borderRadius: tokens.radiusThumb, display: 'block' }}
             />
           )}
+          <PublishChecklist items={pack?.checklist ?? []} />
         </div>
       )}
     </PageSection>
+  );
+}
+
+/** 发布前自查清单：五动作项上屏 + 一键复制。满足项（☑）灰字，未满足项带补充说明；
+ *  空清单时「复制清单」按钮禁用（如实不假绿）。 */
+function PublishChecklist({ items }: { items: readonly ChecklistItem[] }): ReactElement {
+  const { message } = AntdApp.useApp();
+  const copy = (): void => {
+    const text = items.map((item) =>
+      item.satisfied ? item.label : `${item.label}（${item.note}）`,
+    ).join('\n');
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => message.success('自查清单已复制'))
+      .catch(() => message.error('复制清单失败'));
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: tokens.text.meta.size, color: tokens.textSecondary }}>发布前自查</span>
+        <Button
+          size="small"
+          icon={<CopyOutlined />}
+          disabled={items.length === 0}
+          onClick={copy}
+        >
+          复制清单
+        </Button>
+      </div>
+      {items.length > 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}>
+          {items.map((item, idx) => (
+            <div key={idx} style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: item.satisfied ? tokens.textTertiary : tokens.textSecondary }}>
+              {item.label}
+              {!item.satisfied && item.note !== '' && (
+                <span style={{ color: tokens.textTertiary }}>（{item.note}）</span>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

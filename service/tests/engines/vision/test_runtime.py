@@ -47,7 +47,11 @@ def test_parse_descriptions_maps_index_to_time() -> None:
 
 
 def test_parse_descriptions_tolerates_noise() -> None:
-    """围栏/空行/坏行跳过；缺字段补空串——坏行不炸整集（分档语义）。"""
+    """围栏/空行/坏行跳过；缺字段补空串——坏行不炸整集（分档语义）。
+
+    `watch_score` 是后加的封面冲击力字段（vision 引擎）：模型没给就补中性分 5，
+    所以缺字段的帧也会带上它——断言按实际契约写全字段，别只挑关心的几个比。
+    """
     text = (
         "```json\n"
         "\n"
@@ -60,8 +64,10 @@ def test_parse_descriptions_tolerates_noise() -> None:
     frames = runtime.parse_descriptions(text, count=2, episode_s=60.0)
     assert len(frames) == 2
     assert frames[0]["mood"] == "静"
+    assert frames[0]["watch_score"] == 5
     assert frames[1] == {
         "t": 45.0, "shot": "", "scene": "大殿", "people": "", "action": "", "mood": "",
+        "watch_score": 5,
     }
 
 

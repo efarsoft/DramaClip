@@ -78,7 +78,7 @@ def _ocr_channel_available(context: AppContext) -> bool:
 
 
 def _llm_stamp(settings: dict[str, str]) -> str:
-    """语义层配置指纹（模型+提示词当前值）——换配置后签名失配，语义自动重跑。
+    """语义层配置签名（模型+提示词当前值的摘要）——换配置后签名失配，语义自动重跑。
 
     提示词取 llm_prompts 注册表而非裸 settings 键（settings 扫描器会报
     未登记读键）：注册表的 default/override 就是语义层实际吃到的文本。
@@ -109,7 +109,7 @@ def _current_signature(context: AppContext, episode: dict[str, Any]) -> str | No
     )
     if base is None:
         return None
-    # 语义 stamp 拼尾：源指纹相同时 LLM 配置变化也会让签名失配——语义列
+    # 语义 stamp 拼尾：源签名相同时 LLM 配置变化也会让签名失配——语义列
     # （冲突分/高光/题材）按新配置重跑，转写/OCR/场景保留（不依赖 LLM）。
     return f"{base}|{_llm_stamp(context.settings)}"
 
@@ -508,7 +508,7 @@ def _analyze_one(
 
     # 分析开始前取签名：产物对应的是这份源；分析中途源被换则存的是旧签名，
     # 下轮判定必然失配重算——宁多算一轮，不把新签名盖在旧源产物上。
-    # 语义层 stamp（第二梯队③）：签名末尾拼 LLM 模型+提示词覆盖指纹——
+    # 语义层 stamp（第二梯队③）：签名末尾拼 LLM 模型+提示词覆盖摘要——
     # 换模型或改提示词后语义产物（冲突分/高光/题材）自动失效重跑，
     # 转写/OCR/场景等贵步骤保留（它们不依赖 LLM 配置）。
     signature = _current_signature(context, episode)

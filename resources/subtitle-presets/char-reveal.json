@@ -1,0 +1,41 @@
+{
+  "preset_id": "char-reveal",
+  "preset_name": "逐字浮现",
+  "description": "逐字淡入揭示（char_reveal）+ 弹跳进场：每个字在逐字窗口内渐显、按字序滚动浮现，无高亮对比色，适合金句逐字铺陈与悬念揭示。rhythm.type=char_reveal（与 karaoke 逐字高亮、whole_line 整行三档独立），animation.entrance=bounce 控制进场动效。",
+  "dimensions": {
+    "rhythm": {
+      "type": "char_reveal"
+    },
+    "animation": {
+      "entrance": "bounce",
+      "fade_ms": 200
+    },
+    "layout": {
+      "default": "center_single"
+    },
+    "emotion_style": {
+      "default": {
+        "primary": "&H00FFFFFF",
+        "outline": "&H00000000",
+        "effect": "none"
+      },
+      "anger": {
+        "primary": "&H000000FF",
+        "outline": "&H00FFFFFF",
+        "effect": "shake"
+      },
+      "triumph": {
+        "primary": "&H0000D7FF",
+        "outline": "&H00000000",
+        "effect": "scale_glow"
+      }
+    }
+  },
+  "font": {
+    "size": 80,
+    "bold": true,
+    "outline_width": 3,
+    "shadow": 1,
+    "margin_v": 10
+  }
+}

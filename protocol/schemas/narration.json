@@ -465,6 +465,19 @@
                 "ai_declaration": { "type": "string", "description": "逐平台 AI 声明指引（运营建议，法定隐式标识另走 export.aigc_metadata）" }
               }
             }
+          },
+          "checklist": {
+            "type": "array",
+            "description": "发布前自查五动作：授权/挂载/标题封面恒为人工项（satisfied 恒 false），剧名层与话题组依当前配置如实判",
+            "items": {
+              "type": "object",
+              "required": ["label", "satisfied", "note"],
+              "properties": {
+                "label": { "type": "string", "description": "动作文案（已带 ☑/☐ 前缀，前端照搬）" },
+                "satisfied": { "type": "boolean" },
+                "note": { "type": "string", "description": "未满足时的补充说明；满足时为空串" }
+              }
+            }
           }
         }
       }

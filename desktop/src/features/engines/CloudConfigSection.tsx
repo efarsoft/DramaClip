@@ -139,7 +139,7 @@ function RowAction({
 
 const ADD_BUTTON: React.CSSProperties = {
   width: '100%',
-  padding: `${layout.configCard.paddingCompact}px`,
+  padding: `${String(layout.configCard.paddingCompact)}px`,
   borderRadius: tokens.radiusControl,
   border: `1px dashed ${tokens.border}`,
   background: 'none',

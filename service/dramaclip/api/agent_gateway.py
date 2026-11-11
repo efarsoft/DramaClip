@@ -25,8 +25,109 @@ from dramaclip.engines.narration import audit as A
 from dramaclip.engines.narration import titles as titles_engine
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
 from dramaclip.infra.storage.repos import settings as settings_repo
+from dramaclip.transport.rpc import RpcRequest
 
 _SETTINGS_PREFIX = "agent_gateway."
+
+# 生产链端点允许透传进 Router.dispatch 的 RPC 方法白名单（分析/规划/出片/任务查询）。
+# 不放任意方法：网关只开放自动化生产链需要的读/提交面，不代理 settings.update、
+# system.shutdown 这类能改全局状态的方法——生产链自动化不等于把整个服务裸端出去。
+_PRODUCTION_CHAIN_METHODS = frozenset(
+    {
+        "analysis.start",
+        "analysis.status",
+        "analysis.results",
+        "narration.plan_variants",
+        "narration.list_plans",
+        "narration.get_plan",
+        "narration.publish_pack",
+        "export.submit",
+        "export.get",
+        "export.list",
+        "jobs.get",
+        "jobs.list",
+        "system.ping",
+    }
+)
+
+
+def handle_produce_chain(
+    router_provider: Callable[[], Any] | None,
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """生产链一条龙（B3-14 无人值守入口）：分析 → 规划 → 出片，返回各阶段 job_id。
+
+    复用 Router.dispatch 走与桌面端同一份库函数（契约零漂移），不重造业务逻辑。
+    缺 router_provider（独立 CLI 无生产运行时）时如实回 501，不静默假绿。
+    """
+    router = router_provider() if router_provider is not None else None
+    if router is None:
+        raise NotImplementedError(
+            "生产链端点需要服务内网关（带 Router）；独立 CLI 不承载生产运行时"
+        )
+    project_id = str(body.get("project_id") or "")
+    if not project_id:
+        raise ValueError("body.project_id 必须非空")
+    modes = [str(m) for m in (body.get("modes") or [])]
+    if not modes:
+        raise ValueError("body.modes 必须非空数组")
+    k = int(body.get("k") or 1)
+    # 阶段① 分析（已分析过会幂等跳过，不重转写）
+    analysis_result = _dispatch(router, "analysis.start", {"project_id": project_id})
+    analysis_job = str(analysis_result.get("job_id") or "")
+    # 阶段② 规划（每模式 K 条卖点互异方案）
+    plan_result = _dispatch(
+        router,
+        "narration.plan_variants",
+        {"project_id": project_id, "modes": modes, "k": k},
+    )
+    plan_job = str(plan_result.get("job_id") or "")
+    return {
+        "ok": True,
+        "project_id": project_id,
+        "analysis_job_id": analysis_job,
+        "plan_job_id": plan_job,
+        "modes": modes,
+        "k": k,
+        "hint": "轮询 jobs.get(analysis_job_id / plan_job_id) 追踪进度；"
+        "规划完成后用 export.submit 出片",
+    }
+
+
+def handle_export_status(
+    router_provider: Callable[[], Any] | None, body: dict[str, Any]
+) -> dict[str, Any]:
+    """查某条出片 job 的状态（B3-14 轮询面）：终态返回结果与自检。"""
+    router = router_provider() if router_provider is not None else None
+    if router is None:
+        raise NotImplementedError("独立 CLI 不承载生产运行时")
+    export_id = str(body.get("export_id") or "")
+    if not export_id:
+        raise ValueError("body.export_id 必须非空")
+    return _dispatch(router, "export.get", {"export_id": export_id})
+
+
+def handle_job_status(
+    router_provider: Callable[[], Any] | None, body: dict[str, Any]
+) -> dict[str, Any]:
+    """查某条 job（分析/规划/出片）的状态与进度（B3-14 轮询面）。"""
+    router = router_provider() if router_provider is not None else None
+    if router is None:
+        raise NotImplementedError("独立 CLI 不承载生产运行时")
+    job_id = str(body.get("job_id") or "")
+    if not job_id:
+        raise ValueError("body.job_id 必须非空")
+    return _dispatch(router, "jobs.get", {"job_id": job_id})
+
+
+def _dispatch(router: Any, method: str, params: dict[str, Any]) -> dict[str, Any]:
+    """白名单内方法经 Router.dispatch；越界方法不转发（不代理改状态端点）。"""
+    if method not in _PRODUCTION_CHAIN_METHODS:
+        raise ValueError(f"方法 {method} 不在生产链白名单内")
+    response = router.dispatch(RpcRequest(id="agent", method=method, params=params))
+    if response.error is not None:
+        raise ValueError(f"{method} 失败: {response.error.message}")
+    return dict(response.result or {})
 
 
 def _report_json(report: A.ReviewReport) -> dict[str, Any]:
@@ -94,8 +195,12 @@ def make_handler(
     token: str,
     settings_provider: Callable[[], dict[str, str]],
     trace_dir: Path | None = None,
+    router_provider: Callable[[], Any] | None = None,
 ) -> type[BaseHTTPRequestHandler]:
-    """构造带鉴权与路由的 handler 类；settings/trace_dir 注入（测试替身用）。"""
+    """构造带鉴权与路由的 handler 类；settings/trace_dir/router_provider 注入（测试替身用）。
+
+    router_provider 给生产链端点（B3-14）用：服务内网关注入 Router，独立 CLI 缺省（端点回 501）。
+    """
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt: str, *args: Any) -> None:  # 安静：别刷服务日志
@@ -108,6 +213,9 @@ def make_handler(
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+
+        def _send_not_implemented(self, detail: str) -> None:
+            self._send(501, {"error": detail, "reason": "not_implemented_in_this_gateway"})
 
         def _dispatch(self, method: str) -> None:
             path = urlsplit(self.path).path
@@ -126,6 +234,15 @@ def make_handler(
                 "/tools/retell_check": lambda b: handle_retell_check(
                     b, settings_provider()
                 ),
+                "/tools/produce_chain": lambda b: handle_produce_chain(
+                    router_provider, b
+                ),
+                "/tools/export_status": lambda b: handle_export_status(
+                    router_provider, b
+                ),
+                "/tools/job_status": lambda b: handle_job_status(
+                    router_provider, b
+                ),
             }
             handler = routes.get(path)
             if handler is None or method != "POST":
@@ -143,6 +260,8 @@ def make_handler(
                 self._send(200, handler(body))
             except LlmUnavailable as exc:
                 self._send(503, {"error": str(exc)})
+            except NotImplementedError as exc:
+                self._send_not_implemented(str(exc))
             except ValueError as exc:
                 self._send(422, {"error": str(exc)})
 
@@ -158,9 +277,15 @@ def make_handler(
 class AgentGateway:
     """设置键驱动的网关生命周期：sync(settings) 热生效，stop() 随服务退出。"""
 
-    def __init__(self, conn: sqlite3.Connection, trace_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        trace_dir: Path | None = None,
+        router_provider: Callable[[], Any] | None = None,
+    ) -> None:
         self._conn = conn
         self._trace_dir = trace_dir
+        self._router_provider = router_provider
         self._lock = threading.Lock()
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -188,7 +313,16 @@ class AgentGateway:
                 return None
             self._stop_locked()
             server = ThreadingHTTPServer(
-                ("127.0.0.1", port), make_handler(token, lambda: settings, self._trace_dir)
+                (
+                    "127.0.0.1",
+                    port,
+                ),
+                make_handler(
+                    token,
+                    lambda: settings,
+                    self._trace_dir,
+                    self._router_provider,
+                ),
             )
             thread = threading.Thread(
                 target=server.serve_forever, name="agent-gateway", daemon=True

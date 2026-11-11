@@ -36,7 +36,7 @@ const idleQueue = {
   rejected: [],
   error: '',
   run: vi.fn(),
-    rerollOne: vi.fn(async () => undefined),
+    rerollOne: vi.fn(() => Promise.resolve()),
 };
 
 const idleBatch = {
@@ -48,7 +48,7 @@ const idleBatch = {
   batchId: null,
   spec: null,
   run: vi.fn(),
-    rerollOne: vi.fn(async () => undefined),
+    rerollOne: vi.fn(() => Promise.resolve()),
   cancel: vi.fn(),
 };
 

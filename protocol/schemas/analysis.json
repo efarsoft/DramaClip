@@ -242,6 +242,68 @@
           "skipped": { "type": "integer" }
         }
       }
+    },
+    {
+      "name": "analysis.episodes",
+      "summary": "集列表摘要（按集分拆批）：只回集号/状态/计数，首屏毫秒级；详情走 analysis.episode_detail",
+      "params": {
+        "type": "object",
+        "required": ["project_id"],
+        "properties": { "project_id": { "type": "string" } }
+      },
+      "result": {
+        "type": "object",
+        "required": ["episodes"],
+        "properties": {
+          "episodes": { "type": "array", "items": { "$ref": "#/x-models/EpisodeAnalysisResult" } }
+        }
+      }
+    },
+    {
+      "name": "analysis.episode_detail",
+      "summary": "单集详情（按集分拆批）：ASR 台词/高光/冲突分/画面轨——点开才拉，KB 级",
+      "params": {
+        "type": "object",
+        "required": ["episode_id"],
+        "properties": { "episode_id": { "type": "string" } }
+      },
+      "result": {
+        "type": "object",
+        "required": ["episode_id", "asr_segments", "highlights", "conflict_scores"],
+        "properties": {
+          "episode_id": { "type": "string" },
+          "asr_segments": { "type": "array", "items": { "$ref": "#/x-models/AsrSegment" } },
+          "highlights": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["start", "end", "score"],
+              "properties": {
+                "start": { "type": "number" },
+                "end": { "type": "number" },
+                "score": { "type": "number" },
+                "reason": { "type": "string" }
+              }
+            }
+          },
+          "conflict_scores": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["scene_index", "start", "end", "score"],
+              "properties": {
+                "scene_index": { "type": "integer" },
+                "start": { "type": "number" },
+                "end": { "type": "number" },
+                "score": { "type": "integer" },
+                "reason": { "type": "string" }
+              }
+            }
+          },
+          "prescreen": { "type": ["object", "null"] },
+          "visual_track": { "type": ["object", "null"] }
+        }
+      }
     }
   ]
 }

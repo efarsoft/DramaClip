@@ -106,7 +106,7 @@ export function TtsTab({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
       {recommendation !== 'none' ? (
-        <CloudNudgeCard domain="tts" onConnected={() => { onChanged?.(); }} />
+        <CloudNudgeCard domain="tts" onConnected={() => { onChanged(); }} />
       ) : null}
       {activeCloud !== undefined ? (
         <CloudActiveCard

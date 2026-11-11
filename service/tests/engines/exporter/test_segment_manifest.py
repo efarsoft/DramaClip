@@ -123,6 +123,6 @@ def test_manifest_orders_by_timeline_index(tmp_path: Path) -> None:
         "seg_999.mp4",
         "seg_1000.mp4",
     ], f"清单必须按时间轴 index 排，且不受入参顺序影响：{manifest}"
-    assert [item.index for item in manifest] == [0, 999, 1000], (
+    assert [item.seq for item in manifest] == [0, 999, 1000], (
         f"序号要跟路径一起交给下游（偏移计算靠它，不靠二次排序）：{manifest}"
     )

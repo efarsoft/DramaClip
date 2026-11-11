@@ -58,7 +58,6 @@ _SEGMENT_PEAK_CEILING_DBFS = -9.0
 # 段真峰高 0.4 dB 破 0）；音量常量被真机门禁按名字读，只在此定义一次。
 _SEGMENT_SAMPLE_RATE = 48000
 _SEGMENT_CHANNEL_LAYOUT = "stereo"
-_SEGMENT_CHANNEL_LAYOUT = "stereo"
 
 # BGM 床（C 项接线 → 批3 听感治理升级）：床目标响度、回退音量与尾淡出。
 # 床目标 −28 LUFS 的锚：干音契约 −13 LUFS（level_fix 参考带）再低 15 LU——床是

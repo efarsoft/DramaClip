@@ -75,6 +75,11 @@ class PipeServerImpl implements PipeServer {
   }
 
   private acceptClient(client: net.Socket): void {
+    // remoteAddress/remotePort 在 socket 已断开后可能为空（net 的类型是可选的）：
+    // 日志只是诊断用，为空时打占位符，别让整条 accept 分支因为一条日志抛错。
+    const remoteAddress = client.remoteAddress ?? '未知地址';
+    const remotePort = String(client.remotePort ?? 0);
+    console.log(`[pipe-server] 客户端连接: ${remoteAddress}:${remotePort}`);
     if (this.socket !== null && !this.socket.destroyed) {
       // 单连接：后来者拒接，且绝不顶掉在用的那条——否则真服务的响应会被写进
       // 这条已销毁的假连接，pending 全数错判成超时（劫持只需一次重连尝试）。
@@ -167,12 +172,18 @@ class PipeServerImpl implements PipeServer {
   }
 
   private writeJson(payload: unknown): boolean {
-    if (this.socket === null || this.socket.destroyed) return false;
+    if (this.socket === null || this.socket.destroyed) {
+      console.log('[pipe-server] writeJson 跳过：socket 为空或已销毁');
+      return false;
+    }
+    const method = (payload as { method?: string }).method ?? 'notification';
+    console.log(`[pipe-server] → ${method}`);
     this.socket.write(`${JSON.stringify(payload)}\n`);
     return true;
   }
 
   private handleDisconnect(client: net.Socket): void {
+    console.log("[pipe-server] 客户端断开");
     // 迟到的 close 事件来自已被替换/拒接的连接：当前连接还活着，不许清状态
     //（否则 pending 全被拒、onClientDisconnect 误报，正在跑的任务当场判死）
     if (this.socket !== client) return;

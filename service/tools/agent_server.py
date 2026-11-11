@@ -4,6 +4,16 @@
 service_app 按 agent_gateway.* 设置键自动管理同一个网关。本 CLI 覆盖的场景：
 源码部署但不启动桌面，或想临时起一个独立端口。
 
+端点面分两档（agent_gateway 的 `router_provider` 注入决定）：
+  · 文本工具面（audit_script / audit_copy / draft_titles / retell_check）——
+    库函数零转发，本 CLI 独立起即可全功能；
+  · 生产链面（produce_chain / export_status / job_status，B3-14）——
+    复用服务内 RPC Router 的库函数，需要 AppContext/job_store 等生产运行时。
+    本 CLI 不构造 AppContext，生产链端点**如实回 501**
+    （`reason: not_implemented_in_this_gateway`），不静默假绿。
+    要跑全链生产，起桌面内建网关（偏好设置 → Agent 网关），或扩展本 CLI
+    注入 router_provider（见 agent_gateway.AgentGateway 签名）。
+
 用法：
     uv run python tools/agent_server.py [--port 8340] [--token xxx]
 llm.* 配置直读本机数据库（DramaClip/data/data.db，DRAMACLIP_DATA 可指目录；

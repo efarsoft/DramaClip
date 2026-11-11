@@ -226,7 +226,11 @@ def detect() -> dict[str, object]:
     adapters: list[dict[str, object]] = []
     if sys.platform == "win32":
         try:
-            adapters = list(_query_cim_adapters())
+            # CIM 子函数只写 str 字段（name/vendor/driver_version），但下游要往同一批
+            # dict 里补 vendor_id/device_id/专用显存等 int 字段，所以在这里拓宽成
+            # dict[str, object]——而不是把 CIM 侧的窄类型改宽，那会波及
+            # parse_cim_output 的既有契约与它的等值断言。
+            adapters = [dict(item) for item in _query_cim_adapters()]
         except Exception:  # noqa: BLE001 - 探测不许拖垮服务：CIM 侧任何意外都当作没有适配器
             adapters = []
     d3d: list[dict[str, object]] = []

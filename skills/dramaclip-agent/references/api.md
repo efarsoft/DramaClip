@@ -4,7 +4,8 @@
 `Authorization: Bearer <AGENT_TOKEN>`。所有请求/响应均为 UTF-8 JSON。
 
 错误码：401 鉴权失败；404 未知端点；422 业务校验失败（`error` 带人读原因）；
-503 LLM 未配置或不可达（仅出稿类端点）。
+503 LLM 未配置或不可达（仅出稿类端点）；501 端点形态与网关形态不匹配（生产链端点
+仅桌面内建网关可用，独立 CLI 起则 501 如实报）。
 
 ## GET /health
 
@@ -65,3 +66,45 @@ passed, message, location, prompt_quote, needs_human}], "meta": {}}`
 ```
 
 第一 selected 标题即封面字层用的那条。
+
+## 生产链端点（B3-14 无人值守；仅桌面内建网关可用）
+
+以下端点复用服务内 RPC `Router`（与桌面端同一份库函数，契约零漂移）。独立 CLI
+（`tools/agent_server.py`）没有生产运行时（无 `AppContext`/job_store），调用会
+返回 **501** `{"error": "生产链端点需要服务内网关", "reason": "not_implemented_in_this_gateway"}`——
+如实不可用，不静默假绿。
+
+白名单方法（`_PRODUCTION_CHAIN_METHODS`）限制网关只透传读/提交面，不代理
+`settings.update`/`system.shutdown` 等改全局状态的端点。
+
+### POST /tools/produce_chain
+
+生产链一条龙：`analysis.start` → `narration.plan_variants`，返回各阶段 job_id。
+
+请求体：
+```json
+{"project_id": "p1", "modes": ["full_narration", "ultra_short"], "k": 3}
+```
+
+响应：
+```json
+{
+  "ok": true,
+  "project_id": "p1",
+  "analysis_job_id": "j_...",
+  "plan_job_id": "j_...",
+  "modes": ["full_narration", "ultra_short"],
+  "k": 3,
+  "hint": "轮询 jobs.get(analysis_job_id / plan_job_id) 追踪进度；规划完成后用 export.submit 出片"
+}
+```
+
+### POST /tools/job_status
+
+查某条 job（分析/规划/出片）状态与进度。请求体 `{"job_id": "j_..."}`，
+响应即 `jobs.get` 结果（`{"job": {...}}`）。
+
+### POST /tools/export_status
+
+查某条出片 job 终态与自检。请求体 `{"export_id": "e_..."}`，
+响应即 `export.get` 结果。

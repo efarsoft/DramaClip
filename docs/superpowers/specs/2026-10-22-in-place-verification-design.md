@@ -245,3 +245,49 @@ W3 的 `StateBlock` 管**屏级四态**（空/载入/失败/部分成功）。�
   - **两条候选口径已实测，结论相反**（本机 16 逻辑核）：① `--no-isolate` 最快（54.19s）但**不是修法**——6 条红，其中 `StatusBar` 三条 GPU 段读到「待检测」、`downloadUx` 两条，全是跨文件的 store 残留，另有 1 条照旧超时；② `--maxWorkers=4` 保持 isolate，97.14s、91 文件全绿。默认 `maxWorkers`（≈核数−1）跑 83-112s，与 ② 同量级却换来抖动。
   - **定案（`8725df3`）：按 ② 把 `maxWorkers: 4` 写进 `vitest.config.ts`**，`testTimeout`（5000ms）与 `isolate`（true）保持默认。取舍写在配置注释里：`isolate` 留着是因为它在测真相（每文件一份环境），代价是每个文件第一个重渲染用例要付一次冷启动；限到 4 后并发负载下最坏 155s（本机同时跑后端测试），仍 0 超时红。`isolate:false` 与全局加宽 `testTimeout` 两条都没走——前者实测否掉，后者会让真挂死的用例更晚才红。
 - **`ruff check service` 的 2 错已清**：`tests/engines/narration/test_audit.py:11` 的 `I001`（带 `# noqa` 的单行导入只能整条换行）与 `tests/engines/subtitle/test_ass_burn.py:240` 的 `E501`（把内联 cue 字典提成局部变量）。这两个都是并行文案线已提交的债，此前没人跑过 `ruff check`，所以 CI 的 service job 一直在红。
+
+## 8. A项：恢复证明能力（2026-10-23，业主裁「清 ruff + 修模式表 + 真跑一次门禁」）
+
+§7.4 记的两笔欠账（ruff 恒红、超时口径）已在那一节收口。这一节记**真机模式门禁为什么跑不动、修到哪一步、跑出了什么**。
+
+**门禁侧五刀**（全在 `scripts/verify_modes.py`，逐刀都有实测依据，不是读代码读出来的）：
+
+| # | 症状 | 根因 | 修法 |
+| --- | --- | --- | --- |
+| 1 | 开跑即 `return 2`，自 2026-10-17 起一次没跑成 | `ALL_MODES` 手抄 9 个 vs 生产 10 个，`_mode_table_drift` 拦住 | 表改由 `SUPPORTED_MODES` 与 `expected_copy_source` 构造；顺手删掉 `EXPECT_NARRATION.get(mode, "many")` 的静默默认，`--modes` 里的陌生名字退出 2 |
+| 2 | CI 里没人跑它，修好也会再漂 | 门禁脚本不在 CI，`pytest` 只引用它的表 | 新增 `tests/api/test_w1_gates.py::test_g2_mode_gate_tables_derive_from_production_mode_list`，点名 `highlight_cut="none"`/`intro_narration="one"`（变异：改回手抄表漏一名 → 四条断言全红） |
+| 3 | 预检报「IndexTTS 运行环境未就绪」 | 隔离副本只联了 `models`，没联 `runtimes` | 联接循环到 `("models","runtimes")`，真没装过那一层就跳过，让预检去说 |
+| 4 | 同上，联了 `runtimes` 仍然报 | TTS 引擎找隔离 venv 走**进程级** `paths.resolve_data_dir()`（读 `DRAMACLIP_DATA_DIR`），不看 AppContext 的 `data_dir` | 门禁自己把这个变量指到副本——桌面端启动服务时也是这么做的 |
+| 5 | 预检改报「需要参考音频，当前 voice 不是有效文件：zf_001」 | 预检把音色写死成 kokoro 的默认值，等于第二处「本机用哪个音色」的真相 | 按生产口径取 `tts.voice.<engine>`，回退旧库的全局 `tts.voice` |
+| 6 | 报表里 W8 的自检整条静默旁路 | 门禁的代码是 HEAD、库是开发者运行中的那份，schema 天生差一个提交（`no such column: publish_data`） | `build_context` 补 `db.migrate(conn)`；单模式复验：那行留痕消失、`raw_clip` 全部断言通过 |
+
+**十模式全量实跑（`--modes all`，基线 HEAD `4a75838`，耗时 2h20m，退出码 1）**：
+
+- **过**：`raw_clip` `highlight_cut` `subtitle_flow`（三个纯剪辑模式，rule 来源，正常）＋ `ultra_short_hook` `full_narration` `dual_host_chat` `inner_monologue` 四条**出了片**，但响度判据红。
+- **方案级失败（不降级裁决在生效，不是崩）**：`intro_narration`——「配音回填后画面窗口越过源集末尾…这条方案判失败而不是把旁白截掉」；`cross_narration`——「交叉桥段实测 4.06s，空隙只有 3.29s，放不下」。
+- **超时**：`dialogue_narration` 撞上 `--job-timeout` 默认 1800s。这台机器只有 AMD 显卡，indextts2 走 CPU：单段推理 40-66s、RTF 18.9-32.1，**全量十模式的真实成本是 2 小时级，不是十几分钟**——排期按这个数，别按 9 月那次的 kokoro 口径。
+- **新案①（系统性）**：四个出片模式的「压底残差」全部落在 **−4.08…−4.75 dB**，容差 ±2.0，且**清一色负号**——实测比「干音＋按声明压底的原声」的预测值更轻。四档模式段数各不相同却同向偏移，不像素材噪声，像预测模型漏了一层：C项 BGM 床（`66a9d51`/`97210b0`）刚进混音链，预测侧只算了旁白＋原声。这条要单独定性，**不是把容差放宽**。
+- **新案②（最高危）**：`full_narration` 成片 65.60s vs Σ 段产物 263.32s（差 −197.72s，容差 0.1s）＝**段在 concat 阶段丢了**，同时「插桩只覆盖 19/8 段」——门禁自己判定这一行不可信。P1-1（`8838f1d`）收的是「jobs 清单逐段验盘」，这条要么是它没盖住的形状，要么是 BGM 接线后的新形状，须按产物验，不能验「不再抛」。
+- **读数边界**：这一轮跑的是 `4a75838`，同一天并行线又进了 `1d3e985`（TTS 回环校验＋钩子兑现检查）——**上面两条新案的定位必须先在新 HEAD 上复现**，否则可能是在追别人已经改掉的东西。库副本用的是开发者此刻的 `data/data.db`（10 集已分析），没写 live 库。
+
+## 9. §8 新案①的两条落点：门禁补限幅级（#35）与干音电平契约（#36）
+
+**先记一条归因自我更正**：先前口头报的「缓存里 8/8 个 indextts2 干音出厂真峰 +0.5…+3.1 dBTP」量的其实是 `data/cache/analysis/tts/*.mp3`——那是 edge 的产物（`audio-24khz-48kbitrate-mono-mp3`）。重测 31 段（edge + indextts2 都有）：真峰 **全部** 在 +0.2…+3.8 dBTP，集成响度 −14.8…−11.4 LUFS（中位 −13.10、全距 3.4 dB）。
+
+**#35｜门禁侧**：`_check_ducking` 的预测从三真数变四真数——干音 N 之外再过一遍「生产构造的格式统一 + 真峰天花板」探针拿 N′，`limiter_cut = N′ − N` 进预测。换上限幅后读数，`full_narration` 三段残差从 −3.04…−4.62 塌回 −0.08/−0.19/−0.22 dB。三条不让：**削底量只能实测**（alimiter 吃的是 attack/release 包络，不是真峰超出量的函数）、**`DUCK_RESIDUAL_TOL_DB` 保持 2.0 一字未动**（业主明令不许拿放宽容差当修法）、探针只过干音不过原声是可证安全的近似（压底后原声 ≤ −20 dBFS，碰不到 −9 dBFS 天花板，误差上界 ~0.4 dB）。量不到探针一律判红。判据滤镜串逐字复用 `encoder._audio_format_filter()` + `_peak_ceiling_filter()`，另钉一条「源码里不许出现 `alimiter=limit=` 字面量」防手抄。
+
+**#36｜引擎侧**：修的不是「峰值超 0」，而是**旁白响度一直没人负责**——混音分支让干音以 `volume=1.0` 并入，所以它自带的 LUFS 直接决定人声对原声的比重，换引擎就换 3 dB。第一版推荐按峰值契约压（≤ −10 dBTP 让限幅空转），**被自己的实测否掉**：语音频峰比中位 14.3 dB，压进去要 −10.2…−13.8 dB 纯增益，人声单独过现役链路会低 **6.5–9.5 dB**——「限幅空转」和「电平不变」在一根线性增益上不可兼得。落地的形态因此是**电平参考带**（`engines/tts/level_fix.py`，接在 `synthesize_item` 唯一落位出口）：
+
+| 口径 | 值 | 依据 |
+| --- | --- | --- |
+| 参考响度 | −13.0 LUFS | 31 段实测中位 −13.10，落在已验收听感里（基线成片 I=−14.1 就是这批干音混的） |
+| 带宽 | ±1.0 dB | 带外比例实测 1.5→6% / 1.0→19% / 0.5→42%；再紧一档＝多一倍真 mp3 二次有损编码 |
+| 抬升闸 | 真峰 ≤ −1.0 dBTP | 抬增益连底噪一起抬；重采样与下游编码自己会长出 1.1–1.3 dB 采样间过冲。衰减不设闸 |
+| 增益地板 | 0.05 dB | 闸缝只剩零点几 dB 时不值得多付一次有损重编码 |
+| 先验后搬 | 复测**位移**（after ≈ before + 计划增益）超 2.0 dB 就不搬 | 不是「离参考 ≤2 dB」：被闸钳住的抬升本来就够不到参考带，按参考验收会把自己刚批准的产物每次扔掉、还每段白烧一遍 ffmpeg（评审抓到的一条，已钉端到端用例） |
+
+**契约不许外抛**：`normalize_dry_level` 的增益步与 `os.replace` 一起包在 `except (SubprocessError, OSError)` 里（超时／ffmpeg 不在／目标被占用都只出一条「电平契约未走完」的回执）。第一版只有 `try/finally`，`TimeoutExpired` 会一路穿透到 `synthesize_item`，正撞上「永不因为电平把一段配音判死」的自家承诺——评审抓的第二条，用例 `test_gain_step_never_raises_out_of_the_contract` 钉住。同理 `to_dict()` 因全仓无消费者已删（回执数值不进协议层，只以文本进日志）。
+
+**峰值仍由段级限幅承担**（它本来就是峰值的管理者，咬合量现在逐段报在 `duck_worst_limiter_db` 里）。另两条边界：归一结果**绝不写回内容寻址缓存**（键里没有电平这一维，写回＝同一键两种字节 + 世代损失积累）；indextts2 int16 出厂 `torch.clamp` 硬削顶（#37 定性、#36 修法待裁，`infer_v2_5.py:854`）烘进波形的失真纯增益救不回，那是引擎侧的遗留分叉。
+
+**证据**：`tests/engines/tts/test_dry_level_band.py`（19 例：真 ffmpeg 渲染 ＋ 6 例纯策略）＋ `tests/engines/narration/test_dry_level_hook.py`（6 例钉三条出口与 warn 分级）。变异锚点七把，逐把只红在该红的那一条：拆抬升闸 → 3 红；复测判据退回「离参考」→ 钳位端到端红；跳复测 → 位移用例红；拆 `staging_suffix` 内容嗅探 → 容器用例红（无损 WAV 被转码）；去增益地板 → 地板用例红；去掉增益步的 `except` → 该用例以 `TimeoutExpired` 穿透而红；松容差到 5.0 → 一致性上界 + 纯策略红。定向三面（tts + narration + 门禁压底）547 passed；三处评审修复后全量后端重跑＝**1908 passed / 1 skipped / 0 failed**（391s；修复前 1906，差的两条在 `test_dry_level_band.py` 的 17→19 里）。

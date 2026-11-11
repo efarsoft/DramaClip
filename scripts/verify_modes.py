@@ -818,7 +818,41 @@ def main() -> int:
         action="store_true",
         help="跳过漂移对比（首次跑还没基线时不必加：无基线文件自动跳过）",
     )
+    ap.add_argument(
+        "--quality-gate",
+        action="store_true",
+        help="跑真机门禁前离线快跑质量黄金集（tools/quality_eval.py --check）：量化漂移先于规格门禁被拦，"
+        "fail 退 1 不进真机（几秒 vs 15-25 分钟）",
+    )
+    ap.add_argument(
+        "--fixtures",
+        default=str(REPO / "service" / "review_fixtures"),
+        help="质量黄金集标注样本目录（--quality-gate 消费；缺省 review_fixtures）",
+    )
     args = ap.parse_args()
+
+    # 离线质量门禁（B3-13）：量化指标漂移先于真机规格门禁——几秒跑完，
+    # 超阈退 1 不进 15-25 分钟真机（同 verify_modes 的「环境问题 vs 产品问题」两档纪律）。
+    if args.quality_gate:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "quality_eval", REPO / "service" / "tools" / "quality_eval.py"
+        )
+        if spec is None or spec.loader is None:
+            print("质量门禁不可用：找不到 service/tools/quality_eval.py", file=sys.stderr)
+            return 2
+        quality_eval = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(quality_eval)
+        print(f"质量黄金集门禁：{args.fixtures}（离线快跑，漂移阈值见 tools/quality_eval.py）")
+        rc = quality_eval.run_cli(["--fixtures", args.fixtures, "--check"])
+        if rc != 0:
+            print(
+                "质量门禁未过（量化指标漂移超阈值）——先查上游（模型/阈值/夹具）再谈真机规格，"
+                "退 1 不进 15-25 分钟真机门禁",
+                file=sys.stderr,
+            )
+            return 1
 
     modes = ALL_MODES if args.modes == "all" else [m.strip() for m in args.modes.split(",")]
     unknown = [mode for mode in modes if mode not in EXPECT_NARRATION]

@@ -11,6 +11,7 @@ import type { NarrationMode, NarrationPlan } from '@dramaclip/protocol';
 import { analysisApi, jobsApi, narrationApi, projectApi } from '../../services/client';
 import { useJobsStore } from '../../stores/jobs';
 import { POLL_INTERVAL_MS, isTerminal, reasonOr, sleep } from './poll';
+import { usePlanReroll } from './usePlanReroll';
 
 export interface PlanBatchSpec {
   modes: NarrationMode[];
@@ -62,6 +63,63 @@ async function restoreSpec(projectId: string): Promise<PlanBatchSpec | null> {
   };
 }
 
+type JobRow = Awaited<ReturnType<typeof jobsApi.list>>['jobs'][number];
+
+interface PlanPollPorts {
+  readonly projectId: string;
+  readonly tick: (progress: number, message: string, error: string) => void;
+  readonly plans: (plans: NarrationPlan[]) => void;
+  readonly fail: (reason: string) => void;
+}
+
+/** 轮询一只规划作业直到终态：进度/明细逐拍回写，方案增量取回（run / 重进共用）。 */
+async function pollPlanJob(jobId: string, batch: string, ports: PlanPollPorts): Promise<void> {
+  for (;;) {
+    const job = await analysisApi.status(jobId);
+    ports.tick(job.progress, job.message ?? '', job.error ?? '');
+    ports.plans(await narrationApi.listPlans(ports.projectId, batch));
+    if (job.status === 'completed' || job.status === 'cancelled') return;
+    if (isTerminal(job.status)) {
+      ports.fail(reasonOr(job.error, reasonOr(job.message, `规划作业${job.status}`)));
+      return;
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+}
+
+interface ResumePorts {
+  readonly projectId: string;
+  readonly stopped: () => boolean;
+  readonly pollUntilTerminal: (jobId: string, batch: string) => Promise<void>;
+  readonly showLatest: (batchId: string | null, plans: NarrationPlan[]) => void;
+  readonly showActive: (active: JobRow, plans: NarrationPlan[]) => void;
+  readonly applySpec: (spec: PlanBatchSpec) => void;
+}
+
+/** 重进页面时找回家的路：有在跑作业 → 重新挂轮询；没有 → 把库里最近一批捞回来。 */
+async function resumeActiveBatch(ports: ResumePorts): Promise<void> {
+  const { jobs } = await jobsApi.list(20, true);
+  if (ports.stopped()) return;
+  const active = jobs.find(
+    (job) =>
+      job.type === 'narration'
+      && job.ref_id === ports.projectId
+      && (job.status === 'running' || job.status === 'pending'),
+  );
+  const all = await narrationApi.listPlans(ports.projectId);
+  if (ports.stopped()) return;
+  if (active === undefined) {
+    const picked = latestBatch(all);
+    ports.showLatest(picked.batchId, picked.plans);
+    return;
+  }
+  ports.showActive(active, all.filter((p) => p.batch_id === active.id));
+  const restored = await restoreSpec(ports.projectId).catch((): PlanBatchSpec | null => null);
+  if (restored !== null && !ports.stopped()) ports.applySpec(restored);
+  if (ports.stopped()) return;
+  await ports.pollUntilTerminal(active.id, active.id);
+}
+
 export function usePlanBatch(projectId: string): PlanBatch {
   const [planning, setPlanning] = useState(false);
   const [percent, setPercent] = useState(0);
@@ -87,27 +145,17 @@ export function usePlanBatch(projectId: string): PlanBatch {
 
   /** 轮询一只规划作业直到终态：方案增量取回 + 失败明细透出（run/resume 共用）。 */
   const pollUntilTerminal = useCallback(
-    async (jobId: string, batch: string): Promise<void> => {
-      for (;;) {
-        const job = await analysisApi.status(jobId);
-        setPercent(job.progress);
-        setStageText(job.message ?? '');
-        setFailDetail(job.error ?? '');
-        setPlans(await narrationApi.listPlans(projectId, batch));
-        if (job.status === 'completed') {
-          setPlans(await narrationApi.listPlans(projectId, batch));
-          return;
-        }
-        if (job.status === 'cancelled') {
-          return;
-        }
-        if (isTerminal(job.status)) {
-          setError(reasonOr(job.error, reasonOr(job.message, `规划作业${job.status}`)));
-          return;
-        }
-        await sleep(POLL_INTERVAL_MS);
-      }
-    },
+    (jobId: string, batch: string): Promise<void> =>
+      pollPlanJob(jobId, batch, {
+        projectId,
+        tick: (progress, message, detail) => {
+          setPercent(progress);
+          setStageText(message);
+          setFailDetail(detail);
+        },
+        plans: setPlans,
+        fail: setError,
+      }),
     [projectId],
   );
 
@@ -151,35 +199,25 @@ export function usePlanBatch(projectId: string): PlanBatch {
     const stopped = (): boolean => guard.cancelled;
     void (async (): Promise<void> => {
       try {
-        const { jobs } = await jobsApi.list(20, true);
-        if (stopped()) return;
-        const active = jobs.find(
-          (job) => job.type === 'narration' && job.ref_id === projectId && (job.status === 'running' || job.status === 'pending'),
-        );
-        const all = await narrationApi.listPlans(projectId);
-        if (stopped()) return;
-        if (active === undefined) {
-          const picked = latestBatch(all);
-          setBatchId(picked.batchId);
-          setPlans(picked.plans);
-          return;
-        }
-        jobIdRef.current = active.id;
-        setBatchId(active.id);
-        setPlanning(true);
-        setPercent(active.progress);
-        setStageText(active.label ?? '');
-        setFailDetail(active.error ?? '');
-        setPlans(all.filter((p) => p.batch_id === active.id));
-        if (stopped()) return;
-        try {
-          const restored = await restoreSpec(projectId);
-          if (restored !== null && !stopped()) setSpec(restored);
-        } catch {
-          // 规格恢复失败只影响骨架显示，不影响轮询
-        }
-        if (stopped()) return;
-        await pollUntilTerminal(active.id, active.id);
+        await resumeActiveBatch({
+          projectId,
+          stopped,
+          pollUntilTerminal,
+          showLatest: (batch, list) => {
+            setBatchId(batch);
+            setPlans(list);
+          },
+          showActive: (active, list) => {
+            jobIdRef.current = active.id;
+            setBatchId(active.id);
+            setPlanning(true);
+            setPercent(active.progress);
+            setStageText(active.label ?? '');
+            setFailDetail(active.error ?? '');
+            setPlans(list);
+          },
+          applySpec: setSpec,
+        });
       } catch {
         // 找回失败按「没有在跑作业」处理：不打扰用户
       } finally {
@@ -194,51 +232,16 @@ export function usePlanBatch(projectId: string): PlanBatch {
     };
   }, [pollUntilTerminal, projectId]);
 
-  /** 重掷单条：同模式 k=1、exclude 掉被掷的那条；新方案落在新批次，**追加**进当前
-   * 视图而不是切走——用户正在挑的是这一批，切走等于把他正在挑的方案藏起来。 */
-  const rerollOne = useCallback(
-    async (plan: NarrationPlan): Promise<void> => {
-      if (planning) return;
-      setPlanning(true);
-      setError('');
-      setFailDetail('');
-      setStageText('重掷此条');
-      try {
-        const { job_id: jobId } = await narrationApi.planVariants(
-          projectId,
-          [plan.narration_mode],
-          1,
-          [plan.id],
-        );
-        jobIdRef.current = jobId;
-        for (;;) {
-          const job = await analysisApi.status(jobId);
-          setStageText(job.message ?? '');
-          setFailDetail(job.error ?? '');
-          if (isTerminal(job.status)) {
-            const all = await narrationApi.listPlans(projectId);
-            setPlans((prev) => {
-              const known = new Set(prev.map((p) => p.id));
-              const grown = all.filter((p) => p.batch_id === jobId && !known.has(p.id));
-              return grown.length > 0 ? [...prev, ...grown] : prev;
-            });
-            if (job.status !== 'completed') {
-              setError(reasonOr(job.error, reasonOr(job.message, `重掷作业${job.status}`)));
-            }
-            return;
-          }
-          await sleep(POLL_INTERVAL_MS);
-        }
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : String(cause));
-      } finally {
-        jobIdRef.current = null;
-        setPlanning(false);
-        setStageText('');
-      }
-    },
-    [planning, projectId],
-  );
+  const rerollOne = usePlanReroll({
+    projectId,
+    planning,
+    jobIdRef,
+    setPlanning,
+    setError,
+    setFailDetail,
+    setStageText,
+    setPlans,
+  });
 
   return { planning, percent, stageText, plans, failDetail, batchId, spec, error, run, rerollOne, cancel };
 }

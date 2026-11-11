@@ -496,6 +496,12 @@ def _event_line(
         # 覆盖出不可预测的形状——该路径下忽略 span（不给时行为本就逐字节一致）。
         body = _karaoke_body(text, duration_s, overrides, primary)
         return _event_row(start, end, margin_v, body)
+    if rhythm == "char_reveal":
+        # 逐字淡入揭示（B3-12）：每个字用 \fad 在前 fade_ms 内逐字显现，与整行
+        # 一次性淡入（whole_line）/逐字高亮填充（karaoke）独立成第三档节奏。
+        # 与 karaoke 同样与 span 互斥：逐字自带 \fad，再叠区间颜色形状不可预测。
+        body = _char_reveal_body(text, duration_s, overrides, primary, fade_ms)
+        return _event_row(start, end, margin_v, body)
     spans = line.get("span_emotions")
     if spans:
         body = _span_body(text, list(spans), overrides, colors, emotion_styles)
@@ -526,6 +532,32 @@ def _karaoke_body(text: str, duration_s: float, overrides: str, primary: str) ->
     parts = ["{" + overrides + f"\\1c{primary}\\2c&H5A5A5A}}"]
     for ch in chars:
         parts.append(f"{{\\k{per_cs}}}{_escape(ch)}")
+    return "".join(parts)
+
+
+def _char_reveal_body(
+    text: str, duration_s: float, overrides: str, primary: str, fade_ms: int
+) -> str:
+    """逐字淡入揭示（B3-12 char_reveal）：每个字用 \\fad 在逐字窗口内渐显，
+    整行按字序滚动显现。
+
+    与 karaoke（逐字 \\k 高亮填充）和 whole_line（整行一次 \\fad）三档独立：
+      · karaoke 让未念到的字变暗、念到的字亮（卡拉OK灯）；
+      · char_reveal 让每个字从无到有逐个「浮」出来（逐字显现，无高亮对比色）；
+      · whole_line 整行一起淡入淡出。
+    每字窗口 = 整行时长 / 字数；逐字 \\fad(窗口,0) 只淡入不淡出（出场渐显、
+    驻留不消隐，读完整行整行才在行尾按原 \\fad 退场）。空行/全空白回退整行
+    单 override 路径（不逐字拆，与 karaoke 的空行约定一致，逐字节安全）。
+    """
+    chars = [ch for ch in text if not ch.isspace()]
+    if not chars:
+        return "{" + overrides + "}" + _escape(text)
+    per_ms = max(1, int(duration_s * 1000 / len(chars)))
+    # 逐字只淡入不退（第二参 0）：libass \fad(fade_in, fade_out)，fade_out=0 即驻留。
+    reveal_tag = f"\\fad({per_ms},0)"
+    parts = [f"{{{overrides}}}{reveal_tag}"]
+    for ch in chars:
+        parts.append(f"{{{reveal_tag}}}{_escape(ch)}")
     return "".join(parts)
 
 

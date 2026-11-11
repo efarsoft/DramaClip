@@ -169,7 +169,11 @@ def generate_titles(context: AppContext, params: dict[str, Any]) -> dict[str, An
 
 
 def publish_pack(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
-    """逐平台发布包（只读）：标题/文案/标签与详情页同一份库快照。"""
+    """逐平台发布包（只读）：标题/文案/标签与详情页同一份库快照。
+
+    附发布前自查清单（五动作，授权/挂载/标题封面恒为人工项，剧名层与话题组
+    依当前配置如实判满足）——见 engines.narration.publish_pack.build_checklist。
+    """
     from dramaclip.engines.narration import publish_pack as pack_engine
 
     plan_id = str(params.get("plan_id", ""))
@@ -177,9 +181,18 @@ def publish_pack(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     if row is None:
         raise RpcDomainError(_ERR_PLAN_NOT_FOUND, f"编排方案不存在: {plan_id}")
     meta = row.get("publish_meta") or {}
-    return pack_engine.build_pack(
+    pack = pack_engine.build_pack(
         row.get("titles") or [], meta.get("caption"), meta.get("tags") or []
     )
+    project_row = projects_repo.get(context.conn, str(row["project_id"]))
+    drama_name = str(project_row["name"]) if project_row is not None else ""
+    settings = _effective_settings(context, str(row["project_id"]))
+    checklist = pack_engine.build_checklist(
+        pack,
+        drama_name=drama_name,
+        drama_name_layer_enabled=config.get_bool(settings, "export.drama_name_layer"),
+    )
+    return {**pack, "checklist": checklist}
 
 
 def update_titles(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:

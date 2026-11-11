@@ -162,6 +162,9 @@ export function PageFooter({
         boxShadow: tokens.shadowSticky,
       }}
     >
+      <Button icon={<LeftOutlined />} onClick={onPrev}>
+        上一步
+      </Button>
       <span
         style={{
           fontSize: tokens.text.meta.size,

@@ -161,7 +161,7 @@ export function SessionLogFeed(): React.ReactElement {
       <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}>
         {notifyLog.map((entry, index) => (
           <span
-            key={entry.at + String(index)}
+            key={`${String(entry.at)}-${String(index)}`}
             style={{
               fontSize: tokens.text.badge.size,
               lineHeight: tokens.text.badge.leading,
