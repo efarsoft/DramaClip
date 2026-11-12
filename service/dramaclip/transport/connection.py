@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import socket
+import sys
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -65,8 +66,10 @@ class ServiceConnection:
         # on_disconnect → 主进程重生服务。此前无 keepalive，断管后 ipc-reader
         # 永远阻塞在 readinto、RPC 全超时、进程活着但完全不响应（py-spy 实锤）。
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-        keepalive_vals = getattr(socket.socket, "SIO_KEEPALIVE_VALS", 0x98000004)
-        self._sock.ioctl(keepalive_vals, (1, 10_000, 3_000))
+        if sys.platform == "win32":
+            # 探活节奏（10s 空闲起探、3s 间隔）走 Windows 专属的 SIO_KEEPALIVE_VALS；
+            # 其余平台没有 socket.ioctl，只留上面的开关（系统默认节奏）。
+            self._sock.ioctl(socket.SIO_KEEPALIVE_VALS, (1, 10_000, 3_000))
         self._sock.settimeout(None)
         self._reader = self._sock.makefile("rb", buffering=0)
         self._writer = self._sock.makefile("wb", buffering=0)
