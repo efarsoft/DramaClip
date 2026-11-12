@@ -2,7 +2,7 @@
 import type {
   AbReport, AnalysisJobStatus, AnalysisResults, BgmGenerateRequest, BgmLibrary, BgmRescanResult,
   BgmRuntimeStatus, CopyFilesResult, DashboardSummary, DataPaths, DramaClipBridge,
-  EngineConfig, ExportJob, ExportSubmitResult, ExportTranscriptsResult, HealthResult, ImportInspection,
+  EngineConfig, EpisodeDetailResult, ExportJob, ExportSubmitResult, ExportTranscriptsResult, HealthResult, ImportInspection,
   ImportRecord, JobInfo, JobsListResult, LlmTraceListResult, ModeRecommendation, ModelInfo, NarrationMode,
   NarrationPlan, OrphanCopy, PingResult, PlanDetail, PlanTraceResult, PlanVariantsResult, PlatformPack, Project,
   ProjectGetResult, PromptsListResult, RevealResult, RelayoutResult, SafeZoneMask, ScannedEpisode, SelftestResult,
@@ -145,9 +145,10 @@ export const analysisApi = {
     rpc<Pick<AnalysisResults, 'episodes'>>('analysis.episodes', {
       project_id: projectId,
     }),
-  /** 按集分拆：单集详情（ASR/高光/冲突/画面轨）——点开才拉，KB 级。 */
-  episodeDetail: (episodeId: string): Promise<AnalysisResults> =>
-    rpc<AnalysisResults>('analysis.episode_detail', { episode_id: episodeId }),
+  /** 按集分拆：单集详情（ASR/高光/冲突/画面轨）——点开才拉，KB 级。
+   *  返回的是该集自己的列表，不是 results 那种按集号的映射。 */
+  episodeDetail: (episodeId: string): Promise<EpisodeDetailResult> =>
+    rpc<EpisodeDetailResult>('analysis.episode_detail', { episode_id: episodeId }),
   /** 全部已分析集一次性导出：逐集 SRT + 合并全剧台词 TXT，产物在 data/exports/transcripts/。 */
   exportTranscripts: (projectId: string): Promise<ExportTranscriptsResult> =>
     rpc<ExportTranscriptsResult>('analysis.export_transcripts', { project_id: projectId }),

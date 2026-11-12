@@ -45,6 +45,14 @@ export function analysisErrorsOf(results: AnalysisResults | null): Record<string
   return out;
 }
 
+/** 集 id → 高光条数（左栏行徽章的数据源）。取摘要计数，不数高光明细——按集分拆后
+ *  明细只有点开过的集才有，数明细会让没点开的集一律显示成「没有高光」。 */
+export function highlightCountsOf(results: AnalysisResults | null): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const item of results?.episodes ?? []) out[item.episode_id] = item.highlight_count;
+  return out;
+}
+
 export interface PrescreenCoverage {
   /** 预筛过的集数（recommended 非 null）。 */
   readonly prescreened: number;

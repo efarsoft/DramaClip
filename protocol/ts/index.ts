@@ -350,6 +350,20 @@ export interface AnalysisResults {
   readonly prescreen?: Readonly<Record<string, PrescreenRow>>;
 }
 
+/** analysis.episode_detail：单集详情（按集分拆）。
+ * 各项是**这一集自己的**列表/对象，不是 AnalysisResults 那种「集号 → 值」的映射——
+ * 并进页面状态时要由调用方按 episode_id 归位（schemas/analysis.json 同名方法是真相源）。 */
+export interface EpisodeDetailResult {
+  readonly episode_id: string;
+  readonly asr_segments: AsrSegment[];
+  readonly highlights: HighlightSegment[];
+  readonly conflict_scores: ConflictScorePoint[];
+  /** 该集没预筛过为 null。 */
+  readonly prescreen?: PrescreenRow | null;
+  /** 该集没跑视觉轨（或没有帧）为 null。 */
+  readonly visual_track?: VisualTrack | null;
+}
+
 /** ---- narration / export 命名空间（W4）---- */
 
 export type NarrationMode =

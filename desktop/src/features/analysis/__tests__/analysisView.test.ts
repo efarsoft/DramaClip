@@ -2,7 +2,13 @@
 /** analysisView 纯逻辑：档位解析、缺音轨筛选（三态）、预筛覆盖度（金色告警数据源）。 */
 import { describe, expect, it } from 'vitest';
 import type { AnalysisResults, Episode, EpisodeAnalysisResult } from '@dramaclip/protocol';
-import { missingAudioEpisodes, parseTier, prescreenCoverage, TIER_OPTIONS } from '../analysisView';
+import {
+  highlightCountsOf,
+  missingAudioEpisodes,
+  parseTier,
+  prescreenCoverage,
+  TIER_OPTIONS,
+} from '../analysisView';
 
 function episode(id: string, hasAudio?: boolean | null): Episode {
   return {
@@ -69,5 +75,18 @@ describe('预筛覆盖度（静默清单第 1 条：输入覆盖度）', () => {
   it('全部推荐：notRecommended 为 0（界面据此不渲染告警）', () => {
     const results: AnalysisResults = { episodes: [entry(true), entry(true)] };
     expect(prescreenCoverage(results)).toEqual({ prescreened: 2, recommended: 2, notRecommended: 0 });
+  });
+});
+
+describe('左栏高光计数（按集分拆后的数据源纪律）', () => {
+  it('取摘要计数：每集都有数，与「点没点开过详情」无关', () => {
+    const results: AnalysisResults = {
+      episodes: [
+        { ...entry(null), episode_id: 'a', highlight_count: 6 },
+        { ...entry(null), episode_id: 'b', highlight_count: 0 },
+      ],
+    };
+    expect(highlightCountsOf(results)).toEqual({ a: 6, b: 0 });
+    expect(highlightCountsOf(null)).toEqual({});
   });
 });

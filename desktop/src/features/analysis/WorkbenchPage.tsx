@@ -5,7 +5,7 @@ import type { AnalysisResults } from '@dramaclip/protocol';
 import { dramaProducePath } from '../../app/routes';
 import { analysisApi, revealInFolder } from '../../services/client';
 import { layout, tokens } from '../../styles/theme';
-import { analysisErrorsOf, prescreenCoverage } from './analysisView';
+import { analysisErrorsOf, highlightCountsOf, prescreenCoverage } from './analysisView';
 import { useAnalysisWorkspace } from './useAnalysisWorkspace';
 import { useEpisodeOrder } from './useEpisodeOrder';
 import { useProjectDetail, useEpisodeReorder } from './useProjectDetail';
@@ -161,7 +161,7 @@ function TwoColumns(props: TwoColumnsProps): React.ReactElement {
         <EpisodeListPanel
           orderedIds={order.orderedIds}
           byId={order.byId}
-          highlights={props.results?.highlights ?? {}}
+          highlightCounts={highlightCountsOf(props.results)}
           errors={analysisErrorsOf(props.results)}
           activeEpisodeId={props.activeEpisodeId}
           selectedIds={props.selectedIds}

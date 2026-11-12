@@ -202,7 +202,7 @@ function smokeEpisodeList(): void {
     <EpisodeListPanel
       orderedIds={episodes.map((episode) => episode.id)}
       byId={byId}
-      highlights={{}}
+      highlightCounts={{}}
       errors={{}}
       activeEpisodeId={null}
       selectedIds={[]}

@@ -4,6 +4,7 @@ import type {
   AnalysisJobStatus,
   AnalysisResults,
   Episode,
+  EpisodeDetailResult,
   Project,
   ProjectGetResult,
 } from '@dramaclip/protocol';
@@ -20,6 +21,39 @@ const SETTLED_STATUSES: readonly AnalysisJobStatus['status'][] = ['completed', '
 
 /** 勾选集住在壳级 store（跨页保勾选）；本剧还没进过 store 时的空视图。 */
 const EMPTY_SELECTION: readonly string[] = [];
+
+/** 「集号 → 值」映射里把某一集归位；值为空（该集没有这项）则摘掉它的键。 */
+function placed<T>(
+  map: Readonly<Record<string, T>> | undefined,
+  episodeId: string,
+  value: T | null | undefined,
+): Record<string, T> {
+  const others = Object.fromEntries(
+    Object.entries(map ?? {}).filter(([key]) => key !== episodeId),
+  );
+  return value === null || value === undefined ? others : { ...others, [episodeId]: value };
+}
+
+/**
+ * 把单集详情并进页面状态。详情里各项是**这一集自己的**列表，页面状态是「集号 → 列表」
+ * 的映射——必须按 episode_id 归位。直接把列表展开进映射得到的是 0/1/2 这种下标键，
+ * 永远对不上集号（按集分拆上线时就是这么写的，分析页转写/高光/曲线/画面轨整体失效）。
+ * 空列表照样落键：键在 = 这集拉过了，键不在 = 还没拉——选中集据此判断要不要拉。
+ */
+export function mergeEpisodeDetail(
+  prev: AnalysisResults | null,
+  detail: EpisodeDetailResult,
+): AnalysisResults {
+  const id = detail.episode_id;
+  return {
+    episodes: prev?.episodes ?? [],
+    asr_segments: placed(prev?.asr_segments, id, detail.asr_segments),
+    highlights: placed(prev?.highlights, id, detail.highlights),
+    conflict_scores: placed(prev?.conflict_scores, id, detail.conflict_scores),
+    prescreen: placed(prev?.prescreen, id, detail.prescreen),
+    visual_tracks: placed(prev?.visual_tracks, id, detail.visual_track),
+  };
+}
 
 /**
  * 把轮询拿到的实时集状态合并进列表——运行中徽章翻动的唯一通道。
@@ -110,33 +144,58 @@ export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
       setEpisodes(detail.episodes);
       // 首进默认勾未完成集；同剧重载保留用户勾选（卷二 §6.5）
       syncSelectionOnEpisodes(projectId, detail.episodes);
-      setActiveEpisodeId(detail.episodes[0]?.id ?? null);
+      // 重载保留当前选中集（还在列表里的话）：分析中每完成一集都会整页重载，
+      // 回回跳到第 1 集等于把用户正在看的那集抢走。首进、或选中集已不在才落第 1 集。
+      setActiveEpisodeId((prev) =>
+        prev !== null && detail.episodes.some((item) => item.id === prev)
+          ? prev
+          : (detail.episodes[0]?.id ?? null),
+      );
     },
     [projectId],
   );
+
+  /** 详情代际：整页重载 +1。重载前发出的详情晚到就丢——它读的可能是这一集转完之前
+   *  的库（空列表），并进来会把「尚未转写」钉在刚转完的集上。 */
+  const generation = useRef(0);
+  const pendingDetail = useRef<Set<string>>(new Set());
 
   const loadAll = useCallback(async (): Promise<void> => {
     applyDetail(await projectApi.get(projectId));
     // 按集分拆（analysis 分批）：首屏只拉集列表摘要（纯数字），不拖全剧
     // 台词——50 集的全量 results 一口气几 MB JSON，首屏等它就是「卡死」。
     const summary = await analysisApi.episodes(projectId);
+    // 已拉的详情一并作废（重跑会改它们）；选中集的那份由下方 effect 立刻补拉
+    generation.current += 1;
+    pendingDetail.current.clear();
     setResults({ episodes: summary.episodes });
     const active = await fetchActiveJob(projectId);
     if (active !== null) setJob(active);
   }, [applyDetail, projectId]);
 
-  /** 点开某集时才拉该集详情（ASR 台词/高光/冲突/画面轨），KB 级。 */
+  /** 拉某集详情（ASR 台词/高光/冲突/画面轨）并按集号并进页面状态，KB 级。 */
   const loadEpisodeDetail = useCallback(async (episodeId: string): Promise<void> => {
-    const detail = await analysisApi.episodeDetail(episodeId);
-    setResults((prev) => ({
-      episodes: prev?.episodes ?? [],
-      asr_segments: { ...prev?.asr_segments, ...detail.asr_segments },
-      highlights: { ...prev?.highlights, ...detail.highlights },
-      conflict_scores: { ...prev?.conflict_scores, ...detail.conflict_scores },
-      prescreen: { ...prev?.prescreen, ...detail.prescreen },
-      visual_tracks: { ...prev?.visual_tracks, ...detail.visual_tracks },
-    }));
+    if (pendingDetail.current.has(episodeId)) return;
+    pendingDetail.current.add(episodeId);
+    const born = generation.current;
+    try {
+      const detail = await analysisApi.episodeDetail(episodeId);
+      if (born === generation.current) setResults((prev) => mergeEpisodeDetail(prev, detail));
+    } catch {
+      // 详情取不到不挡页面：面板保持空态，切集或整页重载会再拉
+    } finally {
+      if (born === generation.current) pendingDetail.current.delete(episodeId);
+    }
   }, []);
+
+  // 选中集的详情按需拉：状态里没有这集的键就拉。首屏默认选中、点击切集、整页重载
+  // 清空之后——三条路共用这一处。此前只有「点击」会拉，默认选中的那集和每次重载
+  // 之后的面板都是空的（「尚未转写」），任务一跑完必现。
+  useEffect(() => {
+    if (activeEpisodeId === null || results === null) return;
+    if (results.asr_segments?.[activeEpisodeId] !== undefined) return;
+    void loadEpisodeDetail(activeEpisodeId);
+  }, [activeEpisodeId, results, loadEpisodeDetail]);
 
   // 服务就绪前 RPC 会失败；ready 后（重）加载一次
   useEffect(() => {
@@ -197,13 +256,8 @@ export function useAnalysisWorkspace(projectId: string): AnalysisWorkspace {
       toggleEpisode(projectId, episodeId, checked);
     },
     activeEpisodeId,
-    setActiveEpisodeId: (id: string | null) => {
-      setActiveEpisodeId(id);
-      // 点开某集时按需拉详情（按集分拆）：不在首屏拖全剧台词
-      if (id !== null && results?.asr_segments?.[id] === undefined) {
-        void loadEpisodeDetail(id);
-      }
-    },
+    // 切集只改选中项；详情由上方 effect 按「状态里有没有这集」统一补拉
+    setActiveEpisodeId,
     results,
     job,
     start,

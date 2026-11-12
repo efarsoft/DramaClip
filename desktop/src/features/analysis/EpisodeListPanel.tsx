@@ -2,7 +2,7 @@
 import type { RefObject } from 'react';
 import { useState } from 'react';
 import { Button, Card, Checkbox } from 'antd';
-import type { Episode, HighlightSegment } from '@dramaclip/protocol';
+import type { Episode } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
 import { missingAudioEpisodes } from './analysisView';
 import { EpisodeListRow } from './EpisodeListRow';
@@ -10,7 +10,8 @@ import { EpisodeListRow } from './EpisodeListRow';
 interface ListProps {
   orderedIds: string[];
   byId: Map<string, Episode>;
-  highlights: Partial<Record<string, HighlightSegment[]>>;
+  /** 集 id → 高光条数（摘要计数：每集都有，与「点没点开过」无关）。 */
+  highlightCounts: Readonly<Record<string, number>>;
   /** 集 id → 失败原因原文（H3 §3.1.1）；没有原因的集缺席，行内如实说「未入库」。 */
   errors: Record<string, string>;
   activeEpisodeId: string | null;
@@ -28,7 +29,7 @@ interface ListProps {
 
 /** 剧集素材列表（按手动/智能顺序渲染）。 */
 export function EpisodeListPanel(props: ListProps): React.ReactElement {
-  const highlightCount = (id: string): number => props.highlights[id]?.length ?? 0;
+  const highlightCount = (id: string): number => props.highlightCounts[id] ?? 0;
   const missing = missingAudioEpisodes(orderedEpisodes(props.orderedIds, props.byId));
   return (
     <Card

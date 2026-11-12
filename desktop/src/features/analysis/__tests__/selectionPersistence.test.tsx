@@ -19,7 +19,12 @@ vi.mock('../../../services/client', () => ({
   analysisApi: {
     results: () => analysisEpisodes(),
     episodes: () => analysisEpisodes(),
-    episodeDetail: () => Promise.resolve({ episodes: [], asr_segments: {}, highlights: {}, conflict_scores: {}, prescreen: {}, visual_tracks: {} }),
+    // 形状以 protocol/schemas/analysis.json 的 analysis.episode_detail 为准：该集自己的列表
+    episodeDetail: (episodeId: string) =>
+      Promise.resolve({
+        episode_id: episodeId, asr_segments: [], highlights: [], conflict_scores: [],
+        prescreen: null, visual_track: null,
+      }),
     status: vi.fn(),
   },
   jobsApi: { list: () => jobsList() },
