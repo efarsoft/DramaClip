@@ -372,6 +372,36 @@ def test_torch_variant_marker_roundtrip(tmp_path: Path) -> None:
     assert tts_runtime.status(data)["torch_variant"] == "unknown"  # 探针跑不动假解释器 → 未装完
 
 
+def test_torch_variant_trusts_the_installed_wheel_over_the_marker(tmp_path: Path) -> None:
+    """盘上的轮子说了算：标记停在上一轮的值上时（torch 换了轮子、后续步骤失败/取消），
+    以轮子自报的版本标签为准——真机 2026-11-12 标记 cuda、实装 +cpu。"""
+    from dramaclip.infra.model_manager import music_runtime, tts_runtime
+
+    data = tmp_path / "data"
+    marker = tts_runtime._variant_marker(data)
+    marker.parent.mkdir(parents=True)
+    marker.write_text("cuda", encoding="utf-8")
+    version_py = tts_runtime.venv_dir(data) / "Lib" / "site-packages" / "torch" / "version.py"
+    version_py.parent.mkdir(parents=True)
+
+    def wheel(tag: str) -> str:
+        version_py.write_text(f"__version__ = '2.8.0{tag}'\ncuda = None\n", encoding="utf-8")
+        return tts_runtime.torch_variant(data)
+
+    assert wheel("+cpu") == "cpu"
+    assert wheel("+cu128") == "cuda"
+    assert wheel("+xpu") == "xpu"
+    # 轮子不带本地标签（读得到但认不出）→ 落回标记
+    assert wheel("") == "cuda"
+
+    # 配乐运行时同口径
+    music_py = music_runtime.venv_dir(data) / "Lib" / "site-packages" / "torch" / "version.py"
+    music_py.parent.mkdir(parents=True)
+    music_py.write_text("__version__ = '2.8.0+cpu'\n", encoding="utf-8")
+    music_runtime._variant_marker(data).write_text("cuda", encoding="utf-8")
+    assert music_runtime.torch_variant(data) == "cpu"
+
+
 def test_gpu_variant_two_tiers(monkeypatch) -> None:
     """算力两档：≥7.0 cu128 / <7.0 或无卡 CPU（cu126 老卡轮 2.8.0 实测无 sm_50 内核，否决）。"""
     from dramaclip.infra.model_manager import tts_runtime

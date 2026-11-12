@@ -68,11 +68,17 @@ def _variant_marker(data_dir: Path) -> Path:
 
 
 def torch_variant(data_dir: Path) -> str:
-    """music-venv 里 torch 的变体：cuda / cpu / unknown（装的时候选了哪条轮子）。"""
-    try:
-        raw = _variant_marker(data_dir).read_text(encoding="utf-8").strip()
-    except OSError:
-        return "unknown"
+    """music-venv 里 torch 的变体：cuda / cpu / unknown。
+
+    与双栈同口径：以已装轮子自报的标签为准，标记文件只在读不到时兜底——acestep 的
+    依赖解析排在 torch 之后，轮子被换掉时标记不会知道。
+    """
+    raw = tts_runtime.wheel_variant(venv_dir(data_dir))
+    if raw is None:
+        try:
+            raw = _variant_marker(data_dir).read_text(encoding="utf-8").strip()
+        except OSError:
+            return "unknown"
     return raw if raw in ("cuda", "cpu") else "unknown"
 
 
@@ -134,6 +140,8 @@ def install(
     variant_label = "CUDA 12.8" if variant == "cuda" else "CPU"
     _pct(18, f"安装 torch（{variant_label} 变体，约 0.2-2.5GB）")
     _install_torch(uv, venv, variant)
+    # 标记跟着轮子落（与双栈同一处）：留到收尾再写，后面任一步失败/取消都会让它失真
+    _variant_marker(data_dir).write_text(variant, encoding="utf-8")
     _check_cancel()
 
     # ④ acestep 源码（钉 rev；归档完整已实测）+ pip 安装（依赖自解析；
@@ -158,7 +166,6 @@ def install(
     _pct(94, "自检（首次 import 较慢）")
     if not tts_runtime._venv_imports_ok(py, ("acestep",)):
         raise RuntimeError("自检失败：acestep 导入异常（配乐生成），可重试修复")
-    _variant_marker(data_dir).write_text(variant, encoding="utf-8")
     _pct(100, "完成")
 
 

@@ -27,6 +27,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tarfile
@@ -257,13 +258,42 @@ def _variant_marker(data_dir: Path) -> Path:
     return venv_dir(data_dir).parent / "tts-venv.torch-variant"
 
 
-def torch_variant(data_dir: Path) -> str:
-    """venv 里 torch 的变体：cuda / cpu / unknown（未装或旧版安装无标记）。
+_TORCH_LOCAL_TAG = re.compile(r"__version__\s*=\s*['\"][^'\"+]*\+([a-z]+)")
 
-    安装完成时写标记文件（零探针成本——status 是 health 高频端点，不能跑子进程）；
-    判定不允许只看文件在不在：torch 装了但 CUDA 初始化失败的情形由合成 worker
-    的运行时探针诚实回退，这里的变体只是「装的时候选了哪条轮子」。
+
+def wheel_variant(venv: Path) -> str | None:
+    """已装 torch 轮子自报的变体：读 version.py 里的本地版本标签（+cpu / +cu128 / +xpu）。
+
+    纯文本读取，不 import、不起子进程（status 是 health 高频端点）。读不到或认不出
+    返回 None，由调用方落回标记文件。
     """
+    try:
+        text = (venv / "Lib" / "site-packages" / "torch" / "version.py").read_text(
+            encoding="utf-8", errors="replace"
+        )
+    except OSError:
+        return None
+    match = _TORCH_LOCAL_TAG.search(text)
+    if match is None:
+        return None
+    tag = match.group(1)
+    if tag.startswith("cu"):
+        return "cuda"
+    return tag if tag in ("cpu", "xpu") else None
+
+
+def torch_variant(data_dir: Path) -> str:
+    """venv 里 torch 的变体：cuda / cpu / xpu / unknown（未装或认不出）。
+
+    以已装轮子自报的标签为准（零探针成本），标记文件只在标签读不到时兜底。标记曾是
+    唯一来源，但它记的是「安装流程选了哪条轮子」而不是「盘上是哪条轮子」——torch
+    换了轮子而后续步骤失败/被取消时两者会分家（2026-11-12 真机：标记 cuda、实装
+    +cpu，能力表据此给老卡点了一颗运行时必然回退的绿灯）。
+    torch 装对了但 CUDA 初始化失败的情形，仍由合成 worker 的运行时探针诚实回退。
+    """
+    wheel = wheel_variant(venv_dir(data_dir))
+    if wheel is not None:
+        return wheel
     marker = _variant_marker(data_dir)
     try:
         raw = marker.read_text(encoding="utf-8").strip()
@@ -615,6 +645,8 @@ def install(
     variant_label = {"cuda": "CUDA 12.8", "xpu": "Intel XPU"}.get(variant, "CPU")
     _pct(18, f"安装 torch（{variant_label} 变体，约 0.2-2.5GB）")
     _install_torch(uv, venv, variant)
+    # 标记跟着轮子落：留到收尾再写，后面任一步失败/取消都会让它停在上一轮的值上
+    _variant_marker(data_dir).write_text(variant, encoding="utf-8")
     _check_cancel()
 
     # ④ 双栈其余依赖（清华镜像；transformers 定 4.52.1 = IndexTTS 硬需要 +
@@ -726,7 +758,6 @@ def install(
         raise RuntimeError("自检失败：funasr 导入异常（本地 ASR），可重试修复")
     if not _venv_imports_ok(py, ("kokoro",)):
         raise RuntimeError("自检失败：kokoro 导入异常（本地 TTS），可重试修复")
-    _variant_marker(data_dir).write_text(variant, encoding="utf-8")
     _pct(100, "完成")
 
 
