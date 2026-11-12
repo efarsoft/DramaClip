@@ -37,6 +37,7 @@ class _FakeLlm:
         _FakeLlm.instances.append(self)
 
     def chat_json(self, _system: str, user: str, temperature: float = 0.3) -> dict:
+        self.last_system = _system
         self.last_user = user
         if isinstance(_FakeLlm.reply, Exception):
             raise _FakeLlm.reply
@@ -184,6 +185,70 @@ def test_unconfigured_llm_never_constructed(
     project_id = _project_with_analysis(memory_db, tmp_path)
     result = mode_recommend.recommend(memory_db, project_id, {}, refresh=False)
     assert [m["mode"] for m in result["modes"]] == mode_recommend._FALLBACK_ORDER
+
+
+def test_retired_mode_is_off_the_menu_and_never_recommended(
+    memory_db: sqlite3.Connection, tmp_path: Path, fake_llm: type[_FakeLlm]
+) -> None:
+    """退役模式（高光混剪）不进菜单、id 与中文标签都映射不上——真机实锤回归：
+    它曾从全量标签表混进菜单，LLM 选了它、出片页自动勾上，生成方案即
+    「模式暂未支持: highlight_cut」。"""
+    project_id = _project_with_analysis(memory_db, tmp_path)
+    fake_llm.reply = {
+        "modes": [
+            {"mode": "highlight_cut", "reason": "退役 id"},
+            {"mode": "高光混剪", "reason": "退役标签"},
+            {"mode": "dialogue_narration", "reason": "合法"},
+        ]
+    }
+
+    result = mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
+
+    system = fake_llm.instances[0].last_system
+    assert "highlight_cut" not in system and "高光混剪" not in system, "菜单里不该有退役模式"
+    assert "纯原片剪辑" in system, "可供应模式要在菜单里"
+    modes = [m["mode"] for m in result["modes"]]
+    assert "highlight_cut" not in modes
+    assert modes[0] == "dialogue_narration"
+    assert len(modes) == 3, "剔掉退役项后按通用序补足三个"
+    assert "已剔除退役模式" not in " ".join(m["reason"] for m in result["modes"]), (
+        "这轮是 LLM 现算被滤，补位理由沿用既有文案"
+    )
+
+
+def test_cached_recommendation_with_retired_mode_is_purified_and_rewritten(
+    memory_db: sqlite3.Connection, tmp_path: Path, fake_llm: type[_FakeLlm]
+) -> None:
+    """老缓存带着退役模式：读到就净化（剔除+补足三个）并写回缓存，不再每次当坏缓存。"""
+    project_id = _project_with_analysis(memory_db, tmp_path)
+    projects_repo.update_settings(
+        memory_db,
+        project_id,
+        {
+            "mode_recommendation": {
+                "modes": [
+                    {"mode": "raw_clip", "reason": "原声强"},
+                    {"mode": "highlight_cut", "reason": "退役残留"},
+                    {"mode": "dialogue_narration", "reason": "叙事"},
+                ],
+                "genre": "逆袭",
+                "at": 1,
+            }
+        },
+    )
+
+    result = mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
+
+    modes = [m["mode"] for m in result["modes"]]
+    assert "highlight_cut" not in modes
+    assert modes[0] == "raw_clip" and modes[1] == "dialogue_narration"
+    assert len(modes) == 3, "净化后补足三个"
+    assert "已剔除退役模式" in result["modes"][2]["reason"]
+    rewritten = projects_repo.get_settings(memory_db, project_id)["mode_recommendation"]
+    assert "highlight_cut" not in [m["mode"] for m in rewritten["modes"]], "净化结果要落回缓存"
+    assert len(fake_llm.instances) == 0, "读缓存净化不该惊动 LLM"
+    again = mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
+    assert again == result, "净化后的缓存照常命中"
 
 
 def test_rpc_rejects_missing_project(memory_db: sqlite3.Connection, tmp_path: Path) -> None:

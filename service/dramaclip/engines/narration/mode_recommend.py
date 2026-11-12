@@ -13,7 +13,7 @@ import logging
 import time
 from typing import Any
 
-from dramaclip.engines.narration.pipeline import MODE_LABELS
+from dramaclip.engines.narration.pipeline import MODE_LABELS, RETIRED_MODES
 from dramaclip.engines.semantic.llm_client import LlmUnavailable, client_for, is_configured
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -27,7 +27,10 @@ _RECOMMEND_TIMEOUT_S = 60.0
 #: LLM 缺位时的静态组合与补位顺序：叙事强 → 节奏快 → 门槛最低，通用可用的次序。
 _FALLBACK_ORDER = ["dialogue_narration", "cross_narration", "raw_clip"]
 
-_MENU = "\n".join(f"- {mode}: {label}" for mode, label in MODE_LABELS.items())
+#: 可供应模式（退役模式不进推荐面：进菜单=LLM 可选=出片页自动勾上=撞「模式暂未支持」，
+# 2026-11-12 真机实锤——高光混剪退役后仍从全量标签表混进推荐并被缓存）。
+_OFFERABLE = {mode: label for mode, label in MODE_LABELS.items() if mode not in RETIRED_MODES}
+_MENU = "\n".join(f"- {mode}: {label}" for mode, label in _OFFERABLE.items())
 _SYSTEM = (
     "你是短剧推广出片顾问。根据剧集的题材与高光信息，从模式菜单里挑出最"
     f"适合推广的 {_RECOMMEND_COUNT} 个模式，只输出 JSON："
@@ -39,11 +42,21 @@ _SYSTEM = (
 def recommend(
     conn: Any, project_id: str, settings: dict[str, str], *, refresh: bool
 ) -> dict[str, Any]:
-    """取推荐：有缓存且未要求刷新直接回；否则现算并写回项目设置。"""
+    """取推荐：有缓存且未要求刷新直接回；否则现算并写回项目设置。
+
+    老缓存可能带着退役模式（推荐菜单曾按全量标签表生成）：读到就净化——剔除、
+    按通用序补回三个、把净化结果写回缓存（不写回等于每次读都当坏缓存处理）。
+    """
     if not refresh:
         cached = projects_repo.get_settings(conn, project_id).get(_CACHE_KEY)
         if isinstance(cached, dict) and cached.get("modes"):
-            return cached
+            raw_modes = cached.get("modes")
+            kept = _drop_retired(raw_modes)
+            if len(kept) == len(raw_modes if isinstance(raw_modes, list) else []):
+                return cached
+            purified = {**cached, "modes": _fallback(kept, "已剔除退役模式")}
+            projects_repo.update_settings(conn, project_id, {_CACHE_KEY: purified})
+            return purified
     result = _compute(conn, project_id, settings)
     projects_repo.update_settings(conn, project_id, {_CACHE_KEY: result})
     return result
@@ -106,10 +119,11 @@ def _ask_llm(settings: dict[str, str], genre: str, reasons: list[str]) -> list[d
 
 def _validate(raw: Any) -> list[dict[str, str]]:
     """筛出菜单内的合法模式（去重）；mode 兼容 id 或中文标签（LLM 偶尔
-    返回「高光混剪」而非 highlight_cut，能唯一映射回 id 就不整条丢弃）。
+    返回「高光混剪」这类中文名，能唯一映射回可供应 id 就不整条丢弃）——
+    退役模式的 id 和标签都映射不上，天然被这条滤掉。
     """
     out: list[dict[str, str]] = []
-    label_to_id = {label: mode for mode, label in MODE_LABELS.items()}
+    label_to_id = {label: mode for mode, label in _OFFERABLE.items()}
     if not isinstance(raw, dict):
         return out
     for item in raw.get("modes") or []:
@@ -117,11 +131,24 @@ def _validate(raw: Any) -> list[dict[str, str]]:
             continue
         mode = str(item.get("mode") or "").strip()
         mode = label_to_id.get(mode, mode)
-        if mode not in MODE_LABELS or any(p["mode"] == mode for p in out):
+        if mode not in _OFFERABLE or any(p["mode"] == mode for p in out):
             continue
-        reason = str(item.get("reason") or "").strip()[:40] or str(MODE_LABELS[mode])
+        reason = str(item.get("reason") or "").strip()[:40] or str(_OFFERABLE[mode])
         out.append({"mode": mode, "reason": reason})
     return out[:_RECOMMEND_COUNT]
+
+
+def _drop_retired(items: Any) -> list[dict[str, str]]:
+    """缓存里的退役模式剔除；形状不是列表或全被剔空都返回空表（交补位）。"""
+    out: list[dict[str, str]] = []
+    if not isinstance(items, list):
+        return out
+    for item in items:
+        if isinstance(item, dict) and str(item.get("mode") or "") in _OFFERABLE:
+            out.append(
+                {"mode": str(item["mode"]), "reason": str(item.get("reason") or "")[:40]}
+            )
+    return out
 
 
 def _fallback(picked: list[dict[str, str]], reason: str) -> list[dict[str, str]]:

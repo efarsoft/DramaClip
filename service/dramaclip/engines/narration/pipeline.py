@@ -59,6 +59,12 @@ MODE_LABELS = {
     "inner_monologue": "内心独白",
 }
 
+#: 已退役模式（2026-10-27 业主裁决：高光混剪并入纯原片剪辑，raw_clip 单入口）。
+# 渲染链保留——build 分支/_NO_TTS_MODES/库里旧方案照常出片；但一切「可供应」面
+# （新方案白名单 narration_plans.SUPPORTED_MODES、AI 模式推荐菜单与缓存）都不得
+# 再出现它们。两张表的差集由契约测试锁定（test_modes.py），别再手抄第四份清单。
+RETIRED_MODES = frozenset({"highlight_cut"})
+
 
 def build_plan(
     mode: str,

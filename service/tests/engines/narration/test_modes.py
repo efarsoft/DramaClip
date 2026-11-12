@@ -26,6 +26,20 @@ def _scenes() -> list[ConflictScore]:
     ]
 
 
+def test_supported_modes_are_labels_minus_retired() -> None:
+    """契约：可供应白名单 == 全量标签表 − 退役名单。
+
+    两张表各有一份手抄（SUPPORTED_MODES 给新方案闸、MODE_LABELS 给渲染与展示），
+    差集只该是退役名单——2026-11-12 真机实锤过漂移的代价：退役的高光混剪仍在
+    标签表里，推荐菜单照它生成，LLM 选了它、出片页自动勾上、生成方案即
+    「模式暂未支持」。名单本身登记在 pipeline.RETIRED_MODES，本用例锁三者关系。
+    """
+    from dramaclip.api.narration_plans import SUPPORTED_MODES
+
+    assert set(pipeline.MODE_LABELS) >= pipeline.RETIRED_MODES, "退役名单必须登记在标签表里"
+    assert set(SUPPORTED_MODES) == set(pipeline.MODE_LABELS) - pipeline.RETIRED_MODES
+
+
 def test_raw_clip_follows_episode_order() -> None:
     """真机 2026-10-20 业主否掉预告式前置：无解说模式里异集孤插开场=莫名其妙。
 
