@@ -30,6 +30,10 @@ export interface ReadinessInput {
   readonly selftests?: SelftestResults;
   readonly settings: Readonly<Record<string, string>>;
   readonly ffmpegVersion: string;
+  /** LLM 引用配置启用态（engine_configs 有启用行即 true）——settings 镜像
+   *  与 configs 加载是两条并行 RPC，首开总览时 settings 可能还没回来，
+   *  只看 settings 会闪「未配置」；configs 启用态是更稳定的判据。 */
+  readonly llmConfigActive?: boolean;
 }
 
 /**
@@ -92,12 +96,17 @@ function asrStep(input: ReadinessInput): ReadinessStep {
 
 function llmStep(input: ReadinessInput): ReadinessStep {
   const url = input.settings['llm.base_url'] ?? '';
+  // settings 镜像与 configs 启用态双判据：settings 没回来但 configs 有启用行
+  // 也算已配置（首开总览不再闪「未配置」——两条 RPC 是并行的）
+  const ok = url !== '' || input.llmConfigActive === true;
   return {
     key: 'llm',
     index: '②',
     label: '文案',
-    detail: url === '' ? '未配置 · 解说模式不可用' : `云端 · ${input.settings['llm.model'] ?? '已配置'}`,
-    ok: url !== '',
+    detail: ok
+      ? `云端 · ${input.settings['llm.model'] ?? '已配置'}`
+      : '未配置 · 解说模式不可用',
+    ok,
     tab: 'llm',
   };
 }

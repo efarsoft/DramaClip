@@ -36,6 +36,7 @@ export function OverviewTab({
   ffmpegVersion,
   onChanged,
   onVerify,
+  llmConfigActive,
 }: {
   models: readonly ModelInfo[];
   settings: SettingsMap;
@@ -44,9 +45,10 @@ export function OverviewTab({
   ffmpegVersion: string;
   onChanged: () => void;
   onVerify: (modelId: string) => void;
+  llmConfigActive: boolean;
 }): ReactElement {
   const navigate = useNavigate();
-  const steps = workReadiness({ models, reports, selftests, settings, ffmpegVersion });
+  const steps = workReadiness({ models, reports, selftests, settings, ffmpegVersion, llmConfigActive });
   const go = (tab: EngineTab): void => {
     void navigate(`/engines/${tab}`);
   };

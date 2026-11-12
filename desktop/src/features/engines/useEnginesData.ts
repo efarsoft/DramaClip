@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { App as AntdApp } from 'antd';
 import type { ImportRecord, ModelInfo, SelftestResults } from '@dramaclip/protocol';
-import { enginesApi, modelsApi, onServiceEvent, rpc, systemApi } from '../../services/client';
+import { engineConfigsApi, enginesApi, modelsApi, onServiceEvent, rpc, systemApi } from '../../services/client';
 import { type Reports, reportsOf } from './assetState';
 import { type MachineSpecs, specsFromHealth } from './machineFit';
 import type { SettingsMap } from './EnginesPage';
@@ -24,6 +24,9 @@ export interface EnginesData {
   readonly selftests: SelftestResults;
   readonly ffmpegVersion: string;
   readonly machine: MachineSpecs;
+  /** LLM 引用配置启用态：首开总览时 settings 镜像 RPC 与 configs RPC 并行，
+   * 只看 settings 会闪「未配置」——configs 启用行是更稳定的判据。 */
+  readonly llmConfigActive: boolean;
 }
 
 export interface EnginesDataHub {
@@ -38,14 +41,18 @@ export function useEnginesData(): EnginesDataHub {
   const [data, setData] = useState<EnginesData | null>(null);
 
   const load = useCallback(async () => {
-    const [models, settings, reports, health, records, selftests] = await Promise.all([
-      modelsApi.list(),
-      rpc<SettingsMap>('settings.get'),
-      modelsApi.verify(),
-      systemApi.health(),
-      modelsApi.importRecords(),
-      enginesApi.selftestResults(),
-    ]);
+    const [models, settings, reports, health, records, selftests, llmConfigs] =
+      await Promise.all([
+        modelsApi.list(),
+        rpc<SettingsMap>('settings.get'),
+        modelsApi.verify(),
+        systemApi.health(),
+        modelsApi.importRecords(),
+        enginesApi.selftestResults(),
+        // LLM 引用配置启用态：settings 镜像与 configs 是两条并行 RPC，
+        // 首开总览时只看 settings 会闪「未配置」——configs 启用行是更稳的判据
+        engineConfigsApi.list('llm').catch(() => ({ configs: [] })),
+      ]);
     setData({
       models,
       imported: records.records,
@@ -55,6 +62,7 @@ export function useEnginesData(): EnginesDataHub {
       selftests,
       ffmpegVersion: health.ffmpeg_version,
       machine: specsFromHealth(health),
+      llmConfigActive: llmConfigs.configs.some((c) => c.enabled > 0),
     });
   }, []);
 

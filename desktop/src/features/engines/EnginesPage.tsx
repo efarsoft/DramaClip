@@ -146,6 +146,7 @@ function TabBody({
       ffmpegVersion={data.ffmpegVersion}
       onChanged={domain.onChanged}
       onVerify={domain.onVerify}
+      llmConfigActive={data.llmConfigActive}
     />
   );
 }
