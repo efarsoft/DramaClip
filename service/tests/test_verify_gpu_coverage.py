@@ -144,10 +144,10 @@ def test_judge_actual_accepts_amf_for_cuda(mod) -> None:
 
 
 def test_select_hw_encoder_returns_first_working_candidate(mod, monkeypatch) -> None:
-    from dramaclip.engines.exporter import encoder
+    from dramaclip.engines.exporter import encoder, hw_encoders
 
     monkeypatch.setattr(
-        encoder, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_amf", "h264_qsv"]
+        hw_encoders, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_amf", "h264_qsv"]
     )
 
     def fake_run_cut(args, cancel=None, **kwargs):
@@ -161,10 +161,10 @@ def test_select_hw_encoder_returns_first_working_candidate(mod, monkeypatch) -> 
 
 
 def test_select_hw_encoder_all_fail_lists_every_candidate(mod, monkeypatch) -> None:
-    from dramaclip.engines.exporter import encoder
+    from dramaclip.engines.exporter import encoder, hw_encoders
 
     monkeypatch.setattr(
-        encoder, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_amf", "h264_qsv"]
+        hw_encoders, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_amf", "h264_qsv"]
     )
     seen: list[str] = []
 

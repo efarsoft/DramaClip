@@ -11,14 +11,11 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import json
 import logging
-import math
 import os
 import random
-import sys
+import subprocess  # noqa: F401, S404 - 测试经 encoder.subprocess 打桩 run；film_assembly 实际使用
 import threading
-import uuid
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -30,14 +27,17 @@ from dramaclip.engines.dedup import jitter
 from dramaclip.engines.dedup import params as dedup_params
 from dramaclip.engines.exporter import ai_label, aigc_metadata, drama_name_layer, loudness
 
+# 测试桩兼容：subprocess 模块对象共享，patch encoder.subprocess.run 对 film_assembly 同效
+# 拆出模块的 re-export（cut_segment_args/_export_plan_once 内部调用 + 外部引用面）
+from dramaclip.engines.exporter.bgm_bed import (
+    _mix_bgm_bed as _mix_bgm_bed,
+)
+
 # 成片装配层（拆分专项）：concat/签名/审计/段偏移从本模块 re-export
 # ——外部调用方与测试桩按旧名从 encoder 取的契约不变。
 from dramaclip.engines.exporter.film_assembly import (  # noqa: F401
     _COLOR_ARGS,
-    _FALLBACK_CODEC,
     _SEGMENT_SAMPLE_RATE,
-    AUDIT_DURATION_ABS_TOLERANCE_S,
-    AUDIT_DURATION_REL_TOLERANCE,
     FilmIntegrityError,
     _audio_signature,
     _audit_film_duration,
@@ -50,10 +50,55 @@ from dramaclip.engines.exporter.film_assembly import (  # noqa: F401
     _staged_path,
     _video_signature,
 )
-from dramaclip.engines.narration.models import PlanData, TimelineSegment
+from dramaclip.engines.exporter.film_assembly import (
+    _FALLBACK_CODEC as _FALLBACK_CODEC,
+)
+from dramaclip.engines.exporter.film_assembly import (
+    AUDIT_DURATION_ABS_TOLERANCE_S as AUDIT_DURATION_ABS_TOLERANCE_S,
+)
+from dramaclip.engines.exporter.film_assembly import (
+    AUDIT_DURATION_REL_TOLERANCE as AUDIT_DURATION_REL_TOLERANCE,
+)
+from dramaclip.engines.exporter.hw_encoders import (
+    _video_codec_params as _video_codec_params,
+)
+from dramaclip.engines.exporter.hw_encoders import (
+    nvenc_available as nvenc_available,
+)
+from dramaclip.engines.exporter.hw_encoders import (
+    pick_hw_encoder as pick_hw_encoder,
+)
+from dramaclip.engines.exporter.signatures import (
+    _SIG_VERSION as _SIG_VERSION,
+)
+from dramaclip.engines.exporter.signatures import (
+    _file_identity as _file_identity,
+)
+from dramaclip.engines.exporter.signatures import (
+    _prune_stale_segments as _prune_stale_segments,
+)
+from dramaclip.engines.exporter.signatures import (
+    _read_sig as _read_sig,
+)
+from dramaclip.engines.exporter.signatures import (
+    _reusable_subtitles as _reusable_subtitles,
+)
+from dramaclip.engines.exporter.signatures import (
+    _sha256_file as _sha256_file,
+)
+from dramaclip.engines.exporter.signatures import (
+    _sig_path_for as _sig_path_for,
+)
+from dramaclip.engines.exporter.signatures import (
+    _write_sig_atomic as _write_sig_atomic,
+)
+from dramaclip.engines.exporter.signatures import (
+    _zones_fingerprint as _zones_fingerprint,
+)
+from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.subtitle import caption_font
 from dramaclip.infra import compute, config
-from dramaclip.infra.ffmpeg import probe as ffprobe_mod
+from dramaclip.infra.ffmpeg import probe as ffprobe_mod  # noqa: F401 - 测试桩经 encoder.ffprobe_mod.probe 打桩
 from dramaclip.infra.ffmpeg import runner
 
 # 测试桩兼容：模块对象共享，patch encoder.ffprobe_mod.probe 对 film_assembly 同效
@@ -189,8 +234,6 @@ def seam_fades(
 
 class EpisodeSourceMissing(Exception):
     """时间轴引用的源集文件缺失。"""
-
-
 
 
 def resolve_canvas(episode_paths: dict[str, str], cap: tuple[int, int]) -> tuple[int, int]:
@@ -494,7 +537,6 @@ def cut_segment_args(
 
 def _escape_filter_path(path: str) -> str:
     """ass 滤镜路径处理：优先相对路径（规避盘符冒号的转义地狱），绝对路径双转义保底。"""
-    import os
 
     normalized = path.replace("\\", "/")
     if ":" not in normalized:
@@ -528,94 +570,6 @@ _HW_CANDIDATES_BY_PLATFORM: dict[str, tuple[str, ...]] = {
 # 重编码 concat 都注入；流复制分支保留源标签不动。
 
 _HW_CANDIDATES_LINUX: tuple[str, ...] = ("h264_nvenc", "h264_qsv")
-
-# 驱动挂起兜底：探测真编不许拖住导出超过 15s（正式段编码仍走 _run_cut 默认 600s）。
-_HW_PROBE_TIMEOUT_S = 15.0
-
-
-def _hw_candidates(platform: str | None = None) -> list[str]:
-    """当前平台的硬编候选序（win32/darwin 显式表，其余平台按 linux 序）。"""
-    key = sys.platform if platform is None else platform
-    if key in _HW_CANDIDATES_BY_PLATFORM:
-        return list(_HW_CANDIDATES_BY_PLATFORM[key])
-    return list(_HW_CANDIDATES_LINUX)
-
-
-def _video_codec_params(video_codec: str) -> list[str]:
-    """各编码器的质量参数——正式合成与探测真试编读**同一处**构造（不许各写一份）。"""
-    if video_codec == "h264_nvenc":
-        return ["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", "22"]
-    if video_codec == "h264_amf":
-        # cqp 22 对齐 NVENC 的 vbr/cq 22 与 QSV 的 global_quality 22；usage=transcoding
-        # 对文件导出而非低延迟场景。参数只在这一处定义，探针与正式段共用。
-        return [
-            "-usage", "transcoding",
-            "-quality", "quality",
-            "-rc", "cqp",
-            "-qp_i", "22", "-qp_p", "22", "-qp_b", "24",
-        ]
-    if video_codec == "h264_qsv":
-        # QSV 用全局质量（ICQ）对齐 NVENC 的 VBR+CQ 语义；preset 名与 x264 系不同。
-        return ["-preset", "medium", "-global_quality", "22"]
-    if video_codec == "h264_videotoolbox":
-        return ["-q:v", "55"]
-    # medium：交付场景同 CRF 画质明显优于 veryfast（编码时间约两倍，段级
-    # 并行下可接受）；探针真试编与正式段读同一处，签名天然一致。
-    return ["-preset", "medium", "-crf", "20"]
-
-
-def _hw_probe_args(video_codec: str) -> list[str]:
-    """0.1s 黑帧真试编命令：与正式段编码同形状的质量参数，输出到 null。"""
-    return [
-        "-f", "lavfi", "-i", "color=black:s=256x256:d=0.1",
-        "-c:v", video_codec, *_video_codec_params(video_codec),
-        # 色彩参数与正式段同形状（探针验证的是同一输出形状）
-        *_COLOR_ARGS,
-        "-f", "null", "-",
-    ]
-
-
-_HW_LOCK = threading.Lock()
-# 缓存「选中的编码器名」（None=全失败也缓存）：会话级结果，防换卡/驱动更新后陈旧
-# 的代价由进程生命周期界定；旧 _NVENC_CACHE(bool) 形状被 pick_hw_encoder 取代。
-_HW_ENCODER_CACHE: str | None = None
-
-
-def pick_hw_encoder() -> str | None:
-    """返回第一个真试编通过的硬编编码器名；全失败/探测自身异常返回 None。
-
-    探测自身的任何异常（驱动崩溃、OSError）都吞掉按不可用处理——best-effort 增强
-    绝不反过来把本来能软编成功的导出挡死。
-    """
-    global _HW_ENCODER_CACHE  # noqa: PLW0603
-    with _HW_LOCK:
-        if _HW_ENCODER_CACHE is None:
-            chosen: str | None = None
-            for candidate in _hw_candidates():
-                try:
-                    _run_cut(_hw_probe_args(candidate), timeout_s=_HW_PROBE_TIMEOUT_S)
-                except Exception:  # noqa: BLE001 - 驱动/会话异常一律按该候选不可用
-                    continue
-                chosen = candidate
-                break
-            # 用哨兵区分「还没探过」与「探过、全失败」：全失败缓存为 ""，
-            # 避免每次导出都重试真编（黑帧 0.1s×候选数，机器慢时是秒级）。
-            _HW_ENCODER_CACHE = chosen if chosen is not None else ""
-            if chosen is None:
-                _LOGGER.info("硬编探测：所有候选不可用，回退 libx264")
-            else:
-                _LOGGER.info("硬编探测：选用 %s", chosen)
-        return _HW_ENCODER_CACHE or None
-
-
-def nvenc_available() -> bool:
-    """旧签名兼容（api/export.py 无参调用）：严格语义 = pick_hw_encoder() 选中 NVENC。
-
-    不放宽成「任何硬编可用」：调用方拿到 True 后写死 h264_nvenc，若这里在 mac 上因
-    videotoolbox 返回 True 就会用 NVENC 真编挂掉。新调用方直接用 pick_hw_encoder()。
-    """
-    return pick_hw_encoder() == "h264_nvenc"
-
 
 def _run_cut(
     args: list[str],
@@ -677,9 +631,6 @@ def _fallback_eligible(exc: runner.FfmpegError, args: list[str]) -> bool:
 # 复用判据=声明输入一致（源身份/集号/起止/角色/转场/淡入淡出/尺寸/字幕形状与文本
 # hash/TTS 音频 sha/保护区哈希/请求 codec==实际成功 codec）；不含 jitter 后实际切点
 # （那是每次渲染要不同的量）。sig 与段同生命周期、tmp+replace 原子写；陈旧尾段清掉。
-_SIG_VERSION = 1
-
-
 @dataclass
 class _SegmentJob:
     """一段的编码任务 + 写 sidecar 签名所需的全部上下文。
@@ -698,133 +649,6 @@ class _SegmentJob:
     subtitle_source: str
     ass_sha256: str | None
     reuse: bool
-
-
-
-
-def _sig_path_for(seg_path: Path) -> Path:
-    return seg_path.with_suffix(".sig")
-
-
-def _sha256_file(path: str | Path) -> str | None:
-    """文件内容 sha256；读不到返回 None（调用方按不可复用处理）。"""
-    try:
-        digest = hashlib.sha256()
-        with open(path, "rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-    except OSError:
-        return None
-    return digest.hexdigest()
-
-
-def _file_identity(path: str | Path) -> dict[str, object]:
-    """源文件身份：path+size+mtime_ns。stat 失败给 -1（必与任何真实签名不等）。"""
-    try:
-        stat = Path(path).stat()
-    except OSError:
-        return {"path": str(path), "size": -1, "mtime_ns": -1}
-    return {"path": str(path), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
-
-
-def _zones_fingerprint(zones: list[SpeechZone]) -> str:
-    """台词保护区内容哈希：手工 .srt 或库内 ASR 变了，切点语义就变了，不许复用。"""
-    payload = json.dumps([[zone.start, zone.end] for zone in zones])
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def _read_sig(seg_path: Path) -> dict[str, Any] | None:
-    """读 sidecar 签名：缺任何一边/损坏/版本或形状不对都返回 None（按不可复用）。
-
-    产物必须非空（与 A5 缓存的 `_usable` 同判据）：0 字节残留不是可复用产物。
-    """
-    sig_path = _sig_path_for(seg_path)
-    if not sig_path.is_file():
-        return None
-    try:
-        if not (seg_path.is_file() and seg_path.stat().st_size > 0):
-            return None
-        payload = json.loads(sig_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # ValueError 含 JSONDecodeError：损坏按不可复用
-        return None
-    if not isinstance(payload, dict) or payload.get("version") != _SIG_VERSION:
-        return None
-    inputs = payload.get("inputs")
-    recorded = payload.get("recorded")
-    if not isinstance(inputs, dict) or not isinstance(recorded, dict):
-        return None
-    return {"inputs": inputs, "recorded": recorded}
-
-
-def _write_sig_atomic(seg_path: Path, payload: dict[str, Any]) -> None:
-    """签名原子落盘（tmp+replace，A5 缓存同形状）：崩溃只会丢 sig，不会留半截可误读的。"""
-    sig_path = _sig_path_for(seg_path)
-    tmp = seg_path.with_name(f"{seg_path.stem}.{uuid.uuid4().hex}.tmp")
-    try:
-        tmp.write_text(
-            json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
-        )
-        os.replace(tmp, sig_path)
-    finally:
-        tmp.unlink(missing_ok=True)
-
-
-def _reusable_subtitles(
-    index: int,
-    segment: TimelineSegment,
-    recorded: dict[str, Any],
-    subtitle_source: str,
-    subtitle_burner: Callable[[int, str, float], str] | None,
-    original_subtitle_provider: Callable[[int, float, float], str | None] | None,
-) -> bool:
-    """复用候选段的字幕校验：用**上次记录的窗口**重新生成 ass，内容 hash 必须与记录一致。
-
-    为什么必须重新生成而不是「旧 ass 文件还在就行」：ass 字节由预设、拆行逻辑、
-    emotion 标签共同决定，编码器看不见这些量；重新生成一遍才证明它们没变。
-    生成窗口取 sig 里记的上次值而非本次 jitter 切点——否则时间字段必然不同，
-    复用永不命中（rng 无种子）。任何异常/hash 不一致→不可复用（重编）。
-    """
-    if recorded.get("subtitle_source") != subtitle_source:
-        return False
-    want = recorded.get("ass_sha256")
-    produced: str | None = None
-    try:
-        if subtitle_source == "burner":
-            if subtitle_burner is None:
-                return False
-            produced = subtitle_burner(
-                index, str(segment.subtitle_text or ""), float(recorded["duration_s"])
-            )
-        elif subtitle_source == "provider":
-            if original_subtitle_provider is None:
-                return False
-            produced = original_subtitle_provider(
-                index, float(recorded["safe_start"]), float(recorded["safe_end"])
-            )
-        elif subtitle_source != "none":
-            return False
-    except Exception:  # noqa: BLE001 - 校验失败按不可复用处理，绝不挡正常编码
-        return False
-    if produced is None:
-        return want is None
-    return want is not None and _sha256_file(produced) == want
-
-
-def _prune_stale_segments(work_dir: Path, segment_count: int) -> None:
-    """清掉上次更长的计划留下的 seg/sig 尾段（索引 >= 本次段数）。
-
-    Phase B 已改成按 jobs 清单取段（`_concat_manifest`），尾段进不了成片；这里清它们
-    只为不留垃圾占盘、不让 sig 复用判据在下次更长的计划里吃到过期产物。
-    只按 seg_NNN 命名清 .mp4/.sig 两种，不碰 api 层的 seg_NNN.ass。
-    """
-    for pattern in ("seg_*.mp4", "seg_*.sig"):
-        for path in work_dir.glob(pattern):
-            try:
-                index = int(path.stem.rsplit("_", 1)[-1])
-            except ValueError:
-                continue
-            if index >= segment_count:
-                path.unlink(missing_ok=True)
 
 
 def _compute_requested(value: str) -> str:
@@ -1376,111 +1200,4 @@ def _export_plan_once(
     if on_progress is not None:
         on_progress(100.0, "导出完成")
     return out_path
-
-
-def _bed_gain_db(track: Path) -> float | None:
-    """曲目 integrated LUFS → 床增益（dB）；量不到返回 None（调用方回退固定增益）。
-
-    床响度归一（批3）：固定 0.15 线性增益下曲目间 6~10 LUFS 的 master 差异
-    原样透进成片，换曲=换片感；按「床目标 − 曲目实测」算增益后任何曲目
-    落床都同响。ebur128 走门禁同款量法（loudness.measure_integrated_lufs）。
-    """
-    try:
-        reading = loudness.measure_integrated_lufs(track)
-    except Exception as exc:  # noqa: BLE001 - 增强项：量不到回退，不挡片
-        _LOGGER.warning(
-            "BGM 曲目响度测量失败（%s）：床增益回退固定 %s", str(exc)[:120], _BGM_BED_VOLUME
-        )
-        return None
-    return round(_BGM_BED_TARGET_LUFS - reading.integrated_lufs, 2)
-
-
-def _bed_loop_inputs(track: Path, duration: float, track_dur: float) -> tuple[list[str], str]:
-    """床循环输入与子图前缀（产出恒定标签 ``[bedsrc]``）。
-
-    多副本 acrossfade 优先，边界情形回退 stream_loop。返回 (附加输入参数,
-    子图前缀)；调用方保证输入 0 是成片、床副本从 1 号输入起编号。acrossfade
-    接长的链长 = N*track_dur − (N−1)*crossfade ≥ 成片长（N 多取一副本留
-    余量）；amix duration=first 与 -t 再兜底裁齐。
-    """
-    if duration <= track_dur:
-        return ["-i", str(track)], "[1:a]anull[bedsrc];"  # 曲比片长：无需循环
-    need = math.ceil(duration / track_dur) + 1
-    can_crossfade = track_dur > 2 * _BGM_LOOP_XFADE_S and need <= _BGM_LOOP_MAX_COPIES
-    if not can_crossfade:
-        # 曲目过短（crossfade 会吃掉大半）或副本数超帽（超长片×超短曲）：
-        # 回退硬循环——循环点咔哒风险换可行性，留痕在常量注释。
-        return ["-stream_loop", "-1", "-i", str(track)], "[1:a]anull[bedsrc];"
-    inputs: list[str] = ["-i", str(track)]
-    chain: list[str] = []
-    prev = "[1:a]"
-    for index in range(2, need + 1):
-        inputs += ["-i", str(track)]
-        label = "[bedsrc]" if index == need else f"[c{index}]"
-        chain.append(f"{prev}[{index}:a]acrossfade=d={_BGM_LOOP_XFADE_S}{label}")
-        prev = label
-    return inputs, ";".join(chain) + ";"
-
-
-def _mix_bgm_bed(
-    film: Path, track: Path, work_dir: Path, *, lossless_intermediate: bool = False
-) -> Path:
-    """整片铺 BGM 床，返回混好的文件路径（替换/续加工由调用方决定）。
-
-    v2（批3 听感治理）三升级，画轨不变仍零重编（-c:v copy）：
-    - 床响度归一：_bed_gain_db 按曲目实测 LUFS 算 dB，量不到回退固定 0.15；
-    - 循环 crossfade：_bed_loop_inputs 多副本接长替代硬循环，循环点无咔哒；
-    - 人声躲床：成片混音 sidechain 触发压床（_BGM_DUCK_COMPRESS），旁白/
-      原声对白开口床自动退让——与原声衬底避让同一模式、更慢的包络防泵动。
-    - lossless_intermediate=True 时音频落 PCM（.mov 容器），供响度归一同链
-      续编——开 BGM 成片少一代 AAC 有损。
-    其余纪律不变：normalize=0 必须显式关（amix 默认每路乘 1/n 会把人声减半）；
-    尾部淡出让收尾不停在硬切的音乐上；混音失败向上抛由调用方降级留痕——
-    临时文件里混，原成片不会半途损毁。
-    """
-    work_dir.mkdir(parents=True, exist_ok=True)
-    suffix = ".mov" if lossless_intermediate else film.suffix
-    mixed = work_dir / f"bgm-mixed{suffix}"
-    duration = ffprobe_mod.probe(film).duration_s
-    # 曲目是纯音频（probe 要求视频轨会拒收）——用曲库同款 audio_duration_s
-    from dramaclip.engines.tts.base import audio_duration_s  # noqa: PLC0415
-
-    track_dur = audio_duration_s(track)
-    if track_dur <= 0:
-        raise RuntimeError(f"BGM 曲目时长非正（{track_dur:g}s），疑似坏文件")
-    fade_start = max(duration - _BGM_TAIL_FADE_S, 0.0)
-    loop_inputs, bed_prefix = _bed_loop_inputs(track, duration, track_dur)
-    gain_db = _bed_gain_db(track)
-    gain_filter = (
-        f"volume={gain_db:+.2f}dB" if gain_db is not None else f"volume={_BGM_BED_VOLUME}"
-    )
-    filter_complex = (
-        f"{bed_prefix}"
-        f"[bedsrc]{gain_filter}[bedg];"
-        f"[0:a]asplit=2[mix_main][duck_trig];"
-        f"[bedg][duck_trig]{_BGM_DUCK_COMPRESS}[bedduck];"
-        f"[bedduck]afade=t=out:st={fade_start:.3f}:d={_BGM_TAIL_FADE_S}[bed];"
-        "[mix_main][bed]amix=inputs=2:duration=first:normalize=0[a]"
-    )
-    audio_args = (
-        ["-c:a", "pcm_s16le"] if lossless_intermediate else ["-c:a", "aac", "-b:a", "192k"]
-    )
-    runner.run(
-        [
-            "-hide_banner", "-loglevel", "error", "-y",
-            "-i", str(film),
-            *loop_inputs,
-            "-filter_complex", filter_complex,
-            "-map", "0:v", "-map", "[a]",
-            "-c:v", "copy",
-            *audio_args,
-            "-t", f"{duration:.3f}",
-            str(mixed),
-        ],
-        timeout_s=900,
-    )
-    if not mixed.is_file() or mixed.stat().st_size == 0:
-        raise RuntimeError("BGM 床混音未产出文件")
-    return mixed
-
 

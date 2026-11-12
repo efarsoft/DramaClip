@@ -23,6 +23,7 @@ from pathlib import Path
 from dramaclip.engines.narration import audit as A
 from dramaclip.engines.narration import copywriter as CW
 from dramaclip.engines.narration import scriptwriter as SW
+from dramaclip.engines.narration.copy_audit import review_copy
 from dramaclip.engines.semantic.llm_client import client_or_none
 
 # ---------------------------------------------------------------------------
@@ -178,7 +179,7 @@ def cmd_run(args) -> int:
             src = "REAL"
         # chat_json 返回 {"lines": [...]}，mock 直接是列表：审查器只吃 lines 列表
         lines = output.get("lines", []) if isinstance(output, dict) else output
-        report = A.review_copy(lines, slots, mode=args.mode_label or "")
+        report = review_copy(lines, slots, mode=args.mode_label or "")
 
     print("=" * 70)
     print("真实组装的 SYSTEM 提示词（来自 build_*_request，与生成函数同源）")

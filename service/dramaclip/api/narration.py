@@ -14,7 +14,6 @@ from dramaclip.api.narration_plans import (  # noqa: F401 - _NO_TTS_MODES 供测
     _NO_TTS_MODES,
     SUPPORTED_MODES,
     _run_plan_variants,
-    _scene_cuts_of,
     expected_copy_source,
 )
 from dramaclip.engines.narration import mode_recommend, variant_scoring
@@ -22,6 +21,7 @@ from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration import styles as styles_lib
 from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
+from dramaclip.engines.narration.plan_inputs import scene_cuts_of
 from dramaclip.engines.semantic.llm_client import LlmUnavailable, client_or_none
 from dramaclip.infra import config
 from dramaclip.infra.storage.repos import analysis as analysis_repo
@@ -333,7 +333,7 @@ def _scene_cuts_for(context: AppContext, plan: PlanData) -> dict[str, list[float
     for episode_id in sorted({str(seg.episode_id) for seg in plan.timeline}):
         record = analysis_repo.get(context.conn, episode_id)
         if record is not None:
-            cuts[episode_id] = _scene_cuts_of(record.get("scene_data"))
+            cuts[episode_id] = scene_cuts_of(record.get("scene_data"))
     return cuts
 
 

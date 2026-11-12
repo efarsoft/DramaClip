@@ -23,6 +23,8 @@ from urllib.parse import urlsplit
 from dramaclip.engines import llm_trace
 from dramaclip.engines.narration import audit as A
 from dramaclip.engines.narration import titles as titles_engine
+from dramaclip.engines.narration.copy_audit import review_copy
+from dramaclip.engines.narration.findings import ReviewReport
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
 from dramaclip.infra.storage.repos import settings as settings_repo
 from dramaclip.transport.rpc import RpcRequest
@@ -130,7 +132,7 @@ def _dispatch(router: Any, method: str, params: dict[str, Any]) -> dict[str, Any
     return dict(response.result or {})
 
 
-def _report_json(report: A.ReviewReport) -> dict[str, Any]:
+def _report_json(report: ReviewReport) -> dict[str, Any]:
     return {
         "target": report.target,
         "passed": report.passed,
@@ -154,7 +156,7 @@ def handle_audit_copy(body: dict[str, Any]) -> dict[str, Any]:
     slots = body.get("slots")
     if not isinstance(lines, list) or not isinstance(slots, list):
         raise ValueError("body.lines 与 body.slots 必须是数组")
-    return _report_json(A.review_copy(lines, slots, mode=str(body.get("mode", ""))))
+    return _report_json(review_copy(lines, slots, mode=str(body.get("mode", ""))))
 
 
 def handle_retell_check(

@@ -90,27 +90,6 @@ def test_finding_anchors_prompt_quote() -> None:
     assert "episode" in by_id["STRUCT_EPISODE_REQUIRED"].prompt_quote
 
 
-def test_review_copy_catches_missing_slot_and_meta() -> None:
-    slots = [
-        {"id": "s1", "task": "开场", "start": 0.0, "end": 12.5, "lines": "x"},
-        {"id": "s2", "task": "点银两", "start": 24.0, "end": 38.0, "lines": "y"},
-    ]
-    bad_lines = [
-        {"id": "s1", "text": "苏明月被当众羞辱，这镜头看得人牙痒。"},  # s2 漏 + 镜头
-    ]
-    rep = A.review_copy(bad_lines, slots)
-    failed = {f.rule_id for f in rep.hard_fails}
-    assert "COPY_COVER_ALL_IDS" in failed
-    assert "COPY_NO_METANARRATIVE" in failed
-
-
-def test_review_copy_good_passes() -> None:
-    slots = [{"id": f"s{i}", "task": "t", "start": 0.0, "end": 5.0, "lines": "x"} for i in range(3)]
-    lines = [{"id": f"s{i}", "text": "短句文案，无元叙述，声纹已换名。"} for i in range(3)]
-    rep = A.review_copy(lines, slots)
-    assert rep.passed
-
-
 def test_propose_aggregates_repeated_hard_fails() -> None:
     recs = []
     for _ in range(3):
@@ -301,15 +280,6 @@ def test_episode_jump_flags_non_adjacent_leap() -> None:
     assert jump[0].severity == "soft"
 
 
-def test_copy_line_cap_accepts_production_tolerance() -> None:
-    """review 与生产同容差（cap×1.2）：61–72 字的生产放行稿不得在审查里恒 REJECT。"""
-    report = A.review_copy(
-        [{"id": "a", "text": "字" * 65}], [{"id": "a"}], mode="full_narration"
-    )
-    line = [f for f in report.findings if f.rule_id == "COPY_LINE_CAP"]
-    assert line and line[0].passed is True, "65 字 ≤ 72（60×1.2）生产容差，审查不得翻脸"
-
-
 def test_all_prompt_quotes_are_literal_substrings() -> None:
     """守卫（注册表单源版）：规则原文只存 prompt_rules 一处，字面一致由装配构造
     恒真——这条守卫查的是三件仍然需要人守的事：
@@ -321,6 +291,7 @@ def test_all_prompt_quotes_are_literal_substrings() -> None:
     import ast
     import inspect
 
+    from dramaclip.engines.narration import copy_audit as CA
     from dramaclip.engines.narration import copywriter as C
     from dramaclip.engines.narration import scriptwriter as S
     from dramaclip.engines.narration.prompt_rules import RULE_TEXTS
@@ -332,15 +303,16 @@ def test_all_prompt_quotes_are_literal_substrings() -> None:
             if isinstance(value, str) and len(value) > 30:
                 texts.append(value)
 
-    tree = ast.parse(inspect.getsource(A))
     used: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.keyword) and node.arg == "prompt_quote":
-            if not isinstance(node.value, ast.Subscript):
-                continue  # f-string 动态 quote（行长两条）由现有用例覆盖
-            key_node = node.value.slice
-            if isinstance(key_node, ast.Constant):
-                used.add(str(key_node.value))
+    for mod in (A, CA):  # review_copy 拆到 copy_audit 后，copy 层 key 由它引用
+        tree = ast.parse(inspect.getsource(mod))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.keyword) and node.arg == "prompt_quote":
+                if not isinstance(node.value, ast.Subscript):
+                    continue  # f-string 动态 quote（行长两条）由现有用例覆盖
+                key_node = node.value.slice
+                if isinstance(key_node, ast.Constant):
+                    used.add(str(key_node.value))
     unknown = sorted(used - set(RULE_TEXTS))
     assert unknown == [], f"audit 引用了注册表不存在的 key：{unknown}"
 

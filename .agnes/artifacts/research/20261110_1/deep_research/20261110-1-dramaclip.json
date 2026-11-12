@@ -1,0 +1,150 @@
+{
+  "kind": "agnes_artifact",
+  "artifact_type": "research_markdown_report",
+  "research_kind": "deep_research",
+  "mode": "deep_research",
+  "session_id": "20261110_1",
+  "title": "DramaClip 项目深度分析与同类开源/成品方案对比",
+  "local_path": "D:\\PersonProjects\\DramaClip\\.agnes\\artifacts\\research\\20261110_1\\deep_research\\20261110-1-dramaclip.md",
+  "manifest_path": "D:\\PersonProjects\\DramaClip\\.agnes\\artifacts\\research\\20261110_1\\deep_research\\20261110-1-dramaclip.json",
+  "repo_path": "D:\\PersonProjects\\DramaClip\\.agnes\\work\\research\\20261110_1\\deep_research\\repo",
+  "preview_uri": "ui://agnes-research/deep_research/20261110-1-dramaclip",
+  "sources_count": 7,
+  "evidence_count": 8,
+  "conflicts_count": 0,
+  "blocked_sources_count": 0,
+  "confidence": "high",
+  "quality_warnings": [
+    "6 evidence item(s) are missing quotes or extracted text."
+  ],
+  "created_at": "2026-11-10T07:18:08.462301300+00:00",
+  "sources": [
+    {
+      "title": "项目 README",
+      "url": "D:\\PersonProjects\\DramaClip\\README.md",
+      "note": null
+    },
+    {
+      "title": "架构文档",
+      "url": "D:\\PersonProjects\\DramaClip\\docs\\02-总体架构与文档地图.md",
+      "note": null
+    },
+    {
+      "title": "竞品增量调研",
+      "url": "D:\\PersonProjects\\DramaClip\\docs\\research\\2026-11-09-competitor-refresh.md",
+      "note": null
+    },
+    {
+      "title": "参考项目深读",
+      "url": "D:\\PersonProjects\\DramaClip\\docs\\research\\2026-09-22-competitor-teardown.md",
+      "note": null
+    },
+    {
+      "title": "升级日志",
+      "url": "D:\\PersonProjects\\DramaClip\\upgrade.md",
+      "note": null
+    },
+    {
+      "title": "Python 依赖清单",
+      "url": "D:\\PersonProjects\\DramaClip\\service\\pyproject.toml",
+      "note": null
+    },
+    {
+      "title": "协议 schema",
+      "url": "D:\\PersonProjects\\DramaClip\\protocol\\schemas\\export.json",
+      "note": null
+    }
+  ],
+  "evidence": [
+    {
+      "claim": "项目定位：本地优先短剧自动高光剪辑工具",
+      "value": null,
+      "source_title": "README.md",
+      "source_url": "D:\\PersonProjects\\DramaClip\\README.md",
+      "source_type": "code",
+      "quote": "DramaClip 是一款本地优先（local-first）的短剧自动高光剪辑工具，面向短剧推广达人（短剧 CPS 从业者）",
+      "observed_at": null,
+      "confidence": null,
+      "notes": null
+    },
+    {
+      "claim": "技术栈 Electron 44 + React 19 + TS 5.9 + AntD 6 + Zustand 5；Python 3.12 服务层；JSON-RPC 2.0 环回 TCP；SQLite WAL；FFmpeg 8.1.1",
+      "value": null,
+      "source_title": "package.json / pyproject.toml",
+      "source_url": "D:\\PersonProjects\\DramaClip\\package.json, service\\pyproject.toml",
+      "source_type": "code",
+      "quote": null,
+      "observed_at": null,
+      "confidence": null,
+      "notes": null
+    },
+    {
+      "claim": "AI 栈：paraformer-large、Qwen3-VL (GGUF)、RapidOCR、PySceneDetect、librosa、Kokoro/edge-tts/IndexTTS2/CosyVoice",
+      "value": null,
+      "source_title": "README.md",
+      "source_url": "D:\\PersonProjects\\DramaClip\\README.md",
+      "source_type": "code",
+      "quote": null,
+      "observed_at": null,
+      "confidence": null,
+      "notes": null
+    },
+    {
+      "claim": "十种出片模式 + 十二叙事母题卡 + 复述质检重写循环 + 跨集编排",
+      "value": null,
+      "source_title": "README.md / service/dramaclip/engines/narration/",
+      "source_url": "D:\\PersonProjects\\DramaClip\\README.md",
+      "source_type": "code",
+      "quote": null,
+      "observed_at": null,
+      "confidence": null,
+      "notes": null
+    },
+    {
+      "claim": "服务端结构：transport→api→engines→infra 单向依赖",
+      "value": null,
+      "source_title": "docs/02-总体架构与文档地图.md",
+      "source_url": "D:\\PersonProjects\\DramaClip\\docs\\02-总体架构与文档地图.md",
+      "source_type": "code",
+      "quote": null,
+      "observed_at": null,
+      "confidence": null,
+      "notes": null
+    },
+    {
+      "claim": "竞品调研：HotClip/MoneyPrinterTurbo/VideoLingo/FunClip/JJYB 等已有 2026-11 增量分析",
+      "value": null,
+      "source_title": "docs/research/2026-11-09-competitor-refresh.md",
+      "source_url": "D:\\PersonProjects\\DramaClip\\docs\\research\\2026-11-09-competitor-refresh.md",
+      "source_type": "code",
+      "quote": null,
+      "observed_at": null,
+      "confidence": null,
+      "notes": null
+    },
+    {
+      "claim": "服务端规模 150 文件 / 32838 行 / 1297 函数",
+      "value": null,
+      "source_title": "analyze 工具输出",
+      "source_url": "D:\\PersonProjects\\DramaClip\\service\\dramaclip",
+      "source_type": "tool",
+      "quote": null,
+      "observed_at": null,
+      "confidence": null,
+      "notes": null
+    },
+    {
+      "claim": "v0.2.4 协议已含 A/B 四态报告与逐平台封面重裁",
+      "value": null,
+      "source_title": "protocol/schemas/export.json",
+      "source_url": "D:\\PersonProjects\\DramaClip\\protocol\\schemas\\export.json",
+      "source_type": "code",
+      "quote": "export.ab_report 四态判定 + export.platform_covers 逐平台封面重裁",
+      "observed_at": null,
+      "confidence": null,
+      "notes": null
+    }
+  ],
+  "conflicts": [],
+  "blocked_sources": []
+}

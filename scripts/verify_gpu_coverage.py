@@ -443,12 +443,12 @@ def _select_hw_encoder() -> tuple[str, str]:
     「产品能导出、验收说 unsupported」的两套结论（规格 §5.2）。全失败抛
     `Unsupported`——本机没有硬编不是产品失败，但必须逐项说清为什么不算。
     """
-    from dramaclip.engines.exporter import encoder
+    from dramaclip.engines.exporter import encoder, hw_encoders
 
     skipped: list[str] = []
-    for codec in encoder._hw_candidates():
+    for codec in hw_encoders._hw_candidates():
         try:
-            encoder._run_cut(encoder._hw_probe_args(codec), timeout_s=30)
+            encoder._run_cut(hw_encoders._hw_probe_args(codec), timeout_s=30)
         except Exception as exc:  # noqa: BLE001 - 真试编失败即该候选在本机不可用
             skipped.append(f"{codec}: {type(exc).__name__}: {str(exc)[:120]}")
             continue

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from dramaclip.engines.analysis import transcriber
+from dramaclip.engines.analysis.asr import sensevoice as sensevoice_mod
 from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.infra.model_manager import tts_runtime, worker_bridge
 
@@ -59,7 +60,7 @@ def test_bridge_roundtrip_error_path_and_close(stub_runtime: None) -> None:
 def test_sensevoice_takes_worker_branch_when_inproc_missing(
     stub_runtime: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(transcriber, "_inproc_funasr", lambda: None)
+    monkeypatch.setattr(sensevoice_mod, "_inproc_funasr", lambda: None)
     engine = transcriber.SenseVoiceEngine(models_dir=Path("unused"))
     segments = engine.transcribe(Path("x.wav"))
     assert segments == [AsrSegment(start=0.1, end=0.9, text="铺垫反转")]
@@ -71,7 +72,7 @@ def test_worker_missing_runtime_gives_install_guidance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """无进程内 funasr 且 venv 未装：启动失败文案必须指向安装入口，不许裸 OSError。"""
-    monkeypatch.setattr(transcriber, "_inproc_funasr", lambda: None)
+    monkeypatch.setattr(sensevoice_mod, "_inproc_funasr", lambda: None)
     monkeypatch.setattr(tts_runtime, "venv_python", lambda _d: tmp_path / "nope" / "python.exe")
     engine = transcriber.SenseVoiceEngine(models_dir=tmp_path)
     with pytest.raises(RuntimeError, match="安装运行环境"):

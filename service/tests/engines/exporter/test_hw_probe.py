@@ -11,14 +11,14 @@ from typing import Any
 
 import pytest
 
-from dramaclip.engines.exporter import encoder
+from dramaclip.engines.exporter import encoder, hw_encoders
 from dramaclip.infra.ffmpeg import runner
 
 
 @pytest.fixture(autouse=True)
 def _reset_probe_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     """每个测试从「未探测」状态开始；monkeypatch 负责还原全局缓存。"""
-    monkeypatch.setattr(encoder, "_HW_ENCODER_CACHE", None)
+    monkeypatch.setattr(hw_encoders, "_HW_ENCODER_CACHE", None)
 
 
 def _stub_run_cut(
@@ -41,22 +41,22 @@ def _stub_run_cut(
 
 def test_candidate_order_by_platform() -> None:
     """win32 三厂商按 NVIDIA→AMD→Intel 排：N 卡第一次命中，AMD 第二次，核显兜底。"""
-    assert encoder._hw_candidates("win32") == ["h264_nvenc", "h264_amf", "h264_qsv"]
-    assert encoder._hw_candidates("darwin") == ["h264_videotoolbox"]
-    assert encoder._hw_candidates("linux") == ["h264_nvenc", "h264_qsv"]
+    assert hw_encoders._hw_candidates("win32") == ["h264_nvenc", "h264_amf", "h264_qsv"]
+    assert hw_encoders._hw_candidates("darwin") == ["h264_videotoolbox"]
+    assert hw_encoders._hw_candidates("linux") == ["h264_nvenc", "h264_qsv"]
 
 
 def test_probe_encodes_black_frame_with_production_params_and_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(encoder, "_hw_candidates", lambda platform=None: ["h264_nvenc"])
+    monkeypatch.setattr(hw_encoders, "_hw_candidates", lambda platform=None: ["h264_nvenc"])
     seen_args, seen_kwargs = _stub_run_cut(monkeypatch, fail=set())
 
     assert encoder.pick_hw_encoder() == "h264_nvenc"
     probe = seen_args[0]
     assert "color=black:s=256x256:d=0.1" in probe, "0.1s 黑帧真试编"
     assert probe[-3:] == ["-f", "null", "-"], "探针不落盘（-f null 必须带输出目标）"
-    prod = encoder._video_codec_params("h264_nvenc")
+    prod = hw_encoders._video_codec_params("h264_nvenc")
     assert prod == ["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", "22"]
     i = probe.index("-c:v")
     assert probe[i + 2 : i + 2 + len(prod)] == prod, "探针必须带正式合成的同形状质量参数"
@@ -71,15 +71,15 @@ def test_probe_params_identical_to_cut_params(codec: str) -> None:
         tts_audio=None, rng=random.Random(0), video_codec=codec,
     )
     prod = cut[cut.index("-c:v") + 1 : cut.index("-c:a")]
-    probe = encoder._hw_probe_args(codec)
+    probe = hw_encoders._hw_probe_args(codec)
     tail = probe[probe.index("-c:v") + 1 :]
-    assert prod == [codec, *encoder._video_codec_params(codec), *encoder._COLOR_ARGS]
+    assert prod == [codec, *hw_encoders._video_codec_params(codec), *encoder._COLOR_ARGS]
     assert tail[: len(prod)] == prod, f"{codec} 探针参数与正式合成不同形状"
 
 
 def test_first_working_encoder_selected_and_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        encoder, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_qsv"]
+        hw_encoders, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_qsv"]
     )
     seen_args, _ = _stub_run_cut(monkeypatch, fail={"h264_nvenc"})
 
@@ -91,7 +91,7 @@ def test_first_working_encoder_selected_and_cached(monkeypatch: pytest.MonkeyPat
 
 def test_all_candidates_fail_returns_none_and_caches(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        encoder, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_qsv"]
+        hw_encoders, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_qsv"]
     )
     seen_args, _ = _stub_run_cut(monkeypatch, fail={"h264_nvenc", "h264_qsv"})
 
@@ -101,14 +101,14 @@ def test_all_candidates_fail_returns_none_and_caches(monkeypatch: pytest.MonkeyP
 
 
 def test_nvenc_available_true_is_bool_compat(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(encoder, "_hw_candidates", lambda platform=None: ["h264_nvenc"])
+    monkeypatch.setattr(hw_encoders, "_hw_candidates", lambda platform=None: ["h264_nvenc"])
     _stub_run_cut(monkeypatch, fail=set())
     assert encoder.nvenc_available() is True
 
 
 def test_probe_crash_swallowed_as_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     """探测自身的任何异常（OSError/驱动崩）都按不可用处理，绝不外抛。"""
-    monkeypatch.setattr(encoder, "_hw_candidates", lambda platform=None: ["h264_nvenc"])
+    monkeypatch.setattr(hw_encoders, "_hw_candidates", lambda platform=None: ["h264_nvenc"])
 
     def boom(*_a: Any, **_k: Any) -> None:
         raise OSError("驱动挂起")
@@ -119,7 +119,7 @@ def test_probe_crash_swallowed_as_unavailable(monkeypatch: pytest.MonkeyPatch) -
 
 def test_amf_params_align_with_nvenc_quality() -> None:
     """cqp 22 对齐 NVENC 的 vbr/cq 22 与 QSV 的 global_quality 22；B 帧常规略降。"""
-    assert encoder._video_codec_params("h264_amf") == [
+    assert hw_encoders._video_codec_params("h264_amf") == [
         "-usage", "transcoding",
         "-quality", "quality",
         "-rc", "cqp",
@@ -130,7 +130,7 @@ def test_amf_params_align_with_nvenc_quality() -> None:
 def test_amf_selected_when_nvenc_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """AMD 主机：nvenc 黑帧真试编失败后继续试 AMF 并命中，qsv 不再试。"""
     monkeypatch.setattr(
-        encoder, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_amf", "h264_qsv"]
+        hw_encoders, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_amf", "h264_qsv"]
     )
     seen_args, _ = _stub_run_cut(monkeypatch, fail={"h264_nvenc"})
 
@@ -141,7 +141,7 @@ def test_amf_selected_when_nvenc_fails(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_amf_failure_falls_through_to_qsv(monkeypatch: pytest.MonkeyPatch) -> None:
     """AMF 在 NVIDIA 机器上失败属预期：继续往下走，不影响最终选中 QSV。"""
     monkeypatch.setattr(
-        encoder, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_amf", "h264_qsv"]
+        hw_encoders, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_amf", "h264_qsv"]
     )
     seen_args, _ = _stub_run_cut(monkeypatch, fail={"h264_nvenc", "h264_amf"})
 
@@ -151,7 +151,7 @@ def test_amf_failure_falls_through_to_qsv(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_all_three_win32_candidates_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        encoder, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_amf", "h264_qsv"]
+        hw_encoders, "_hw_candidates", lambda platform=None: ["h264_nvenc", "h264_amf", "h264_qsv"]
     )
     seen_args, _ = _stub_run_cut(monkeypatch, fail={"h264_nvenc", "h264_amf", "h264_qsv"})
 

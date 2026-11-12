@@ -49,3 +49,17 @@ jobs:
       - run: ruff check .
       - run: mypy dramaclip
       - run: python -m pytest -x -q
+
+  service-windows:
+    name: service-windows（质量黄金集离线校验）
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 质量黄金集离线校验（quality_eval --check，纯 stdlib 可离线跑）
+        run: python tools/quality_eval.py --check

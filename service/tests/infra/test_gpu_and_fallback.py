@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-import dramaclip.engines.analysis.transcriber as transcriber_mod
+from dramaclip.engines.analysis.asr import whisper as whisper_mod
 from dramaclip.engines.analysis.transcriber import FasterWhisperEngine
 from dramaclip.infra import compute, gpu
 
@@ -56,7 +56,7 @@ class _FakeWhisper:
 def test_auto_cuda_failure_falls_back_and_reports(monkeypatch) -> None:
     fake = types.SimpleNamespace(WhisperModel=_FakeWhisper)
     monkeypatch.setitem(sys.modules, "faster_whisper", fake)
-    monkeypatch.setattr(transcriber_mod, "_ct2_cuda_available", lambda: True)
+    monkeypatch.setattr(whisper_mod, "_ct2_cuda_available", lambda: True)
     _FakeWhisper.created.clear()
     engine = FasterWhisperEngine("base", device="auto")
     model = engine._ensure_model()
@@ -121,7 +121,7 @@ class _FakeLazyWhisper:
 def test_auto_cuda_failure_during_inference_falls_back(monkeypatch) -> None:
     fake = types.SimpleNamespace(WhisperModel=_FakeLazyWhisper)
     monkeypatch.setitem(sys.modules, "faster_whisper", fake)
-    monkeypatch.setattr(transcriber_mod, "_ct2_cuda_available", lambda: True)
+    monkeypatch.setattr(whisper_mod, "_ct2_cuda_available", lambda: True)
     _FakeLazyWhisper.created.clear()
     engine = FasterWhisperEngine("base", device="auto")
     segments = engine.transcribe(Path("x.wav"))
@@ -165,17 +165,17 @@ def test_auto_resolves_probe_target_and_cpu_never_probes(monkeypatch) -> None:
     fake = types.SimpleNamespace(WhisperModel=_ComputeRecorder)
     monkeypatch.setitem(sys.modules, "faster_whisper", fake)
     _ComputeRecorder.created.clear()
-    monkeypatch.setattr(transcriber_mod, "_ct2_cuda_available", lambda: True)
+    monkeypatch.setattr(whisper_mod, "_ct2_cuda_available", lambda: True)
     FasterWhisperEngine("base", device="auto")._ensure_model()
     assert _ComputeRecorder.created[-1] == ("cuda", "auto")
-    monkeypatch.setattr(transcriber_mod, "_ct2_cuda_available", lambda: False)
+    monkeypatch.setattr(whisper_mod, "_ct2_cuda_available", lambda: False)
     FasterWhisperEngine("base", device="auto")._ensure_model()
     assert _ComputeRecorder.created[-1] == ("cpu", "auto")
 
     def _must_not_probe() -> bool:
         raise AssertionError("显式 cpu 不得探 CUDA")
 
-    monkeypatch.setattr(transcriber_mod, "_ct2_cuda_available", _must_not_probe)
+    monkeypatch.setattr(whisper_mod, "_ct2_cuda_available", _must_not_probe)
     FasterWhisperEngine("base", device="cpu")._ensure_model()
     assert _ComputeRecorder.created[-1] == ("cpu", "auto")
 
@@ -190,7 +190,7 @@ def test_legacy_int8_is_never_sent_to_a_gpu(monkeypatch) -> None:
     _ComputeRecorder.created.clear()
     FasterWhisperEngine("base", device="cuda", compute_type="int8")._ensure_model()
     assert _ComputeRecorder.created[-1] == ("cuda", "auto")
-    monkeypatch.setattr(transcriber_mod, "_ct2_cuda_available", lambda: True)
+    monkeypatch.setattr(whisper_mod, "_ct2_cuda_available", lambda: True)
     FasterWhisperEngine("base", device="auto", compute_type="int8")._ensure_model()
     assert _ComputeRecorder.created[-1] == ("cuda", "auto")
     FasterWhisperEngine("base", device="cpu", compute_type="int8")._ensure_model()
@@ -453,7 +453,7 @@ def test_resolve_torch_device(monkeypatch) -> None:
 
 
 def test_sensevoice_passes_device_to_automodel(monkeypatch, tmp_path: Path) -> None:
-    import dramaclip.engines.analysis.transcriber as mod
+    import dramaclip.engines.analysis.asr.sensevoice as mod
 
     captured: dict[str, Any] = {}
 
@@ -476,7 +476,7 @@ def test_sensevoice_passes_device_to_automodel(monkeypatch, tmp_path: Path) -> N
 
 
 def test_sensevoice_falls_back_to_cpu_on_cuda_failure(monkeypatch, tmp_path: Path) -> None:
-    import dramaclip.engines.analysis.transcriber as mod
+    import dramaclip.engines.analysis.asr.sensevoice as mod
 
     devices: list[str] = []
 
@@ -503,7 +503,7 @@ def test_sensevoice_falls_back_to_cpu_on_cuda_failure(monkeypatch, tmp_path: Pat
 
 
 def test_sensevoice_explicit_cuda_failure_raises(monkeypatch, tmp_path: Path) -> None:
-    import dramaclip.engines.analysis.transcriber as mod
+    import dramaclip.engines.analysis.asr.sensevoice as mod
 
     class _FakeAuto:
         def __init__(self, **_kwargs: Any) -> None:

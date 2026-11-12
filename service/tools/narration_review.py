@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 from dramaclip.engines.narration import audit as A
+from dramaclip.engines.narration.copy_audit import review_copy
 
 
 def _load(p: str) -> dict:
@@ -85,7 +86,7 @@ def cmd_audit(args) -> int:
     else:
         lines = _load(args.copy)
         slots = _load(args.slots) if args.slots else []
-        report = A.review_copy(lines, slots, mode=args.mode or "")
+        report = review_copy(lines, slots, mode=args.mode or "")
     print(A.format_report(report))
     print()
     print(report.summary_line())
