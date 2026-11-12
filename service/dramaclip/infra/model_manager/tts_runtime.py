@@ -462,14 +462,42 @@ def _install_ort(
     _write_ort_marker(data_dir, variant="cpu", reason=reason)
 
 
+_status_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_STATUS_TTL_S = 60.0
+
+
+def warm_status_cache(data_dir: Path) -> None:
+    """启动预热（同 gpu.prefetch 模式）：子进程探测在冷盘上秒级，
+    首开引擎中心时 UI 立刻查 status 会因排队超时——后台先跑一遍入缓存。"""
+    import contextlib
+
+    with contextlib.suppress(Exception):
+        status(data_dir)
+
+
 def status(data_dir: Path) -> dict[str, Any]:
     """venv 安装态：installed = 双栈 TTS 基线（indextts+torch）通过；groups 按能力分族。
 
     目录在但坏=未装完，可重装修复。groups 是 E-2 扩容后的按族探针（一次子进程
     逐个 __import__ 记成败）：indextts 需源码路径引入，funasr/kokoro 是纯 pip 组。
     installed 维持旧口径（双栈 TTS）——前端既有判据零改动，新消费者读 groups。
-    """
 
+    结果 60s 缓存：子进程探测秒级，UI 轮询不应反复 spawn。
+    """
+    import time as _time
+
+    cache_key = str(data_dir)
+    cached = _status_cache.get(cache_key)
+    if cached is not None and _time.monotonic() - cached[0] < _STATUS_TTL_S:
+        return cached[1]
+
+    result = _status_uncached(data_dir)
+    _status_cache[cache_key] = (_time.monotonic(), result)
+    return result
+
+
+def _status_uncached(data_dir: Path) -> dict[str, Any]:
+    """真正的探测（无缓存）：status() 的内部实现。"""
     venv = venv_dir(data_dir)
     py = venv / "Scripts" / "python.exe"
     if not py.is_file():

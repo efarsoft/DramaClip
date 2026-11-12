@@ -190,6 +190,16 @@ class ServiceApp:
             name="model-warm",
             daemon=True,
         ).start()
+        # 本地运行环境探测预热（同上）：子进程 import 探测秒级，首开引擎中心
+        # 时 models.local_runtime_status 会因 query 池排队超时（2026-11-12 实测）
+        from dramaclip.infra.model_manager import tts_runtime as _tts_rt
+
+        threading.Thread(
+            target=_tts_rt.warm_status_cache,
+            args=(data_dir,),
+            name="runtime-warm",
+            daemon=True,
+        ).start()
 
         log_file = logging_setup.setup_file_logging(data_dir / "logs")
         if log_file is not None:
