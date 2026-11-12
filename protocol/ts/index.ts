@@ -368,7 +368,6 @@ export interface EpisodeDetailResult {
 
 export type NarrationMode =
   | 'raw_clip'
-  | 'highlight_cut'
   | 'intro_narration'
   | 'cross_narration'
   | 'full_narration'

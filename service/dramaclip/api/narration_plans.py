@@ -50,9 +50,9 @@ from dramaclip.infra.storage.repos import projects as projects_repo
 
 SUPPORTED_MODES = (
     "raw_clip",
-    # highlight_cut 已合并退役（2026-10-27 业主裁决：以纯原片剪辑为主，5 秒均切
-    # 取消）：原声形态收敛到 raw_clip 单入口。渲染链保留（_NO_TTS_MODES/build 分支
-    # /BGM 门禁不动），库里旧高光方案照常出片。
+    # 高光混剪（highlight_cut）2026-10-27 业主裁决并入纯原片剪辑（raw_clip 单入口，
+    # 5 秒均切取消），2026-11-12 完全清除：生成/渲染/消费分支全删，存量方案行由
+    # migrations/027 删除，历史推荐缓存由 mode_recommend 读时净化。
 
     "intro_narration",
     "cross_narration",
@@ -65,7 +65,7 @@ SUPPORTED_MODES = (
 )
 
 # 与 TTS 合成并行的两组：剧情解说已由 LLM 剧本驱动，每段都要配音，不再属"无 TTS"。
-_NO_TTS_MODES = frozenset({"raw_clip", "subtitle_flow", "highlight_cut"})
+_NO_TTS_MODES = frozenset({"raw_clip", "subtitle_flow"})
 # 零文案模式（=_NO_TTS_MODES）：没有旁白槽位，母题/钩子/句式约束无处落地——
 # 选题换零文案专用提示词（只挑跨集冲突链并命名，_REEL_SYSTEM_PROMPT），失败回落
 # 单集锚定（_deterministic_variants）。2026-10-20 业主裁决：单集锚定当主路线不
@@ -82,7 +82,8 @@ def expected_copy_source(mode: str) -> str:
     """该模式的方案文案应当来自哪里：``llm_script``（LLM 成稿）或 ``rule``（规则预算）。
 
     「模式 → 来源」的唯一判定接口：verify_modes 与方案卡徽章都从它取判据，不许
-    另立第二份手抄模式表（2026-10-16 规格 §1.1；手抄表漏 highlight_cut 的漂移实证）。
+    另立第二份手抄模式表（2026-10-16 规格 §1.1；手抄表漏条目的漂移实证——那次
+    漏的是高光混剪，该模式已于 2026-11-12 完全移除，教训照旧成立）。
     """
     return "rule" if mode in _NO_TTS_MODES else "llm_script"
 
@@ -359,9 +360,9 @@ def _score_batch(
     rows = plans_repo.list_by_batch(context.conn, project_id, job_id)
     if not rows:
         return
-    # 纯原片剪辑/字幕金句流/高光混剪设计上就没有旁白文案：拿「文案六维」去评它们，
+    # 纯原片剪辑/字幕金句流设计上就没有旁白文案：拿「文案六维」去评它们，
     # 评分器只能给全 1 分外加一句「补上开场首句口播」——那是把设计当缺陷报。
-    # 真机实测：1.0 分把这三个模式永久踩在方案列表底部，建议还劝用户给不该有
+    # 真机实测：1.0 分把这两个模式永久踩在方案列表底部，建议还劝用户给不该有
     # 旁白的模式加旁白。它们不参与文案评分，score_total 留 NULL，
     # 由 rank_variants 的「无分沉底」处理，顺序语义不变。
     rows = [row for row in rows if row.get("narration_mode") not in _NO_TTS_MODES]

@@ -27,8 +27,9 @@ _RECOMMEND_TIMEOUT_S = 60.0
 #: LLM 缺位时的静态组合与补位顺序：叙事强 → 节奏快 → 门槛最低，通用可用的次序。
 _FALLBACK_ORDER = ["dialogue_narration", "cross_narration", "raw_clip"]
 
-#: 可供应模式（退役模式不进推荐面：进菜单=LLM 可选=出片页自动勾上=撞「模式暂未支持」，
-# 2026-11-12 真机实锤——高光混剪退役后仍从全量标签表混进推荐并被缓存）。
+#: 可供应模式（下线模式不进推荐面：进菜单=LLM 可选=出片页自动勾上=撞「模式暂未支持」，
+# 2026-11-12 真机实锤——已下线的高光混剪曾从全量标签表混进推荐并被缓存）。
+# 标签表已随完全清除同步瘦身，这层过滤是给「下次下线」与历史缓存兜底的。
 _OFFERABLE = {mode: label for mode, label in MODE_LABELS.items() if mode not in RETIRED_MODES}
 _MENU = "\n".join(f"- {mode}: {label}" for mode, label in _OFFERABLE.items())
 _SYSTEM = (
@@ -119,8 +120,8 @@ def _ask_llm(settings: dict[str, str], genre: str, reasons: list[str]) -> list[d
 
 def _validate(raw: Any) -> list[dict[str, str]]:
     """筛出菜单内的合法模式（去重）；mode 兼容 id 或中文标签（LLM 偶尔
-    返回「高光混剪」这类中文名，能唯一映射回可供应 id 就不整条丢弃）——
-    退役模式的 id 和标签都映射不上，天然被这条滤掉。
+    返回「剧情解说」这类中文名而非 id，能唯一映射回可供应 id 就不整条丢弃）——
+    已下线模式的 id 和标签都映射不上，天然被这条滤掉。
     """
     out: list[dict[str, str]] = []
     label_to_id = {label: mode for mode, label in _OFFERABLE.items()}

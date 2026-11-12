@@ -59,11 +59,37 @@ def test_migrate_idempotent() -> None:
             "024_compute_receipts.sql",
             "025_export_degraded.sql",
             "026_publish_data.sql",
+            "027_remove_highlight_cut_plans.sql",
         ]
         assert db.migrate(conn) == expected_migrations
         assert db.migrate(conn) == []  # 第二次全量跳过
     finally:
         conn.close()
+
+
+def test_migration_027_drops_highlight_cut_plans_only(memory_db: sqlite3.Connection) -> None:
+    """高光混剪完全清除（2026-11-12 业主裁决）：存量方案行删除、其他模式不受牵连。
+
+    直接执行 027 的 SQL 原文（migrate 已把它记为已应用，走机制测不到删除效果）。
+    """
+    memory_db.execute(
+        "INSERT INTO projects (id, name, source_path, created_at, updated_at)"
+        " VALUES ('p1', '剧', 'D:/x', 0, 0)"
+    )
+    for index, mode in enumerate(("highlight_cut", "raw_clip")):
+        memory_db.execute(
+            "INSERT INTO narration_plans"
+            " (id, project_id, narration_mode, episode_ids, plan_data, status, created_at)"
+            " VALUES (?, 'p1', ?, '[]', '{}', 'ready', 0)",
+            (f"plan-{index}", mode),
+        )
+    sql = (db.MIGRATIONS_DIR / "027_remove_highlight_cut_plans.sql").read_text("utf-8")
+    memory_db.executescript(sql)
+    left = [
+        row[0]
+        for row in memory_db.execute("SELECT narration_mode FROM narration_plans")
+    ]
+    assert left == ["raw_clip"], "只删高光混剪，别的模式一行不动"
 
 
 def test_settings_roundtrip(memory_db: sqlite3.Connection) -> None:

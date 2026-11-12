@@ -9,9 +9,9 @@ describe('modeLabel', () => {
     expect(modeLabel('dialogue_narration')).toBe('剧情解说');
   });
 
-  it('退役模式（高光混剪）有展示名但不进可选面', () => {
+  it('已完全移除的模式不在可选面，原样显示 id（高光混剪 2026-11-12 清除）', () => {
     expect(MODE_INFO.some((item) => item.mode === 'highlight_cut')).toBe(false);
-    expect(modeLabel('highlight_cut')).toBe('高光混剪');
+    expect(modeLabel('highlight_cut')).toBe('highlight_cut');
   });
 
   it('未知模式原样显示、没有模式统称成片（宁可露 id 不给空白）', () => {

@@ -43,7 +43,6 @@ _FREEZE_DURATION_RE = re.compile(r"freeze_duration:\s*(\d+(?:\.\d+)?)")
 # 光有音轨不够，那可能是纯原声顶替了解说。
 EXPECT_NARRATION: dict[str, str] = {
     "raw_clip": "none",
-    "highlight_cut": "none",
     "subtitle_flow": "none",
     "intro_narration": "one",
     "cross_narration": "many",

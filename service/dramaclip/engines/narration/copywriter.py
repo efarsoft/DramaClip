@@ -339,7 +339,7 @@ def _repair_closing(
     指令，整条方案被门禁标 draft——一句收尾废掉全稿成本太高。重写仍不合格则保留
     原稿，交由门禁照常拦截（行为与修复前一致）。
     """
-    if plan.mode in ("raw_clip", "highlight_cut") or not plan.timeline:
+    if plan.mode == "raw_clip" or not plan.timeline:
         return filled, None
     closing_id = plan.timeline[-1].narration_id
     if closing_id is None or closing_id not in filled:

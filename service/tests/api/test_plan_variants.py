@@ -152,7 +152,7 @@ def test_only_sound_only_modes_skip_tts_group() -> None:
 
     剧情解说在剧本链落地后每段都要配音，留在无 TTS 组等于宣称它没有旁白。
     """
-    tts_free = frozenset({"raw_clip", "subtitle_flow", "highlight_cut"})
+    tts_free = frozenset({"raw_clip", "subtitle_flow"})
     assert tts_free == narration_api._NO_TTS_MODES
 
 
@@ -163,12 +163,9 @@ def test_every_supported_mode_has_a_chinese_label() -> None:
     是本文件能到的两处；`desktop/src/components/modeMeta.ts` 的 `MODE_INFO` 是第三面
     镜子，service 侧够不着（已在计划里记为 P-3 已知接受项）。
     """
-    # 2026-10-27 起两集合一朝「入口⊆标签」演化：SUPPORTED_MODES 是新产入口
-    # （合并退役的模式摘除），MODE_LABELS 是人读标签（保留退役模式供旧方案渲染）。
-    assert set(narration_api.SUPPORTED_MODES) <= set(pipeline.MODE_LABELS)
-    assert "highlight_cut" in set(pipeline.MODE_LABELS) - set(
-        narration_api.SUPPORTED_MODES
-    ), "已退役模式必须有标签：队列页旧方案不得露出英文模式名"
+    # 2026-11-12 高光混剪完全清除后，两集合回到严格相等——再出现差集就是漂移
+    # （上一次差集里的退役模式从推荐菜单漏出去撞了「模式暂未支持」）。
+    assert set(narration_api.SUPPORTED_MODES) == set(pipeline.MODE_LABELS)
 
 
 _PLANTED_STYLE_ID = "i2-style"
@@ -1309,7 +1306,7 @@ def test_zero_copy_modes_deterministically_anchor_episodes(
 ) -> None:
     """零文案模式（raw_clip 等）不付选题往返：按集冲突峰确定性锚定，互异且无母题。
 
-    2026-10-20 逐一核对：raw_clip/高光混剪/字幕金句流没有文案面，角度/母题/钩子
+    2026-10-20 逐一核对：raw_clip/字幕金句流没有文案面，角度/母题/钩子
     对成片零影响——为它们付 LLM 选题往返是「付钱不收货」。互异轴=锚定集（峰值
     降序），K 封顶于集数；母题恒空（方案卡不出紫标，不再许空头承诺）。
     """

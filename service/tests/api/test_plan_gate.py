@@ -69,7 +69,7 @@ def test_list_plans_returns_block_reason_when_cta_missing(
 
 
 def _plan_of_mode(mode: str) -> PlanData:
-    timeline = [] if mode in ("raw_clip", "subtitle_flow", "highlight_cut") else [
+    timeline = [] if mode in ("raw_clip", "subtitle_flow") else [
         TimelineSegment(
             episode_id="ep1", start=0.0, end=3.0, audio="ducked", narration_id="a"
         )
@@ -129,8 +129,8 @@ def test_list_plans_zero_copy_mode_rule_is_by_design(
 
 
 def test_expected_copy_source_covers_every_supported_mode() -> None:
-    """判据接口必须覆盖全部支持模式——highlight_cut 曾被手抄表漏掉（漂移实证）。"""
+    """判据接口必须覆盖全部支持模式——手抄表漏条目的漂移实证（那次漏的是
+    高光混剪，该模式已于 2026-11-12 完全移除，教训照旧成立）。"""
     for mode in narration_api.SUPPORTED_MODES:
         expected = "rule" if mode in narration_api._NO_TTS_MODES else "llm_script"
         assert narration_api.expected_copy_source(mode) == expected, mode
-    assert narration_api.expected_copy_source("highlight_cut") == "rule"

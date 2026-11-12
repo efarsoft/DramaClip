@@ -48,7 +48,6 @@ from dramaclip.engines.tts import base as tts_base
 
 MODE_LABELS = {
     "raw_clip": "纯原片剪辑",
-    "highlight_cut": "高光混剪",
     "intro_narration": "片头解说",
     "cross_narration": "交叉解说",
     "ultra_short_hook": "超短悬念版",
@@ -59,11 +58,12 @@ MODE_LABELS = {
     "inner_monologue": "内心独白",
 }
 
-#: 已退役模式（2026-10-27 业主裁决：高光混剪并入纯原片剪辑，raw_clip 单入口）。
-# 渲染链保留——build 分支/_NO_TTS_MODES/库里旧方案照常出片；但一切「可供应」面
-# （新方案白名单 narration_plans.SUPPORTED_MODES、AI 模式推荐菜单与缓存）都不得
-# 再出现它们。两张表的差集由契约测试锁定（test_modes.py），别再手抄第四份清单。
-RETIRED_MODES = frozenset({"highlight_cut"})
+#: 已下线模式登记表：下线的模式从标签表与白名单里**删干净**，只在这里留名，
+# 供 AI 模式推荐净化历史缓存（老项目的推荐缓存/方案行里可能还带着）。
+# 2026-10-27 业主裁决高光混剪并入纯原片剪辑（raw_clip 单入口），2026-11-12
+# 业主裁决完全清除（生成/渲染/消费分支全删，存量方案行由迁移 027 删除）。
+# 当前为空：九种模式全部在供应。
+RETIRED_MODES: frozenset[str] = frozenset()
 
 
 def build_plan(
@@ -93,8 +93,6 @@ def build_plan(
 
     if mode == "raw_clip":
         return _finish(modes.build_raw_clip(scenes, highlights, strategy, material))
-    if mode == "highlight_cut":
-        return _finish(modes.build_highlight_cut(scenes, strategy, material))
     if mode == "intro_narration":
         return _finish(modes.build_intro(scenes, strategy, material))
     if mode == "cross_narration":

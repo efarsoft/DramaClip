@@ -20,14 +20,7 @@ export const MODE_INFO: readonly ModeInfoItem[] = [
   { mode: 'inner_monologue', label: '内心独白', desc: '第一人称 OS 旁白，代入主角视角', needs: ['copy', 'voice'] },
 ];
 
-/** 退役模式的展示名：只在库里旧方案/旧成片的展示中出现，任何可选面（模式九宫格、
- * AI 推荐菜单）都不再有它——退役裁决见 service 侧 pipeline.RETIRED_MODES。 */
-const LEGACY_MODE_LABELS: Readonly<Record<string, string>> = {
-  highlight_cut: '高光混剪',
-};
-
 /** 模式 → 中文名；未知模式原样显示（宁可露 id 也不给空白），没有模式时统称「成片」。 */
 export function modeLabel(mode: string | undefined): string {
-  if (mode === undefined) return '成片';
-  return MODE_INFO.find((item) => item.mode === mode)?.label ?? LEGACY_MODE_LABELS[mode] ?? mode;
+  return MODE_INFO.find((item) => item.mode === mode)?.label ?? mode ?? '成片';
 }

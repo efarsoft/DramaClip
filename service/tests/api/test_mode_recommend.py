@@ -190,9 +190,10 @@ def test_unconfigured_llm_never_constructed(
 def test_retired_mode_is_off_the_menu_and_never_recommended(
     memory_db: sqlite3.Connection, tmp_path: Path, fake_llm: type[_FakeLlm]
 ) -> None:
-    """退役模式（高光混剪）不进菜单、id 与中文标签都映射不上——真机实锤回归：
+    """已下线模式（高光混剪）不进菜单、id 与中文标签都映射不上——真机实锤回归：
     它曾从全量标签表混进菜单，LLM 选了它、出片页自动勾上，生成方案即
-    「模式暂未支持: highlight_cut」。"""
+    「模式暂未支持: highlight_cut」；2026-11-12 已完全移除，本用例同时守卫
+    「下次下线」也走同一套滤网。"""
     project_id = _project_with_analysis(memory_db, tmp_path)
     fake_llm.reply = {
         "modes": [
@@ -219,7 +220,7 @@ def test_retired_mode_is_off_the_menu_and_never_recommended(
 def test_cached_recommendation_with_retired_mode_is_purified_and_rewritten(
     memory_db: sqlite3.Connection, tmp_path: Path, fake_llm: type[_FakeLlm]
 ) -> None:
-    """老缓存带着退役模式：读到就净化（剔除+补足三个）并写回缓存，不再每次当坏缓存。"""
+    """老缓存带着已下线模式：读到就净化（剔除+补足三个）并写回缓存，不再每次当坏缓存。"""
     project_id = _project_with_analysis(memory_db, tmp_path)
     projects_repo.update_settings(
         memory_db,

@@ -31,9 +31,6 @@ _INTRO_SLOT_ID = "intro-1"
 _CTA_SLOT_ID = "cta-1"
 _CTA_FALLBACK_S = 2.0
 
-
-_HIGHLIGHT_CLIP_S = 5.0   # 高光混剪的单条时长（真机参考：13×5s ≈ 65s 预告）
-_HIGHLIGHT_MAX_CLIPS = 15  # 条数上限：时长让位≠无限堆料，预告形态 75s 内最猛
 _ADJACENT_GAP_S = 1.5  # 邻接合并阈值：同集间隙 ≤1.5s（基本贴合）才合并；间隙大的各自成段保留节奏
 # 对拍依据（2026-10-23，dev 活库 8 条 ready 方案 43 处同集相邻间隙）：
 # 1.0-1.5s「三线不一致区」仅 1 处（2.3%）——邻接合并先吃掉 ≤1.5s 的间隙，
@@ -43,9 +40,9 @@ _ADJACENT_GAP_S = 1.5  # 邻接合并阈值：同集间隙 ≤1.5s（基本贴�
 def _merge_adjacent(ordered: list[EpisodeScene]) -> list[EpisodeScene]:
     """邻接合并：同集且首尾间隙 ≤`_ADJACENT_GAP_S` 的选中场景合成一个连续块。
 
-    纯冲突分排序会让时间轴在高分场景之间反复横跳（真机 raw_clip 20 段 11 跳场、
-    高光混剪 6 处）——相邻的高分场景本就是连续剧情，合并成块播放，块内不再
-    跳场，叙事完整度优先于碎片化快切。
+    纯冲突分排序会让时间轴在高分场景之间反复横跳（真机 raw_clip 20 段 11 跳场
+    实证）——相邻的高分场景本就是连续剧情，合并成块播放，块内不再跳场，
+    叙事完整度优先于碎片化快切。
     """
     if not ordered:
         return ordered
@@ -67,56 +64,6 @@ def _merge_adjacent(ordered: list[EpisodeScene]) -> list[EpisodeScene]:
         else:
             merged.append(scene)
     return merged
-
-
-def build_highlight_cut(
-    scenes: list[EpisodeScene],
-    strategy: StrategySpec,
-    material: MaterialByEpisode | None = None,
-) -> PlanData:
-    """高光混剪（预告形态）：全剧最高冲突场景 × 5 秒快切 + 配乐床，零解说。
-
-    参考真机混剪流程：选段=冲突分头部、时长=统一 5 秒快切、顺序=时间序
-    （预告叙事），冲突分最高的场景前置做开场；零 TTS 零字幕加工，
-    「配乐床」目前是占位描述：engines/bgm/selector.py 尚未接线（生产零调用），
-    接线前成片没有 BGM——W7 落地时替换此句。
-    邻接合并不适用于此模式：快切本身就是节奏，碎片化是设计意图而非缺陷。
-    `material` 可选：给到时过滤哑段（原声快切里混 5 秒无声动作戏=白剪）、
-    窗口边界吸附台词句边界（与 raw_clip 同款纪律，2026-10-27 审计立案）。
-    """
-    if not scenes:
-        return PlanData(mode="highlight_cut", strategy=strategy)
-    ranked = sorted(scenes, key=score_order)[:_HIGHLIGHT_MAX_CLIPS]
-    if material is not None:
-        voiced = [scene for scene in ranked if has_dialogue(material, scene)]
-        if len(voiced) >= 3:
-            ranked = voiced
-    ordered = sorted(ranked, key=episode_order)
-    best = max(ordered, key=lambda s: s.score)
-    if ordered[0] is not best:
-        ordered.remove(best)
-        ordered.insert(0, best)
-    timeline: list[TimelineSegment] = []
-    for scene in ordered:
-        span = scene.end - scene.start
-        if span <= 0:
-            continue
-        if span <= _HIGHLIGHT_CLIP_S:
-            start, end = scene.start, scene.end
-        else:
-            mid = (scene.start + scene.end) / 2
-            start, end = mid - _HIGHLIGHT_CLIP_S / 2, mid + _HIGHLIGHT_CLIP_S / 2
-        timeline.append(
-            TimelineSegment(
-                episode_id=scene.episode_id,
-                start=round(start, 3),
-                end=round(end, 3),
-                audio="original",
-            )
-        )
-    timeline = _snap_windows_to_dialogue(timeline, material)
-    timeline = extend_openings_over_connectives(timeline, material)
-    return PlanData(mode="highlight_cut", timeline=timeline, strategy=strategy)
 
 
 def build_raw_clip(

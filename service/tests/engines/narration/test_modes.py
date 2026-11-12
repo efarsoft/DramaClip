@@ -7,7 +7,7 @@ import pytest
 from dramaclip.engines.narration import pipeline
 from dramaclip.engines.narration.casting import stamp
 from dramaclip.engines.narration.models import StrategySpec
-from dramaclip.engines.narration.modes import build_highlight_cut, build_intro, build_raw_clip
+from dramaclip.engines.narration.modes import build_intro, build_raw_clip
 from dramaclip.engines.semantic.models import ConflictScore, HighlightSegment
 from tests.engines.narration.conftest import assert_slots_paired
 
@@ -26,18 +26,20 @@ def _scenes() -> list[ConflictScore]:
     ]
 
 
-def test_supported_modes_are_labels_minus_retired() -> None:
-    """契约：可供应白名单 == 全量标签表 − 退役名单。
+def test_supported_modes_equal_labels_and_retired_are_gone() -> None:
+    """契约：可供应白名单 == 全量标签表；下线名单上的名字不得出现在两张表里。
 
-    两张表各有一份手抄（SUPPORTED_MODES 给新方案闸、MODE_LABELS 给渲染与展示），
-    差集只该是退役名单——2026-11-12 真机实锤过漂移的代价：退役的高光混剪仍在
-    标签表里，推荐菜单照它生成，LLM 选了它、出片页自动勾上、生成方案即
-    「模式暂未支持」。名单本身登记在 pipeline.RETIRED_MODES，本用例锁三者关系。
+    高光混剪的两段史锁在这：合并退役时它还留在标签表里「供旧方案渲染」，结果
+    从推荐菜单漏出去被 LLM 选中、缓存、出片页自动勾上，生成方案即「模式暂未
+    支持」（2026-11-12 真机实锤）；当天业主裁决完全清除。此后下线即干净摘除，
+    名单只留名字给推荐缓存净化用。
     """
     from dramaclip.api.narration_plans import SUPPORTED_MODES
 
-    assert set(pipeline.MODE_LABELS) >= pipeline.RETIRED_MODES, "退役名单必须登记在标签表里"
-    assert set(SUPPORTED_MODES) == set(pipeline.MODE_LABELS) - pipeline.RETIRED_MODES
+    assert not (set(pipeline.MODE_LABELS) & pipeline.RETIRED_MODES), (
+        "下线名单上的名字不得残留在标签表里"
+    )
+    assert set(SUPPORTED_MODES) == set(pipeline.MODE_LABELS)
 
 
 def test_raw_clip_follows_episode_order() -> None:
@@ -131,34 +133,6 @@ def test_raw_clip_snap_yields_when_extension_hits_next_window() -> None:
     }
     plan = build_raw_clip(stamp([(1, "ep1", scenes)]), [], _STRATEGY, material)
     assert (plan.timeline[0].start, plan.timeline[0].end) == (6.0, 8.0)
-
-
-def test_highlight_cut_filters_mutes_and_snaps_to_sentences() -> None:
-    """高光混剪同款纪律（2026-10-27 审计）：哑段过滤 + 5 秒窗界吸附台词句边界。"""
-    from dramaclip.engines.analysis.models import AsrSegment
-    from dramaclip.engines.narration.casting import EpisodeMaterial
-
-    scenes = [
-        ConflictScore(scene_index=0, start=0.0, end=6.0, score=95),  # 哑段
-        ConflictScore(scene_index=1, start=6.0, end=12.0, score=80),
-        ConflictScore(scene_index=2, start=12.0, end=18.0, score=75),
-        ConflictScore(scene_index=3, start=18.0, end=24.0, score=70),
-    ]
-    material = {
-        "ep1": EpisodeMaterial(
-            number=1,
-            asr=[
-                AsrSegment(start=6.0, end=11.0, text="甲"),
-                AsrSegment(start=11.5, end=17.0, text="乙"),
-                AsrSegment(start=17.5, end=23.0, text="丙"),
-            ],
-        )
-    }
-    plan = build_highlight_cut(stamp([(1, "ep1", scenes)]), _STRATEGY, material)
-    spans = [(seg.start, seg.end) for seg in plan.timeline]
-    assert (0.0, 6.0) not in spans, "有声候选 ≥3 时哑段不得入选"
-    # 几何取中窗 [6.5,11.5]… 起点 全部退到句首，剪口不切句
-    assert spans == [(6.0, 11.5), (11.5, 17.5), (17.5, 23.5)]
 
 
 def test_intro_filters_mute_body_scenes() -> None:
@@ -259,55 +233,6 @@ def test_build_plan_refuses_dialogue_rule_arrangement() -> None:
         pipeline.build_plan(
             "dialogue_narration", stamp([(1, "ep1", _scenes())]), [], {}, {}
         )
-
-
-def test_highlight_cut_uniform_clips_chronological_best_first() -> None:
-    """高光混剪（预告形态）：冲突分头部 × 5 秒快切，时间序叙事、最高分前置。
-
-    零解说零 TTS，BGM 床由 selector 按主导情绪选曲（should_add_bgm 默认开）。
-    """
-    from dramaclip.engines.narration.modes import build_highlight_cut
-
-    scenes = stamp([(1, "ep1", _scenes()), (2, "ep2", _scenes())])
-    plan = build_highlight_cut(scenes, _STRATEGY)
-    assert plan.mode == "highlight_cut"
-    assert plan.narration_texts == [], "预告形态零解说零 TTS"
-    assert len(plan.timeline) == 14, "条数上限 15（夹具 14 场全取）"
-    episodes_order = [s.episode_id for s in plan.timeline]
-    assert episodes_order == sorted(episodes_order), "跨集按时间序（预告叙事）"
-    first = plan.timeline[0]
-    assert (first.start, first.end) == (24.5, 29.5), "score=90 场景居首，取中点 5 秒"
-    assert all(
-        s.end - s.start <= 5.0 + 1e-6 for s in plan.timeline
-    ), "单条 ≤5 秒（短场景取全长）"
-
-
-def test_highlight_cut_via_build_plan_dispatches() -> None:
-    """build_plan 分发冒烟：apply_transitions 后保结构（条数可为转场后处理值）。"""
-    plan = pipeline.build_plan(
-        "highlight_cut",
-        stamp([(1, "ep1", _scenes()), (2, "ep2", _scenes())]),
-        [],
-        {},
-        {},
-    )
-    assert plan.mode == "highlight_cut"
-    assert len(plan.timeline) >= 12, "快切预告形态：≥12 条高能切片"
-    assert plan.narration_texts == []
-
-
-def test_highlight_cut_skips_degenerate_scenes() -> None:
-    """零长度场景跳过，不产出负/零长段。"""
-    from dramaclip.engines.semantic.models import ConflictScore
-
-    plan = pipeline.build_plan(
-        "highlight_cut",
-        stamp([(1, "ep1", [ConflictScore(scene_index=0, start=5.0, end=5.0, score=90)])]),
-        [],
-        {},
-        {},
-    )
-    assert plan.timeline == []
 
 
 def test_raw_clip_merges_adjacent_high_scores_into_one_block() -> None:
