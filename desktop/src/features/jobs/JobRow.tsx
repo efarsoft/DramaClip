@@ -9,7 +9,7 @@ import { jobsApi } from '../../services/client';
 import { mixins } from '../../styles/mixins';
 import { tokens } from '../../styles/theme';
 import { useJobsStore } from '../../stores/jobs';
-import { computeLabel } from '../engines/assetState';
+import { computeSummary } from '../engines/assetState';
 import {
   durationLabel,
   isActiveJob,
@@ -209,10 +209,8 @@ function JobMetaLine({
   if (job.status === 'pending') parts.push('等待并发额度');
   if (elapsed !== null) parts.push(`${isActiveJob(job) ? '已进行' : '耗时'} ${durationLabel(elapsed)}`);
   if (!isActiveJob(job) && job.status !== 'pending') {
-    const runtime = (job.compute ?? [])
-      .map((report) => computeLabel(report))
-      .filter((label): label is string => label !== undefined)
-      .join(' · ');
+    // 多回执任务（转写 + 画面理解）各标环节名；单条沿用原话
+    const runtime = computeSummary(job.compute ?? []);
     if (runtime !== '') parts.push(runtime);
   }
   const showCancel = isActiveJob(job);

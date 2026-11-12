@@ -196,7 +196,8 @@ def builtin_specs() -> list[ModelSpec]:
             desc="声纹嵌入+聚类，把台词按角色聚类并标注说话人（角色A/B…）",
             required_files=("campplus_cn_common.bin",),
         ),
-        # ---- 视觉轨（vision）：Qwen3-VL 三档，GGUF+mmproj 双文件（管理先行，运行接入见 P2b）----
+        # ---- 视觉轨（vision）：Qwen3-VL 三档，GGUF+mmproj 双文件（运行时 = engines/vision 的
+        # llama-server 会话；耗时数字是 2026-11-12 真机实测，只写量过的档）----
         ModelSpec(
             model_id="qwen3-vl-2b",
             kind="vision",
@@ -205,12 +206,12 @@ def builtin_specs() -> list[ModelSpec]:
             ms_repo="Qwen/Qwen3-VL-2B-Instruct-GGUF",
             placement="vl/qwen3-vl-2b",
             name="Qwen3-VL 2B（视觉·轻量档）",
-            notes="主模型 + mmproj 视觉编码器双文件；运行需 llama.cpp（接入中）",
+            notes="主模型 + mmproj 视觉编码器双文件；由 llama.cpp 运行，N 卡可整模型卸载",
             size_label="~1.6GB",
             tier="fast",
             speed=5,
             quality=2,
-            desc="逐集拼图画面理解·轻量档：16GB 内存机器可跑，弱机/尝鲜",
+            desc="逐集画面理解·轻量档：16GB 内存机器可跑，弱机/尝鲜",
             required_files=_VL2B_FILES,
             download_files=_VL2B_FILES,
         ),
@@ -222,12 +223,15 @@ def builtin_specs() -> list[ModelSpec]:
             ms_repo="Qwen/Qwen3-VL-4B-Instruct-GGUF",
             placement="vl/qwen3-vl-4b",
             name="Qwen3-VL 4B（视觉·均衡档）",
-            notes="主模型 + mmproj 视觉编码器双文件；运行需 llama.cpp（接入中）",
+            notes="主模型 + mmproj 视觉编码器双文件；由 llama.cpp 运行，N 卡可整模型卸载",
             size_label="~3GB",
             tier="balanced",
             speed=4,
             quality=3,
-            desc="逐集拼图画面理解·均衡档：默认推荐候选，真机 CPU 一张拼图约 15~30 秒",
+            desc=(
+                "逐集画面理解·均衡档：默认推荐候选；"
+                "实测 CPU 约 14 分钟/集，Quadro M4000 卸载 4.5~5.5 分钟/集"
+            ),
             required_files=_VL4B_FILES,
             download_files=_VL4B_FILES,
         ),
@@ -239,12 +243,12 @@ def builtin_specs() -> list[ModelSpec]:
             ms_repo="Qwen/Qwen3-VL-8B-Instruct-GGUF",
             placement="vl/qwen3-vl-8b",
             name="Qwen3-VL 8B（视觉·高配档）",
-            notes="主模型 + mmproj 视觉编码器双文件；运行需 llama.cpp（接入中）",
+            notes="主模型 + mmproj 视觉编码器双文件；由 llama.cpp 运行，N 卡可整模型卸载",
             size_label="~5.8GB",
             tier="accurate",
             speed=3,
             quality=4,
-            desc="逐集拼图画面理解·高配档：32GB+ 内存机器",
+            desc="逐集画面理解·高配档：32GB+ 内存机器；显卡卸载需约 8GB 空闲显存",
             required_files=_VL8B_FILES,
             download_files=_VL8B_FILES,
         ),

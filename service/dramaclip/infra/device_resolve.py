@@ -4,10 +4,12 @@
 本模块只按 ``ok``/``ready``/``reason`` 取数，**不解析 hint 文案**；引擎侧不再各自读
 设置（旧状：runtime/factory/pool/preview/selftest 五处各读一次 ``asr.device``/``tts.device``）。
 
-不纳入解析的两类，各有自己的解析器并遵守同一契约「解析 → 运行证据 → ComputeReport」：
+不纳入解析的三类，各有自己的解析器并遵守同一契约「解析 → 运行证据 → ComputeReport」：
 - 人声分离：没有设备开关，恒 ``auto`` 交给 worker（worker 的 provider 探测会把
   「缺 CUDA EP / CUDA 试跑失败」的真实原因写进回执；在入口预判 CPU 反而丢掉原因）。
 - 视频编码：``encoder.pick_hw_encoder`` 用真实试编决定，下限不可预知，只能试。
+- 本地视觉轨：``llama_device`` 按 llama-server 自己报的设备清单选卡，会话拉起时
+  解析（能力表里的 ``local_visual_*`` 只是静态结论，供界面提示）。
 """
 
 from __future__ import annotations

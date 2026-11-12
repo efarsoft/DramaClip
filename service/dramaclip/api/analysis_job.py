@@ -554,6 +554,13 @@ def _analyze_one(
             )
             sheet = _contact_sheet(context, episode)
             frames = _describe_frames(context, vision, episode, episode_id, report)
+            # 视觉轨回执并入算力账：会话拉起后才有证据，转写与画面理解各记一条
+            vision_report = vision.compute() if vision is not None else None
+            if vision_report is not None:
+                context.job_store.set_compute(
+                    job_id,
+                    [r.to_dict() for r in (compute_report, vision_report) if r is not None],
+                )
             track: dict[str, Any] = {}
             if sheet is not None:
                 track["contact_sheet"] = sheet

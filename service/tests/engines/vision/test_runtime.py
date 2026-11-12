@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from dramaclip.engines.vision import runtime
+from dramaclip.infra import llama_device
+from dramaclip.infra.compute import ComputeUnavailableError
 
 
 def test_sample_frames_args_deterministic() -> None:
@@ -150,13 +152,20 @@ def local_session(monkeypatch: pytest.MonkeyPatch, tmp_path):
     monkeypatch.setattr(runtime, "_free_port", lambda: 45123)
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     monkeypatch.setattr(runtime.runner, "run", fake_run)
-    session = runtime.VisionSession(
+    # 设备探测默认「没有 CUDA 设备」：Popen 已是替身，真去跑 --list-devices 只会炸在替身上
+    monkeypatch.setattr(runtime.llama_device, "list_cuda_devices", lambda *_a, **_k: [])
+    session = _session(tmp_path)
+    return session, spawned, asked
+
+
+def _session(tmp_path: Path, requested: str = "auto") -> runtime.VisionSession:
+    return runtime.VisionSession(
         model_id="qwen3-vl-4b",
         exe=tmp_path / "llama-server.exe",
         model=tmp_path / "model.gguf",
         mmproj=tmp_path / "mmproj.gguf",
+        requested=requested,
     )
-    return session, spawned, asked
 
 
 def test_describe_episode_boots_llama_server_before_asking(
@@ -182,3 +191,185 @@ def test_describe_episode_reuses_the_live_server(
     for _ in range(2):
         session.describe_episode(tmp_path / "ep.mp4", 60.0, tmp_path / "work", count=2)
     assert len(spawned) == 1
+
+
+# ── 算力解析：vision.device × llama-server 设备清单 → 启动参数与回执 ──
+
+_M4000 = llama_device.CudaDevice("CUDA0", "Quadro M4000", 8191, 7305)
+_Local = tuple[runtime.VisionSession, list[list[str]], list[str]]
+
+
+class _DeadProc:
+    """拉起即退出的 llama-server（GPU 初始化失败的形态）。"""
+
+    returncode = 1
+
+    def poll(self) -> int:
+        return 1
+
+    def terminate(self) -> None:
+        return None
+
+
+def _offer_gpu(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runtime.llama_device, "list_cuda_devices", lambda *_a, **_k: [_M4000])
+    monkeypatch.setattr(runtime.llama_device, "has_cuda_build", lambda _exe: True)
+
+
+def _device_arg(cmd: list[str]) -> str:
+    return cmd[cmd.index("--device") + 1]
+
+
+def _gpu_dies(monkeypatch: pytest.MonkeyPatch, spawned: list[list[str]]) -> None:
+    """卸载到真设备的启动立刻退出；禁用卸载（--device none）的照常活着（沿用夹具替身）。"""
+    alive = runtime.subprocess.Popen
+
+    def popen(cmd: list[str], **kwargs: object) -> object:
+        if _device_arg(cmd) != "none":
+            spawned.append(list(cmd))
+            return _DeadProc()
+        return alive(cmd, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(runtime.subprocess, "Popen", popen)  # type: ignore[attr-defined]
+
+
+def test_auto_offloads_to_the_cuda_device(
+    local_session: _Local, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """auto + 清单里有 CUDA 设备：整模型卸载，回执写实际设备名。"""
+    session, spawned, _asked = local_session
+    _offer_gpu(monkeypatch)
+    assert session.compute() is None, "没拉起过就没有证据，不许先发回执"
+    session.describe_episode(tmp_path / "ep.mp4", 60.0, tmp_path / "work", count=2)
+
+    cmd = spawned[0]
+    assert cmd[cmd.index("--device") + 1] == "CUDA0"
+    assert cmd[cmd.index("-ngl") + 1] == "99"
+    report = session.compute()
+    assert report is not None
+    assert (report.component, report.requested, report.resolved, report.actual) == (
+        "vision.llama", "auto", "cuda", "cuda",
+    )
+    assert report.fallback is False and report.device == "Quadro M4000"
+
+
+def test_auto_without_cuda_device_stays_on_cpu_and_says_why(
+    local_session: _Local, tmp_path: Path
+) -> None:
+    """清单为空（CPU 构建）：回执是 CPU 且带原因，但不算回退。"""
+    session, spawned, _asked = local_session
+    session.describe_episode(tmp_path / "ep.mp4", 60.0, tmp_path / "work", count=2)
+
+    assert _device_arg(spawned[0]) == "none"
+    assert spawned[0][spawned[0].index("-ngl") + 1] == "0"
+    report = session.compute()
+    assert report is not None
+    assert (report.resolved, report.actual, report.fallback) == ("cpu", "cpu", False)
+    assert "CPU 构建" in report.reason
+
+
+def test_auto_falls_back_to_cpu_when_gpu_launch_dies(
+    local_session: _Local, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GPU 起不来（显存不够/驱动不认）：回退 CPU 重启一次，描述照出，回执标 fallback。"""
+    session, spawned, _asked = local_session
+    _offer_gpu(monkeypatch)
+    _gpu_dies(monkeypatch, spawned)
+    frames = session.describe_episode(tmp_path / "ep.mp4", 60.0, tmp_path / "work", count=2)
+
+    assert len(spawned) == 2
+    assert _device_arg(spawned[0]) == "CUDA0" and _device_arg(spawned[1]) == "none"
+    assert [f["shot"] for f in frames] == ["特写", "特写"]
+    report = session.compute()
+    assert report is not None
+    assert (report.resolved, report.actual, report.fallback) == ("cuda", "cpu", True)
+    assert "提前退出" in report.reason
+
+
+def test_explicit_cuda_without_device_fails_before_launch(
+    local_session: _Local, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """显式 cuda 是承诺：没有 CUDA 设备就报错，不拉 CPU 进程慢慢跑。"""
+    _auto, spawned, _asked = local_session
+    monkeypatch.setattr(runtime.llama_device, "has_cuda_build", lambda _exe: True)
+    session = _session(tmp_path, "cuda")
+    with pytest.raises(ComputeUnavailableError, match="CUDA 运行库"):
+        session.describe_episode(tmp_path / "ep.mp4", 60.0, tmp_path / "work", count=2)
+    assert spawned == []
+    assert session.compute() is None, "没跑成的事不留回执"
+
+
+def test_explicit_cuda_launch_failure_is_not_retried_on_cpu(
+    local_session: _Local, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _auto, spawned, _asked = local_session
+    _offer_gpu(monkeypatch)
+    _gpu_dies(monkeypatch, spawned)
+    session = _session(tmp_path, "cuda")
+    with pytest.raises(ComputeUnavailableError, match="GPU 启动失败"):
+        session.describe_episode(tmp_path / "ep.mp4", 60.0, tmp_path / "work", count=2)
+    assert len(spawned) == 1, "显式 cuda 失败后不得再拉一只 CPU 进程"
+
+
+def test_cpu_request_skips_the_device_probe(
+    local_session: _Local, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """显式 cpu 是逃生口：不跑探测、显式禁用卸载——哪怕机器上有可用的 CUDA 设备。
+
+    禁用不能靠「不带参数」：带 GPU 后端的构建默认把能卸的全卸上显卡（2026-11-12
+    实测 CUDA 构建无参数启动即占 5GB 显存，只给 -ngl 0 视觉编码器仍在卡上）——
+    回执写 CPU、实际在 GPU，cpu 逃生口就名存实亡。
+    """
+    _auto, spawned, _asked = local_session
+
+    def must_not_probe(*_a: object, **_k: object) -> list[llama_device.CudaDevice]:
+        raise AssertionError("请求 cpu 不该跑设备探测")
+
+    monkeypatch.setattr(runtime.llama_device, "list_cuda_devices", must_not_probe)
+    session = _session(tmp_path, "cpu")
+    session.describe_episode(tmp_path / "ep.mp4", 60.0, tmp_path / "work", count=2)
+
+    assert _device_arg(spawned[0]) == "none"
+    assert spawned[0][spawned[0].index("-ngl") + 1] == "0"
+    report = session.compute()
+    assert report is not None and (report.requested, report.actual) == ("cpu", "cpu")
+
+
+def test_open_session_normalizes_the_device_setting(tmp_path: Path) -> None:
+    """vision.device 透传给会话；写坏的值按 auto——配置错不该挡住分析。"""
+    models = tmp_path / "models"
+    model_dir = models / "vl" / "qwen3-vl-4b"
+    model_dir.mkdir(parents=True)
+    (model_dir / "Qwen3VL-4B-Instruct-Q4_K_M.gguf").write_bytes(b"x")
+    (model_dir / "mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf").write_bytes(b"x")
+    exe = tmp_path / "tools" / "llama.cpp" / "llama-server.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"MZ")
+
+    def requested(value: str) -> str:
+        session = runtime.open_session(
+            tmp_path, models, {"vision.model": "qwen3-vl-4b", "vision.device": value}
+        )
+        assert isinstance(session, runtime.VisionSession)
+        return session._requested  # noqa: SLF001 - 解析结果没有公开读口
+
+    assert requested("cpu") == "cpu"
+    assert requested("CUDA") == "cuda"
+    assert requested("") == "auto"
+    assert requested("gpu-please") == "auto"
+
+
+def test_cloud_session_reports_only_after_answering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = runtime.CloudVisionSession(base_url="https://x/v1", api_key="k", model="qwen-vl")
+    assert session.compute() is None, "一组都没答过（各集走缓存）不发回执"
+    frame = tmp_path / "frame-01.png"
+    frame.write_bytes(b"\x89PNG\r\n\x1a\n")
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda *_a, **_k: _FakeResp(_fake_chat_body(1))
+    )
+    session._ask_group([frame], 1)  # noqa: SLF001 - 直走传输层，不起采样
+    report = session.compute()
+    assert report is not None
+    assert (report.component, report.actual) == ("vision.cloud", "cloud")

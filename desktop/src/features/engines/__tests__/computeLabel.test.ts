@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ComputeReport } from '@dramaclip/protocol';
-import { computeLabel } from '../assetState';
+import { computeLabel, computeSummary } from '../assetState';
 
 const base: ComputeReport = {
   component: 'asr.whisper', requested: 'auto', resolved: 'cuda',
@@ -21,5 +21,32 @@ describe('computeLabel', () => {
   });
   it('没有回执不编造', () => {
     expect(computeLabel(undefined)).toBeUndefined();
+  });
+});
+
+describe('computeSummary', () => {
+  const vision: ComputeReport = {
+    component: 'vision.llama', requested: 'auto', resolved: 'cuda', actual: 'cuda',
+    fallback: false, reason: '', device: 'Quadro M4000',
+  };
+  it('单条回执沿用原话（不标环节名）', () => {
+    expect(computeSummary([{ ...base, actual: 'cuda', fallback: false, reason: '', device: 'cuda' }]))
+      .toBe('本次实际：GPU（cuda）');
+  });
+  it('多条回执给已登记环节标环节名', () => {
+    expect(computeSummary([
+      { ...base, component: 'asr.funasr', actual: 'cuda', fallback: false, reason: '', device: 'cuda' },
+      vision,
+    ])).toBe('转写 GPU（cuda） · 画面理解 GPU（Quadro M4000）');
+  });
+  it('未登记环节的多回执维持原话（导出任务的既有文案不动）', () => {
+    expect(computeSummary([
+      { ...base, component: 'tts.separation', actual: 'cloud', resolved: 'cloud', fallback: false, reason: '' },
+      { ...base, component: 'video.encode', requested: 'cpu', resolved: 'libx264', actual: 'libx264', fallback: false, reason: '' },
+    ])).toBe('本次实际：云端 · 编码：libx264');
+  });
+  it('没证据的回执跳过，一条不剩就是空串', () => {
+    expect(computeSummary([])).toBe('');
+    expect(computeSummary([{ ...base, actual: 'unknown', fallback: false, reason: '' }])).toBe('');
   });
 });

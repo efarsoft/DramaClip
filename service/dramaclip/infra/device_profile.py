@@ -206,12 +206,15 @@ def profile(
     *,
     separation_ort: dict[str, Any] | None = None,
     torch_variant: str | None = None,
+    visual_cuda_build: bool = False,
 ) -> dict[str, Any]:
     """探测快照 + 运行库/ORT/torch 安装态 → 设备档位与各引擎能力结论。
 
     ``separation_ort`` 是 tts_runtime.ort_state（安装期真实 session 探测的 marker）；
-    ``torch_variant`` 是 tts_runtime.torch_variant。两者由调用方按**自己的 data_dir**
-    读进来：本函数不许再去猜全局 data_dir，否则 system.health 与解析入口会各得结论。
+    ``torch_variant`` 是 tts_runtime.torch_variant；``visual_cuda_build`` 是
+    llama_device.has_cuda_build（视觉轨 llama-server 旁带不带 CUDA 后端）。三者由
+    调用方按**自己的 data_dir** 读进来：本函数不许再去猜全局 data_dir，否则
+    system.health 与解析入口会各得结论。
     安装态与可用态分开——GPU 轮装上了但 session 落 CPU 时必须如实不 ready。
     """
     vendor = str(snapshot.get("vendor") or "none")
@@ -397,8 +400,10 @@ def profile(
         else:
             sep_hint, sep_reason = "", ""
 
-    # 本地视觉轨三档（llama.cpp llama-server，非 torch 体系——GPU 取决于
-    # llama-server 是否 CUDA 构建，属资产层；显存为 fp16 权重估算）
+    # 本地视觉轨三档（llama.cpp llama-server，非 torch 体系）：GPU 卸载要 llama.cpp 的
+    # CUDA 构建（属资产层）+ cuda_runtime 的 cudart/cublas。这里是静态结论，实际后端
+    # 以会话首次拉起时的设备清单与任务回执为准；显存下限为 fp16 权重的保守估算
+    # （4B Q4 实测占用 5.2GB）。
     visual: dict[str, dict[str, Any]] = {}
     for v_key, floor_gb in (
         ("local_visual_2b", 6.0),
@@ -407,16 +412,24 @@ def profile(
     ):
         v_hint, v_reason, v_short = note(v_key, local=True)
         v_ok = is_nvidia and vram_gb >= floor_gb
+        v_ready = False
         if not v_short:
             if not is_nvidia:
                 v_hint, v_reason = hw_hint, hw_reason
             elif not v_ok:
                 v_hint = f"本地视觉模型需 {floor_gb:.0f}GB+ 显存（当前 {vram_gb:.1f}GB）"
                 v_reason = f"显存不足 {floor_gb:.0f}GB"
-            else:
+            elif not visual_cuda_build:
                 v_hint = "需 llama.cpp CUDA 构建资产（资产库提供后生效）"
                 v_reason = "视觉模型 CUDA 构建资产未入库"
-        visual[v_key] = _cap(v_ok, False, v_hint, v_reason)
+            elif not hardware_ok:
+                v_hint, v_reason = hw_hint, hw_reason
+            elif not cuda_runtime_installed:
+                v_hint = "CUDA 运行库未安装（安装后画面理解可走 GPU）"
+                v_reason = _REASON_RUNTIME_MISSING
+            else:
+                v_ready = True
+        visual[v_key] = _cap(v_ok, v_ready, v_hint, v_reason)
 
     caps = {
         "faster_whisper_gpu": _cap(whisper_ok, whisper_ready, fw_hint, fw_reason),

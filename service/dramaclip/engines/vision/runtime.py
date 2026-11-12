@@ -6,6 +6,10 @@
 
 形态来自 2026-10-09 真机横评：拼图单请求出局（4B 无格级定位，16 格全首格复读），
 **多图独立序列可靠**——每集 16 帧全分辨率采样，4 张一组发多图请求逐图描述。
+
+算力（2026-11-12）：本地会话按 ``vision.device``（auto/cuda/cpu，同 asr.device 词汇）
+解析——auto 下 llama.cpp 构建暴露出 CUDA 设备且显存够就整模型卸载，GPU 起不来
+回退 CPU 重启一次；显式 cuda 是承诺，不静默落 CPU。实际后端由 ``compute()`` 回执。
 """
 
 from __future__ import annotations
@@ -21,15 +25,29 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from dramaclip.infra import llama_device
+from dramaclip.infra.compute import (
+    ComputeReport,
+    ComputeUnavailableError,
+    normalize_requested,
+)
+from dramaclip.infra.compute import cloud as cloud_report
 from dramaclip.infra.ffmpeg import runner
 
 MODEL_KEY = "vision.model"  # 档位 = 模型中心 kind=vision 的 model_id；空 = 视觉轨关闭
-_SERVER_REL = Path("tools") / "llama.cpp" / "llama-server.exe"
+DEVICE_KEY = "vision.device"  # auto / cuda / cpu；缺省或写坏按 auto
+_COMPONENT = "vision.llama"
+_SERVER_REL = llama_device.SERVER_REL
 _FRAMES_PER_REQUEST = 4
 _FRAME_WIDTH = 640
 _LOAD_TIMEOUT_S = 600.0
 _REQUEST_TIMEOUT_S = 900.0
 _MMPROJ_PREFIX = "mmproj"
+_GPU_LAYERS = "99"  # 整模型卸载：层数上限远超任何一档视觉模型
+# CPU 必须明说：带 GPU 后端的构建不带参数启动会把能卸的全卸上显卡（2026-11-12 实测
+# CUDA 构建显存 1.0→6.1GB；只给 -ngl 0 时视觉编码器仍留在卡上 1.0→2.0GB）。不写这两项，
+# 「落 CPU」只是回执上的字，cpu 逃生口与显存余量把关都会失效。
+_CPU_ONLY_ARGS = ["--device", "none", "-ngl", "0"]
 
 
 def enabled(settings: dict[str, str]) -> bool:
@@ -63,7 +81,18 @@ def open_session(
     exe = data_dir / _SERVER_REL
     if not mains or not mmprojs or not exe.is_file():
         return None
-    return VisionSession(model_id=model_id, exe=exe, model=mains[0], mmproj=mmprojs[0])
+    return VisionSession(
+        model_id=model_id, exe=exe, model=mains[0], mmproj=mmprojs[0],
+        requested=_requested(settings), data_dir=data_dir,
+    )
+
+
+def _requested(settings: dict[str, str]) -> str:
+    """``vision.device`` 归一；写坏的值按 auto——视觉轨是增强品，配置错不该挡分析。"""
+    try:
+        return normalize_requested(settings.get(DEVICE_KEY))
+    except ValueError:
+        return "auto"
 
 
 def sample_frames_args(
@@ -212,6 +241,11 @@ class CloudVisionSession:
         self._endpoint = f"{base_url.rstrip('/')}/chat/completions"
         self._api_key = api_key
         self._model = model
+        self._answered = False
+
+    def compute(self) -> ComputeReport | None:
+        """云端回执；一组都没答过（各集走缓存）时没有证据，不编造。"""
+        return cloud_report("vision.cloud") if self._answered else None
 
     def describe_episode(
         self,
@@ -248,6 +282,7 @@ class CloudVisionSession:
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:300]
             raise RuntimeError(f"云端视觉请求失败 HTTP {exc.code}: {detail}") from exc
+        self._answered = True
         return str(body["choices"][0]["message"]["content"])
 
     def close(self) -> None:
@@ -255,34 +290,99 @@ class CloudVisionSession:
 
 
 class VisionSession:
-    """一只 llama-server 子进程：跨集复用模型，用完 close。"""
+    """一只 llama-server 子进程：跨集复用模型，用完 close。
 
-    def __init__(self, *, model_id: str, exe: Path, model: Path, mmproj: Path) -> None:
+    GPU 卸载在首次拉起时解析（见模块头）：auto 下 CUDA 设备可用就整模型卸载，
+    拉不起来回退 CPU 重启一次；显式 cuda 失败直接抛——承诺语义，不静默降速。
+    """
+
+    def __init__(
+        self, *, model_id: str, exe: Path, model: Path, mmproj: Path,
+        requested: str = "auto", data_dir: Path | None = None,
+    ) -> None:
         self.model_id = model_id
         self._exe = exe
         self._model = model
         self._mmproj = mmproj
+        self._requested = normalize_requested(requested)
+        self._data_dir = data_dir
         self._proc: subprocess.Popen[str] | None = None
+        self._report: ComputeReport | None = None
+
+    def compute(self) -> ComputeReport | None:
+        """实际后端回执；会话从未拉起（各集全走缓存）时没有证据，不编造。"""
+        return self._report
 
     def _ensure(self) -> None:
         if self._proc is not None and self._proc.poll() is None:
             return
         if self._proc is not None:
             raise RuntimeError("llama-server 进程已退出，无法继续视觉描述")
+        choice = self._resolve_device()
+        if choice.device is not None:
+            try:
+                self._launch(choice.device)
+            except RuntimeError as exc:
+                self._discard_proc()
+                if self._requested == "cuda":
+                    raise ComputeUnavailableError(
+                        f"{_COMPONENT} 请求 cuda：GPU 启动失败（{exc}）"
+                    ) from exc
+                self._launch(None)
+                self._report = ComputeReport(
+                    component=_COMPONENT, requested="auto",
+                    resolved="cuda", actual="cpu", fallback=True,
+                    reason=f"GPU 启动失败（{exc}）",
+                )
+                return
+            self._report = ComputeReport(
+                component=_COMPONENT, requested=self._requested,
+                resolved="cuda", actual="cuda", device=choice.device.name,
+            )
+            return
+        if self._requested == "cuda":
+            raise ComputeUnavailableError(f"{_COMPONENT} 请求 cuda：{choice.reason}")
+        self._launch(None)
+        self._report = ComputeReport(
+            component=_COMPONENT, requested=self._requested,
+            resolved="cpu", actual="cpu", reason=choice.reason,
+        )
+
+    def _resolve_device(self) -> llama_device.Choice:
+        """按 vision.device 与设备清单定后端；cpu 直落，不跑探测。"""
+        if self._requested == "cpu":
+            return llama_device.Choice(None, "")
+        devices = llama_device.list_cuda_devices(
+            self._exe, env=llama_device.runtime_env(self._data_dir)
+        )
+        return llama_device.choose(
+            devices, llama_device.required_mb(self._model, self._mmproj),
+            explicit=self._requested == "cuda",
+            cuda_build=llama_device.has_cuda_build(self._exe),
+        )
+
+    def _launch(self, device: llama_device.CudaDevice | None) -> None:
+        """拉起 llama-server 并等 /health 就绪；失败抛错，不留半死进程。"""
         port = _free_port()
         self._port = port
+        cmd = [
+            str(self._exe),
+            "-m", str(self._model),
+            "--mmproj", str(self._mmproj),
+            "--port", str(port),
+            "-c", "12288",
+            "--threads", "8",
+        ]
+        if device is not None:
+            cmd += ["--device", device.device_id, "-ngl", _GPU_LAYERS]
+        else:
+            cmd += _CPU_ONLY_ARGS
         self._proc = subprocess.Popen(  # noqa: S603
-            [
-                str(self._exe),
-                "-m", str(self._model),
-                "--mmproj", str(self._mmproj),
-                "--port", str(port),
-                "-c", "12288",
-                "--threads", "8",
-            ],
+            cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             text=True,
+            env=llama_device.runtime_env(self._data_dir),
         )
         deadline = time.monotonic() + _LOAD_TIMEOUT_S
         while time.monotonic() < deadline:
@@ -296,6 +396,12 @@ class VisionSession:
                 time.sleep(2)
         self.close()
         raise RuntimeError(f"llama-server {_LOAD_TIMEOUT_S:.0f}s 内未就绪")
+
+    def _discard_proc(self) -> None:
+        """GPU 尝试失败的善后：掐掉进程、恢复未拉起态，CPU 重启才能走通。"""
+        proc, self._proc = self._proc, None
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
 
     def describe_episode(
         self,

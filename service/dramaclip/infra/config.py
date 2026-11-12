@@ -34,6 +34,9 @@ DEFAULTS: dict[str, str] = {
     "asr.language": "zh",
     # 视觉轨档位（P2b）：kind=vision 的 model_id（qwen3-vl-2b/4b/8b）；空 = 视觉轨关闭（分档语义）
     "vision.model": "",
+    # 本地视觉轨设备（llama-server）：auto=构建暴露出 CUDA 设备且显存够就整模型卸载，
+    # 起不来回退 CPU 并记账；cuda=承诺，失败即报错；cpu=逃生口（卸载出问题时强制 CPU）
+    "vision.device": "auto",
     # 停顿切分（P1 本地 ASR 基础设施）：能量检测找句间停顿，按停顿切片段逐段转写；"0"=整条直喂
     "asr.pause_split": "1",
     # 人工热词兜底（顿号/逗号/空格分隔）：挖掘表是 OCR 派生的，会漏生僻人名

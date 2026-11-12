@@ -29,6 +29,8 @@ import {
   MixedEnginePicker,
   activeCloudConfig,
 } from './CloudDomainUI';
+import { deviceSelectProps, visualCapKey } from './deviceOptions';
+import { SettingSelect } from './SettingSelect';
 import { useDownloadState } from './useDownloadProgress';
 import { useEngineConfigs } from './useEngineConfigs';
 
@@ -106,6 +108,8 @@ export function VisionTab({
           active={active}
           reports={reports}
           selftests={selftests}
+          settings={settings}
+          machine={machine}
           onSave={onSave}
           onVerify={onVerify}
           configs={cloud.configs}
@@ -151,6 +155,8 @@ function ActiveCard({
   active,
   reports,
   selftests,
+  settings,
+  machine,
   onSave,
   onVerify,
   configs,
@@ -160,6 +166,8 @@ function ActiveCard({
   active: ModelInfo | undefined;
   reports: Reports;
   selftests: DomainTabProps['selftests'];
+  settings: DomainTabProps['settings'];
+  machine: DomainTabProps['machine'];
   onSave: DomainTabProps['onSave'];
   onVerify: DomainTabProps['onVerify'];
   configs: readonly EngineConfig[];
@@ -168,6 +176,7 @@ function ActiveCard({
   const report = active === undefined ? undefined : reportFor(reports, active.model_id);
   const state = active === undefined ? null : assetState(active, report, selftests?.[active.model_id]);
   const download = useDownloadState(active);
+  const device = settings['vision.device'] ?? 'auto';
   const card: ActiveCardProps = {
     domain: '画面理解 VL',
     title: active?.name ?? '未启用（视觉轨关闭）',
@@ -210,12 +219,36 @@ function ActiveCard({
         </Button>
       ),
     props: [
+      ...(active === undefined
+        ? []
+        : [
+            {
+              label: '运行设备',
+              value: (
+                <SettingSelect
+                  value={device}
+                  options={
+                    deviceSelectProps({
+                      engine: active.engine,
+                      capKey: visualCapKey(active.model_id),
+                      saved: device,
+                      machine,
+                    }).options
+                  }
+                  onChange={(value: string) => {
+                    onSave({ 'vision.device': value });
+                  }}
+                />
+              ),
+            },
+          ]),
       { label: '磁盘实占', value: active === undefined ? '—' : active.size_bytes === undefined || active.size_bytes === null ? '统计中…' : formatBytes(active.size_bytes) },
       { label: '生效时机', value: '保存后下次分析' },
     ],
     footnote:
-      'CPU 实测（拼图 16 帧/集）：2B 约 2.5 分钟、4B 约 5.4 分钟、8B 约 6.6 分钟；'
-      + '8B 质量最佳（龙袍/帝王级识别）仅比 4B 慢 25%，32GB+ 内存建议直接上 8B。',
+      '4B 实测（2 分钟竖屏集，16 帧分 4 组）：CPU 约 14 分钟/集；Quadro M4000 整模型卸载 4.5~5.5 分钟/集'
+      + '（该测试卡散热差，过热降频会更慢）。「自动」＝llama.cpp 带 CUDA 构建、CUDA 运行库已装且显存够'
+      + '（约模型体积 + 2.5GB）才卸载，起不来回退 CPU 并在任务回执里写明原因；「CUDA」是承诺，失败即报错不静默换 CPU。',
   };
   return <ActiveEngineCard {...card} />;
 }

@@ -1,7 +1,7 @@
 /** 设备选项：CUDA 是承诺，界面只给会被后端 resolve 接受的值。 */
 import { describe, expect, it } from 'vitest';
 import type { DeviceCaps, GpuInfo } from '@dramaclip/protocol';
-import { deviceOptions } from '../deviceOptions';
+import { deviceOptions, visualCapKey } from '../deviceOptions';
 
 const NVIDIA_READY: GpuInfo = {
   ready: true, vendor: 'nvidia', name: 'RTX 4060', driver_version: '572.10',
@@ -87,5 +87,24 @@ describe('deviceOptions', () => {
       deviceOptions({ engine: 'sensevoice', saved: 'auto', gpu: NVIDIA_READY, caps })
         .some((o) => o.value === 'cuda'),
     ).toBe(true);
+  });
+
+  it('视觉轨按模型档位点名 cap：哪档 ready 哪档给 CUDA', () => {
+    const caps: DeviceCaps = {
+      local_visual_2b: { ok: true, ready: true, hint: '', reason: '' },
+      local_visual_4b: { ok: true, ready: false, hint: '', reason: '视觉模型 CUDA 构建资产未入库' },
+    };
+    expect(
+      deviceOptions({
+        engine: 'qwen3_vl', capKey: visualCapKey('qwen3-vl-2b'), saved: 'auto',
+        gpu: NVIDIA_READY, caps,
+      }).map((o) => o.value),
+    ).toEqual(['auto', 'cpu', 'cuda']);
+    expect(
+      deviceOptions({
+        engine: 'qwen3_vl', capKey: visualCapKey('qwen3-vl-4b'), saved: 'auto',
+        gpu: NVIDIA_READY, caps,
+      }).map((o) => o.value),
+    ).toEqual(['auto', 'cpu']);
   });
 });

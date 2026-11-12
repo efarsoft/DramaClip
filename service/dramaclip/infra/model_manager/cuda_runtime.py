@@ -52,6 +52,12 @@ def status(data_dir: Path) -> dict[str, Any]:
     return {**parts, "installed": all(parts.values())}
 
 
+def dll_dirs(data_dir: Path) -> list[Path]:
+    """已落位的 CUDA DLL 目录（按包序）。进程内注入与子进程自带 PATH 共用这一份。"""
+    root = runtime_dir(data_dir)
+    return [d for d in ((root / p["name"]).resolve() for p in _PACKAGES) if d.is_dir()]
+
+
 def inject_dll_dirs(data_dir: Path) -> int:
     """服务启动调用：把 CUDA DLL 目录注入进程搜索路径。返回注入数。
 
@@ -63,18 +69,12 @@ def inject_dll_dirs(data_dir: Path) -> int:
     运行库注入只在该平台有意义）——护栏同时是给 mypy 的平台契约。"""
     if sys.platform != "win32":
         return 0
-    root = runtime_dir(data_dir)
-    injected = 0
-    dirs: list[str] = []
-    for p in _PACKAGES:
-        d = (root / p["name"]).resolve()
-        if d.is_dir():
-            os.add_dll_directory(str(d))
-            dirs.append(str(d))
-            injected += 1
+    dirs = [str(d) for d in dll_dirs(data_dir)]
+    for d in dirs:
+        os.add_dll_directory(d)
     if dirs:
         os.environ["PATH"] = os.pathsep.join(dirs) + os.pathsep + os.environ.get("PATH", "")
-    return injected
+    return len(dirs)
 
 
 _SHA_ANCHOR = re.compile(r"#sha256=([0-9a-fA-F]{64})")

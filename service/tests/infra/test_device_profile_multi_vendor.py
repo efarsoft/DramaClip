@@ -202,11 +202,42 @@ def test_driver_too_old_still_says_so_with_the_number() -> None:
 
 
 def test_local_visual_caps_stay_not_ready_for_everyone() -> None:
-    """视觉轨的 CUDA 构建资产还没进资产库：任何宿主都不得提前点亮。"""
+    """llama.cpp 不带 CUDA 后端（资产未入库/纯 CPU 构建）时：任何宿主都不得提前点亮。"""
     for snap in (_NVIDIA_OK, _AMD, _NONE):
         caps = _caps(snap, cuda_runtime_installed=True, torch_variant="cuda")
         for key in ("local_visual_2b", "local_visual_4b", "local_visual_8b"):
             assert caps[key]["ready"] is False, f"{snap['vendor']}/{key}"
+    # 显存够的 N 卡档位：原因说的是构建资产，不是硬件
+    nvidia = _caps(_NVIDIA_OK, cuda_runtime_installed=True, torch_variant="cuda")
+    assert nvidia["local_visual_4b"]["reason"] == "视觉模型 CUDA 构建资产未入库"
+
+
+def test_local_visual_ready_needs_cuda_build_and_runtime() -> None:
+    """CUDA 构建在场只是第一道门：没有 CUDA 运行库照样不 ready，且原因要说运行库。"""
+    caps = _caps(
+        _NVIDIA_OK, cuda_runtime_installed=False, torch_variant="cuda",
+        visual_cuda_build=True,
+    )
+    assert caps["local_visual_4b"]["ready"] is False
+    assert caps["local_visual_4b"]["reason"] == "CUDA 运行库未安装"
+    assert "CUDA 运行库" in caps["local_visual_4b"]["hint"]
+    # AMD 主机带 CUDA 构建也一样：非 NVIDIA 的短路文案在前，不许报运行库
+    amd = _caps(_AMD, cuda_runtime_installed=True, torch_variant="cuda", visual_cuda_build=True)
+    assert amd["local_visual_2b"]["ready"] is False
+    assert amd["local_visual_2b"]["reason"] == "本机无 NVIDIA 显卡，加速需要 CUDA"
+
+
+def test_local_visual_ready_lights_up_when_all_three_present() -> None:
+    """N 卡 + CUDA 构建 + 运行库齐装：2B/4B 档点亮，8B 档仍受显存门槛约束。"""
+    caps = _caps(
+        _NVIDIA_OK, cuda_runtime_installed=True, torch_variant="cuda",
+        visual_cuda_build=True,
+    )
+    assert caps["local_visual_2b"]["ready"] is True
+    assert caps["local_visual_4b"]["ready"] is True
+    assert caps["local_visual_4b"]["hint"] == ""
+    assert caps["local_visual_8b"]["ok"] is False  # 12GB 够 4B 不够 8B
+    assert caps["local_visual_8b"]["ready"] is False
 
 
 def test_local_visual_ok_follows_the_vram_floor() -> None:

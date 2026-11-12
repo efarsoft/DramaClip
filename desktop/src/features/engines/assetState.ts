@@ -77,6 +77,29 @@ export function computeLabel(report?: ComputeReport | null): string | undefined 
   return undefined;
 }
 
+/** 环节名：一个任务挂多条回执时才用得上（分析任务 = 转写 + 画面理解）。 */
+const STAGE_NAMES: readonly (readonly [prefix: string, stage: string])[] = [
+  ['asr.', '转写'],
+  ['vision.', '画面理解'],
+];
+
+/**
+ * 任务行的算力摘要：单条回执沿用 computeLabel 原话；多条时给已登记环节的回执
+ * 标上环节名——否则两条「本次实际：GPU」并排分不清谁是谁。
+ */
+export function computeSummary(reports: readonly ComputeReport[]): string {
+  const multi = reports.length > 1;
+  return reports
+    .map((report) => {
+      const label = computeLabel(report);
+      if (label === undefined || !multi) return label;
+      const stage = STAGE_NAMES.find(([prefix]) => report.component.startsWith(prefix))?.[1];
+      return stage === undefined ? label : `${stage} ${label.replace(/^本次实际：/, '')}`;
+    })
+    .filter((label): label is string => label !== undefined)
+    .join(' · ');
+}
+
 /**
  * 能否「选为生效」：只由文件层体检结论决定（report.ok，§10.1）——warn 级异常
  * （残留/无从对账/多余副本）不禁用生效，但必须上卡且自带修法；

@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from dramaclip.infra import device_profile, gpu, machine
+from dramaclip.infra import device_profile, gpu, llama_device, machine
 from dramaclip.infra.ffmpeg import binaries
 from dramaclip.infra.model_manager import cuda_runtime, tts_runtime
 from dramaclip.transport.rpc import Router
@@ -15,7 +15,7 @@ _STARTED_AT = time.monotonic()
 
 
 def health(params: dict[str, Any], data_dir: Any) -> dict[str, Any]:
-    """system.health：GPU 快照 + 三处安装态 marker → 设备档位与各引擎能力结论。
+    """system.health：GPU 快照 + 各处安装态 marker → 设备档位与各引擎能力结论。
 
     安装态一律按调用方传入的 data_dir 读——档位表若与解析入口各读一份真相，
     界面上就会和实际执行结论打架。
@@ -31,6 +31,11 @@ def health(params: dict[str, Any], data_dir: Any) -> dict[str, Any]:
             cuda_runtime.status(data_dir)["installed"] if data_dir is not None else False,
             separation_ort=tts_runtime.ort_state(data_dir) if data_dir is not None else None,
             torch_variant=tts_runtime.torch_variant(data_dir) if data_dir is not None else None,
+            visual_cuda_build=(
+                llama_device.has_cuda_build(llama_device.server_exe(data_dir))
+                if data_dir is not None
+                else False
+            ),
         ),
         "ram_total_gb": machine.specs(force=force_refresh).get("ram_total_gb"),
         "ram_free_gb": machine.specs().get("ram_free_gb"),
