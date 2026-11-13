@@ -60,6 +60,7 @@ def test_migrate_idempotent() -> None:
             "025_export_degraded.sql",
             "026_publish_data.sql",
             "027_remove_highlight_cut_plans.sql",
+            "028_hotwords_project_level.sql",
         ]
         assert db.migrate(conn) == expected_migrations
         assert db.migrate(conn) == []  # 第二次全量跳过
@@ -90,6 +91,20 @@ def test_migration_027_drops_highlight_cut_plans_only(memory_db: sqlite3.Connect
         for row in memory_db.execute("SELECT narration_mode FROM narration_plans")
     ]
     assert left == ["raw_clip"], "只删高光混剪，别的模式一行不动"
+
+
+def test_migration_028_drops_global_hotwords_row(memory_db: sqlite3.Connection) -> None:
+    """人工热词改项目级（2026-11-12 业主裁决）：全局行删除（跨剧泄漏源），
+    其他设置键不受牵连。直接执行 028 的 SQL 原文（migrate 已记为已应用）。"""
+    memory_db.execute(
+        "INSERT INTO settings (key, value, updated_at) VALUES"
+        " ('asr.hotwords_extra', '骆养性、崇祯', 0),"
+        " ('asr.pause_split', '1', 0)"
+    )
+    sql = (db.MIGRATIONS_DIR / "028_hotwords_project_level.sql").read_text("utf-8")
+    memory_db.executescript(sql)
+    left = {row[0] for row in memory_db.execute("SELECT key FROM settings")}
+    assert left == {"asr.pause_split"}, "只删热词全局行，别的键一行不动"
 
 
 def test_settings_roundtrip(memory_db: sqlite3.Connection) -> None:

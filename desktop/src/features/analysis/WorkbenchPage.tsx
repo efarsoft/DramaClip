@@ -1,7 +1,7 @@
 /** 项目详情工作台：步骤导航 + 转写档位 + 左素材列表 + 右复合面板（分割线可拖拽）。 */
 import { useNavigate, useParams } from 'react-router-dom';
 import { Alert, App as AntdApp } from 'antd';
-import type { AnalysisResults } from '@dramaclip/protocol';
+import type { AnalysisResults, Project } from '@dramaclip/protocol';
 import { dramaProducePath } from '../../app/routes';
 import { analysisApi, revealInFolder } from '../../services/client';
 import { layout, tokens } from '../../styles/theme';
@@ -11,6 +11,13 @@ import { useEpisodeOrder } from './useEpisodeOrder';
 import { useProjectDetail, useEpisodeReorder } from './useProjectDetail';
 import { useSplitDrag } from './useSplit';
 import { useTranscribeTier } from './useTranscribeTier';
+import { HOTWORDS_KEY, HotwordsBar } from './HotwordsBar';
+
+/** 本剧热词原文（project.settings 里的 unknown 收成 string；非字符串=未录入）。 */
+function hotwordsOf(project: Project | null): string {
+  const raw = project?.settings[HOTWORDS_KEY];
+  return typeof raw === 'string' ? raw : '';
+}
 import { WorkbenchHeader } from './WorkbenchHeader';
 import { PageFooter } from '../../components/layout/PageKit';
 import { EpisodeListPanel } from './EpisodeListPanel';
@@ -51,6 +58,13 @@ export function WorkbenchPage() {
         }}
         onExportTranscripts={() => {
           exportTranscripts(projectId, message);
+        }}
+      />
+      <HotwordsBar
+        projectId={projectId}
+        value={hotwordsOf(project)}
+        onSaved={() => {
+          void reloadProject();
         }}
       />
       <CoverageAlert results={workspace.results} />

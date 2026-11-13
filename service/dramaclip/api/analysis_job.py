@@ -314,13 +314,23 @@ def _mine_hotwords(
     on_episode: Callable[[int, int], None] | None = None,
     *,
     ocr_enabled: bool = True,
+    project_id: str,
 ) -> tuple[
     dict[str, list[OcrSegment]],
     dict[str, tuple[float, float]],
     dict[str, list[tuple[float, float]]],
     str,
 ]:
-    """阶段 A：全剧 OCR 抽取（落库）→ 挖掘全剧热词表；字幕带与逐行框按集回传。"""
+    """阶段 A：全剧 OCR 抽取（落库）→ 挖掘全剧热词表；字幕带与逐行框按集回传。
+
+    人工热词（asr.hotwords_extra）是**剧级**输入（2026-11-12 业主裁决改项目级）：
+    只读本项目的 projects.settings——此前它是全局设置，一部剧点的人名会喂进
+    下一部剧的转写引导（真机：明朝人名混进现代言情剧的热词表）。
+    """
+    extra = str(
+        projects_repo.get_settings(context.conn, project_id).get("asr.hotwords_extra")
+        or ""
+    )
     bars_by_episode: dict[str, list[OcrSegment]] = {}
     bands_by_episode: dict[str, tuple[float, float]] = {}
     lines_by_episode: dict[str, list[tuple[float, float]]] = {}
@@ -329,7 +339,7 @@ def _mine_hotwords(
             bars_by_episode,
             bands_by_episode,
             lines_by_episode,
-            hotwords_engine.merge_extra("", str(context.settings.get("asr.hotwords_extra") or "")),
+            hotwords_engine.merge_extra("", extra),
         )
     for index, episode in enumerate(targets):
         if cancel_event.is_set():
@@ -351,10 +361,10 @@ def _mine_hotwords(
             context.conn, episode_id, _dumps([b.model_dump() for b in bars])
         )
     # 人工热词在最前：挖掘表是 OCR 派生的，会漏生僻人名也会把 OCR 错字当热词——
-    # 业主点名（asr.hotwords_extra）是最强信号。
+    # 业主点名（剧级 asr.hotwords_extra）是最强信号。
     hotwords = hotwords_engine.merge_extra(
         hotwords_engine.mine([b for bars in bars_by_episode.values() for b in bars]),
-        str(context.settings.get("asr.hotwords_extra") or ""),
+        extra,
     )
     if hotwords:
         context.notifier.log("info", f"全剧热词表：{hotwords}")
@@ -420,7 +430,7 @@ def _run_job(
             context.notifier.progress(job_id, percent, message)
 
         bars_by_episode, bands_by_episode, lines_by_episode, hotwords = _mine_hotwords(
-            context, targets, cancel_event, on_episode=mining_report
+            context, targets, cancel_event, on_episode=mining_report, project_id=project_id
         )
         # 精炼熔断计数（稳定收尾批）：连续 2 集调用失败后跳过 LLM 精炼
         refine_state = {"failures": 0, "tripped": False}
