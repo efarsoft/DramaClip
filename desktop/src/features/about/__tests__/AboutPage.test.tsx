@@ -44,6 +44,14 @@ describe('AboutPage', () => {
     }
   });
 
+  it('联系与反馈=交流群入口（微信群码 + 过期指引，不再指向公众号）', () => {
+    page();
+    expect(screen.getByText('联系与反馈')).toBeTruthy();
+    expect(screen.getByText('加入交流群')).toBeTruthy();
+    expect(screen.getByAltText(/微信群二维码/)).toBeTruthy();
+    expect(screen.getByText(/7 天有效/)).toBeTruthy();
+  });
+
   it('本地数据五行各带「打开」入口（含回收站，§3.4 可达性）', () => {
     page();
     expect(screen.getAllByText('打开')).toHaveLength(5);

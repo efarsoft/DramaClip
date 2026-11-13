@@ -22,14 +22,14 @@ AI 替你把全剧看完、稿写好、角色原声克隆成解说嗓、画面�
 
 ---
 
-## 📲 关注公众号
+## 📲 加入交流群
 
 <div align="center">
 
-<img src="desktop/src/assets/images/wechat-qrcode.jpg" width="150" alt="微信公众号二维码" />
+<img src="docs/images/wechat-group.png" width="150" alt="微信群二维码（DramaClip 短剧剪辑交流群）" />
 
-**扫码关注 · 更新动态 / 使用技巧 / 短剧推广实操**
-问题反馈与交流也在公众号进行。
+**微信扫码进群 · 问题反馈 / 使用交流 / 版本动态**
+群码 7 天有效，随版本发布更新——过期请到 [Releases](https://github.com/efarsoft/DramaClip/releases) 最新版本页扫码。
 
 </div>
 

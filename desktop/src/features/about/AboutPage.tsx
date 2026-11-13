@@ -1,6 +1,6 @@
 /** 关于（独立页面；业主裁决 2026-09-15 替代规格 §4.8 的覆盖层方案）。
  *
- * 「检查更新」与公众号/打赏二维码未实装——缺席而非假控件，实装后在此补。
+ * 「检查更新」未实装——缺席而非假控件，实装后在此补。
  */
 import { InfoOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button } from 'antd';
@@ -12,7 +12,7 @@ import { mixins } from '../../styles/mixins';
 import { tokens, layout } from '../../styles/theme';
 import { OPEN_SOURCE } from './openSource';
 import logo from '../../assets/logo.png';
-import wechatQrcode from '../../assets/images/wechat-qrcode.jpg';
+import wechatGroup from '../../assets/images/wechat-group.jpg';
 
 /** 授权与合规声明（素材授权责任归使用者；全本机处理，素材不上传）。
  *  AI 标注段（业主裁决 2026-10-15）：用户开关、默认关闭——平台标注要求因平台而异，
@@ -257,14 +257,16 @@ function DataPathRow({
   );
 }
 
-/** 公众号卡：二维码 + 引导文案。扫码后长按识别在微信内完成，故无需附链接。 */
+/** 交流群卡：微信群二维码 + 引导文案。个人群码 7 天有效，随版本发布换码——
+ * 换码=覆盖 desktop/src/assets/images/wechat-group.jpg 与 docs/images/wechat-group.png
+ * 两份资产（app 内嵌走打包，README 走仓库），其余零改动。 */
 function WechatBlock(): ReactElement {
   return (
     <PageSection title="联系与反馈">
       <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceLg }}>
         <img
-          src={wechatQrcode}
-          alt="微信公众号二维码"
+          src={wechatGroup}
+          alt="微信群二维码（DramaClip 短剧剪辑交流群）"
           style={{
             width: 112,
             height: 112,
@@ -274,10 +276,12 @@ function WechatBlock(): ReactElement {
         />
         <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs, minWidth: 0 }}>
           <span style={{ fontSize: tokens.text.body.size, fontWeight: 600, color: tokens.textPrimary }}>
-            关注公众号
+            加入交流群
           </span>
           <div style={COPY}>
-            获取更新动态、使用技巧与短剧推广实操内容；问题反馈与交流也在公众号进行。
+            微信扫码进「DramaClip 短剧剪辑交流群」：问题反馈、使用交流、版本动态都在群里。
+            反馈时请带上版本号（上方「版本」区）与报错截图。群码 7 天有效，过期请到
+            GitHub Releases 最新版本页扫码。
           </div>
         </div>
       </div>
