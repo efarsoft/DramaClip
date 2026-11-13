@@ -44,10 +44,10 @@ describe('AboutPage', () => {
     }
   });
 
-  it('联系与反馈=交流群入口（微信群码 + 过期指引，不再指向公众号）', () => {
+  it('联系与反馈=公众号与交流群两码并存', () => {
     page();
     expect(screen.getByText('联系与反馈')).toBeTruthy();
-    expect(screen.getByText('加入交流群')).toBeTruthy();
+    expect(screen.getByAltText('微信公众号二维码')).toBeTruthy();
     expect(screen.getByAltText(/微信群二维码/)).toBeTruthy();
     expect(screen.getByText(/7 天有效/)).toBeTruthy();
   });

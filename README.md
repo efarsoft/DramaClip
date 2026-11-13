@@ -22,7 +22,19 @@ AI 替你把全剧看完、稿写好、角色原声克隆成解说嗓、画面�
 
 ---
 
-## 📲 加入交流群
+## 📲 关注公众号
+
+<div align="center">
+
+<img src="desktop/src/assets/images/wechat-qrcode.jpg" width="150" alt="微信公众号二维码" />
+
+**扫码关注 · 更新动态 / 使用技巧 / 短剧推广实操**
+
+</div>
+
+---
+
+## 💬 加入交流群
 
 <div align="center">
 
