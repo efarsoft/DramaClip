@@ -34,6 +34,9 @@ export function AboutPage(): ReactElement {
         <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.space2xl, minWidth: 0 }}>
           <VersionBlock />
           <PageSection title="开源许可">
+            <div style={{ ...COPY, marginBottom: tokens.spaceSm }}>
+              本项目代码以 MIT License 开源；随包分发的第三方组件与运行时下载的模型权重依各自上游许可（模型许可登记见仓库 docs/model_licenses.md）。
+            </div>
             <div style={COPY}>{OPEN_SOURCE.join(' · ')}</div>
           </PageSection>
           <PageSection title="授权与合规声明">
