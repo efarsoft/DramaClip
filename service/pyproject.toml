@@ -42,8 +42,10 @@ ml = [
   "onnxruntime>=1.18",
   "opencc-python-reimplemented>=0.1.7",
   # 云端 ASR 适配器（dashscope_cloud）的运行时依赖：此前只在本机 ad-hoc 安装，
-  # CI 打的安装包没带上它（v0.2.2 首次 CI 打包实证）——真机 1.27.7 验收版
-  "dashscope>=1.27.7",
+  # CI 打的安装包没带上它（v0.2.2 首次 CI 打包实证）。钉死真机验收版：
+  # >= 无上界曾让安装包装入未测试的 2.0.4 大版本（2026-11-13 构建日志实证，
+  # 2.x 靠 legacy_1x 兼容层但冻结包未验）——升级须真机验收后有意 bump。
+  "dashscope==1.27.7",
 ]
 # dev 进程内分支的事实依赖（torch/funasr/kokoro）：E-2 后「主 venv 零 torch」是
 # **打包态**契约；dev/测试态的进程内 ASR/TTS 回退分支仍 import 这三样。不声明
