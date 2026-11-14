@@ -50,6 +50,31 @@ def _install_fake_funasr(
     return _FakeAutoModel
 
 
+def _reader(engine_cls: type) -> Any:
+    """设备助手名字的读者 = 引擎类所在模块。
+
+    拆分后引擎在 asr 包内 from-import 绑死了 common 的助手名；给门面
+    transcriber 打桩只改门面那份绑定，引擎读不到——桩静默失效，开发机
+    （真探针恰好放行）假绿，CPU torch 的 CI 上才红。桩必须打在读者上。
+    """
+    return sys.modules[engine_cls.__module__]
+
+
+def _stub_probe(
+    monkeypatch: pytest.MonkeyPatch, engine_cls: type, *, problem: str = ""
+) -> list[str]:
+    """真算探针换成记账桩：返回调用记录，由用例断言桩确实被走到。"""
+
+    calls: list[str] = []
+
+    def _probe(device: str) -> str:
+        calls.append(device)
+        return problem
+
+    monkeypatch.setattr(_reader(engine_cls), "_probe_cuda_op", _probe)
+    return calls
+
+
 def _torch_has_cuda() -> bool:
     try:
         import torch
@@ -77,12 +102,52 @@ def test_explicit_cuda_landing_on_cpu_is_a_broken_promise(
     engine_cls: type, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _install_fake_funasr(monkeypatch, placement="cpu", resolved="cpu")
-    monkeypatch.setattr(transcriber, "_probe_cuda_op", lambda _device: "", raising=False)
+    probed = _stub_probe(monkeypatch, engine_cls)
 
     engine = engine_cls(models_dir=tmp_path, device="cuda")
 
     with pytest.raises(compute.ComputeUnavailableError, match="cpu"):
         engine._ensure_model()
+    assert probed, "探针桩必须被走到：没走到说明桩没打在读者模块上"
+
+
+@pytest.mark.parametrize("engine_cls", [SenseVoiceEngine, ParaformerEngine])
+def test_probe_problem_refuses_explicit_cuda_before_funasr_loads(
+    engine_cls: type, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """真算探针判不可算时，显式 cuda 在 funasr 加载前就拒绝（不许静默落 CPU）。"""
+    fake = _install_fake_funasr(monkeypatch, placement="cpu", resolved="cpu")
+    problem = "模拟：Torch not compiled with CUDA enabled"
+    probed = _stub_probe(monkeypatch, engine_cls, problem=problem)
+
+    engine = engine_cls(models_dir=tmp_path, device="cuda")
+
+    with pytest.raises(compute.ComputeUnavailableError, match="CUDA"):
+        engine._ensure_model()
+    assert probed == ["cuda:0"]
+    assert fake.instances == [], "探针已判不可算，不许再让 funasr 静默落 CPU"
+
+
+@pytest.mark.parametrize("engine_cls", [SenseVoiceEngine, ParaformerEngine])
+def test_probe_problem_falls_auto_back_to_cpu_with_reason(
+    engine_cls: type, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """auto 解析到 cuda 但真算失败（坏驱动一类）：回退 CPU，回执记 fallback 与原因。"""
+    _install_fake_funasr(monkeypatch, placement="cpu", resolved="cpu")
+    problem = "模拟：RuntimeError: Found no NVIDIA driver"
+    probed = _stub_probe(monkeypatch, engine_cls, problem=problem)
+    monkeypatch.setattr(
+        _reader(engine_cls), "_resolve_torch_device", lambda _device: "cuda:0"
+    )
+
+    engine = engine_cls(models_dir=tmp_path, device="auto")
+    engine._ensure_model()
+
+    report = engine.compute()
+    assert report is not None
+    assert (report.requested, report.resolved, report.actual) == ("auto", "cuda", "cpu")
+    assert report.fallback is True and problem in report.reason
+    assert probed == ["cuda:0"]
 
 
 @pytest.mark.parametrize("engine_cls", [SenseVoiceEngine, ParaformerEngine])
@@ -90,8 +155,10 @@ def test_auto_silent_fallback_records_cpu_with_reason(
     engine_cls: type, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _install_fake_funasr(monkeypatch, placement="cpu", resolved="cpu")
-    monkeypatch.setattr(transcriber, "_probe_cuda_op", lambda _device: "", raising=False)
-    monkeypatch.setattr(transcriber, "_resolve_torch_device", lambda _device: "cuda:0")
+    _stub_probe(monkeypatch, engine_cls)
+    monkeypatch.setattr(
+        _reader(engine_cls), "_resolve_torch_device", lambda _device: "cuda:0"
+    )
 
     engine = engine_cls(models_dir=tmp_path, device="auto")
     engine._ensure_model()
@@ -107,11 +174,14 @@ def test_cuda_placement_evidence_is_reported_as_cuda(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _install_fake_funasr(monkeypatch, placement="cuda", resolved="cuda:0")
-    monkeypatch.setattr(transcriber, "_probe_cuda_op", lambda _device: "", raising=False)
-    monkeypatch.setattr(transcriber, "_resolve_torch_device", lambda _device: "cuda:0")
+    probed = _stub_probe(monkeypatch, SenseVoiceEngine)
+    monkeypatch.setattr(
+        _reader(SenseVoiceEngine), "_resolve_torch_device", lambda _device: "cuda:0"
+    )
 
     engine = SenseVoiceEngine(models_dir=tmp_path, device="cuda")
     engine._ensure_model()
+    assert probed == ["cuda:0"]
 
     report = engine.compute()
     assert report is not None
