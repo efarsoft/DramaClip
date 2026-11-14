@@ -392,6 +392,9 @@ def test_classify_failure_maps_signals_to_actions() -> None:
     assert "访问门槛" in classify(RuntimeError("HTTP Error 401: Unauthorized"))
     assert "源站临时故障" in classify(RuntimeError("HTTP Error 503: Unavailable"))
     assert "所有下载源都失败" in classify(RuntimeError("全部来源失败：boom"))
+    # 聚合错误置顶：全部来源耗尽后，单源话术（「直接重试/换下载源」）不可行动
+    aggregate = classify(RuntimeError("全部来源失败：大小校验失败：期望 X 字节，实际 Y 字节"))
+    assert "所有下载源都失败了" in aggregate and "大小校验失败" in aggregate
     # 认不出的：异常名 + 原文，不硬套类别
     assert classify(ValueError("weird")) == "ValueError: weird"
 

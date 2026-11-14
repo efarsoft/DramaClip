@@ -131,6 +131,10 @@ def classify_failure(exc: Exception) -> str:
     errno = getattr(exc, "errno", None)
     if errno in (28, 112) or "no space left" in lowered:
         return "磁盘空间不足——清理磁盘后重试（「环境」段可看各盘剩余空间）"
+    # 聚合错误置顶：全部来源耗尽后，单源话术（「直接重试」「换下载源」）不可行动——
+    # 真机 2026-11-13：最后一条是「大小校验失败」时，卡片话术让人白重试一整轮
+    if "全部来源失败" in text:
+        return f"所有下载源都失败了——{text.removeprefix('全部来源失败：')}"
     if "大小校验失败" in text or "SHA256 校验失败" in text:
         return "下载内容校验失败（半成品已删，不会污染续传）——直接重试；反复失败请换下载源"
     if isinstance(exc, (TimeoutError, ConnectionError)) or "timed out" in lowered:
@@ -157,8 +161,6 @@ def classify_failure(exc: Exception) -> str:
         return "源站临时故障（5xx）——稍后重试，或换个源"
     if "仓库文件清单为空" in text:
         return "仓库清单为空——源站临时故障或仓库已迁移，换个源试试"
-    if "全部来源失败" in text:
-        return f"所有下载源都失败了——{text.removeprefix('全部来源失败：')}"
     return f"{type(exc).__name__}: {text}"
 
 
