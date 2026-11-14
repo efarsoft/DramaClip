@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import threading
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -669,7 +670,7 @@ def install_music_runtime(context: AppContext, _params: dict[str, Any]) -> dict[
             )
             context.notifier.log("info", "配乐运行环境安装完成")
         except Exception as exc:  # noqa: BLE001 - 作业失败原样落 error
-            context.job_store.mark_failed(job_id, str(exc))
+            context.job_store.mark_failed(job_id, _failure_with_origin(exc))
         finally:
             done_event.set()
 
@@ -683,6 +684,23 @@ def install_music_runtime(context: AppContext, _params: dict[str, Any]) -> dict[
     threading.Thread(target=_run, daemon=True, name="music-runtime-install").start()
     threading.Thread(target=_watch, daemon=True, name="music-runtime-watch").start()
     return {"job_id": job_id}
+
+
+def _failure_with_origin(exc: Exception) -> str:
+    """异常消息带上最内层业务帧（文件:行 函数名）。
+
+    `'NoneType' object is not subscriptable` 这类无上下文报错（真机 2026-11-13：
+    运行环境安装作业只落了这一句，无从排查）必须有出处可查——取 traceback 里
+    最深一帧本仓库代码，不动原消息语义。
+    """
+    frames = [
+        f for f in traceback.extract_tb(exc.__traceback__)
+        if "dramaclip" in Path(f.filename).as_posix().lower()
+    ]
+    if not frames:
+        return str(exc)
+    last = frames[-1]
+    return f"{exc}（出处：{Path(last.filename).name}:{last.lineno} {last.name}）"
 
 
 def _install_local_runtime(context: AppContext, *, ready_label: str) -> dict[str, Any]:
@@ -717,7 +735,7 @@ def _install_local_runtime(context: AppContext, *, ready_label: str) -> dict[str
             )
             context.notifier.log("info", "本地智能运行环境安装完成")
         except Exception as exc:  # noqa: BLE001 - 作业失败原样落 error
-            context.job_store.mark_failed(job_id, str(exc))
+            context.job_store.mark_failed(job_id, _failure_with_origin(exc))
         finally:
             done_event.set()
 

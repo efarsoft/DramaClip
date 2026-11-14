@@ -367,6 +367,14 @@ def test_classify_failure_maps_signals_to_actions() -> None:
     assert "校验失败" in classify(OSError("SHA256 校验失败：期望 ab…"))
     assert "网络超时" in classify(TimeoutError("timed out"))
     assert "换个源" in classify(OSError("urlopen error 连接被重置"))
+    # TLS 被中间网络拦/代理换证书（真机 2026-11-13：hf-mirror 被拦、modelscope 同机可达）
+    # ≠ 网络不通——归因成「域名解析失败」会把人带去修根本没坏的网络
+    ssl_hit = OSError(
+        "urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed:"
+        " unable to get local issuer certificate (_ssl.c:1010)"
+    )
+    assert "证书校验失败" in classify(ssl_hit)
+    assert "网络不通" not in classify(ssl_hit)
     assert "源站说没有这个文件" in classify(RuntimeError("HTTP Error 404: Not Found"))
     assert "访问门槛" in classify(RuntimeError("HTTP Error 401: Unauthorized"))
     assert "源站临时故障" in classify(RuntimeError("HTTP Error 503: Unavailable"))

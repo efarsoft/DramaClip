@@ -135,6 +135,13 @@ def classify_failure(exc: Exception) -> str:
         return "下载内容校验失败（半成品已删，不会污染续传）——直接重试；反复失败请换下载源"
     if isinstance(exc, (TimeoutError, ConnectionError)) or "timed out" in lowered:
         return "网络超时或连接被断——稍后重试，或在下载气泡里换个源"
+    if "certificate_verify_failed" in lowered or ("ssl" in lowered and "certificate" in lowered):
+        # 网络是通的、TLS 握手被中间网络替换了证书（真机 2026-11-13：hf-mirror 被拦
+        # 而 modelscope 同机可达）——归因成「网络不通」会把人带去修根本没坏的网络。
+        return (
+            "下载域名的证书校验失败（当前网络疑似拦截/代理了该站点）"
+            "——换网络（如手机热点）重试，或在下载气泡里换个源"
+        )
     if (
         "urlopen error" in lowered
         or "getaddrinfo" in lowered

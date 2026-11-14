@@ -309,3 +309,23 @@ def test_watchdog_marks_cancelled(
     job = context.job_store.get(job_id)
     assert job is not None
     assert job["status"] == "cancelled"
+
+
+def test_failure_with_origin_points_at_the_innermost_frame() -> None:
+    """无上下文报错（'NoneType' object is not subscriptable 一类）必须可回溯到行。"""
+
+    def _raise_deep() -> None:
+        raise TypeError("something broke")
+
+    try:
+        _raise_deep()
+    except TypeError as exc:
+        message = models_api._failure_with_origin(exc)
+    assert message.startswith("something broke"), message
+    assert "test_models_download.py" in message and "_raise_deep" in message, message
+
+
+def test_failure_with_origin_keeps_message_without_frames() -> None:
+    """过滤后没有本仓库帧就原样返回，不硬造出处。"""
+    exc = ValueError("plain")
+    assert models_api._failure_with_origin(exc) == "plain"
