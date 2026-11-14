@@ -25,8 +25,10 @@ function renderCard(segments: AsrSegment[]) {
 function chipOf(text: string): HTMLElement {
   const chips = screen.getAllByText(text);
   expect(chips.length).toBeGreaterThan(0);
-  expect(chips[0]?.tagName).toBe('SPAN');
-  return chips[0] as HTMLElement;
+  const chip = chips.at(0);
+  if (chip === undefined) throw new Error('测试前置失败：未找到 Chip');
+  expect(chip.tagName).toBe('SPAN');
+  return chip;
 }
 
 it('带 speaker 的段行前缀出角色 Chip', () => {
