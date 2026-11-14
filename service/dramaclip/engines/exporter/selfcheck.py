@@ -197,6 +197,31 @@ def measure_caption_band(
         return None
 
 
+def measure_caption_rows(
+    video: Path,
+    *,
+    work_dir: Path,
+    duration_s: float,
+    ocr: subtitle_ocr.OcrCallable | None = None,
+) -> list[tuple[float, subtitle_ocr.FrameResult]] | None:
+    """成片探针帧的**逐帧** OCR 读数（带定位与残字检测共用同一次采样）；量不到 None。
+
+    比 measure_caption_band 多回传逐帧明细：带定位只要包络，残字影子项要的是
+    「每帧带内有几簇文字」，一次探针喂两个消费端（10 帧 OCR 不做两遍）。
+    OCR 依赖没装、抽帧失败——一律 None（量不到不是检出残留）。
+    """
+    if ocr is None:
+        try:
+            ocr = subtitle_ocr._rapidocr()
+        except Exception:  # noqa: BLE001 - 依赖缺失是量不到，不是检出
+            return None
+    try:
+        rows = subtitle_ocr._probe_frames(video, work_dir, duration_s, ocr)
+    except Exception:  # noqa: BLE001
+        return None
+    return rows or None
+
+
 # avsync 采样参数：三点位（15%/50%/80%）、窗口 2s（成片）/3s（源）、采样率 16k
 _AVSYNC_FRACTIONS = (0.15, 0.5, 0.85)
 _AVSYNC_SAMPLE_RATE = 16000
@@ -474,6 +499,62 @@ def check_caption_placement(
 
 _ITEMS = ("duration", "narration", "silence", "freeze")
 
+# 残字影子判据：带容差与逐帧行聚簇的纵向间隔。带容差取带外沿一档（批1 band 吸收
+# 的目标形态正是带外沿残字）；行聚簇间隔 2% 画布高 ≈ 行间空隙的下限——两行字幕
+# （行距 ~0.11）与「残字+我们的字」分离簇都要分开数。
+_RESIDUE_BAND_TOL = 0.04
+_RESIDUE_ROW_GAP = 0.02
+
+
+def check_caption_residue(
+    probe_rows: list[tuple[float, subtitle_ocr.FrameResult]] | None,
+    caption_band: tuple[float, float] | None,
+) -> dict[str, Any]:
+    """影子项：成片带内是否出现「我们的字幕之外」的第二簇文字（原字残留候选）。
+
+    判据刻意粗（跨片攒数据用）：带内文字按纵向重叠聚簇，一帧簇数 ≥2 记一次
+    候选。已知盲区——残字与我们的字幕纵向恰好叠住时并成一簇，量不出；锐利
+    判据（文本匹配「读数是不是我们烧的那行字」）等影子数据证明粗判据不够再上。
+    `pass` 恒 None（影子模式不改四项徽章口径，avsync 82474a1 同款纪律）。
+    """
+    if not probe_rows or caption_band is None:
+        return {"pass": None, "reason": "未采样或无覆盖承诺"}
+    band_top = caption_band[0] - _RESIDUE_BAND_TOL
+    band_bottom = caption_band[1] + _RESIDUE_BAND_TOL
+    band_frames = 0
+    residue_frames = 0
+    samples: list[dict[str, Any]] = []
+    for film_t, boxes in probe_rows:
+        rows = sorted(
+            (float(top), float(bottom), str(text))
+            for text, top, bottom, _conf in boxes
+            if float(bottom) >= band_top and float(top) <= band_bottom
+        )
+        if not rows:
+            continue
+        band_frames += 1
+        clusters = 0
+        last_bottom: float | None = None
+        for top, bottom, _text in rows:
+            if last_bottom is None or top - last_bottom > _RESIDUE_ROW_GAP:
+                clusters += 1
+            last_bottom = bottom if last_bottom is None else max(last_bottom, bottom)
+        if clusters >= 2:
+            residue_frames += 1
+            if len(samples) < 5:
+                samples.append(
+                    {
+                        "film_t": round(film_t, 2),
+                        "rows": [text[:20] for _t, _b, text in rows],
+                    }
+                )
+    return {
+        "pass": None,
+        "band_frames": band_frames,
+        "residue_frames": residue_frames,
+        "samples": samples,
+    }
+
 
 def overall_state(checks: dict[str, Any]) -> str:
     """汇总态（selfcheck_state 列的词表）：passed=四项全绿 / failed=任一红 / partial=其余。
@@ -516,15 +597,21 @@ def run(
 
     `caption_band` 是调用端按 `coverage_promised` 过滤后的**覆盖承诺**（源台词带）：
     只有真承诺了才付成片 OCR 的账（10 探针帧），没承诺/没 work_dir 直接灰，不猜。
+    v2 增 `caption_residue` 影子项（带内第二簇文字=原字残留候选）：只攒数据不改
+    徽章，判红阈值等跨片数据到位再定（avsync 影子→门禁同一纪律）。
     """
     mean_volume_db, max_freeze_s = measure_audio_video(video)
     measured_caption: tuple[float, float] | None = None
+    probe_rows: list[tuple[float, subtitle_ocr.FrameResult]] | None = None
     if caption_band is not None and work_dir is not None and measured_s:
-        measured_caption = measure_caption_band(
-            video, work_dir=work_dir, duration_s=measured_s
-        )
+        # 一次探针 OCR 双消费：包络给落位判据，逐帧簇数给残字影子项
+        probe_rows = measure_caption_rows(video, work_dir=work_dir, duration_s=measured_s)
+        if probe_rows:
+            picked = subtitle_ocr._pick_band([boxes for _t, boxes in probe_rows])
+            # detect_band 的同款出口形状：_Band → (float, float) 元组
+            measured_caption = None if picked is None else (float(picked.top), float(picked.bottom))
     payload = {
-        "version": 1,
+        "version": 2,
         "checked_at": _now_ms(),
         "duration": check_duration(
             measured_s, budget_s, segment_count=segment_count
@@ -533,6 +620,7 @@ def run(
         "silence": check_silence(mean_volume_db, has_audio),
         "freeze": check_freeze(max_freeze_s),
         "caption_placement": check_caption_placement(measured_caption, caption_band),
+        "caption_residue": check_caption_residue(probe_rows, caption_band),
         "safe_zone": check_safe_zone(caption_band),
         "ending": check_ending(ending_end_s, ending_lines),
         "avsync": check_avsync(

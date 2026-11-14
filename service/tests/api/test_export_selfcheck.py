@@ -154,9 +154,11 @@ def test_run_payload_shape(sample_video: Path, monkeypatch: pytest.MonkeyPatch) 
         sample_video, measured_s=3.0, has_audio=True, mode="raw_clip",
         budget_s=3.0, planned_segments=None,
     )
-    assert payload["version"] == 1 and payload["checked_at"] > 0
+    assert payload["version"] == 2 and payload["checked_at"] > 0
     assert selfcheck.overall_state(payload) == "passed"
     assert json.loads(json.dumps(payload))["freeze"]["max_freeze_s"] == 0.5
+    # 无覆盖承诺：残字影子项灰（不采样），不挡四项徽章
+    assert payload["caption_residue"] == {"pass": None, "reason": "未采样或无覆盖承诺"}
 
 
 # ---- 画面侧度量：成片文字落位 vs 覆盖承诺（业主裁决④）----
@@ -178,6 +180,101 @@ def test_measure_caption_band_reuses_probe(tmp_path: Path, monkeypatch: pytest.M
     measured = selfcheck.measure_caption_band(film, work_dir=tmp_path / "w", duration_s=30.0)
     assert measured == (0.81, 0.91)
     assert seen == {"video": film, "work_dir": tmp_path / "w", "duration_s": 30.0, "ocr": None}
+
+
+# ---- 残字影子项（v0.2.5 6.1 批3）：带内第二簇文字=原字残留候选，只攒数据不判红 ----
+
+
+def test_measure_caption_rows_probes_once_and_degrades(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """逐帧读数原语：探针透传注入 ocr；探测崩=量不到（None），不是检出残留。"""
+    seen: dict[str, Any] = {}
+    fake_ocr = lambda _path: []  # noqa: E731
+
+    def fake_probes(
+        video: Path, work_dir: Path, duration_s: float, ocr: Any
+    ) -> list[tuple[float, Any]]:
+        seen["ocr_injected"] = ocr is fake_ocr
+        seen["duration_s"] = duration_s
+        return [(1.0, [("字", 0.8, 0.9, 0.9)])]
+
+    monkeypatch.setattr(selfcheck.subtitle_ocr, "_probe_frames", fake_probes)
+    film = tmp_path / "film.mp4"
+    film.write_bytes(b"x")
+    rows = selfcheck.measure_caption_rows(
+        film, work_dir=tmp_path / "w", duration_s=30.0, ocr=fake_ocr
+    )
+    assert rows is not None and rows[0][0] == 1.0
+    assert seen == {"ocr_injected": True, "duration_s": 30.0}
+
+    def boom(*_a: Any, **_k: Any) -> None:
+        raise RuntimeError("抽帧失败")
+
+    monkeypatch.setattr(selfcheck.subtitle_ocr, "_probe_frames", boom)
+    assert selfcheck.measure_caption_rows(
+        film, work_dir=tmp_path / "w", duration_s=30.0, ocr=fake_ocr
+    ) is None, "探测崩是量不到，不是干净"
+
+    monkeypatch.setattr(
+        selfcheck.subtitle_ocr, "_rapidocr", lambda: (_ for _ in ()).throw(ImportError("未安装"))
+    )
+    assert selfcheck.measure_caption_rows(
+        film, work_dir=tmp_path / "w", duration_s=30.0, ocr=None
+    ) is None, "OCR 依赖缺失同样是量不到"
+
+
+_BAND = (0.80, 0.90)
+
+
+def test_caption_residue_counts_second_cluster_only() -> None:
+    """影子判据真值表：带外角标不计；带外沿残字成第二簇计入；叠住残字是已知盲区。"""
+    rows = [
+        (10.0, [("我们的字", 0.82, 0.88, 0.9)]),
+        (20.0, [("我们的字", 0.82, 0.88, 0.9), ("残留白字", 0.70, 0.76, 0.8)]),
+        (30.0, [("左上角标", 0.10, 0.16, 0.9)]),
+        (40.0, [("我们的字", 0.82, 0.88, 0.9), ("叠住的残字", 0.875, 0.895, 0.8)]),
+    ]
+    report = selfcheck.check_caption_residue(rows, _BAND)
+    assert report["pass"] is None, "影子项恒不判红（avsync 同款纪律）"
+    assert report["band_frames"] == 3, "角标帧在带外不进 band_frames"
+    assert report["residue_frames"] == 1, "只有 20s 帧的第二簇算残留候选；40s 叠住=并簇盲区"
+    assert report["samples"] == [{"film_t": 20.0, "rows": ["残留白字", "我们的字"]}], (
+        f"样本按纵向序带原文供人工核：{report['samples']}"
+    )
+
+
+def test_caption_residue_gray_without_sampling_or_promise() -> None:
+    assert selfcheck.check_caption_residue(None, _BAND)["pass"] is None
+    assert selfcheck.check_caption_residue([(1.0, [("字", 0.8, 0.9, 0.9)])], None)["pass"] is None
+
+
+def test_run_with_promise_probes_once_and_reports_residue(
+    sample_video: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """有覆盖承诺：一次探针双消费——落位判据拿包络，残字影子项拿逐帧簇数。"""
+    monkeypatch.setattr(selfcheck, "measure_audio_video", lambda _v: (-20.0, 0.5))
+    probe_rows = [
+        (1.0, [("我们的字一", 0.82, 0.88, 0.9), ("残留白字甲", 0.70, 0.76, 0.8)]),
+        (2.0, [("我们的字二", 0.82, 0.88, 0.9), ("残留白字乙", 0.70, 0.76, 0.8)]),
+    ]
+    monkeypatch.setattr(selfcheck, "measure_caption_rows", lambda *_a, **_k: probe_rows)
+    payload = selfcheck.run(
+        sample_video,
+        measured_s=3.0,
+        has_audio=True,
+        mode="dialogue_narration",
+        budget_s=3.0,
+        planned_segments=1,
+        caption_band=(0.80, 0.90),
+        work_dir=sample_video.parent,
+    )
+    residue = payload["caption_residue"]
+    assert residue["band_frames"] == 2 and residue["residue_frames"] == 2
+    placement = payload["caption_placement"]
+    assert placement["measured_top"] == 0.66 and placement["measured_bottom"] == 0.92, (
+        f"落位度量消费同一份探针（带定位按行距吸收盖两簇）：{placement}"
+    )
 
 
 def test_measure_caption_band_unusable_ocr_is_none(
@@ -232,11 +329,12 @@ def test_run_measures_caption_only_when_promise_exists(
     monkeypatch.setattr(selfcheck, "measure_audio_video", lambda _v: (-20.0, 0.5))
     calls: list[tuple[Any, ...]] = []
 
-    def fake_measure(*args: Any, **kwargs: Any) -> tuple[float, float]:
+    def fake_measure(*args: Any, **kwargs: Any) -> list[tuple[float, Any]]:
         calls.append((args, kwargs))
-        return (0.80, 0.92)
+        # 文本逐帧变化：同文同位会被 _persistent_spots 判成常驻横幅滤掉
+        return [(1.0, [("字幕一", 0.85, 0.87, 0.9)]), (2.0, [("字幕二", 0.85, 0.87, 0.9)])]
 
-    monkeypatch.setattr(selfcheck, "measure_caption_band", fake_measure)
+    monkeypatch.setattr(selfcheck, "measure_caption_rows", fake_measure)
     work_dir = sample_video.parent / "cache"
     grey = selfcheck.run(
         sample_video, measured_s=3.0, has_audio=True, mode="raw_clip",
@@ -486,7 +584,14 @@ def test_completion_hook_records_caption_placement(
         memory_db, episode_id, json.dumps({"band": [0.70, 0.95], "lines": [[0.80, 0.90]]})
     ), "种数据没种上，这条用例等于没测"
     monkeypatch.setattr(selfcheck, "measure_audio_video", lambda _v: (-20.0, 0.5))
-    monkeypatch.setattr(selfcheck, "measure_caption_band", lambda *_a, **_k: (0.81, 0.91))
+    monkeypatch.setattr(
+        selfcheck,
+        "measure_caption_rows",
+        lambda *_a, **_k: [
+            (1.0, [("字幕一", 0.85, 0.87, 0.9)]),
+            (2.0, [("字幕二", 0.85, 0.87, 0.9)]),
+        ],
+    )
     _render(monkeypatch, context, export_id, plan_row, plan_data)
 
     row = exports_repo.get(memory_db, export_id)
