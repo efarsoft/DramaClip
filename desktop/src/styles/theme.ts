@@ -38,6 +38,9 @@ export const tokens = {
   errorText: '#F87171',
   /** 关闭按钮热区：非重复色，收进此处后组件里不再出现裸 hex。 */
   closeHot: '#C43A3A',
+  /** 说话人标签色板（转写卡角色 Chip，v0.2.5 2.1）：按标签名稳定散列取色，
+   * 同一角色恒定同色；六色均避开主色与语义色族（primary/success/warning/error）。 */
+  speakerPalette: ['#F472B6', '#38BDF8', '#A78BFA', '#FB923C', '#2DD4BF', '#A3E635'],
   /** 海报/视频的黑底与底部渐隐（原先在四个文件里逐字重复）。 */
   posterBase: '#000000',
   posterScrim: 'linear-gradient(180deg, rgba(0,0,0,0) 50%, rgba(0,0,0,0.68) 100%)',
