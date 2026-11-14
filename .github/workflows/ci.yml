@@ -48,7 +48,9 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - run: ruff check .
       - run: mypy dramaclip
-      - run: python -m pytest -x -q
+      # 不用 -x：它每次只露一个失败，Linux 债是逐层揭示、每层一个 CI 周期清掉的——
+      # 红一次要把压着的失败全露出来（--maxfail=25 仍保留快速失败语义）
+      - run: python -m pytest -q --maxfail=25
 
   service-windows:
     name: service-windows（质量黄金集离线校验）
