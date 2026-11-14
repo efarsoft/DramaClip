@@ -88,6 +88,7 @@ function SegmentRow({
           -{formatClock(segment.end)}
         </span>
         <SourceBadge source={segment.source} />
+        <SpeakerChip speaker={segment.speaker} />
         <span
           style={{ color: tokens.textPrimary, cursor: 'text' }}
           onClick={() => {
@@ -181,6 +182,26 @@ function SourceBadge({ source }: { source: string | undefined }): React.ReactEle
     return <Chip text="待复核" color={tokens.colorWarning} />;
   }
   return null;
+}
+
+/** 说话人标签行前缀（云端 diarization / 本地聚类都是「角色X」形态）：数据在库，此前界面零渲染。 */
+function SpeakerChip({ speaker }: { speaker: string | undefined }): React.ReactElement | null {
+  if (!speaker) {
+    return null;
+  }
+  return <Chip text={speaker} color={speakerColor(speaker)} />;
+}
+
+const SPEAKER_COLORS = ['#F472B6', '#38BDF8', '#A78BFA', '#FB923C', '#2DD4BF', '#A3E635'] as const;
+/* 取避开主色与语义色（primary/success/warning），同标签恒定同色看得出「谁在说」。 */
+
+function speakerColor(label: string): string {
+  let hash = 0;
+  for (let i = 0; i < label.length; i += 1) {
+    hash = (hash * 31 + label.charCodeAt(i)) >>> 0;
+  }
+  const index = hash % SPEAKER_COLORS.length;
+  return SPEAKER_COLORS[index] ?? '#F472B6';
 }
 
 function Chip({ text, color }: { text: string; color: string }): React.ReactElement {

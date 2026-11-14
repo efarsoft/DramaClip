@@ -53,7 +53,7 @@ def collapse_warning(segments: list[AsrSegment], duration_s: float) -> str | Non
     detail = f"（全片 {duration_s:.0f}s）" if duration_s > 0 else ""
     return (
         f"转写时间轴疑似坍缩：{len(segments)} 段全挤在 {window} 内{detail}"
-        "——字幕/台词锚点不可信，建议切云端 ASR 重析本集"
+        "——字幕/台词锚点不可信，说话人标签已一并丢弃，建议切云端 ASR 重析本集"
     )
 
 
@@ -115,6 +115,11 @@ def analyze_episode(
     collapse = collapse_warning(asr_segments, _wav_duration_s(wav_path))
     if collapse is not None:
         warnings.append(collapse)
+        # 塌缩=时间轴失去真实锚：说话人归属按时间重叠算（《颠勺》EP1 形态下归属
+        # 全错），错误标签会顺着 [角色X] 前缀流进编剧/文案 prompt 污染人物关系——
+        # 丢标签回退纯文本（无标签只是少信息，错标签是假信息）。
+        for seg in asr_segments:
+            seg.speaker = None
     _emit(0.55, "场景切割")
     scenes = scene_detector.merge_scenes(scene_detector.detect_scenes(video_path))
     _emit(0.75, "音频特征")

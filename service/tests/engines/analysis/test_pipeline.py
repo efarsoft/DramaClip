@@ -104,3 +104,72 @@ def test_collapse_warning_flags_squeezed_timeline() -> None:
     assert pipeline.collapse_warning(squeezed, 0.0) is not None, (
         "时长拿不到时按跨度本身判（15s 窗）"
     )
+
+
+class _CollapsingTranscriber:
+    """返回坍缩形态转写（46 段挤窄窗、全带 speaker 标签）的桩引擎。
+
+    段跨度必须低于 min(15s, 全片×10%)：3 秒测试视频的判定窗只有 0.3s，
+    46 段挤 0.275s 即复现「全部挤进首个转写单元」的坍缩特征。
+    """
+
+    name = "fake-collapse"
+
+    def transcribe(
+        self, wav_path: Path, language: str = "zh", *, hotwords: str = ""
+    ) -> list[AsrSegment]:
+        assert wav_path.is_file(), "管线应先完成真实音频提取"
+        return [
+            AsrSegment(
+                start=k * 0.006,
+                end=k * 0.006 + 0.005,
+                text="词",
+                speaker=f"角色{chr(ord('A') + k % 3)}",
+            )
+            for k in range(46)
+        ]
+
+
+def test_analyze_episode_strips_speakers_on_collapse(
+    sample_video: Path, tmp_path: Path
+) -> None:
+    """塌缩命中 → speaker 全剥（时间轴不可信则时间重叠归属全错）：错误标签不进文案链。"""
+    result = pipeline.analyze_episode(
+        video_path=sample_video,
+        work_dir=tmp_path / "work",
+        transcriber=_CollapsingTranscriber(),
+        language="zh",
+    )
+    assert all(seg.speaker is None for seg in result.asr_segments), (
+        "塌缩轴上的说话人归属是假信息，必须剥干净回退纯文本"
+    )
+    assert any("坍缩" in w and "标签已一并丢弃" in w for w in result.warnings), (
+        "警告要如实说明标签被丢弃，不然界面无标签显得像没跑分离"
+    )
+
+
+def test_analyze_episode_keeps_speakers_when_timeline_healthy(
+    sample_video: Path, tmp_path: Path
+) -> None:
+    """时间轴健康的转写不剥标签：塌缩降级只服务坍缩场景，正常归属原样保留。"""
+    spread = [
+        AsrSegment(start=float(k) * 55.0, end=float(k) * 55.0 + 3.0, text="台词", speaker="角色A")
+        for k in range(46)
+    ]
+
+    class _SpreadTranscriber:
+        name = "fake-spread"
+
+        def transcribe(
+            self, wav_path: Path, language: str = "zh", *, hotwords: str = ""
+        ) -> list[AsrSegment]:
+            return spread
+
+    result = pipeline.analyze_episode(
+        video_path=sample_video,
+        work_dir=tmp_path / "work",
+        transcriber=_SpreadTranscriber(),
+        language="zh",
+    )
+    assert all(seg.speaker == "角色A" for seg in result.asr_segments)
+    assert result.warnings == []
