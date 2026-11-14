@@ -813,6 +813,11 @@ def _extract_tar_stripped(archive: Path, dest: Path) -> None:
             target = dest.joinpath(*_member_parts(name))
             if member.isdir():
                 target.mkdir(parents=True, exist_ok=True)
+            elif member.issym() or member.islnk():
+                # 仓库内数据目录的软链（真机 2026-11-13：Matcha 的 data → 数据集占位）：
+                # 运行期 import/合成链用不到；Windows 建符号链接还要特权。跳过且绝不
+                # 实体化——软链是归档解包的第二条逃逸通道，不落地就无逃逸。
+                continue
             elif member.isfile():
                 handle = tar.extractfile(member)
                 if handle is None:
