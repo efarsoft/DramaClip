@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import subprocess  # noqa: S404 - 参数为受控列表
 import weakref
@@ -11,10 +12,19 @@ from pathlib import Path
 
 import pytest
 
+from dramaclip.engines.narration import variant_scoring
+from dramaclip.engines.semantic import llm_quota
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 from dramaclip.infra.storage import db
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# CI 的 torch 是 CPU 轮，开发机常带可用 CUDA：设备相关用例（真算探针/回退）在两边
+# 走的是不同分支，本机绿不等于 CI 绿（2026-11-13 实锤：失效桩被可用 GPU 掩蔽，
+# 只在 CI 上红）。pytest 会话默认隐藏 GPU 与 CI 同口径；要拿真卡做临时验证时设
+# DRAMACLIP_TEST_REAL_GPU=1。须赶在任何用例触发 CUDA 初始化之前生效。
+if not os.environ.get("DRAMACLIP_TEST_REAL_GPU"):
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 
 def _ffmpeg() -> str:
@@ -26,6 +36,22 @@ def _ffmpeg() -> str:
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return REPO_ROOT
+
+
+@pytest.fixture(autouse=True)
+def _llm_side_channels_offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LLM 侧通道默认不连网（方案评分、额度预检）；专测它们的用例自行打桩（后打的赢）。
+
+    这两处读的是各自模块的绑定，不在各文件 LLM 桩覆盖内——规划链与导出链的
+    端到端用例都会触发：对测试假域名发真请求，再吃网络类退避（每次 5s+15s，
+    CI 实锤）。
+    """
+
+    def _refuse_client(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("测试默认不连 LLM 端点（要测的用例请自行打桩）")
+
+    monkeypatch.setattr(variant_scoring, "client_for", _refuse_client)
+    monkeypatch.setattr(llm_quota, "probe_quota", lambda _config: llm_quota.SKIPPED)
 
 
 # 作业线程池登记表：泄漏的作业线程若活过测试，会在 monkeypatch 还原后撞共享模块

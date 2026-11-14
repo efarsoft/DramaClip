@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from dramaclip.engines.narration import angles, story_arc
+from dramaclip.engines.narration import angles, story_arc, titles
 from dramaclip.infra.storage.repos import plans as plans_repo
 from tests.api.test_plan_variants import _LLM_SETTINGS, Harness, _seed_project_with_analysis
 from tests.llm_stub import patch_client_for
@@ -39,6 +39,13 @@ def _stub_llm(monkeypatch: pytest.MonkeyPatch) -> None:
             return {}
 
     patch_client_for(monkeypatch, angles, _Llm)
+
+    # 导出收尾的候选标题是另一处真客户端读者：不桩就是对假域名发真请求
+    # 吃网络类退避（本用例 43s 的来源）。标题是增强项，拒绝桩走既有降级留痕。
+    def _refuse(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("测试不连标题端点（导出侧降级留痕兜底）")
+
+    monkeypatch.setattr(titles, "client_for", _refuse)
 
 
 def test_export_output_lands_under_data_dir(

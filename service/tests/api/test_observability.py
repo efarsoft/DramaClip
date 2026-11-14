@@ -23,6 +23,7 @@ from dramaclip.api import narration as narration_api
 from dramaclip.api import narration_plans as narration_plans
 from dramaclip.engines.analysis import pipeline
 from dramaclip.engines.analysis.models import EpisodeRawAnalysis
+from dramaclip.engines.narration import titles
 from dramaclip.engines.semantic.llm_client import LlmClient
 from dramaclip.infra import jobs as jobs_mod
 from dramaclip.infra.storage.repos import analysis as analysis_repo
@@ -216,6 +217,14 @@ def test_export_logs_carry_the_job_id(
 ) -> None:
     harness = _harness(memory_db, tmp_path, export_api)
     monkeypatch.setattr(export_api, "_run_export", _probe)
+
+    # 导出收尾的候选标题走 titles 自己的真客户端：不桩就吃网络类退避。
+    # 标题是增强项，拒绝桩走既有降级留痕；本用例只验日志带 job_id。
+    def _refuse_titles(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("测试不连标题端点")
+
+    monkeypatch.setattr(titles, "client_for", _refuse_titles)
+
     _project_id, plan_id = _seed_plan(memory_db, tmp_path, _voiced_plan(tmp_path))
 
     result = _rpc(harness, "export.submit", {"plan_ids": [plan_id]})
