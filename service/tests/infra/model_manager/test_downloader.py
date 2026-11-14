@@ -43,8 +43,21 @@ class _Notifier:
 
 def test_sources_domestic_first() -> None:
     assert _spec("sensevoice-small").sources()[0][0] == "modelscope"
+    # whisper 四档：MS 镜像源在先（hf-mirror 被部分网络 TLS 拦截时唯一可用源，
+    # 真机 2026-11-13 实证），镜像逐文件哈希对账见 builtin_specs 头注
     kinds = [kind for kind, _ in _spec("faster-whisper-base").sources()]
-    assert kinds == ["hf_mirror", "huggingface"]
+    assert kinds == ["modelscope", "hf_mirror", "huggingface"]
+
+
+def test_whisper_ms_mirror_repos_are_registered() -> None:
+    """镜像仓逐文件哈希对账过（builtin_specs 头注）：登记错一个字下载即 404。"""
+    for model_id in ("faster-whisper-base", "faster-whisper-small",
+                     "faster-whisper-medium", "faster-whisper-large-v3"):
+        spec = _spec(model_id)
+        assert spec.ms_repo == f"pengzhendong/{model_id}", model_id
+        assert [kind for kind, _ in spec.sources()] == [
+            "modelscope", "hf_mirror", "huggingface",
+        ], model_id
 
 
 def test_source_chain_selected_first_then_domestic() -> None:

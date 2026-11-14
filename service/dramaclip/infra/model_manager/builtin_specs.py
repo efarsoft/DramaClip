@@ -15,12 +15,21 @@ _VL8B_FILES = ("Qwen3VL-8B-Instruct-Q4_K_M.gguf", "mmproj-Qwen3VL-8B-Instruct-Q8
 
 
 def builtin_specs() -> list[ModelSpec]:
+    # whisper 四档挂 ModelScope 镜像（pengzhendong/faster-whisper-*）：hf-mirror.com
+    # 在部分网络被 HTTPS 中间人拦截（真机 2026-11-13：CERTIFICATE_VERIFY_FAILED，
+    # 同机 ModelScope 可达），只有 HF 系源的机器 ASR 模型完全装不了。镜像逐文件
+    # 对账过（2026-11-14）：model.bin 的 MS Sha256 == HF lfs.oid（四档全同），
+    # 小文件下载比对逐字节相同且 MS API Sha256 即内容哈希（download_file 校验
+    # 直接可用）；MS 多一个平台自带的 configuration.json（56B，运行期不读，无害）。
+    # ms 源无 git 提交号：走 snapshots/main 落盘 + 体检报「无从对账」（设计内，
+    # 权重齐仍可用）。
     return [
         ModelSpec(
             model_id="faster-whisper-base",
             kind="asr",
             engine="faster_whisper",
             repo_id="Systran/faster-whisper-base",
+            ms_repo="pengzhendong/faster-whisper-base",
             placement="asr/faster-whisper",
             name="Whisper Base（CPU 快速转写）",
             required=True,
@@ -36,6 +45,7 @@ def builtin_specs() -> list[ModelSpec]:
             kind="asr",
             engine="faster_whisper",
             repo_id="Systran/faster-whisper-small",
+            ms_repo="pengzhendong/faster-whisper-small",
             placement="asr/faster-whisper",
             name="Whisper Small（更准，稍慢）",
             notes="约 480MB",
@@ -50,6 +60,7 @@ def builtin_specs() -> list[ModelSpec]:
             kind="asr",
             engine="faster_whisper",
             repo_id="Systran/faster-whisper-medium",
+            ms_repo="pengzhendong/faster-whisper-medium",
             placement="asr/faster-whisper",
             name="Whisper Medium（高准确度）",
             size_label="~1.5GB",
@@ -63,6 +74,7 @@ def builtin_specs() -> list[ModelSpec]:
             kind="asr",
             engine="faster_whisper",
             repo_id="Systran/faster-whisper-large-v3",
+            ms_repo="pengzhendong/faster-whisper-large-v3",
             placement="asr/faster-whisper",
             name="Whisper Large-v3（最高精度）",
             size_label="~3GB",

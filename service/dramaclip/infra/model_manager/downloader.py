@@ -470,7 +470,7 @@ def list_tree(kind: str, repo: str, endpoints: Endpoints) -> list[FileEntry]:
                 str(item["Path"]),
                 int(item.get("Size") or 0),
                 _sha_or_none(item.get("Sha256") or item.get("sha256")),
-                "",  # ModelScope 没有 git blob 概念；whisper 系不挂 ms 源，trees 用不到
+                "",  # ModelScope 没有 git blob 概念（ms 源不写 trees，走 snapshots/main）
             )
             for item in (files or [])
             if item.get("Type") == "blob" and _wanted(str(item["Path"]))
