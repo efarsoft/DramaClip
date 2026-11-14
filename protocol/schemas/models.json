@@ -916,6 +916,63 @@
           }
         }
       }
+    },
+    {
+      "name": "models.llama_status",
+      "summary": "视觉推理运行时（llama.cpp）安装态：installed + tag/variant/文件清单",
+      "params": {
+        "type": "object",
+        "properties": {}
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "installed",
+          "exe",
+          "tag",
+          "variant",
+          "files"
+        ],
+        "properties": {
+          "installed": {
+            "type": "boolean"
+          },
+          "exe": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "variant": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "models.llama_install",
+      "summary": "一键下载 llama.cpp 视觉推理运行时（变体按显卡自动选：N 卡 CUDA 12.4 构建含运行库，其余 CPU 构建；作业模式有进度可取消）",
+      "params": {
+        "type": "object",
+        "properties": {}
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        }
+      }
     }
   ]
 }

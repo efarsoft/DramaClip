@@ -30,6 +30,7 @@ import {
   activeCloudConfig,
 } from './CloudDomainUI';
 import { deviceSelectProps, visualCapKey } from './deviceOptions';
+import { LlamaRuntimeSlot } from './LlamaRuntimeSlot';
 import { SettingSelect } from './SettingSelect';
 import { useDownloadState } from './useDownloadProgress';
 import { useEngineConfigs } from './useEngineConfigs';
@@ -118,6 +119,7 @@ export function VisionTab({
           }}
         />
       )}
+      {pane === 'local' && <LlamaRuntimeSlot />}
       {pane === 'local' ? (
         <AssetLibrary
           models={domainModels}

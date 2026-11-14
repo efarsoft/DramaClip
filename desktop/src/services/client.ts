@@ -318,6 +318,19 @@ export const musicRuntimeApi = {
     rpc<{ job_id: string }>('models.install_music_runtime', {}),
 } as const;
 
+/** 视觉推理运行时（llama.cpp，0.2.5 主题一 1.1）：变体按显卡自动选，安装走作业模式。 */
+export const llamaRuntimeApi = {
+  status: (): Promise<{
+    installed: boolean;
+    exe: string;
+    tag: string;
+    variant: string;
+    files: string[];
+  }> => rpc('models.llama_status', {}),
+  install: (): Promise<{ job_id: string }> =>
+    rpc<{ job_id: string }>('models.llama_install', {}),
+} as const;
+
 /** 配乐域（bgm）：ACE-Step 本地 BGM 生成 + 曲库清单/重扫。 */
 export const bgmApi = {
   generate: (req: BgmGenerateRequest): Promise<{ job_id: string }> =>

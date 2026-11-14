@@ -47,6 +47,8 @@ def register(router: Router, context: AppContext) -> None:
     router.register("models.import_records", lambda params: import_records(context))
     router.register("models.import_forget", lambda params: import_forget(context, params))
     router.register("models.runtime_status", lambda params: runtime_status(context, params))
+    router.register("models.llama_status", lambda params: llama_status(context, params))
+    router.register("models.llama_install", lambda params: llama_install(context, params))
     router.register("models.install_runtime", lambda params: install_runtime(context, params))
     router.register("models.indextts_status", lambda params: indextts_status(context, params))
     router.register("models.install_indextts", lambda params: install_indextts(context, params))
@@ -355,6 +357,65 @@ def runtime_status(context: AppContext, params: dict[str, Any]) -> dict[str, Any
     from dramaclip.infra.model_manager import cuda_runtime
 
     return cuda_runtime.status(context.data_dir)
+
+
+def llama_status(context: AppContext, _params: dict[str, Any]) -> dict[str, Any]:
+    """视觉推理运行时（llama.cpp）安装态：installed + tag/variant/文件清单。"""
+    from dramaclip.infra.model_manager import llama_assets
+
+    return {
+        "installed": llama_assets.installed(context.data_dir),
+        "exe": str(llama_assets.server_exe(context.data_dir)),
+        **llama_assets.marker_state(context.data_dir),
+    }
+
+
+def llama_install(context: AppContext, _params: dict[str, Any]) -> dict[str, Any]:
+    """一键下载 llama.cpp 视觉推理运行时（变体按显卡自动选，作业模式）。"""
+    from dramaclip.infra.model_manager import llama_assets
+
+    if llama_assets.installed(context.data_dir):
+        raise RpcDomainError(_ERR_MODEL_STATE, "llama.cpp 运行时已就绪")
+    _active = [
+        j for j in context.job_store.list_recent(limit=50, active_only=True)
+        if j["type"] == "llama_runtime"
+    ]
+    if _active:
+        raise RpcDomainError(_ERR_MODEL_STATE, "已有安装任务进行中，请等待完成或取消")
+    job_id = context.job_store.create("llama_runtime", ref_id="llama-runtime")
+    context.job_store.mark_running(job_id)
+    cancel_event = threading.Event()
+    context.cancel_events[job_id] = cancel_event
+    done_event = threading.Event()
+
+    def _run() -> None:
+        try:
+            result = llama_assets.install(
+                context.data_dir,
+                cancel=cancel_event,
+                on_progress=lambda percent, stage: context.job_store.set_progress(
+                    job_id, float(percent), stage
+                ),
+            )
+            context.notifier.log(
+                "info",
+                f"llama.cpp 视觉运行时安装完成（{result['variant']}，{result['tag']}）",
+            )
+        except Exception as exc:  # noqa: BLE001 - 作业失败原样落 error
+            context.job_store.mark_failed(job_id, _failure_with_origin(exc))
+        finally:
+            done_event.set()
+
+    def _watch() -> None:
+        done_event.wait()
+        job = context.job_store.get(job_id)
+        if job is not None and job["status"] == "running":
+            context.job_store.mark_completed(job_id)
+        context.cancel_events.pop(job_id, None)
+
+    threading.Thread(target=_run, daemon=True, name="llama-runtime-install").start()
+    threading.Thread(target=_watch, daemon=True, name="llama-runtime-watch").start()
+    return {"job_id": job_id}
 
 
 def install_runtime(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:

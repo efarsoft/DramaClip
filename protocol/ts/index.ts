@@ -1070,6 +1070,8 @@ export const METHOD_NAMES = [
   'models.install_local_runtime',
   'models.install_indextts',
   'models.install_music_runtime',
+  'models.llama_status',
+  'models.llama_install',
   'bgm.generate',
   'bgm.rescan',
   'bgm.library',
