@@ -267,3 +267,27 @@ def test_prop_page_never_reaches_line_rects() -> None:
     assert band is not None
     lines = subtitle_ocr._cluster_lines(candidates, band)
     assert [(round(b.top, 3), round(b.bottom, 3)) for b in lines] == [(0.812, 0.899)]
+
+
+# ---- 带包络行距吸收（v0.2.5 6.1：2026-11-13 成片体检 112s 残字在带外沿）----
+
+
+def test_band_from_absorbs_second_row_of_two_line_subtitle() -> None:
+    """两行字幕的第二行 top 距中位锚超 ±0.08 窗——包络按行距吸收后带盖住两行。
+
+    吸收半径 = _LINE_PITCH_MAX（一个行距）：行高 0.094–0.108 + 行间的两行字幕，
+    第二行不再整行落带外；band 兜底擦（行框缺失回退整带）与压位定位随之覆盖。
+    """
+    candidates = [(0.72, 0.81), (0.85, 0.93)]
+    band = subtitle_ocr._band_from(candidates)
+    assert band is not None
+    assert band.top <= 0.72, f"第一行落带外：{band}"
+    assert band.bottom >= 0.93, f"第二行落带外：{band}"
+
+
+def test_band_from_does_not_absorb_distant_decor() -> None:
+    """隔半个画面的簇不吸附（吸收半径只够一个行距）：带不会被撑到花字/道具上。"""
+    candidates = [(0.82, 0.891), (0.40, 0.55)]
+    band = subtitle_ocr._band_from(candidates)
+    assert band is not None
+    assert band.top >= 0.7, f"远簇被吸进带里：{band}"

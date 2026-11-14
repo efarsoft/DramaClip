@@ -285,6 +285,35 @@ def resolve_output_fps(episode_paths: dict[str, str]) -> float:
 _ERASE_SPAN_MIN_S = 0.05
 _ERASE_SPAN_MERGE_S = 0.20
 
+# 行框可用性形状闸（单一真相源）：调用端「剔完是否回退整带」与滤镜循环内
+# 「逐框跳过」必须用同一把尺，两边永不漂移。
+_ERASE_RECT_H_MIN = 0.01
+_ERASE_RECT_H_MAX = 0.16
+
+
+def _usable_erase_rect(rect: tuple[float, float]) -> bool:
+    """这条框像不像值得擦的矩形：过矮是退化框，超高是满幅文字背景误检。
+
+    超高（>16% 画布高 ≈ 台词行最高 9% 的近两倍）是片头字幕墙/竖排题字聚合，
+    不是台词行——擦它等于糊大半个屏幕（2026-10-09 真机 16:9 源反馈）。
+    """
+    top = min(max(float(rect[0]), 0.0), 1.0)
+    bottom = min(max(float(rect[1]), 0.0), 1.0)
+    return _ERASE_RECT_H_MIN < bottom - top <= _ERASE_RECT_H_MAX
+
+
+def _usable_erase_rects(
+    rects: list[tuple[float, float]] | None,
+) -> list[tuple[float, float]] | None:
+    """行框集中过形状闸：剔完非空原样回，剔空返回 None——调用端据此回退整带。
+
+    真机 2026-11-13 成片体检 277s：两行字幕被 OCR 合成一条超高框，是行框集中
+    唯一条目——上游「列表非空」不触发整带回退、滤镜循环内逐框剔除后又全跳，
+    结果零 delogo、原字幕带内完整裸奔。闸必须在整带回退判定**之前**生效。
+    """
+    usable = [rect for rect in (rects or []) if _usable_erase_rect(rect)]
+    return usable or None
+
 
 def _erase_enable_suffix(
     windows: list[tuple[float, float]] | None, start: float, end: float
@@ -389,12 +418,9 @@ def cut_segment_args(
     for rect_top, rect_bottom in (erase_rects or []) if has_subtitle else []:
         top = min(max(float(rect_top), 0.0), 1.0)
         bottom = min(max(float(rect_bottom), 0.0), 1.0)
-        if bottom - top <= 0.01:
-            continue
-        if bottom - top > 0.16:
-            # 超高"行框"（>16% 画布高 ≈ 台词行最高 9% 的近两倍）是满幅文字
-            # 背景的误检（片头字幕墙/竖排题字聚合），不是台词行——擦它等于
-            # 糊大半个屏幕（2026-10-09 真机 16:9 源反馈），整框跳过。
+        if not _usable_erase_rect((rect_top, rect_bottom)):
+            # 形状闸与调用端回退共用同一把尺（_usable_erase_rect）；剔空兜底
+            # 在调用端（_usable_erase_rects 剔完返回 None → 回退整带）。
             continue
         content_x = max(1, round((out_w - scaled_w) / 2))
         content_y = max(1, round((out_h - scaled_h) / 2))
@@ -973,9 +999,10 @@ def _export_plan_once(
                     afade_out_s=aout,
                     # 只在我们烧字幕的段擦源带（ass_path 为空=该段画面保留原样，
                     # raw_clip 整片、交叉的原声段都属此类——原片台词字幕是内容，不能抹）；
-                    # 有行框用行框（贴行不贴带），行框缺失回退整带
+                    # 有行框用行框（贴行不贴带），行框缺失或全被形状闸剔除（_usable_
+                    # erase_rects 返回 None，如两行合并出的超高框）回退整带
                     erase_rects=(
-                        (subtitle_erase_rects or {}).get(segment.episode_id)
+                        _usable_erase_rects((subtitle_erase_rects or {}).get(segment.episode_id))
                         or (
                             [band]
                             if (band := (subtitle_bands or {}).get(segment.episode_id))

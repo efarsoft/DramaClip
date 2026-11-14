@@ -22,6 +22,7 @@ _MIN_FRAME_SUPPORT = 2    # 台词位置簇的最少贡献帧数：单帧密集�
 _SAMPLE_FPS = 1.0         # 抽帧率：短剧镜头 1.5~3s，字幕驻留普遍 ≥1s
 _ROI_WIDTH = 800          # 裁剪后缩放宽（识别耗时与像素量成正比）
 _BAND_EXPAND = 0.04       # 字幕带上下各扩 4% 画面高，容納描边/阴影
+_LINE_PITCH_MAX = 0.16    # 两行字幕行距上限（行高 0.094–0.108 + 行间）：带包络吸收相邻台词簇的判据
 _LINE_STROKE_MARGIN = 0.008  # 逐行擦除框的描边余量（≈15px@1920）：贴字不贴带
 _LINE_H_MIN = 0.03        # 台词行框高度下限：切镜半帧的标点残迹不够一行字
 _LINE_H_MAX = 0.13        # 上限：真机 10 集实测最宽一档 0.108，两行合并/幕墙聚合 ≥0.15
@@ -30,7 +31,8 @@ _TAIL_PAD_S = 1.0         # 字幕条结尾向后补（采样间隔 + 消失延�
 _OCR_WORKERS = 4        # 帧识别并行度（onnxruntime session 线程安全）
 _MERGE_RATIO = 0.85       # 相邻帧文本相似度阈值（OCR 抖动容差）
 _MIN_BAR_CHARS = 2        # 字幕条最短字数：单字残条=切镜半帧噪声
-ENGINE_TAG = "rapidocr3-ppocrv6"  # 引擎代际标记：跨轮缓存按它判新旧（换代即失效）
+# 引擎代际标记：跨轮缓存按它判新旧（换代即失效）；-r2=带包络行距吸收（v0.2.5 6.1）
+ENGINE_TAG = "rapidocr3-ppocrv6-r2"
 
 # OCR 单帧结果：文本 + 归一化纵向位置（top, bottom）
 FrameResult = list[tuple[str, float, float, float]]
@@ -209,16 +211,34 @@ def _persistent_spots(probes: list[FrameResult]) -> set[tuple[float, float]]:
 
 
 def _band_from(candidates: list[tuple[float, float]]) -> _Band | None:
-    """台词行位置 → 单一包络带（中位锚点聚类，供采样裁剪与 ASS 压位）。"""
+    """台词行位置 → 单一包络带（中位锚点聚类，供采样裁剪与 ASS 压位）。
+
+    中位锚只圈出**主台词行**（±0.08）；两行字幕的第二行 top 距锚常超此窗
+    （行高 0.094–0.108 + 行间），会被整行落在带外——真机 2026-11-13 成片体检
+    112s 残字在带外沿即此形态。故锚定后再做**行距吸收**：与当前包络垂直距离
+    ≤ 一个行距（_LINE_PITCH_MAX）的相邻台词簇并入，迭代到不动点；远处的
+    花字/道具簇（中屏装饰与字幕带隔半个画面）不吸附。
+    """
     if not candidates:
         return None
     tops = sorted(top for top, _b in candidates)
     anchor = tops[len(tops) // 2]  # 中位数位置为字幕带锚点
-    same_band = [
+    envelope = [
         (top, bottom) for top, bottom in candidates if abs(top - anchor) <= _BAND_EXPAND * 2
     ]
-    top = min(top for top, _b in same_band)
-    bottom = max(bottom for _t, bottom in same_band)
+    changed = True
+    while changed:
+        band_top = min(top for top, _b in envelope)
+        band_bottom = max(bottom for _t, bottom in envelope)
+        changed = False
+        for cand in candidates:
+            if cand in envelope:
+                continue
+            if band_top - _LINE_PITCH_MAX <= cand[0] <= band_bottom + _LINE_PITCH_MAX:
+                envelope.append(cand)
+                changed = True
+    top = min(top for top, _b in envelope)
+    bottom = max(bottom for _t, bottom in envelope)
     return _Band(max(0.0, top - _BAND_EXPAND), min(1.0, bottom + _BAND_EXPAND))
 
 

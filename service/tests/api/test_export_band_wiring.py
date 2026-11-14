@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from dramaclip.api import export as export_api
+from dramaclip.api import export_covers
 from dramaclip.engines.exporter import encoder
 from dramaclip.engines.narration.models import NarrationText, PlanData, TimelineSegment
 from dramaclip.engines.subtitle import presets
@@ -406,6 +407,25 @@ def test_erase_windows_survive_garbage_ocr_json(
         joined = " ".join(" ".join(c) for c in calls)
         assert joined.count("delogo=") == 1, f"坏窗 {garbage!r} 把擦除整块弄没了"
         assert ":enable=" not in joined, f"坏窗 {garbage!r} 竟被采信成时间窗"
+
+
+def test_dwell_windows_bridge_ocr_blackout_gaps() -> None:
+    """OCR 黑帧（运动模糊/切镜）劈窗的洞在并集层桥接：那几秒原字幕不裸奔（v0.2.5 6.1）。
+
+    生产者补时（尾 1.0/头 0.5，邻条中点封顶）之后黑帧洞最大 ~1.5s，桥接上限
+    2.0s 全盖；真空白过场（间隔远超上限）保持分开。merge 契约不动——「无字帧
+    断开运行」是 10-09 取证钉死的裁决，桥接只发生在消费端窗并集（_dwell_windows
+    是渲染预取与自检承诺的唯一解析处）。
+    """
+    bars = [
+        {"start": 22.0, "end": 23.0, "text": "黑帧前半", "conf": 0.9},
+        {"start": 25.0, "end": 26.0, "text": "黑帧后半", "conf": 0.9},
+        {"start": 40.0, "end": 41.0, "text": "过场后一条", "conf": 0.9},
+    ]
+    windows = export_covers._dwell_windows(json.dumps(bars))
+    assert windows == [(22.0, 26.0), (40.0, 41.0)], (
+        f"洞 23~25（2s 间隔 ≤ 桥接上限）该桥成一条窗，远处过场不吸：{windows}"
+    )
 
 
 # ---- 旁白段（burn_subtitle 路径）----------------------------------------------

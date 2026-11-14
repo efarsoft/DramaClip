@@ -409,6 +409,24 @@ def test_erase_windows_are_emitted_in_time_order() -> None:
     assert ":enable='between(t,1.000,3.000)+between(t,5.500,7.000)'" in _vf(args)
 
 
+def test_usable_erase_rects_shape_gate_and_full_drop_fallback() -> None:
+    """行框形状闸单一真相源：剔空返回 None 触发调用端整带回退（v0.2.5 6.1）。
+
+    真机 2026-11-13 成片体检 277s 的候选机制：两行合并的超高框是行框集唯一
+    条目时，旧逻辑「列表非空不走回退 + 循环内逐框全跳」= 零 delogo 带内裸奔。
+    """
+    assert encoder._usable_erase_rects([(0.82, 0.891)]) == [(0.82, 0.891)]
+    assert encoder._usable_erase_rects([(0.82, 0.891), (0.60, 0.90)]) == [(0.82, 0.891)], (
+        "超高框（两行合并 h=0.30）剔除，真行保留"
+    )
+    assert encoder._usable_erase_rects([(0.60, 0.90)]) is None, (
+        "全部超高 → None → 调用端 `None or [band]` 回退整带"
+    )
+    assert encoder._usable_erase_rects([(0.90, 0.905)]) is None, "退化矮框（h≤0.01）同样不可用"
+    assert encoder._usable_erase_rects(None) is None
+    assert encoder._usable_erase_rects([]) is None
+
+
 def test_missing_windows_keep_full_length_erase() -> None:
     """窗缺失（None / 空表 / OCR 未跑）→ 不收窄，退回整段擦（现状逐字节一致）。"""
     baseline = _vf(

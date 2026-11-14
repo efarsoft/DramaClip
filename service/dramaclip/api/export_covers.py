@@ -39,6 +39,13 @@ def _as_float(value: Any) -> float | None:
     return float(value)
 
 
+_WINDOW_BRIDGE_S = 2.0
+"""驻留窗桥接上限：OCR 条被 ≥2 个连续无字帧劈开时，两侧补时（尾 1.0/头 0.5）
+最多留 1.5s 的洞——真机 2026-11-13 成片体检 277s「部分驻留窗漏检」的候选机制。
+桥接只发生在窗的并集层（不动 merge 契约：「无字帧断开运行」是 10-09 取证钉死的
+裁决）；真空白（纯音乐/无字幕过场）被多擦的上限也就是这几秒，且只在带内。"""
+
+
 def _dwell_windows(raw: Any) -> list[tuple[float, float]]:
     """episode_analysis.ocr_segments → 台词在屏上的驻留窗（源绝对秒）。
 
@@ -46,6 +53,10 @@ def _dwell_windows(raw: Any) -> list[tuple[float, float]]:
     逐条走 `OcrSegment` 校验：非 JSON、非列表、元素形状不对、区间倒挂一律丢弃，
     全丢光就是空表——空表在编码端等于「不收窄，整段擦」，坏数据不会让源字幕
     漏擦（漏擦=原片台词留在屏上，是可见缺陷）。
+
+    收集后按时间排序并把间隙 ≤ _WINDOW_BRIDGE_S 的相邻窗桥接：OCR 黑帧（运动
+    模糊/切镜）劈开的窗在 enable 时间线上留洞=那几秒原字幕裸奔。渲染预取与
+    自检承诺读同一份桥接后的窗（本文件是唯一解析处）。
     """
     if not raw:
         return []
@@ -63,7 +74,13 @@ def _dwell_windows(raw: Any) -> list[tuple[float, float]]:
             continue
         if bar.end > bar.start:
             windows.append((float(bar.start), float(bar.end)))
-    return windows
+    bridged: list[tuple[float, float]] = []
+    for lo, hi in sorted(windows):
+        if bridged and lo - bridged[-1][1] <= _WINDOW_BRIDGE_S:
+            bridged[-1] = (bridged[-1][0], max(bridged[-1][1], hi))
+        else:
+            bridged.append((lo, hi))
+    return bridged
 
 
 def _as_pair(raw: Any) -> tuple[float, float] | None:
