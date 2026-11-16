@@ -63,7 +63,7 @@ function useHomeActions() {
 }
 
 export function HomePage() {
-  const { data, ready } = useWorkbench();
+  const { data, ready, reload } = useWorkbench();
   const { creating, onCreate, onRestart } = useHomeActions();
 
   const dramas = buildDramas(data.projects, data.works);
@@ -102,6 +102,9 @@ export function HomePage() {
         creating={creating}
         onCreate={onCreate}
         onRestart={onRestart}
+        onModelsChanged={() => {
+          void reload();
+        }}
       />
     </PageShell>
   );
@@ -116,6 +119,7 @@ function HomeBody({
   creating,
   onCreate,
   onRestart,
+  onModelsChanged,
 }: {
   data: WorkbenchData;
   todos: TodoItem[];
@@ -124,6 +128,7 @@ function HomeBody({
   creating: boolean;
   onCreate: () => void;
   onRestart: () => void;
+  onModelsChanged: () => void;
 }): React.ReactElement {
   const navigate = useNavigate();
   return (
@@ -155,7 +160,13 @@ function HomeBody({
             }}
           />
         ) : (
-          <EmptyWorkbench creating={creating} onCreate={onCreate} models={data.models} llmBaseUrl={data.llmBaseUrl} />
+          <EmptyWorkbench
+            creating={creating}
+            onCreate={onCreate}
+            models={data.models}
+            llmBaseUrl={data.llmBaseUrl}
+            onModelsChanged={onModelsChanged}
+          />
         )}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>

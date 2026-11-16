@@ -21,11 +21,14 @@ export function EmptyWorkbench({
   onCreate,
   models,
   llmBaseUrl,
+  onModelsChanged,
 }: {
   creating: boolean;
   onCreate: () => void;
   models: ModelInfo[] | null;
   llmBaseUrl: string;
+  /** 一键引导下载完成/取消后重拉 models.list（HomePage 透传 useWorkbench.reload）。 */
+  onModelsChanged: () => void;
 }): ReactElement {
   return (
     <section
@@ -55,7 +58,7 @@ export function EmptyWorkbench({
           三步开始：装一个识别模型、配文案引擎、选素材文件夹建剧。
         </div>
       </div>
-      <OnboardingSteps models={models} llmBaseUrl={llmBaseUrl} />
+      <OnboardingSteps models={models} llmBaseUrl={llmBaseUrl} onModelsChanged={onModelsChanged} />
       <Button type="primary" icon={<FolderAddOutlined />} loading={creating} disabled={creating} onClick={onCreate}>
         新增项目
       </Button>

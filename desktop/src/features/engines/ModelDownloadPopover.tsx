@@ -3,9 +3,10 @@ import { useState, type ReactElement } from 'react';
 import { App as AntdApp, Button, Popover, Radio } from 'antd';
 import { CopyOutlined, DownloadOutlined } from '@ant-design/icons';
 import type { ModelInfo, ModelSource } from '@dramaclip/protocol';
-import { jobsApi, modelsApi } from '../../services/client';
+import { modelsApi } from '../../services/client';
 import { type ModelDownloadState, useUiStore } from '../../stores/ui';
 import { tokens } from '../../styles/theme';
+import { requestCancel } from './downloadCancel';
 import { downloadingLabel } from './downloadLabel';
 import { errorText } from './errorText';
 
@@ -57,9 +58,9 @@ export function DownloadSourceButton({
 /**
  * 失败态（附录 B②）：这里只留「重试」这个动作。原因原文由宿主行写进**可见文本**
  * （资产行的状态列、生效卡的状态行，都出自 `downloadFailureNote`）——悬停要鼠标配合，
- * 一次性 toast 会自己消失，两者都不是账（规格 H3 §3.1.2）。
+ * 一次性 toast 会自己消失，两者都不是账（规格 H3 §3.1.2）。导出供一键引导复用。
  */
-function RetryDownload({ model, onChanged }: { model: ModelInfo; onChanged: () => void }): ReactElement {
+export function RetryDownload({ model, onChanged }: { model: ModelInfo; onChanged: () => void }): ReactElement {
   const { message } = AntdApp.useApp();
   return (
     <Button
@@ -77,10 +78,9 @@ function RetryDownload({ model, onChanged }: { model: ModelInfo; onChanged: () =
 
 /**
  * 下载中：进度三件套 + 取消（`RepairActions` 的强制重下话术早就承诺「下载中可取消」，
- * 这一版把入口补上）。作业 id 不在进度事件里（服务端不下发），刷新后 store 里也没有——
- * 所以按「进行中的 model_download 且 ref_id=本模型」现查，页面刷过之后取消照样能用。
+ * 这一版把入口补上）。导出供工作台一键引导（OnboardingSteps）复用同一套取消语义。
  */
-function CancelDownload({
+export function CancelDownload({
   model,
   download,
   onChanged,
@@ -127,17 +127,6 @@ function CancelDownload({
       </Button>
     </span>
   );
-}
-
-type CancelOutcome = { kind: 'cancelled' } | { kind: 'gone' } | { kind: 'blocked'; reason: string };
-
-async function requestCancel(modelId: string): Promise<CancelOutcome> {
-  const { jobs } = await jobsApi.list(50, true);
-  const job = jobs.find((item) => item.type === 'model_download' && item.ref_id === modelId);
-  if (job === undefined) return { kind: 'gone' };
-  const result = await jobsApi.cancel(job.id);
-  if (!result.cancelling) return { kind: 'blocked', reason: result.reason ?? '服务端未给出原因' };
-  return { kind: 'cancelled' };
 }
 
 function DirectDownload({ model, onChanged }: { model: ModelInfo; onChanged: () => void }): ReactElement {

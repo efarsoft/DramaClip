@@ -24,7 +24,13 @@ function renderEmpty(models: Parameters<typeof EmptyWorkbench>[0]['models'] = nu
   const onCreate = vi.fn();
   const view = render(
     <MemoryRouter>
-      <EmptyWorkbench creating={false} onCreate={onCreate} models={models} llmBaseUrl={llmBaseUrl} />
+      <EmptyWorkbench
+        creating={false}
+        onCreate={onCreate}
+        models={models}
+        llmBaseUrl={llmBaseUrl}
+        onModelsChanged={() => undefined}
+      />
     </MemoryRouter>,
   );
   return { ...view, onCreate };
@@ -49,7 +55,7 @@ describe('EmptyWorkbench', () => {
   it('建剧中时按钮进 loading 且不可再点', () => {
     render(
       <MemoryRouter>
-        <EmptyWorkbench creating onCreate={vi.fn()} models={null} llmBaseUrl="" />
+        <EmptyWorkbench creating onCreate={vi.fn()} models={null} llmBaseUrl="" onModelsChanged={() => undefined} />
       </MemoryRouter>,
     );
     // 「新增项目」有两个命中（三步引导的步名 + primary 按钮）：primary 只有一个
