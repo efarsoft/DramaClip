@@ -1037,6 +1037,7 @@ export const METHOD_NAMES = [
   'project.reorder_episodes',
   'analysis.prescreen',
   'analysis.update_asr',
+  'analysis.speaker_mapping',
   'analysis.resync_semantic',
   'analysis.start',
   'analysis.status',

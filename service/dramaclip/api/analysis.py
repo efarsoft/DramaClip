@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from dramaclip.api import narration_plans
 from dramaclip.api.analysis_job import (
     _analyze_one,  # noqa: F401 - 测试经 analysis_api._analyze_one 直调，引用面保留
     _current_signature,
@@ -42,11 +43,15 @@ _ERR_NO_EPISODES = -32202
 _ERR_NO_ANALYSIS = -32203
 _ERR_SEGMENT_INVALID = -32204
 _ERR_ANALYSIS_BUSY = -32205
+_ERR_MAPPING_INVALID = -32207
 
 
 def register(router: Router, context: AppContext) -> None:
     router.register("analysis.prescreen", lambda params: prescreen(context, params))
     router.register("analysis.update_asr", lambda params: update_asr(context, params))
+    router.register(
+        "analysis.speaker_mapping", lambda params: speaker_mapping(context, params)
+    )
     router.register("analysis.resync_semantic", lambda params: resync_semantic(context, params))
     router.register("analysis.start", lambda params: start(context, params))
     router.register("analysis.status", lambda params: status(context, params))
@@ -436,6 +441,48 @@ def update_asr(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         context.conn, episode_id, json.dumps(cleaned, ensure_ascii=False)
     )
     return {"ok": True, "count": len(cleaned)}
+
+
+def speaker_mapping(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """角色真名映射读写（v0.2.5 2.2）：无 mapping 参数=读，带=校验后写。
+
+    存放裁决：强项目归属数据挂 projects.settings 单键（migration 028 热词同款
+    先例——全局表是跨剧泄漏源；随 project.duplicate 自动复制）。文案链消费点
+    在原料装配（narration_plans 两处），audit 的残留标签判定由此变确定性。
+    """
+    project_id = str(params.get("project_id", ""))
+    if projects_repo.get(context.conn, project_id) is None:
+        raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
+    mapping = params.get("mapping")
+    if mapping is None:
+        raw = projects_repo.get_settings(context.conn, project_id).get(
+            narration_plans.SPEAKER_MAPPING_SETTINGS_KEY
+        )
+        try:
+            current = json.loads(str(raw)) if raw else {}
+        except (TypeError, ValueError):
+            current = {}
+        return {"mapping": current if isinstance(current, dict) else {}}
+    if not isinstance(mapping, dict):
+        raise RpcDomainError(_ERR_MAPPING_INVALID, "mapping 必须是对象（角色标签 → 真名）")
+    cleaned: dict[str, str] = {}
+    for key, value in mapping.items():
+        label = str(key).strip()
+        name = str(value).strip()
+        if label and name:
+            cleaned[label] = name
+    if len(cleaned) > 60:
+        raise RpcDomainError(_ERR_MAPPING_INVALID, "映射条目过多（上限 60）")
+    projects_repo.update_settings(
+        context.conn,
+        project_id,
+        {
+            narration_plans.SPEAKER_MAPPING_SETTINGS_KEY: json.dumps(
+                cleaned, ensure_ascii=False
+            )
+        },
+    )
+    return {"mapping": cleaned}
 
 
 def resync_semantic(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:

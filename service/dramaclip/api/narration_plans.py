@@ -48,6 +48,11 @@ from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
 
+# 真名映射（v0.2.5 2.2）：project.settings 单键（JSON 串，角色标签→真名）。
+# 存放裁决=强项目归属数据挂 projects.settings（migration 028 热词同款先例：
+# 全局表是跨剧泄漏源；随 project.duplicate 自动复制）。
+SPEAKER_MAPPING_SETTINGS_KEY = "speaker.mapping"
+
 SUPPORTED_MODES = (
     "raw_clip",
     # 高光混剪（highlight_cut）2026-10-27 业主裁决并入纯原片剪辑（raw_clip 单入口，
@@ -168,6 +173,7 @@ def _run_plan_variants(
 
         context.job_store.mark_running(job_id)
         settings = narration_api._effective_settings(context, project_id)
+        speaker_mapping = _speaker_mapping_of(settings)
         try:
             settings["_prior_texts_json"] = json.dumps(
                 _collect_prior_texts(context, project_id), ensure_ascii=False
@@ -257,6 +263,7 @@ def _run_plan_variants(
                             variant_hint=_card_hint(strategy_cards, index - 1),
                             next_hint=_card_hint(strategy_cards, index),
                             past_copies=past_copies or None,
+                            speaker_mapping=speaker_mapping,
                         )
                     finally:
                         if suppress_directives:
@@ -493,6 +500,7 @@ def _plan_one(
     variant_hint: str = "",
     next_hint: str = "",
     past_copies: list[str] | None = None,
+    speaker_mapping: dict[str, str] | None = None,
 ) -> tuple[PlanData, list[str]]:
     """按取材意图产出一条方案（未配音、未落库）。返回 (方案, **实际用到**的集 id)。
     """
@@ -520,7 +528,9 @@ def _plan_one(
         _retell_gate(plan, settings, trace_dir, context.notifier, context=context)
         return plan.model_copy(update={"arc": variant.arc}), used_ids
 
-    scenes, highlights, material = _casting_for(context, episodes, variant)
+    scenes, highlights, material = _casting_for(
+        context, episodes, variant, speaker_mapping=speaker_mapping
+    )
     # 字幕金句流的金句判定交给 LLM（2026-10-08 业主裁决「规则打分不可靠，
     # LLM 提取」）：按集编号回填零幻觉，LLM 不可用时 modes_w9 回退规则打分
     golden = None
@@ -812,6 +822,8 @@ def _casting_for(
     context: AppContext,
     episodes: list[dict[str, Any]],
     variant: _Variant,
+    *,
+    speaker_mapping: dict[str, str] | None = None,
 ) -> tuple[list[EpisodeScene], list[HighlightSegment], MaterialByEpisode]:
     """把意图点名的那几集装配成编排器要吃的三样东西（场景表 / 高光表 / 逐集台词）。
     """
@@ -841,7 +853,10 @@ def _casting_for(
         audio = audio_of(record.get("audio_features"))
         material[episode_id] = casting.EpisodeMaterial(
             number=number,
-            asr=narration_pipeline.parse_asr_segments(record["asr_segments"]),
+            asr=_apply_speaker_mapping(
+                narration_pipeline.parse_asr_segments(record["asr_segments"]),
+                speaker_mapping,
+            ),
             beats=parse_beats(record["audio_features"]),
             # 语义层声画对位：画面轨帧进逐段填词（_slot_block 按取材区间切片消费）；
             # 未跑视觉轨的集空元组，槽位块落到「无画面轨」分档，行为不变。
@@ -868,7 +883,9 @@ def _inject_run_settings(
     record = analysis_repo.get(context.conn, str(episodes[0]["id"]))
     if record is not None and record["genre"]:
         settings["_genre"] = str(record["genre"])
-    episode_inputs = _collect_episode_inputs(context, episodes)
+    episode_inputs = _collect_episode_inputs(
+        context, episodes, _speaker_mapping_of(settings)
+    )
     preferred = settings.get("narration.style_id")
     pinned = bool(preferred) and preferred != styles_lib.AUTO_STYLE_ID
     if any(mode in _NARRATION_MODES for mode in modes) and (episode_inputs or pinned):
@@ -894,9 +911,45 @@ def _settle_failed(context: AppContext, job_id: str, error: str) -> None:
         )
 
 
+def _speaker_mapping_of(settings: dict[str, str]) -> dict[str, str]:
+    """settings 里的真名映射（JSON 串）；缺失/坏 JSON/形不对一律空表——映射是
+    增强不是义务，不为它付「这条方案出不了片」的代价。"""
+    raw = settings.get(SPEAKER_MAPPING_SETTINGS_KEY)
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(str(raw))
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {
+        str(key).strip(): str(value).strip()
+        for key, value in parsed.items()
+        if str(key).strip() and str(value).strip()
+    }
+
+
+def _apply_speaker_mapping(
+    segments: list[Any], mapping: dict[str, str] | None
+) -> list[Any]:
+    """真名映射应用（v0.2.5 2.2）：[角色X] → 真名在原料装配时落定——编剧/文案/
+    audit 三链的「推断真名」从 LLM 猜变为确定性输入。未映射标签原样保留；
+    空映射原列表直通（与 2.2 之前逐字节一致）。"""
+    if not mapping:
+        return segments
+    out: list[Any] = []
+    for seg in segments:
+        if seg.speaker and seg.speaker in mapping:
+            seg = seg.model_copy(update={"speaker": mapping[seg.speaker]})
+        out.append(seg)
+    return out
+
+
 def _collect_episode_inputs(
     context: AppContext,
     episodes: list[dict[str, Any]],
+    speaker_mapping: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """收集全部完成集的转写输入（跨集剧本原料），按集号升序。"""
     inputs: list[dict[str, Any]] = []
@@ -904,7 +957,10 @@ def _collect_episode_inputs(
         record = analysis_repo.get(context.conn, str(episode["id"]))
         if record is None:
             continue
-        segments = narration_pipeline.parse_asr_segments(record["asr_segments"])
+        segments = _apply_speaker_mapping(
+            narration_pipeline.parse_asr_segments(record["asr_segments"]),
+            speaker_mapping,
+        )
         if not segments:
             continue
         inputs.append(

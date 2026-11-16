@@ -10,12 +10,15 @@ export function TranscriptCard({
   onSeek,
   onSaveEdit,
   onResync,
+  speakerMapping,
 }: {
   segments: readonly AsrSegment[];
   resyncing: boolean;
   onSeek: (seconds: number) => void;
   onSaveEdit: (index: number, text: string) => void;
   onResync: () => void;
+  /** 真名映射（2.2）：Chip 显示真名，颜色仍按原标签稳定散列。 */
+  speakerMapping?: Record<string, string>;
 }): React.ReactElement {
   return (
     <Card
@@ -46,6 +49,7 @@ export function TranscriptCard({
               index={index}
               onSeek={onSeek}
               onSaveEdit={onSaveEdit}
+              speakerMapping={speakerMapping}
             />
           ))}
         </div>
@@ -71,11 +75,13 @@ function SegmentRow({
   index,
   onSeek,
   onSaveEdit,
+  speakerMapping,
 }: {
   segment: AsrSegment;
   index: number;
   onSeek: (seconds: number) => void;
   onSaveEdit: (index: number, text: string) => void;
+  speakerMapping: Record<string, string> | undefined;
 }): React.ReactElement {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -88,7 +94,7 @@ function SegmentRow({
           -{formatClock(segment.end)}
         </span>
         <SourceBadge source={segment.source} />
-        <SpeakerChip speaker={segment.speaker} />
+        <SpeakerChip speaker={segment.speaker} mapping={speakerMapping} />
         <span
           style={{ color: tokens.textPrimary, cursor: 'text' }}
           onClick={() => {
@@ -184,12 +190,19 @@ function SourceBadge({ source }: { source: string | undefined }): React.ReactEle
   return null;
 }
 
-/** 说话人标签行前缀（云端 diarization / 本地聚类都是「角色X」形态）：数据在库，此前界面零渲染。 */
-function SpeakerChip({ speaker }: { speaker: string | undefined }): React.ReactElement | null {
+/** 说话人标签行前缀（云端 diarization / 本地聚类都是「角色X」形态）：显示真名映射
+ * （2.2），颜色仍按原标签稳定散列——映射前后同一角色不变色。 */
+function SpeakerChip({
+  speaker,
+  mapping,
+}: {
+  speaker: string | undefined;
+  mapping: Record<string, string> | undefined;
+}): React.ReactElement | null {
   if (!speaker) {
     return null;
   }
-  return <Chip text={speaker} color={speakerColor(speaker)} />;
+  return <Chip text={mapping?.[speaker] ?? speaker} color={speakerColor(speaker)} />;
 }
 
 const SPEAKER_PALETTE = tokens.speakerPalette;

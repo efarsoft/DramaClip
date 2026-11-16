@@ -6,54 +6,130 @@
   "x-models": {
     "AsrSegment": {
       "type": "object",
-      "required": ["start", "end", "text"],
+      "required": [
+        "start",
+        "end",
+        "text"
+      ],
       "properties": {
-        "start": { "type": "number" },
-        "end": { "type": "number" },
-        "text": { "type": "string" },
-        "speaker": { "type": "string" },
-        "emotion": { "type": "string" }
+        "start": {
+          "type": "number"
+        },
+        "end": {
+          "type": "number"
+        },
+        "text": {
+          "type": "string"
+        },
+        "speaker": {
+          "type": "string"
+        },
+        "emotion": {
+          "type": "string"
+        }
       }
     },
     "EpisodeAnalysisResult": {
       "type": "object",
-      "required": ["episode_id", "episode_number", "status", "asr_segment_count", "scene_count", "highlight_count"],
+      "required": [
+        "episode_id",
+        "episode_number",
+        "status",
+        "asr_segment_count",
+        "scene_count",
+        "highlight_count"
+      ],
       "properties": {
-        "episode_id": { "type": "string" },
-        "episode_number": { "type": "integer" },
-        "status": { "type": "string" },
-        "asr_segment_count": { "type": "integer" },
-        "scene_count": { "type": "integer" },
-        "highlight_count": { "type": "integer" },
-        "genre": { "type": "string" },
-        "error": { "type": "string" },
+        "episode_id": {
+          "type": "string"
+        },
+        "episode_number": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "asr_segment_count": {
+          "type": "integer"
+        },
+        "scene_count": {
+          "type": "integer"
+        },
+        "highlight_count": {
+          "type": "integer"
+        },
+        "genre": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
         "prescreen_score": {
-          "type": ["number", "null"],
+          "type": [
+            "number",
+            "null"
+          ],
           "description": "预筛综合分（0-100）；null = 该集没预筛过"
         },
         "recommended": {
-          "type": ["boolean", "null"],
+          "type": [
+            "boolean",
+            "null"
+          ],
           "description": "预筛推荐判定（金色覆盖度告警的数据源）；null = 没预筛过"
         },
         "clipping": {
           "type": "boolean",
           "description": "源音频进仓已削顶：成片限幅只能压电平，不能把平顶长回来"
         },
-        "peak_dbfs": { "type": ["number", "null"] }
+        "peak_dbfs": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
       }
     },
     "AnalysisJobStatus": {
       "type": "object",
-      "required": ["job_id", "status", "progress"],
+      "required": [
+        "job_id",
+        "status",
+        "progress"
+      ],
       "properties": {
-        "job_id": { "type": "string" },
-        "status": { "type": "string" },
-        "progress": { "type": "number" },
-        "message": { "type": "string" },
-        "error": { "type": "string" },
+        "job_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "message": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
         "episodes": {
           "type": "array",
-          "items": { "type": "object", "required": ["episode_id", "status"], "properties": { "episode_id": { "type": "string" }, "status": { "type": "string" } } }
+          "items": {
+            "type": "object",
+            "required": [
+              "episode_id",
+              "status"
+            ],
+            "properties": {
+              "episode_id": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     }
@@ -64,21 +140,43 @@
       "summary": "整列表替换 ASR 段（用户修正转写错误/删幻觉段）；下游语义结果保留",
       "params": {
         "type": "object",
-        "required": ["project_id", "episode_id", "segments"],
+        "required": [
+          "project_id",
+          "episode_id",
+          "segments"
+        ],
         "properties": {
-          "project_id": { "type": "string" },
-          "episode_id": { "type": "string" },
+          "project_id": {
+            "type": "string"
+          },
+          "episode_id": {
+            "type": "string"
+          },
           "segments": {
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["start", "end", "text"],
+              "required": [
+                "start",
+                "end",
+                "text"
+              ],
               "properties": {
-                "start": { "type": "number" },
-                "end": { "type": "number" },
-                "text": { "type": "string" },
-                "speaker": { "type": "string" },
-                "emotion": { "type": "string" }
+                "start": {
+                  "type": "number"
+                },
+                "end": {
+                  "type": "number"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "speaker": {
+                  "type": "string"
+                },
+                "emotion": {
+                  "type": "string"
+                }
               }
             }
           }
@@ -86,8 +184,18 @@
       },
       "result": {
         "type": "object",
-        "required": ["ok", "count"],
-        "properties": { "ok": { "type": "boolean" }, "count": { "type": "integer" } }
+        "required": [
+          "ok",
+          "count"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "count": {
+            "type": "integer"
+          }
+        }
       }
     },
     {
@@ -95,51 +203,141 @@
       "summary": "仅重跑语义层（修正 ASR 后刷新冲突/高光/题材），不重转写（job 模式）",
       "params": {
         "type": "object",
-        "required": ["project_id", "episode_id"],
+        "required": [
+          "project_id",
+          "episode_id"
+        ],
         "properties": {
-          "project_id": { "type": "string" },
-          "episode_id": { "type": "string" }
+          "project_id": {
+            "type": "string"
+          },
+          "episode_id": {
+            "type": "string"
+          }
         }
       },
-      "result": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } }
+      "result": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        }
+      }
     },
     {
       "name": "analysis.start",
       "summary": "启动精准分析（长任务 job 模式；episode_ids 缺省=全部未完成集）",
       "params": {
         "type": "object",
-        "required": ["project_id"],
+        "required": [
+          "project_id"
+        ],
         "properties": {
-          "project_id": { "type": "string" },
-          "episode_ids": { "type": "array", "items": { "type": "string" } }
+          "project_id": {
+            "type": "string"
+          },
+          "episode_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         }
       },
-      "result": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } }
+      "result": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        }
+      }
     },
     {
       "name": "analysis.status",
       "summary": "任务状态与逐集进度",
-      "params": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } },
-      "result": { "$ref": "#/x-models/AnalysisJobStatus" }
+      "params": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/x-models/AnalysisJobStatus"
+      }
     },
     {
       "name": "analysis.cancel",
       "summary": "取消任务",
-      "params": { "type": "object", "required": ["job_id"], "properties": { "job_id": { "type": "string" } } },
-      "result": { "type": "object", "required": ["ok"], "properties": { "ok": { "type": "boolean" } } }
+      "params": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
     },
     {
       "name": "analysis.results",
       "summary": "项目分析结果（含 ASR 全文/冲突曲线/高光，供语义看板与 W4 编排）",
-      "params": { "type": "object", "required": ["project_id"], "properties": { "project_id": { "type": "string" } } },
+      "params": {
+        "type": "object",
+        "required": [
+          "project_id"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        }
+      },
       "result": {
         "type": "object",
-        "required": ["episodes"],
+        "required": [
+          "episodes"
+        ],
         "properties": {
-          "episodes": { "type": "array", "items": { "$ref": "#/x-models/EpisodeAnalysisResult" } },
+          "episodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/x-models/EpisodeAnalysisResult"
+            }
+          },
           "asr_segments": {
             "type": "object",
-            "additionalProperties": { "type": "array", "items": { "$ref": "#/x-models/AsrSegment" } }
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/x-models/AsrSegment"
+              }
+            }
           },
           "highlights": {
             "type": "object",
@@ -147,12 +345,24 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["start", "end", "score"],
+                "required": [
+                  "start",
+                  "end",
+                  "score"
+                ],
                 "properties": {
-                  "start": { "type": "number" },
-                  "end": { "type": "number" },
-                  "score": { "type": "number" },
-                  "reason": { "type": "string" }
+                  "start": {
+                    "type": "number"
+                  },
+                  "end": {
+                    "type": "number"
+                  },
+                  "score": {
+                    "type": "number"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
                 }
               }
             }
@@ -163,13 +373,28 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["scene_index", "start", "end", "score"],
+                "required": [
+                  "scene_index",
+                  "start",
+                  "end",
+                  "score"
+                ],
                 "properties": {
-                  "scene_index": { "type": "integer" },
-                  "start": { "type": "number" },
-                  "end": { "type": "number" },
-                  "score": { "type": "integer" },
-                  "reason": { "type": "string" }
+                  "scene_index": {
+                    "type": "integer"
+                  },
+                  "start": {
+                    "type": "number"
+                  },
+                  "end": {
+                    "type": "number"
+                  },
+                  "score": {
+                    "type": "integer"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
                 }
               }
             }
@@ -180,20 +405,39 @@
             "additionalProperties": {
               "type": "object",
               "properties": {
-                "contact_sheet": { "type": "string" },
-                "engine": { "type": "string" },
+                "contact_sheet": {
+                  "type": "string"
+                },
+                "engine": {
+                  "type": "string"
+                },
                 "frames": {
                   "type": "array",
                   "items": {
                     "type": "object",
-                    "required": ["t", "scene"],
+                    "required": [
+                      "t",
+                      "scene"
+                    ],
                     "properties": {
-                      "t": { "type": "number" },
-                      "shot": { "type": "string" },
-                      "scene": { "type": "string" },
-                      "people": { "type": "string" },
-                      "action": { "type": "string" },
-                      "mood": { "type": "string" }
+                      "t": {
+                        "type": "number"
+                      },
+                      "shot": {
+                        "type": "string"
+                      },
+                      "scene": {
+                        "type": "string"
+                      },
+                      "people": {
+                        "type": "string"
+                      },
+                      "action": {
+                        "type": "string"
+                      },
+                      "mood": {
+                        "type": "string"
+                      }
                     }
                   }
                 }
@@ -205,41 +449,87 @@
             "description": "预筛原始行（每集一条）。注意 recommended 在此是库内 0/1 整数；界面判定请用 episodes[].recommended（已转布尔）",
             "additionalProperties": {
               "type": "object",
-              "required": ["prescreen_score", "recommended"],
+              "required": [
+                "prescreen_score",
+                "recommended"
+              ],
               "properties": {
-                "episode_id": { "type": "string" },
-                "audio_peak_density": { "type": "number" },
-                "scene_cut_density": { "type": "number" },
-                "voice_activity_ratio": { "type": "number" },
-                "motion_intensity": { "type": "number" },
-                "prescreen_score": { "type": "number" },
-                "recommended": { "type": "integer" },
-                "created_at": { "type": "integer" }
+                "episode_id": {
+                  "type": "string"
+                },
+                "audio_peak_density": {
+                  "type": "number"
+                },
+                "scene_cut_density": {
+                  "type": "number"
+                },
+                "voice_activity_ratio": {
+                  "type": "number"
+                },
+                "motion_intensity": {
+                  "type": "number"
+                },
+                "prescreen_score": {
+                  "type": "number"
+                },
+                "recommended": {
+                  "type": "integer"
+                },
+                "created_at": {
+                  "type": "integer"
+                }
               }
             }
           }
         }
       }
-    }
-,
+    },
     {
       "name": "analysis.export_transcripts",
       "summary": "全部已分析集一次性导出：逐集 SRT + 合并全剧台词 TXT，产物在 data/exports/transcripts/<剧名>/（同步返回）",
       "params": {
         "type": "object",
-        "required": ["project_id"],
-        "properties": { "project_id": { "type": "string" } }
+        "required": [
+          "project_id"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        }
       },
       "result": {
         "type": "object",
-        "required": ["ok", "dir", "txt_path", "files", "exported", "skipped"],
+        "required": [
+          "ok",
+          "dir",
+          "txt_path",
+          "files",
+          "exported",
+          "skipped"
+        ],
         "properties": {
-          "ok": { "type": "boolean" },
-          "dir": { "type": "string" },
-          "txt_path": { "type": "string" },
-          "files": { "type": "array", "items": { "type": "string" } },
-          "exported": { "type": "integer" },
-          "skipped": { "type": "integer" }
+          "ok": {
+            "type": "boolean"
+          },
+          "dir": {
+            "type": "string"
+          },
+          "txt_path": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "exported": {
+            "type": "integer"
+          },
+          "skipped": {
+            "type": "integer"
+          }
         }
       }
     },
@@ -248,14 +538,27 @@
       "summary": "集列表摘要（按集分拆批）：只回集号/状态/计数，首屏毫秒级；详情走 analysis.episode_detail",
       "params": {
         "type": "object",
-        "required": ["project_id"],
-        "properties": { "project_id": { "type": "string" } }
+        "required": [
+          "project_id"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        }
       },
       "result": {
         "type": "object",
-        "required": ["episodes"],
+        "required": [
+          "episodes"
+        ],
         "properties": {
-          "episodes": { "type": "array", "items": { "$ref": "#/x-models/EpisodeAnalysisResult" } }
+          "episodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/x-models/EpisodeAnalysisResult"
+            }
+          }
         }
       }
     },
@@ -264,25 +567,55 @@
       "summary": "单集详情（按集分拆批）：ASR 台词/高光/冲突分/画面轨——点开才拉，KB 级",
       "params": {
         "type": "object",
-        "required": ["episode_id"],
-        "properties": { "episode_id": { "type": "string" } }
+        "required": [
+          "episode_id"
+        ],
+        "properties": {
+          "episode_id": {
+            "type": "string"
+          }
+        }
       },
       "result": {
         "type": "object",
-        "required": ["episode_id", "asr_segments", "highlights", "conflict_scores"],
+        "required": [
+          "episode_id",
+          "asr_segments",
+          "highlights",
+          "conflict_scores"
+        ],
         "properties": {
-          "episode_id": { "type": "string" },
-          "asr_segments": { "type": "array", "items": { "$ref": "#/x-models/AsrSegment" } },
+          "episode_id": {
+            "type": "string"
+          },
+          "asr_segments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/x-models/AsrSegment"
+            }
+          },
           "highlights": {
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["start", "end", "score"],
+              "required": [
+                "start",
+                "end",
+                "score"
+              ],
               "properties": {
-                "start": { "type": "number" },
-                "end": { "type": "number" },
-                "score": { "type": "number" },
-                "reason": { "type": "string" }
+                "start": {
+                  "type": "number"
+                },
+                "end": {
+                  "type": "number"
+                },
+                "score": {
+                  "type": "number"
+                },
+                "reason": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -290,18 +623,79 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["scene_index", "start", "end", "score"],
+              "required": [
+                "scene_index",
+                "start",
+                "end",
+                "score"
+              ],
               "properties": {
-                "scene_index": { "type": "integer" },
-                "start": { "type": "number" },
-                "end": { "type": "number" },
-                "score": { "type": "integer" },
-                "reason": { "type": "string" }
+                "scene_index": {
+                  "type": "integer"
+                },
+                "start": {
+                  "type": "number"
+                },
+                "end": {
+                  "type": "number"
+                },
+                "score": {
+                  "type": "integer"
+                },
+                "reason": {
+                  "type": "string"
+                }
               }
             }
           },
-          "prescreen": { "type": ["object", "null"] },
-          "visual_track": { "type": ["object", "null"] }
+          "prescreen": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "visual_track": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "analysis.speaker_mapping",
+      "summary": "角色真名映射读写（v0.2.5 2.2）：mapping 缺席=读当前映射；带=校验后写 project.settings 单键（角色标签→真名），文案链按映射确定性称呼角色",
+      "params": {
+        "type": "object",
+        "required": [
+          "project_id"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "mapping": {
+            "type": "object",
+            "description": "角色标签 → 真名；缺席=读。值全为非空字符串，空白值=删除该条",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "mapping"
+        ],
+        "properties": {
+          "mapping": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
         }
       }
     }

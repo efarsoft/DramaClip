@@ -133,6 +133,15 @@ export const analysisApi = {
     rpc<AnalysisJobStatus>('analysis.status', { job_id: jobId }),
   cancel: (jobId: string): Promise<{ ok: boolean }> =>
     rpc<{ ok: boolean }>('analysis.cancel', { job_id: jobId }),
+  /** 角色真名映射（2.2）：mapping 缺席=读当前映射；带=校验后写（project.settings 单键）。 */
+  speakerMapping: (
+    projectId: string,
+    mapping?: Record<string, string>,
+  ): Promise<{ mapping: Record<string, string> }> =>
+    rpc<{ mapping: Record<string, string> }>(
+      'analysis.speaker_mapping',
+      mapping === undefined ? { project_id: projectId } : { project_id: projectId, mapping },
+    ),
   resyncSemantic: (projectId: string, episodeId: string): Promise<{ job_id: string }> =>
     rpc<{ job_id: string }>('analysis.resync_semantic', {
       project_id: projectId,

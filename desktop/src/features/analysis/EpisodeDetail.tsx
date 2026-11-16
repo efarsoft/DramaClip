@@ -1,11 +1,12 @@
 /** 右栏·复合面板：播放器(高光标记) → 高光列表 → 转写编辑 → 操作。 */
 import { tokens } from '../../styles/theme';
 import { App as AntdApp, Alert, Card, Empty } from 'antd';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { AnalysisResults, AsrSegment, Episode, VisualFrame } from '@dramaclip/protocol';
 import { ActionsCard, PlayerHighlightsRow } from './DetailCards';
 import { reanalyzeEpisode } from './reanalyze';
 import { CurveCard } from './CurveCard';
+import { SpeakerMappingCard } from './SpeakerMappingCard';
 import { TranscriptCard } from './TranscriptCard';
 import { useEpisodeSeek } from './useEpisodeSeek';
 import { useResyncSemantic } from './useResyncSemantic';
@@ -53,6 +54,15 @@ export function EpisodeDetail({
     [activeEpisodeId, results],
   );
   const visualFrames = visualTrack?.frames ?? [];
+  // 真名映射（2.2）：项目级单份，映射卡编辑、转写卡 Chip 显示共用同一份状态
+  const [speakerMapping, setSpeakerMapping] = useState<Record<string, string>>({});
+  const speakerLabels = useMemo(() => {
+    const seen: string[] = [];
+    for (const seg of transcript) {
+      if (seg.speaker && !seen.includes(seg.speaker)) seen.push(seg.speaker);
+    }
+    return seen;
+  }, [transcript]);
 
     if (episode === null) return <EmptyDetail />;
   return (
@@ -79,6 +89,11 @@ export function EpisodeDetail({
         resyncing={resync.running}
         onSeek={seek}
         onSaveEdit={saveEdit}
+        speakerLabels={speakerLabels}
+        speakerMapping={speakerMapping}
+        onSpeakerMapping={setSpeakerMapping}
+        projectId={projectId}
+        onReload={onReload}
         onRerun={() => {
           runResync(resync, notifyError);
         }}
@@ -95,6 +110,11 @@ interface BottomProps {
   resyncing: boolean;
   onSeek: (seconds: number) => void;
   onSaveEdit: (index: number, text: string) => void;
+  speakerLabels: string[];
+  speakerMapping: Record<string, string>;
+  onSpeakerMapping: (next: Record<string, string>) => void;
+  projectId: string;
+  onReload: () => void;
   onRerun: () => void;
   onReanalyze: () => void;
 }
@@ -102,12 +122,22 @@ interface BottomProps {
 function BottomCards(props: BottomProps): React.ReactElement {
   return (
     <>
+      {props.speakerLabels.length > 0 && (
+        <SpeakerMappingCard
+          projectId={props.projectId}
+          labels={props.speakerLabels}
+          mapping={props.speakerMapping}
+          onMapping={props.onSpeakerMapping}
+          onSaved={props.onReload}
+        />
+      )}
       <TranscriptCard
         segments={props.transcript}
         resyncing={props.resyncing}
         onSeek={props.onSeek}
         onSaveEdit={props.onSaveEdit}
         onResync={props.onRerun}
+        speakerMapping={props.speakerMapping}
       />
       <ActionsCard onReanalyze={props.onReanalyze} />
     </>
@@ -134,7 +164,7 @@ function runResync(
 function transcriptOf(
   results: AnalysisResults | null,
   activeEpisodeId: string | null,
-): readonly { start: number; end: number; text: string }[] {
+): readonly AsrSegment[] {
   if (activeEpisodeId === null || results === null) return [];
   return results.asr_segments?.[activeEpisodeId] ?? [];
 }
