@@ -188,6 +188,126 @@ def test_start_rejects_concurrent_ingest(
     assert excinfo.value.code == -32205
 
 
+class _ExplodingExecutor:
+    """submit 必炸的执行器桩：模拟池关闭/饱和瞬间的投递失败。"""
+
+    def submit(self, *_a: Any, **_k: Any) -> None:
+        raise RuntimeError("pool unavailable")
+
+
+def _statuses(memory_db: sqlite3.Connection, project_id: str) -> list[str]:
+    return [
+        str(ep["status"]) for ep in episodes_repo.list_by_project(memory_db, project_id)
+    ]
+
+
+def test_start_capacity_reject_is_zero_side_effect(
+    memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """4.2 闸位预占：并发闸满 → -32206 且零副作用（不建 job/不标集/不占 cancel）。
+
+    旧时序先建单标集再 acquire，拒绝路径留下僵尸 pending job——被
+    _assert_no_active_ingest 匹配后该项目永久 -32205 卡死到重启（两槽全灭第二形态）。
+    """
+    project_id, _episodes = _project_with_episodes(memory_db, tmp_path)
+    context = _context(memory_db, tmp_path)
+    assert analysis_api._analysis_semaphore.acquire(blocking=False)
+    assert analysis_api._analysis_semaphore.acquire(blocking=False)
+    try:
+        with pytest.raises(RpcDomainError) as excinfo:
+            analysis_api.start(context, {"project_id": project_id})
+        assert excinfo.value.code == -32206
+        assert context.job_store.list_recent(limit=10) == [], "拒绝不得留 job 行"
+        assert _statuses(memory_db, project_id) == ["pending", "pending"], (
+            "拒绝不得把集标成 analyzing"
+        )
+        assert context.cancel_events == {}
+    finally:
+        analysis_api._analysis_semaphore.release()
+        analysis_api._analysis_semaphore.release()
+
+
+def test_start_submit_failure_releases_gate_and_terminates_job(
+    memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """acquire→submit 之间投递失败：闸位归还 + job 终态化 + 集回 pending。
+
+    任何一步漏了都会留僵尸：少一槽=后续全 -32206，活 job=后续全 -32205。
+    """
+    project_id, _episodes = _project_with_episodes(memory_db, tmp_path)
+    context = _context(memory_db, tmp_path)
+    context.executor = _ExplodingExecutor()
+    with pytest.raises(RuntimeError, match="pool unavailable"):
+        analysis_api.start(context, {"project_id": project_id})
+    # 闸位已归还：两次 acquire 都拿得到（容量回到 2）
+    assert analysis_api._analysis_semaphore.acquire(blocking=False)
+    assert analysis_api._analysis_semaphore.acquire(blocking=False)
+    analysis_api._analysis_semaphore.release()
+    analysis_api._analysis_semaphore.release()
+    # job 已终态化：不再被单飞守卫当成活任务，同项目可重新 start
+    jobs = context.job_store.list_recent(limit=10)
+    assert [str(job["status"]) for job in jobs] == ["failed"]
+    assert _statuses(memory_db, project_id) == ["pending", "pending"]
+    assert context.cancel_events == {}
+
+
+def test_start_holds_capacity_slot_until_task_completes(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """受理成功占一槽：第二笔 start 报 -32206（容量闸语义保持，未被预占重构稀释）。"""
+    project_id, _episodes = _project_with_episodes(memory_db, tmp_path)
+    context = _context(memory_db, tmp_path)
+    monkeypatch.setattr(analysis_api, "_run_job", lambda *a, **k: None)
+
+    class _RecordingExecutor:
+        def __init__(self) -> None:
+            self.tasks: list[tuple[Any, tuple[Any, ...]]] = []
+
+        def submit(self, fn: Any, *args: Any) -> None:
+            self.tasks.append((fn, args))
+
+    context.executor = _RecordingExecutor()
+    result = analysis_api.start(context, {"project_id": project_id})
+    assert result["job_id"]
+    # 后两笔用另外的项目：同项目会被 -32205 单飞闸先拦，到不了容量闸。
+    # 项目 source_path 有 UNIQUE 约束，每个项目得换根路径。
+    second = projects_repo.create(memory_db, "剧二", str(tmp_path / "other"))
+    episodes_repo.replace_all(
+        memory_db,
+        str(second["id"]),
+        [
+            {
+                "episode_number": 1,
+                "source_path": str(tmp_path / "other" / "ep1.mp4"),
+                "duration": 60.0,
+            }
+        ],
+    )
+    assert analysis_api.start(context, {"project_id": str(second["id"])})["job_id"]
+    third = projects_repo.create(memory_db, "剧三", str(tmp_path / "third"))
+    episodes_repo.replace_all(
+        memory_db,
+        str(third["id"]),
+        [
+            {
+                "episode_number": 1,
+                "source_path": str(tmp_path / "third" / "ep1.mp4"),
+                "duration": 60.0,
+            }
+        ],
+    )
+    with pytest.raises(RpcDomainError) as excinfo:
+        analysis_api.start(context, {"project_id": str(third["id"])})
+    assert excinfo.value.code == -32206
+    # 两笔受理的任务都跑完（含 finally 释放闸）后，闸位回到 2
+    for fn, args in context.executor.tasks:
+        fn(*args)
+    assert analysis_api._analysis_semaphore.acquire(blocking=False)
+    assert analysis_api._analysis_semaphore.acquire(blocking=False)
+    analysis_api._analysis_semaphore.release()
+    analysis_api._analysis_semaphore.release()
+
+
 def test_update_asr_rejected_while_analyzing(
     memory_db: sqlite3.Connection, tmp_path: Path
 ) -> None:

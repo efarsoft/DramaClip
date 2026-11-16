@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import threading
@@ -226,30 +227,46 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     if not targets:
         raise RpcDomainError(_ERR_NO_EPISODES, "没有待分析的集")
 
-    job_id = context.job_store.create("analysis", ref_id=project_id)
-    # 建单即整批标 analyzing：前置的全剧 OCR/热词挖掘要逐集跑数分钟，期间集状态
-    # 不能滞留旧值（否则界面整批显示 failed/pending 一动不动，用户无从判断是否受理）。
-    # 未真正处理到的集由 _run_job finally 回滚；崩溃残留下次启动被 reset_stale_analyzing 清扫。
-    for episode in targets:
-        episodes_repo.set_status(context.conn, str(episode["id"]), "analyzing")
-    cancel_event = threading.Event()
-    context.cancel_events[job_id] = cancel_event
+    # 4.2 闸位预占（v0.2.5）：acquire 提到全部副作用之前——饱和拒绝零副作用
+    # （不建 job、不标集、不占 cancel_events）。旧时序（先建单标集再 acquire）在
+    # 拒绝路径留下僵尸 pending job，被 _assert_no_active_ingest 匹配后该项目后续
+    # start/prescreen 永久 -32205 直到重启清扫——「池饱和两槽全灭」的第二形态。
     if not _analysis_semaphore.acquire(blocking=False):
-        context.cancel_events.pop(job_id, None)
-        for episode in targets:
-            episodes_repo.set_status(context.conn, str(episode["id"]), "pending")
         raise RpcDomainError(-32206, "已有分析任务在跑（并发上限 2），请等待完成后再发起")
-    context.executor.submit(
-        context.notifier.tracked(
-            job_id,
-            _run_analysis_gated,
-            context,
-            job_id,
-            project_id,
-            targets,
-            cancel_event,
+    job_id: str | None = None
+    try:
+        job_id = context.job_store.create("analysis", ref_id=project_id)
+        # 建单即整批标 analyzing：前置的全剧 OCR/热词挖掘要逐集跑数分钟，期间集状态
+        # 不能滞留旧值（否则界面整批显示 failed/pending 一动不动，用户无从判断是否受理）。
+        # 未真正处理到的集由 _run_job finally 回滚；崩溃残留下次启动被 reset_stale_analyzing 清扫。
+        for episode in targets:
+            episodes_repo.set_status(context.conn, str(episode["id"]), "analyzing")
+        cancel_event = threading.Event()
+        context.cancel_events[job_id] = cancel_event
+        context.executor.submit(
+            context.notifier.tracked(
+                job_id,
+                _run_analysis_gated,
+                context,
+                job_id,
+                project_id,
+                targets,
+                cancel_event,
+            )
         )
-    )
+    except BaseException:
+        # acquire→submit 之间任何失败都要把闸位还回去（否则 2 槽永久少一）；
+        # 已建的 job 行终态化，不给 -32205 单飞守卫留僵尸活口；集状态显式回 pending。
+        # 回滚自身失败（DB 已坏）只能吞掉——原始异常优先如实上抛。
+        _analysis_semaphore.release()
+        if job_id is not None:
+            context.cancel_events.pop(job_id, None)
+            with contextlib.suppress(Exception):
+                context.job_store.mark_failed(job_id, "分析任务投递失败")
+        for episode in targets:
+            with contextlib.suppress(Exception):
+                episodes_repo.set_status(context.conn, str(episode["id"]), "pending")
+        raise
     return {"job_id": job_id}
 
 
