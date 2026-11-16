@@ -518,3 +518,87 @@ def test_build_script_request_appends_visual_block() -> None:
     )
     assert "画面轨" not in user_plain
 
+
+
+# ---- 3.1 哑段解说画布（v0.2.5）：无台词高光区间入剧本 prompt，解说照画面写 ----
+
+
+def test_format_mute_canvas_renders_dialogue_free_spans() -> None:
+    """台词补集 ∩ 帧证据 = 哑段画布条目：跨句边界、帧行带〔视觉N〕，集号分组。"""
+    inputs = [
+        {
+            "number": 1,
+            "duration": 12.0,
+            "segments": [
+                {"start": 1.0, "end": 3.0, "text": "台词一"},
+                {"start": 8.0, "end": 10.0, "text": "台词二"},
+            ],
+            "visual_track": [
+                {"t": 5.0, "watch_score": 9, "shot": "远景", "scene": "悬崖",
+                 "people": "女主", "action": "坠崖慢镜", "mood": "惊悚"},
+            ],
+        },
+        {
+            # 全程有台词：无补集，不出现
+            "number": 2,
+            "duration": 6.0,
+            "segments": [{"start": 0.0, "end": 6.0, "text": "全程台词"}],
+            "visual_track": [{"t": 3.0, "watch_score": 9, "scene": "大殿"}],
+        },
+    ]
+    block = scriptwriter.format_mute_canvas(inputs)
+    assert "【第1集·无台词画面区间】" in block
+    assert "- 3.0-8.0s（画面均分 9.0，无台词）" in block, f"跨句补集区间入池：{block}"
+    assert "5.0s 〔视觉9〕远景 悬崖：女主，坠崖慢镜（惊悚）" in block
+    assert "第2集" not in block, "无补集的集不出现"
+    assert "禁止无中生有台词" in block, "照画面写的纪律随块下发"
+
+
+def test_format_mute_canvas_requires_frame_evidence_and_min_len() -> None:
+    """无帧的哑段（证据不足）与 <2s 的补集（闪了一下）都不入池；2s 整带帧照进。"""
+    inputs = [
+        {
+            "number": 1,
+            "duration": 12.0,
+            "segments": [
+                {"start": 2.0, "end": 2.5, "text": "短缝前句"},
+                {"start": 4.0, "end": 9.0, "text": "长哑段后的台词"},
+            ],
+            "visual_track": [{"t": 1.0, "watch_score": 10, "shot": "特写", "scene": "空景"}],
+        },
+    ]
+    block = scriptwriter.format_mute_canvas(inputs)
+    # 补集三段：0-2（2s 整，帧在内→入池）/ 2.5-4（0.5s 过短）/ 9-12（3s 但无帧→证据不足）
+    assert "- 0.0-2.0s（画面均分 10.0，无台词）" in block, f"2s 整带帧入池：{block}"
+    assert "2.5-4.0s" not in block and "9.0-12.0s" not in block, (
+        f"过短/无证据哑段不得入池：{block}"
+    )
+
+
+def test_build_script_request_appends_mute_block() -> None:
+    """哑段块挂在画面轨之后；全剧无候选时整块缺席（不产空标题）。"""
+    base = {
+        "number": 1,
+        "duration": 12.0,
+        "segments": [
+            {"start": 1.0, "end": 3.0, "text": "台词一句", "speaker": ""},
+            {"start": 8.0, "end": 10.0, "text": "台词二句", "speaker": ""},
+        ],
+        "visual_track": [{"t": 5.0, "watch_score": 9, "scene": "悬崖", "people": "女主"}],
+    }
+    _, user = scriptwriter.build_script_request(
+        [base], project_name="剧", angle_block="", style_directives=""
+    )
+    assert "无台词画面区间" in user
+    assert user.index("画面轨") < user.index("无台词画面区间"), "哑段块在画面轨之后"
+
+    all_dialogue = {
+        "number": 1,
+        "duration": 6.0,
+        "segments": [{"start": 0.0, "end": 6.0, "text": "全程台词", "speaker": ""}],
+        "visual_track": [{"t": 3.0, "watch_score": 9, "scene": "大殿"}],
+    }
+    _, user_plain = scriptwriter.build_script_request(
+        [all_dialogue], project_name="剧", angle_block="", style_directives=""
+    )
+    assert "无台词画面区间" not in user_plain

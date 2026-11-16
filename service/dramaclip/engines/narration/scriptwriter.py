@@ -483,6 +483,85 @@ def format_visual_tracks(episode_inputs: list[dict[str, Any]]) -> str:
     )
 
 
+#: 哑段画布（v0.2.5 3.1）：入池最小窗长（同 SCENE_WINDOW_MIN_S 口径，低于两秒
+#: 「闪了一下」）与单集注入上限（VL 每集 16 帧，能背书的哑段本就有限，帽防长尾）。
+_MUTE_CANVAS_MIN_S = 2.0
+_MUTE_CANVAS_TOP_K = 4
+
+
+def _mute_canvas_spans(
+    segments: list[dict[str, Any]], frames: list[dict[str, Any]], duration: float
+) -> list[tuple[float, float, float, list[dict[str, Any]]]]:
+    """单集「哑段 × watch_score × VL 描述」池（降序）：ASR 台词补集 ∩ 画面轨帧。
+
+    哑段判定与 has_dialogue 同一相交口径取反（台词段补集）；池条目必须有帧在
+    区间内——VL 描述是「解说照画面写」的证据，无帧不算候选。外沿取
+    max(末台词尾, 末帧时刻, duration)：集尾哑段（常是收束画面）与帧证据都入池，
+    证据之外不瞎编。
+    """
+    parsed_spans = sorted(
+        (float(seg.get("start") or 0.0), float(seg.get("end") or 0.0))
+        for seg in segments
+        if float(seg.get("end") or 0.0) > float(seg.get("start") or 0.0)
+    )
+    frame_ts = [float(frame.get("t") or 0.0) for frame in frames]
+    horizon = max([*frame_ts, *(end for _s, end in parsed_spans), duration, 0.0])
+    runs: list[tuple[float, float]] = []
+    cursor = 0.0
+    for start, end in parsed_spans:
+        if start > cursor:
+            runs.append((cursor, start))
+        cursor = max(cursor, end)
+    if cursor < horizon:
+        runs.append((cursor, horizon))
+    out: list[tuple[float, float, float, list[dict[str, Any]]]] = []
+    for start, end in runs:
+        if end - start < _MUTE_CANVAS_MIN_S:
+            continue
+        inside = [
+            frame
+            for frame in frames
+            if start - 1e-6 <= float(frame.get("t") or 0.0) <= end + 1e-6
+        ]
+        if not inside:
+            continue
+        score = sum(float(f.get("watch_score") or 5) for f in inside) / len(inside)
+        out.append((start, end, score, inside))
+    return sorted(out, key=lambda item: (-item[2], item[0]))
+
+
+def format_mute_canvas(episode_inputs: list[dict[str, Any]]) -> str:
+    """无台词高光画面（解说画布）块：哑段池逐集渲染，全剧无候选时整块缺席。
+
+    spec 3.1 的「解说照画面写」入口：这些区间没有台词压着但画面冲击力达标，
+    剧本可以把某段的 start/end 直接落在区间边界上——旁白压着纯画面说话。
+    帧行复用 format_frame_line（与画面轨同一格式，模型不用学第二套记号）。
+    """
+    blocks: list[str] = []
+    for episode in episode_inputs:
+        spans = _mute_canvas_spans(
+            list(episode.get("segments") or []),
+            list(episode.get("visual_track") or []),
+            float(episode.get("duration") or 0.0),
+        )
+        if not spans:
+            continue
+        picked = spans[:_MUTE_CANVAS_TOP_K]
+        lines: list[str] = []
+        for start, end, score, frames in picked:
+            lines.append(f"- {start:.1f}-{end:.1f}s（画面均分 {score:.1f}，无台词）")
+            lines.extend(f"    {format_frame_line(frame)}" for frame in frames)
+        blocks.append(f"【第{int(episode['number'])}集·无台词画面区间】\n" + "\n".join(lines))
+    if not blocks:
+        return ""
+    return (
+        "无台词画面区间（解说画布：区间内没有台词，但画面冲击力达标。可以把某段"
+        "的 start/end 直接落在区间边界上——旁白压着纯画面说话，画面里有什么就写"
+        "什么，禁止无中生有台词；边界可 ±1s 微调贴镜头切点）：\n"
+        + "\n".join(blocks)
+    )
+
+
 def build_script_request(
     episode_inputs: list[dict[str, Any]],
     *,
@@ -514,6 +593,8 @@ def build_script_request(
     style_block = f"\n解说风格要求：{style_directives}" if style_directives != "" else ""
     visual_block = format_visual_tracks(episode_inputs)
     visual_suffix = f"\n\n{visual_block}" if visual_block else ""
+    mute_block = format_mute_canvas(episode_inputs)
+    mute_suffix = f"\n\n{mute_block}" if mute_block else ""
     user_prompt = (
         f"项目：{project_name}\n"
         f"段数随剧情需要而定：每段只承载一个信息点，把关键冲突讲透、反转给足戏份。\n"
@@ -522,6 +603,7 @@ def build_script_request(
         f"{angle_block}\n"
         f"台词转写：\n" + transcript_block
         + visual_suffix
+        + mute_suffix
         + genre_emphasis_block(genre)
         + f"{style_block}"
     )
