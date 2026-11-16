@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
+from typing import Any
 
 from dramaclip.engines.analysis.models import OcrSegment
 from dramaclip.engines.analysis.transcriber import simplify
@@ -439,6 +441,20 @@ def _similar(a: str, b: str) -> bool:
     return a == b or SequenceMatcher(None, a, b).ratio() >= _MERGE_RATIO
 
 
+def _rapidocr_params() -> dict[str, Any] | None:
+    """OCR 引擎参数：N 卡在场才传 use_cuda，其余机器默认 CPU（v0.2.5 1.2）。
+
+    门控只看 nvidia-smi 在场（宽容判定）：ORT CUDA EP 的算力下限与 torch 不是
+    一条线——CUDA 12 构建仍支持 sm_50（M4000），torch 的 7.0 线不适用；CUDA
+    真不可用时 rapidocr 自带 provider 级回退（provider 配置校验不过只 warning
+    后回 CPU EP 建会话），不炸不谎。主 venv 已换 onnxruntime-gpu 轮（ml extra），
+    CPU 轮机器传 use_cuda 同样静默回 CPU，只是白付一次检查。
+    """
+    if shutil.which("nvidia-smi") is None:
+        return None
+    return {"EngineConfig.onnxruntime.use_cuda": True}
+
+
 def _rapidocr() -> OcrCallable:
     """懒加载 RapidOCR（ml extras），输出归一化为 FrameResult。
 
@@ -448,7 +464,8 @@ def _rapidocr() -> OcrCallable:
     """
     from rapidocr import RapidOCR
 
-    engine = RapidOCR()
+    params = _rapidocr_params()
+    engine = RapidOCR(params=params) if params is not None else RapidOCR()
 
     def call(image_path: str) -> FrameResult:
         result = engine(image_path)

@@ -291,3 +291,17 @@ def test_band_from_does_not_absorb_distant_decor() -> None:
     band = subtitle_ocr._band_from(candidates)
     assert band is not None
     assert band.top >= 0.7, f"远簇被吸进带里：{band}"
+
+
+# ---- OCR GPU 门控（v0.2.5 1.2：主 venv 换 onnxruntime-gpu 轮）----
+
+
+def test_rapidocr_params_gate_on_nvidia_smi(monkeypatch: pytest.MonkeyPatch) -> None:
+    """N 卡在场才传 use_cuda：ORT CUDA EP 算力线与 torch 不同（CUDA12 仍支持 sm_50），
+    真不可用时 rapidocr 自带 provider 级 CPU 回退，门控不必替它判。"""
+    monkeypatch.setattr(
+        subtitle_ocr.shutil, "which", lambda _name: r"C:\Program Files\NVIDIA\smi.exe"
+    )
+    assert subtitle_ocr._rapidocr_params() == {"EngineConfig.onnxruntime.use_cuda": True}
+    monkeypatch.setattr(subtitle_ocr.shutil, "which", lambda _name: None)
+    assert subtitle_ocr._rapidocr_params() is None, "无 nvidia-smi 默认 CPU 参数（None=全默认）"

@@ -39,7 +39,12 @@ ml = [
   "librosa>=0.10",
   "soundfile>=0.13",
   "rapidocr>=3.10",
-  "onnxruntime>=1.18",
+  # ORT 唯一消费者是 rapidocr（v0.2.5 1.2）：CPU 轮换 GPU 轮，OCR 预扫吃 CUDA EP
+  # （720ms/帧 CPU 地板 → M4000 真机 A/B）。钉 1.22.0 而非最新：1.23+ 是 CUDA 13
+  # 构建（丢 Maxwell/Pascal——M4000 sm_52 在 CUDA 12 支持矩阵内）；win 轮 205MB
+  # 自带 providers_cuda.dll（1.18 起 CUDA 运行库静态打包，无需 aiinfra 索引）。
+  # 无 N 卡机器：rapidocr provider 级回退静默走 CPU EP，代价只剩包体积。
+  "onnxruntime-gpu==1.22.0",
   "opencc-python-reimplemented>=0.1.7",
   # 云端 ASR 适配器（dashscope_cloud）的运行时依赖：此前只在本机 ad-hoc 安装，
   # CI 打的安装包没带上它（v0.2.2 首次 CI 打包实证）。钉死真机验收版：
@@ -62,6 +67,14 @@ dramaclip-service = "dramaclip.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["dramaclip"]
+
+[tool.uv]
+# faster-whisper 声明依赖 onnxruntime（CPU 发行包，供 silero VAD）：与 ml extra 的
+# onnxruntime-gpu 提供同名 import 模块，uv 装两份发行会文件冲突。GPU 轮就是同一
+# onnxruntime 模块的 CUDA 构建——摘掉 CPU 声明后 faster-whisper 的 import 落在
+# GPU 轮上，默认 CPU EP 照常跑（v0.2.5 1.2 主 venv 换轮）。不可能标记=从解析里
+# 移除该传递依赖的标准姿势。
+override-dependencies = ["onnxruntime; python_version < '0'"]
 
 [tool.ruff]
 line-length = 100
