@@ -36,11 +36,19 @@ def no_gpu(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_variant_for_follows_vendor() -> None:
-    assert llama_assets.variant_for([{"vendor": "nvidia"}]) == "cuda124"
-    assert llama_assets.variant_for([{"vendor": "intel"}]) == "cpu"
-    assert llama_assets.variant_for([]) == "cpu"
-    assert llama_assets.variant_for(None) == "cpu"
+def test_variant_for_follows_vendor_and_driver_cuda_line() -> None:
+    """N 卡且驱动支持的 CUDA 主版本 ≥12 → cuda124；老驱动/读不出 → cpu（不赌大包）。"""
+    assert llama_assets.variant_for([{"vendor": "nvidia"}], "12.8") == "cuda124"
+    assert llama_assets.variant_for([{"vendor": "nvidia"}], "12.0") == "cuda124", (
+        "CUDA 12.x 靠 minor version compatibility：12.0 驱动即可跑 12.4 构建"
+    )
+    assert llama_assets.variant_for([{"vendor": "nvidia"}], "11.8") == "cpu"
+    assert llama_assets.variant_for([{"vendor": "nvidia"}], "") == "cpu", (
+        "驱动上限读不出：678MB 不赌，降 cpu（variant_reason 如实带原因）"
+    )
+    assert llama_assets.variant_for([{"vendor": "intel"}], "12.8") == "cpu"
+    assert llama_assets.variant_for([], "12.8") == "cpu"
+    assert llama_assets.variant_for(None, "12.8") == "cpu"
 
 
 def test_install_downloads_flattens_and_marks(

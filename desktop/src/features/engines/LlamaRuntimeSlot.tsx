@@ -49,7 +49,7 @@ export function LlamaRuntimeSlot(): ReactElement | null {
       <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: layout.stack.tight }}>
         <span style={{ color: tokens.colorWarning }}>
           视觉推理运行时未安装（llama.cpp，画面理解本地档依赖；变体按显卡自动选——
-          N 卡含 CUDA 运行库约 694MB，其余机型 CPU 构建约 24MB）
+          N 卡含 CUDA 运行库约 678MB，其余机型 CPU 构建约 24MB）
         </span>
         {state.problem !== '' && <span style={{ color: tokens.errorText }}>{state.problem}</span>}
       </span>

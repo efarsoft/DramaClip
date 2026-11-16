@@ -399,7 +399,8 @@ def llama_install(context: AppContext, _params: dict[str, Any]) -> dict[str, Any
             )
             context.notifier.log(
                 "info",
-                f"llama.cpp 视觉运行时安装完成（{result['variant']}，{result['tag']}）",
+                f"llama.cpp 视觉运行时安装完成（{result['variant']}，{result['tag']}）："
+                f"{result.get('variant_reason', '')}",
             )
         except Exception as exc:  # noqa: BLE001 - 作业失败原样落 error
             context.job_store.mark_failed(job_id, _failure_with_origin(exc))

@@ -80,16 +80,49 @@ def marker_state(data_dir: Path) -> dict[str, Any]:
     }
 
 
-def variant_for(adapters: list[dict[str, Any]] | None) -> str:
-    """N 卡在场 → cuda124；其余（无卡/AMD/Intel）→ cpu（视觉走 CPU）。"""
+def assets_for(variant: str) -> tuple[_Asset, ...]:
+    return _CUDA_ZIPS if variant == "cuda124" else _CPU_ZIPS
+
+
+# CUDA 12.x 应用靠 minor version compatibility 在 ≥12.0 的驱动上都能跑
+# （12.4 构建不要求 12.4 驱动）——判据落主版本线即可，不过度收紧。
+_CUDA_MIN_MAJOR = 12.0
+
+
+def variant_for(
+    adapters: list[dict[str, Any]] | None, max_cuda_version: str = ""
+) -> str:
+    """变体判据（v0.2.5 补驱动门控）：N 卡在场**且驱动支持的 CUDA 主版本 ≥ 12**
+    才给 cuda124；老驱动降 cpu。实锤：678MB 白下后运行期才失败。
+
+    nvidia-smi 读不出（max_cuda_version 空）：vendor 是 N 卡但驱动上限未知——
+    这包太大不赌，降 cpu 并如实带原因（variant_reason）。
+    """
     for adapter in adapters or []:
         if isinstance(adapter, dict) and str(adapter.get("vendor") or "") == "nvidia":
-            return "cuda124"
+            head = str(max_cuda_version).split()[0] if str(max_cuda_version).split() else ""
+            try:
+                if head and float(head) >= _CUDA_MIN_MAJOR:
+                    return "cuda124"
+            except ValueError:
+                pass
+            return "cpu"
     return "cpu"
 
 
-def assets_for(variant: str) -> tuple[_Asset, ...]:
-    return _CUDA_ZIPS if variant == "cuda124" else _CPU_ZIPS
+def variant_reason(variant: str, max_cuda_version: str) -> str:
+    """变体选型/降级的人读原因（安装任务日志与 UI problem 位共用）。"""
+    if variant == "cuda124":
+        return f"N 卡驱动支持的 CUDA {max_cuda_version or '?'} 达标，装 CUDA 档"
+    if str(max_cuda_version).strip():
+        return (
+            f"驱动支持的 CUDA {max_cuda_version} 低于 12：CUDA 12.4 档跑不了，"
+            "装 CPU 档（升级驱动后可重新安装 CUDA 档）"
+        )
+    return (
+        "N 卡在场但读不到驱动支持的 CUDA 上限（nvidia-smi 缺失或驱动过旧）："
+        "为避免大包白下载装 CPU 档（升级驱动或 nvidia-smi 可用后可重装 CUDA 档）"
+    )
 
 
 def _sources_for(name: str) -> list[str]:
@@ -132,8 +165,12 @@ def install(
 ) -> dict[str, Any]:
     """按变体下载双包（CPU 一包）→ 解压扁平落位 → 写标记。返回 {dir, variant, tag}。"""
     if variant is None:
-        adapters = gpu.snapshot_sync().get("adapters") or []
-        variant = variant_for(adapters if isinstance(adapters, list) else [])
+        snapshot = gpu.snapshot_sync()
+        adapters = snapshot.get("adapters") or []
+        max_cuda = str(snapshot.get("max_cuda_version") or "")
+        variant = variant_for(adapters if isinstance(adapters, list) else [], max_cuda)
+    else:
+        max_cuda = ""
     if variant not in ("cuda124", "cpu"):
         raise RuntimeError(f"未知变体：{variant}")
     assets = assets_for(variant)
@@ -182,4 +219,9 @@ def install(
     (dest / _MARKER).write_text(json.dumps(marker, ensure_ascii=False, indent=1), encoding="utf-8")
     if on_progress is not None:
         on_progress(100.0, "完成")
-    return {"dir": str(dest), "variant": variant, "tag": LLAMA_TAG}
+    return {
+        "dir": str(dest),
+        "variant": variant,
+        "tag": LLAMA_TAG,
+        "variant_reason": variant_reason(variant, max_cuda),
+    }
