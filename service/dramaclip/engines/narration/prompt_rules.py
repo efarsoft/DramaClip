@@ -5,6 +5,7 @@ RULE_TEXTS: dict[str, str] = {
     'hook_concrete_contrast': 'hook 必须含一个具体反差事实（身份/生死/数字），禁「他竟然…」式空泛悬念；',
     'question_ending_cap': '全稿以问号收尾的段至多两个，相邻段禁止同款收尾；',
     'core_motif_cap': '核心意象（数字+物件，如两千斤玄铁锅）全稿至多完整点名两次，再提只讲它带来的新后果。',
+    'info_gain': '每段都要让信息、关系或风险真的变化，无变化的段删掉或合并；',
     'body_sensation_sparse': '每三到四段落一个人物的体感或心理瞬间（「脸上发烫」「攥紧了指节」式——用身体写内心，禁直呼「愤怒/悲伤」这类情绪名词）',
     'json_only': '只输出 JSON，不要多余文字。',
     'every_segment_episode': '每个片段都必须带 episode，一个都不能漏；',

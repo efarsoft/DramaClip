@@ -481,3 +481,17 @@ def test_closing_repair_failure_keeps_original_for_the_gate(llm: Any) -> None:
     )
     assert "看全集" not in plan.narration_texts[-1].text
     assert plan.planner == "llm_script"
+
+
+# ---- 跨槽整句复读硬闸（v0.2.5 7.2 实锤：mono「被看的，就是我」×2）----
+
+
+def test_reject_duplicate_lines_flags_cross_slot_repeat() -> None:
+    filled = {"mono-1": "被看的就是我。", "mono-2": "被看的就是我"}
+    with pytest.raises(ValueError, match="整句复读"):
+        copywriter._reject_duplicate_lines(filled)
+
+
+def test_reject_duplicate_lines_passes_distinct_lines() -> None:
+    filled = {"mono-1": "被看的就是我。", "mono-2": "麦克风在我手里。"}
+    copywriter._reject_duplicate_lines(filled)  # 不抛=通过

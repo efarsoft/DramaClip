@@ -179,7 +179,29 @@ def _sanitize(
     if missing:
         raise ValueError(f"编剧漏了 {len(missing)} 个槽位：{', '.join(missing)}")
     _reject_metanarrative(got)
+    _reject_duplicate_lines(got)
     return got
+
+
+def _reject_duplicate_lines(filled: dict[str, str]) -> None:
+    """跨槽整句复读硬闸（v0.2.5 7.2 实锤：mono「被看的，就是我」×2）：剥标点后
+    同一句在两个槽位出现=同句式复读，第二处挤掉新信息位。ValueError 原文经
+    「上一稿被判无效」通道进下一轮 prompt（:298 同款），重掷自动带上下文。
+    延迟 import audit 与 _reject_metanarrative 同款（模块加载期无环）。
+    """
+    from dramaclip.engines.narration.audit import _PUNCT_RE  # noqa: PLC0415
+
+    seen: dict[str, str] = {}
+    for key, text in filled.items():
+        normalized = _PUNCT_RE.sub("", text)
+        if not normalized:
+            continue
+        if normalized in seen:
+            raise ValueError(
+                f"槽位 {key} 与槽位 {seen[normalized]} 整句复读：「{text[:24]}」——"
+                "重复句保留首次出现，其余改写换角度（谁做了什么/数字怎么变）或删除"
+            )
+        seen[normalized] = key
 
 
 def _reject_metanarrative(filled: dict[str, str]) -> None:

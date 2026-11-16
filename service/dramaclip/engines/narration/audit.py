@@ -143,10 +143,72 @@ def _narrative_texture_findings(segs: list[dict[str, Any]]) -> list[Finding]:
         needs_human=True,
     ))
     findings.append(_phrase_monotony_finding(segs))
+
+    # 中段俗语劝和空转粗筛（v0.2.5 7.3 实锤：n8「退一步海阔天空」）：中段出现
+    # 俗语/劝和句式且不带具体锚=信息/关系/风险零变化。粗筛+人耳复核（soft），
+    # 首尾段豁免——收尾俗语呼应常是设计。
+    preachy = [
+        i
+        for i, text in enumerate(texts)
+        if 0 < i < len(texts) - 1 and _PREACH_CLICHE_RE.search(text)
+    ]
+    findings.append(Finding(
+        "NARR_NO_INFO_GAIN", "fund_full", "soft",
+        not preachy,
+        "无俗语劝和空转句" if not preachy
+        else f"中段疑似俗语劝和空转（下标 {preachy[:3]}）——信息/关系/风险没有变化，"
+        "观众此刻要的是剧情推进不是人生道理",
+        location=";".join(f"segments[{i}]" for i in preachy[:3]) if preachy else "",
+        prompt_quote=_RULES["info_gain"],
+        needs_human=True,
+    ))
     return findings
 
 
 _TAIL_PUNCT = "。，、；：！？…—,,.;:!?'\"」』）)>》"
+# 整句复读归一（7.2）：剥全部标点与空白后比较；俗语劝和词表（7.3 粗筛，
+# 人耳复核兜底——词表只锁「零剧情推进的人生道理」句式，不锁正常对话）。
+_PUNCT_RE = re.compile(r"[，。、；：！？…—,,.;:!?'\"」』（）()<>《》\s]+")
+_PREACH_CLICHE_RE = re.compile(
+    r"(退一步|海阔天空|常言道|俗话说|老话说|冤冤相报|回头是岸|知足常乐"
+    "|看开点|想开点|凡事看|何必呢|何必为难|苦海无边|放下执念)"
+)
+
+
+def _duplicate_line_finding(segs: list[dict[str, Any]]) -> Finding | None:
+    """整句复读（v0.2.5 7.2 实锤：mono「被看的，就是我」×2）：剥标点后同一句
+    全稿出现 ≥2 次即硬伤——重复句挤掉新信息位（架构与节奏：每段都要让信息
+    真的变化）。与 _phrase_monotony_finding（连续 3 段同头尾）不同信号。
+
+    severity=hard：进重掷循环，audit_details 自动带「位置+违例+fix_hint」。
+    判据=剥标点后整串相等（保守），避免误伤合法的排比与呼应。
+    """
+    seen: dict[str, int] = {}
+    duplicates: list[tuple[str, int, int]] = []  # (原句, 首现下标, 复现下标)
+    for index, seg in enumerate(segs):
+        normalized = _PUNCT_RE.sub("", str(seg.get("text") or ""))
+        if not normalized:
+            continue
+        if normalized in seen:
+            duplicates.append((str(seg.get("text") or ""), seen[normalized], index))
+        else:
+            seen[normalized] = index
+    if not duplicates:
+        return None
+    sample = "；".join(
+        f"「{text[:18]}」segments[{first}]↔segments[{again}]"
+        for text, first, again in duplicates[:3]
+    )
+    locations = "；".join(f"segments[{idx}]" for _t, _f, idx in duplicates[:3])
+    return Finding(
+        "FUND_LINE_DUPLICATE", "fund_full", "hard",
+        passed=False,
+        message=f"整句复读：{sample}——重复句挤掉新信息位",
+        location=locations,
+        prompt_quote=_RULES["info_gain"],
+        needs_human=False,
+        fix_hint="重复句保留首次出现，其余改写换角度（谁做了什么/数字怎么变/关系怎么变）或删除——每段只承载一个信息点",
+    )
 
 
 def _phrase_monotony_finding(segs: list[dict[str, Any]]) -> Finding:
@@ -642,6 +704,9 @@ def review_script(
         findings.extend(_fabrication_findings(segs, transcript))
     findings.extend(_invented_anchor_findings(segs))
     findings.extend(_narrative_texture_findings(segs))
+    duplicate = _duplicate_line_finding(segs)
+    if duplicate is not None:
+        findings.append(duplicate)
     findings.append(_cross_episode_finding(segs))
     findings.extend(_person_intro_findings(segs, prior_texts))
 
