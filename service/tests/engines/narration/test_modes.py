@@ -88,6 +88,94 @@ def test_raw_clip_all_original_audio() -> None:
     assert all(seg.audio == "original" for seg in plan.timeline)
 
 
+# ---- 3.2 窗级画面加成（v0.2.5）：门槛吃综合分（冲突+画面项），排序仍纯时间序 ----
+
+
+def _material_with_frames(
+    scores_at: dict[float, int], asr_spans: list[tuple[float, float]]
+) -> dict:
+    """一集带画面轨的取材原料：台词段显式给（对齐场景边界防吸附挪窗），帧按表给分。
+
+    scores_at: 帧时刻 → watch_score（画面加成的分布来源）；asr_spans: 台词覆盖面
+    （has_dialogue voiced 过滤的输入，须与被测场景对齐，不然过滤路径喧宾夺主）。
+    """
+    from dramaclip.engines.analysis.models import AsrSegment
+    from dramaclip.engines.narration.casting import EpisodeMaterial
+
+    frames = tuple(
+        {"t": t, "watch_score": score, "scene": "画", "action": "", "mood": ""}
+        for t, score in sorted(scores_at.items())
+    )
+    asr = [
+        AsrSegment(start=float(start), end=float(end), text="该场景台词")
+        for start, end in asr_spans
+    ]
+    return {"ep1": EpisodeMaterial(number=1, asr=asr, frames=frames)}
+
+
+def test_raw_clip_visual_bonus_rescues_marginal_window() -> None:
+    """画面炸的边缘窗（冲突 62 + 加成 10 = 72）过线入选；无画面轨时同窗落选。
+
+    冲突分仍是主导：加成上界 ±10（权重 2.0 × 偏离 5），低冲突窗不能靠画面硬灌。
+    场景集给足 4 个（≥3 过线即无 fallback 回捞），边缘窗的进出才看得见。
+    """
+    scenes = [
+        ConflictScore(scene_index=0, start=0.0, end=6.0, score=80),
+        ConflictScore(scene_index=1, start=6.0, end=12.0, score=62),
+        ConflictScore(scene_index=2, start=12.0, end=18.0, score=90),
+        ConflictScore(scene_index=3, start=18.0, end=24.0, score=85),
+    ]
+    baseline = build_raw_clip(stamp([(1, "ep1", scenes)]), [], _STRATEGY)
+    assert [(seg.start, seg.end) for seg in baseline.timeline] == [(0.0, 6.0), (12.0, 24.0)]
+
+    material = _material_with_frames(
+        {7.0: 10, 9.0: 10},
+        [(0.0, 6.0), (6.0, 12.0), (12.0, 18.0), (18.0, 24.0)],
+    )
+    boosted = build_raw_clip(stamp([(1, "ep1", scenes)]), [], _STRATEGY, material)
+    assert [(seg.start, seg.end) for seg in boosted.timeline] == [(0.0, 24.0)], (
+        "窗内 watch_score 均值 10 → 加成 +10，62 分边缘窗过线后四窗邻接合并成块"
+    )
+
+
+def test_raw_clip_visual_bonus_demotes_flat_window() -> None:
+    """画面平淡（均值 1 → 加成 -8）把 74 分窗压到线下：画面项是双向的，不是白送分。"""
+    scenes = [
+        ConflictScore(scene_index=0, start=0.0, end=6.0, score=90),
+        ConflictScore(scene_index=1, start=6.0, end=12.0, score=74),
+        ConflictScore(scene_index=2, start=12.0, end=18.0, score=88),
+        ConflictScore(scene_index=3, start=18.0, end=24.0, score=86),
+    ]
+    baseline = build_raw_clip(stamp([(1, "ep1", scenes)]), [], _STRATEGY)
+    assert [(seg.start, seg.end) for seg in baseline.timeline] == [(0.0, 24.0)]
+
+    material = _material_with_frames(
+        {7.0: 1, 9.0: 1},
+        [(0.0, 6.0), (6.0, 12.0), (12.0, 18.0), (18.0, 24.0)],
+    )
+    demoted = build_raw_clip(stamp([(1, "ep1", scenes)]), [], _STRATEGY, material)
+    assert [(seg.start, seg.end) for seg in demoted.timeline] == [(0.0, 6.0), (12.0, 24.0)], (
+        "均值 1 的画面 −8 分，74 分窗跌出 70 线且不触发兜底回捞（余 3 窗过线）"
+    )
+
+
+def test_raw_clip_visual_bonus_neutral_without_frames() -> None:
+    """无画面轨的集加成恒 0：选段与 3.2 之前逐字节一致（黄金集零漂移的机制）。"""
+    scenes = [
+        ConflictScore(scene_index=0, start=0.0, end=6.0, score=69),
+        ConflictScore(scene_index=1, start=6.0, end=12.0, score=71),
+        ConflictScore(scene_index=2, start=12.0, end=18.0, score=88),
+        ConflictScore(scene_index=3, start=18.0, end=24.0, score=90),
+    ]
+    no_frames = _material_with_frames(
+        {}, [(0.0, 6.0), (6.0, 12.0), (12.0, 18.0), (18.0, 24.0)]
+    )
+    both = build_raw_clip(stamp([(1, "ep1", scenes)]), [], _STRATEGY, no_frames)
+    assert [(seg.start, seg.end) for seg in both.timeline] == [(6.0, 24.0)], (
+        "无帧=中性 5.0=加成 0：69 分窗照样落选，行为与改动前一致"
+    )
+
+
 def test_raw_clip_window_boundaries_snap_to_sentence_bounds() -> None:
     """剪口不落在句子中间（业主 2026-10-27 立案：成品 14 窗 7 切句，还在说话就跳场）。
 

@@ -26,6 +26,11 @@ RAW_CLIP_MIN_SCORE = 70
 _RAW_CLIP_MIN_S = 3.0
 _RAW_CLIP_MAX_S = 25.0
 _RAW_CLIP_FALLBACK_COUNT = 6  # 门槛放宽兜底的条数上限（不再借 len(highlights) 张冠李戴）
+# 画面加成权重（v0.2.5 3.2）：窗级有效分 = 冲突分 + (窗内 watch_score 均值 - 5) × 本权重。
+# watch_score 1~10 → 加成 ±10 上界，冲突分仍是主导项；5.0 中性（与 intro 双因子
+# 的 scene_visual_score 同源），无画面轨的集加成恒 0——黄金集（无画面轨 fixture）
+# 选段零漂移即由此保证（对拍 tools/quality_eval --check）。
+_RAW_CLIP_VISUAL_W = 2.0
 _INTRO_MAX_S = 30.0  # 片头段保守时长（TTS 实际时长在导出时回填）
 _INTRO_SLOT_ID = "intro-1"
 _CTA_SLOT_ID = "cta-1"
@@ -66,6 +71,20 @@ def _merge_adjacent(ordered: list[EpisodeScene]) -> list[EpisodeScene]:
     return merged
 
 
+def _window_visual_bonus(
+    material: MaterialByEpisode | None, scene: EpisodeScene
+) -> float:
+    """窗级画面加成（v0.2.5 3.2）：watch_score 均值偏离中性 5 的加权值（±10 上界）。
+
+    分布统计落**均值**——与开场双因子的 scene_visual_score 同源同口径，不另造
+    第二套画面判据；无画面轨的集（material 缺键/frames 空）恒 0，选段行为与
+    3.2 之前逐字节一致。
+    """
+    if material is None:
+        return 0.0
+    return (scene_visual_score(material, scene) - 5.0) * _RAW_CLIP_VISUAL_W
+
+
 def build_raw_clip(
     scenes: list[EpisodeScene],
     highlights: list[HighlightSegment],
@@ -79,13 +98,17 @@ def build_raw_clip(
     需要旁白兜底（片头解说有），本模式的卖点是「原声台词高光合集」，要的是连贯。
     因此：①不前置；②候选必须有台词在场（material 可注入时过滤哑段，过滤后
     不足三条或缺该集原料时回退，可用性优先）。
+
+    门槛判定吃**窗级综合分**（v0.2.5 3.2）：冲突分 + 画面加成（见
+    `_window_visual_bonus`）——视觉炸裂的台词窗不再被冲突线一刀切掉；排序仍是
+    纯时间序（episode_order），画面项只动「进不进池」不动「先后次序」。
     """
     if not scenes:
         return PlanData(mode="raw_clip", strategy=strategy)
     candidates = [
         scene
         for scene in scenes
-        if scene.score >= RAW_CLIP_MIN_SCORE
+        if scene.score + _window_visual_bonus(material, scene) >= RAW_CLIP_MIN_SCORE
         and _RAW_CLIP_MIN_S <= scene.end - scene.start <= _RAW_CLIP_MAX_S
     ]
     if material is not None:
