@@ -24,6 +24,23 @@ RULE_TEXTS: dict[str, str] = {
 }
 
 
+# 行帽句注册（v0.2.5 5.1）：生产句（copywriter._structure_prompt）与审查引用
+# （copy_audit.COPY_LINE_CAP 的 prompt_quote）共用同一模板——旧形态两处独立
+# f-string，措辞漂移是静默的（三查守卫对 f-string 动态 quote 豁免）。生产/审查
+# 各自 replace("{cap}") 渲染，装配产物逐字节不变。
+PROMPT_QUOTES: dict[str, str] = {
+    'copy_line_cap': '每条不超过 {cap} 字；',
+}
+
+
+def render_quote(key: str, **values: str) -> str:
+    """行内参数化引用：{cap} 类运行期值按 kwargs 渲染（与 assemble 同款 replace）。"""
+    text = PROMPT_QUOTES[key]
+    for name, value in values.items():
+        text = text.replace("{" + name + "}", value)
+    return text
+
+
 def assemble(template: str) -> str:
     """{key} 占位 → 规则原文。不用 str.format：提示词含字面花括号。"""
     for key, text in RULE_TEXTS.items():

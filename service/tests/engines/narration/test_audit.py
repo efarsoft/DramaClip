@@ -309,7 +309,7 @@ def test_all_prompt_quotes_are_literal_substrings() -> None:
         for node in ast.walk(tree):
             if isinstance(node, ast.keyword) and node.arg == "prompt_quote":
                 if not isinstance(node.value, ast.Subscript):
-                    continue  # f-string 动态 quote（行长两条）由现有用例覆盖
+                    continue  # 非下标引用已清零（行帽句走 PROMPT_QUOTES，另有专测）
                 key_node = node.value.slice
                 if isinstance(key_node, ast.Constant):
                     used.add(str(key_node.value))
@@ -324,6 +324,41 @@ def test_all_prompt_quotes_are_literal_substrings() -> None:
         if not any(text in candidate for candidate in texts)
     ]
     assert homeless == [], f"以下注册表原文不再出现在任何 prompt 常量中：{homeless}"
+
+
+def test_copy_line_cap_quote_is_registry_sourced() -> None:
+    """行帽句单源（v0.2.5 5.1）：生产句与审查引用同出 PROMPT_QUOTES 模板。
+
+    旧形态两处独立 f-string（copywriter._structure_prompt / copy_audit
+    COPY_LINE_CAP 的 prompt_quote），措辞漂移是静默的——三查守卫对动态
+    quote 豁免。注册化后两侧消费点都引用 copy_line_cap 模板，本测试在
+    AST 层钉住两侧引用，并对产物形状互证。
+    """
+    import ast
+    import inspect
+    import re
+
+    from dramaclip.engines.narration import copy_audit as CA
+    from dramaclip.engines.narration import copywriter as C
+    from dramaclip.engines.narration.prompt_rules import PROMPT_QUOTES
+
+    template = PROMPT_QUOTES["copy_line_cap"]
+    for mod in (C, CA):
+        tree = ast.parse(inspect.getsource(mod))
+        calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "id", "") in ("render_quote", "_render_quote")
+            and any(
+                isinstance(arg, ast.Constant) and arg.value == "copy_line_cap"
+                for arg in node.args
+            )
+        ]
+        assert calls, f"{mod.__name__} 的行帽句消费点未走注册表模板"
+
+    pattern = re.compile(template.replace("{cap}", r"\d+"))
+    assert re.search(pattern, C._COPY_STRUCTURE_DEFAULT), "生产句偏离注册表模板（句式漂移）"
 
 
 def test_hook_payoff_flags_unfulfilled_anchor() -> None:

@@ -14,6 +14,7 @@ from dramaclip.engines.narration import casting, conversion, scriptwriter
 from dramaclip.engines.narration.models import NarrationText, PlanData, TimelineSegment
 from dramaclip.engines.narration.numerals import to_chinese_numerals
 from dramaclip.engines.narration.prompt_rules import assemble as _assemble_rules
+from dramaclip.engines.narration.prompt_rules import render_quote as _render_quote
 from dramaclip.engines.semantic.llm_client import LlmClient, LlmUnavailable, client_for
 
 logger = logging.getLogger(__name__)
@@ -52,8 +53,9 @@ def _structure_prompt(mode: str) -> str:
             "为每个槽位各写一条解说文案。"
             '只输出 JSON：{"lines": [{"id": "槽位id", "text": "解说文案"}]}，不要其他文字。'
             "硬性要求（一字不差）：{lines_cover_all_slots}"
-            f"每条不超过 {_line_cap_of(mode)} 字；"
-            "{slot_contract}"
+            # 行帽句走注册表模板（5.1）：与 copy_audit 的审查引用同源，措辞漂移不再静默
+            + _render_quote("copy_line_cap", cap=str(_line_cap_of(mode)))
+            + "{slot_contract}"
             # 编造禁令/条尾半句钩/「念着拗口」三簇已由基本功层（FUND_BASE
             # 纪律 + SLOT 手艺卡）逐字承担——同一指令在一份 system 里出现
             # 两三遍不提高遵从率，只摊薄其它规则的注意力（2026-11-04 审查 #8）。

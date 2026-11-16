@@ -27,6 +27,7 @@ def review_copy(
     """
     findings: list[Finding] = []
     from dramaclip.engines.narration.copywriter import _OVERSIZE_TOLERANCE, _line_cap_of
+    from dramaclip.engines.narration.prompt_rules import render_quote
     cap = _line_cap_of(mode)
 
     line_ids = [line.get("id") for line in lines]
@@ -56,7 +57,7 @@ def review_copy(
         not over,
         f"每条均 ≤ {oversize_cap} 字" if not over else f"超长：{over}",
         location="lines" if over else "",
-        prompt_quote=f"每条不超过 {cap} 字；",
+        prompt_quote=render_quote("copy_line_cap", cap=str(cap)),
     ))
 
     # —— 禁元叙述（零容忍，同样适用填词）——

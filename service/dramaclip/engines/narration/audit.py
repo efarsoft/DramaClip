@@ -220,10 +220,7 @@ def _episode_jump_finding(segs: list[dict[str, Any]]) -> Finding:
         if not jumps
         else f"存在大跨度跳集：{'；'.join(jumps[:4])}——须逐一确认目标集确有关键爆点",
         location="segments",
-        prompt_quote=(
-            "换集优先取相邻集，大跨度跳集只许跳往确有关键爆点的集，"
-            "且前集段尾必须把跨集因果说破，禁止无因果跳切；"
-        ),
+        prompt_quote=_RULES["adjacent_episode_jump"],
         needs_human=bool(jumps),
     )
 
