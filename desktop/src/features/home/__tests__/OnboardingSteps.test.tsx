@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
-/** 首启三步（规格 §4.2）：完成态与动作的正确性。2026-11-16 一键引导批起，ASR 步
- *  的动作是「一键下载推荐模型」（点一下默认源直下），判据放宽为任一 ASR 模型已装
- *  （required 只有 base——照提示装推荐 Small 不打勾是既有错位）。清单未回/无候选
- *  回退「去下载」跳转。 */
+/** 首启三步（规格 §4.2）：完成态与动作的正确性。2026-11-16 双入口批起，ASR 步是
+ *  「一键装齐推荐档（Paraformer-large 串装链）+ 快速档（Whisper Small 单包）」——
+ *  链状态机自身的行为在 useOnboardingChain.test 钉，这里钉组件静态面与发起转发。 */
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { App as AntdApp } from 'antd';
 import { MemoryRouter } from 'react-router-dom';
@@ -10,7 +9,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import type { ModelInfo } from '@dramaclip/protocol';
 import { OnboardingSteps } from '../OnboardingSteps';
-import { useUiStore } from '../../../stores/ui';
 
 const download = vi.hoisted(() => vi.fn());
 
@@ -24,30 +22,33 @@ vi.mock('../../../services/client', () => ({
     ),
     install: vi.fn(() => Promise.resolve({ job_id: 'j' })),
   },
-  modelsApi: { download: (modelId: string, source?: string): unknown => download(modelId, source) },
+  jobsApi: { get: vi.fn(), list: vi.fn(() => Promise.resolve({ jobs: [] })), cancel: vi.fn() },
+  modelsApi: {
+    download: (modelId: string, source?: string): unknown => download(modelId, source),
+    list: vi.fn(() => Promise.resolve([])),
+  },
 }));
 
 afterEach(() => {
   cleanup();
   download.mockClear();
-  useUiStore.setState({ modelDownloads: {} });
 });
 
-function asrModel(modelId: string, status: string, required: boolean): ModelInfo {
+function model(modelId: string, status: string): ModelInfo {
   return {
     model_id: modelId,
     kind: 'asr',
-    engine: 'faster_whisper',
-    repo_id: `Systran/${modelId}`,
-    name: 'Whisper',
-    required,
+    engine: 'funasr',
+    repo_id: '',
+    name: modelId,
+    required: false,
     status,
     engine_ready: true,
   };
 }
 
 function wrapper({ children }: { children: ReactNode }): ReactNode {
-  // OneClickDownload/取消件走 AntdApp.useApp() 的 message——必须在 App 上下文里渲染
+  // 动作区走 AntdApp.useApp() 的 message——必须在 App 上下文里渲染
   return <AntdApp><MemoryRouter>{children}</MemoryRouter></AntdApp>;
 }
 
@@ -60,68 +61,55 @@ function renderSteps(models: ModelInfo[] | null, llmBaseUrl = '') {
   return { ...view, onModelsChanged };
 }
 
-const DOWNLOADING = {
-  percent: 42, status: 'downloading' as const, speed: '3.2 MB/s', eta: '1分', message: '',
-};
+const FULL_UNINSTALLED = ['paraformer-large', 'fsmn-vad', 'campplus-sv', 'faster-whisper-small'].map((id) =>
+  model(id, 'not_installed'),
+);
 
 describe('OnboardingSteps', () => {
-  it('清单未回（null）：回退去下载跳转，一键按钮不出现', () => {
+  it('清单未回（null）：回退去下载跳转，双入口不出现', () => {
     renderSteps(null);
     expect(screen.getByText('去下载')).toBeTruthy();
-    expect(screen.queryByText('一键下载推荐模型')).toBeNull();
+    expect(screen.queryByText(/一键装齐推荐档/)).toBeNull();
+    expect(screen.queryByText(/快速档：Whisper Small/)).toBeNull();
     expect(screen.getByText('去配置')).toBeTruthy();
   });
 
-  it('未装+推荐在场：一键按钮就地可点，不再跳引擎中心', () => {
-    renderSteps([asrModel('faster-whisper-small', 'not_installed', false)]);
-    expect(screen.getByText('一键下载推荐模型')).toBeTruthy();
+  it('推荐链+快速档都未装：双入口就地可点，不再跳引擎中心', () => {
+    renderSteps(FULL_UNINSTALLED);
+    expect(screen.getByText('一键装齐推荐档（约 910MB + 运行环境）')).toBeTruthy();
+    expect(screen.getByText('快速档：Whisper Small（约 480MB，免装运行环境）')).toBeTruthy();
     expect(screen.queryByText('去下载')).toBeNull();
   });
 
-  it('点一键：download 以推荐 model_id 发出（默认源序，零选择直下）', async () => {
-    download.mockResolvedValue({ job_id: 'j1' });
-    renderSteps([asrModel('faster-whisper-small', 'not_installed', false)]);
-    screen.getByText('一键下载推荐模型').click();
+  it('点推荐档：串装链以链首包 paraformer-large 发起下载（默认源序）', async () => {
+    download.mockResolvedValue({ job_id: 'd1' });
+    renderSteps(FULL_UNINSTALLED);
+    screen.getByText('一键装齐推荐档（约 910MB + 运行环境）').click();
     await waitFor(() => {
-      // 第二参 undefined = 不指定下载源，走服务端默认源序（国内优先）
-      expect(download).toHaveBeenCalledWith('faster-whisper-small', undefined);
+      expect(download).toHaveBeenCalledWith('paraformer-large', undefined);
     });
   });
 
-  it('下载中：行内进度三件套 + 取消入口，一键按钮消失', () => {
-    useUiStore.setState({
-      modelDownloads: { 'faster-whisper-small': DOWNLOADING },
-    });
-    renderSteps([asrModel('faster-whisper-small', 'not_installed', false)]);
-    expect(screen.getByText(/下载中 42%/)).toBeTruthy();
-    expect(screen.getByText('取 消')).toBeTruthy(); // antd 按钮对两字 CJK 自动插空格
-    expect(screen.queryByText('一键下载推荐模型')).toBeNull();
-  });
-
-  it('完成：重拉回调恰好一次，动作区让空等步骤打勾接管', async () => {
-    useUiStore.setState({
-      modelDownloads: { 'faster-whisper-small': { ...DOWNLOADING, percent: 100, status: 'done', speed: '', eta: '' } },
-    });
-    const { onModelsChanged } = renderSteps([asrModel('faster-whisper-small', 'not_installed', false)]);
-    await waitFor(() => {
-      expect(onModelsChanged).toHaveBeenCalledTimes(1);
-    });
-    expect(screen.queryByText('一键下载推荐模型')).toBeNull();
-  });
-
-  it('失败：原因原文行内可见 + 重试入口（不是只给 toast）', () => {
-    useUiStore.setState({
-      modelDownloads: { 'faster-whisper-small': { ...DOWNLOADING, status: 'failed', message: '网络中断' } },
-    });
-    renderSteps([asrModel('faster-whisper-small', 'not_installed', false)]);
-    expect(screen.getByText('网络中断')).toBeTruthy();
-    expect(screen.getByText('重试')).toBeTruthy();
-  });
-
-  it('判据放宽回归钉：非 required 的 ASR 模型已装同样打勾且无动作', () => {
-    renderSteps([asrModel('faster-whisper-small', 'installed', false)]);
-    expect(screen.queryByText('一键下载推荐模型')).toBeNull();
+  it('推荐链全装完：这步已完成——打勾且不再给任何入口（含快速档）', () => {
+    // 链三包装齐 = 「装一个 ASR 模型」完成；快速档是给没装的人的入口，不再出现
+    const models = ['paraformer-large', 'fsmn-vad', 'campplus-sv'].map((id) => model(id, 'installed'));
+    models.push(model('faster-whisper-small', 'not_installed'));
+    renderSteps(models);
+    expect(screen.queryByText(/一键装齐推荐档/)).toBeNull();
+    expect(screen.queryByText(/快速档：Whisper Small/)).toBeNull();
     expect(screen.queryByText('去下载')).toBeNull();
-    expect(screen.queryByText('重试')).toBeNull();
+  });
+
+  it('判据回归钉：任一 ASR 模型已装（非 required）即打勾且无任何动作', () => {
+    renderSteps([model('faster-whisper-small', 'installed')]);
+    expect(screen.queryByText(/一键装齐推荐档/)).toBeNull();
+    expect(screen.queryByText(/快速档：Whisper Small/)).toBeNull();
+    expect(screen.queryByText('去下载')).toBeNull();
+  });
+
+  it('LLM 已配：不再给「去配置」', () => {
+    renderSteps(null, 'https://dashscope.example/compatible-mode/v1');
+    expect(screen.queryByText('去配置')).toBeNull();
+    expect(screen.getByText('去下载')).toBeTruthy();
   });
 });
