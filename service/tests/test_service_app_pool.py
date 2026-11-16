@@ -38,7 +38,8 @@ def test_every_protocol_rpc_is_classified() -> None:
     known_long = {
         "analysis.cancel", "analysis.episodes", "analysis.episode_detail",
         "analysis.export_transcripts", "analysis.prescreen",
-        "analysis.start", "analysis.resync_semantic", "analysis.update_asr",
+        "analysis.speaker_mapping", "analysis.start", "analysis.resync_semantic",
+        "analysis.update_asr",
         "bgm.generate", "bgm.rescan",
         "engine_configs.create", "engine_configs.delete", "engine_configs.enable",
         "engine_configs.test", "engine_configs.update", "engines.selftest",
