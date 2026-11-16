@@ -53,6 +53,39 @@ def test_zero_copy_raw_clip_uses_project_brief(
     assert "剧名：《钟情错付》" in llm.user and "取材角度" in llm.user
 
 
+def test_zero_copy_window_excerpts_take_priority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """7.1：有逐窗台词摘录时标题从窗口实际内容长出来——承诺的爆点必须真的在
+    窗口里（黑卡亮卡瞬间只盖尾部 1.2s 的标题党不再可能）；摘录缺席回退 brief。"""
+    plan = {
+        "mode": "raw_clip",
+        "narration_texts": [],
+        "timeline": [
+            {"episode_id": "ep1", "start": 3.5, "end": 13.2, "audio": "original"}
+        ],
+    }
+    llm = _FakeLlm(
+        {
+            "titles": ["黑卡一亮，抢婚现场谁慌了"],
+            "caption": "黑卡亮出来的那一刻全场安静",
+            "tags": ["爽剧"],
+        }
+    )
+    monkeypatch.setattr(titles, "client_for", lambda *a, **k: llm)
+    result = titles.generate(
+        plan,
+        _settings(),
+        trace_path=None,
+        project_brief="剧名：《钟情错付》（辅助）",
+        window_excerpts=["第9集 3.5-13.2s：黑卡拍在桌上／全场哗然"],
+    )
+    assert result["titles"][0]["text"].startswith("黑卡")
+    assert "选中窗口的实际台词摘录" in llm.user and "黑卡拍在桌上" in llm.user
+    assert llm.user.index("选中窗口的实际台词摘录") < llm.user.index("影片信息")
+    assert "禁止取材窗口之外" in llm.user
+
+
 def test_zero_copy_subtitle_flow_uses_golden_lines(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -52,6 +52,7 @@ def generate(
     trace_path: Path | None = None,
     project_brief: str | None = None,
     visual_hooks: list[str] | None = None,
+    window_excerpts: list[str] | None = None,
 ) -> dict[str, Any]:
     """返回 {titles: [{text, selected}], caption, tags}；LLM 未配置或标题为空时抛异常，
     由调用方转译。caption/tags 是同一往返顺带产出的发布物料，缺了不挡标题。
@@ -65,6 +66,10 @@ def generate(
     `visual_hooks`：VL 高 watch_score 帧的画面描述（api 层从 visual_track 收集），
     标题生成注入画面亮点——标题可以具体到画面（"她把婚书扔进火里的那一刻"），
     不再纯文字抽象悬念。
+
+    `window_excerpts`（v0.2.5 7.1）：选中窗口的实际台词摘录（api 层逐窗切片），
+    零文案模式的标题从**窗口实际内容**长出来——不再只按取材角度猜（7.1 实锤：
+    标题承诺的爆点不在窗口集合里，标题党伤完播）。
     """
     client = client_for(settings, min_timeout_s=min_timeout_s, site="候选标题")
     texts = [str(t.get("text", "")) for t in plan_data.get("narration_texts", []) if t.get("text")]
@@ -93,6 +98,17 @@ def generate(
             "标题与发布文案从这些金句的冲突与情绪出发，"
             "忠于台词呈现的剧情，禁止编造台词之外的情节。\n金句台词：\n"
             + "\n".join(f"- {line}" for line in golden[:12])
+            + visual_block
+        )
+    elif window_excerpts:
+        # 零文案·窗口实据分支（v0.2.5 7.1）：标题承诺的爆点必须真的在窗口里
+        user = (
+            "这是一条**纯原片高光合集**推广视频（无解说无字幕，只有原声对白画面）。"
+            "标题与发布文案必须从下面**选中窗口的实际台词**里长出来——观众看到的"
+            "就是这些片段，标题承诺的爆点必须真的在窗口里，禁止取材窗口之外。\n"
+            "选中窗口的实际台词摘录：\n"
+            + "\n".join(f"- {line}" for line in window_excerpts[:12])
+            + "\n影片信息（辅助）：\n" + (project_brief or "")
             + visual_block
         )
     else:

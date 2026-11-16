@@ -117,11 +117,18 @@ def generate_titles(context: AppContext, params: dict[str, Any]) -> dict[str, An
     # 前 5 帧画面描述，注入标题 prompt——标题可以具体到画面，不再纯文字抽象悬念。
     visual_hooks: list[str] = []
     scored: list[tuple[int, str]] = []
+    # 逐窗台词摘录（v0.2.5 7.1）：标题从窗口实际内容长出来，不再只按取材角度猜。
+    asr_by_episode: dict[str, Any] = {}
     for eid in sorted({str(seg.get("episode_id") or "") for seg in plan_data.get("timeline", [])}):
         if not eid:
             continue
         rec = analysis_repo.get(context.conn, eid)
-        if rec is None or not rec.get("visual_track"):
+        if rec is None:
+            continue
+        asr_by_episode[eid] = narration_pipeline.parse_asr_segments(
+            str(rec.get("asr_segments") or "")
+        )
+        if not rec.get("visual_track"):
             continue
         try:
             vt = json.loads(str(rec["visual_track"]))
@@ -141,6 +148,34 @@ def generate_titles(context: AppContext, params: dict[str, Any]) -> dict[str, An
                 scored.append((w, desc))
     scored.sort(key=lambda pair: (-pair[0], pair[1]))
     visual_hooks = [f"{desc}" for _w, desc in scored[:5]]
+    # 逐窗台词摘录：每窗切本窗内台词（截 120 字防 prompt 膨胀），cap 12 窗
+    episode_number_of: dict[str, str] = {}
+    for seg in plan_data.get("timeline", []):
+        eid = str(seg.get("episode_id") or "")
+        if not eid or eid in episode_number_of:
+            continue
+        ep_row = episodes_repo.get(context.conn, eid)
+        episode_number_of[eid] = str(ep_row["episode_number"]) if ep_row is not None else "?"
+    window_excerpts: list[str] = []
+    for seg in plan_data.get("timeline", []):
+        eid = str(seg.get("episode_id") or "")
+        if not eid:
+            continue
+        inside = [
+            line.text.strip()
+            for line in asr_by_episode.get(eid, [])
+            if line.text.strip() and line.start < float(seg.get("end") or 0) - 1e-6
+            and line.end > float(seg.get("start") or 0) + 1e-6
+        ]
+        if not inside:
+            continue
+        text = "／".join(inside)[:120]
+        number = episode_number_of.get(eid, "?")
+        start_s = float(seg.get("start") or 0)
+        end_s = float(seg.get("end") or 0)
+        window_excerpts.append(f"第{number}集 {start_s:.1f}-{end_s:.1f}s：{text}")
+        if len(window_excerpts) >= 12:
+            break
     try:
         result = titles_engine.generate(
             plan_data,
@@ -148,6 +183,7 @@ def generate_titles(context: AppContext, params: dict[str, Any]) -> dict[str, An
             trace_path=llm_trace_dir(context) / f"llm_titles_{plan_id}.json",
             project_brief=brief,
             visual_hooks=visual_hooks or None,
+            window_excerpts=window_excerpts or None,
         )
     except LlmUnavailable as exc:
         raise RpcDomainError(_ERR_LLM, str(exc)) from exc
