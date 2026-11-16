@@ -262,6 +262,18 @@ def test_intro_marks_first_segment_as_narration() -> None:
     assert all(seg.audio == "original" for seg in plan.timeline[1:-1])
 
 
+def test_intro_brief_puts_conflict_first() -> None:
+    """7.3：intro-1 首句必须是冲突/反差本体，行为指令句式降位第二句起。
+
+    rhythm 病灶实锤（7.3）：氛围指令占黄金首句位，钩子前置不足。
+    """
+    plan = build_intro(stamp([(1, "ep1", _scenes())]), _STRATEGY)
+    intro = [t for t in plan.narration_texts if t.id == "intro-1"][0]
+    assert "第一句必须是冲突/反差本体" in intro.brief
+    assert "禁止氛围铺垫或行为指令占首句" in intro.brief
+    assert "第二句起" in intro.brief
+
+
 def test_intro_opens_with_highest_conflict() -> None:
     """B 项：片头画面=最高冲突镜（与 raw_clip 同构的预告式开场）。
 

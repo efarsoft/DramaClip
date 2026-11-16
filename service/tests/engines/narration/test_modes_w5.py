@@ -36,6 +36,20 @@ def test_cross_alternates_original_and_narration() -> None:
     assert ids == [f"cross-{i + 1}" for i in range(narration_count)]
 
 
+def test_cross_ending_brief_requires_three_part_cta() -> None:
+    """7.4：收尾槽 brief 升级三段式——锚点词+新缺口/损失+免费口径行动引导。
+
+    实锤（7.4）：cross-6「新娘账怎么算，点进去看全集」缺免费口径与锚点词。
+    """
+    plan = build_cross(stamp([(1, "ep1", _scenes())]), _STRATEGY)
+    ending = [t for t in plan.narration_texts if t.id == "cross-6"][0]
+    assert "三段式" in ending.brief
+    assert "点击左下角" in ending.brief and "免费观看全集" in ending.brief
+    assert "锚点词" in ending.brief
+    mid = [t for t in plan.narration_texts if t.id == "cross-1"][0]
+    assert "免费观看全集" not in mid.brief, "转化口径只归收尾槽，桥段不背"
+
+
 def test_cross_keeps_top_scenes_without_duration_chop() -> None:
     strategy = StrategySpec()
     plan = build_cross(stamp([(1, "ep1", _scenes())]), strategy)
