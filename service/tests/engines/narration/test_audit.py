@@ -319,11 +319,19 @@ def test_all_prompt_quotes_are_literal_substrings() -> None:
     orphans = sorted(set(RULE_TEXTS) - used)
     assert orphans == [], f"注册表存在无人引用的孤儿条目（删掉或接线）：{orphans}"
 
+    # homeless 语义（W5 约束搬家后收紧）：原文的合法消费位置有两处——初始 prompt
+    # 常量（指导生成）与 audit 的 prompt_quote（机器检出违例后原文随重掷反馈回
+    # LLM，指导修复）。前者缺失但 audit 在引用的 key（metanarrative/numerals_cn，
+    # 2026-11-17 约束搬家：负向钳制移出创意调用、确定性检查兜底）不算无家——
+    # 两者都缺才是死条目（删掉或接线）。
     homeless = [
         key for key, text in RULE_TEXTS.items()
-        if not any(text in candidate for candidate in texts)
+        if key not in used and not any(text in candidate for candidate in texts)
     ]
-    assert homeless == [], f"以下注册表原文不再出现在任何 prompt 常量中：{homeless}"
+    assert homeless == [], (
+        "以下注册表原文既不在任何 prompt 常量中、也不被 audit 重掷反馈引用"
+        f"（死条目，删掉或接线）：{homeless}"
+    )
 
 
 def test_copy_line_cap_quote_is_registry_sourced() -> None:

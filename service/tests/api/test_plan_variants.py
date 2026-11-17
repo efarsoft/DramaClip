@@ -577,7 +577,12 @@ def _stub_language_and_tts(
                 budget = re.search(r"目标 ≤(\d+) 字", block)
                 if budget:
                     cap = int(budget.group(1))
-                    body = body[: cap - 1].rstrip("，、；—-") + "。"
+                    # W2 呼吸扣减后小空隙桥预算缩到 6 字档，头部截断会把「cross-2/
+                    # cross-5」的槽位标识吞掉 → 各桥截成同前缀 → 7.2 整句复读闸误拦。
+                    # 真模型每桥写不同剧情词不会截成同串，这是桩的伪影——尾部带
+                    # 桥序号制造差异（长度仍=cap；中文化出口把数字转中文）。
+                    tail = slot[-1]
+                    body = body[: max(cap - 2, 1)].rstrip("，、；—-") + f"{tail}。"
                 return {"id": slot, "text": body}
 
             # 变异三件套（第一梯队①）：桩与真模型同责——收到策略卡就该按
