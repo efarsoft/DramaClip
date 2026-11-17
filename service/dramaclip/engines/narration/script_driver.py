@@ -10,7 +10,7 @@ from typing import Any
 
 from dramaclip.engines import llm_prompts
 from dramaclip.engines.analysis.models import AsrSegment
-from dramaclip.engines.narration import casting, scriptwriter, styles
+from dramaclip.engines.narration import casting, flow_writer, scriptwriter, styles
 from dramaclip.engines.narration import modes as narration_modes
 from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration.models import PlanData, StrategySpec
@@ -89,6 +89,38 @@ def script_dialogue_plan(
     """跨集剧本驱动的对话解说。LLM 未配置或剧本不合格一律抛（降级已禁止）。
     """
     strategy = StrategySpec(platform="douyin")
+
+    # 整篇叙事变体（W6 试验线，settings narration.flow_style=1）：自由文本生成
+    # → 锚定台词引用 → 确定性铺轴；与槽位制/剧本链天然成 A/B 对照组。
+    if str(settings.get("narration.flow_style") or "").strip() == "1":
+        llm = client_for(settings, min_timeout_s=SCRIPT_LLM_TIMEOUT_S, site="剧情解说")
+        script = flow_writer.write_flow_script(
+            llm,
+            episode_inputs,
+            project_name=str(settings.get("_project_name") or "这部剧"),
+            angle_block=angle_block,
+            style_directives=str(settings.get("_style_directives") or ""),
+            genre=str(settings.get("_genre") or ""),
+            trace_path=(
+                Path(trace_dir) / f"flow_{time.strftime('%m%d_%H%M%S')}.json"
+                if trace_dir is not None
+                else None
+            ),
+            prompts=llm_prompts.overrides_from(settings),
+            prior_texts=_prior_texts_of(settings),
+        )
+        return narration_pipeline.build_from_script_episodes(
+            {
+                int(ep["number"]): (
+                    str(ep["episode_id"]),
+                    [AsrSegment.model_validate(seg) for seg in ep["segments"]],
+                )
+                for ep in episode_inputs
+            },
+            {int(ep["number"]): float(ep.get("duration") or 0.0) for ep in episode_inputs},
+            script,
+            strategy,
+        ), sorted({int(ep["number"]) for ep in episode_inputs})
 
     # 基本功层内置于编剧 system prompt；口味层 directives 注入 user prompt
     llm = client_for(settings, min_timeout_s=SCRIPT_LLM_TIMEOUT_S, site="剧情解说")

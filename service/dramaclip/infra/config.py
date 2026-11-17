@@ -88,6 +88,7 @@ DEFAULTS: dict[str, str] = {
     "narration.rewrite_loop": "1",
     # 剧本硬规则内联审查：生成→audit→带 prompt 原句重掷，soft 只进 trace；"0"=关闭
     "narration.script_audit": "1",
+"narration.flow_style": "0",
     "download.hf_mirror": "https://hf-mirror.com",
     "download.ms_base": "https://modelscope.cn",
     # 成片响度目标（EBU R128）：Phase C 整片两遍 loudnorm 收口，见 engines/exporter/loudness.py
