@@ -68,6 +68,31 @@ class _FakeLlm:
         return json.loads(self._payload)
 
 
+class _AlwaysOkLlm:
+    """每轮都产出同一份合法稿（评审层单独打桩，生成层零干扰）。"""
+
+    def __init__(self, payload: str) -> None:
+        self._payload = payload
+        self.prompts: list[str] = []
+
+    def chat_json(self, _system: str, user: str, temperature: float = 0.3) -> Any:
+        self.prompts.append(user)
+        return json.loads(self._payload)
+
+
+def test_flow_prompt_carries_hook_forms_and_rhythm_hint() -> None:
+    """W7-1：system 带钩子四形态库、user 带每秒约四字的节奏参考（正向指导）。"""
+    system, user = flow_writer.build_flow_request(
+        _episode_inputs(),
+        project_name="测试剧",
+        angle_block="",
+    )
+    assert "结局前置" in system and "反常识断言" in system
+    assert "绝境点名" in system and "诡异疑问" in system
+    assert "每秒约四个字" in user
+    assert "参考不是硬性上限" in user
+
+
 def test_anchor_maps_quote_to_transcript_window(tmp_path: Path) -> None:
     """锚定 quote 精确定位转写段：start/end 取自台词区间（LLM 不产时间戳）。"""
     llm = _FakeLlm(_flow_json())
@@ -153,4 +178,95 @@ def test_llm_unavailable_backoff_then_raise(
         trace_path=tmp_path / "trace.json",
     )
     assert llm.calls == 2
+    assert script.segments
+
+
+def _write_with_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    llm: _AlwaysOkLlm,
+    score_one: Any,
+) -> Any:
+    monkeypatch.setattr(flow_writer.variant_scoring, "score_one", score_one)
+    return flow_writer.write_flow_script(
+        llm,
+        _episode_inputs(),
+        project_name="测试剧",
+        angle_block="",
+        trace_path=tmp_path / "trace.json",
+        settings={"llm.model": "stub"},
+    )
+
+
+def test_judge_low_score_feeds_suggestion_into_reroll(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W7-2：评审总分过低 → 拒稿一次，评审建议原文进下一轮 ask（软反馈）。"""
+    llm = _AlwaysOkLlm(_flow_json())
+    verdicts = iter(
+        [
+            {"total": 4.5, "suggestion": "把身份反差提到第一句"},
+            {"total": 8.2, "suggestion": "已经是好稿"},
+        ]
+    )
+
+    def _score_one(plan_data: Any, _angle: str, _settings: Any, **_k: object) -> Any:
+        assert plan_data["narration_texts"], "评审喂进来的必须是解说全文"
+        return next(verdicts)
+
+    script = _write_with_settings(tmp_path, monkeypatch, llm, _score_one)
+    assert script.segments
+    assert "上一稿按这些意见重写" not in llm.prompts[0]
+    assert "把身份反差提到第一句" in llm.prompts[1]
+
+
+def test_judge_failure_skips_silently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """评审失败返 None：一轮即采纳，生成流程零感知（评审是增益不是依赖）。"""
+
+    def _none(*_a: object, **_k: object) -> None:
+        return None
+
+    llm = _AlwaysOkLlm(_flow_json())
+    script = _write_with_settings(tmp_path, monkeypatch, llm, _none)
+    assert script.segments
+    assert len(llm.prompts) == 1
+
+
+def test_judge_reject_capped_then_adopt_with_annotation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """拒稿封顶 1 次：第二轮即便评分仍低也采纳（评审低分不挡片），批注进 trace。"""
+    calls = {"n": 0}
+
+    def _always_low(*_a: object, **_k: object) -> dict[str, Any]:
+        calls["n"] += 1
+        return {"total": 3.0, "suggestion": "还是不够狠"}
+
+    llm = _AlwaysOkLlm(_flow_json())
+    script = _write_with_settings(tmp_path, monkeypatch, llm, _always_low)
+    assert script.segments
+    assert calls["n"] == 2  # 轮0 拒稿一次、轮1 采纳——不是 3 轮打满
+    trace = json.loads((tmp_path / "trace.json").read_text(encoding="utf-8"))
+    assert trace["attempts"][-1]["judge"]["total"] == pytest.approx(3.0)
+
+
+def test_default_settings_skips_judge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """settings 缺省（测试/直调路径）完全不触发评审——W6 行为逐字节不变。"""
+
+    def _forbid(*_a: object, **_k: object) -> Any:
+        raise AssertionError("未传 settings 不该跑评审")
+
+    monkeypatch.setattr(flow_writer.variant_scoring, "score_one", _forbid)
+    llm = _AlwaysOkLlm(_flow_json())
+    script = flow_writer.write_flow_script(
+        llm,
+        _episode_inputs(),
+        project_name="测试剧",
+        angle_block="",
+        trace_path=tmp_path / "trace.json",
+    )
     assert script.segments

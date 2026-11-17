@@ -108,6 +108,7 @@ def script_dialogue_plan(
             ),
             prompts=llm_prompts.overrides_from(settings),
             prior_texts=_prior_texts_of(settings),
+            settings=settings,
         )
         return narration_pipeline.build_from_script_episodes(
             {

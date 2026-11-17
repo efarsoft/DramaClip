@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from dramaclip.engines.llm_trace import dump_trace
 from dramaclip.engines.narration import audit as narration_audit
+from dramaclip.engines.narration import variant_scoring
 from dramaclip.engines.narration.numerals import to_chinese_numerals
 from dramaclip.engines.narration.scriptwriter import (
     FUNDAMENTALS,
@@ -48,6 +49,8 @@ _RETRY_BACKOFF_S = (15.0, 30.0)
 _FUZZY_ANCHOR_RATIO = 0.55
 _PAUSE_BREATH_S = 0.30  # 与 models.PAUSE_BREATH_S 同源（呼吸扣减见 W2）
 _MIN_BODY_LINES = 4  # 正文句数下限（防退化，同剧本链段数下限纪律）
+_JUDGE_REJECT_BELOW = 7.0  # 六维语义评审总分低于此值才触发重掷（软信号，见 W7）
+_MAX_JUDGE_REJECTS = 1  # 评审拒稿封顶：最后一轮无论评分多低都采纳带批注（不挡片）
 
 class FlowLine(BaseModel):
     """整篇线的一句：解说文本 + 它所依据的原文台词引用（锚）。"""
@@ -75,7 +78,14 @@ def _flow_system() -> str:
         "不需要管画面窗口，画面落点由后置工序按你的台词引用自动对齐。只管把故事"
         "讲得抓人。\n"
         + FUNDAMENTALS
-        + "\n输出 JSON（只输出 JSON，不要多余文字）："
+        + "\n开场钩子从四种形态里挑最贴这部题材的一种下笔（也可把转写里最冲突的那句"
+        "台词原样搬来当第一句——剧中人自己开口，比任何转述都先声夺人）：\n"
+        "①结局前置：第一句就抛最震撼的结果或瞬间，不做任何铺垫（复仇/犯罪/反转题材顺手）；\n"
+        "②反常识断言：一句颠覆常识的判断或反问，逼观众想反驳（人性/现实题材顺手）；\n"
+        "③绝境点名：把窒息级的困境和具体处境叠进一句（灾难/求生/家庭题材顺手）；\n"
+        "④诡异疑问：呈现一个说不通的场景，让人必须问为什么（悬疑/奇幻题材顺手）。\n"
+        "首句控制在口播三秒念得完的长度，写完自己默念一遍。\n"
+        "输出 JSON（只输出 JSON，不要多余文字）："
         '{"hook": {"quote": "开场句依据的原文台词，一字不差摘录，无则空串", '
         '"text": "开场钩子句"}, '
         '"segments": [{"quote": "该句依据的原文台词，无则空串", "text": "解说句"}…], '
@@ -104,7 +114,10 @@ def build_flow_request(
         "转写按集分组（每组以「【第N集】」单独一行开头），其后每行一条台词，"
         "格式为「开始-结束 台词」，时间为该集内的相对时间。"
         "受上下文预算限制，每组是该集跨头尾的均匀摘录（集首与集尾台词必定保留），"
-        "不是全量逐字。你的 quote 必须从这些台词行里摘录。"
+        "不是全量逐字。你的 quote 必须从这些台词行里摘录。\n"
+        "句子长度参考节奏：每句解说锚定的台词片段时长，按每秒约四个字的口播速度"
+        "折算，就是它顺口的长度——关键冲突可以多给两句戏份，转场过渡一句带过即可；"
+        "这是参考不是硬性上限，讲得自然优先。"
     )
     style_block = f"\n解说风格要求：{style_directives}" if style_directives != "" else ""
     visual_suffix = format_visual_tracks(episode_inputs)
@@ -215,6 +228,12 @@ def _flow_to_script(
     return Script(hook=hook, segments=placed, cta=cta)
 
 
+def _script_as_plan_like(script: Script) -> dict[str, Any]:
+    """Script → 六维评审的 plan_data 形状（format_variant 只认 narration_texts）。"""
+    texts = [script.hook, *(seg.text for seg in script.segments), script.cta]
+    return {"narration_texts": [{"text": t} for t in texts if t.strip()]}
+
+
 def write_flow_script(
     llm: LlmClient,
     episode_inputs: list[dict[str, Any]],
@@ -226,9 +245,13 @@ def write_flow_script(
     trace_path: Path | None = None,
     prompts: dict[str, str] | None = None,
     prior_texts: list[str] | None = None,
+    settings: dict[str, str] | None = None,
 ) -> Script:
-    """整篇线主入口：生成 → 锚定铺轴 → 硬审查重掷（复用剧本链同款 audit）。
+    """整篇线主入口：生成 → 锚定铺轴 → 硬审查重掷（复用剧本链同款 audit）→
+    六维语义评审（W7：软信号——总分过低给一次带评审建议的重掷，最后一轮无论
+    评分多低都采纳带批注，评审失败安静跳过，绝不挡片）。
     产出与剧本链同形的 Script——清洗/铺轴/渲染下游零改动。
+    ``settings`` 缺省 None（测试/直调）：不跑语义评审，行为与 W6 一致。
     """
     system, user_prompt = build_flow_request(
         episode_inputs,
@@ -253,11 +276,19 @@ def write_flow_script(
     }
     attempts: list[dict[str, Any]] = []
     script: Script | None = None
+    judge_rejections = 0
     for attempt in range(_MAX_ATTEMPTS):
-        ask = user_prompt + (
-            "\n\n上一稿违反了这些硬规则，重写时逐条避免：\n"
-            + "\n".join(f"- {q}" for q in attempts[-1].get("audit_quotes", []))
-            if attempts and attempts[-1].get("audit_quotes")
+        feedback: list[str] = [
+            f"- {q}" for q in (attempts[-1].get("audit_quotes") if attempts else None) or []
+        ]
+        rejected_suggestion = str(
+            (attempts[-1].get("judge_rejected") if attempts else None) or ""
+        ).strip()
+        if rejected_suggestion:
+            feedback.append(f"- 评审建议：{rejected_suggestion}")
+        ask = (
+            user_prompt + "\n\n上一稿按这些意见重写（逐条落实）：\n" + "\n".join(feedback)
+            if feedback
             else user_prompt
         )
         raw: Any = None
@@ -321,6 +352,30 @@ def write_flow_script(
             ]
             script = None
             continue
+        # 六维语义评审（软信号）：规则闸已干净才评，总分过低给一次带建议的重掷；
+        # 失败返 None 安静跳过；最后一轮不拒稿（评审低分不该把活儿拦死）。
+        if settings is not None:
+            verdict = variant_scoring.score_one(
+                _script_as_plan_like(script),
+                "整篇解说线",
+                settings,
+                trace_dir=trace_path.parent if trace_path is not None else None,
+            )
+            if verdict is not None:
+                total = float(verdict.get("total") or 0.0)
+                attempts[-1]["judge"] = {
+                    "total": total,
+                    "suggestion": str(verdict.get("suggestion") or "").strip(),
+                }
+                if (
+                    total < _JUDGE_REJECT_BELOW
+                    and judge_rejections < _MAX_JUDGE_REJECTS
+                    and attempt < _MAX_ATTEMPTS - 1
+                ):
+                    judge_rejections += 1
+                    attempts[-1]["judge_rejected"] = attempts[-1]["judge"]["suggestion"]
+                    script = None
+                    continue
         dump_trace(trace_path, {"attempts": attempts, "script": script.model_dump()})
         return script
     tail = attempts[-1] if attempts else {}
