@@ -33,6 +33,14 @@ _BGM_LOOP_MAX_COPIES = 8
 # 人声躲床：成片混音做 sidechain 触发压床（旁白/原声对白开口床自动退让），
 # 与 _SIDECHAIN_COMPRESS 同一模式；attack/release 放慢避免逐音节泵动。
 _BGM_DUCK_COMPRESS = "sidechaincompress=threshold=0.05:ratio=4:attack=150:release=400"
+# 床曲首拍起播（W3 节拍对齐）：librosa 实测曲目首个拍点，首拍离曲头超过
+# _BED_FIRST_BEAT_MIN_S（曲头静音/渐入非节拍区，sadness_01 实测 9.40s）就从
+# 首拍前 0.05s 起播——床进点落在节拍上。首拍过大（> _BED_FIRST_BEAT_CAP_S，
+# 疑似 beat_track 误判）不跳。任何测量失败回退 0（增强项不挡片）。
+_BED_FIRST_BEAT_MIN_S = 0.20
+_BED_FIRST_BEAT_CAP_S = 20.0
+_BED_FIRST_BEAT_LEAD_S = 0.05
+_bed_start_offset_cache: dict[Path, float] = {}
 
 
 def _bed_gain_db(track: Path) -> float | None:
@@ -52,7 +60,43 @@ def _bed_gain_db(track: Path) -> float | None:
     return round(_BGM_BED_TARGET_LUFS - reading.integrated_lufs, 2)
 
 
-def _bed_loop_inputs(track: Path, duration: float, track_dur: float) -> tuple[list[str], str]:
+def _bed_first_beat_s(track: Path) -> float:
+    """曲目首个拍点位置（秒）；失败/无拍回退 0（曲头起播，增强项不挡片）。
+
+    librosa.beat 经 importlib 惰性取（ml extras 可选依赖，与 analysis.
+    audio_analyzer 同款绕法）；结果按曲目缓存——同一曲目多片复用不重算。
+    """
+    cached = _bed_start_offset_cache.get(track)
+    if cached is not None:
+        return cached
+    offset = 0.0
+    try:
+        import importlib
+
+        import librosa
+
+        beat_mod = importlib.import_module("librosa.beat")
+        y, sr = librosa.load(str(track), sr=22050, mono=True, duration=90)
+        _tempo, beats = beat_mod.beat_track(y=y, sr=sr, units="time")
+        import numpy as np
+
+        flat = np.ravel(beats)
+        if np.size(flat):
+            first = float(flat[0])
+            if _BED_FIRST_BEAT_MIN_S < first < _BED_FIRST_BEAT_CAP_S:
+                offset = max(first - _BED_FIRST_BEAT_LEAD_S, 0.0)
+    except Exception as exc:  # noqa: BLE001 - 增强项：量不到从曲头起播
+        _LOGGER.warning("BGM 曲目首拍测量失败（%s）：床从曲头起播", str(exc)[:120])
+        offset = 0.0
+    _bed_start_offset_cache[track] = offset
+    if offset > 0:
+        _LOGGER.info("床曲首拍对齐：%s 从 %.2fs 起播（跳过曲头非节拍区）", track.name, offset)
+    return offset
+
+
+def _bed_loop_inputs(
+    track: Path, duration: float, track_dur: float, start_offset: float = 0.0
+) -> tuple[list[str], str]:
     """床循环输入与子图前缀（产出恒定标签 ``[bedsrc]``）。
 
     多副本 acrossfade 优先，边界情形回退 stream_loop。返回 (附加输入参数,
@@ -61,14 +105,19 @@ def _bed_loop_inputs(track: Path, duration: float, track_dur: float) -> tuple[li
     余量）；amix duration=first 与 -t 再兜底裁齐。
     """
     if duration <= track_dur:
-        return ["-i", str(track)], "[1:a]anull[bedsrc];"  # 曲比片长：无需循环
-    need = math.ceil(duration / track_dur) + 1
-    can_crossfade = track_dur > 2 * _BGM_LOOP_XFADE_S and need <= _BGM_LOOP_MAX_COPIES
+        # -ss 在 -i 前=输入侧快跳（不解码曲头），起播落在实测首拍上
+        lead = ["-ss", f"{start_offset:.3f}"] if start_offset > 0 else []
+        return [*lead, "-i", str(track)], "[1:a]anull[bedsrc];"  # 曲比片长：无需循环
+    effective_dur = track_dur - start_offset
+    need = math.ceil(duration / effective_dur) + 1
+    can_crossfade = effective_dur > 2 * _BGM_LOOP_XFADE_S and need <= _BGM_LOOP_MAX_COPIES
     if not can_crossfade:
         # 曲目过短（crossfade 会吃掉大半）或副本数超帽（超长片×超短曲）：
         # 回退硬循环——循环点咔哒风险换可行性，留痕在常量注释。
-        return ["-stream_loop", "-1", "-i", str(track)], "[1:a]anull[bedsrc];"
-    inputs: list[str] = ["-i", str(track)]
+        lead = ["-ss", f"{start_offset:.3f}"] if start_offset > 0 else []
+        return [*lead, "-stream_loop", "-1", "-i", str(track)], "[1:a]anull[bedsrc];"
+    lead = ["-ss", f"{start_offset:.3f}"] if start_offset > 0 else []
+    inputs: list[str] = [*lead, "-i", str(track)]
     chain: list[str] = []
     prev = "[1:a]"
     for index in range(2, need + 1):
@@ -106,7 +155,8 @@ def _mix_bgm_bed(
     if track_dur <= 0:
         raise RuntimeError(f"BGM 曲目时长非正（{track_dur:g}s），疑似坏文件")
     fade_start = max(duration - _BGM_TAIL_FADE_S, 0.0)
-    loop_inputs, bed_prefix = _bed_loop_inputs(track, duration, track_dur)
+    start_offset = _bed_first_beat_s(track)
+    loop_inputs, bed_prefix = _bed_loop_inputs(track, duration, track_dur, start_offset)
     gain_db = _bed_gain_db(track)
     gain_filter = (
         f"volume={gain_db:+.2f}dB" if gain_db is not None else f"volume={_BGM_BED_VOLUME}"
