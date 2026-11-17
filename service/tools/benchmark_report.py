@@ -167,8 +167,11 @@ def _profile_reconcile_lines(
 
 
 def profile_init(conn: sqlite3.Connection, out_path: str) -> str:
-    """当前实测 → 建议档案（status=proposed）：业主核对改 accepted 才生效。"""
+    """建议档案（status=proposed）：初值=**行业区间中值**（对标的起点是往行业节奏
+    靠，不是把素材现状固化成目标——素材镜长慢一拍抄进来就永远慢一拍）；素材库
+    实测只作 observed 附注供对照。业主核对/改值后把 status 改 accepted 才生效。"""
     projects = _project_report(conn)
+    observed: dict[str, float] = {}
     per_ep: dict[str, list[float]] = {}
     for project in projects:
         eps: list[dict[str, float | None]] = project["episodes"]  # type: ignore[assignment]
@@ -192,19 +195,33 @@ def profile_init(conn: sqlite3.Connection, out_path: str) -> str:
         per_ep.setdefault("tail_silence_s", []).extend(
             float(m["tail_silence_s"]) for m in eps if m.get("tail_silence_s") is not None
         )
-    fields = {key: round(_p50(vals), 2) for key, vals in per_ep.items() if vals}
+    observed = {key: round(_p50(vals), 2) for key, vals in per_ep.items() if vals}
+    fields = {
+        "first_episode_s": round(sum(_REF_FIRST_EP_S) / 2, 2),
+        "regular_episode_s": round(sum(_REF_REG_EP_S) / 2, 2),
+        "shot_s": round(sum(_REF_SHOT_S) / 2, 2),
+        "voiced_ratio": round(sum(_REF_VOICED_RATIO) / 2, 2),
+        "wps": round(sum(_REF_WPS_NORMAL) / 2, 2),
+        "tail_silence_s": _REF_TAIL_SILENCE_MAX,
+    }
     profile = {
         "status": "proposed",
         "fields": fields,
+        "fields_observed": observed,
         "note": (
-            "初值=素材库实测 p50。核对后把 status 改成 accepted 启用对账判定；"
-            "字段值也可手改成创作目标（档案值是拍板的节奏目标，不是行业区间的抄本）。"
+            "初值=行业抽样区间中值（对标起点，非素材现状的抄本；"
+            "fields_observed 是素材库实测 p50 供对照）。核对后把 status 改成 "
+            "accepted 启用对账判定；字段值可手改成创作目标——档案值是拍板的"
+            "节奏目标，不是行业区间的抄本。"
         ),
     }
     Path(out_path).write_text(
         json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    return f"节奏档案已写入 {out_path}（status=proposed，字段：{fields}）"
+    return (
+        f"节奏档案已写入 {out_path}（status=proposed，字段={fields}，"
+        f"素材实测={observed}）"
+    )
 
 
 def render(projects: list[dict[str, object]], profile: dict | None = None) -> str:

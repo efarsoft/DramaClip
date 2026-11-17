@@ -470,3 +470,35 @@ def test_highlight_flag_carried_into_script(tmp_path: Path) -> None:
         trace_path=tmp_path / "trace.json",
     )
     assert [seg.highlight for seg in script.segments] == [True, False, True, False]
+
+
+def test_highlight_clamped_to_cap(tmp_path: Path) -> None:
+    """W8 钳制：LLM 全标 true 时按句序保留前 4 个，裁剪数进 trace
+    （prompt 遵从率不稳是已知问题，代码兜底防退化成拍拍都停）。"""
+    payload = json.dumps(
+        {
+            "hook": {"quote": "", "text": "开场。"},
+            "segments": [
+                {"quote": "她把丈夫的药倒进了老鼠洞", "text": "一。", "highlight": True},
+                {"quote": "", "text": "二。", "highlight": True},
+                {"quote": "是药里有人动了手脚", "text": "三。", "highlight": True},
+                {"quote": "", "text": "四。", "highlight": True},
+                {"quote": "那人终于登门", "text": "五。", "highlight": True},
+                {"quote": "", "text": "六。", "highlight": True},
+            ],
+            "cta": {"quote": "", "text": "引导。"},
+        },
+        ensure_ascii=False,
+    )
+    llm = _AlwaysOkLlm(payload)
+    script = flow_writer.write_flow_script(
+        llm,
+        _episode_inputs(),
+        project_name="测试剧",
+        angle_block="",
+        trace_path=tmp_path / "trace.json",
+    )
+    assert [seg.highlight for seg in script.segments][:4] == [True] * 4
+    assert [seg.highlight for seg in script.segments][4:] == [False, False]
+    trace = json.loads((tmp_path / "trace.json").read_text(encoding="utf-8"))
+    assert trace["attempts"][-1]["highlights_clamped"] == 2

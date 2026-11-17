@@ -55,6 +55,7 @@ _HOOK_MIN_CHARS = 6  # 首选钩子低于此字数视为无效，备选候选接
 _JUDGE_REJECT_BELOW = 7.0  # 六维评审总分低于此值触发重掷；7.0~8.0 只记批注不拒
 _JUDGE_NOTE_BELOW = 8.0  # 批注线：≥8.0 干净采纳
 _MAX_SEMANTIC_REJECTS = 2  # 语义类拒稿（预算/复述/评审）共享预算；audit 硬闸独立
+_MAX_HIGHLIGHTS = 4  # 强拍标注确定性上限：全标 true 就退化成「拍拍都停」
 _RETELL_FIX_BY_ISSUE = {
     # 复述缺口 → 修订指令（缺口分类处置：先删和拆，不是补——重写纪律）
     "unclear": "这句没讲明白：把指代和因果写直白",
@@ -301,6 +302,20 @@ def _script_as_plan_like(script: Script) -> dict[str, Any]:
     return {"narration_texts": [{"text": t} for t in texts if t.strip()]}
 
 
+def _clamp_highlights(flow: FlowScript) -> int:
+    """强拍标注确定性钳制：LLM 遵从率不稳（全标 true 就退化成拍拍都停），
+    超上限按句序保留前 N 个——prompt 说不算数，代码兜底才算数。返回裁剪数。"""
+    kept = 0
+    clamped = 0
+    for line in flow.segments:
+        if line.highlight:
+            kept += 1
+            if kept > _MAX_HIGHLIGHTS:
+                line.highlight = False
+                clamped += 1
+    return clamped
+
+
 def write_flow_script(
     llm: LlmClient,
     episode_inputs: list[dict[str, Any]],
@@ -381,6 +396,7 @@ def write_flow_script(
             )
             for line in flow.all_lines():
                 line.text = to_chinese_numerals(line.text.strip())
+            clamped = _clamp_highlights(flow)
             script, overs, deduped = _flow_to_script(flow, episode_inputs)
         except (LlmUnavailable, ValidationError, ValueError, TypeError, KeyError) as exc:
             attempt_trace: dict[str, Any] = {"error": f"{type(exc).__name__}: {exc}"}
@@ -411,6 +427,8 @@ def write_flow_script(
         )
         if deduped:
             attempts[-1]["anchor_deduped"] = deduped
+        if clamped:
+            attempts[-1]["highlights_clamped"] = clamped
         report = narration_audit.audit_script(
             script, transcript, episode_durations=durations, prior_texts=prior_texts
         )
@@ -427,7 +445,9 @@ def write_flow_script(
             attempts[-1]["rewrite_feedback"] = [
                 f"- 规则 {rule}：{detail}"
                 for rule, detail in zip(
-                    attempts[-1]["audit_quotes"], attempts[-1]["audit_details"]
+                    attempts[-1]["audit_quotes"],
+                    attempts[-1]["audit_details"],
+                    strict=True,
                 )
             ]
             script = None
@@ -449,11 +469,21 @@ def write_flow_script(
             script = None
             continue
         attempts[-1]["budget_overs"] = overs
-        # 复述闸（听懂了没，比评分狠）：无上下文观众闭卷复述 + 感受流缺口分类处置
+        # 复述闸（听懂了没，比评分狠）：无上下文观众闭卷复述 + 感受流缺口分类处置。
+        # 文字稿=钩子+正文+引导（观众听到的全文）——钩子直接影响「主角目标明确」判定
         if retell_on:
             try:
                 retell_report = retell_check(
-                    "\n".join(seg.text for seg in script.segments), llm
+                    "\n".join(
+                        part
+                        for part in (
+                            script.hook,
+                            *(seg.text for seg in script.segments),
+                            script.cta,
+                        )
+                        if part.strip()
+                    ),
+                    llm,
                 )
             except Exception:  # noqa: BLE001 - 复述是增益不是依赖：失败安静跳过
                 retell_report = None
@@ -472,7 +502,8 @@ def write_flow_script(
                             "- 结尾一句点明主角此刻处境与下一步悬念（不剧透结局）"
                         )
                     items.extend(
-                        f"- 「{c['quote']}」：{_RETELL_FIX_BY_ISSUE.get(c['issue'], _RETELL_FIX_BY_ISSUE['unclear'])}"
+                        f"- 「{c['quote']}」："
+                        f"{_RETELL_FIX_BY_ISSUE.get(c['issue'], _RETELL_FIX_BY_ISSUE['unclear'])}"
                         for c in retell_report.confusions[:4]
                     )
                     attempts[-1]["rewrite_feedback"] = items
