@@ -16,6 +16,8 @@ from dramaclip.engines.narration.casting import (
     strongest_span_of,
 )
 from dramaclip.engines.narration.models import (
+    PAUSE_BREATH_MIN_GAP_S,
+    PAUSE_BREATH_S,
     NarrationText,
     PlanData,
     SceneCandidate,
@@ -122,7 +124,11 @@ def build_cross(
                 # 画面序列自明，渲染期无桥可弃。
                 emit_slot = False
             else:
-                cap = min(60, int(gap * 4.0))  # indextts2 实测 ≈4.5 字/秒，留 12% 裕量
+                # 呼吸扣减（W2 停顿协议）：预算先扣 0.3s 段间呼吸再按语速换算——
+                # 解说段音频天然短于窗尾一拍，桥段之间不再零呼吸地赶人；
+                # 小空隙不扣（呼吸与内容抢窗时优先保内容）
+                breath = PAUSE_BREATH_S if gap >= PAUSE_BREATH_MIN_GAP_S else 0.0
+                cap = min(60, int((gap - breath) * 4.0))  # indextts2 实测 ≈4.5 字/秒，留 12% 裕量
                 if cap < 60:
                     char_budget = max(_BRIDGE_CAP_FLOOR_CHARS, cap)
                     bridge += (

@@ -26,6 +26,8 @@ from dramaclip.engines.narration.layout import (
     _patch_timeline,
 )
 from dramaclip.engines.narration.models import (
+    PAUSE_BREATH_MIN_GAP_S,
+    PAUSE_BREATH_S,
     NarrationText,
     PlanData,
     StrategySpec,
@@ -285,7 +287,10 @@ def _rewrite_and_resynth(
         duration = float(entry["duration"])
         gap_s = float(entry["gap_s"])
         cps = len(text) / duration if duration > 0 else 4.0
-        target_chars = max(8, int(gap_s * cps))
+        # 呼吸扣减（W2 停顿协议）：收短目标先扣 0.3s 段间呼吸——收短出来的段
+        # 也不再贴满窗口；小空隙不扣（保内容优先）。
+        breath = PAUSE_BREATH_S if gap_s >= PAUSE_BREATH_MIN_GAP_S else 0.0
+        target_chars = max(8, int((gap_s - breath) * cps))
         try:
             new_text = rewrite_for_fit(text, target_chars)
         except Exception as exc:  # noqa: BLE001 - LLM 失败不致命：该段回退弃段路径

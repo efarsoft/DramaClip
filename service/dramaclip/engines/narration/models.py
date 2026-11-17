@@ -43,6 +43,13 @@ class NarrationText(BaseModel):
     char_budget: int | None = None
 
 
+# 解说段间呼吸（v0.2.6 W2 停顿协议）：预算与收短目标统一扣 0.3s——解说段音频
+# 天然短于窗尾一拍，段间不再零呼吸地赶人。小空隙（<1s）不扣：呼吸与内容抢
+# 窗时优先保内容。消费点=modes_w5 桥段预算 + pipeline 定向收短目标。
+PAUSE_BREATH_S = 0.30
+PAUSE_BREATH_MIN_GAP_S = 1.0
+
+
 class StrategySpec(BaseModel):
     """推广策略（原案第五章；W4 内置默认，平台预设 W7 接入）。
 
