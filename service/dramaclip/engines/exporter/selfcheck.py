@@ -32,6 +32,12 @@ from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 MIN_MEAN_VOLUME_DB = -70.0
 MAX_FREEZE_S = 2.0
 
+# 开场 3 秒质检（W4）：narration 模式开场应有旁白开口——前窗静默黑洞（文案没
+# 落位/渲染错）是明确缺陷，原声模式（raw_clip 等）开场自有节奏不判。「有可闻
+# 声」阈值 -45dB 是初值未做真人校准（verify_modes 同款纪律），实测数据到位再调。
+OPENING_WINDOW_S = 3.0
+OPENING_MIN_MEAN_DB = -45.0
+
 # freezedetect 参数与 verify_modes.max_freeze_s 逐字同判：噪声门 -60dB、
 # 只报 >=1.0s 的静止段；「无长冻结帧」的线在 MAX_FREEZE_S。
 _FREEZE_VF = "freezedetect=n=-60dB:d=1.0"
@@ -574,6 +580,60 @@ def overall_state(checks: dict[str, Any]) -> str:
     return "partial"
 
 
+def measure_opening_audio(video: Path, *, window_s: float = OPENING_WINDOW_S) -> float | None:
+    """开场窗口的 mean_volume（只解码前 window_s 秒，成本忽略）；量不到 None。"""
+    try:
+        completed = subprocess.run(  # noqa: S603
+            [
+                resolve_ffmpeg(),
+                "-hide_banner",
+                "-nostats",
+                "-t",
+                f"{window_s:.2f}",
+                "-i",
+                str(video),
+                "-map",
+                "0:a:0?",
+                "-af",
+                "volumedetect",
+                "-f",
+                "null",
+                "-",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60.0,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    found = _MEAN_VOLUME_RE.search(completed.stderr or "")
+    return float(found.group(1)) if found else None
+
+
+def check_opening(mean_db: float | None, mode: str) -> dict[str, Any] | None:
+    """开场 3 秒质检（W4）：narration 模式前窗应有旁白开口——静默黑洞（文案
+    没落位/渲染错）判红带实测数；原声模式开场自有节奏，灰不判。"""
+    if EXPECT_NARRATION.get(mode) == "none":
+        return None
+    if mean_db is None:
+        return None
+    has_sound = mean_db > OPENING_MIN_MEAN_DB
+    return {
+        "pass": has_sound,
+        "window_s": OPENING_WINDOW_S,
+        "mean_volume_db": round(mean_db, 1),
+        "reason": (
+            f"开场 {OPENING_WINDOW_S:.0f}s 有可闻声（mean {mean_db:.1f} dB）"
+            if has_sound
+            else f"开场静默黑洞：前 {OPENING_WINDOW_S:.0f}s mean {mean_db:.1f} dB，"
+            "无旁白开口——检查文案落位或渲染"
+        ),
+    }
+
+
 def check_loudness(video: Path, target: tuple[float, float] | None) -> dict[str, Any] | None:
     """响度实测读数（v3 影子项）：导出链 loudness.py 的复核门禁已经硬失败守门——
     能进自检的成片必然过门，所以这里只记归一后的复核实测做历史账（偏差可见），
@@ -627,6 +687,7 @@ def run(
     徽章，判红阈值等跨片数据到位再定（avsync 影子→门禁同一纪律）。
     """
     mean_volume_db, max_freeze_s = measure_audio_video(video)
+    opening_mean_db = measure_opening_audio(video)
     measured_caption: tuple[float, float] | None = None
     probe_rows: list[tuple[float, subtitle_ocr.FrameResult]] | None = None
     if caption_band is not None and work_dir is not None and measured_s:
@@ -650,6 +711,7 @@ def run(
         "safe_zone": check_safe_zone(caption_band),
         "ending": check_ending(ending_end_s, ending_lines),
         "loudness": check_loudness(video, loudness_target),
+        "opening": check_opening(opening_mean_db, mode),
         "avsync": check_avsync(
             measure_avsync_offsets(video, avsync_samples or [], episode_paths or {})
             if avsync_samples and episode_paths
