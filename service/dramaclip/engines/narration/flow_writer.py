@@ -171,7 +171,14 @@ def _flow_to_script(
 ) -> Script:
     """锚定铺轴：每句 quote 定位转写段得 (集, start, end)；无锚句沿用上一句的
     集与光标续写（转场/情绪句跟随叙事流）。产出与剧本链同形的 Script——
-    铺轴吸附/近邻衔接/CTA 尾铺由 build_from_script_episodes 原样接管。"""
+    铺轴吸附/近邻衔接/CTA 尾铺由 build_from_script_episodes 原样接管。
+
+    集上界钳制（装测实锤：长句 est 超集长被 audit 硬拦）：end 不越过所在集
+    时长；文案长到锚窗装不下时窗口按 est 延展的上限就是集尾——超出的部分
+    由下游合成期收短兜底（fit-relayout 既有纪律）。"""
+    durations = {
+        int(ep["number"]): float(ep.get("duration") or 0.0) for ep in episode_inputs
+    }
     transcripts = _transcript_index(episode_inputs)
     placed: list[ScriptSegment] = []
     cursor_by_ep: dict[int, float] = {}
@@ -184,18 +191,21 @@ def _flow_to_script(
         anchor = _anchor_of_quote(line.quote, transcripts)
         if anchor is not None:
             number, a_start, a_end = anchor
+            limit_by_ep = durations.get(number, 0.0)
             prev_end = cursor_by_ep.get(number)
             # 无锚句可能已把锚窗吃到过半：锚句 start 顺延到前尾之后（不倒序），
             # end 不早于 start+估算（文案短时保住锚窗剩余，长时按实测延展）
             start = max(a_start, prev_end) if prev_end is not None else a_start
-            end = max(a_end, start + estimate_duration(text))
+            end = min(max(a_end, start + estimate_duration(text)), limit_by_ep)
         elif placed:
             last = placed[-1]
             number, start = last.episode, last.end
-            end = start + estimate_duration(text)
+            limit_by_ep = durations.get(number, 0.0)
+            end = min(start + estimate_duration(text), limit_by_ep)
         else:
             number = transcripts[0][0] if transcripts else 1
-            start, end = 0.0, estimate_duration(text)
+            start, end = 0.0, min(estimate_duration(text), limit_by_ep)
+        end = min(end, limit_by_ep)
         placed.append(
             ScriptSegment(episode=number, start=round(start, 2), end=round(end, 2), text=text)
         )
@@ -283,9 +293,19 @@ def write_flow_script(
             continue
         if len(script.segments) < _MIN_BODY_LINES:
             kept = len(script.segments)
-            attempts[-1]["rejected"] = f"正文仅 {kept} 句（要求至少 {_MIN_BODY_LINES} 句）"
+            attempts.append(
+                {
+                    "raw": raw,
+                    "accepted": False,
+                    "segments_kept": kept,
+                    "rejected": f"正文仅 {kept} 句（要求至少 {_MIN_BODY_LINES} 句）",
+                }
+            )
             script = None
             continue
+        attempts.append(
+            {"raw": raw, "accepted": True, "segments_kept": len(script.segments)}
+        )
         report = narration_audit.audit_script(
             script, transcript, episode_durations=durations, prior_texts=prior_texts
         )
