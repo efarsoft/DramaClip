@@ -23,6 +23,23 @@ class DownloadCancelled(Exception):
     """用户取消下载（经 cancel Event 触发）。"""
 
 
+class ConnectionTruncated(Exception):
+    """连接被源站/中间设备提前关闭（截断）——半成品已保留，重试将从断点续传。
+
+    实锤（2026-11-17 装测）：1.4GB 模型在 88% 被静默掐断——服务端/中间盒优雅
+    关闭（FIN）让客户端看到「正常读到结尾」，截断只有走到大小对账才露馅；
+    旧实现校验失败删半成品 → 每次掐断从 0 重下，大文件永远磨不完。
+    """
+
+    def __init__(self, received: int, expected: int) -> None:
+        self.received = received
+        self.expected = expected
+        percent = f"{received / expected:.0%}" if expected > 0 else "?"
+        super().__init__(
+            f"连接中断于 {received}/{expected} 字节（{percent}），断点已保留——再次下载将从断点续传"
+        )
+
+
 def fetch_json(url: str, *, timeout: float = 30.0) -> object:
     """GET 并解析 JSON（带 UA；HTTP 错误抛 URLError/HTTPError）。"""
     request = urllib.request.Request(url, headers={"User-Agent": _UA})
@@ -87,6 +104,7 @@ def download_file(
     with urllib.request.urlopen(request, timeout=60) as resp:
         append = start > 0 and resp.status == 206
         position = start if append else 0
+        declared_length = resp.headers.get("Content-Length")
         with tmp.open("ab" if append else "wb") as sink:
             while True:
                 if cancel.is_set():
@@ -98,6 +116,14 @@ def download_file(
                 position += len(chunk)
                 if on_progress is not None:
                     on_progress(position)
+        # 截断检测：响应自带 Content-Length 时，实收不足即连接被提前关闭——
+        # 保留半成品抛专用异常（下校验还会兜一次，这里先拦是因为半成品保留
+        # 与否的分界在「截断」而非「对账失败」）。无 CL 头的源走对账兜底。
+        if declared_length is not None:
+            expected_end = start + int(declared_length) if append else int(declared_length)
+            received_this = position - start if append else position
+            if received_this != int(declared_length):
+                raise ConnectionTruncated(position, expected_end)
     _validate_and_promote(tmp, dest, expected_size, expected_sha256, expected_blob_id)
 
 
@@ -108,11 +134,21 @@ def _validate_and_promote(
     expected_sha256: str | None,
     expected_blob_id: str,
 ) -> None:
-    """下载完成或半成品恰好写满时的统一收口：大小/哈希对账 + 原子改名落位。"""
+    """下载完成或半成品恰好写满时的统一收口：大小/哈希对账 + 原子改名落位。
+
+    大小不符分方向处理：偏短（actual < expected）= 连接截断的兜底捕获（源不发
+    Content-Length 时主检测拦不到）——保留半成品抛「连接中断」，重试从断点续传；
+    偏长 = 字节流和期望的文件不是同一个东西，删。SHA/Blob 不符仍删（坏内容
+    不能当续传前缀），最终落位前的哈希终验是内容完整性的兜底防线。
+    """
     actual = tmp.stat().st_size
     if expected_size > 0 and actual != expected_size:
+        if actual < expected_size:
+            raise ConnectionTruncated(actual, expected_size)
         tmp.unlink(missing_ok=True)
-        raise OSError(f"大小校验失败：期望 {expected_size} 字节，实际 {actual} 字节")
+        raise OSError(
+            f"大小校验失败：期望 {expected_size} 字节，实际 {actual} 字节（超长，半成品已删）"
+        )
     if expected_sha256 or expected_blob_id:
         digest, blob = sha256_and_blob_id_of(tmp)
         if expected_sha256 and digest != expected_sha256.strip().lower():

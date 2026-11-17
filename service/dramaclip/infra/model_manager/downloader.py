@@ -323,7 +323,10 @@ def _download_from(
             continue
         url = file_url(kind, repo, rel, endpoints)
         state["base"] = state["done"]
-        for attempt in (1, 2):
+        # 截断续传磨盘（装测 2026-11-17 实锤：1.4GB 在 88% 被静默掐断）：fetch
+        # 已保留半成品，这里多轮续传从断点接着要——轮间小缓冲让被限速/回收的
+        # 会话策略翻篇；哈希不符（坏内容）会删半成品重下，轮数同样罩住。
+        for attempt in (1, 2, 3, 4, 5):
             try:
                 fetch.download_file(
                     url,
@@ -337,10 +340,19 @@ def _download_from(
                 break
             except DownloadCancelled:
                 raise
-            except Exception:
-                if attempt == 2:
+            except fetch.ConnectionTruncated as exc:
+                if attempt == 5:
                     raise
-                notifier.log("warn", f"{rel} 下载或校验失败（第 1 次），重试")
+                notifier.log(
+                    "warn",
+                    f"{rel} 连接中断（{exc}），第 {attempt} 次续传",
+                )
+                time.sleep(2)
+            except Exception:
+                if attempt == 5:
+                    raise
+                notifier.log("warn", f"{rel} 下载或校验失败（第 {attempt} 次），重试")
+                time.sleep(2)
         state["done"] += size
         manifest.append(
             {"path": rel, "size": dest.stat().st_size, "sha256": sha256, "blob_id": blob_id}

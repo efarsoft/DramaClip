@@ -1,4 +1,5 @@
-"""fetch 原语：Range 续传、镜像忽略 Range 时覆盖写、size/SHA256/blob 校验与取消。"""
+"""fetch 原语：Range 续传、镜像忽略 Range 时覆盖写、size/SHA256/blob 校验与取消、
+连接截断的断点保留（装测 2026-11-17：1.4GB 在 88% 被静默掐断，磨盘救回）。"""
 
 from __future__ import annotations
 
@@ -14,6 +15,11 @@ from dramaclip.infra.model_manager import fetch
 
 _FILES: dict[str, bytes] = {"/model.bin": b"0123456789" * 8}
 _IGNORE_RANGE = False
+#: 响应体截断位置（模拟源站/中间盒发着发着关连接）；None=不截断。
+#: Content-Length 仍按未截断值发送——正是真实世界的静默掐法。
+_TRUNCATE_AT: int | None = None
+#: 响应不发 Content-Length（连接关闭界定长度）——截断兜底路径的载体。
+_NO_LENGTH = False
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -31,7 +37,11 @@ class _Handler(BaseHTTPRequestHandler):
         else:
             chunk = data
             self.send_response(200)
-        self.send_header("Content-Length", str(len(chunk)))
+        if _TRUNCATE_AT is not None:
+            chunk = chunk[:_TRUNCATE_AT]
+        if not _NO_LENGTH:
+            full = len(data[start:]) if (rng and not _IGNORE_RANGE) else len(data)
+            self.send_header("Content-Length", str(full))
         self.end_headers()
         self.wfile.write(chunk)
 
@@ -41,6 +51,9 @@ class _Handler(BaseHTTPRequestHandler):
 
 @pytest.fixture()
 def server() -> object:
+    global _TRUNCATE_AT, _NO_LENGTH
+    _TRUNCATE_AT = None
+    _NO_LENGTH = False
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -124,12 +137,48 @@ def test_ignored_range_overwrites_instead_of_append(tmp_path: Path, server: str)
         _IGNORE_RANGE = False
 
 
-def test_size_mismatch_rejects(tmp_path: Path, server: str) -> None:
+def test_size_mismatch_keeps_partial_and_reports_truncation(tmp_path: Path, server: str) -> None:
+    """期望远大于实际（无 CL 头源的截断兜底路径）：不再删半成品、不再报「大小
+    校验失败」——保留断点抛「连接中断」，重试从断点续传（磨盘救回的前提）。"""
     dest, url = _get(tmp_path, server)
-    with pytest.raises(IOError, match="大小校验失败"):
+    with pytest.raises(fetch.ConnectionTruncated, match="连接中断"):
         fetch.download_file(url, dest, 999999, cancel=threading.Event())
-    assert not dest.exists()
-    assert not dest.with_name(dest.name + fetch.TMP_SUFFIX).exists()
+    partial = dest.with_name(dest.name + fetch.TMP_SUFFIX)
+    assert partial.is_file()  # 断点保留
+    assert partial.stat().st_size == len(_FILES["/model.bin"])
+
+
+def test_truncated_connection_keeps_partial_then_resumes(tmp_path: Path, server: str) -> None:
+    """主检测路径（响应带 Content-Length 实收不足）：断点保留 + 续传磨完。
+    完整复刻装测实锤——1.4GB 传到 88% 被静默掐断，重试从 88% 接着要。"""
+    global _TRUNCATE_AT
+    _TRUNCATE_AT = 40  # 80 字节发到一半断开，CL 仍按 80 发
+    dest, url = _get(tmp_path, server)
+    payload = _FILES["/model.bin"]
+    with pytest.raises(fetch.ConnectionTruncated) as excinfo:
+        fetch.download_file(url, dest, len(payload), cancel=threading.Event())
+    assert excinfo.value.received == 40
+    assert excinfo.value.expected == len(payload)
+    partial = dest.with_name(dest.name + fetch.TMP_SUFFIX)
+    assert partial.is_file() and partial.stat().st_size == 40
+    # 第二次下载（掐断已过去）：从断点续传拼回完整文件
+    _TRUNCATE_AT = None
+    fetch.download_file(url, dest, len(payload), cancel=threading.Event())
+    assert dest.read_bytes() == payload
+    assert not partial.exists()
+
+
+def test_no_length_truncation_falls_back_to_keep_partial(tmp_path: Path, server: str) -> None:
+    """源不发 Content-Length（连接关闭界定长度）：主检测拦不到，大小对账
+    兜底同样保断点——两类源行为一致。"""
+    global _NO_LENGTH, _TRUNCATE_AT
+    _NO_LENGTH = True
+    _TRUNCATE_AT = 40
+    dest, url = _get(tmp_path, server)
+    with pytest.raises(fetch.ConnectionTruncated, match="连接中断"):
+        fetch.download_file(url, dest, len(_FILES["/model.bin"]), cancel=threading.Event())
+    assert dest.with_name(dest.name + fetch.TMP_SUFFIX).stat().st_size == 40
+
 
 
 def test_sha256_match_passes(tmp_path: Path, server: str) -> None:
