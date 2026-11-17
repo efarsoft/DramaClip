@@ -120,7 +120,7 @@ def script_dialogue_plan(
             {int(ep["number"]): float(ep.get("duration") or 0.0) for ep in episode_inputs},
             script,
             strategy,
-        ), sorted({int(ep["number"]) for ep in episode_inputs})
+        ), sorted({str(int(ep["number"])) for ep in episode_inputs})
 
     # 基本功层内置于编剧 system prompt；口味层 directives 注入 user prompt
     llm = client_for(settings, min_timeout_s=SCRIPT_LLM_TIMEOUT_S, site="剧情解说")
