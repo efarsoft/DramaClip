@@ -154,11 +154,13 @@ def test_run_payload_shape(sample_video: Path, monkeypatch: pytest.MonkeyPatch) 
         sample_video, measured_s=3.0, has_audio=True, mode="raw_clip",
         budget_s=3.0, planned_segments=None,
     )
-    assert payload["version"] == 2 and payload["checked_at"] > 0
+    assert payload["version"] == 3 and payload["checked_at"] > 0
     assert selfcheck.overall_state(payload) == "passed"
     assert json.loads(json.dumps(payload))["freeze"]["max_freeze_s"] == 0.5
     # 无覆盖承诺：残字影子项灰（不采样），不挡四项徽章
     assert payload["caption_residue"] == {"pass": None, "reason": "未采样或无覆盖承诺"}
+    # 未配响度目标：影子读数灰（None），不挡徽章
+    assert payload["loudness"] is None
 
 
 # ---- 画面侧度量：成片文字落位 vs 覆盖承诺（业主裁决④）----

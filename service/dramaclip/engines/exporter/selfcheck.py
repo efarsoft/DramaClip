@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.engines.analysis import subtitle_ocr
-from dramaclip.engines.exporter import film_assembly
+from dramaclip.engines.exporter import film_assembly, loudness
 from dramaclip.engines.subtitle.safe_zone import check_safe_zone
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 
@@ -574,6 +574,31 @@ def overall_state(checks: dict[str, Any]) -> str:
     return "partial"
 
 
+def check_loudness(video: Path, target: tuple[float, float] | None) -> dict[str, Any] | None:
+    """响度实测读数（v3 影子项）：导出链 loudness.py 的复核门禁已经硬失败守门——
+    能进自检的成片必然过门，所以这里只记归一后的复核实测做历史账（偏差可见），
+    不设徽章（对已守门项设徽章是双保险，没有信息量）。量不到写 None（诚实纪律）。
+
+    成本：ebur128 门禁量法独立一遍整片解码——自检本就 job 化（同步 RPC 会卡
+    界面），付得起；不复用 mean_volume 那一遍（滤镜链合并会把两个量法耦死）。
+    """
+    if target is None:
+        return None
+    try:
+        m = loudness.measure_integrated_lufs(video)
+    except loudness.LoudnessError:
+        return None
+    return {
+        "status": "measured",
+        "measured_i": round(m.integrated_lufs, 2),
+        "measured_tp": round(m.true_peak_dbtp, 2),
+        "lra": round(m.lra, 2),
+        "target_i": target[0],
+        "target_tp": target[1],
+        "deviation_lu": round(abs(m.integrated_lufs - target[0]), 2),
+    }
+
+
 def run(
     video: Path,
     *,
@@ -589,6 +614,7 @@ def run(
     ending_lines: list[tuple[float, float, str]] | None = None,
     avsync_samples: list[tuple[float, str, float]] | None = None,
     episode_paths: dict[str, str] | None = None,
+    loudness_target: tuple[float, float] | None = None,
 ) -> dict[str, Any]:
     """四项全测 + 画面侧落位实测，返回落库形状的成绩单（json.dumps 后进 export_jobs.selfcheck）。
 
@@ -611,7 +637,7 @@ def run(
             # detect_band 的同款出口形状：_Band → (float, float) 元组
             measured_caption = None if picked is None else (float(picked.top), float(picked.bottom))
     payload = {
-        "version": 2,
+        "version": 3,
         "checked_at": _now_ms(),
         "duration": check_duration(
             measured_s, budget_s, segment_count=segment_count
@@ -623,6 +649,7 @@ def run(
         "caption_residue": check_caption_residue(probe_rows, caption_band),
         "safe_zone": check_safe_zone(caption_band),
         "ending": check_ending(ending_end_s, ending_lines),
+        "loudness": check_loudness(video, loudness_target),
         "avsync": check_avsync(
             measure_avsync_offsets(video, avsync_samples or [], episode_paths or {})
             if avsync_samples and episode_paths

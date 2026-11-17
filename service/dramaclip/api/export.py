@@ -49,6 +49,7 @@ from dramaclip.api.export_render import (
 from dramaclip.engines.exporter import (
     aigc_metadata,
     encoder,  # noqa: F401 - 测试经 export_api.encoder 打桩 export_plan
+    loudness,
     selfcheck,
 )
 from dramaclip.engines.narration.conversion import defects
@@ -479,6 +480,9 @@ def _selfcheck_one(context: AppContext, export_id: str) -> bool:
         if plan_data is not None
         else None
     )
+    # 响度影子读数（v3）：导出链 loudness.py 复核门禁已硬失败守门，这里只记
+    # 归一后的复核实测做历史账（目标值从设置读，与 encoder 归一同一来源）。
+    loudness_target = loudness.LoudnessTarget.from_settings(context.settings)
     payload = selfcheck.run(
         out_path,
         measured_s=media.duration_s,
@@ -493,6 +497,10 @@ def _selfcheck_one(context: AppContext, export_id: str) -> bool:
         ending_lines=ending_lines,
         avsync_samples=avsync_samples,
         episode_paths=_episode_paths_of(context, plan_data),
+        loudness_target=(
+            loudness_target.integrated_lufs,
+            loudness_target.true_peak_dbtp,
+        ),
     )
     exports_repo.set_selfcheck(
         context.conn,
