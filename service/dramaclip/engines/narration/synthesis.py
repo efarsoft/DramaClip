@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import shutil
 import uuid
 from collections.abc import Callable
@@ -148,6 +149,30 @@ def _emit(log: LogFn | None, message: str, level: str = "info") -> None:
     (logger.warning if level == "warn" else logger.info)("%s", message)
     if log is not None:
         log(level, message)
+
+
+# ---- W8·TTS 忠实度防线（事前 flatten + 死穴扫描，报告不是门禁） ----------------
+# 生成式 TTS 有三类已知翻车：冒号引语的说话人标签被吞/引语被拿去变声演绎/舞台
+# 指令（括号注释）被念出来。防线分两层：
+# 1. flatten：口播侧把「某人：「台词」」压成叙述流（只动标点不换词），字幕层
+#    仍烧原文，两边不打架；缓存键吃 flatten 后文本，同段不重复付费。
+# 2. 死穴扫描：括号舞台指令 flatten 不了（删了丢信息），影子模式 warn 留痕，
+#    不拦片、不改写——诚实留痕 vs 替用户做决定（reference_qc 同款边界）。
+_SPEECH_QUOTE_RE = re.compile(r"([：:])\s*([「『\"“‘])([^」』\"”’]{1,60}?)([」』\"”’])")
+_STAGE_DIRECTION_RE = re.compile(r"[（(][^（）()]{1,10}[)）]")
+
+
+def flatten_speech_text(text: str) -> str:
+    """口播文本压引语：冒号→逗号、去引号；只动标点不换字词。"""
+    flattened: str = _SPEECH_QUOTE_RE.sub(r"，\3", text)
+    return flattened
+
+
+def _warn_stage_directions(item_id: str, text: str, log: LogFn | None) -> None:
+    """括号舞台指令影子扫描：TTS 大概率把它念出来，warn 留痕不拦片。"""
+    hits = _STAGE_DIRECTION_RE.findall(text)
+    if hits:
+        _emit(log, f"旁白 {item_id} 疑似舞台指令 {hits}——TTS 可能照念，建议改写为叙述", "warn")
 
 
 def _synthesize_into(
@@ -383,6 +408,8 @@ class _EnginePool:
         cache_dir: Path,
     ) -> Path:
         """合成一段，返回落位后的音频路径；全链失败抛 RuntimeError（逐因带出）。"""
+        _warn_stage_directions(item_id, text, self._log)
+        speech_text = flatten_speech_text(text)
         reasons: list[str] = []
         for name in self._names:
             engine = self._instances.get(name)
@@ -400,10 +427,12 @@ class _EnginePool:
                     reasons.append(f"{name}: 构造失败 {type(exc).__name__}: {exc}")
                     continue
                 self._instances[name] = engine
-            target = _content_addressed_audio(work_dir, item_id, text, voice, name, speed)
+            target = _content_addressed_audio(
+                work_dir, item_id, speech_text, voice, name, speed
+            )
             try:
                 synthesized = _synthesize_into(
-                    engine, name, text, voice, speed, target, cache_dir
+                    engine, name, speech_text, voice, speed, target, cache_dir
                 )
             except Exception as exc:
                 if self._explicit:

@@ -121,6 +121,11 @@ def build_plan(
 
 
 _NEAR_GAP_S = 1.0  # 近邻衔接阈值：段间隔小于此值视为同镜头连续推进
+# 强拍呼吸窗（v0.2.6 W8·highlight 留白）：强拍句窗尾追加一段原声直通——旁白停、
+# 剧情声透出来收尾（留白透原声，枪响回荡/人群嘈杂比静音有戏）。留白是标点
+# 不是空格：只有 ScriptSegment.highlight 的句留，弱拍照常推进不设位。
+_HIGHLIGHT_BREATH_S = 1.5
+_HIGHLIGHT_BREATH_MIN_S = 0.8  # 剩余空间不足此值就不留（宁缺毋滥，留半截更怪）
 # 镜头切点外扩吸附容差：0.7s 内有切点就扩过去（start 前扩/end 后扩，只加余地不吞内容）；
 # 更宽会把解说与画面的对应关系拉远，更窄则大部分切点够不着。
 _SHOT_TOL_S = 0.7
@@ -233,6 +238,19 @@ def build_from_script_episodes(
         ):
             shot_aligned.add(len(timeline) - 1)
         texts.append(NarrationText(id=body_id, text=segment.text))
+        if segment.highlight:
+            breath_end = min(end + _HIGHLIGHT_BREATH_S, durations.get(ep, 0.0))
+            if breath_end - end >= _HIGHLIGHT_BREATH_MIN_S:
+                timeline.append(
+                    TimelineSegment(
+                        episode_id=episode_map[ep][0],
+                        start=round(end, 2),
+                        end=round(breath_end, 2),
+                        audio="original",
+                    )
+                )
+                cursors[ep] = breath_end
+                continue
         cursors[ep] = end
 
     if script.cta != "":

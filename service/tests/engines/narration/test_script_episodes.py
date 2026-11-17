@@ -350,3 +350,41 @@ def test_sanitize_still_clamps_within_episode_by_start_order() -> None:
     assert starts[0] == (1.0, 12.0), "起点 1.0 的段钳制不受模型顺序影响"
     assert starts[1][0] >= 12.0, "后段的起点仍被集内游标推挤到前段尾之后"
     assert clamped >= 1
+
+
+def test_highlight_segment_breathes_original_sound() -> None:
+    """W8 强拍留白：highlight 句窗尾追加原声直通段（旁白停剧情声透出），
+    非强拍句不设位；留白被集尾/下窗约束自然让位。"""
+    from dramaclip.engines.narration.scriptwriter import Script, ScriptSegment
+
+    script = Script(
+        hook="开场钩子一句话",
+        segments=[
+            ScriptSegment(episode=1, start=8.0, end=12.0, text="强拍句台词", highlight=True),
+            ScriptSegment(episode=1, start=20.0, end=26.0, text="普通句不设位"),
+        ],
+        cta="",
+    )
+    asr = [
+        AsrSegment.model_validate({"start": 1.0, "end": 5.0, "text": "x"}),
+        AsrSegment.model_validate({"start": 8.0, "end": 12.0, "text": "y"}),
+        AsrSegment.model_validate({"start": 20.0, "end": 26.0, "text": "z"}),
+    ]
+    plan = build_from_script_episodes(
+        {1: ("ep1", asr)},
+        {1: 60.0},
+        script,
+        StrategySpec(platform="douyin"),
+    )
+    originals = [seg for seg in plan.timeline if seg.audio == "original"]
+    assert len(originals) == 1, "只有 highlight 句带原声呼吸窗"
+    breath = originals[0]
+    narr = [seg for seg in plan.timeline if seg.audio == "narration"]
+    breath_prev_end = max(
+        (seg.end for seg in narr if seg.start < breath.start), default=0.0
+    )
+    assert breath.start == pytest.approx(breath_prev_end)
+    assert 0.8 <= breath.end - breath.start <= 1.5 + 0.01
+    # 下一句不倒退：呼吸窗之后的旁白段起点不早于呼吸尾
+    after = [seg for seg in narr if seg.start >= breath.end - 0.01]
+    assert after, "呼吸窗后仍有旁白段"

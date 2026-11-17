@@ -399,3 +399,20 @@ def test_hook_payoff_passes_when_anchor_recurs() -> None:
     }
     by_id2 = {f.rule_id: f for f in A.review_script(abstract, []).findings}
     assert by_id2["FUND_HOOK_PAYOFF"].passed is True, "锚点抓不到的抽象钩子不判（宁漏勿冤）"
+
+
+def test_phrase_monotony_exempts_quote_direct_openings() -> None:
+    """W8 豁免：台词直开（引号开头）是钦定手法，连续三段引语开场不算同头模板。"""
+    script = {
+        "hook": "她替嫁进了将军府",
+        "segments": [
+            {"episode": 1, "start": 0.0, "end": 2.0, "text": "“你敢动他一根手指试试。”"},
+            {"episode": 1, "start": 2.0, "end": 4.0, "text": "“退婚书拿回去，我不签。”"},
+            {"episode": 1, "start": 4.0, "end": 6.0, "text": "“这将军府，我一天都不待。”"},
+            {"episode": 1, "start": 6.0, "end": 8.0, "text": "山下的集市比想象里吵得多。"},
+        ],
+        "cta": "点击左下角看全集",
+    }
+    report = A.review_script(script, [])
+    mono = [f for f in report.findings if f.rule_id == "NARR_PHRASE_MONOTONY"]
+    assert mono and mono[0].passed is True, "引语开场三连不应判同头模板"

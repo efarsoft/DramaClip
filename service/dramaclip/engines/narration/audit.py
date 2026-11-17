@@ -220,7 +220,12 @@ def _phrase_monotony_finding(segs: list[dict[str, Any]]) -> Finding:
     同款收尾」承诺同用这条判据兜底。
     """
     texts = [str(s.get("text", "") or "").strip() for s in segs]
-    heads = [t[:2] for t in texts if len(t) >= 2]
+    # 台词直开（引号开头）是钦定手法，不参与「同头」判定——连续三段台词直开
+    # 是刻意设计不是模板感（重复判据要能说明损失，首尾呼应/引语排比有叙事作用）。
+    _QUOTE_HEADS = ("\"", "'", "「", "『", "《", "“", "‘")
+    heads = [
+        t[:2] for t in texts if len(t) >= 2 and not t.startswith(_QUOTE_HEADS)
+    ]
     tails = [t.rstrip(_TAIL_PUNCT)[-2:] for t in texts if len(t) >= 2]
     hits: list[str] = []
     for i in range(max(len(heads) - 2, 0)):

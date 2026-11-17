@@ -9,11 +9,13 @@ asr_segments / scene_data。台词跨度占比是 ASR 识别下界（识别不�
 语速参考按题材分档（古装权谋语速天然慢于常规题材，genre 列在手）。
 
 用法：
-  uv run python tools/benchmark_report.py [--db ../data/data.db]
+  uv run python tools/benchmark_report.py report [--db ...] [--profile P]
+  uv run python tools/benchmark_report.py profile-init --db ... --out P
 
-产出 markdown 报告（stdout）：每项目一节 + 全项目差距总表。参考区间是横向
-参考不是质量门槛——形态差异（素材本身不是微短剧节奏）按「形态外」标注，
-不判好差。
+节奏档案（W8·对账闭环）：``profile-init`` 把当前实测写成档案（status=proposed）；
+业主核对后把 status 改成 accepted 才启用对账判定——report 读到 accepted 档案
+时逐字段出「档案值｜实测｜偏差」，proposed/缺档案只报实测数值不判好差
+（节奏数值不硬编码在审查器里，档案化后偏差也只是参考不是门禁）。
 """
 
 from __future__ import annotations
@@ -34,6 +36,17 @@ _REF_WPS_PERIOD = (2.3, 3.3)  # 古装权谋档（≈2.8 中值带 ±0.5 容差�
 _REF_TAIL_SILENCE_MAX = 1.2
 
 _GENRE_PERIOD_KEYS = ("古装", "权谋", "宫斗", "历史")
+
+# 档案字段 → 实测聚合键 + 相对容差（accepted 对账用；偏差只是参考不是门禁）
+_PROFILE_FIELDS: dict[str, tuple[str, float]] = {
+    "first_episode_s": ("first_episode", 0.25),
+    "regular_episode_s": ("regular_episode", 0.25),
+    "shot_s": ("shot", 0.25),
+    "voiced_ratio": ("voiced", 0.25),
+    "wps": ("wps", 0.25),
+    "tail_silence_s": ("tail", 0.5),
+}
+_PROFILE_TOLERANCE_DEFAULT = 0.25
 
 
 def _p50(values: list[float]) -> float:
@@ -121,7 +134,80 @@ def _judgement(value: float, lo: float, hi: float) -> str:
     )
 
 
-def render(projects: list[dict[str, object]]) -> str:
+def _load_profile(path: str | None) -> dict | None:
+    if not path:
+        return None
+    file = Path(path)
+    if not file.is_file():
+        return None
+    return json.loads(file.read_text(encoding="utf-8"))
+
+
+def _profile_reconcile_lines(
+    profile: dict, measured: dict[str, float]
+) -> list[str]:
+    """accepted 档案对账（REV-12 语义）：逐字段「档案值｜实测｜偏差」，只是参考。"""
+    lines = ["", f"### 节奏档案对账（status={profile.get('status')}，偏差仅为参考非门禁）", ""]
+    lines.append("| 字段 | 档案值 | 实测 | 偏差 |")
+    lines.append("| --- | --- | --- | --- |")
+    fields = profile.get("fields") or {}
+    for field, (key, default_tol) in _PROFILE_FIELDS.items():
+        target = fields.get(field)
+        actual = measured.get(key)
+        if target is None or actual is None or actual == 0:
+            continue
+        tol = float(profile.get("tolerance") or default_tol)
+        drift = (actual - float(target)) / max(abs(float(target)), 1e-6)
+        verdict = "达标" if abs(drift) <= tol else ("偏高" if drift > 0 else "偏低")
+        lines.append(
+            f"| {field} | {float(target):.2f} | {actual:.2f} "
+            f"| {verdict}（{drift * 100:+.0f}%） |"
+        )
+    return lines
+
+
+def profile_init(conn: sqlite3.Connection, out_path: str) -> str:
+    """当前实测 → 建议档案（status=proposed）：业主核对改 accepted 才生效。"""
+    projects = _project_report(conn)
+    per_ep: dict[str, list[float]] = {}
+    for project in projects:
+        eps: list[dict[str, float | None]] = project["episodes"]  # type: ignore[assignment]
+        first: dict[str, float | None] | None = project["first_episode"]  # type: ignore[assignment]
+        regular = eps[1:] if first else eps
+        if first is not None and first.get("duration"):
+            per_ep.setdefault("first_episode_s", []).append(float(first["duration"]))
+        if regular:
+            per_ep.setdefault("regular_episode_s", []).extend(
+                float(m["duration"]) for m in regular
+            )
+        per_ep.setdefault("shot_s", []).extend(
+            float(m["shot_s"]) for m in eps if m.get("shot_s") is not None
+        )
+        per_ep.setdefault("voiced_ratio", []).extend(
+            float(m["voiced_ratio"]) for m in eps if m.get("voiced_ratio") is not None
+        )
+        per_ep.setdefault("wps", []).extend(
+            float(m["wps"]) for m in eps if m.get("wps") is not None
+        )
+        per_ep.setdefault("tail_silence_s", []).extend(
+            float(m["tail_silence_s"]) for m in eps if m.get("tail_silence_s") is not None
+        )
+    fields = {key: round(_p50(vals), 2) for key, vals in per_ep.items() if vals}
+    profile = {
+        "status": "proposed",
+        "fields": fields,
+        "note": (
+            "初值=素材库实测 p50。核对后把 status 改成 accepted 启用对账判定；"
+            "字段值也可手改成创作目标（档案值是拍板的节奏目标，不是行业区间的抄本）。"
+        ),
+    }
+    Path(out_path).write_text(
+        json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return f"节奏档案已写入 {out_path}（status=proposed，字段：{fields}）"
+
+
+def render(projects: list[dict[str, object]], profile: dict | None = None) -> str:
     lines: list[str] = ["# 对标剧量化差距报告（v1）", ""]
     lines.append(
         "> 参考区间为微短剧行业抽样横值，仅横向参考非质量门槛。本报告测的是"
@@ -194,17 +280,37 @@ def render(projects: list[dict[str, object]]) -> str:
             f"| {'区间内' if tail <= _REF_TAIL_SILENCE_MAX else '留白偏长'} |"
         )
         lines.append("")
+        if profile and profile.get("status") == "accepted":
+            measured = {
+                "first_episode": first_dur,
+                "regular_episode": reg_dur,
+                "shot": shot,
+                "voiced": voiced,
+                "wps": wps,
+                "tail": tail,
+            }
+            lines.extend(_profile_reconcile_lines(profile, measured))
     return "\n".join(lines)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", default="../data/data.db", help="dev 库路径")
+    sub = parser.add_subparsers(dest="command")
+    report_p = sub.add_parser("report", help="差距报告（可带节奏档案对账）")
+    report_p.add_argument("--db", default="../data/data.db", help="dev 库路径")
+    report_p.add_argument("--profile", default="", help="节奏档案 JSON（accepted 才对账）")
+    init_p = sub.add_parser("profile-init", help="当前实测 → 建议节奏档案")
+    init_p.add_argument("--db", default="../data/data.db", help="dev 库路径")
+    init_p.add_argument("--out", default="../data/rhythm_profile.json", help="档案输出路径")
     args = parser.parse_args()
+    command = args.command or "report"
     conn = sqlite3.connect(f"file:{Path(args.db).resolve()}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
-        print(render(_project_report(conn)))
+        if command == "profile-init":
+            print(profile_init(conn, args.out))
+            return
+        print(render(_project_report(conn), _load_profile(getattr(args, "profile", ""))))
     finally:
         conn.close()
 
