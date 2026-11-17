@@ -88,7 +88,12 @@ DEFAULTS: dict[str, str] = {
     "narration.rewrite_loop": "1",
     # 剧本硬规则内联审查：生成→audit→带 prompt 原句重掷，soft 只进 trace；"0"=关闭
     "narration.script_audit": "1",
-"narration.flow_style": "0",
+    # 整篇叙事试验线开关（W6）：'1'=flow 线（自由文本+锚定铺轴），'0'=槽位/剧本链
+    "narration.flow_style": "0",
+    # 整篇线复述闸（W8）：交稿前闭卷复述质检，缺口分类退稿重写；"0"=关闭
+    "narration.flow_retell": "1",
+    # 整篇线六维语义评审（W7/W8）：≥8 干净 / 7~8 批注 / <7 拒稿走语义预算；"0"=关闭
+    "narration.flow_judge": "1",
     "download.hf_mirror": "https://hf-mirror.com",
     "download.ms_base": "https://modelscope.cn",
     # 成片响度目标（EBU R128）：Phase C 整片两遍 loudnorm 收口，见 engines/exporter/loudness.py

@@ -186,6 +186,7 @@ def _write_with_settings(
     monkeypatch: pytest.MonkeyPatch,
     llm: _AlwaysOkLlm,
     score_one: Any,
+    settings: dict[str, str] | None = None,
 ) -> Any:
     monkeypatch.setattr(flow_writer.variant_scoring, "score_one", score_one)
     return flow_writer.write_flow_script(
@@ -194,7 +195,7 @@ def _write_with_settings(
         project_name="测试剧",
         angle_block="",
         trace_path=tmp_path / "trace.json",
-        settings={"llm.model": "stub"},
+        settings=settings or {"llm.model": "stub", "narration.flow_retell": "0"},
     )
 
 
@@ -237,7 +238,7 @@ def test_judge_failure_skips_silently(
 def test_judge_reject_capped_then_adopt_with_annotation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """拒稿封顶 1 次：第二轮即便评分仍低也采纳（评审低分不挡片），批注进 trace。"""
+    """语义预算封顶（2 次）：连拒两轮后第三轮强制采纳（评审低分不挡片），批注进 trace。"""
     calls = {"n": 0}
 
     def _always_low(*_a: object, **_k: object) -> dict[str, Any]:
@@ -247,9 +248,10 @@ def test_judge_reject_capped_then_adopt_with_annotation(
     llm = _AlwaysOkLlm(_flow_json())
     script = _write_with_settings(tmp_path, monkeypatch, llm, _always_low)
     assert script.segments
-    assert calls["n"] == 2  # 轮0 拒稿一次、轮1 采纳——不是 3 轮打满
+    assert calls["n"] == 3  # 轮0/轮1 拒稿烧完共享预算、轮2 强制采纳
     trace = json.loads((tmp_path / "trace.json").read_text(encoding="utf-8"))
     assert trace["attempts"][-1]["judge"]["total"] == pytest.approx(3.0)
+    assert trace["attempts"][-1]["judge"]["tier"] == "reject"
 
 
 def test_default_settings_skips_judge(
@@ -270,3 +272,201 @@ def test_default_settings_skips_judge(
         trace_path=tmp_path / "trace.json",
     )
     assert script.segments
+
+
+class _TwoPhaseLlm:
+    """前一轮返 first、之后返 second（闸链拒稿→改稿路径的生成层桩）。"""
+
+    def __init__(self, first: str, second: str) -> None:
+        self._first = first
+        self._second = second
+        self.calls = 0
+        self.prompts: list[str] = []
+
+    def chat_json(self, _system: str, user: str, temperature: float = 0.3) -> Any:
+        self.calls += 1
+        self.prompts.append(user)
+        return json.loads(self._first if self.calls == 1 else self._second)
+
+
+def test_same_anchor_deduped_to_unanchored(tmp_path: Path) -> None:
+    """W8 同锚去重：两处引用同一句台词，第二句降级无锚续写并留痕。"""
+    payload = json.dumps(
+        {
+            "hook": {"quote": "", "text": "开场。"},
+            "segments": [
+                {"quote": "她把丈夫的药倒进了老鼠洞", "text": "第一处。"},
+                {"quote": "她把丈夫的药倒进了老鼠洞", "text": "第二处紧挨复读。"},
+                {"quote": "那人终于登门", "text": "第三处。"},
+                {"quote": "", "text": "收尾。"},
+            ],
+            "cta": {"quote": "", "text": "引导。"},
+        },
+        ensure_ascii=False,
+    )
+    llm = _AlwaysOkLlm(payload)
+    script = flow_writer.write_flow_script(
+        llm,
+        _episode_inputs(),
+        project_name="测试剧",
+        angle_block="",
+        trace_path=tmp_path / "trace.json",
+    )
+    assert script.segments[1].start == pytest.approx(script.segments[0].end)
+    assert script.segments[1].end >= script.segments[0].end - 0.01  # 接前尾不重叠
+    trace = json.loads((tmp_path / "trace.json").read_text(encoding="utf-8"))
+    assert trace["attempts"][-1]["anchor_deduped"] == 1
+
+
+def test_budget_overs_rejected_then_fixed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """W8 预算闸（先排片后成稿）：画面装不下的句子生成期退回收短。"""
+    long_text = "她把丈夫的药倒进了老鼠洞之后" * 8  # ~112 字 est≈25s ≫ 锚窗
+    fixed_text = "药的来历她早已看穿。"
+    payload_long = json.dumps(
+        {
+            "hook": {"quote": "", "text": "开场。"},
+            "segments": [
+                {"quote": "她把丈夫的药倒进了老鼠洞", "text": long_text},
+                {"quote": "", "text": "承。"},
+                {"quote": "那人终于登门", "text": "转。"},
+                {"quote": "", "text": "收尾。"},
+            ],
+            "cta": {"quote": "", "text": "引导。"},
+        },
+        ensure_ascii=False,
+    )
+    payload_fixed = payload_long.replace(long_text, fixed_text)
+    llm = _TwoPhaseLlm(payload_long, payload_fixed)
+    monkeypatch.setattr(flow_writer.variant_scoring, "score_one", lambda *_a, **_k: None)
+    # 短集（6s）：锚窗到集尾只有 ~6s，长句 est 才会真超预算
+    tight_inputs = [
+        {**ep, "duration": 6.0} for ep in _episode_inputs() if ep["number"] == 1
+    ]
+    script = flow_writer.write_flow_script(
+        llm,
+        tight_inputs,
+        project_name="测试剧",
+        angle_block="",
+        trace_path=tmp_path / "trace.json",
+        settings={"llm.model": "stub", "narration.flow_retell": "0"},
+    )
+    assert script.segments[0].text == fixed_text
+    assert "画面窗只有" in llm.prompts[1]
+    trace = json.loads((tmp_path / "trace.json").read_text(encoding="utf-8"))
+    assert trace["attempts"][0]["rejected_by"] == "budget"
+
+
+def test_retell_gate_rejects_with_typed_fixes_then_adopts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W8 复述闸：缺口分类修订指令进重掷；第二轮通过即采纳。"""
+    from dramaclip.engines.narration.retell import RetellReport
+
+    fail = RetellReport(
+        retell="",
+        confusions=[{"quote": "她不动声色", "issue": "persona_mix", "note": "谁？"}],
+        has_goal=False,
+        has_suspense=True,
+        passed=False,
+        reasons=["主角目标不明"],
+    )
+    ok = RetellReport(retell="主线清楚", passed=True, has_goal=True, has_suspense=True)
+    reports = iter([fail, ok])
+    monkeypatch.setattr(
+        flow_writer, "retell_check", lambda _t, _c: next(reports)
+    )
+    monkeypatch.setattr(flow_writer.variant_scoring, "score_one", lambda *_a, **_k: None)
+    llm = _AlwaysOkLlm(_flow_json())
+    script = flow_writer.write_flow_script(
+        llm,
+        _episode_inputs(),
+        project_name="测试剧",
+        angle_block="",
+        trace_path=tmp_path / "trace.json",
+        settings={"llm.model": "stub"},
+    )
+    assert script.segments
+    assert "开场三句内让观众明确主角想要什么" in llm.prompts[1]
+    assert "首次出现处点名身份" in llm.prompts[1]
+    trace = json.loads((tmp_path / "trace.json").read_text(encoding="utf-8"))
+    assert trace["attempts"][0]["rejected_by"] == "retell"
+    assert trace["attempts"][-1]["retell"]["passed"] is True
+
+
+def test_hook_alt_takes_over_when_primary_weak(tmp_path: Path) -> None:
+    """W8 多候选挑优：首选钩子空/过短时备选接管。"""
+    payload = json.dumps(
+        {
+            "hook": {
+                "quote": "",
+                "text": "",
+                "alt": {"quote": "", "text": "备选钩子顶上来了"},
+            },
+            "segments": [
+                {"quote": "她把丈夫的药倒进了老鼠洞", "text": "一。"},
+                {"quote": "", "text": "二。"},
+                {"quote": "那人终于登门", "text": "三。"},
+                {"quote": "", "text": "收尾。"},
+            ],
+            "cta": {"quote": "", "text": "引导。"},
+        },
+        ensure_ascii=False,
+    )
+    llm = _AlwaysOkLlm(payload)
+    script = flow_writer.write_flow_script(
+        llm,
+        _episode_inputs(),
+        project_name="测试剧",
+        angle_block="",
+        trace_path=tmp_path / "trace.json",
+    )
+    assert script.hook == "备选钩子顶上来了"
+
+
+def test_judge_note_tier_recorded_without_reject(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W8 双阈值：总分 7~8 记 note 批注不拒稿（tier 进 trace）。"""
+    monkeypatch.setattr(
+        flow_writer.variant_scoring,
+        "score_one",
+        lambda *_a, **_k: {"total": 7.5, "suggestion": "略平"},
+    )
+    llm = _AlwaysOkLlm(_flow_json())
+    script = flow_writer.write_flow_script(
+        llm,
+        _episode_inputs(),
+        project_name="测试剧",
+        angle_block="",
+        trace_path=tmp_path / "trace.json",
+        settings={"llm.model": "stub", "narration.flow_retell": "0"},
+    )
+    assert script.segments
+    trace = json.loads((tmp_path / "trace.json").read_text(encoding="utf-8"))
+    assert trace["attempts"][-1]["judge"]["tier"] == "note"
+
+
+def test_highlight_flag_carried_into_script(tmp_path: Path) -> None:
+    """W8 强拍标注：LLM highlight 透传进 ScriptSegment（铺轴留白窗的消费源）。"""
+    payload = json.dumps(
+        {
+            "hook": {"quote": "", "text": "开场。"},
+            "segments": [
+                {"quote": "她把丈夫的药倒进了老鼠洞", "text": "一。", "highlight": True},
+                {"quote": "", "text": "二。"},
+                {"quote": "那人终于登门", "text": "三。", "highlight": True},
+                {"quote": "", "text": "收尾。"},
+            ],
+            "cta": {"quote": "", "text": "引导。"},
+        },
+        ensure_ascii=False,
+    )
+    llm = _AlwaysOkLlm(payload)
+    script = flow_writer.write_flow_script(
+        llm,
+        _episode_inputs(),
+        project_name="测试剧",
+        angle_block="",
+        trace_path=tmp_path / "trace.json",
+    )
+    assert [seg.highlight for seg in script.segments] == [True, False, True, False]

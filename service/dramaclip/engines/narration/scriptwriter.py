@@ -191,12 +191,17 @@ def system_prompt(prompts: dict[str, str] | None = None) -> str:
 
 
 class ScriptSegment(BaseModel):
-    """剧本片段：源视频区间 + 对应解说文案（跨集时 episode 为集号）。"""
+    """剧本片段：源视频区间 + 对应解说文案（跨集时 episode 为集号）。
+
+    ``highlight`` 标记强拍句（v0.2.6 W8）：铺轴时它的窗尾追加一段原声呼吸窗
+    （留白透原声——留白是标点不是空格，只在强拍停弱拍不停）。默认 False：
+    剧本链与旧数据零影响。"""
 
     episode: int = 1
     start: float
     end: float
     text: str
+    highlight: bool = False
 
 
 class Script(BaseModel):
