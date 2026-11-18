@@ -327,6 +327,39 @@ def _script_time_findings(
     ]
 
 
+def _episode_pack_findings(
+    segs: list[dict[str, Any]], ep_bounds: dict[int, float]
+) -> list[Finding]:
+    """包外集号引用告警（soft+人审）：文案提到素材外的集号——业主裁决
+    「不生成包外剧情」的验证侧补强（生成侧 no_fabrication 已有强约束）。
+    ep_bounds 缺集号 = 素材没有这一集；文案讲了它就是包外剧情，哪怕画面
+    已被清洗丢弃，文案层面的讲述也该提示人审确认。"""
+    if not ep_bounds:
+        return []
+    max_episode = max(ep_bounds)
+    out_refs: dict[int, list[int]] = {}
+    for i, seg in enumerate(segs):
+        for ref in re.findall(r"第([0-9０-９]+)[集话]", str(seg.get("text", ""))):
+            ref_n = int(ref.translate(str.maketrans("０１２３４５６７８９", "0123456789")))
+            if ref_n > max_episode:
+                out_refs.setdefault(ref_n, []).append(i)
+    if not out_refs:
+        return []
+    refs_desc = "、".join(
+        f"第{n}集（段 {','.join(str(i) for i in idxs)}）" for n, idxs in sorted(out_refs.items())
+    )
+    return [
+        Finding(
+            "FUND_EPISODE_OUT_OF_PACK", "fund_base", "soft",
+            False,
+            f"文案引用了素材包外的集号：{refs_desc}——素材只到第{max_episode}集，"
+            "确认是否在讲素材外剧情（清洗层已丢弃包外画面段，但文案讲述仍在）",
+            location="segments",
+            needs_human=True,
+        )
+    ]
+
+
 def _hook_findings(hook: str) -> list[Finding]:
     """结构组三：空泛悬念（硬，零容忍目标） vs 无具体锚点（软，启发式不可全判）。"""
     hook_empty = bool(_SUSPECT_EMPTY_RE.search(hook))
@@ -700,6 +733,7 @@ def review_script(
     findings: list[Finding] = []
     findings.extend(_script_shape_findings(segs))
     findings.extend(_script_time_findings(segs, ep_bounds))
+    findings.extend(_episode_pack_findings(segs, ep_bounds))
     findings.extend(_hook_findings(hook))
     findings.append(_hook_payoff_finding(hook, segs))
     findings.extend(_cta_findings(cta))

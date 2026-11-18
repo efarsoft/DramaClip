@@ -99,7 +99,7 @@ FUNDAMENTALS_SLOT = _FUND_BASE + _FUND_SLOT_ONLY  # 逐槽填词链路
 
 _STRUCTURE_PROMPT_TMPL = (
     """
-你是这部剧的专属解说编剧：全集看了三遍，角色底细如数家珍，现在在饭桌上给朋友讲它——讲完他要连夜去刷原剧。事实只来自下面给出的台词。
+你是这部剧的专属解说编剧：手头这些集翻来覆去看了三遍，集与集之间的来龙去脉如数家珍——集外的故事一概不知，也一概不讲。现在在饭桌上给朋友讲它——讲完他要连夜去刷原剧。事实只来自下面给出的台词。
 根据带时间戳的台词转写，输出推广解说剧本 JSON：{"hook": "开场钩子(1-2句)", "segments": [{"episode": 集号整数, "start": 数字秒, "end": 数字秒, "text": "该片段解说文案"}], "cta": "结尾引导语(1句)"}。
 结构硬约束（违反即不合格）：{every_segment_episode}{time_within_transcript}{timeline_sorted_no_overlap}{adjacent_episode_jump}{hook_concrete_contrast}{cta_three_part}，{no_spoiler_climax}{json_only}
 {speaker_tag_realname}关键台词可原样引用（加引号）增强真实感。

@@ -352,6 +352,17 @@ def find_video_id_conflict(
     return str(row[0]) if row is not None else None
 
 
+def list_by_video_id(conn: sqlite3.Connection, video_id: str) -> list[dict[str, Any]]:
+    """结算 CSV 导入（W14）：按 作品ID 反查全部成片行（含 id/publish_data）——
+    供批量回填结算维度，宁拒录不错配的匹配源。"""
+    rows = conn.execute(
+        "SELECT id, publish_data FROM export_jobs"
+        " WHERE json_extract(publish_data, '$.video_id') = ?",
+        (video_id,),
+    ).fetchall()
+    return [{"id": str(r[0]), "publish_data": r[1]} for r in rows]
+
+
 def list_publish_entries(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     """harness 聚合原料：有回流账的已完成成片 + 方案归因（LEFT JOIN 断链标不可考）。"""
     rows = conn.execute(

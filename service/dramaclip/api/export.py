@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import shutil
 import threading
@@ -95,6 +97,9 @@ def register(router: Router, context: AppContext) -> None:
     router.register("export.delete", lambda params: delete_export(context, params))
     router.register("export.selfcheck", lambda params: selfcheck_batch(context, params))
     router.register("export.set_publish_data", lambda params: set_publish_data(context, params))
+    router.register(
+        "export.import_settlement_csv", lambda params: import_settlement_csv(context, params)
+    )
     router.register("export.publish_report", lambda params: publish_report(context, params))
     router.register("export.ab_report", lambda params: ab_report(context, params))
 
@@ -377,6 +382,23 @@ def set_publish_data(context: AppContext, params: dict[str, Any]) -> dict[str, A
                 _ERR_PUBLISH_DATA, f"作品 ID 已绑定另一条成片 {conflict}：宁拒录，不错配"
             )
     published_at = str(raw.get("published_at") or "").strip() or None
+
+    def _opt_text(key: str, cap: int) -> str | None:
+        value = str(raw.get(key) or "").strip() or None
+        if value is not None and len(value) > cap:
+            raise RpcDomainError(_ERR_PUBLISH_DATA, f"{key} 过长（≤{cap} 字符）")
+        return value
+
+    settlement = raw.get("settlement_amount")
+    settlement_amount: float | None = None
+    if settlement not in (None, ""):
+        try:
+            settlement_amount = round(float(str(settlement)), 2)
+        except (TypeError, ValueError) as exc:
+            raise RpcDomainError(_ERR_PUBLISH_DATA, f"settlement_amount 须为数字: {exc}") from exc
+        if settlement_amount < 0:
+            raise RpcDomainError(_ERR_PUBLISH_DATA, "settlement_amount ≥ 0")
+
     data = {
         "platform": platform,
         "plays": plays,
@@ -386,10 +408,89 @@ def set_publish_data(context: AppContext, params: dict[str, Any]) -> dict[str, A
         "retention_3s": None if retention_3s is None else round(retention_3s, 2),
         "video_id": video_id,
         "published_at": published_at,
+        # 五个对账维度（W14·条件③）：片→任务→号→结算的锚，只记录不对账逻辑
+        # 不做分发/收款/佣金（「不做变现化工程」裁决边界内）。
+        "task_ref": _opt_text("task_ref", 100),
+        "drama_name": _opt_text("drama_name", 100),
+        "pack_version": _opt_text("pack_version", 100),
+        "publish_account": _opt_text("publish_account", 100),
+        "settlement_amount": settlement_amount,
         "recorded_at": _now_ms(),
     }
     exports_repo.set_publish_data(context.conn, export_id, data)
     return {"ok": True, "publish_data": data}
+
+
+_CSV_HEADER_ALIASES: dict[str, tuple[str, ...]] = {
+    "video_id": ("video_id", "作品id", "作品 id"),
+    "settlement_amount": ("settlement_amount", "结算金额", "结算"),
+    "publish_account": ("publish_account", "发布账号", "账号"),
+}
+
+
+def import_settlement_csv(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
+    """任务后台结算 CSV 批量导入（W14·条件③对账）：按 作品ID 匹配成片，
+    回填 结算金额/发布账号 到对应 publish_data——只记录，不做对账逻辑
+    （「不做变现化工程」裁决边界内）。匹配不到的行宁拒录不错配。"""
+    csv_text = str(params.get("csv_text", "")).strip()
+    if not csv_text:
+        raise RpcDomainError(_ERR_PUBLISH_DATA, "csv_text 为空")
+    rows = list(csv.DictReader(io.StringIO(csv_text.lstrip("﻿"))))
+    if not rows:
+        raise RpcDomainError(_ERR_PUBLISH_DATA, "CSV 没有数据行")
+    header_map: dict[str, str] = {}
+    for column in rows[0]:
+        norm = column.strip().lower().replace(" ", "")
+        for canonical, aliases in _CSV_HEADER_ALIASES.items():
+            if norm in aliases:
+                header_map[canonical] = column
+    if "video_id" not in header_map:
+        raise RpcDomainError(_ERR_PUBLISH_DATA, "CSV 缺少 作品ID 列")
+    matched, skipped, touched = 0, [], set()
+    for row in rows:
+        video_id = str(row.get(header_map["video_id"], "")).strip()
+        if not video_id:
+            skipped.append({"reason": "作品ID为空", "row": row})
+            continue
+        account = row.get(header_map.get("publish_account", ""), "")
+        amount_raw = row.get(header_map.get("settlement_amount", ""), "")
+        amount: float | None = None
+        if str(amount_raw).strip():
+            try:
+                amount = round(float(str(amount_raw).strip()), 2)
+            except ValueError:
+                skipped.append({"reason": f"结算金额不是数字：{amount_raw}", "row": row})
+                continue
+        hits = exports_repo.list_by_video_id(context.conn, video_id)
+        if not hits:
+            skipped.append({"reason": f"作品ID {video_id} 没有匹配到成片", "row": row})
+            continue
+        for export_row in hits:
+            export_id = str(export_row["id"])
+            existing = exports_repo.get(context.conn, export_id)
+            raw_publish = existing["publish_data"] if existing else None
+            # repo 层 _parse_publish 已把 publish_data 转成 dict——str 只出现在直查 SQL 场景
+            publish = (
+                json.loads(raw_publish)
+                if isinstance(raw_publish, str)
+                else (raw_publish if isinstance(raw_publish, dict) else None)
+            )
+            if not isinstance(publish, dict):
+                skipped.append({"reason": f"成片 {export_id} 尚无发布记录，先录入平台与作品ID", "row": row})
+                continue
+            if str(account).strip():
+                publish["publish_account"] = str(account).strip()
+            if amount is not None:
+                publish["settlement_amount"] = amount
+            exports_repo.set_publish_data(context.conn, export_id, publish)
+            touched.add(export_id)
+            matched += 1
+    return {
+        "ok": True,
+        "matched": matched,
+        "touched_export_ids": sorted(touched),
+        "skipped": skipped,
+    }
 
 
 def publish_report(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
