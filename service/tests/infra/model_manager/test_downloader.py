@@ -463,3 +463,15 @@ def test_download_allowlist_total_miss_raises() -> None:
     with pytest.raises(RuntimeError, match="找不到登记的下载文件"):
         downloader._apply_download_allowlist(spec, [("renamed.gguf", 1, None, "x" * 40)])
 
+
+
+def test_classify_connection_refused_points_at_proxy() -> None:
+    """装测实锤（2026-11-17 终端用户全源 WinError 10061）：代理开着但没连上时
+    所有源走同一代理端口一并被拒——话术要把人引向代理/防火墙，不是换源重试。"""
+    from dramaclip.infra.model_manager.downloader import classify_failure
+
+    reason = classify_failure(
+        RuntimeError("全部来源失败：全部源下载失败: <urlopen error "
+                     "[WinError 10061] 由于目标计算机积极拒绝，无法连接。>")
+    )
+    assert "代理" in reason and "所有下载源都连接被拒" in reason

@@ -913,4 +913,18 @@ def _fetch_first(sources: list[str], target: Path, size: int, cancel: threading.
             return
         except Exception as exc:  # noqa: BLE001 - 多源容错
             last = exc
-    raise RuntimeError(f"全部源下载失败: {last}") from last
+    hint = _connection_refused_hint(last)
+    raise RuntimeError(f"全部源下载失败: {last}{hint}") from last
+
+
+def _connection_refused_hint(last: Exception | None) -> str:
+    """连接拒绝类错误的行动性归因（装测实锤 2026-11-17：终端用户全部源
+    WinError 10061——典型场景是系统代理开着但代理没在跑，Python 请求走代理
+    端口被拒，所有源一并失败；不点破用户只会反复重试）。"""
+    text = str(last or "")
+    if "10061" in text or "积极拒绝" in text or "Connection refused" in text:
+        return (
+            "（连接被拒绝：请检查系统代理/VPN 是否开着但没连上，"
+            "或防火墙拦截——关掉代理或换个网络后重试）"
+        )
+    return ""

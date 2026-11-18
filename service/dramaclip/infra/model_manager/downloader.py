@@ -134,6 +134,13 @@ def classify_failure(exc: Exception) -> str:
     # 聚合错误置顶：全部来源耗尽后，单源话术（「直接重试」「换下载源」）不可行动——
     # 真机 2026-11-13：最后一条是「大小校验失败」时，卡片话术让人白重试一整轮
     if "全部来源失败" in text:
+        # 连接拒绝（装测实锤 2026-11-17 终端用户全源 WinError 10061）：典型场景是
+        # 系统代理开着但代理没在跑——所有源走同一代理端口一并被拒，不是源的问题
+        if "10061" in text or "积极拒绝" in text or "connection refused" in lowered:
+            return (
+                "所有下载源都连接被拒——大概率是代理/VPN 开着但没连上，"
+                "或防火墙拦截：关掉代理或换个网络后重试"
+            )
         return f"所有下载源都失败了——{text.removeprefix('全部来源失败：')}"
     if "大小校验失败" in text or "SHA256 校验失败" in text:
         return "下载内容校验失败（半成品已删，不会污染续传）——直接重试；反复失败请换下载源"
