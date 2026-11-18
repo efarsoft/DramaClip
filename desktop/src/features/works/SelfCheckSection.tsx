@@ -62,6 +62,18 @@ export function SelfCheckSection({
             </span>
           </div>
         )}
+        {selfcheck !== null && selfcheck !== undefined && selfcheck.dedup_jitter !== undefined && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceMd }}>
+            <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textSecondary }}>
+              逐片段微扰动
+            </span>
+            <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>
+              {selfcheck.dedup_jitter
+                ? '已施加（微量变速/缩放/亮度对比扰动，处理参数见编码记录）——注意可能被平台识别为刻意规避'
+                : '未施加（本片未做规避性扰动）'}
+            </span>
+          </div>
+        )}
         <span
           style={{
             fontSize: tokens.text.badge.size,

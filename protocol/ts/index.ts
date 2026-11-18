@@ -498,6 +498,8 @@ export interface SelfCheck {
   readonly freeze: SelfCheckItem;
   readonly caption_placement?: SelfCheckItem;
   readonly safe_zone?: SelfCheckItem;
+  /** v4：逐片段微扰动开关状态（export.dedup_jitter）——处理链如实记录，成片可自证。 */
+  readonly dedup_jitter?: boolean;
 }
 
 /** 自检汇总态：passed 四项全绿 / failed 任一红 / partial 有灰无红；null = 从未自检。 */

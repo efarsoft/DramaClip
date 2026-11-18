@@ -2,11 +2,12 @@
 import type { ReactElement } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert } from 'antd';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { ExportJob, ModeRecommendation, NarrationMode, Project } from '@dramaclip/protocol';
-import { PageHeader as PageKitHeader, PageShell } from '../../components/layout/PageKit';
+import { PageFooter, PageHeader as PageKitHeader, PageShell } from '../../components/layout/PageKit';
 import { MODE_INFO } from '../../components/modeMeta';
 import { exportApi, narrationApi, projectApi, settingsApi } from '../../services/client';
+import { dramaEntryPath } from '../../app/routes';
 import { rememberDrama } from '../../stores/lastDrama';
 import { useUiStore } from '../../stores/ui';
 import { layout, tokens } from '../../styles/theme';
@@ -257,7 +258,37 @@ export function ProductionPage() {
       <div ref={exportRef}>
         <ExportsCard exports={exports} onRefresh={() => void reloadExports()} />
       </div>
+      <ProductionFooter projectId={projectId} exports={exports} />
     </PageShell>
+  );
+}
+
+/** 向导底栏（W12 贯通）：上一步回分析页，下一步去作品库——分析页 footer 的下一站。 */
+function ProductionFooter({
+  projectId,
+  exports,
+}: {
+  projectId: string;
+  exports: ExportJob[] | null;
+}): ReactElement {
+  const navigate = useNavigate();
+  const doneCount = (exports ?? []).filter((job) => job.status === 'completed').length;
+  return (
+    <PageFooter
+      canProceed
+      proceedHint={
+        doneCount > 0
+          ? `已完成 ${String(doneCount)} 条成片 · 到作品库查看与发布`
+          : '出片完成后到作品库查看；也可以先回去调整分析或模式'
+      }
+      nextLabel="查看作品库"
+      onPrev={() => {
+        void navigate(dramaEntryPath(projectId));
+      }}
+      onNext={() => {
+        void navigate('/works');
+      }}
+    />
   );
 }
 
