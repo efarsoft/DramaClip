@@ -52,7 +52,7 @@ const MARKETING_BANNED: readonly Phrase[] = [
   { phrase: '指纹', reason: '合规红线：同上' },
   { phrase: '排重', reason: '合规红线：同上' },
   { phrase: '特征向量', reason: '合规红线：特征破坏类表述' },
-  { phrase: '可关闭', reason: '实测四项处理在 encoder 无条件注入，无开关可承诺' },
+  { phrase: '可关闭', reason: '逐片段微扰动已有设置页开关与成绩单如实记录——对外文案不再以「可关闭」作为卖点表述' },
 ];
 
 /** 文档与源码注释面：允许给子系统起名字（`消重` 是内部模块名），但不许写成"目的是对抗平台判定"。 */
@@ -328,8 +328,8 @@ describe('文案真值门禁', () => {
     // 与 UI 模式数矛盾的中文数词表述一律禁（「十种模式」曾在 UI 只有 9 个时长期漂移）
     const zhNumerals: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
     for (const [zh, n] of Object.entries(zhNumerals)) {
-      if (readme.includes(`${zh}种出片模式`)) {
-        expect(n, `README 写「${zh}种出片模式」但 UI 实有 ${String(uiModes)} 个模式`).toBe(uiModes);
+      if (readme.includes(`${zh}种出片模式`) || readme.includes(`${zh}种模式`)) {
+        expect(n, `README 写「${zh}种（出片）模式」但 UI 实有 ${String(uiModes)} 个模式`).toBe(uiModes);
       }
     }
     expect(uiModes).toBeGreaterThan(0);

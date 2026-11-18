@@ -126,10 +126,6 @@ _SEGMENT_CHANNEL_LAYOUT = "stereo"
 # 床目标 −28 LUFS 的锚：干音契约 −13 LUFS（level_fix 参考带）再低 15 LU——床是
 # 连续情绪层不抢人声；固定 0.15 时代曲目 master 实测 −9~−14 LUFS、线性增益
 # −16.5 dB 落床 −25~−30 LUFS，取其中位为锚（改这两个数要重听，别挑）。
-# 量不到曲目响度时回退 _BGM_BED_VOLUME 固定增益（增强项不挡片）。
-_BGM_BED_VOLUME = "0.15"
-_BGM_BED_TARGET_LUFS = -28.0
-_BGM_TAIL_FADE_S = 1.2
 # 循环接长：多副本 acrossfade 替代 stream_loop 硬循环——非无缝曲目在循环点的
 # 咔哒消除；曲目过短或副本数超帽（超长片×超短曲）回退硬循环。
 _BGM_LOOP_XFADE_S = 0.5
