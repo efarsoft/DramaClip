@@ -99,7 +99,7 @@ def test_csv_rejects_missing_video_id_column(memory_db: sqlite3.Connection) -> N
 def test_csv_skips_non_numeric_amount(
     memory_db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    export_id = _seed_with_plan(memory_db, tmp_path, "vid-1")
+    _seed_with_plan(memory_db, tmp_path, "vid-1")
     csv_text = "作品ID,结算金额,发布账号\nvid-1,abc,主号\n"
     result = export_api.import_settlement_csv(
         SimpleNamespace(conn=memory_db), {"csv_text": csv_text}

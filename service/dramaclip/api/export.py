@@ -476,7 +476,10 @@ def import_settlement_csv(context: AppContext, params: dict[str, Any]) -> dict[s
                 else (raw_publish if isinstance(raw_publish, dict) else None)
             )
             if not isinstance(publish, dict):
-                skipped.append({"reason": f"成片 {export_id} 尚无发布记录，先录入平台与作品ID", "row": row})
+                skipped.append({
+                "reason": f"成片 {export_id} 尚无发布记录，先录入平台与作品ID",
+                "row": row,
+            })
                 continue
             if str(account).strip():
                 publish["publish_account"] = str(account).strip()
