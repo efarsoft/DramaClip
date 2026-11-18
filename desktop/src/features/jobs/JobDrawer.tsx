@@ -4,10 +4,10 @@
  * 失败行 error 原文不截断且给「去处理」；取消被拒时把服务端 reason 原样说出来。
  * 行内三段与过滤工具条在 ./JobRow（300 行红线拆出）。
  */
-import { useEffect, useState, type ReactElement } from 'react';
+import { Fragment, useEffect, useState, type ReactElement } from 'react';
 import { Alert, Drawer, Empty } from 'antd';
 import type { JobInfo } from '@dramaclip/protocol';
-import { jobsApi, modelsApi, projectApi } from '../../services/client';
+import { analysisApi, jobsApi, modelsApi, projectApi } from '../../services/client';
 import { tokens } from '../../styles/theme';
 import { useJobsStore } from '../../stores/jobs';
 import {
@@ -54,6 +54,27 @@ function JobsBody(): ReactElement {
   const names = useJobSubjects(open);
   const [filter, setFilter] = useState<Filter>('all');
   const [notes, cancel] = useCancelJob();
+  const [retryNotes, setRetryNotes] = useState<Readonly<Record<string, string>>>({});
+  const retry = (job: JobInfo): void => {
+    // 通用重试只有两类有单条 API：模型下载（重发下载）与分析（重跑整项目）；
+    // export/narration 的重跑依赖页面上下文（方案参数/导出 id），保持「去处理」路由。
+    setRetryNotes((prev) => ({ ...prev, [job.id]: '已重新提交' }));
+    const finish = (reason: string): void => {
+      setRetryNotes((prev) => ({ ...prev, [job.id]: reason }));
+    };
+    const call = (() => {
+      if (job.type === 'model_download' && job.ref_id !== null && job.ref_id !== '') {
+        return modelsApi.download(job.ref_id).then(() => '已重新提交下载');
+      }
+      if (job.type === 'analysis' && job.ref_id !== null && job.ref_id !== '') {
+        return analysisApi.start(job.ref_id).then(() => '已重新提交分析');
+      }
+      return Promise.reject(new Error('该任务类型请在对应页面重新发起'));
+    })();
+    call.catch((error: unknown) => {
+      finish(error instanceof Error && error.message !== '' ? error.message : String(error));
+    });
+  };
 
   if (!available) {
     return (
@@ -77,7 +98,10 @@ function JobsBody(): ReactElement {
         onFilter={setFilter}
       />
       {shown.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有符合条件的任务" />}
-      {shown.map((job) => (
+      {shown.map((job) => {
+        const retryNote = retryNotes[job.id];
+        return (
+          <Fragment key={job.id}>
         <JobRow
           key={job.id}
           job={job}
@@ -87,8 +111,22 @@ function JobsBody(): ReactElement {
           onCancel={() => {
             cancel(job.id);
           }}
+          onRetry={
+            job.type === 'model_download' || job.type === 'analysis'
+              ? () => {
+                  retry(job);
+                }
+              : undefined
+          }
         />
-      ))}
+        {retryNote !== undefined && (
+          <span style={{ fontSize: tokens.text.badge.size, color: tokens.textSecondary }}>
+            {job.label ?? ''}：{retryNote}
+          </span>
+        )}
+          </Fragment>
+        );
+      })}
       <span style={{ fontSize: tokens.text.badge.size, lineHeight: tokens.text.badge.leading, color: tokens.textTertiary }}>
         仅显示最近变更的 200 条任务。
       </span>

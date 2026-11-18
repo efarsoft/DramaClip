@@ -318,6 +318,23 @@ describe('文案真值门禁', () => {
     expect(readme).toContain('不提供规避原创性检测的功能');
   });
 
+  it('README 模式数与 UI 真值对表（modeMeta 数量即产品口径，禁手写矛盾数字）', () => {
+    const readme = readFileSync(path.join(ROOT_DIR, 'README.md'), 'utf8');
+    const modeMeta = readFileSync(
+      path.join(ROOT_DIR, 'desktop', 'src', 'components', 'modeMeta.ts'),
+      'utf8',
+    );
+    const uiModes = (modeMeta.match(/mode: '/g) ?? []).length;
+    // 与 UI 模式数矛盾的中文数词表述一律禁（「十种模式」曾在 UI 只有 9 个时长期漂移）
+    const zhNumerals: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+    for (const [zh, n] of Object.entries(zhNumerals)) {
+      if (readme.includes(`${zh}种出片模式`)) {
+        expect(n, `README 写「${zh}种出片模式」但 UI 实有 ${String(uiModes)} 个模式`).toBe(uiModes);
+      }
+    }
+    expect(uiModes).toBeGreaterThan(0);
+  });
+
   afterAll(() => {
     // 三条各自挡一种退化：重复走盘（缓存被拆）、逐条重读（单趟被打回 per-phrase）、
     // 命中表与词表脱钩（加了红线词却没进扫描）。

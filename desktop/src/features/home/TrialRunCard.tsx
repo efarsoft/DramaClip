@@ -30,8 +30,6 @@ function PhaseLine({ label, percent, message }: { label: string; percent: number
 export function TrialRunCard({ projectId, projectName }: { projectId: string; projectName: string }): ReactElement {
   const { phase, start, reset } = useTrialRun(projectId);
   const navigate = useNavigate();
-  const running =
-    phase.kind === 'checking' || phase.kind === 'analyzing' || phase.kind === 'planning' || phase.kind === 'exporting';
 
   return (
     <Card title={COPY.title} size="small">

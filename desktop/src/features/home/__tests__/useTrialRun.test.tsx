@@ -3,7 +3,15 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useTrialRun } from '../useTrialRun';
 
-const rpcMock = vi.fn();
+type RpcReply =
+  | { episodes: { id: string; episode_number: number; status: string }[] }
+  | { job_id: string; k?: number; batch_id?: string }
+  | { id: string }[]
+  | { exports: { plan_id: string; export_id: string; job_id: string }[]; rejected: never[] }
+  | { job: { id: string; type: string; ref_id: null; status: string; progress: number } }
+  | { status: string; progress: number; message?: string; error?: string };
+
+const rpcMock = vi.fn<(method: string, params?: unknown) => Promise<RpcReply>>();
 vi.mock('../../../services/client', () => ({
   analysisApi: {
     episodes: (projectId: string) => rpcMock('analysis.episodes', { project_id: projectId }),
@@ -21,7 +29,7 @@ vi.mock('../../../services/client', () => ({
   jobsApi: { get: (jobId: string) => rpcMock('jobs.get', { job_id: jobId }) },
 }));
 
-function rpcReply(method: string): unknown {
+function rpcReply(method: string): RpcReply {
   switch (method) {
     case 'analysis.episodes':
       return { episodes: [{ id: 'ep2', episode_number: 2, status: 'done' }, { id: 'ep1', episode_number: 1, status: 'done' }] };
@@ -50,7 +58,8 @@ describe('useTrialRun', () => {
     await act(async () => {
       await result.current.start();
     });
-    await waitFor(() => expect(result.current.phase.kind).toBe('done'));
+
+    await waitFor(() => { expect(result.current.phase.kind).toBe('done'); });
     const startCall = rpcMock.mock.calls.find((c) => c[0] === 'analysis.start');
     expect(startCall).toBeUndefined(); // 两集都 done：分析阶段整段跳过
     const planCall = rpcMock.mock.calls.find((c) => c[0] === 'narration.plan_variants');
@@ -73,13 +82,14 @@ describe('useTrialRun', () => {
     await act(async () => {
       await result.current.start();
     });
-    await waitFor(() => expect(result.current.phase.kind).toBe('no-material'));
+
+    await waitFor(() => { expect(result.current.phase.kind).toBe('no-material'); });
     expect(rpcMock.mock.calls.some((c) => c[0] === 'narration.plan_variants')).toBe(false);
   });
 
   it('分析失败：failed 带阶段与原因，重试从失败阶段重入', async () => {
     let analysisCalls = 0;
-    rpcMock.mockImplementation((method: string) => {
+    rpcMock.mockImplementation((method: string): Promise<RpcReply> => {
       if (method === 'analysis.episodes') {
         return Promise.resolve({
           episodes: [{ id: 'ep1', episode_number: 1, status: 'pending' }],
@@ -103,7 +113,8 @@ describe('useTrialRun', () => {
     await act(async () => {
       await result.current.start();
     });
-    await waitFor(() => expect(result.current.phase.kind).toBe('failed'));
+
+    await waitFor(() => { expect(result.current.phase.kind).toBe('failed'); });
     if (result.current.phase.kind === 'failed') {
       expect(result.current.phase.stage).toBe('analysis');
       expect(result.current.phase.reason).toBe('显存不够');
@@ -111,7 +122,8 @@ describe('useTrialRun', () => {
     await act(async () => {
       await result.current.start();
     });
-    await waitFor(() => expect(result.current.phase.kind).toBe('done'));
+
+    await waitFor(() => { expect(result.current.phase.kind).toBe('done'); });
     expect(analysisCalls).toBeGreaterThanOrEqual(2);
   });
 });

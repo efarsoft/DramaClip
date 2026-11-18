@@ -33,13 +33,36 @@ interface EpisodeSummary {
   readonly status: string;
 }
 
-export function useTrialRun(projectId: string): {
+/** 通用轮询：status 取数 → 进度回写 → 终态裁决（completed 放行 / 其余按失败带原因）。 */
+async function pollUntilDone(
+  fetch: () => Promise<{ status: string; progress: number; message?: string; error?: string | null }>,
+  onTick: (percent: number, message: string) => void,
+  isStopped: () => boolean,
+  failReason: (job: { status: string; error?: string | null; message?: string }) => string,
+): Promise<void> {
+  for (;;) {
+    if (isStopped()) return;
+    const job = await fetch();
+    onTick(Math.round(job.progress), job.message ?? '');
+    if (job.status === 'completed') return;
+    if (job.status !== 'running' && job.status !== 'pending') {
+      throw new Error(failReason(job));
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+}
+
+export function useTrialRun(
+  projectId: string,
+): {
   phase: TrialPhase;
   start: () => Promise<void>;
   reset: () => void;
 } {
   const [phase, setPhase] = useState<TrialPhase>({ kind: 'idle' });
   const stoppedRef = useRef(false);
+  // 经函数读取打断控制流窄化（直接读 ref.current 会被判「always falsy」）
+  const stopped = (): boolean => stoppedRef.current;
 
   const reset = useCallback((): void => {
     stoppedRef.current = true;
@@ -51,12 +74,8 @@ export function useTrialRun(projectId: string): {
     setPhase({ kind: 'checking' });
     try {
       const { episodes } = await analysisApi.episodes(projectId);
-      if (stoppedRef.current) return;
+      if (stopped()) return;
       const summaries = (episodes as unknown as EpisodeSummary[]).slice();
-      if (summaries.length === 0) {
-        setPhase({ kind: 'no-material' });
-        return;
-      }
       const sorted = summaries.slice().sort((a, b) => a.episode_number - b.episode_number);
       const first = sorted[0];
       if (first === undefined) {
@@ -68,50 +87,29 @@ export function useTrialRun(projectId: string): {
       if (first.status !== 'done') {
         setPhase({ kind: 'analyzing', percent: 0, message: '准备分析' });
         const { job_id } = await analysisApi.start(projectId, [first.id]);
-        for (;;) {
-          if (stoppedRef.current) return;
-          const job = await analysisApi.status(job_id);
-          setPhase({
-            kind: 'analyzing',
-            percent: Math.round(job.progress),
-            message: job.message ?? '',
-          });
-          if (job.status === 'completed') break;
-          if (job.status !== 'running' && job.status !== 'pending') {
-            setPhase({
-              kind: 'failed',
-              stage: 'analysis',
-              reason: job.error || job.message || `分析任务${job.status}`,
-            });
-            return;
-          }
-          await sleep(POLL_INTERVAL_MS);
-        }
+        await pollUntilDone(
+          () => analysisApi.status(job_id),
+          (percent, message) => {
+            setPhase({ kind: 'analyzing', percent, message });
+          },
+          () => stopped(),
+          (job) => job.error ?? job.message ?? `分析任务${job.status}`,
+        );
+        if (stopped()) return;
       }
 
       // ② 规划：纯原片剪辑 ×1 条（零文案模式，全链不触 LLM）
-      if (stoppedRef.current) return;
       setPhase({ kind: 'planning', percent: 0, message: '挑选高冲突片段' });
       const planned = await narrationApi.planVariants(projectId, ['raw_clip'], 1);
-      for (;;) {
-        if (stoppedRef.current) return;
-        const job = await analysisApi.status(planned.job_id);
-        setPhase({
-          kind: 'planning',
-          percent: Math.round(job.progress),
-          message: job.message ?? '',
-        });
-        if (job.status === 'completed') break;
-        if (job.status !== 'running' && job.status !== 'pending') {
-          setPhase({
-            kind: 'failed',
-            stage: 'planning',
-            reason: job.error || job.message || `规划任务${job.status}`,
-          });
-          return;
-        }
-        await sleep(POLL_INTERVAL_MS);
-      }
+      await pollUntilDone(
+        () => analysisApi.status(planned.job_id),
+        (percent, message) => {
+          setPhase({ kind: 'planning', percent, message });
+        },
+        () => stoppedRef.current,
+        (job) => job.error ?? job.message ?? `规划任务${job.status}`,
+      );
+      if (stopped()) return;
       const batchPlans = await narrationApi.listPlans(projectId, planned.batch_id);
       const planId = batchPlans[0]?.id;
       if (planId === undefined) {
@@ -120,10 +118,10 @@ export function useTrialRun(projectId: string): {
       }
 
       // ③ 导出：提交后按导出任务轮询到终态
-      if (stoppedRef.current) return;
       setPhase({ kind: 'exporting', percent: 0, message: '合成成片' });
       const submission = await exportApi.submit([planId]);
-      if (submission.exports.length === 0) {
+      const submitted = submission.exports[0];
+      if (submitted === undefined) {
         setPhase({
           kind: 'failed',
           stage: 'export',
@@ -131,36 +129,18 @@ export function useTrialRun(projectId: string): {
         });
         return;
       }
-      const submitted = submission.exports[0];
-      if (submitted === undefined) {
-        setPhase({ kind: 'failed', stage: 'export', reason: '导出提交返回为空' });
-        return;
-      }
-      const { export_id, job_id } = submitted;
-      for (;;) {
-        if (stoppedRef.current) return;
-        const { job } = await jobsApi.get(job_id);
-        setPhase({
-          kind: 'exporting',
-          percent: Math.round(job.progress ?? 0),
-          message: '',
-        });
-        if (job.status === 'completed') {
-          setPhase({ kind: 'done', exportId: export_id });
-          return;
-        }
-        if (job.status !== 'running' && job.status !== 'pending') {
-          setPhase({
-            kind: 'failed',
-            stage: 'export',
-            reason: job.error || `导出任务${job.status}`,
-          });
-          return;
-        }
-        await sleep(POLL_INTERVAL_MS);
-      }
+      await pollUntilDone(
+        () => jobsApi.get(submitted.job_id).then(({ job }) => job),
+        (percent, message) => {
+          setPhase({ kind: 'exporting', percent, message });
+        },
+        () => stoppedRef.current,
+        (job) => job.error ?? `导出任务${job.status}`,
+      );
+      if (stopped()) return;
+      setPhase({ kind: 'done', exportId: submitted.export_id });
     } catch (exc) {
-      if (stoppedRef.current) return;
+      if (stopped()) return;
       setPhase({
         kind: 'failed',
         stage: 'analysis',

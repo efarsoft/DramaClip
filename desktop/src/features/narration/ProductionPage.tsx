@@ -44,9 +44,10 @@ function useKDefault(serviceState: string, setK: (k: number) => void): void {
   }, [serviceState, setK]);
 }
 
-/** LLM 配置状态：llm.base_url 非空即视为已配置——模式卡的「需配 LLM」警示源。 */
-function useLlmConfigured(serviceState: string): boolean {
-  const [configured, setConfigured] = useState(false);
+/** LLM 配置状态：true=已配置 / false=确认未配置 / null=读取失败（未知）。
+ * 三态缺一不可：把「读取失败」当「未配置」会让用户去白配 LLM（外部审查实锤）。 */
+function useLlmConfigured(serviceState: string): boolean | null {
+  const [configured, setConfigured] = useState<boolean | null>(null);
   useEffect(() => {
     if (serviceState !== 'ready') return;
     void settingsApi
@@ -54,7 +55,9 @@ function useLlmConfigured(serviceState: string): boolean {
       .then((values) => {
         setConfigured(Boolean((values['llm.base_url'] ?? '').trim()));
       })
-      .catch(() => undefined);
+      .catch(() => {
+        setConfigured(null);
+      });
   }, [serviceState]);
   return configured;
 }
@@ -123,6 +126,7 @@ export function ProductionPage() {
   // K 默认（09-10 §4.6「生产线默认值」）：初值读设置页同键，不写死 3
   useKDefault(serviceState, setK);
   const llmConfigured = useLlmConfigured(serviceState);
+  // null（读取失败）按已配置处理：不显示「需配置」警示——误导性归因比不提示更坏
 
   // AI 模式推荐：服务端随项目缓存（命中秒回，未命中现算并落缓存）
   useEffect(() => {

@@ -26,8 +26,8 @@ export function ModePicker({
   batch: PlanBatch;
   modes: NarrationMode[];
   k: number;
-  /** LLM 是否已配置（llm.base_url 非空）：未配置时含文案模式的徽标转为警示。 */
-  llmConfigured?: boolean;
+  /** LLM 配置状态：false=确认未配置才转警示；null=读取失败不误导（按已配置展示）。 */
+  llmConfigured?: boolean | null;
   recommendation?: ModeRecommendation | null;
   recLoading?: boolean;
   /** 生成方案入口：页面先定格规格（模式×条数）再启动（规格供规划队列画骨架）。 */
@@ -157,7 +157,7 @@ function ModeGrid({
 }: {
   modes: NarrationMode[];
   onToggleMode: (mode: NarrationMode) => void;
-  llmConfigured: boolean;
+  llmConfigured: boolean | null;
 }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: tokens.spaceMd }}>
@@ -189,7 +189,7 @@ function ModeTile({
   label: string;
   desc: string;
   needs: ('copy' | 'voice')[];
-  llmConfigured: boolean;
+  llmConfigured: boolean | null;
   checked: boolean;
   onToggle: () => void;
 }) {
@@ -215,10 +215,10 @@ function ModeTile({
         <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>{desc}</span>
         <span style={{ display: 'flex', gap: tokens.spaceSm, marginTop: 'auto' }}>
           {needs.includes('copy') ? (
-            llmConfigured ? (
-              <NeedBadge text="含 AI 文案" />
-            ) : (
+            llmConfigured === false ? (
               <NeedBadge text="含 AI 文案 · 需先配置文案 LLM" warn />
+            ) : (
+              <NeedBadge text="含 AI 文案" />
             )
           ) : (
             <NeedBadge text="无需文案" muted />
