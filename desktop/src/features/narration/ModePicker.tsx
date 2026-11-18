@@ -14,6 +14,7 @@ export function ModePicker({
   batch,
   modes,
   k,
+  llmConfigured = true,
   recommendation = null,
   recLoading = false,
   onReroll,
@@ -25,6 +26,8 @@ export function ModePicker({
   batch: PlanBatch;
   modes: NarrationMode[];
   k: number;
+  /** LLM 是否已配置（llm.base_url 非空）：未配置时含文案模式的徽标转为警示。 */
+  llmConfigured?: boolean;
   recommendation?: ModeRecommendation | null;
   recLoading?: boolean;
   /** 生成方案入口：页面先定格规格（模式×条数）再启动（规格供规划队列画骨架）。 */
@@ -39,7 +42,7 @@ export function ModePicker({
       {recommendation !== null && recommendation.modes.length > 0 && (
         <RecommendationLine recommendation={recommendation} recLoading={recLoading} onReroll={onReroll} />
       )}
-      <ModeGrid modes={modes} onToggleMode={onToggleMode} />
+      <ModeGrid modes={modes} onToggleMode={onToggleMode} llmConfigured={llmConfigured} />
       <PlanToolbar
         batch={batch}
         modes={modes}
@@ -147,7 +150,15 @@ function PlanToolbar({
   );
 }
 
-function ModeGrid({ modes, onToggleMode }: { modes: NarrationMode[]; onToggleMode: (mode: NarrationMode) => void }) {
+function ModeGrid({
+  modes,
+  onToggleMode,
+  llmConfigured,
+}: {
+  modes: NarrationMode[];
+  onToggleMode: (mode: NarrationMode) => void;
+  llmConfigured: boolean;
+}) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: tokens.spaceMd }}>
       {MODE_INFO.map((item) => (
@@ -156,6 +167,7 @@ function ModeGrid({ modes, onToggleMode }: { modes: NarrationMode[]; onToggleMod
           label={item.label}
           desc={item.desc}
           needs={item.needs}
+          llmConfigured={llmConfigured}
           checked={modes.includes(item.mode as NarrationMode)}
           onToggle={() => {
             onToggleMode(item.mode as NarrationMode);
@@ -170,12 +182,14 @@ function ModeTile({
   label,
   desc,
   needs,
+  llmConfigured,
   checked,
   onToggle,
 }: {
   label: string;
   desc: string;
   needs: ('copy' | 'voice')[];
+  llmConfigured: boolean;
   checked: boolean;
   onToggle: () => void;
 }) {
@@ -200,7 +214,15 @@ function ModeTile({
         </div>
         <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textTertiary }}>{desc}</span>
         <span style={{ display: 'flex', gap: tokens.spaceSm, marginTop: 'auto' }}>
-          {needs.includes('copy') ? <NeedBadge text="含 AI 文案" /> : <NeedBadge text="无需文案" muted />}
+          {needs.includes('copy') ? (
+            llmConfigured ? (
+              <NeedBadge text="含 AI 文案" />
+            ) : (
+              <NeedBadge text="含 AI 文案 · 需先配置文案 LLM" warn />
+            )
+          ) : (
+            <NeedBadge text="无需文案" muted />
+          )}
           {needs.includes('voice') ? <NeedBadge text="含 AI 配音" /> : <NeedBadge text="原声" muted />}
         </span>
       </div>
@@ -208,7 +230,15 @@ function ModeTile({
   );
 }
 
-function NeedBadge({ text, muted = false }: { text: string; muted?: boolean }): React.ReactElement {
+function NeedBadge({
+  text,
+  muted = false,
+  warn = false,
+}: {
+  text: string;
+  muted?: boolean;
+  warn?: boolean;
+}): React.ReactElement {
   return (
     <span
       style={{
@@ -216,7 +246,11 @@ function NeedBadge({ text, muted = false }: { text: string; muted?: boolean }): 
         lineHeight: tokens.text.badge.leading,
         padding: `${String(layout.chip.paddingBlock)}px ${layout.chip.paddingInline}`,
         borderRadius: tokens.radiusChip,
-        color: muted ? tokens.textTertiary : tokens.colorSuccess,
+        color: warn
+          ? tokens.colorWarning
+          : muted
+            ? tokens.textTertiary
+            : tokens.colorSuccess,
         border: `1px solid ${tokens.border}`,
         background: muted ? 'transparent' : tokens.successSoft,
       }}

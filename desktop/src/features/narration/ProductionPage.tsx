@@ -44,6 +44,21 @@ function useKDefault(serviceState: string, setK: (k: number) => void): void {
   }, [serviceState, setK]);
 }
 
+/** LLM 配置状态：llm.base_url 非空即视为已配置——模式卡的「需配 LLM」警示源。 */
+function useLlmConfigured(serviceState: string): boolean {
+  const [configured, setConfigured] = useState(false);
+  useEffect(() => {
+    if (serviceState !== 'ready') return;
+    void settingsApi
+      .get()
+      .then((values) => {
+        setConfigured(Boolean((values['llm.base_url'] ?? '').trim()));
+      })
+      .catch(() => undefined);
+  }, [serviceState]);
+  return configured;
+}
+
 /** ③ 区段容器：与 PageShell 同一节奏的纵向排布，focus 滚动的锚。 */
 function sectionStyle(): React.CSSProperties {
   return { display: 'flex', flexDirection: 'column', gap: layout.page.gap };
@@ -107,6 +122,7 @@ export function ProductionPage() {
 
   // K 默认（09-10 §4.6「生产线默认值」）：初值读设置页同键，不写死 3
   useKDefault(serviceState, setK);
+  const llmConfigured = useLlmConfigured(serviceState);
 
   // AI 模式推荐：服务端随项目缓存（命中秒回，未命中现算并落缓存）
   useEffect(() => {
@@ -171,6 +187,7 @@ export function ProductionPage() {
         <ModePicker
           batch={batch}
           modes={modes}
+          llmConfigured={llmConfigured}
           onGenerate={onGenerate}
           recommendation={recommendation}
           recLoading={recLoading}

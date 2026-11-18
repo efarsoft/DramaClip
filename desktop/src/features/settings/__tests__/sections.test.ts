@@ -27,6 +27,7 @@ const KNOWN_KEYS = new Set([
   'agent_gateway.enabled',
   'agent_gateway.port',
   'agent_gateway.token',
+  'export.dedup_jitter',
   'download.hf_mirror',
   'download.ms_base',
   'hardware.max_parallel_jobs',
