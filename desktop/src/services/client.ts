@@ -253,6 +253,12 @@ export const exportApi = {
       retention_3s?: number | null;
       video_id?: string | null;
       published_at?: string | null;
+      /** 五个对账维度（W14·条件③），只记录不做对账逻辑。 */
+      task_ref?: string | null;
+      drama_name?: string | null;
+      pack_version?: string | null;
+      publish_account?: string | null;
+      settlement_amount?: number | null;
     } | null,
   ): Promise<{ ok: boolean; publish_data: PublishData | null }> =>
     rpc<{ ok: boolean; publish_data: PublishData | null }>('export.set_publish_data', {

@@ -24,7 +24,7 @@ _FILE_RATCHET: dict[str, int] = {
     "dramaclip/api/models.py": 813,
     "dramaclip/api/narration_plans.py": 1002,
     "dramaclip/engines/exporter/encoder.py": 1240,
-    "dramaclip/engines/narration/audit.py": 807,
+    "dramaclip/engines/narration/audit.py": 841,  # +34：包外集号告警规则（W14-A）
     # +3：stderr None 防御（2026-11-18 装测实锤）
     "dramaclip/infra/model_manager/tts_runtime.py": 933,
 }

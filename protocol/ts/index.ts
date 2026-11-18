@@ -521,7 +521,12 @@ export interface PublishData {
   readonly video_id?: string | null;
   /** 发布日期（YYYY-MM-DD，可选）。 */
   readonly published_at?: string | null;
-  /** 录入时刻（毫秒，服务端记录）。 */
+  /** 五个对账维度（W14·条件③）：片→任务→号→结算的锚，只记录不做对账逻辑。 */
+  readonly task_ref?: string | null;
+  readonly drama_name?: string | null;
+  readonly pack_version?: string | null;
+  readonly publish_account?: string | null;
+  readonly settlement_amount?: number | null;
   readonly recorded_at: number;
 }
 
@@ -1064,6 +1069,7 @@ export const METHOD_NAMES = [
   'export.delete',
   'export.selfcheck',
   'export.set_publish_data',
+  'export.import_settlement_csv',
   'export.publish_report',
   'export.ab_report',
   'models.runtime_status',

@@ -13,6 +13,8 @@ export function PublishDataSection({ job, onReload }: { job: ExportJob; onReload
     existing, platform, setPlatform, plays, setPlays, retention, setRetention,
     likes, setLikes, shares, setShares, retention3s, setRetention3s,
     videoId, setVideoId, publishedAt, setPublishedAt, saving, save, clear,
+    taskRef, setTaskRef, dramaName, setDramaName, packVersion, setPackVersion,
+    publishAccount, setPublishAccount, settlementAmount, setSettlementAmount,
   } = usePublishDataForm(job, onReload);
 
   return (
@@ -95,6 +97,14 @@ export function PublishDataSection({ job, onReload }: { job: ExportJob; onReload
           onChange={(value) => { setPublishedAt(value); }}
           style={{ width: 150 }}
         />
+        {/* 五个对账维度（W14·条件③）：片→任务→号→结算的锚，只记录不做对账逻辑。 */}
+        <SettlementInputs
+          taskRef={taskRef} onTaskRef={setTaskRef}
+          dramaName={dramaName} onDramaName={setDramaName}
+          packVersion={packVersion} onPackVersion={setPackVersion}
+          publishAccount={publishAccount} onPublishAccount={setPublishAccount}
+          settlementAmount={settlementAmount} onSettlementAmount={setSettlementAmount}
+        />
         <Button type="primary" size="small" loading={saving} onClick={save}>
           保存
         </Button>
@@ -110,3 +120,26 @@ export function PublishDataSection({ job, onReload }: { job: ExportJob; onReload
     </PageSection>
   );
 }
+
+/** 对账维度输入组（W14·条件③）：拆出主函数为行帽留位，五个输入一行排布。 */
+function SettlementInputs({
+  taskRef, onTaskRef, dramaName, onDramaName, packVersion, onPackVersion,
+  publishAccount, onPublishAccount, settlementAmount, onSettlementAmount,
+}: {
+  taskRef: string; onTaskRef: (v: string) => void;
+  dramaName: string; onDramaName: (v: string) => void;
+  packVersion: string; onPackVersion: (v: string) => void;
+  publishAccount: string; onPublishAccount: (v: string) => void;
+  settlementAmount: number | null; onSettlementAmount: (v: number | null) => void;
+}): ReactElement {
+  return (
+    <>
+      <Input size="small" placeholder="任务编号" value={taskRef} onChange={(e) => { onTaskRef(e.target.value); }} style={{ width: 140 }} />
+      <Input size="small" placeholder="剧目" value={dramaName} onChange={(e) => { onDramaName(e.target.value); }} style={{ width: 120 }} />
+      <Input size="small" placeholder="素材包版本" value={packVersion} onChange={(e) => { onPackVersion(e.target.value); }} style={{ width: 130 }} />
+      <Input size="small" placeholder="发布账号" value={publishAccount} onChange={(e) => { onPublishAccount(e.target.value); }} style={{ width: 120 }} />
+      <InputNumber size="small" min={0} precision={2} placeholder="结算(选填)" value={settlementAmount} onChange={(v) => { onSettlementAmount(typeof v === 'number' ? v : null); }} style={{ width: 112 }} />
+    </>
+  );
+}
+

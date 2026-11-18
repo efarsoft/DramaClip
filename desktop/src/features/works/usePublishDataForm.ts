@@ -27,6 +27,14 @@ export function usePublishDataForm(job: ExportJob, onReload: () => void) {
   const [publishedAt, setPublishedAt] = useState<dayjs.Dayjs | null>(
     existing?.published_at ? dayjs(existing.published_at) : null,
   );
+  // 五个对账维度（W14·条件③）：任务编号/剧目/素材包版本自动带出可手改，账号/结算手填
+  const [taskRef, setTaskRef] = useState(existing?.task_ref ?? '');
+  const [dramaName, setDramaName] = useState(existing?.drama_name ?? '');
+  const [packVersion, setPackVersion] = useState(existing?.pack_version ?? '');
+  const [publishAccount, setPublishAccount] = useState(existing?.publish_account ?? '');
+  const [settlementAmount, setSettlementAmount] = useState<number | null>(
+    existing?.settlement_amount ?? null,
+  );
   const [saving, setSaving] = useState(false);
 
   const save = (): void => {
@@ -45,6 +53,11 @@ export function usePublishDataForm(job: ExportJob, onReload: () => void) {
         retention_3s: retention3s,
         video_id: videoId.trim() === '' ? null : videoId.trim(),
         published_at: publishedAt !== null ? publishedAt.format('YYYY-MM-DD') : null,
+        task_ref: taskRef.trim() === '' ? null : taskRef.trim(),
+        drama_name: dramaName.trim() === '' ? null : dramaName.trim(),
+        pack_version: packVersion.trim() === '' ? null : packVersion.trim(),
+        publish_account: publishAccount.trim() === '' ? null : publishAccount.trim(),
+        settlement_amount: settlementAmount,
       })
       .then(() => {
         localStorage.setItem(PLATFORM_MEMORY_KEY, platform);
@@ -71,5 +84,7 @@ export function usePublishDataForm(job: ExportJob, onReload: () => void) {
     existing, platform, setPlatform, plays, setPlays, retention, setRetention,
     likes, setLikes, shares, setShares, retention3s, setRetention3s,
     videoId, setVideoId, publishedAt, setPublishedAt, saving, save, clear,
+    taskRef, setTaskRef, dramaName, setDramaName, packVersion, setPackVersion,
+    publishAccount, setPublishAccount, settlementAmount, setSettlementAmount,
   };
 }

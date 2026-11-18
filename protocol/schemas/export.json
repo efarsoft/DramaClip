@@ -591,18 +591,28 @@
       },
       "result": {
         "type": "object",
-        "required": ["ok", "covers", "skipped"],
+        "required": [
+          "ok",
+          "covers",
+          "skipped"
+        ],
         "properties": {
-          "ok": { "type": "boolean" },
+          "ok": {
+            "type": "boolean"
+          },
           "covers": {
             "type": "object",
             "description": "平台名 → 已生成封面绝对路径",
-            "additionalProperties": { "type": "string" }
+            "additionalProperties": {
+              "type": "string"
+            }
           },
           "skipped": {
             "type": "object",
             "description": "平台名 → 未生成原因（截帧失败）",
-            "additionalProperties": { "type": "string" }
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         }
       }
@@ -759,14 +769,73 @@
                     ],
                     "minimum": 0
                   },
-                  "shares": { "type": ["integer", "null"], "minimum": 0 },
-                  "retention_3s": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
-                  "video_id": { "type": ["string", "null"], "maxLength": 200 },
+                  "shares": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
+                  },
+                  "retention_3s": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "video_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 200
+                  },
                   "published_at": {
                     "type": [
                       "string",
                       "null"
                     ]
+                  },
+                  "task_ref": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 100,
+                    "description": "任务后台的任务编号（对账锚）"
+                  },
+                  "drama_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 100,
+                    "description": "剧目名（对账锚）"
+                  },
+                  "pack_version": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 100,
+                    "description": "素材包版本（对账锚）"
+                  },
+                  "publish_account": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 100,
+                    "description": "发布账号（对账锚）"
+                  },
+                  "settlement_amount": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "minimum": 0,
+                    "description": "结算金额（对账记录，不做对账逻辑）"
                   }
                 },
                 "additionalProperties": false
@@ -810,20 +879,73 @@
         "properties": {
           "dimension": {
             "type": "string",
-            "enum": ["mode", "arc", "angle", "platform", "duration_bucket"]
+            "enum": [
+              "mode",
+              "arc",
+              "angle",
+              "platform",
+              "duration_bucket"
+            ]
           }
         }
       },
-      "result": { "type": "object" }
+      "result": {
+        "type": "object"
+      }
     },
     {
       "name": "export.ab_report",
       "summary": "A/B 对照组四态：同项目同平台/72h/≥500 播放，等待/证据不足/差异不明显/方向性领先",
       "params": {
         "type": "object",
-        "properties": { "project_id": { "type": "string" } }
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        }
       },
-      "result": { "type": "object" }
+      "result": {
+        "type": "object"
+      }
+    },
+    {
+      "name": "export.import_settlement_csv",
+      "summary": "任务后台结算 CSV 批量导入（W14·条件③对账）：按 作品ID 匹配成片回填结算维度；匹配不到的行宁拒录不错配",
+      "params": {
+        "type": "object",
+        "required": [
+          "csv_text"
+        ],
+        "properties": {
+          "csv_text": {
+            "type": "string",
+            "description": "CSV 全文（表头含 作品ID/结算金额/发布账号，容忍别名）"
+          }
+        }
+      },
+      "returns": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "matched": {
+            "type": "integer"
+          },
+          "touched_export_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      }
     }
   ]
 }
