@@ -50,7 +50,8 @@ function section(id: string) {
 
 describe('两分区补入', () => {
   it('「生产线默认值」有 K 默认 / 风格默认 / 时长档（从出片区搬来）', () => {
-    const keys = section('production').fields.map((field) => field.key);
+    // info 知情行无键，不进键序断言（插在生产默认值分区开头）
+    const keys = section('production').fields.flatMap((f) => (f.key === undefined ? [] : [f.key]));
     expect(keys).toEqual([
       'narration.variants_per_mode',
       'narration.style_id',
@@ -88,7 +89,9 @@ describe('AI 生成标注开关（业主裁决 2026-10-15：用户可决、默�
 
 describe('键与消费端同源验收', () => {
   it('界面上每个控件的键都是服务端认识的键', () => {
-    const allKeys = buildSections(dynamic).flatMap((s) => s.fields.map((f) => f.key));
+    const allKeys = buildSections(dynamic).flatMap((s) =>
+      s.fields.flatMap((f) => (f.key === undefined ? [] : [f.key])),
+    );
     for (const key of allKeys) {
       expect(KNOWN_KEYS.has(key), key).toBe(true);
     }

@@ -14,10 +14,11 @@ export interface Option {
   readonly value: string;
 }
 
-export type FieldType = 'text' | 'password' | 'number' | 'select' | 'switch';
+export type FieldType = 'text' | 'password' | 'number' | 'select' | 'switch' | 'info';
 
 export interface FieldSpec {
-  readonly key: string;
+  /** 设置键；'info' 型是纯知情行没有键（不进键同源验收）。 */
+  readonly key?: string;
   readonly label: string;
   readonly type: FieldType;
   readonly help?: string;
@@ -94,6 +95,16 @@ function productionSection(dynamic: DynamicOptions): SectionSpec {
     id: 'production',
     title: '生产线默认值',
     fields: [
+    {
+      type: 'info',
+      label: '模式与文案引擎',
+      help: '九种出片模式里，七种解说类需要先配置文案 LLM；「纯原片剪辑」与「金句流」两种免 LLM 可用。未配置时解说类会明确提示，不会静默失败',
+    },
+    {
+      type: 'info',
+      label: '配音引擎联网与下载',
+      help: 'Edge 免安装但需联网；本地引擎（Kokoro / IndexTTS / CosyVoice）需下载模型与运行环境（引擎中心按需安装）。导出阶段全部在本机完成，素材不上传',
+    },
       {
         key: 'narration.variants_per_mode',
         label: '每个模式出几条方案 (K)',

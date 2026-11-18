@@ -200,18 +200,24 @@ function SettingsBody({
     <>
       {sections.map((section) => (
         <PageSection key={section.id} title={section.title}>
-          {section.fields.map((field, index, all) => (
-            <FieldRow
-              key={field.key}
-              spec={field}
-              value={draft[field.key] ?? ''}
-              values={draft}
-              last={index === all.length - 1}
-              onChange={(next) => {
-                onPatch(field.key, next);
-              }}
-            />
-          ))}
+          {section.fields.map((field, index, all) => {
+            // 'info' 型没有键：不取草稿值、不参与补丁（纯知情行）
+            const key = field.key ?? `__info_${section.id}_${index}`;
+            return (
+              <FieldRow
+                key={key}
+                spec={field}
+                value={field.key === undefined ? '' : (draft[field.key] ?? '')}
+                values={draft}
+                last={index === all.length - 1}
+                onChange={(next) => {
+                  if (field.key !== undefined) {
+                    onPatch(field.key, next);
+                  }
+                }}
+              />
+            );
+          })}
         </PageSection>
       ))}
     </>
@@ -247,6 +253,8 @@ function FieldControl(props: {
           onChange={onChange}
         />
       );
+    case 'info':
+      return <InfoControl label={spec.label} help={spec.help ?? ''} />;
     case 'switch':
       return <SwitchControl value={value} onChange={onChange} />;
     case 'password':
@@ -254,6 +262,16 @@ function FieldControl(props: {
     default:
       return <TextField spec={spec} value={value} onChange={onChange} />;
   }
+}
+
+/** 知情行：没有键、不可编辑——把散在别处的「哪些模式要什么」收进设置页。 */
+function InfoControl({ label, help }: { label: string; help: string }): React.ReactElement {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={{ fontWeight: 600 }}>{label}</span>
+      <span style={{ color: tokens.textTertiary }}>{help}</span>
+    </div>
+  );
 }
 
 function SwitchControl({
