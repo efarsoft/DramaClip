@@ -900,7 +900,10 @@ def _run_uv(uv: Path, venv: Path, *args: str) -> None:
         creationflags=_NO_WINDOW, env=env, check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"uv {' '.join(args[:2])} 失败: {result.stderr[-300:]}")
+        # stderr 可能是 None（Windows 管道异常/进程被强杀场景，装测实锤
+        # 'NoneType' object is not subscriptable）——防御取空串，别让报错本身再炸
+        detail = (result.stderr or "")[-300:]
+        raise RuntimeError(f"uv {' '.join(args[:2])} 失败: {detail}")
 
 
 def _fetch_first(sources: list[str], target: Path, size: int, cancel: threading.Event) -> None:

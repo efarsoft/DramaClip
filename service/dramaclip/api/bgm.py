@@ -79,7 +79,7 @@ def subprocess_run_ffmpeg(wav_path: Path, dest: Path) -> str:
         ],
         capture_output=True, text=True, check=False,
     )
-    return result.stderr[-300:] if result.returncode != 0 else ""
+    return (result.stderr or "")[-300:] if result.returncode != 0 else ""
 
 
 def _generate_worker(context: Any, job_id: str, payload: dict[str, Any]) -> None:
