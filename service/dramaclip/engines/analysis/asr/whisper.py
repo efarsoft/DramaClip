@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from dramaclip.engines.analysis.asr.common import (
     _CUDA_PROBLEM,
+    _MISSING_ASSET,
     _ct2_cuda_available,
     _report_from_state,
     simplify,
@@ -54,6 +55,11 @@ class FasterWhisperEngine:
         try:
             return self._run(self._ensure_model(), wav_path, language, hotwords)
         except Exception as exc:  # noqa: BLE001 - CUDA 运行库问题统一按关键字识别
+            # 资产文件缺失（VAD onnx 等）不是算力问题：换 CPU 也修不了，套 CUDA 壳
+            # 会把用户引去查驱动（装测实锤：NO_SUCHFILE 被包装成「请求 CUDA，推理
+            # 失败」）——原样上抛，自检按加载失败归类、给修复指引。
+            if _MISSING_ASSET.search(str(exc)):
+                raise
             # cuBLAS/cuDNN 缺失往往在首次推理（惰性计算）时才暴露，构造期兜不住
             if self._requested == "cuda":
                 raise compute.ComputeUnavailableError(
@@ -139,6 +145,8 @@ class FasterWhisperEngine:
                 download_root=str(self._models_dir) if self._models_dir else None,
             )
         except Exception as exc:  # noqa: BLE001 - CUDA 运行库问题统一按关键字识别
+            if _MISSING_ASSET.search(str(exc)):
+                raise  # 资产缺失同上：原样上抛，不进 CUDA 归因壳
             if device == "cpu" or not _CUDA_PROBLEM.search(str(exc)):
                 raise
             if self._requested == "cuda":

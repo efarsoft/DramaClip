@@ -184,6 +184,13 @@ def _gpu_variant() -> str:
     Arc/Ultra（Meteor Lake+ 核显与 Arc 独显的命名特征；老 Gen9.5 核显无
     XPU 后端不入）。最终裁决在 worker 的 torch.xpu 真算探针——装错轮的
     代价是一次 CPU 回退与如实 reason。
+
+    门控方向（2026-11-17 装测实锤反转）：无卡机器的 nvidia-smi 可以是
+    Microsoft Store 假 stub 或驱动残留——`which` 命中但 probe 读不出算力。
+    「信息缺失→保守装 CUDA」的旧兜底在无卡机器上正好造出白下 2.5GB；两种
+    损失不对称（错装=2.5GB 白下，漏装=合成探针如实回退+明确 reason），保守
+    方向因此反转：算力读不出来一律 CPU 轮。硬件真相以 D3D 枚举为准——
+    adapters 里没有 NVIDIA 适配器时不再问 nvidia-smi。
     """
     raw_adapters = gpu.snapshot_sync().get("adapters") or []
     adapters = (
@@ -192,6 +199,15 @@ def _gpu_variant() -> str:
     if _intel_xpu_capable(adapters):
         print("[tts-runtime] Intel Arc/Ultra 适配器在场：装 torch XPU 轮")
         return "xpu"
+    has_nvidia = any(
+        str(a.get("vendor") or "") == "nvidia"
+        and not a.get("is_virtual")
+        and not a.get("is_software")
+        for a in adapters
+    )
+    if not has_nvidia:
+        print("[tts-runtime] D3D 枚举无 NVIDIA 适配器：装 CPU 轮")
+        return "cpu"
     if shutil.which("nvidia-smi") is None:
         return "cpu"
     probe = subprocess.run(  # noqa: S603 - 固定二进制受控参数
@@ -204,9 +220,11 @@ def _gpu_variant() -> str:
     try:
         major = float(cap.split()[0]) if cap else -1.0
     except ValueError:
-        return "cuda"  # 算力读不出来：保守装 CUDA 轮，合成探针诚实回退
+        print("[tts-runtime] nvidia-smi 算力读不出来（stub/驱动异常）：装 CPU 轮")
+        return "cpu"
     if major < 0.0:
-        return "cuda"  # nvidia-smi 空输出同理：信息缺失不等于没有 CUDA
+        print("[tts-runtime] nvidia-smi 空输出（stub/驱动异常）：装 CPU 轮")
+        return "cpu"
     if major < 7.0:
         print(f"[tts-runtime] N 卡算力 {cap} 低于 cu128 支持线（7.0）：装 CPU 轮")
         return "cpu"

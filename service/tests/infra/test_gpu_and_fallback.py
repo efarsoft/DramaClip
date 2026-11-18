@@ -402,10 +402,20 @@ def test_torch_variant_trusts_the_installed_wheel_over_the_marker(tmp_path: Path
     assert music_runtime.torch_variant(data) == "cpu"
 
 
+def _nvidia_adapters(monkeypatch) -> None:
+    """D3D 枚举返回一块真 N 卡（_gpu_variant 的硬件真相前置）。"""
+    from dramaclip.infra import gpu
+
+    monkeypatch.setattr(
+        gpu, "snapshot_sync", lambda **_k: {"adapters": [{"vendor": "nvidia"}]}
+    )
+
+
 def test_gpu_variant_two_tiers(monkeypatch) -> None:
     """算力两档：≥7.0 cu128 / <7.0 或无卡 CPU（cu126 老卡轮 2.8.0 实测无 sm_50 内核，否决）。"""
     from dramaclip.infra.model_manager import tts_runtime
 
+    _nvidia_adapters(monkeypatch)
     monkeypatch.setattr(tts_runtime.shutil, "which", lambda _n: r"C:\fake\nvidia-smi.exe")
 
     class _Probe:
@@ -419,7 +429,9 @@ def test_gpu_variant_two_tiers(monkeypatch) -> None:
         "5.2": "cpu",  # M4000 实测：2.8.0+cu126 装得上但算子无内核
         "6.1": "cpu",
         "4.5": "cpu",
-        "": "cuda",  # 探测失败按有卡处理（保守装 CUDA 轮，合成探针诚实回退）
+        # 装测实锤反转（2026-11-17）：有 D3D 真卡但算力读不出来=stub/驱动异常——
+        # 错装 GPU 轮白下 2.5GB，漏装只是合成探针如实回退；保守方向改为 cpu
+        "": "cpu",
     }
     for cap, expected in cases.items():
         monkeypatch.setattr(
@@ -433,7 +445,29 @@ def test_gpu_variant_two_tiers(monkeypatch) -> None:
 def test_gpu_variant_cpu_when_no_smi(monkeypatch) -> None:
     from dramaclip.infra.model_manager import tts_runtime
 
+    _nvidia_adapters(monkeypatch)
     monkeypatch.setattr(tts_runtime.shutil, "which", lambda _n: None)
+    assert tts_runtime._gpu_variant() == "cpu"
+
+
+def test_gpu_variant_cpu_when_d3d_has_no_nvidia(monkeypatch) -> None:
+    """装测实锤（2026-11-17）：无 N 卡机器的 nvidia-smi 可以是商店 stub/驱动残留——
+    D3D 枚举没有 NVIDIA 适配器就是硬件真相，不再问 nvidia-smi（旧兜底「probe
+    读不出→保守装 CUDA」在这台机器上正好白下 2.5GB cu128）。"""
+    from dramaclip.infra import gpu
+    from dramaclip.infra.model_manager import tts_runtime
+
+    monkeypatch.setattr(
+        gpu, "snapshot_sync", lambda **_k: {"adapters": [{"vendor": "intel"}]}
+    )
+    # nvidia-smi 在场（stub）且 probe 正常返回算力——D3D 真相仍然优先
+    monkeypatch.setattr(tts_runtime.shutil, "which", lambda _n: r"C:\fake\nvidia-smi.exe")
+
+    class _Probe:
+        stdout = "8.9\n"
+        returncode = 0
+
+    monkeypatch.setattr(tts_runtime.subprocess, "run", lambda *a, **k: _Probe())
     assert tts_runtime._gpu_variant() == "cpu"
 
 

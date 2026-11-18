@@ -124,6 +124,11 @@ def main() -> int:
         cmd += ["--add-data", f"{workers_src};dramaclip/engines/tts/workers"]
     # jieba 词典数据：热词挖掘在主进程用（misaki/kokoro/num2words 已随 E-2 移出主包）
     cmd += ["--collect-data", "jieba"]
+    # faster-whisper 包内资产（silero_vad_v6.onnx）：PyInstaller 静态分析不收包内
+    # 数据文件——装测实锤（2026-11-17）：缺它全量用户 faster-whisper 自检
+    # NO_SUCHFILE 必挂，还被 CUDA 归因壳包装成「算力不可用」。1MB 数据文件，
+    # 缺了就是发布阻断级（dev/CI 从源码跑探不到，只有装测产物才暴露）。
+    cmd += ["--collect-data", "faster_whisper"]
     if args.cuda:
         # CUDA 变体：运行库随包（用户只需 NVIDIA 驱动）；ctranslate2 自动启用 GPU
         for module in ("nvidia.cublas", "nvidia.cudnn"):

@@ -20,6 +20,9 @@ from dramaclip.infra import compute
 
 _LOGGER = logging.getLogger(__name__)
 _CUDA_PROBLEM = re.compile(r"cublas|cudnn|cudart|cuda|gpu|int8 compute type", re.I)
+# 资产文件缺失特征（onnxruntime NO_SUCHFILE 等）：不是算力问题，不进 CUDA 归因壳——
+# 装测实锤（2026-11-17）：打包缺 silero VAD onnx 被包装成「请求 CUDA，推理失败」
+_MISSING_ASSET = re.compile(r"NO_SUCHFILE|File doesn.t exist|No such file", re.I)
 
 
 def _ct2_cuda_available() -> bool:
