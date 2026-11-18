@@ -8,6 +8,7 @@ _effective_settings 留守（RPC 层受理期也要读），执行体惰性导�
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 import time
@@ -202,6 +203,11 @@ def _run_plan_variants(
             # 表达骨架错开）；past_copies 攒本模式已产文案做避重与闸门基准。
             strategy_cards = diversity.strategy_queue(k)
             past_copies: list[str] = []
+            # 跨任务历史预填（W9·跨片避重）：批内三件套只看得到本批——追更场景
+            # 「上次那条视频」的表达同质化它看不见。同项目近期成稿预填进基准；
+            # 预取失败只少一层保护，不挡生成。
+            with contextlib.suppress(Exception):
+                past_copies.extend(_collect_prior_texts(context, project_id))
             try:
                 if mode in _ZERO_COPY_MODES:
                     try:
@@ -519,7 +525,11 @@ def _plan_one(
             f"每集约 {scriptwriter.transcript_sampling_quota(len(scoped))} 段摘录",
         )
         plan, used_ids = script_driver.script_dialogue_plan(
-            scoped, settings, angle_block=variant.angle_block, trace_dir=trace_dir
+            scoped,
+            settings,
+            angle_block=variant.angle_block,
+            trace_dir=trace_dir,
+            past_copies=past_copies,
         )
         # 复述质检接入（此前只覆盖逐槽族，最重的剧本链反而没有质检）。不达标
         # 只留痕不自动重写：整稿重写＝与首稿同价的 LLM 往返（逐槽族「改写若干槽」

@@ -152,7 +152,9 @@ def test_sweep_interrupted_fails_crashed_download(
     job = context.job_store.get(job_id)
     assert job is not None
     assert job["status"] == "failed"
-    assert job["error"] == "服务中断"
+    # 装测实锤（2026-11-17）：下载类「服务中断」必须附断点提示——重试不是
+    # 从头再来（.incomplete 半成品跨任务保留），话术要把这件事说给用户
+    assert job["error"] == "服务中断（下载断点已保留，重试将从断点续传）"
 
 
 def test_download_rejects_a_model_without_any_source(

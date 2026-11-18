@@ -220,14 +220,26 @@ class JobStore:
 
     def sweep_interrupted(self) -> int:
         """启动清扫：上一会话遗留的 running / pending 任务标记失败（崩溃重入协议）。
+
+        下载类附断点提示：fetch 的 ``.incomplete`` 半成品按目标路径确定性命名、
+        跨任务保留——重试不是从头再来，话术要把这件事说给用户（装测实锤：
+        用户看到「服务中断」不敢点重试，以为又要白下几个 GB）。
         """
+        now = _now_ms()
+        cursor = self._conn.execute(
+            "UPDATE jobs SET status = 'failed',"
+            " error = '服务中断（下载断点已保留，重试将从断点续传）', updated_at = ?"
+            " WHERE type = 'model_download' AND status IN (?, ?)",
+            (now, STATUS_PENDING, STATUS_RUNNING),
+        )
+        download_count = cursor.rowcount or 0
         cursor = self._conn.execute(
             "UPDATE jobs SET status = 'failed', error = '服务中断', updated_at = ?"
-            " WHERE status IN (?, ?)",
-            (_now_ms(), STATUS_PENDING, STATUS_RUNNING),
+            " WHERE type != 'model_download' AND status IN (?, ?)",
+            (now, STATUS_PENDING, STATUS_RUNNING),
         )
         self._conn.commit()
-        return cursor.rowcount or 0
+        return download_count + (cursor.rowcount or 0)
 
     def _transition(
         self, job_id: str, status: str, error: str | None = None, progress: float | None = None

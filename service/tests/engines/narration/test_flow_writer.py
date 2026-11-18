@@ -502,3 +502,41 @@ def test_highlight_clamped_to_cap(tmp_path: Path) -> None:
     assert [seg.highlight for seg in script.segments][4:] == [False, False]
     trace = json.loads((tmp_path / "trace.json").read_text(encoding="utf-8"))
     assert trace["attempts"][-1]["highlights_clamped"] == 2
+
+
+def test_past_copies_injected_and_dice_gate_rejects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W9 跨片避重：历史基准随 <past_copy> 注入 prompt；3-gram 过似的稿被
+    语义拒稿一次、第二轮放行——批内三件套同款判据（diversity.too_similar）。"""
+    system, user = flow_writer.build_flow_request(
+        _episode_inputs(),
+        project_name="测试剧",
+        angle_block="",
+        past_copies=["旧稿正文一段足够长的文本用于注入断言占位。"],
+    )
+    assert "<past_copy>" in user and "旧稿正文" in user
+
+    calls = {"n": 0}
+
+    def _fake_too_similar(_new: str, _old: list[str]) -> bool:
+        calls["n"] += 1
+        return calls["n"] == 1  # 首轮过似、次轮干净
+
+    monkeypatch.setattr(flow_writer.diversity, "too_similar", _fake_too_similar)
+    monkeypatch.setattr(flow_writer.variant_scoring, "score_one", lambda *_a, **_k: None)
+    llm = _AlwaysOkLlm(_flow_json())
+    script = flow_writer.write_flow_script(
+        llm,
+        _episode_inputs(),
+        project_name="测试剧",
+        angle_block="",
+        trace_path=tmp_path / "trace.json",
+        settings={"llm.model": "stub", "narration.flow_retell": "0"},
+        past_copies=["近期成稿文案。"],
+    )
+    assert script.segments
+    assert calls["n"] == 2  # 首轮被闸拒、次轮放行
+    trace = json.loads((tmp_path / "trace.json").read_text(encoding="utf-8"))
+    assert trace["attempts"][0]["rejected_by"] == "diversity"
+    assert "近期成稿文案" in llm.prompts[0]  # 注入侧：基准进生成题目

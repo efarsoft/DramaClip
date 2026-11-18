@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from dramaclip.engines.llm_trace import dump_trace
 from dramaclip.engines.narration import audit as narration_audit
-from dramaclip.engines.narration import variant_scoring
+from dramaclip.engines.narration import diversity, variant_scoring
 from dramaclip.engines.narration.numerals import to_chinese_numerals
 from dramaclip.engines.narration.retell import retell_check
 from dramaclip.engines.narration.scriptwriter import (
@@ -132,6 +132,7 @@ def build_flow_request(
     style_directives: str = "",
     genre: str = "",
     prompts: dict[str, str] | None = None,
+    past_copies: list[str] | None = None,
 ) -> tuple[str, str]:
     """纯函数：组装整篇线的 (system, user)，不调用 LLM（审计/回放工具复用）。"""
     transcript_block = format_transcript_episodes(episode_inputs)
@@ -164,6 +165,9 @@ def build_flow_request(
     )
     override = (prompts or {}).get("prompt.flow_system")
     system = override if override else _flow_system()
+    avoid_block = diversity.past_copy_block(past_copies or [])
+    if avoid_block:
+        user_prompt = f"{avoid_block}\n{user_prompt}"
     return system, user_prompt
 
 
@@ -328,6 +332,7 @@ def write_flow_script(
     prompts: dict[str, str] | None = None,
     prior_texts: list[str] | None = None,
     settings: dict[str, str] | None = None,
+    past_copies: list[str] | None = None,
 ) -> Script:
     """整篇线主入口：生成 → 锚定铺轴 → 闸链（audit 硬闸 → 预算闸 → 复述闸 →
     六维评审批注）→ 交付。
@@ -345,6 +350,7 @@ def write_flow_script(
         style_directives=style_directives,
         genre=genre,
         prompts=prompts,
+        past_copies=past_copies,
     )
     transcript = [
         {
@@ -456,6 +462,21 @@ def write_flow_script(
             semantic_rejections < _MAX_SEMANTIC_REJECTS
             and attempt < _MAX_ATTEMPTS - 1
         )
+        # 跨片避重闸（W9）：与近期成稿 3-gram 过似 → 语义拒稿换表达重写
+        #（基准在 prompt 里已随 <past_copy> 注入，闸是验收兜底——两层缺一不可）。
+        if past_copies:
+            draft_text = "\n".join(seg.text for seg in script.segments)
+            if diversity.too_similar(draft_text, past_copies):
+                attempts[-1]["diversity_overlapped"] = True
+                if semantic_left:
+                    semantic_rejections += 1
+                    attempts[-1]["rejected_by"] = "diversity"
+                    attempts[-1]["rewrite_feedback"] = [
+                        "- 与近期成稿表达过似：换开头方式与组织结构重写，"
+                        "事实与取材不变（基准已附在题目上方，先读再写）"
+                    ]
+                    script = None
+                    continue
         # 预算闸（先排片后成稿）：画面装不下的句子生成期退回收短
         if overs and semantic_left:
             semantic_rejections += 1

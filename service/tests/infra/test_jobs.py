@@ -115,3 +115,22 @@ def test_set_ref_id_points_row_at_the_artifact(memory_db: sqlite3.Connection) ->
     row = store.get(job_id)
     assert row is not None
     assert row["ref_id"] == "C:/data/voices/auto-ref-1020.wav"
+
+
+def test_sweep_download_jobs_carry_resume_hint(
+    memory_db: sqlite3.Connection,
+) -> None:
+    """装测实锤（2026-11-17）：「服务中断」没说断点已保留，用户不敢点重试
+    以为要白下几个 GB——下载类话术附续传提示，其余任务维持原话术。"""
+    store = JobStore(memory_db)
+    download_id = store.create("model_download", ref_id="kokoro")
+    analysis_id = store.create("analysis")
+    store.mark_running(download_id)
+    store.mark_running(analysis_id)
+
+    store.sweep_interrupted()
+
+    download = store.get(download_id)
+    analysis = store.get(analysis_id)
+    assert download is not None and "断点已保留" in (download["error"] or "")
+    assert analysis is not None and analysis["error"] == "服务中断"

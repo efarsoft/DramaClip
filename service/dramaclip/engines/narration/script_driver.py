@@ -85,6 +85,7 @@ def script_dialogue_plan(
     angle_block: str,
     trace_dir: Any = None,
     min_segments: int | None = None,
+    past_copies: list[str] | None = None,
 ) -> tuple[PlanData, list[str]]:
     """跨集剧本驱动的对话解说。LLM 未配置或剧本不合格一律抛（降级已禁止）。
     """
@@ -109,6 +110,7 @@ def script_dialogue_plan(
             prompts=llm_prompts.overrides_from(settings),
             prior_texts=_prior_texts_of(settings),
             settings=settings,
+            past_copies=past_copies,
         )
         return narration_pipeline.build_from_script_episodes(
             {
