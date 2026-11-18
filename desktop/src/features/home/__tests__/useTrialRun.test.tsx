@@ -7,7 +7,7 @@ type RpcReply =
   | { episodes: { id: string; episode_number: number; status: string }[] }
   | { job_id: string; k?: number; batch_id?: string }
   | { id: string }[]
-  | { exports: { plan_id: string; export_id: string; job_id: string }[]; rejected: never[] }
+  | { exports: { plan_id: string; export_id: string; job_id: string }[]; rejected: { plan_id: string; reason: string }[] }
   | { job: { id: string; type: string; ref_id: null; status: string; progress: number } }
   | { status: string; progress: number; message?: string; error?: string };
 
@@ -59,7 +59,9 @@ describe('useTrialRun', () => {
       await result.current.start();
     });
 
-    await waitFor(() => { expect(result.current.phase.kind).toBe('done'); });
+    await waitFor(() => {
+      expect(result.current.phase.kind).toBe('done')
+    });
     const startCall = rpcMock.mock.calls.find((c) => c[0] === 'analysis.start');
     expect(startCall).toBeUndefined(); // 两集都 done：分析阶段整段跳过
     const planCall = rpcMock.mock.calls.find((c) => c[0] === 'narration.plan_variants');
@@ -72,17 +74,18 @@ describe('useTrialRun', () => {
   });
 
   it('导出被拒：export.submit 的 rejected 带人读理由进 failed 阶段', async () => {
-    rpcMock.mockImplementation((method: string) => {
+    rpcMock.mockImplementation((method: string): Promise<RpcReply> => {
       if (method === 'analysis.episodes') {
         return Promise.resolve({
           episodes: [{ id: 'ep1', episode_number: 1, status: 'done' }],
         });
       }
       if (method === 'export.submit') {
-        return Promise.resolve({
-          exports: [],
+        const rejectedPack = {
+          exports: [] as { plan_id: string; export_id: string; job_id: string }[],
           rejected: [{ plan_id: 'plan-1', reason: '方案没有可渲染的时间轴' }],
-        });
+        };
+        return Promise.resolve(rejectedPack);
       }
       return Promise.resolve(rpcReply(method));
     });
@@ -90,7 +93,9 @@ describe('useTrialRun', () => {
     await act(async () => {
       await result.current.start();
     });
-    await waitFor(() => expect(result.current.phase.kind).toBe('failed'));
+    await waitFor(() => {
+      expect(result.current.phase.kind).toBe('failed');
+    });
     if (result.current.phase.kind === 'failed') {
       expect(result.current.phase.stage).toBe('export');
       expect(result.current.phase.reason).toContain('方案没有可渲染的时间轴');
@@ -109,7 +114,9 @@ describe('useTrialRun', () => {
       await result.current.start();
     });
 
-    await waitFor(() => { expect(result.current.phase.kind).toBe('no-material'); });
+    await waitFor(() => {
+      expect(result.current.phase.kind).toBe('no-material')
+    });
     expect(rpcMock.mock.calls.some((c) => c[0] === 'narration.plan_variants')).toBe(false);
   });
 
@@ -140,7 +147,9 @@ describe('useTrialRun', () => {
       await result.current.start();
     });
 
-    await waitFor(() => { expect(result.current.phase.kind).toBe('failed'); });
+    await waitFor(() => {
+      expect(result.current.phase.kind).toBe('failed')
+    });
     if (result.current.phase.kind === 'failed') {
       expect(result.current.phase.stage).toBe('analysis');
       expect(result.current.phase.reason).toBe('显存不够');
@@ -149,7 +158,9 @@ describe('useTrialRun', () => {
       await result.current.start();
     });
 
-    await waitFor(() => { expect(result.current.phase.kind).toBe('done'); });
+    await waitFor(() => {
+      expect(result.current.phase.kind).toBe('done')
+    });
     expect(analysisCalls).toBeGreaterThanOrEqual(2);
   });
 });

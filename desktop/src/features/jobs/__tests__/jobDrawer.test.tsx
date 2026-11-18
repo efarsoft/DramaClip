@@ -172,10 +172,18 @@ describe('JobDrawer', () => {
     // antd 给两字按钮插空格（「重 试」），按可及名正则匹配
     const retryButtons = await screen.findAllByRole('button', { name: /重\s*试/ });
     expect(retryButtons.length).toBe(2);
-    fireEvent.click(retryButtons[0]);
-    await waitFor(() => expect(api.modelDownload).toHaveBeenCalledWith('kokoro'));
-    fireEvent.click(retryButtons[1]);
-    await waitFor(() => expect(api.analysisStart).toHaveBeenCalledWith('p1'));
+    const [dlButton, analysisButton] = retryButtons;
+    if (dlButton === undefined || analysisButton === undefined) {
+      throw new Error('两个失败行都该有重试按钮');
+    }
+    fireEvent.click(dlButton);
+    await waitFor(() => {
+      expect(api.modelDownload).toHaveBeenCalledWith('kokoro');
+    });
+    fireEvent.click(analysisButton);
+    await waitFor(() => {
+      expect(api.analysisStart).toHaveBeenCalledWith('p1');
+    });
   });
 
   it('export 失败行不显示就地重试（依赖页面上下文），保持「去处理」路由', async () => {
