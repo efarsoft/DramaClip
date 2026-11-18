@@ -20,6 +20,7 @@ import { tokens } from '../../styles/theme';
 import { createDramaFromFolder } from './createDrama';
 import { DramaMatrix } from './DramaMatrix';
 import { EmptyWorkbench } from './EmptyWorkbench';
+import { TrialRunCard } from './TrialRunCard';
 import { EnvPanel, TipsPanel } from './EnvPanel';
 import { TodoList } from './TodoList';
 import { buildStats, type WorkbenchStats } from './stats';
@@ -130,6 +131,9 @@ function HomeBody({
   onRestart: () => void;
   onModelsChanged: () => void;
 }): React.ReactElement {
+  // 试跑卡的目标用户：已有项目但还没出过片（新用户首条成片的快捷路径）
+  const firstProject =
+    data.projects.find((project) => !data.works.some((w) => w.project_id === project.id)) ?? null;
   const navigate = useNavigate();
   return (
     <div
@@ -170,6 +174,9 @@ function HomeBody({
         )}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
+        {firstProject !== null && (
+          <TrialRunCard projectId={firstProject.id} projectName={firstProject.name} />
+        )}
         <EnvPanel models={data.models} llmBaseUrl={data.llmBaseUrl} ttsEngine={data.ttsEngine} />
         <TipsPanel />
       </div>
