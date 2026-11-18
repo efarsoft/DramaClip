@@ -62,7 +62,7 @@ export function SelfCheckSection({
             </span>
           </div>
         )}
-        {selfcheck !== null && selfcheck !== undefined && selfcheck.dedup_jitter !== undefined && (
+        {selfcheck?.dedup_jitter !== undefined && (
           <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceMd }}>
             <span style={{ fontSize: tokens.text.meta.size, lineHeight: tokens.text.meta.leading, color: tokens.textSecondary }}>
               逐片段微扰动
