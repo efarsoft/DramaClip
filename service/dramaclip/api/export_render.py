@@ -587,6 +587,7 @@ def render_export(
             out_path,
             context.work_dir / "export" / export_id,
             video_codec=video_codec,
+            jitter_enabled=config.get_bool(context.settings, "export.dedup_jitter"),
             tts_audio_by_segment=tts_segments or None,
             cancel=cancel_event,
             on_progress=report,

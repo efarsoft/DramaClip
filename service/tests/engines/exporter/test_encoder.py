@@ -20,6 +20,7 @@ def test_cut_segment_args_original_audio() -> None:
         audio="original",
         tts_audio=None,
         rng=random.Random(42),
+        jitter_enabled=True,  # 本用例测「微缩放后等比适配」——扰动行为显式开
     )
     joined = " ".join(args)
     assert "-ss 1.500" in joined and "-to 8.250" in joined
@@ -236,6 +237,7 @@ def test_cut_segment_args_band_erasure_delogo() -> None:
         tts_audio=None,
         rng=random.Random(42),
         erase_rects=[band],
+        jitter_enabled=True,  # 矩形按「扰动缩放后」内容区折算——本用例显式开
     )
     joined = " ".join(args)
     assert "delogo=" in joined, "有 band 必须有 delogo 擦除"

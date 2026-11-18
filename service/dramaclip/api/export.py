@@ -55,6 +55,7 @@ from dramaclip.engines.exporter import (
 from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.semantic import llm_budget
+from dramaclip.infra import config
 from dramaclip.infra.ffmpeg import (
     cover as ffmpeg_cover,  # noqa: F401 - 测试经 export_api.ffmpeg_cover 取模块对象打桩，引用面保留
 )
@@ -501,6 +502,7 @@ def _selfcheck_one(context: AppContext, export_id: str) -> bool:
             loudness_target.integrated_lufs,
             loudness_target.true_peak_dbtp,
         ),
+        dedup_jitter=config.get_bool(context.settings, "export.dedup_jitter"),
     )
     exports_repo.set_selfcheck(
         context.conn,

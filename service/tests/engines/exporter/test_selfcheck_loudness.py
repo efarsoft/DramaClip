@@ -79,7 +79,7 @@ def test_run_payload_carries_loudness(
         segment_count=0,
         loudness_target=(-14.0, -1.5),
     )
-    assert payload["version"] == 3
+    assert payload["version"] == 4
     row = payload["loudness"]
     assert row is not None and row["status"] == "measured"
     assert row["deviation_lu"] == pytest.approx(0.6)

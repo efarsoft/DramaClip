@@ -136,7 +136,6 @@ _BGM_LOOP_XFADE_S = 0.5
 _BGM_LOOP_MAX_COPIES = 8
 # 人声躲床：成片混音做 sidechain 触发压床（旁白/原声对白开口床自动退让），
 # 与 _SIDECHAIN_COMPRESS 同一模式；attack/release 放慢避免逐音节泵动。
-_BGM_DUCK_COMPRESS = "sidechaincompress=threshold=0.05:ratio=4:attack=150:release=400"
 
 # 压底段的原声音量（旁白段 10% / 全片衬底段 8%）。真机门禁按名字读这两个数——它要用同一个
 # 值算出该段的预测响度再去量实测，所以音量只在这里定义一次。写成字符串是因为它直接拼进滤镜。
@@ -378,6 +377,7 @@ def cut_segment_args(
     ai_label_vf: str | None = None,
     drama_name_vf: str | None = None,
     fps: float = _FALLBACK_FPS,
+    jitter_enabled: bool = False,
 ) -> list[str]:
     """构建单段切割命令（Phase A）。
 
@@ -401,7 +401,12 @@ def cut_segment_args(
     挂着的旧行为窄，比逐行精确粗，取中间值是有意的（要逐行窗须先改生产者）。
     """
     out_w, out_h = out_size
-    dedup = dedup_params.generate(rng)
+    # 微扰动默认关（export.dedup_jitter，2026-11-18 业主裁决）：关=恒等参数走原
+    # 滤镜链（eq 1.0/0.0、setpts=/1.0、scale=画布尺寸均零效果），同输入渲染确定；
+    # sig 签名本就不含扰动值（每次渲染要不同的量），开关切换后陈旧段照常重编。
+    dedup = (
+        dedup_params.generate(rng) if jitter_enabled else dedup_params.neutral()
+    )
     speed = dedup.speed_factor
     scaled_w = int(out_w * dedup.scale_factor) // 2 * 2
     scaled_h = int(out_h * dedup.scale_factor) // 2 * 2
@@ -713,6 +718,7 @@ def export_plan(
     bgm_track: Path | None = None,
     aigc_stamp: tuple[str, str] | None = None,
     burn_drama_name: str | None = None,
+    jitter_enabled: bool = False,
 ) -> Path:
     """执行两阶段导出，返回成片路径。
 
@@ -739,6 +745,7 @@ def export_plan(
             subtitle_burner=subtitle_burner,
             original_subtitle_provider=original_subtitle_provider,
             parallel=parallel,
+            jitter_enabled=jitter_enabled,
             dialogue_zones=dialogue_zones,
             out_size=out_size,
             loudness_target=loudness_target,
@@ -773,6 +780,7 @@ def export_plan(
             subtitle_burner=subtitle_burner,
             original_subtitle_provider=original_subtitle_provider,
             parallel=parallel,
+            jitter_enabled=jitter_enabled,
             dialogue_zones=dialogue_zones,
             out_size=out_size,
             loudness_target=loudness_target,
@@ -827,6 +835,7 @@ def _export_plan_once(
     bgm_track: Path | None = None,
     aigc_stamp: tuple[str, str] | None = None,
     burn_drama_name: str | None = None,
+    jitter_enabled: bool = False,
     _allow_uniform_retry: bool = True,
     _report_state: dict[str, Any] | None = None,
 ) -> Path:
@@ -988,6 +997,7 @@ def _export_plan_once(
                     audio=segment.audio,
                     tts_audio=tts_audio,
                     rng=rng,
+                    jitter_enabled=jitter_enabled,
                     transition=segment.transition,
                     ass_path=ass_path,
                     out_size=out_size,

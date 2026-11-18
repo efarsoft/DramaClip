@@ -675,6 +675,7 @@ def run(
     avsync_samples: list[tuple[float, str, float]] | None = None,
     episode_paths: dict[str, str] | None = None,
     loudness_target: tuple[float, float] | None = None,
+    dedup_jitter: bool = False,
 ) -> dict[str, Any]:
     """四项全测 + 画面侧落位实测，返回落库形状的成绩单（json.dumps 后进 export_jobs.selfcheck）。
 
@@ -685,6 +686,8 @@ def run(
     只有真承诺了才付成片 OCR 的账（10 探针帧），没承诺/没 work_dir 直接灰，不猜。
     v2 增 `caption_residue` 影子项（带内第二簇文字=原字残留候选）：只攒数据不改
     徽章，判红阈值等跨片数据到位再定（avsync 影子→门禁同一纪律）。
+    v4 增 `dedup_jitter` 如实记录（2026-11-18 业主裁决）：逐片段微扰动默认关、
+    显式开关——成片做过没做过扰动，发布清单里可自证。
     """
     mean_volume_db, max_freeze_s = measure_audio_video(video)
     opening_mean_db = measure_opening_audio(video)
@@ -698,7 +701,8 @@ def run(
             # detect_band 的同款出口形状：_Band → (float, float) 元组
             measured_caption = None if picked is None else (float(picked.top), float(picked.bottom))
     payload = {
-        "version": 3,
+        "version": 4,
+        "dedup_jitter": bool(dedup_jitter),
         "checked_at": _now_ms(),
         "duration": check_duration(
             measured_s, budget_s, segment_count=segment_count
