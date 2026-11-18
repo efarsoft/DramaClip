@@ -136,7 +136,14 @@ function TitleRow({
   return (
     <div style={{ ...mixins.listRow(), alignItems: 'center' }}>
       <span
+        role="button"
+        tabIndex={0}
         onClick={onToggle}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            onToggle();
+          }
+        }}
         style={{
           flex: 1, minWidth: 0, fontSize: tokens.text.body.size, lineHeight: tokens.text.body.leading,
           color: title.selected ? tokens.colorPrimary : tokens.textSecondary,

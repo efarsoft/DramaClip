@@ -51,7 +51,25 @@ export function ModePicker({
         onKChange={onKChange}
         onGenerate={onGenerate}
       />
-      {batch.error !== '' && <Alert style={{ marginTop: tokens.spaceMd }} type="error" showIcon title={batch.error} />}
+      {batch.error !== '' && (
+        <Alert
+          style={{ marginTop: tokens.spaceMd }}
+          type="error"
+          showIcon
+          title={batch.error}
+          action={
+            <Button
+              size="small"
+              danger
+              onClick={() => {
+                onGenerate(modes, k);
+              }}
+            >
+              按当前选择整批重跑
+            </Button>
+          }
+        />
+      )}
     </PageSection>
   );
 }
@@ -197,7 +215,14 @@ function ModeTile({
     <Card
       size="small"
       hoverable
+      role="button"
+      tabIndex={0}
       onClick={onToggle}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          onToggle();
+        }
+      }}
       style={{
         borderColor: checked ? tokens.colorPrimary : tokens.border,
         background: checked ? tokens.accentSoft : undefined,

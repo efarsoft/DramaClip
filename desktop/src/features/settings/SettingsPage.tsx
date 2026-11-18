@@ -202,7 +202,7 @@ function SettingsBody({
         <PageSection key={section.id} title={section.title}>
           {section.fields.map((field, index, all) => {
             // 'info' 型没有键：不取草稿值、不参与补丁（纯知情行）
-            const key = field.key ?? `__info_${section.id}_${index}`;
+            const key = field.key ?? `__info_${section.id}_${String(index)}`;
             return (
               <FieldRow
                 key={key}
@@ -267,7 +267,7 @@ function FieldControl(props: {
 /** 知情行：没有键、不可编辑——把散在别处的「哪些模式要什么」收进设置页。 */
 function InfoControl({ label, help }: { label: string; help: string }): React.ReactElement {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}>
       <span style={{ fontWeight: 600 }}>{label}</span>
       <span style={{ color: tokens.textTertiary }}>{help}</span>
     </div>

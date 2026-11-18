@@ -2,14 +2,48 @@
  *  规格与话题注入在服务端（publish_pack），本组件只渲染与搬运。 */
 import { CopyOutlined, PictureOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button, Select } from 'antd';
+import type { MessageInstance } from 'antd/es/message/interface';
 import { useEffect, useState, type ReactElement } from 'react';
-import type { ChecklistItem, PlatformPack, TitleCandidate } from '@dramaclip/protocol';
+import type { ChecklistItem, PlatformPack, TitleCandidate, PlatformPackEntry } from '@dramaclip/protocol';
 import { PageSection } from '../../components/layout/PageKit';
 import { exportApi, mediaUrl, titlesApi } from '../../services/client';
 import { errorText } from '../engines/errorText';
 import { tokens } from '../../styles/theme';
 
 const PLATFORMS = ['抖音', '视频号', '快手', '小红书', 'B站'];
+
+/** 发布包文本组装（拆出组件为行帽留位）：标题+文案+话题三段拼切。 */
+function buildPackText(entry: PlatformPackEntry): string {
+  return [entry.title, entry.caption ?? '', entry.tags.map((t) => `#${t}`).join(' ')]
+    .filter((part) => part !== '')
+    .join('\n');
+}
+
+/** 封面重裁（拆出组件为行帽留位）：依赖注入（setState 回调与通知实例）保持纯调用。 */
+async function recropCovers(
+  exportId: string,
+  ports: {
+    setCovers: (covers: Record<string, string>) => void;
+    setCropping: (cropping: boolean) => void;
+    notify: MessageInstance;
+  },
+): Promise<void> {
+  ports.setCropping(true);
+  try {
+    const result = await exportApi.platformCovers(exportId);
+    ports.setCovers(result.covers);
+    const skippedNames = Object.keys(result.skipped);
+    if (skippedNames.length > 0) {
+      ports.notify.warning(`部分平台封面未生成：${skippedNames.join('、')}`);
+    } else {
+      ports.notify.success('平台封面已生成');
+    }
+  } catch (error: unknown) {
+    ports.notify.error(errorText(error, '封面重裁失败'));
+  } finally {
+    ports.setCropping(false);
+  }
+}
 
 export function PlatformPackSection({
   planId,
@@ -27,6 +61,7 @@ export function PlatformPackSection({
   const [covers, setCovers] = useState<Record<string, string>>({});
   const [cropping, setCropping] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [loadFailedReason, setLoadFailedReason] = useState('');
   const [retryTick, setRetryTick] = useState(0);
   useEffect(() => {
     if (planId === '') return;
@@ -34,7 +69,13 @@ export function PlatformPackSection({
     setLoadFailed(false);
     void titlesApi.publishPack(planId)
       .then((result) => { if (active) setPack(result); })
-      .catch(() => { if (active) setLoadFailed(true); });
+      .catch((error: unknown) => {
+        // 失败原文上屏（h3FailureCopyGate 同纪律）：「加载失败」不告诉用户该修什么
+        if (active) {
+          setLoadFailed(true);
+          setLoadFailedReason(error instanceof Error && error.message !== '' ? error.message : String(error));
+        }
+      });
     return () => {
       active = false;
     };
@@ -42,29 +83,14 @@ export function PlatformPackSection({
   const entry = pack?.platforms[platform];
   const copy = (): void => {
     if (entry === undefined) return;
-    const text = [entry.title, entry.caption ?? '', entry.tags.map((t) => `#${t}`).join(' ')]
-      .filter((part) => part !== '')
-      .join('\n');
+    const text = buildPackText(entry);
     void navigator.clipboard
       .writeText(text)
       .then(() => message.success(`${platform}发布包已复制`))
       .catch(() => message.error('复制到剪贴板失败'));
   };
   const crop = (): void => {
-    setCropping(true);
-    void exportApi
-      .platformCovers(exportId)
-      .then((result) => {
-        setCovers(result.covers);
-        const skippedNames = Object.keys(result.skipped);
-        if (skippedNames.length > 0) {
-          message.warning(`部分平台封面未生成：${skippedNames.join('、')}`);
-        } else {
-          message.success('平台封面已生成');
-        }
-      })
-      .catch((error: unknown) => message.error(errorText(error, '封面重裁失败')))
-      .finally(() => { setCropping(false); });
+    void recropCovers(exportId, { setCovers, setCropping, notify: message });
   };
   const coverPath = covers[platform];
   return (
@@ -93,6 +119,7 @@ export function PlatformPackSection({
         <PackPlaceholder
           planId={planId}
           loadFailed={loadFailed}
+          reason={loadFailedReason}
           onRetry={() => {
             setRetryTick((tick) => tick + 1);
           }}
@@ -178,10 +205,12 @@ function PublishChecklist({ items }: { items: readonly ChecklistItem[] }): React
 function PackPlaceholder({
   planId,
   loadFailed,
+  reason,
   onRetry,
 }: {
   planId: string;
   loadFailed: boolean;
+  reason: string;
   onRetry: () => void;
 }): ReactElement {
   return (
@@ -190,7 +219,7 @@ function PackPlaceholder({
         '方案已删除，发布包无从生成'
       ) : loadFailed ? (
         <>
-          发布包加载失败
+          {`发布包加载失败${reason !== '' ? `：${reason}` : ''}`}
           <Button size="small" type="link" onClick={onRetry}>
             重试
           </Button>

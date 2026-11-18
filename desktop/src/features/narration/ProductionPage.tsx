@@ -1,5 +1,7 @@
 /** 出片中心：③ 选模式出 K 条方案 → 勾选方案 → ④ 出片所选，成品入作品库。 */
+import type { ReactElement } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert } from 'antd';
 import { Link, useParams } from 'react-router-dom';
 import type { ExportJob, ModeRecommendation, NarrationMode, Project } from '@dramaclip/protocol';
 import { PageHeader as PageKitHeader, PageShell } from '../../components/layout/PageKit';
@@ -42,6 +44,40 @@ function useKDefault(serviceState: string, setK: (k: number) => void): void {
       })
       .catch(() => undefined);
   }, [serviceState, setK]);
+}
+
+/** 实话读数（外部审查 P0-C）：把「今天能出几条」提前算给用户，而不是等失败。
+ * Y = 选中模式数 × K；素材集数不进读数（素材多少不构成产品分支，业主裁决）。
+ * LLM 三态：null（读取失败）按已配置口径展示，不误导。 */
+function CapacityReadout({
+  llmConfigured,
+  modeCount,
+  k,
+}: {
+  llmConfigured: boolean | null;
+  modeCount: number;
+  k: number;
+}): ReactElement | null {
+  const FREE_MODE_COUNT = 2; // 纯原片剪辑 + 金句流（零文案模式，全链不触 LLM）
+  if (llmConfigured === null) return null;
+  const available = llmConfigured ? 9 : FREE_MODE_COUNT;
+  const planned = modeCount * k;
+  const llmPart =
+    !llmConfigured
+      ? `未配置文案 LLM · 可用 ${String(FREE_MODE_COUNT)} 种免文案模式 · `
+      : `已配置文案 LLM · 可用 ${String(available)} 种模式 · `;
+  if (planned === 0) {
+    return (
+      <Alert type="info" showIcon title={`${llmPart}勾选模式后开始出方案`} />
+    );
+  }
+  return (
+    <Alert
+      type="info"
+      showIcon
+      title={`${llmPart}当前勾选 ${String(modeCount)} 种 × 每种 ${String(k)} 条 = 本次将出 ${String(planned)} 条方案`}
+    />
+  );
 }
 
 /** LLM 配置状态：true=已配置 / false=确认未配置 / null=读取失败（未知）。
@@ -187,6 +223,7 @@ export function ProductionPage() {
     <PageShell>
       <PageHeader projectName={project?.name} />
       <div ref={planningRef} style={sectionStyle()}>
+        <CapacityReadout llmConfigured={llmConfigured} modeCount={modes.length} k={k} />
         <StyleSelectCard />
         <ModePicker
           batch={batch}

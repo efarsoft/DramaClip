@@ -139,8 +139,14 @@ function MatrixRowView({
   return (
     <li
       style={style}
+      tabIndex={0}
       onClick={() => {
         onNavigate(row.cont.route);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          onNavigate(row.cont.route);
+        }
       }}
     >
       <CoverThumb cover={row.project.cover_path} />
