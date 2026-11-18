@@ -204,7 +204,7 @@ def _run_plan_variants(
             strategy_cards = diversity.strategy_queue(k)
             past_copies: list[str] = []
             # 跨任务历史预填（W9·跨片避重）：批内三件套只看得到本批——追更场景
-            # 「上次那条视频」的表达同质化它看不见。同项目近期成稿预填进基准；
+            # 「上次那条视频」的表达趋同它看不见。同项目近期成稿预填进基准；
             # 预取失败只少一层保护，不挡生成。
             with contextlib.suppress(Exception):
                 past_copies.extend(_collect_prior_texts(context, project_id))
