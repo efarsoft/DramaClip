@@ -71,6 +71,32 @@ describe('useTrialRun', () => {
     }
   });
 
+  it('导出被拒：export.submit 的 rejected 带人读理由进 failed 阶段', async () => {
+    rpcMock.mockImplementation((method: string) => {
+      if (method === 'analysis.episodes') {
+        return Promise.resolve({
+          episodes: [{ id: 'ep1', episode_number: 1, status: 'done' }],
+        });
+      }
+      if (method === 'export.submit') {
+        return Promise.resolve({
+          exports: [],
+          rejected: [{ plan_id: 'plan-1', reason: '方案没有可渲染的时间轴' }],
+        });
+      }
+      return Promise.resolve(rpcReply(method));
+    });
+    const { result } = renderHook(() => useTrialRun('proj-1'));
+    await act(async () => {
+      await result.current.start();
+    });
+    await waitFor(() => expect(result.current.phase.kind).toBe('failed'));
+    if (result.current.phase.kind === 'failed') {
+      expect(result.current.phase.stage).toBe('export');
+      expect(result.current.phase.reason).toContain('方案没有可渲染的时间轴');
+    }
+  });
+
   it('项目没有已导入素材：no-material 不发任何任务', async () => {
     rpcMock.mockImplementation((method: string) => {
       if (method === 'analysis.episodes') {

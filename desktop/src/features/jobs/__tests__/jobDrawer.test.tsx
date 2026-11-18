@@ -19,12 +19,15 @@ const api = vi.hoisted(() => ({
   clearFinished: vi.fn(),
   projectList: vi.fn(),
   modelsList: vi.fn(),
+  modelDownload: vi.fn(),
+  analysisStart: vi.fn(),
 }));
 
 vi.mock('../../../services/client', () => ({
   jobsApi: { list: api.listJobs, get: vi.fn(), cancel: api.cancel, clearFinished: api.clearFinished },
   projectApi: { list: api.projectList },
-  modelsApi: { list: api.modelsList },
+  modelsApi: { list: api.modelsList, download: api.modelDownload },
+  analysisApi: { start: api.analysisStart },
   appVersion: vi.fn(() => Promise.resolve('0.2.0')),
   systemApi: { health: vi.fn(() => Promise.resolve({})) },
 }));
@@ -156,6 +159,33 @@ describe('JobDrawer', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /取\s*消/ }));
     expect(await screen.findByText(/已请求取消，等任务在检查点退出/)).toBeTruthy();
+  });
+
+  it('失败行就地重试（W12）：下载类走 models.download、分析类走 analysis.start', async () => {
+    api.modelDownload.mockResolvedValue({ job_id: 'jd2' });
+    api.analysisStart.mockResolvedValue({ job_id: 'ja2' });
+    const failedDownload = job({ id: 'jd', type: 'model_download', ref_id: 'kokoro', status: 'failed', progress: 0, error: '服务中断', updated_at: 900_000 });
+    const failedAnalysis = job({ id: 'ja', type: 'analysis', ref_id: 'p1', status: 'failed', progress: 0, error: '分析失败', updated_at: 900_000 });
+    useJobsStore.setState({ jobs: [failedDownload, failedAnalysis], available: true, serverTimeMs: SERVER_NOW, drawerOpen: true });
+    drawer();
+
+    // antd 给两字按钮插空格（「重 试」），按可及名正则匹配
+    const retryButtons = await screen.findAllByRole('button', { name: /重\s*试/ });
+    expect(retryButtons.length).toBe(2);
+    fireEvent.click(retryButtons[0]);
+    await waitFor(() => expect(api.modelDownload).toHaveBeenCalledWith('kokoro'));
+    fireEvent.click(retryButtons[1]);
+    await waitFor(() => expect(api.analysisStart).toHaveBeenCalledWith('p1'));
+  });
+
+  it('export 失败行不显示就地重试（依赖页面上下文），保持「去处理」路由', async () => {
+    const failedExport = job({ id: 'je', type: 'export', ref_id: 'p1', status: 'failed', progress: 0, error: '导出失败', updated_at: 900_000 });
+    useJobsStore.setState({ jobs: [failedExport], available: true, serverTimeMs: SERVER_NOW, drawerOpen: true });
+    drawer();
+
+    expect(await screen.findByText('导出失败')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /重\s*试/ })).toBeNull();
+    expect(screen.getByRole('button', { name: '去处理' })).toBeTruthy();
   });
 });
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 import difflib
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from pydantic import BaseModel, Field, ValidationError
 from dramaclip.engines.llm_trace import dump_trace
 from dramaclip.engines.narration import audit as narration_audit
 from dramaclip.engines.narration import diversity, variant_scoring
+from dramaclip.engines.narration.findings import Finding
 from dramaclip.engines.narration.numerals import to_chinese_numerals
 from dramaclip.engines.narration.retell import retell_check
 from dramaclip.engines.narration.scriptwriter import (
@@ -320,6 +322,182 @@ def _clamp_highlights(flow: FlowScript) -> int:
     return clamped
 
 
+@dataclass(frozen=True)
+class _GateOutcome:
+    """语义闸链的裁决：rejected=True 时 feedback 已写进 attempts，主循环进下一轮。"""
+
+    rejected: bool
+    rejected_by: str
+
+
+def _parse_and_layout(
+    raw: Any,
+    episode_inputs: list[dict[str, Any]],
+) -> tuple[Script, list[dict[str, Any]], int, int]:
+    """一轮响应的解析+锚定铺轴。形状失败向上抛（主循环统一记 attempts）。
+
+    返回 (script, 超预算明细, 同锚去重数, 强拍裁剪数)。"""
+    if not isinstance(raw, dict):
+        raise ValueError("响应不是 JSON 对象")
+    hook_raw = raw.get("hook") or {}
+    cta_raw = raw.get("cta") or {}
+    segs_raw = raw.get("segments") or []
+    if not isinstance(segs_raw, list) or len(segs_raw) < _MIN_BODY_LINES:
+        count = len(segs_raw) if isinstance(segs_raw, list) else 0
+        raise ValueError(f"正文句数不足：{count}")
+    flow = FlowScript(
+        hook=_hook_line(hook_raw),
+        segments=[_line_fields(item) for item in segs_raw],
+        cta=_line_fields(cta_raw),
+    )
+    for line in flow.all_lines():
+        line.text = to_chinese_numerals(line.text.strip())
+    clamped = _clamp_highlights(flow)
+    script, overs, deduped = _flow_to_script(flow, episode_inputs)
+    return script, overs, deduped, clamped
+
+
+def _audit_hard(
+    attempts: list[dict[str, Any]],
+    script: Script,
+    transcript: list[dict[str, Any]],
+    durations: dict[int, float],
+    prior_texts: list[str] | None,
+) -> list[Finding]:
+    """硬规则审查：结论写进 attempts，返回 hard 违例（空=干净）。"""
+    report = narration_audit.audit_script(
+        script, transcript, episode_durations=durations, prior_texts=prior_texts
+    )
+    hard_fails = [f for f in report.findings if f.severity == "hard" and not f.passed]
+    attempts[-1]["audit"] = {
+        "hard": [f.rule_id for f in hard_fails],
+        "soft": [f.rule_id for f in report.findings if f.severity == "soft" and not f.passed],
+    }
+    if hard_fails:
+        attempts[-1]["audit_quotes"] = [f.prompt_quote or "" for f in hard_fails]
+        attempts[-1]["audit_details"] = [
+            f"{f.message}（{f.fix_hint or '按规则修正'}）" for f in hard_fails
+        ]
+        attempts[-1]["rewrite_feedback"] = [
+            f"- 规则 {rule}：{detail}"
+            for rule, detail in zip(
+                attempts[-1]["audit_quotes"],
+                attempts[-1]["audit_details"],
+                strict=True,
+            )
+        ]
+    return hard_fails
+
+
+def _run_semantic_gates(
+    attempts: list[dict[str, Any]],
+    script: Script,
+    overs: list[dict[str, Any]],
+    *,
+    past_copies: list[str] | None,
+    retell_on: bool,
+    judge_on: bool,
+    settings: dict[str, str] | None,
+    trace_path: Path | None,
+    llm: LlmClient,
+    semantic_left: bool,
+) -> _GateOutcome:
+    """语义闸链（顺序：跨片避重 → 预算 → 复述 → 六维评审）。
+
+    各闸的批注/记录**无条件写进 attempts**（观测面不缺账），拒稿只在
+    ``semantic_left`` 时发生（最后一轮强制采纳带批注——软信号不挡片）。
+    返回裁决；rejected=True 时主循环消耗一次语义预算。"""
+    # 跨片避重闸（W9）：与近期成稿 3-gram 过似 → 换表达重写（prompt 已注入
+    # <past_copy> 基准，闸是验收兜底——两层缺一不可）。
+    if past_copies:
+        draft_text = "\n".join(seg.text for seg in script.segments)
+        if diversity.too_similar(draft_text, past_copies):
+            attempts[-1]["diversity_overlapped"] = True
+            if semantic_left:
+                attempts[-1]["rejected_by"] = "diversity"
+                attempts[-1]["rewrite_feedback"] = [
+                    "- 与近期成稿表达过似：换开头方式与组织结构重写，"
+                    "事实与取材不变（基准已附在题目上方，先读再写）"
+                ]
+                return _GateOutcome(rejected=True, rejected_by="diversity")
+    # 预算闸（先排片后成稿）：画面装不下的句子生成期退回收短
+    if overs and semantic_left:
+        attempts[-1]["rejected_by"] = "budget"
+        attempts[-1]["rewrite_feedback"] = [
+            f"- 「{item['text']}…」估算 {item['est_s']}s，画面窗只有 "
+            f"{item['avail_s']}s（约 {item['target_chars']} 字）——收短到 "
+            f"{item['target_chars']} 字左右，删修饰不删事实"
+            for item in overs
+        ]
+        return _GateOutcome(rejected=True, rejected_by="budget")
+    attempts[-1]["budget_overs"] = overs
+    # 复述闸（听懂了没，比评分狠）：无上下文观众闭卷复述 + 感受流缺口分类处置。
+    # 文字稿=钩子+正文+引导（观众听到的全文）——钩子直接影响「主角目标明确」判定
+    if retell_on:
+        try:
+            retell_report = retell_check(
+                "\n".join(
+                    part
+                    for part in (
+                        script.hook,
+                        *(seg.text for seg in script.segments),
+                        script.cta,
+                    )
+                    if part.strip()
+                ),
+                llm,
+            )
+        except Exception:  # noqa: BLE001 - 复述是增益不是依赖：失败安静跳过
+            retell_report = None
+        if retell_report is not None:
+            attempts[-1]["retell"] = retell_report.to_json()
+            if not retell_report.passed and semantic_left:
+                items = [
+                    "- 优先删和拆，不是补：密度超了删次要信息，不写解释句"
+                ]
+                if not retell_report.has_goal:
+                    items.append("- 开场三句内让观众明确主角想要什么")
+                if not retell_report.has_suspense:
+                    items.append(
+                        "- 结尾一句点明主角此刻处境与下一步悬念（不剧透结局）"
+                    )
+                items.extend(
+                    f"- 「{c['quote']}」："
+                    f"{_RETELL_FIX_BY_ISSUE.get(c['issue'], _RETELL_FIX_BY_ISSUE['unclear'])}"
+                    for c in retell_report.confusions[:4]
+                )
+                attempts[-1]["rejected_by"] = "retell"
+                attempts[-1]["rewrite_feedback"] = items
+                return _GateOutcome(rejected=True, rejected_by="retell")
+    # 六维语义评审（软批注）：≥8 干净 / 7~8 批注 / <7 拒稿走语义预算
+    if judge_on and settings is not None:
+        verdict = variant_scoring.score_one(
+            _script_as_plan_like(script),
+            "整篇解说线",
+            settings,
+            trace_dir=trace_path.parent if trace_path is not None else None,
+        )
+        if verdict is not None:
+            total = float(verdict.get("total") or 0.0)
+            attempts[-1]["judge"] = {
+                "total": total,
+                "suggestion": str(verdict.get("suggestion") or "").strip(),
+                "tier": (
+                    "clean"
+                    if total >= _JUDGE_NOTE_BELOW
+                    else ("note" if total >= _JUDGE_REJECT_BELOW else "reject")
+                ),
+            }
+            if total < _JUDGE_REJECT_BELOW and semantic_left:
+                suggestion = str(verdict.get("suggestion") or "").strip()
+                attempts[-1]["rejected_by"] = "judge"
+                attempts[-1]["rewrite_feedback"] = (
+                    [f"- 评审建议：{suggestion}"] if suggestion else []
+                )
+                return _GateOutcome(rejected=True, rejected_by="judge")
+    return _GateOutcome(rejected=False, rejected_by="")
+
+
 def write_flow_script(
     llm: LlmClient,
     episode_inputs: list[dict[str, Any]],
@@ -334,14 +512,14 @@ def write_flow_script(
     settings: dict[str, str] | None = None,
     past_copies: list[str] | None = None,
 ) -> Script:
-    """整篇线主入口：生成 → 锚定铺轴 → 闸链（audit 硬闸 → 预算闸 → 复述闸 →
-    六维评审批注）→ 交付。
+    """整篇线主入口：生成 → 锚定铺轴 → 闸链（audit 硬闸 → 跨片避重 → 预算 →
+    复述 → 六维评审批注）→ 交付。
 
-    闸链语义（W8）：audit hard 独立不限次内重掷；预算/复述/评审三类**语义拒稿
-    共享预算** `_MAX_SEMANTIC_REJECTS`；最后一轮无论各闸结论如何都采纳带批注
-    （评审低分/复述缺卡不该把活儿拦死——软信号红线）。评审与复述失败都安静
-    跳过（质检是增益不是依赖）。``settings`` 缺省 None（测试/直调）：语义闸
-    全关，行为与 W6 一致。
+    闸链语义（W8/W9）：audit hard 独立不限次内重掷；跨片避重/预算/复述/评审
+    四类**语义拒稿共享预算** `_MAX_SEMANTIC_REJECTS`；最后一轮无论各闸结论如何
+    都采纳带批注（评审低分/复述缺卡不该把活儿拦死——软信号红线）。评审与复述
+    失败都安静跳过（质检是增益不是依赖）。``settings`` 缺省 None（测试/直调）：
+    语义闸全关，行为与 W6 一致。
     """
     system, user_prompt = build_flow_request(
         episode_inputs,
@@ -385,25 +563,12 @@ def write_flow_script(
             else user_prompt
         )
         raw: Any = None
+        clamped = 0
+        deduped = 0
+        overs: list[dict[str, Any]] = []
         try:
             raw = llm.chat_json(system, ask, temperature=0.75)
-            if not isinstance(raw, dict):
-                raise ValueError("响应不是 JSON 对象")
-            hook_raw = raw.get("hook") or {}
-            cta_raw = raw.get("cta") or {}
-            segs_raw = raw.get("segments") or []
-            if not isinstance(segs_raw, list) or len(segs_raw) < _MIN_BODY_LINES:
-                count = len(segs_raw) if isinstance(segs_raw, list) else 0
-                raise ValueError(f"正文句数不足：{count}")
-            flow = FlowScript(
-                hook=_hook_line(hook_raw),
-                segments=[_line_fields(item) for item in segs_raw],
-                cta=_line_fields(cta_raw),
-            )
-            for line in flow.all_lines():
-                line.text = to_chinese_numerals(line.text.strip())
-            clamped = _clamp_highlights(flow)
-            script, overs, deduped = _flow_to_script(flow, episode_inputs)
+            script, overs, deduped, clamped = _parse_and_layout(raw, episode_inputs)
         except (LlmUnavailable, ValidationError, ValueError, TypeError, KeyError) as exc:
             attempt_trace: dict[str, Any] = {"error": f"{type(exc).__name__}: {exc}"}
             if raw is not None:
@@ -435,132 +600,29 @@ def write_flow_script(
             attempts[-1]["anchor_deduped"] = deduped
         if clamped:
             attempts[-1]["highlights_clamped"] = clamped
-        report = narration_audit.audit_script(
-            script, transcript, episode_durations=durations, prior_texts=prior_texts
-        )
-        hard_fails = [f for f in report.findings if f.severity == "hard" and not f.passed]
-        attempts[-1]["audit"] = {
-            "hard": [f.rule_id for f in hard_fails],
-            "soft": [f.rule_id for f in report.findings if f.severity == "soft" and not f.passed],
-        }
-        if hard_fails:
-            attempts[-1]["audit_quotes"] = [f.prompt_quote or "" for f in hard_fails]
-            attempts[-1]["audit_details"] = [
-                f"{f.message}（{f.fix_hint or '按规则修正'}）" for f in hard_fails
-            ]
-            attempts[-1]["rewrite_feedback"] = [
-                f"- 规则 {rule}：{detail}"
-                for rule, detail in zip(
-                    attempts[-1]["audit_quotes"],
-                    attempts[-1]["audit_details"],
-                    strict=True,
-                )
-            ]
+        if _audit_hard(attempts, script, transcript, durations, prior_texts):
             script = None
             continue
         semantic_left = (
             semantic_rejections < _MAX_SEMANTIC_REJECTS
             and attempt < _MAX_ATTEMPTS - 1
         )
-        # 跨片避重闸（W9）：与近期成稿 3-gram 过似 → 语义拒稿换表达重写
-        #（基准在 prompt 里已随 <past_copy> 注入，闸是验收兜底——两层缺一不可）。
-        if past_copies:
-            draft_text = "\n".join(seg.text for seg in script.segments)
-            if diversity.too_similar(draft_text, past_copies):
-                attempts[-1]["diversity_overlapped"] = True
-                if semantic_left:
-                    semantic_rejections += 1
-                    attempts[-1]["rejected_by"] = "diversity"
-                    attempts[-1]["rewrite_feedback"] = [
-                        "- 与近期成稿表达过似：换开头方式与组织结构重写，"
-                        "事实与取材不变（基准已附在题目上方，先读再写）"
-                    ]
-                    script = None
-                    continue
-        # 预算闸（先排片后成稿）：画面装不下的句子生成期退回收短
-        if overs and semantic_left:
+        gate = _run_semantic_gates(
+            attempts,
+            script,
+            overs,
+            past_copies=past_copies,
+            retell_on=retell_on,
+            judge_on=judge_on,
+            settings=settings,
+            trace_path=trace_path,
+            llm=llm,
+            semantic_left=semantic_left,
+        )
+        if gate.rejected:
             semantic_rejections += 1
-            attempts[-1]["rejected_by"] = "budget"
-            attempts[-1]["rewrite_feedback"] = [
-                f"- 「{item['text']}…」估算 {item['est_s']}s，画面窗只有 "
-                f"{item['avail_s']}s（约 {item['target_chars']} 字）——收短到 "
-                f"{item['target_chars']} 字左右，删修饰不删事实"
-                for item in overs
-            ]
             script = None
             continue
-        attempts[-1]["budget_overs"] = overs
-        # 复述闸（听懂了没，比评分狠）：无上下文观众闭卷复述 + 感受流缺口分类处置。
-        # 文字稿=钩子+正文+引导（观众听到的全文）——钩子直接影响「主角目标明确」判定
-        if retell_on:
-            try:
-                retell_report = retell_check(
-                    "\n".join(
-                        part
-                        for part in (
-                            script.hook,
-                            *(seg.text for seg in script.segments),
-                            script.cta,
-                        )
-                        if part.strip()
-                    ),
-                    llm,
-                )
-            except Exception:  # noqa: BLE001 - 复述是增益不是依赖：失败安静跳过
-                retell_report = None
-            if retell_report is not None:
-                attempts[-1]["retell"] = retell_report.to_json()
-                if not retell_report.passed and semantic_left:
-                    semantic_rejections += 1
-                    attempts[-1]["rejected_by"] = "retell"
-                    items = [
-                        "- 优先删和拆，不是补：密度超了删次要信息，不写解释句"
-                    ]
-                    if not retell_report.has_goal:
-                        items.append("- 开场三句内让观众明确主角想要什么")
-                    if not retell_report.has_suspense:
-                        items.append(
-                            "- 结尾一句点明主角此刻处境与下一步悬念（不剧透结局）"
-                        )
-                    items.extend(
-                        f"- 「{c['quote']}」："
-                        f"{_RETELL_FIX_BY_ISSUE.get(c['issue'], _RETELL_FIX_BY_ISSUE['unclear'])}"
-                        for c in retell_report.confusions[:4]
-                    )
-                    attempts[-1]["rewrite_feedback"] = items
-                    script = None
-                    continue
-        # 六维语义评审（软批注）：≥8 干净 / 7~8 批注 / <7 拒稿走语义预算
-        if judge_on and settings is not None:
-            verdict = variant_scoring.score_one(
-                _script_as_plan_like(script),
-                "整篇解说线",
-                settings,
-                trace_dir=trace_path.parent if trace_path is not None else None,
-            )
-            if verdict is not None:
-                total = float(verdict.get("total") or 0.0)
-                attempts[-1]["judge"] = {
-                    "total": total,
-                    "suggestion": str(verdict.get("suggestion") or "").strip(),
-                    "tier": (
-                        "clean"
-                        if total >= _JUDGE_NOTE_BELOW
-                        else ("note" if total >= _JUDGE_REJECT_BELOW else "reject")
-                    ),
-                }
-                if (
-                    total < _JUDGE_REJECT_BELOW
-                    and semantic_left
-                ):
-                    semantic_rejections += 1
-                    attempts[-1]["rejected_by"] = "judge"
-                    suggestion = str(verdict.get("suggestion") or "").strip()
-                    attempts[-1]["rewrite_feedback"] = (
-                        [f"- 评审建议：{suggestion}"] if suggestion else []
-                    )
-                    script = None
-                    continue
         dump_trace(trace_path, {"attempts": attempts, "script": script.model_dump()})
         return script
     tail = attempts[-1] if attempts else {}
