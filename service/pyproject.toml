@@ -59,6 +59,10 @@ ml = [
 devml = [
   "torch>=2.8",
   "funasr>=1.4.16",
+  # fbank 后端：funasr 1.4 缺省实现，缺了会报 "torchaudio is not installed"
+  # （2026-11-19 dev 机引擎自检实锤——devml 漏装它，进程内转写全挂）。
+  # knf 是无 torch 依赖的独立 C++ 实现，与 tts-venv _ANALYSIS_EXTRAS 同款取舍。
+  "kaldi-native-fbank>=1.22.3",
   "kokoro>=0.9.4",
 ]
 

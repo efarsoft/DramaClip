@@ -42,6 +42,7 @@ def _context(memory_db: sqlite3.Connection, tmp_path: Path) -> SimpleNamespace:
     return SimpleNamespace(
         conn=memory_db,
         data_dir=tmp_path,
+        work_dir=tmp_path / "work",
         settings={},
         job_store=jobs_mod.JobStore(memory_db),
         cancel_events={},
@@ -214,9 +215,74 @@ def test_download_auto_verify_passes_for_a_healthy_landing(
         on_done.set()
 
     monkeypatch.setattr(downloader, "download_in_background", fake_download)
+    monkeypatch.setattr(  # 自检不在本用例的验收面：桩掉，保持用例单一焦点
+        models_api.selftest_mod,
+        "run_asr",
+        lambda *a, **k: {"ok": True, "engine": "faster_whisper", "chars": 1},
+    )
     context = _context(memory_db, tmp_path)
 
     models_api.download(context, {"model_id": "faster-whisper-small"})  # type: ignore[arg-type]
     _join_watchdog("faster-whisper-small")
 
     assert any("自动体检通过" in text for text in context.recorder.messages)
+
+
+def test_auto_selftest_runs_and_records_after_healthy_landing(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """体检过了自动跑真加载/推理自检（业主裁决 2026-11-19）：结论落 selftest.json
+    + 通知播报——文件在 ≠ 引擎能跑（fbank 缺失一类依赖缺口只有真推理才暴露）。"""
+
+    def fake_download(spec, models_dir, notifier, cancel, on_done, **kwargs) -> None:  # noqa: ANN001, ANN204
+        base = Path(models_dir) / spec.placement
+        _whisper_cache(base, "small")
+        on_done.set()
+
+    monkeypatch.setattr(downloader, "download_in_background", fake_download)
+    seen: dict[str, str] = {}
+
+    def fake_run_asr(models_dir, spec, *, device="auto", compute_type="auto", data_dir=None):  # noqa: ANN001, ANN003
+        seen["model_id"] = spec.model_id
+        return {"ok": True, "engine": "faster_whisper", "chars": 8, "elapsed_s": 0.4}
+
+    monkeypatch.setattr(models_api.selftest_mod, "run_asr", fake_run_asr)
+    context = _context(memory_db, tmp_path)
+
+    models_api.download(context, {"model_id": "faster-whisper-small"})  # type: ignore[arg-type]
+    _join_watchdog("faster-whisper-small")
+
+    assert seen["model_id"] == "faster-whisper-small"
+    assert any("自动自检通过" in text for text in context.recorder.messages)
+    saved = models_api.selftest_mod.load_results(context.data_dir / "models")
+    assert saved["faster-whisper-small"]["ok"] is True
+
+
+def test_auto_selftest_failure_surfaces_error_and_keeps_download_completed(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """自检失败如实播报原文（fbank 缺失一类），但下载状态不回滚——两件事各说各话。"""
+
+    def fake_download(spec, models_dir, notifier, cancel, on_done, **kwargs) -> None:  # noqa: ANN001, ANN204
+        base = Path(models_dir) / spec.placement
+        _whisper_cache(base, "small")
+        on_done.set()
+
+    monkeypatch.setattr(downloader, "download_in_background", fake_download)
+    monkeypatch.setattr(
+        models_api.selftest_mod,
+        "run_asr",
+        lambda *a, **k: {
+            "ok": False,
+            "error": "加载/推理失败：RuntimeError: torchaudio is not installed",
+        },
+    )
+    context = _context(memory_db, tmp_path)
+
+    result = models_api.download(context, {"model_id": "faster-whisper-small"})  # type: ignore[arg-type]
+    _join_watchdog("faster-whisper-small")
+
+    assert any("自动自检未通过" in text for text in context.recorder.messages)
+    assert any("torchaudio is not installed" in text for text in context.recorder.messages)
+    job = context.job_store.get(str(result["job_id"]))
+    assert job is not None and job["status"] == "completed"

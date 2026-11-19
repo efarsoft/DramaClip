@@ -11,6 +11,7 @@ from typing import Any
 from dramaclip.api.context import AppContext
 from dramaclip.infra.jobs import STATUS_RUNNING
 from dramaclip.infra.model_manager import downloader, importer, registry
+from dramaclip.infra.model_manager import selftest as selftest_mod
 from dramaclip.transport.rpc import Router, RpcDomainError
 
 _ERR_MODEL_NOT_FOUND = -32010
@@ -246,13 +247,15 @@ def _auto_verify(context: AppContext, models_dir: Path, spec: registry.ModelSpec
     """下载收尾即体检：文件层结论当场播报，不留「下完了但没人验过」的悬置态。
 
     措辞只说体检结论、不说「下载成功」——下载是否成功由作业状态自己说话，
-    体检失败时两者并排出现，谁也不冒充谁。
+    体检失败时两者并排出现，谁也不冒充谁。体检过了再自动跑一轮真加载/推理
+    自检（_auto_selftest）。
     """
     report = registry.verify(models_dir, spec)
     if report["ok"]:
         context.notifier.log(
             "info", f"{spec.name}：落盘自动体检通过（{len(report['checks'])} 项判据）"
         )
+        _auto_selftest(context, models_dir, spec)
         return
     fails = "；".join(
         f"{check['name']}：{check['detail']}"
@@ -260,6 +263,38 @@ def _auto_verify(context: AppContext, models_dir: Path, spec: registry.ModelSpec
         if check["status"] == "fail"
     )
     context.notifier.log("warn", f"{spec.name}：落盘自动体检未通过——{fails}")
+
+
+def _auto_selftest(context: AppContext, models_dir: Path, spec: registry.ModelSpec) -> None:
+    """体检过了再自动跑一轮真加载/推理自检（业主裁决 2026-11-19）：文件在 ≠ 引擎
+    能跑——fbank 后端缺失一类的依赖缺口只有真推理才暴露（当日 dev 机自检实锤：
+    落盘体检全绿、一开口全挂）。结果按 model_id 落 selftest.json（引擎页自检账本
+    同一份），通知播报结论原文；失败不回滚下载状态——下载与可用性是两件事，各说
+    各话。只覆盖 ASR/TTS：diarization 随主模型走、vision/运行时资产各有体检。"""
+    if spec.kind not in ("asr", "tts"):
+        return
+    try:
+        if spec.kind == "asr":
+            result = selftest_mod.run_asr(models_dir, spec, data_dir=context.data_dir)
+        else:
+            result = selftest_mod.run_tts(
+                models_dir, context.work_dir, spec, voice="", data_dir=context.data_dir,
+            )
+    except Exception as exc:  # noqa: BLE001 - 自检框架自身的异常也如实播报
+        result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    selftest_mod.save_result(models_dir, spec.model_id, result)
+    if result.get("ok"):
+        detail = (
+            f"转写 {result.get('chars')} 字" if spec.kind == "asr"
+            else f"时长 {result.get('duration_s')}s"
+        )
+        context.notifier.log(
+            "info",
+            f"{spec.name}：自动自检通过（{result.get('engine')}，{detail}，"
+            f"耗时 {result.get('elapsed_s')}s）",
+        )
+    else:
+        context.notifier.log("warn", f"{spec.name}：自动自检未通过——{result.get('error')}")
 
 
 def _require_spec(params: dict[str, Any]) -> registry.ModelSpec:
