@@ -925,8 +925,12 @@ def _run_uv(uv: Path, venv: Path, *args: str) -> None:
         print(f"[tts-runtime] uv stdout 尾部：{out[-200:]}")
         print(f"[tts-runtime] uv stderr 尾部：{err[-200:]}")
         detail = (err or out)[-300:]
+        # 安装链有 torch/双栈 58 项/funasr/kokoro 四个批次同走本函数——报错必须
+        # 区分是哪一批（取第一个包名；flag 后面还有 --index-url 等不算目标）。
+        target = next((a for a in args[2:] if not a.startswith("-")), "")
+        label = f"{' '.join(args[:2])} {target}".strip()
         raise RuntimeError(
-            f"uv {' '.join(args[:2])} 失败（exit {result.returncode}）: {detail}"
+            f"uv {label} 失败（exit {result.returncode}）: {detail}"
         )
 
 

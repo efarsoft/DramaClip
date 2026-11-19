@@ -27,8 +27,8 @@ _FILE_RATCHET: dict[str, int] = {
     "dramaclip/engines/narration/audit.py": 841,  # +34：包外集号告警规则（W14-A）
     # +3：stderr None 防御（2026-11-18 装测实锤）；+4：xpu 轮镜像 fallback（008eecf）
     # +4：uv 报错带 exit code+stdout 兜底；+16：失败全量输出落盘 uv-last-error.log
-    # （Arc 装测二连实锤：exit 1 双流全空，尾部进报错+全量落盘双保险）
-    "dramaclip/infra/model_manager/tts_runtime.py": 957,
+    # +4：报错带目标包名（Arc 装测二连实锤：exit 1 双流全空，落盘+尾部双保险）
+    "dramaclip/infra/model_manager/tts_runtime.py": 961,
 }
 
 _FUNC_RATCHET: dict[str, int] = {
