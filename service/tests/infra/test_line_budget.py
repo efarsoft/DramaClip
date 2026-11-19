@@ -28,7 +28,13 @@ _FILE_RATCHET: dict[str, int] = {
     # +3：stderr None 防御（2026-11-18 装测实锤）；+4：xpu 轮镜像 fallback（008eecf）
     # +4：uv 报错带 exit code+stdout 兜底；+16：失败全量输出落盘 uv-last-error.log
     # +4：报错带目标包名；+4：print→logger 十处（装测批·日志进文件）
-    "dramaclip/infra/model_manager/tts_runtime.py": 965,
+    # +4：audio-separator --no-deps 单装摘 diffq（cp310 轮止步，用户机无 MSVC
+    # 编译必炸，2026-11-19 新机实锤——注释两处 + 安装调用）
+    # +3：_run_uv 显式 UTF-8 解码——text=True 默认 GBK，uv 的 UTF-8 输出把读流
+    # 线程炸死，「exit 1 双流全空」真凶（2026-11-19 A/B 实锤）
+    # −25：PyWorld/WORLD 整链摘除（推理链不 import，源码构建须 MSVC 用户机没有，
+    # 2026-11-19 worker --check 卸载自检绿实证）
+    "dramaclip/infra/model_manager/tts_runtime.py": 946,
 }
 
 _FUNC_RATCHET: dict[str, int] = {
@@ -49,7 +55,7 @@ _FUNC_RATCHET: dict[str, int] = {
     "dramaclip/engines/tts/engines/edge.py::synthesize": 130,
     "dramaclip/infra/device_profile.py::profile": 264,
     "dramaclip/infra/model_manager/builtin_specs.py::builtin_specs": 384,
-    "dramaclip/infra/model_manager/tts_runtime.py::install": 162,
+    "dramaclip/infra/model_manager/tts_runtime.py::install": 151,
     "dramaclip/service_app.py::run": 137,
 }
 

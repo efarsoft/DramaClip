@@ -17,7 +17,7 @@ API，4.x 可用——自检兜底）。产物路径：
 流程（阶段→进度）：uv.exe 下载(0-5) → venv 创建含独立 Python(5-15) →
 torch(15-45, GPU 探测定 cu128/CPU 变体) → 双栈依赖(45-60) → 分析依赖组
 funasr(60-66) → kokoro 依赖组(66-70) → 人声分离 ORT(70-75，装后真探测) →
-源码 zip（IndexTTS + CosyVoice + Matcha-TTS + PyWorld）(75-95) → import
+源码 zip（IndexTTS + CosyVoice + Matcha-TTS）(75-95) → import
 自检（四族各一遍）(95-100)。全程多镜像容错，可取消，可重入（已存在阶段跳过；
 新增依赖组按 import 探针补装）。
 """
@@ -102,15 +102,14 @@ _COSYVOICE_EXTRAS = [
 ]
 # 人声分离（参考音频清洗「彻底档」，vocal_separation.py）：MDX-Net 的 ORT
 # 后端单独按 GPU/CPU 变体安装（_install_ort），不进本组以免解析器拉默认轮。
-# torch/torchvision 必须在本组显式 pin——
-# audio-separator 的裸 torch 依赖 + onnx2torch 的裸 torchvision 依赖会让解析器
-# 把 torch 拉到 2.14（torchvision 0.29 连带），双栈全炸（2026-09-28 本机实测）。
-# torchvision 取 PyPI CPU 轮即可：onnx2torch 只用它的 CPU 算子做 ONNX 图转换，
-# 分离全程 onnxruntime，不依赖 torchvision 的 CUDA 内核。
+# torch/torchvision 必须显式 pin——onnx2torch 的裸 torchvision 依赖会把 torch
+# 拉到 2.14（双栈全炸，2026-09-28 实测）；分离全程 onnxruntime，CPU 轮即可。
+# audio-separator 本体 --no-deps 单装（④处，descript-audiotools 同款）：硬依赖
+# diffq 0.2.4 上游 Windows 轮止步 cp310，py311 须本地编译 C 扩展，用户机无
+# MSVC 必炸（2026-11-19 新机实锤）；分离固定 MDX-Net，demucs 路径的 diffq
+# import 不可达，摘之无伤；其余子依赖已传递覆盖（six←tensorboard 等）。
 _SEPARATION_EXTRAS = [
-    "audio-separator==0.18.3",
     "beartype==0.18.5",
-    "diffq==0.2.4",
     "julius==0.2.7",
     "ml_collections",
     "onnx2torch==1.5.15",
@@ -152,23 +151,13 @@ _INDEXTTS_SOURCES = [
 _INDEXTTS_ZIP_SIZE = 35993020
 _COSYVOICE_ZIP_SIZE = 1633232
 _MATCHA_TGZ_SIZE = 484695
-_PYWORLD_TGZ_SIZE = 46981
-_WORLD_TGZ_SIZE = 111098
 #: CosyVoice 上游固定 revision（本机 Windows 实测组合所用）。
 _COSYVOICE_REV = "074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc"
 _MATCHA_REV = "dd9105b34bf2be2230f4aa1e4769fb586a3c824e"
-_PYWORLD_REV = "f31ad88d543fdaebbda2d0c9a5e4d4f991ae0b6c"
-_WORLD_REV = "d625e7608ca23a870018f01e7c562ac683d9847f"
-# PyPI 轮子不带 WORLD 子模块 → 源码构建，需要 C++ 编译器（缺编译器的报错在
-# 安装日志里很明显，装 VS Build Tools 后重跑本安装即可续）。
-_PYWORLD_SOURCES = [
-    f"{_GH_PROXY}/JeremyCCHsu/Python-Wrapper-for-World-Vocoder/archive/{_PYWORLD_REV}.tar.gz",
-    f"https://github.com/JeremyCCHsu/Python-Wrapper-for-World-Vocoder/archive/{_PYWORLD_REV}.tar.gz",
-]
-_WORLD_SOURCES = [
-    f"{_GH_PROXY}/mmorise/World/archive/{_WORLD_REV}.tar.gz",
-    f"https://github.com/mmorise/World/archive/{_WORLD_REV}.tar.gz",
-]
+# PyWorld/WORLD 有意不引：CosyVoice 全库唯一 pyworld 引用在 dataset/processor.py
+# （训练数据处理，推理链零引用），而 pyworld 源码构建须编译 C 扩展（PyPI 轮
+# 止步 cp38）——终端用户机无 MSVC 必卡（2026-11-19 实锤）；卸载后 worker
+# --check 全链自检绿。上游升版若引入推理期依赖，⑥ 自检会拦，别「顺手」加回来。
 _MATCHA_SOURCES = [
     f"{_GH_PROXY}/shivammehta25/Matcha-TTS/archive/{_MATCHA_REV}.tar.gz",
     f"https://github.com/shivammehta25/Matcha-TTS/archive/{_MATCHA_REV}.tar.gz",
@@ -695,6 +684,10 @@ def install(
     _check_cancel()
     _run_uv(uv, venv, "pip", "install", "--no-deps", "descript-audiotools==0.7.2",
             "--index-url", _PYPI_MIRROR)
+    # audio-separator 同款 --no-deps：diffq 是它声明的依赖但只活在 Demucs 路径
+    # （分离固定 MDX-Net），且无 cp311 轮要 MSVC——详见 _SEPARATION_EXTRAS 注。
+    _run_uv(uv, venv, "pip", "install", "--no-deps", "audio-separator==0.18.3",
+            "--index-url", _PYPI_MIRROR)
     _check_cancel()
 
     # ④b/④c 分析与 kokoro 依赖组（E-2 并入：与双栈共用本 venv 的 torch，单份不重复
@@ -714,7 +707,7 @@ def install(
     _install_ort(uv, venv, data_dir, check_cancel=_check_cancel, progress=_pct)
     _check_cancel()
 
-    # ⑤ 源码：IndexTTS zip（--no-deps 可编辑装）+ CosyVoice/Matcha/PyWorld
+    # ⑤ 源码：IndexTTS zip（--no-deps 可编辑装）+ CosyVoice/Matcha
     # （CosyVoice 非 pip 包：解包落位，由 worker 经 sys.path + 环境变量引入）
     src_root = runtimes / "indextts-src"
     if not (src_root / "pyproject.toml").is_file():
@@ -747,23 +740,8 @@ def install(
         (runtimes / "matcha.tar.gz").unlink(missing_ok=True)
     _check_cancel()
 
-    pyworld = cv_src / "third_party" / "PyWorld"
-    if not (pyworld / "pyworld" / "__init__.py").is_file():
-        _pct(89, "获取 PyWorld 源码（含 WORLD 声码器子模块）")
-        _fetch_first(_PYWORLD_SOURCES, runtimes / "pyworld.tar.gz", _PYWORLD_TGZ_SIZE, cancel)
-        _extract_tar_stripped(runtimes / "pyworld.tar.gz", pyworld)
-        (runtimes / "pyworld.tar.gz").unlink(missing_ok=True)
-    if not (pyworld / "lib" / "World" / "src" / "dio.cpp").is_file():
-        _fetch_first(_WORLD_SOURCES, runtimes / "world.tar.gz", _WORLD_TGZ_SIZE, cancel)
-        _extract_tar_stripped(runtimes / "world.tar.gz", pyworld / "lib" / "World")
-        (runtimes / "world.tar.gz").unlink(missing_ok=True)
-    _check_cancel()
-
-    if not (pyworld / "pyworld" / "__init__.py").is_file():
-        raise RuntimeError("PyWorld 源码不完整，无法构建")
-    _pct(91, "构建安装 PyWorld（源码编译，需 C++ 编译器）")
-    _run_uv(uv, venv, "pip", "install", "--no-deps", str(pyworld))
-    _check_cancel()
+    # PyWorld 有意不装：推理链唯一 pyworld 引用在 dataset/processor.py（训练
+    # 数据处理），装它须编译 C 扩展、用户机无 MSVC——详见常量区注。
 
     # ⑥ 自检：四族各一遍（CosyVoice 走 worker --check，含 sys.path 引导）
     _pct(96, "自检（首次 import 较慢）")
@@ -902,8 +880,11 @@ def _run_uv(uv: Path, venv: Path, *args: str) -> None:
         # --python 必须落在子命令之后：uv 0.8.4 的 `pip` 组不接受组级 --python
         py = str(venv / "Scripts" / "python.exe")
         cmd = [str(uv), "pip", *args[1:2], "--python", py, *args[2:]]
+    # 编码必须显式 UTF-8：uv 输出恒为 UTF-8（含 ├─▶ 等多字节制图符），而
+    # text=True 默认走系统 locale（中文 Windows = GBK）——读流线程解码即死、
+    # 缓冲区留空，「exit 1 双流全空」的真凶（2026-11-19 A/B 实锤）。
     result = subprocess.run(  # noqa: S603 - 固定二进制受控参数
-        cmd, capture_output=True, text=True, timeout=3600,
+        cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=3600,
         creationflags=_NO_WINDOW, env=env, check=False,
     )
     if result.returncode != 0:
