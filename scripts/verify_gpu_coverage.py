@@ -39,7 +39,8 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "service"))
 
 STATUSES = frozenset({"pass", "fail", "unsupported"})
-REQUESTS = frozenset({"auto", "cpu", "cuda", "xpu", "dml"})
+#: 用户词汇 auto/gpu/cpu（2026-11-19 裁决）；cuda/xpu/dml 是后端钉子，本表不用
+REQUESTS = frozenset({"auto", "gpu", "cpu"})
 REASON_MAX_CHARS = 500
 _VIDEO_SIZE = (320, 240)
 _LABEL_MIN_MEAN = 8.0
@@ -144,23 +145,25 @@ def judge_actual(component: str, requested: str, actual: str) -> str:
     actual = (actual or "").strip()
     if actual in ("", "unknown"):
         return "成功路径没有实际设备证据（actual=unknown）"
+    _GPU_LINES = {"cuda", "xpu", "dml"}
     if component.startswith("video."):
         if requested == "cpu" and actual != "libx264":
             return f"请求 cpu，实际编码器 {actual}"
-        if requested == "cuda" and actual not in _HW_ENCODERS:
-            return f"请求 cuda，实际编码器 {actual}"
+        if requested == "gpu" and actual not in _HW_ENCODERS:
+            return f"请求 gpu，实际编码器 {actual}"
         return ""
     if requested == "cpu" and actual != "cpu":
         return f"请求 cpu，实际 {actual}"
-    if requested == "cuda" and actual != "cuda":
-        return f"请求 cuda，实际 {actual}"
-    if requested == "auto" and actual not in {"cpu", "cuda", "cloud"}:
+    if requested == "gpu" and actual not in _GPU_LINES:
+        return f"请求 gpu，实际 {actual}"
+    if requested == "auto" and actual not in {"cpu", "cuda", "xpu", "dml", "cloud"}:
         return f"auto 解析到未知设备 {actual}"
     return ""
 
 
 def classify_error(exc: Exception, requested: str) -> str:
-    if requested != "cuda":
+    # 显式承诺类请求（gpu/后端钉子）才把「本机能力不满足」类失败判 unsupported
+    if requested not in {"cuda", "gpu", "xpu", "dml"}:
         return "fail"
     text = f"{type(exc).__name__}: {exc}"
     if any(re.search(pattern, text, re.I) for pattern in _UNSUPPORTED_PATTERNS):
@@ -261,12 +264,16 @@ def _whisper_size(models_dir: Path) -> str:
 
 
 def _asr_whisper(ctx: Context, requested: str) -> str:
+    from dramaclip.engines.analysis import runtime as asr_runtime
     from dramaclip.engines.analysis.transcriber import FasterWhisperEngine
 
     models_dir = ctx.models_dir / "asr" / "faster-whisper"
     size = _whisper_size(models_dir)
     sample = _sample(ctx, "sample_zh.wav")
-    engine = FasterWhisperEngine(size, device=requested, models_dir=models_dir)
+    # 与产品同一条解析路：gpu 意图先过能力表（不 ready 即抛，判 unsupported），
+    # 引擎收到的恒是具体后端串（cuda/xpu/cpu）
+    device = asr_runtime.resolve_asr_device("faster_whisper", requested, ctx.data_dir)
+    engine = FasterWhisperEngine(size, device=device, models_dir=models_dir)
     segments = engine.transcribe(sample, "zh")
     if not "".join(segment.text for segment in segments).strip():
         raise RuntimeError("转写结果为空——引擎没有真跑通")
@@ -274,12 +281,14 @@ def _asr_whisper(ctx: Context, requested: str) -> str:
 
 
 def _asr_funasr(ctx: Context, requested: str) -> str:
+    from dramaclip.engines.analysis import runtime as asr_runtime
     from dramaclip.engines.analysis.transcriber import SenseVoiceEngine
 
     model_dir = ctx.models_dir / "asr" / "iic" / "SenseVoiceSmall"
     _require_dir(model_dir, "SenseVoice 模型")
     sample = _sample(ctx, "sample_zh.wav")
-    engine = SenseVoiceEngine(models_dir=ctx.models_dir, device=requested)
+    device = asr_runtime.resolve_asr_device("sensevoice", requested, ctx.data_dir)
+    engine = SenseVoiceEngine(models_dir=ctx.models_dir, device=device)
     segments = engine.transcribe(sample, "zh")
     if not "".join(segment.text for segment in segments).strip():
         raise RuntimeError("转写结果为空——引擎没有真跑通")
@@ -320,7 +329,8 @@ def _tts_engine(ctx: Context, engine_name: str, requested: str) -> str:
     from dramaclip.engines.tts.factory import create
 
     _require_tts_venv(ctx)
-    engine = create(engine_name, ctx.models_dir, device=requested)
+    # data_dir 必传：factory 走 device_resolve 解析 gpu 意图（None 会透传原始词）
+    engine = create(engine_name, ctx.models_dir, device=requested, data_dir=ctx.data_dir)
     available, reason = engine.is_available()
     if not available:
         raise Unsupported(reason)
@@ -524,47 +534,36 @@ def _video_ai_label(ctx: Context, codec: str) -> tuple[str, str]:
 
 
 def _checks(ctx: Context) -> list[tuple[str, str, str, CheckFn]]:
+    # 词汇 auto/gpu/cpu（2026-11-19 裁决）：.gpu 钉「本机最优 GPU 线」——N 卡机
+    # 兑现 cuda、Arc 机兑现 xpu/dml，actual 回执记厂商真值。
     return [
         ("video.encode.cpu", "cpu", "ffmpeg", lambda: _video_encode(ctx, "libx264")),
-        ("video.encode.cuda", "cuda", "ffmpeg", _video_encode_cuda(ctx)),
+        ("video.encode.gpu", "gpu", "ffmpeg", _video_encode_cuda(ctx)),
         ("video.ai_label.cpu", "cpu", "ffmpeg", lambda: _video_ai_label(ctx, "libx264")),
-        ("video.ai_label.cuda", "cuda", "ffmpeg", _video_ai_label_cuda(ctx)),
+        ("video.ai_label.gpu", "gpu", "ffmpeg", _video_ai_label_cuda(ctx)),
         ("separation.cpu", "cpu", "tts-venv", lambda: _separation(ctx, "cpu")),
-        ("separation.cuda", "cuda", "tts-venv", lambda: _separation(ctx, "cuda")),
-        # Intel 档（Arc/Ultra）：分离 auto 实走 DML EP（worker _provider_plan），
-        # torch 系四引擎走 XPU 轮——2026-10-25 起 xpu 变体入安装链，本表跟进。
-        ("separation.dml", "dml", "tts-venv", lambda: _separation(ctx, "dml")),
+        ("separation.gpu", "gpu", "tts-venv", lambda: _separation(ctx, "gpu")),
         ("asr.whisper.cpu", "cpu", runtime_label(), lambda: _asr_whisper(ctx, "cpu")),
-        ("asr.whisper.cuda", "cuda", runtime_label(), lambda: _asr_whisper(ctx, "cuda")),
+        ("asr.whisper.gpu", "gpu", runtime_label(), lambda: _asr_whisper(ctx, "gpu")),
         ("asr.funasr.cpu", "cpu", _asr_funasr_runtime(), lambda: _asr_funasr(ctx, "cpu")),
-        ("asr.funasr.cuda", "cuda", _asr_funasr_runtime(), lambda: _asr_funasr(ctx, "cuda")),
-        ("asr.funasr.xpu", "xpu", _asr_funasr_runtime(), lambda: _asr_funasr(ctx, "xpu")),
+        ("asr.funasr.gpu", "gpu", _asr_funasr_runtime(), lambda: _asr_funasr(ctx, "gpu")),
         ("tts.kokoro.cpu", "cpu", "tts-venv", lambda: _tts_kokoro(ctx, "cpu")),
-        ("tts.kokoro.cuda", "cuda", "tts-venv", lambda: _tts_kokoro(ctx, "cuda")),
-        ("tts.kokoro.xpu", "xpu", "tts-venv", lambda: _tts_kokoro(ctx, "xpu")),
+        ("tts.kokoro.gpu", "gpu", "tts-venv", lambda: _tts_kokoro(ctx, "gpu")),
         (
             "tts.indextts2.cpu", "cpu", "tts-venv",
             lambda: _tts_engine(ctx, "indextts2", "cpu"),
         ),
         (
-            "tts.indextts2.cuda", "cuda", "tts-venv",
-            lambda: _tts_engine(ctx, "indextts2", "cuda"),
-        ),
-        (
-            "tts.indextts2.xpu", "xpu", "tts-venv",
-            lambda: _tts_engine(ctx, "indextts2", "xpu"),
+            "tts.indextts2.gpu", "gpu", "tts-venv",
+            lambda: _tts_engine(ctx, "indextts2", "gpu"),
         ),
         (
             "tts.cosyvoice.cpu", "cpu", "tts-venv",
             lambda: _tts_engine(ctx, _cosyvoice_name(ctx), "cpu"),
         ),
         (
-            "tts.cosyvoice.cuda", "cuda", "tts-venv",
-            lambda: _tts_engine(ctx, _cosyvoice_name(ctx), "cuda"),
-        ),
-        (
-            "tts.cosyvoice.xpu", "xpu", "tts-venv",
-            lambda: _tts_engine(ctx, _cosyvoice_name(ctx), "xpu"),
+            "tts.cosyvoice.gpu", "gpu", "tts-venv",
+            lambda: _tts_engine(ctx, _cosyvoice_name(ctx), "gpu"),
         ),
     ]
 

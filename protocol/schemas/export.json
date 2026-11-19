@@ -237,8 +237,11 @@
           "type": "string",
           "enum": [
             "auto",
+            "gpu",
+            "cpu",
             "cuda",
-            "cpu"
+            "xpu",
+            "dml"
           ]
         },
         "resolved": {

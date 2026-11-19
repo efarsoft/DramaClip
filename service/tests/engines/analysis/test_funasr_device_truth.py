@@ -83,28 +83,33 @@ def _torch_has_cuda() -> bool:
     return bool(torch.cuda.is_available())
 
 
-def test_explicit_cuda_on_cpu_torch_fails_before_funasr_silently_lands_cpu(
+def test_legacy_cuda_on_cpu_torch_fails_before_funasr_silently_lands_cpu(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """存量别名 cuda → gpu：CPU torch 上解析链判无 GPU 线路，funasr 拉起前就拒。"""
     if _torch_has_cuda():
         pytest.skip("本机 torch 带 CUDA，静默回退场景不复现")
     fake = _install_fake_funasr(monkeypatch, placement="cpu", resolved="cpu")
 
     engine = SenseVoiceEngine(models_dir=tmp_path, device="cuda")
 
-    with pytest.raises(compute.ComputeUnavailableError, match="CUDA"):
+    with pytest.raises(compute.ComputeUnavailableError, match="没有可用的 GPU 线路"):
         engine._ensure_model()
-    assert fake.instances == [], "探针已判 CUDA 不可算，不许再让 funasr 静默落 CPU"
+    assert fake.instances == [], "解析链已判无 GPU 线路，不许再让 funasr 静默落 CPU"
 
 
 @pytest.mark.parametrize("engine_cls", [SenseVoiceEngine, ParaformerEngine])
-def test_explicit_cuda_landing_on_cpu_is_a_broken_promise(
+def test_explicit_gpu_landing_on_cpu_is_a_broken_promise(
     engine_cls: type, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _install_fake_funasr(monkeypatch, placement="cpu", resolved="cpu")
     probed = _stub_probe(monkeypatch, engine_cls)
+    # 模拟 GPU 在场：解析到 cuda:0、探针放行，但 funasr 把模型静默落在 cpu
+    monkeypatch.setattr(
+        _reader(engine_cls), "_resolve_torch_device", lambda _device: "cuda:0"
+    )
 
-    engine = engine_cls(models_dir=tmp_path, device="cuda")
+    engine = engine_cls(models_dir=tmp_path, device="gpu")
 
     with pytest.raises(compute.ComputeUnavailableError, match="cpu"):
         engine._ensure_model()
@@ -112,17 +117,20 @@ def test_explicit_cuda_landing_on_cpu_is_a_broken_promise(
 
 
 @pytest.mark.parametrize("engine_cls", [SenseVoiceEngine, ParaformerEngine])
-def test_probe_problem_refuses_explicit_cuda_before_funasr_loads(
+def test_probe_problem_refuses_explicit_gpu_before_funasr_loads(
     engine_cls: type, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """真算探针判不可算时，显式 cuda 在 funasr 加载前就拒绝（不许静默落 CPU）。"""
+    """真算探针判不可算时，显式 gpu 在 funasr 加载前就拒绝（不许静默落 CPU）。"""
     fake = _install_fake_funasr(monkeypatch, placement="cpu", resolved="cpu")
     problem = "模拟：Torch not compiled with CUDA enabled"
     probed = _stub_probe(monkeypatch, engine_cls, problem=problem)
+    monkeypatch.setattr(
+        _reader(engine_cls), "_resolve_torch_device", lambda _device: "cuda:0"
+    )
 
-    engine = engine_cls(models_dir=tmp_path, device="cuda")
+    engine = engine_cls(models_dir=tmp_path, device="gpu")
 
-    with pytest.raises(compute.ComputeUnavailableError, match="CUDA"):
+    with pytest.raises(compute.ComputeUnavailableError, match="gpu"):
         engine._ensure_model()
     assert probed == ["cuda:0"]
     assert fake.instances == [], "探针已判不可算，不许再让 funasr 静默落 CPU"
@@ -179,13 +187,13 @@ def test_cuda_placement_evidence_is_reported_as_cuda(
         _reader(SenseVoiceEngine), "_resolve_torch_device", lambda _device: "cuda:0"
     )
 
-    engine = SenseVoiceEngine(models_dir=tmp_path, device="cuda")
+    engine = SenseVoiceEngine(models_dir=tmp_path, device="gpu")
     engine._ensure_model()
     assert probed == ["cuda:0"]
 
     report = engine.compute()
     assert report is not None
-    assert (report.requested, report.resolved, report.actual) == ("cuda", "cuda", "cuda")
+    assert (report.requested, report.resolved, report.actual) == ("gpu", "cuda", "cuda")
     assert report.fallback is False
 
 

@@ -35,7 +35,8 @@ DEFAULTS: dict[str, str] = {
     # 视觉轨档位（P2b）：kind=vision 的 model_id（qwen3-vl-2b/4b/8b）；空 = 视觉轨关闭（分档语义）
     "vision.model": "",
     # 本地视觉轨设备（llama-server）：auto=构建暴露出 CUDA 设备且显存够就整模型卸载，
-    # 起不来回退 CPU 并记账；cuda=承诺，失败即报错；cpu=逃生口（卸载出问题时强制 CPU）
+    # 起不来回退 CPU 并记账；gpu=承诺，失败即报错（llama.cpp 只有 CUDA 构建，gpu 在
+    # 视觉轨语义上即 CUDA）；cpu=逃生口（卸载出问题时强制 CPU）
     "vision.device": "auto",
     # 停顿切分（P1 本地 ASR 基础设施）：能量检测找句间停顿，按停顿切片段逐段转写；"0"=整条直喂
     "asr.pause_split": "1",
@@ -71,7 +72,8 @@ DEFAULTS: dict[str, str] = {
     "vision.cloud_api_key": "",
     "vision.cloud_model": "",
     "tts.engine": "edge",
-    # 本地 TTS 设备：auto=能力+运行时都过才用 GPU，失败回退并记账；cuda=承诺，失败即报错
+    # 本地 TTS 设备：auto=能力+运行时都过才用 GPU，失败回退并记账；gpu=承诺走本机
+    # 最优 GPU 线路（cuda/xpu/dml 择优），失败即报错；存量值 cuda 归一为 gpu
     "tts.device": "auto",
     # 音色按引擎独立成键：两引擎音色体系互不相通（Kokoro 音色名 / 微软官方名）
     "tts.voice.kokoro": "zf_001",

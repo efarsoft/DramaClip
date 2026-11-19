@@ -237,10 +237,12 @@ export interface AnalysisJobStatus {
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 
-/** 本次任务实际用了什么算力：请求、解析、实际、是否回退与原因（服务端回执原文）。 */
+/** 本次任务实际用了什么算力：请求、解析、实际、是否回退与原因（服务端回执原文）。
+ * requested 词汇：auto/gpu/cpu 是用户词汇（gpu=承诺走本机最优 GPU 线），
+ * cuda/xpu/dml 是后端钉子（门禁/遗留设置值归一前的原文）。 */
 export interface ComputeReport {
   readonly component: string;
-  readonly requested: 'auto' | 'cuda' | 'cpu';
+  readonly requested: 'auto' | 'gpu' | 'cpu' | 'cuda' | 'xpu' | 'dml';
   readonly resolved: string;
   readonly actual: string;
   readonly fallback: boolean;

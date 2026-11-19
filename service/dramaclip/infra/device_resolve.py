@@ -60,11 +60,14 @@ class DeviceResolution:
 
 
 def resolve(component: str, requested: str | None, data_dir: Path) -> DeviceResolution:
-    """把 ``requested``（auto/cuda/cpu/None）解析成引擎该收的设备串。
+    """把 ``requested``（auto/gpu/cpu/None）解析成引擎该收的设备串。
 
-    ``cuda`` 是承诺：cap 不 ready 时立刻抛 ``ComputeUnavailableError``，在拉起模型
-    或 worker **之前**失败。``cpu`` 恒 CPU。``auto`` 按 ready 选路，硬件过关但运行时
-    未就绪时 ``downgraded=True``。快照待定 → ``device="auto"``，交给引擎自判。
+    ``gpu`` 是承诺：cap 不 ready 或本机没有 GPU 线路时立刻抛
+    ``ComputeUnavailableError``，在拉起模型或 worker **之前**失败；线路取
+    ``torch_device``（厂商最优：N 卡=cuda / Arc+XPU 轮=xpu），不钉死 cuda。
+    ``cpu`` 恒 CPU。``auto`` 按 ready 选路，硬件过关但运行时未就绪时
+    ``downgraded=True``。快照待定 → ``device="auto"``，交给引擎自判。
+    设置表存量值 ``cuda`` 由 ``compute.normalize_requested`` 归一为 gpu。
     """
     cap = _COMPONENT_CAPS[component]  # 未登记的组件没有判据：KeyError 比猜一个强
     intent = compute.normalize_requested(requested)
@@ -89,12 +92,18 @@ def resolve(component: str, requested: str | None, data_dir: Path) -> DeviceReso
     ok = bool(entry["ok"])
     ready = bool(entry["ready"])
     reason = str(entry["reason"] or entry.get("hint") or "")
-    if intent == "cuda":
+    if intent == "gpu":
         if not ready:
             raise compute.ComputeUnavailableError(
-                f"{component} 请求 cuda，本机能力表判不可用：{reason or '原因未给出'}"
+                f"{component} 请求 gpu，本机能力表判不可用：{reason or '原因未给出'}"
             )
-        return DeviceResolution(component, cap, "cuda", "cuda", "cuda", "cuda", "")
+        # torch_device 由 profile 按主机厂商给出（nvidia=cuda / intel+xpu 轮=xpu）
+        device = str(prof.get("torch_device") or "cpu")
+        if device == "cpu":
+            raise compute.ComputeUnavailableError(
+                f"{component} 请求 gpu，本机没有可兑现的 GPU 线路：{reason or '原因未给出'}"
+            )
+        return DeviceResolution(component, cap, "gpu", device, device, device, "")
     if intent == "cpu":
         return DeviceResolution(component, cap, "cpu", "cpu", "cpu", "cpu", "")
     if ready:

@@ -58,8 +58,13 @@ def clean_reference(
     device: str = "auto",
     cuda_dll_dir: Path | None = None,
 ) -> SeparationResult:
-    """分离出干声，落 <stem>.cleaned.wav（与 fast 档同一命名语义）。"""
+    """分离出干声，落 <stem>.cleaned.wav（与 fast 档同一命名语义）。
+
+    gpu 承诺：worker 端恒收 auto（分离没有能力表预判，provider 探测的真实原因
+    在 worker 回执里）；承诺兑现由 _collect 组回执后 assert_success 拦——
+    请求 gpu 落 cpu 判违约，落 dml/cuda 算兑现。"""
     requested = compute.normalize_requested(device)
+    worker_device = "auto" if requested == "gpu" else requested
     py = _venv_python()
     if not py.is_file():
         raise RuntimeError(
@@ -74,7 +79,7 @@ def clean_reference(
         str(py), str(worker_src),
         "--in", str(src), "--out", str(out),
         "--models", str(model_path(models_dir).parent),
-        "--device", requested,
+        "--device", worker_device,
         "--cuda-dll-dir", str(dll_root),
     ]
     # Windows 默认按 GBK 解子进程输出：参考音频路径带中文时协议行解不开，

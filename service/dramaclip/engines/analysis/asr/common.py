@@ -99,32 +99,47 @@ def _adopt_loaded_device(
     """加载成功后的落点裁决：返回 (actual, fallback_reason)，违诺直接抛。"""
     actual = _model_device(model)
     if actual is None:
-        # 读不到落点就不许替显式 cuda 打包票；auto 至少探针已经证明可算。
-        if requested == "cuda":
+        # 读不到落点就不许替显式承诺打包票；auto 至少探针已经证明可算。
+        if requested in ("cuda", "gpu", "xpu"):
             raise compute.ComputeUnavailableError(
-                f"{component} 请求 CUDA，但无法确认模型的实际落点"
+                f"{component} 请求 {requested}，但无法确认模型的实际落点"
             )
-        actual = "cuda" if wanted.startswith("cuda") else "cpu"
+        actual = (
+            "cuda" if wanted.startswith("cuda")
+            else "xpu" if wanted.startswith("xpu")
+            else "cpu"
+        )
     if requested == "cpu" and actual != "cpu":
         raise compute.ComputeUnavailableError(
             f"{component} 请求 CPU，funasr 把模型落在 {actual}"
         )
-    if wanted.startswith("cuda") and actual != "cuda":
-        if requested == "cuda":
+    if requested == "gpu" and actual not in ("cuda", "xpu"):
+        # 兜底防线：产品路径的 gpu 意图在 resolve() 已预判，这里拦直构引擎的漏网
+        raise compute.ComputeUnavailableError(
+            f"{component} 请求 gpu，funasr 把模型落在 {actual}（本机无可用 GPU 线路）"
+        )
+    wanted_gpu = wanted.startswith("cuda") or wanted.startswith("xpu")
+    if wanted_gpu and actual not in ("cuda", "xpu"):
+        if requested in ("cuda", "gpu", "xpu"):
             raise compute.ComputeUnavailableError(
-                f"{component} 请求 CUDA，funasr 把模型落在 {actual}（静默回退）"
+                f"{component} 请求 {requested}，funasr 把模型落在 {actual}（静默回退）"
             )
         return "cpu", f"funasr 把模型落在 {actual}"
+    if requested == "xpu" and actual != "xpu":
+        # 后端钉子：请求 xpu 兑现 xpu，落 cuda 也算违约（门禁钉线路语义）
+        raise compute.ComputeUnavailableError(
+            f"{component} 请求 xpu，funasr 把模型落在 {actual}"
+        )
     return actual, ""
 
 
 def _resolve_torch_device(device: str) -> str:
     """asr.device 设置值 → funasr AutoModel 的 device 实参（进程内路径专用）。
 
-    auto = 交给 torch 探测（有可用 CUDA 即 cuda:0）；显式 cuda 同样解析成
-    cuda:0；解析结果仍可能初始化失败（驱动/显存），由引擎的加载回退兜底。
+    auto/gpu = 交给 torch 探测（厂商优先级 cuda → xpu → cpu）；显式 cuda 同样
+    解析成 cuda:0；解析结果仍可能初始化失败（驱动/显存），由引擎的加载回退兜底。
     """
-    if device in ("", "auto"):
+    if device in ("", "auto", "gpu"):
         try:
             import torch
 

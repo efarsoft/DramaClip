@@ -88,11 +88,16 @@ def open_session(
 
 
 def _requested(settings: dict[str, str]) -> str:
-    """``vision.device`` 归一；写坏的值按 auto——视觉轨是增强品，配置错不该挡分析。"""
+    """``vision.device`` 归一；写坏的值按 auto——视觉轨是增强品，配置错不该挡分析。
+
+    gpu 承诺在视觉轨语义上就是 CUDA（llama.cpp 只有 CUDA 构建），归一到具体线，
+    会话层的 ``== "cuda"`` 承诺检查保持单点。
+    """
     try:
-        return normalize_requested(settings.get(DEVICE_KEY))
+        requested = normalize_requested(settings.get(DEVICE_KEY))
     except ValueError:
         return "auto"
+    return "cuda" if requested == "gpu" else requested
 
 
 def sample_frames_args(
@@ -304,7 +309,9 @@ class VisionSession:
         self._exe = exe
         self._model = model
         self._mmproj = mmproj
-        self._requested = normalize_requested(requested)
+        requested_normalized = normalize_requested(requested)
+        # gpu 承诺在视觉轨即 CUDA（唯一构建线路）；open_session 与直接构造两个入口都归一
+        self._requested = "cuda" if requested_normalized == "gpu" else requested_normalized
         self._data_dir = data_dir
         self._proc: subprocess.Popen[str] | None = None
         self._report: ComputeReport | None = None

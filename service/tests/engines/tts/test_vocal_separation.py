@@ -219,7 +219,7 @@ def test_clean_reference_rejects_unknown_device(
 ) -> None:
     monkeypatch.setattr(vs, "_venv_python", lambda: tmp_path / "python.exe")
     with pytest.raises(ValueError, match="未知算力请求"):
-        vs.clean_reference(tmp_path / "models", tmp_path / "src.wav", device="gpu")
+        vs.clean_reference(tmp_path / "models", tmp_path / "src.wav", device="npu")
 
 
 def test_clean_reference_launches_worker_with_agreed_paths(
@@ -273,12 +273,13 @@ def test_clean_reference_passes_explicit_cuda(
 
     def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         seen["cmd"] = cmd
-        return _completed(_ok_payload(out, requested="cuda"))
+        return _completed(_ok_payload(out, requested="gpu"))
 
     monkeypatch.setattr(vs.subprocess, "run", fake_run)
-    vs.clean_reference(tmp_path / "models", src, device="cuda")
+    # gpu 承诺：worker 恒收 auto（分离无能力表预判），承诺兑现由回执 assert 拦
+    vs.clean_reference(tmp_path / "models", src, device="gpu")
     assert seen["cmd"][-4:] == [
-        "--device", "cuda", "--cuda-dll-dir", str(tmp_path / "models" / "cuda"),
+        "--device", "auto", "--cuda-dll-dir", str(tmp_path / "models" / "cuda"),
     ]
 
 

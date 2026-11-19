@@ -23,26 +23,42 @@ _SAMPLE_RATE = 24000
 
 
 def _probe_device(requested: str) -> tuple[str, str]:
+    """gpu/auto 按厂商优先级试全链（cuda → xpu）；cpu 恒 CPU；单后端请求只试该线。
+
+    auto 此前只试 cuda——Arc 机器上恒落 CPU 而worker明明装着 xpu 轮
+    （2026-11-19 gpu 词汇裁决时对齐）。"""
     if requested == "cpu":
         return "cpu", ""
     import torch  # noqa: PLC0415
 
     if requested.startswith("xpu"):
-        if not torch.xpu.is_available():
-            return "cpu", "torch.xpu.is_available() = False"
-        try:
-            (torch.ones(4, device="xpu") * 2).sum().item()
-            return "xpu", ""
-        except Exception as exc:  # noqa: BLE001 - XPU 算子/驱动缺口如实回退 CPU
-            return "cpu", f"{type(exc).__name__}: {exc}"
-    if not torch.cuda.is_available():
-        return "cpu", "torch.cuda.is_available() = False"
-    try:
-        (torch.ones(4, device="cuda") * 2).sum().item()
-        return "cuda", ""
-    except Exception as exc:  # noqa: BLE001 - 任何 CUDA 故障都按不可用处理
-        torch.cuda.empty_cache()
-        return "cpu", f"{type(exc).__name__}: {exc}"
+        lines: tuple[str, ...] = ("xpu",)
+    elif requested in ("auto", "gpu"):
+        lines = ("cuda", "xpu")
+    else:
+        lines = ("cuda",)
+    reasons: list[str] = []
+    for line in lines:
+        if line == "cuda":
+            if not torch.cuda.is_available():
+                reasons.append("torch.cuda.is_available() = False")
+                continue
+            try:
+                (torch.ones(4, device="cuda") * 2).sum().item()
+                return "cuda", ""
+            except Exception as exc:  # noqa: BLE001 - 任何 CUDA 故障都按不可用处理
+                torch.cuda.empty_cache()
+                reasons.append(f"{type(exc).__name__}: {exc}")
+        else:
+            if not torch.xpu.is_available():
+                reasons.append("torch.xpu.is_available() = False")
+                continue
+            try:
+                (torch.ones(4, device="xpu") * 2).sum().item()
+                return "xpu", ""
+            except Exception as exc:  # noqa: BLE001 - XPU 算子/驱动缺口如实回退 CPU
+                reasons.append(f"{type(exc).__name__}: {exc}")
+    return "cpu", "；".join(reasons)
 
 
 def main() -> int:
@@ -70,8 +86,13 @@ def main() -> int:
     no_cuda = probe_reason.startswith("torch.cuda.is_available")
     fallback = bool(probe_reason) and requested != "cpu" and not no_cuda
     reason = probe_reason if fallback else ""
-    if requested == "cuda" and device != "cuda":
-        _emit({"ready": False, "error": f"请求 CUDA 但探针失败：{probe_reason or '未知原因'}"})
+    if (requested == "gpu" and device == "cpu") or (
+        requested == "cuda" and device != "cuda"
+    ):
+        _emit({
+            "ready": False,
+            "error": f"请求 {requested} 但探针失败：{probe_reason or '未知原因'}",
+        })
         return 1
 
     def _load(target: str) -> Any:
@@ -84,7 +105,7 @@ def main() -> int:
     try:
         kmodel = _load(device)
     except Exception as exc:  # noqa: BLE001 - 构造期 CUDA 故障按请求语义分叉
-        if device != "cuda" or requested == "cuda":
+        if device != "cuda" or requested in ("cuda", "gpu"):
             _emit({"ready": False, "error": f"模型加载失败：{type(exc).__name__}: {exc}"})
             return 1
         print(f">> CUDA 加载失败回退 CPU：{str(exc)[:160]}", file=sys.stderr)

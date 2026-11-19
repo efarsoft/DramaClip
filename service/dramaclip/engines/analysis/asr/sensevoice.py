@@ -68,17 +68,22 @@ class SenseVoiceEngine:
                 self._model = self._venv_model()
                 return self._model
             device = _resolve_torch_device(self._requested)
-            if device.startswith("cuda"):
+            if device.startswith("cuda") or device.startswith("xpu"):
                 problem = _probe_cuda_op(device)
                 if problem:
-                    if self._requested == "cuda":
+                    if self._requested in ("cuda", "gpu", "xpu"):
                         raise compute.ComputeUnavailableError(
-                            f"SenseVoice 请求 CUDA，但 CUDA 不可计算：{problem}"
+                            f"SenseVoice 请求 {self._requested}，但 {device} 不可计算：{problem}"
                         )
-                    _LOGGER.warning("SenseVoice CUDA 探针失败回退 CPU：%s", problem)
+                    _LOGGER.warning("SenseVoice GPU 探针失败回退 CPU：%s", problem)
                     self._actual_device = "cpu"
                     self._fallback_reason = problem
                     device = "cpu"
+            if device == "cpu" and self._requested in ("cuda", "gpu", "xpu"):
+                # 承诺/钉子在拉起 funasr 之前拦：不许静默落 CPU
+                raise compute.ComputeUnavailableError(
+                    f"SenseVoice 请求 {self._requested}，本机没有可用的 GPU 线路"
+                )
             kwargs: dict[str, Any] = {"model": str(self._model_dir) if (
                 self._model_dir is not None and self._model_dir.is_dir()
             ) else "iic/SenseVoiceSmall", "device": device}
@@ -87,9 +92,9 @@ class SenseVoiceEngine:
             except Exception as exc:  # noqa: BLE001 - CUDA 类失败按请求语义处理
                 if device == "cpu" or not _CUDA_PROBLEM.search(str(exc)):
                     raise
-                if self._requested == "cuda":
+                if self._requested in ("cuda", "gpu"):
                     raise compute.ComputeUnavailableError(
-                        f"SenseVoice 请求 CUDA，加载失败：{type(exc).__name__}: {exc}"
+                        f"SenseVoice 请求 {self._requested}，加载失败：{type(exc).__name__}: {exc}"
                     ) from exc
                 _LOGGER.warning("SenseVoice CUDA 加载失败回退 CPU：%s", str(exc)[:160])
                 self._actual_device = "cpu"

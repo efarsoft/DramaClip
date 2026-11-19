@@ -1,7 +1,7 @@
 {
   "tool": "verify_gpu_coverage",
   "version": 1,
-  "generated_at": "2026-11-19T15:48:08+08:00",
+  "generated_at": "2026-11-19T16:52:34+08:00",
   "environment": {
     "platform": "win32",
     "python": "3.13.15",
@@ -14,7 +14,7 @@
   "summary": {
     "pass": 4,
     "fail": 2,
-    "unsupported": 15,
+    "unsupported": 10,
     "note": "unsupported 不计入通过"
   },
   "records": [
@@ -28,13 +28,13 @@
       "elapsed_s": 0.42
     },
     {
-      "component": "video.encode.cuda",
-      "requested": "cuda",
+      "component": "video.encode.gpu",
+      "requested": "gpu",
       "runtime": "ffmpeg",
       "status": "pass",
       "actual": "h264_qsv",
       "reason": "h264_nvenc: FfmpegError: ffmpeg 退出码 4294967295：ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers  ；h264_amf: FfmpegError: ffmpeg 退出码 2981409195：ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers  ",
-      "elapsed_s": 2.44
+      "elapsed_s": 2.18
     },
     {
       "component": "video.ai_label.cpu",
@@ -46,13 +46,13 @@
       "elapsed_s": 0.33
     },
     {
-      "component": "video.ai_label.cuda",
-      "requested": "cuda",
+      "component": "video.ai_label.gpu",
+      "requested": "gpu",
       "runtime": "ffmpeg",
       "status": "pass",
       "actual": "h264_qsv",
       "reason": "标注区亮度 12.5（无标注 0.0）｜候选回落：h264_nvenc: FfmpegError: ffmpeg 退出码 4294967295：ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers  ；h264_amf: FfmpegError: ffmpeg 退出码 2981409195：ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers  ",
-      "elapsed_s": 3.16
+      "elapsed_s": 3.22
     },
     {
       "component": "separation.cpu",
@@ -64,17 +64,8 @@
       "elapsed_s": 0.0
     },
     {
-      "component": "separation.cuda",
-      "requested": "cuda",
-      "runtime": "tts-venv",
-      "status": "unsupported",
-      "actual": "unknown",
-      "reason": "人声分离模型 缺失：UVR_MDXNET_KARA_2.onnx",
-      "elapsed_s": 0.0
-    },
-    {
-      "component": "separation.dml",
-      "requested": "dml",
+      "component": "separation.gpu",
+      "requested": "gpu",
       "runtime": "tts-venv",
       "status": "unsupported",
       "actual": "unknown",
@@ -88,11 +79,11 @@
       "status": "unsupported",
       "actual": "unknown",
       "reason": "faster-whisper 模型未安装",
-      "elapsed_s": 0.01
+      "elapsed_s": 0.02
     },
     {
-      "component": "asr.whisper.cuda",
-      "requested": "cuda",
+      "component": "asr.whisper.gpu",
+      "requested": "gpu",
       "runtime": "service-venv",
       "status": "unsupported",
       "actual": "unknown",
@@ -109,17 +100,8 @@
       "elapsed_s": 0.0
     },
     {
-      "component": "asr.funasr.cuda",
-      "requested": "cuda",
-      "runtime": "service-venv",
-      "status": "unsupported",
-      "actual": "unknown",
-      "reason": "SenseVoice 模型未安装：SenseVoiceSmall",
-      "elapsed_s": 0.0
-    },
-    {
-      "component": "asr.funasr.xpu",
-      "requested": "xpu",
+      "component": "asr.funasr.gpu",
+      "requested": "gpu",
       "runtime": "service-venv",
       "status": "unsupported",
       "actual": "unknown",
@@ -136,17 +118,8 @@
       "elapsed_s": 0.0
     },
     {
-      "component": "tts.kokoro.cuda",
-      "requested": "cuda",
-      "runtime": "tts-venv",
-      "status": "unsupported",
-      "actual": "unknown",
-      "reason": "Kokoro 模型 缺失：config.json",
-      "elapsed_s": 0.0
-    },
-    {
-      "component": "tts.kokoro.xpu",
-      "requested": "xpu",
+      "component": "tts.kokoro.gpu",
+      "requested": "gpu",
       "runtime": "tts-venv",
       "status": "unsupported",
       "actual": "unknown",
@@ -157,28 +130,19 @@
       "component": "tts.indextts2.cpu",
       "requested": "cpu",
       "runtime": "tts-venv",
-      "status": "unsupported",
+      "status": "fail",
       "actual": "unknown",
-      "reason": "缺模型：<data>\\models\\tts\\indextts2 下没有 config.yaml, gpt.pth, s2mel.pth",
-      "elapsed_s": 0.01
+      "reason": "RuntimeError: worker 启动失败：模型加载失败：ChunkedEncodingError: ('Connection broken: IncompleteRead(30324263 bytes read, 418903908 more expected)', IncompleteRead(30324263 bytes read, 418903908 more expected))",
+      "elapsed_s": 259.17
     },
     {
-      "component": "tts.indextts2.cuda",
-      "requested": "cuda",
-      "runtime": "tts-venv",
-      "status": "unsupported",
-      "actual": "unknown",
-      "reason": "缺模型：<data>\\models\\tts\\indextts2 下没有 config.yaml, gpt.pth, s2mel.pth",
-      "elapsed_s": 0.0
-    },
-    {
-      "component": "tts.indextts2.xpu",
-      "requested": "xpu",
+      "component": "tts.indextts2.gpu",
+      "requested": "gpu",
       "runtime": "tts-venv",
       "status": "fail",
       "actual": "unknown",
-      "reason": "ValueError: 未知算力请求: 'xpu'（可用: auto / cuda / cpu）",
-      "elapsed_s": 0.0
+      "reason": "RuntimeError: worker 启动失败：模型加载失败：FileNotFoundError: [Errno 2] No such file or directory: 'D:\\\\Projects\\\\DramaClip\\\\data\\\\models\\\\tts\\\\indextts2\\\\hf_cache\\\\bigvgan\\\\bigvgan_generator.pt'",
+      "elapsed_s": 23.33
     },
     {
       "component": "tts.cosyvoice.cpu",
@@ -190,21 +154,12 @@
       "elapsed_s": 0.0
     },
     {
-      "component": "tts.cosyvoice.cuda",
-      "requested": "cuda",
+      "component": "tts.cosyvoice.gpu",
+      "requested": "gpu",
       "runtime": "tts-venv",
       "status": "unsupported",
       "actual": "unknown",
       "reason": "缺模型：<data>\\models\\tts\\cosyvoice300m 下没有 cosyvoice.yaml, llm.pt, flow.pt, hift.pt, speech_tokenizer_v1.onnx",
-      "elapsed_s": 0.0
-    },
-    {
-      "component": "tts.cosyvoice.xpu",
-      "requested": "xpu",
-      "runtime": "tts-venv",
-      "status": "fail",
-      "actual": "unknown",
-      "reason": "ValueError: 未知算力请求: 'xpu'（可用: auto / cuda / cpu）",
       "elapsed_s": 0.0
     }
   ],

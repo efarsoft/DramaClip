@@ -46,7 +46,7 @@
             "required": ["component", "requested", "resolved", "actual", "fallback", "reason", "device"],
             "properties": {
               "component": { "type": "string" },
-              "requested": { "type": "string", "enum": ["auto", "cuda", "cpu"] },
+              "requested": { "type": "string", "enum": ["auto", "gpu", "cpu", "cuda", "xpu", "dml"] },
               "resolved": { "type": "string" },
               "actual": { "type": "string" },
               "fallback": { "type": "boolean" },
@@ -103,7 +103,7 @@
             "required": ["component", "requested", "resolved", "actual", "fallback", "reason", "device"],
             "properties": {
               "component": { "type": "string" },
-              "requested": { "type": "string", "enum": ["auto", "cuda", "cpu"] },
+              "requested": { "type": "string", "enum": ["auto", "gpu", "cpu", "cuda", "xpu", "dml"] },
               "resolved": { "type": "string" },
               "actual": { "type": "string" },
               "fallback": { "type": "boolean" },

@@ -41,8 +41,8 @@ def test_pass_requires_actual_evidence(mod):
 def test_non_pass_requires_reason(mod):
     with pytest.raises(ValueError, match="reason"):
         mod.Record(
-            component="asr.whisper.cuda",
-            requested="cuda",
+            component="asr.whisper.gpu",
+            requested="gpu",
             runtime="root-venv",
             status="unsupported",
             actual="unknown",
@@ -68,7 +68,7 @@ def test_parse_require(mod):
 def test_unsupported_is_not_a_pass(mod):
     records = [
         mod.Record(
-            component="asr.whisper.cuda", requested="cuda", runtime="root-venv",
+            component="asr.whisper.gpu", requested="gpu", runtime="root-venv",
             status="unsupported", actual="unknown", reason="no kernel image",
         ),
         mod.Record(
@@ -76,37 +76,42 @@ def test_unsupported_is_not_a_pass(mod):
             status="pass", actual="cpu",
         ),
     ]
-    unmet = mod.unmet_requirements(records, [("asr.whisper.cuda", "pass")])
+    unmet = mod.unmet_requirements(records, [("asr.whisper.gpu", "pass")])
     assert len(unmet) == 1
     assert "unsupported" in unmet[0]
     assert mod.unmet_requirements(records, [("asr.whisper.cpu", "pass")]) == []
-    assert len(mod.unmet_requirements(records, [("asr.funasr.cuda", "pass")])) == 1
+    assert len(mod.unmet_requirements(records, [("asr.funasr.gpu", "pass")])) == 1
 
 
 def test_judge_actual(mod):
-    assert mod.judge_actual("asr.whisper", "cuda", "cuda") == ""
+    assert mod.judge_actual("asr.whisper", "gpu", "cuda") == ""
+    assert mod.judge_actual("asr.whisper", "gpu", "xpu") == ""
+    assert mod.judge_actual("asr.whisper", "gpu", "dml") == ""
     assert mod.judge_actual("asr.whisper", "cpu", "cpu") == ""
     assert mod.judge_actual("asr.whisper", "cpu", "cuda")
-    assert mod.judge_actual("asr.whisper", "cuda", "cpu")
+    assert mod.judge_actual("asr.whisper", "gpu", "cpu")
     assert mod.judge_actual("asr.whisper", "auto", "unknown")
     assert mod.judge_actual("video.encode", "cpu", "libx264") == ""
-    assert mod.judge_actual("video.encode", "cuda", "h264_nvenc") == ""
-    assert mod.judge_actual("video.encode", "cuda", "libx264")
+    assert mod.judge_actual("video.encode", "gpu", "h264_nvenc") == ""
+    assert mod.judge_actual("video.encode", "gpu", "libx264")
     assert mod.judge_actual("video.ai_label", "cpu", "libx264") == ""
 
 
 def test_classify_error(mod):
-    assert mod.classify_error(ComputeUnavailableError("请求 cuda 失败"), "cuda") == "unsupported"
+    assert mod.classify_error(ComputeUnavailableError("请求 gpu 失败"), "gpu") == "unsupported"
     assert mod.classify_error(
-        RuntimeError("请求 CUDA 但探针失败：torch.cuda.is_available = False"), "cuda"
+        RuntimeError("请求 CUDA 但探针失败：torch.cuda.is_available = False"), "gpu"
     ) == "unsupported"
     assert mod.classify_error(
-        RuntimeError("CUDA failed with error no kernel image is available"), "cuda"
+        RuntimeError("CUDA failed with error no kernel image is available"), "gpu"
     ) == "unsupported"
     assert mod.classify_error(
-        RuntimeError("Torch not compiled with CUDA enabled"), "cuda"
+        RuntimeError("Torch not compiled with CUDA enabled"), "gpu"
     ) == "unsupported"
-    assert mod.classify_error(ValueError("bad model dir"), "cuda") == "fail"
+    assert mod.classify_error(
+        RuntimeError("torch.xpu.is_available() = False"), "gpu"
+    ) == "unsupported"
+    assert mod.classify_error(ValueError("bad model dir"), "gpu") == "fail"
     assert mod.classify_error(ValueError("no kernel image"), "cpu") == "fail"
 
 
@@ -135,12 +140,13 @@ def test_hw_encoders_include_amf(mod) -> None:
     assert "h264_amf" in mod._HW_ENCODERS
 
 
-def test_judge_actual_accepts_amf_for_cuda(mod) -> None:
-    """video.* 的 requested=cuda 语义是「请求硬件编码」：actual 说出到底是谁。"""
-    assert mod.judge_actual("video.encode", "cuda", "h264_amf") == ""
-    assert mod.judge_actual("video.encode", "cuda", "h264_nvenc") == ""
-    assert mod.judge_actual("video.encode", "cuda", "h264_qsv") == ""
-    assert mod.judge_actual("video.encode", "cuda", "libx264")
+def test_judge_actual_accepts_any_hw_encoder_for_gpu(mod) -> None:
+    """video.* 的 requested=gpu 语义是「请求硬件编码」：actual 说出到底是谁
+    （N 卡 nvenc / A 卡 amf / Arc qsv 都是兑现）。"""
+    assert mod.judge_actual("video.encode", "gpu", "h264_amf") == ""
+    assert mod.judge_actual("video.encode", "gpu", "h264_nvenc") == ""
+    assert mod.judge_actual("video.encode", "gpu", "h264_qsv") == ""
+    assert mod.judge_actual("video.encode", "gpu", "libx264")
 
 
 def test_select_hw_encoder_returns_first_working_candidate(mod, monkeypatch) -> None:

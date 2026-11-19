@@ -38,7 +38,9 @@ class FasterWhisperEngine:
         compute_type: str = "auto",
     ) -> None:
         self._model_size = model_size
-        self._requested = compute.normalize_requested(device)
+        requested = compute.normalize_requested(device)
+        # gpu 承诺在 whisper 语义上就是 CUDA（ctranslate2 无 xpu 后端），归一到具体线
+        self._requested = "cuda" if requested == "gpu" else requested
         self._models_dir = models_dir
         self._compute_type = compute_type
         self._model: WhisperModel | None = None

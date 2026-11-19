@@ -1,8 +1,10 @@
 /** ASR / TTS / 视觉轨的「运行设备」选项：可用性读后端算好的 cap，不读厂商、不解析文案。
  *
- * CUDA 是承诺（`device_resolve` 会拒绝不 ready 的 cuda），所以界面只提供会被接受的
- * 值。两类缺席必须保留 CUDA 而不是藏掉：显卡还在探测中、该引擎没有能力判据
- * （kokoro 一类）——「不知道」渲染成「不可用」就是假阴性（`unknown ≠ ok`）。
+ * GPU 是承诺（`device_resolve` 会拒绝不 ready 的 gpu），所以界面只提供会被接受的
+ * 值。词汇是 auto/gpu/cpu（2026-11-19 裁决）：cuda/xpu/dml 都是厂商后端，
+ * 用户词汇不区分，`actual` 回执里记厂商真值。两类缺席必须保留 GPU 而不是藏掉：
+ * 显卡还在探测中、该引擎没有能力判据（kokoro 一类）——「不知道」渲染成
+ * 「不可用」就是假阴性（`unknown ≠ ok`）。
  */
 import type { DeviceCaps, GpuInfo } from '@dramaclip/protocol';
 import type { MachineSpecs } from './machineFit';
@@ -24,7 +26,7 @@ const ENGINE_CAP: Readonly<Record<string, string>> = {
   cosyvoice3: 'indextts2_gpu',
 };
 
-const CUDA_LABEL = 'CUDA（NVIDIA）';
+const GPU_LABEL = 'GPU 加速（自动选最优线路）';
 
 /** 视觉模型档位 → cap 名：`qwen3-vl-4b` → `local_visual_4b`（后端 device_profile 同一批键）。 */
 export function visualCapKey(modelId: string): string {
@@ -43,20 +45,22 @@ export function deviceOptions(args: {
     { label: '自动（检测 GPU）', value: 'auto' },
     { label: 'CPU', value: 'cpu' },
   ];
+  // 存量设置值 cuda 视同 gpu（后端归一同款口径），陈旧不可用提示才对得上
+  const saved = args.saved === 'cuda' ? 'gpu' : args.saved;
   if (!args.gpu?.ready) {
-    return [...base, { label: CUDA_LABEL, value: 'cuda' }];
+    return [...base, { label: GPU_LABEL, value: 'gpu' }];
   }
   const cap = args.caps?.[args.capKey ?? ENGINE_CAP[args.engine] ?? ''];
   if (cap === undefined || cap.ready) {
-    return [...base, { label: CUDA_LABEL, value: 'cuda' }];
+    return [...base, { label: GPU_LABEL, value: 'gpu' }];
   }
-  if (args.saved !== 'cuda') return base;
+  if (saved !== 'gpu') return base;
   // 陈旧设置可见、可改走，而不是静默吞掉或渲染成空白
   return [
     ...base,
     {
-      label: `CUDA（${cap.reason !== '' ? cap.reason : '本机不可用'}）`,
-      value: 'cuda',
+      label: `GPU（${cap.reason !== '' ? cap.reason : '本机不可用'}）`,
+      value: 'gpu',
       disabled: true,
     },
   ];
