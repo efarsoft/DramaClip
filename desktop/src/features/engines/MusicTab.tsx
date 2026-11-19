@@ -9,7 +9,7 @@ import {
   ReloadOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
-import { Button, Checkbox, Input, InputNumber, Select, Table, Tabs } from 'antd';
+import { Alert, Button, Checkbox, Input, InputNumber, Select, Table, Tabs } from 'antd';
 import type { ReactElement } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
@@ -303,6 +303,7 @@ function LibraryCard({
           }),
         ]}
       />
+      {lib !== null && lib.tracks.length === 0 && <EmptyLibraryGuide />}
       <Table
         size="small"
         rowKey="id"
@@ -412,5 +413,30 @@ function AssetRow({
       <StateBadge state={state} />
       <DownloadSourceButton model={model} onChanged={onChanged} />
     </div>
+  );
+}
+
+
+/** 空曲库指引（W15）：三条就位方式——自备 CC0 / 可信来源 / ACE-Step 生成。
+ * 只在曲库扫描成功且零曲目时出现；有曲目不占屏。 */
+function EmptyLibraryGuide(): ReactElement {
+  return (
+    <Alert
+      type="info"
+      showIcon
+      title="曲库为空——三种就位方式"
+      description={
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span>
+            ① 自备 CC0 素材：在 数据目录 的 bgm 文件夹下按情绪建子目录（default /
+            愤怒 / 胜利 / 悬疑 / 悲情），把音频文件放进去，然后点上方「重扫目录」
+          </span>
+          <span>
+            ② 可信来源：archive.org 的 Kevin MacLeod 集合（CC0/PDM 1.0，本机首批曲目的同源）
+          </span>
+          <span>③ 装上方 ACE-Step 运行环境按情绪程序化生成（生成产物自动入库）</span>
+        </div>
+      }
+    />
   );
 }
