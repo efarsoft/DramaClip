@@ -25,8 +25,8 @@ _FILE_RATCHET: dict[str, int] = {
     "dramaclip/api/narration_plans.py": 1002,
     "dramaclip/engines/exporter/encoder.py": 1240,
     "dramaclip/engines/narration/audit.py": 841,  # +34：包外集号告警规则（W14-A）
-    # +3：stderr None 防御（2026-11-18 装测实锤）
-    "dramaclip/infra/model_manager/tts_runtime.py": 933,
+    # +3：stderr None 防御（2026-11-18 装测实锤）；+4：xpu 轮镜像 fallback 双来源（008eecf）
+    "dramaclip/infra/model_manager/tts_runtime.py": 937,
 }
 
 _FUNC_RATCHET: dict[str, int] = {
