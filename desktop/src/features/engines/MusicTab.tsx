@@ -426,7 +426,7 @@ function EmptyLibraryGuide(): ReactElement {
       showIcon
       title="曲库为空——三种就位方式"
       description={
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}>
           <span>
             ① 自备 CC0 素材：在 数据目录 的 bgm 文件夹下按情绪建子目录（default /
             愤怒 / 胜利 / 悬疑 / 悲情），把音频文件放进去，然后点上方「重扫目录」
