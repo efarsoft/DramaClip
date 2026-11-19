@@ -906,9 +906,25 @@ def _run_uv(uv: Path, venv: Path, *args: str) -> None:
     if result.returncode != 0:
         # stderr 可能是 None（Windows 管道异常/进程被强杀场景，装测实锤
         # 'NoneType' object is not subscriptable）——防御取空串，别让报错本身再炸。
-        # stderr 空时回退 stdout 尾部（uv 部分失败细节写 stdout），两者皆空至少带
-        # 退出码——空报错没法修（Arc 机装测实锤：「uv pip install 失败: 」整句空白）。
-        detail = ((result.stderr or "").strip() or (result.stdout or "").strip())[-300:]
+        # stderr 空时回退 stdout 尾部；两者皆空至少带退出码并把完整输出落盘
+        # ——Arc 机装测二连实锤：exit 1 且双流全空（正常 uv 失败必写 stderr，
+        # 反常场景只有完整原始输出才能定位），尾部进报错+全量落盘双保险。
+        out = (result.stdout or "").strip()
+        err = (result.stderr or "").strip()
+        dump = venv.parent / "uv-last-error.log"
+        try:  # 落盘失败不遮蔽原错误（只读盘/杀软拦写都可能）——诊断材料尽力而为
+            dump.write_text(
+                f"cmd: {' '.join(cmd)}\nexit: {result.returncode}\n"
+                f"--- stdout ---\n{result.stdout or ''}\n"
+                f"--- stderr ---\n{result.stderr or ''}\n",
+                encoding="utf-8",
+            )
+            print(f"[tts-runtime] uv 失败完整输出已落盘：{dump}")
+        except OSError as dump_exc:
+            print(f"[tts-runtime] uv 失败输出落盘失败（{dump_exc}）")
+        print(f"[tts-runtime] uv stdout 尾部：{out[-200:]}")
+        print(f"[tts-runtime] uv stderr 尾部：{err[-200:]}")
+        detail = (err or out)[-300:]
         raise RuntimeError(
             f"uv {' '.join(args[:2])} 失败（exit {result.returncode}）: {detail}"
         )
