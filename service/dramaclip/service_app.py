@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import faulthandler
+import logging
 import shutil
 import signal
 import sqlite3
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -205,6 +207,9 @@ class ServiceApp:
         log_file = logging_setup.setup_file_logging(data_dir / "logs")
         if log_file is not None:
             print(f"[logging] 服务日志: {log_file}")
+        # 启动横幅进日志：用户只发 backend.log 也带得上环境（单文件真源）
+        logging.getLogger(__name__).info(
+            "服务启动 v%s | 数据目录 %s | 平台 %s", __version__, data_dir, sys.platform)
         notifier = Notifier(self._send)
         work_dir = data_dir / "cache" / "analysis"
         work_dir.mkdir(parents=True, exist_ok=True)

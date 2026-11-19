@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 from typing import Any
 from uuid import uuid4
+
+_LOGGER = logging.getLogger(__name__)
 
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
@@ -77,6 +80,9 @@ class JobStore:
         self._transition(job_id, "completed", progress=100.0)
 
     def mark_failed(self, job_id: str, error: str) -> None:
+        # 失败事件同步落 backend.log：job 行在 DB 里有，但用户发日志时
+        # backend.log 才是单文件真源（装测反馈链的教训：截图只有半行红字）
+        _LOGGER.error("job %s failed: %s", job_id, error)
         self._transition(job_id, "failed", error=error)
 
     def append_detail(self, job_id: str, line: str) -> None:

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -40,6 +41,8 @@ from typing import Any
 from dramaclip.infra import gpu
 from dramaclip.infra.model_manager import cuda_runtime
 from dramaclip.infra.model_manager.fetch import download_file
+
+_LOGGER = logging.getLogger(__name__)
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _UV_VERSION = "0.8.4"
@@ -202,7 +205,7 @@ def _gpu_variant() -> str:
         [a for a in raw_adapters if isinstance(a, dict)] if isinstance(raw_adapters, list) else []
     )
     if _intel_xpu_capable(adapters):
-        print("[tts-runtime] Intel Arc/Ultra 适配器在场：装 torch XPU 轮")
+        _LOGGER.info("[tts-runtime] Intel Arc/Ultra 适配器在场：装 torch XPU 轮")
         return "xpu"
     has_nvidia = any(
         str(a.get("vendor") or "") == "nvidia"
@@ -211,7 +214,7 @@ def _gpu_variant() -> str:
         for a in adapters
     )
     if not has_nvidia:
-        print("[tts-runtime] D3D 枚举无 NVIDIA 适配器：装 CPU 轮")
+        _LOGGER.info("[tts-runtime] D3D 枚举无 NVIDIA 适配器：装 CPU 轮")
         return "cpu"
     if shutil.which("nvidia-smi") is None:
         return "cpu"
@@ -225,13 +228,13 @@ def _gpu_variant() -> str:
     try:
         major = float(cap.split()[0]) if cap else -1.0
     except ValueError:
-        print("[tts-runtime] nvidia-smi 算力读不出来（stub/驱动异常）：装 CPU 轮")
+        _LOGGER.info("[tts-runtime] nvidia-smi 算力读不出来（stub/驱动异常）：装 CPU 轮")
         return "cpu"
     if major < 0.0:
-        print("[tts-runtime] nvidia-smi 空输出（stub/驱动异常）：装 CPU 轮")
+        _LOGGER.info("[tts-runtime] nvidia-smi 空输出（stub/驱动异常）：装 CPU 轮")
         return "cpu"
     if major < 7.0:
-        print(f"[tts-runtime] N 卡算力 {cap} 低于 cu128 支持线（7.0）：装 CPU 轮")
+        _LOGGER.info(f"[tts-runtime] N 卡算力 {cap} 低于 cu128 支持线（7.0）：装 CPU 轮")
         return "cpu"
     return "cuda"
 
@@ -888,7 +891,7 @@ def _install_torch(uv: Path, venv: Path, variant: str) -> None:
             return
         except RuntimeError as exc:
             last = exc
-            print(f"[tts-runtime] torch {variant} 轮 {label} 失败，尝试下一来源")
+            _LOGGER.warning(f"[tts-runtime] torch {variant} 轮 {label} 失败，尝试下一来源")
     raise RuntimeError(f"torch {variant} 轮全部来源失败: {last}")
 
 
@@ -919,11 +922,11 @@ def _run_uv(uv: Path, venv: Path, *args: str) -> None:
                 f"--- stderr ---\n{result.stderr or ''}\n",
                 encoding="utf-8",
             )
-            print(f"[tts-runtime] uv 失败完整输出已落盘：{dump}")
+            _LOGGER.info(f"[tts-runtime] uv 失败完整输出已落盘：{dump}")
         except OSError as dump_exc:
-            print(f"[tts-runtime] uv 失败输出落盘失败（{dump_exc}）")
-        print(f"[tts-runtime] uv stdout 尾部：{out[-200:]}")
-        print(f"[tts-runtime] uv stderr 尾部：{err[-200:]}")
+            _LOGGER.warning(f"[tts-runtime] uv 失败输出落盘失败（{dump_exc}）")
+        _LOGGER.info(f"[tts-runtime] uv stdout 尾部：{out[-200:]}")
+        _LOGGER.info(f"[tts-runtime] uv stderr 尾部：{err[-200:]}")
         detail = (err or out)[-300:]
         # 安装链有 torch/双栈 58 项/funasr/kokoro 四个批次同走本函数——报错必须
         # 区分是哪一批（取第一个包名；flag 后面还有 --index-url 等不算目标）。
@@ -931,6 +934,7 @@ def _run_uv(uv: Path, venv: Path, *args: str) -> None:
         label = f"{' '.join(args[:2])} {target}".strip()
         raise RuntimeError(
             f"uv {label} 失败（exit {result.returncode}）: {detail}"
+            f"（完整输出已存 {dump}）"
         )
 
 
