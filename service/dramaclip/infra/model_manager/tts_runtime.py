@@ -65,6 +65,11 @@ _ORT_GPU_INDEX = (
 )
 _TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
 _TORCH_CPU = ["torch==2.8.0", "torchaudio==2.8.0"]
+# 阿里 pytorch-wheels flat 目录：官方源被掐时的同构 fallback（--find-links
+# 语义，torch==2.8.0 匹配 +cuNNN/+xpu local version），传递依赖仍走清华。
+# xpu 目录轮清单 2026-11-19 真探实存：torch/torchaudio 2.8.0+xpu cp311 win 齐备。
+_TORCH_CU128_MIRROR = "https://mirrors.aliyun.com/pytorch-wheels/cu128/"
+_TORCH_XPU_MIRROR = "https://mirrors.aliyun.com/pytorch-wheels/xpu/"
 # 以下尺寸全部为**实测精确字节数**（2026-09-24 逐件下载量得）：download_file 的
 # expected_size 是精确匹配校验（防代理截断/半包），估一个"大概 18MB"只会把完好
 # 下载拒之门外——uv 首装就是这么失败的（期望 18MiB 整，实际 19103643）。
@@ -850,25 +855,24 @@ def _extract_tar_stripped(archive: Path, dest: Path) -> None:
 
 
 def _install_torch(uv: Path, venv: Path, variant: str) -> None:
-    """torch 按变体安装：官方 cu 源优先，失败回落阿里 pytorch-wheels flat 镜像。
+    """torch 按变体安装：官方源优先，失败回落阿里 pytorch-wheels flat 镜像。
 
     download.pytorch.org 在部分国内网络直连握手失败（2026-10-15 本机实测 SSL
     握手失败），GPU 轮 2.5GB 没有二次机会就是安装流程最大的单点。阿里镜像
-    的 flat 目录做 --find-links（torch==2.8.0 匹配 +cuNNN local version，
+    的 flat 目录做 --find-links（torch==2.8.0 匹配 +cuNNN/+xpu local version，
     pip/uv 语义），其余传递依赖仍走清华。
     """
-    if variant == "xpu":
-        # XPU 轮自包含（索引自带 intel-cmplr-lib-rt/intel-openmp 运行时依赖）；
-        # 与 cuda 轮互斥语义同源：变体是安装期决策，运行期探针如实回退 CPU。
-        _run_uv(uv, venv, "pip", "install", *_TORCH_CPU, "--index-url", _TORCH_XPU_INDEX)
-        return
     if variant == "cpu":
         _run_uv(uv, venv, "pip", "install", *_TORCH_CPU, "--index-url", _PYPI_MIRROR)
         return
-    index = _TORCH_INDEX
-    mirror_dir = "https://mirrors.aliyun.com/pytorch-wheels/cu128/"
+    # XPU 轮自包含（索引自带 intel-cmplr-lib-rt/intel-openmp 运行时依赖）；
+    # 与 cuda 轮互斥语义同源：变体是安装期决策，运行期探针如实回退 CPU。
+    # 双来源与 cuda 轮同构：官方源国内 SSL 握手失败有前科，大轮不能单点。
+    index = _TORCH_XPU_INDEX if variant == "xpu" else _TORCH_INDEX
+    mirror_dir = _TORCH_XPU_MIRROR if variant == "xpu" else _TORCH_CU128_MIRROR
+    official_label = "官方 xpu 源" if variant == "xpu" else "官方 cu 源"
     attempts: list[tuple[str, list[str]]] = [
-        ("官方 cu 源", ["pip", "install", *_TORCH_CPU, "--index-url", index]),
+        (official_label, ["pip", "install", *_TORCH_CPU, "--index-url", index]),
         (
             "阿里镜像",
             [
