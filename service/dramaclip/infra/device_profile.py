@@ -441,7 +441,10 @@ def profile(
     }
     if intel_xpu:
         # 覆盖 note() 的非 NVIDIA 短路：Intel XPU 主机上 torch 系两引擎点亮 XPU；
-        # faster_whisper（ctranslate2 无 XPU 后端）与分离（ORT DML 另批）维持现状。
+        # faster_whisper（ctranslate2 无 XPU 后端）维持现状。分离不再「另批」：
+        # worker auto 本就按 CUDA>DML>CPU 选路（separation_worker._provider_plan），
+        # ORT DML 装好即点亮——此前徽标漏报 DML 实况（2026-11-19 Arc 130T 实测
+        # --probe-dml 真算 PASS，徽标却写「仅支持 NVIDIA CUDA」）。
         caps["funasr_gpu"] = _cap(
             True,
             True,
@@ -451,6 +454,12 @@ def profile(
         caps["indextts2_gpu"] = _cap(
             True, True, "Intel XPU 后端（算子覆盖未经验证）", "Intel XPU",
         )
+        if (separation_ort or {}).get("gpu") and (separation_ort or {}).get("backend") == "dml":
+            caps["vocal_separation_gpu"] = _cap(
+                True, True,
+                "DirectML EP（Intel；首次真分离以任务回执为准）",
+                "Intel DirectML",
+            )
     return {
         "tier": tier,
         "tier_label": tier_label,

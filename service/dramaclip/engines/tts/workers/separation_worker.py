@@ -48,7 +48,7 @@ def main() -> int:
     parser.add_argument("--in", dest="src")
     parser.add_argument("--out", dest="out")
     parser.add_argument("--models", dest="models")
-    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
+    parser.add_argument("--device", choices=("auto", "cpu", "cuda", "dml"), default="auto")
     parser.add_argument("--cuda-dll-dir", dest="cuda_dll_dir", default="")
     parser.add_argument("--probe", action="store_true")
     parser.add_argument("--probe-dml", dest="probe_dml", action="store_true")

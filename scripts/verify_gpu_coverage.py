@@ -39,7 +39,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "service"))
 
 STATUSES = frozenset({"pass", "fail", "unsupported"})
-REQUESTS = frozenset({"auto", "cpu", "cuda"})
+REQUESTS = frozenset({"auto", "cpu", "cuda", "xpu", "dml"})
 REASON_MAX_CHARS = 500
 _VIDEO_SIZE = (320, 240)
 _LABEL_MIN_MEAN = 8.0
@@ -52,6 +52,7 @@ _UNSUPPORTED_PATTERNS = (
     r"ComputeUnavailableError",
     r"请求 CUDA",
     r"torch\.cuda\.is_available",
+    r"torch\.xpu\.is_available",
     r"not compiled with CUDA",
     r"no kernel image",
     r"compute capability",
@@ -59,6 +60,7 @@ _UNSUPPORTED_PATTERNS = (
     r"cublas|cudnn|cudart|cufft",
     r"CUDA (failed|error|driver)",
     r"CUDAExecutionProvider",
+    r"DmlExecutionProvider",
 )
 
 CheckFn = Callable[[], "str | tuple[str, str]"]
@@ -529,12 +531,17 @@ def _checks(ctx: Context) -> list[tuple[str, str, str, CheckFn]]:
         ("video.ai_label.cuda", "cuda", "ffmpeg", _video_ai_label_cuda(ctx)),
         ("separation.cpu", "cpu", "tts-venv", lambda: _separation(ctx, "cpu")),
         ("separation.cuda", "cuda", "tts-venv", lambda: _separation(ctx, "cuda")),
+        # Intel 档（Arc/Ultra）：分离 auto 实走 DML EP（worker _provider_plan），
+        # torch 系四引擎走 XPU 轮——2026-10-25 起 xpu 变体入安装链，本表跟进。
+        ("separation.dml", "dml", "tts-venv", lambda: _separation(ctx, "dml")),
         ("asr.whisper.cpu", "cpu", runtime_label(), lambda: _asr_whisper(ctx, "cpu")),
         ("asr.whisper.cuda", "cuda", runtime_label(), lambda: _asr_whisper(ctx, "cuda")),
         ("asr.funasr.cpu", "cpu", _asr_funasr_runtime(), lambda: _asr_funasr(ctx, "cpu")),
         ("asr.funasr.cuda", "cuda", _asr_funasr_runtime(), lambda: _asr_funasr(ctx, "cuda")),
+        ("asr.funasr.xpu", "xpu", _asr_funasr_runtime(), lambda: _asr_funasr(ctx, "xpu")),
         ("tts.kokoro.cpu", "cpu", "tts-venv", lambda: _tts_kokoro(ctx, "cpu")),
         ("tts.kokoro.cuda", "cuda", "tts-venv", lambda: _tts_kokoro(ctx, "cuda")),
+        ("tts.kokoro.xpu", "xpu", "tts-venv", lambda: _tts_kokoro(ctx, "xpu")),
         (
             "tts.indextts2.cpu", "cpu", "tts-venv",
             lambda: _tts_engine(ctx, "indextts2", "cpu"),
@@ -544,12 +551,20 @@ def _checks(ctx: Context) -> list[tuple[str, str, str, CheckFn]]:
             lambda: _tts_engine(ctx, "indextts2", "cuda"),
         ),
         (
+            "tts.indextts2.xpu", "xpu", "tts-venv",
+            lambda: _tts_engine(ctx, "indextts2", "xpu"),
+        ),
+        (
             "tts.cosyvoice.cpu", "cpu", "tts-venv",
             lambda: _tts_engine(ctx, _cosyvoice_name(ctx), "cpu"),
         ),
         (
             "tts.cosyvoice.cuda", "cuda", "tts-venv",
             lambda: _tts_engine(ctx, _cosyvoice_name(ctx), "cuda"),
+        ),
+        (
+            "tts.cosyvoice.xpu", "xpu", "tts-venv",
+            lambda: _tts_engine(ctx, _cosyvoice_name(ctx), "xpu"),
         ),
     ]
 

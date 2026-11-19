@@ -279,6 +279,41 @@ def test_profile_separation_gpu_needs_ort_probe_marker() -> None:
     assert "CUDA 运行库" in cap_runtime["hint"]
 
 
+def test_profile_intel_xpu_separation_dml_lights_up() -> None:
+    """Arc 形态：ORT DML 装好即点亮分离徽标——worker auto 实走 DML，徽标不再漏报。
+
+    2026-11-19 Arc 130T 真机：ort_state={gpu, backend=dml}、separation_worker
+    --probe-dml 真算 PASS，但徽标仍写「仅支持 NVIDIA CUDA，当前走 CPU」。"""
+    snap = {
+        "vendor": "intel",
+        "name": "Intel(R) Arc(TM) 130T GPU (16GB)",
+        "memory_total_mb": 16384,
+        # XPU 判据走 adapters 列表（_snapshot_intel_xpu_adapter）：名称含 Arc/Ultra
+        "adapters": [
+            {"vendor": "intel", "name": "Intel(R) Arc(TM) 130T GPU (16GB)"},
+        ],
+    }
+    # xpu 轮未装：intel_xpu 双门不全，torch 系与分离都不点亮
+    no_dml = device_profile.profile(snap, cuda_runtime_installed=False)
+    assert no_dml["caps"]["vocal_separation_gpu"]["ready"] is False
+    assert no_dml["caps"]["funasr_gpu"]["ready"] is False
+
+    dml = device_profile.profile(
+        snap, cuda_runtime_installed=False,
+        separation_ort={
+            "variant": "gpu", "gpu": True, "backend": "dml",
+            "providers": ["DmlExecutionProvider", "CPUExecutionProvider"],
+        },
+        torch_variant="xpu",
+    )
+    sep = dml["caps"]["vocal_separation_gpu"]
+    assert sep["ok"] is True and sep["ready"] is True
+    assert "DirectML" in sep["hint"]
+    # 既有 XPU 点亮行为回归：torch 系两引擎不因分离改动受影响
+    assert dml["caps"]["funasr_gpu"]["ready"] is True
+    assert dml["caps"]["indextts2_gpu"]["ready"] is True
+
+
 def test_profile_sm52_blocks_whisper_but_not_funasr(monkeypatch: pytest.MonkeyPatch) -> None:
     """M4000 形态（sm_52）：whisper GPU 加速如实标「不支持」，funasr 看服务 torch 实况。
 

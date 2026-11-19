@@ -1,0 +1,213 @@
+{
+  "tool": "verify_gpu_coverage",
+  "version": 1,
+  "generated_at": "2026-11-19T15:48:08+08:00",
+  "environment": {
+    "platform": "win32",
+    "python": "3.13.15",
+    "interpreter": "<repo>\\service\\.venv\\Scripts\\python.exe",
+    "host_gpu": "{'vendor': 'intel', 'name': 'Intel(R) Arc(TM) 130T GPU (16GB)', 'driver_version': '32.0.101.6554', 'adapters': [{'name': 'IddDesk Device', 'vendor': 'other', 'driver_version': '25.0.0.4'}, {'name': 'Intel(R) Arc(TM) 130T GPU (16GB)', 'vendor': 'intel', 'driver_version': '32.0.101.6554'}]}",
+    "torch": "2.14.1+cpu",
+    "torch_cuda_available": "False",
+    "ffmpeg": "ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers"
+  },
+  "summary": {
+    "pass": 4,
+    "fail": 2,
+    "unsupported": 15,
+    "note": "unsupported 不计入通过"
+  },
+  "records": [
+    {
+      "component": "video.encode.cpu",
+      "requested": "cpu",
+      "runtime": "ffmpeg",
+      "status": "pass",
+      "actual": "libx264",
+      "reason": "",
+      "elapsed_s": 0.42
+    },
+    {
+      "component": "video.encode.cuda",
+      "requested": "cuda",
+      "runtime": "ffmpeg",
+      "status": "pass",
+      "actual": "h264_qsv",
+      "reason": "h264_nvenc: FfmpegError: ffmpeg 退出码 4294967295：ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers  ；h264_amf: FfmpegError: ffmpeg 退出码 2981409195：ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers  ",
+      "elapsed_s": 2.44
+    },
+    {
+      "component": "video.ai_label.cpu",
+      "requested": "cpu",
+      "runtime": "ffmpeg",
+      "status": "pass",
+      "actual": "libx264",
+      "reason": "标注区亮度 12.5（无标注 0.0）",
+      "elapsed_s": 0.33
+    },
+    {
+      "component": "video.ai_label.cuda",
+      "requested": "cuda",
+      "runtime": "ffmpeg",
+      "status": "pass",
+      "actual": "h264_qsv",
+      "reason": "标注区亮度 12.5（无标注 0.0）｜候选回落：h264_nvenc: FfmpegError: ffmpeg 退出码 4294967295：ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers  ；h264_amf: FfmpegError: ffmpeg 退出码 2981409195：ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers  ",
+      "elapsed_s": 3.16
+    },
+    {
+      "component": "separation.cpu",
+      "requested": "cpu",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "人声分离模型 缺失：UVR_MDXNET_KARA_2.onnx",
+      "elapsed_s": 0.0
+    },
+    {
+      "component": "separation.cuda",
+      "requested": "cuda",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "人声分离模型 缺失：UVR_MDXNET_KARA_2.onnx",
+      "elapsed_s": 0.0
+    },
+    {
+      "component": "separation.dml",
+      "requested": "dml",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "人声分离模型 缺失：UVR_MDXNET_KARA_2.onnx",
+      "elapsed_s": 0.0
+    },
+    {
+      "component": "asr.whisper.cpu",
+      "requested": "cpu",
+      "runtime": "service-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "faster-whisper 模型未安装",
+      "elapsed_s": 0.01
+    },
+    {
+      "component": "asr.whisper.cuda",
+      "requested": "cuda",
+      "runtime": "service-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "faster-whisper 模型未安装",
+      "elapsed_s": 0.0
+    },
+    {
+      "component": "asr.funasr.cpu",
+      "requested": "cpu",
+      "runtime": "service-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "SenseVoice 模型未安装：SenseVoiceSmall",
+      "elapsed_s": 0.0
+    },
+    {
+      "component": "asr.funasr.cuda",
+      "requested": "cuda",
+      "runtime": "service-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "SenseVoice 模型未安装：SenseVoiceSmall",
+      "elapsed_s": 0.0
+    },
+    {
+      "component": "asr.funasr.xpu",
+      "requested": "xpu",
+      "runtime": "service-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "SenseVoice 模型未安装：SenseVoiceSmall",
+      "elapsed_s": 0.0
+    },
+    {
+      "component": "tts.kokoro.cpu",
+      "requested": "cpu",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "Kokoro 模型 缺失：config.json",
+      "elapsed_s": 0.0
+    },
+    {
+      "component": "tts.kokoro.cuda",
+      "requested": "cuda",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "Kokoro 模型 缺失：config.json",
+      "elapsed_s": 0.0
+    },
+    {
+      "component": "tts.kokoro.xpu",
+      "requested": "xpu",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "Kokoro 模型 缺失：config.json",
+      "elapsed_s": 0.0
+    },
+    {
+      "component": "tts.indextts2.cpu",
+      "requested": "cpu",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "缺模型：<data>\\models\\tts\\indextts2 下没有 config.yaml, gpt.pth, s2mel.pth",
+      "elapsed_s": 0.01
+    },
+    {
+      "component": "tts.indextts2.cuda",
+      "requested": "cuda",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "缺模型：<data>\\models\\tts\\indextts2 下没有 config.yaml, gpt.pth, s2mel.pth",
+      "elapsed_s": 0.0
+    },
+    {
+      "component": "tts.indextts2.xpu",
+      "requested": "xpu",
+      "runtime": "tts-venv",
+      "status": "fail",
+      "actual": "unknown",
+      "reason": "ValueError: 未知算力请求: 'xpu'（可用: auto / cuda / cpu）",
+      "elapsed_s": 0.0
+    },
+    {
+      "component": "tts.cosyvoice.cpu",
+      "requested": "cpu",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "缺模型：<data>\\models\\tts\\cosyvoice300m 下没有 cosyvoice.yaml, llm.pt, flow.pt, hift.pt, speech_tokenizer_v1.onnx",
+      "elapsed_s": 0.0
+    },
+    {
+      "component": "tts.cosyvoice.cuda",
+      "requested": "cuda",
+      "runtime": "tts-venv",
+      "status": "unsupported",
+      "actual": "unknown",
+      "reason": "缺模型：<data>\\models\\tts\\cosyvoice300m 下没有 cosyvoice.yaml, llm.pt, flow.pt, hift.pt, speech_tokenizer_v1.onnx",
+      "elapsed_s": 0.0
+    },
+    {
+      "component": "tts.cosyvoice.xpu",
+      "requested": "xpu",
+      "runtime": "tts-venv",
+      "status": "fail",
+      "actual": "unknown",
+      "reason": "ValueError: 未知算力请求: 'xpu'（可用: auto / cuda / cpu）",
+      "elapsed_s": 0.0
+    }
+  ],
+  "requirements": [],
+  "unmet": []
+}
