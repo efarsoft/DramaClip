@@ -50,6 +50,11 @@ resources/dramaclip-service/
 build/
 desktop/release/
 desktop/release2/
+# desktop/build 是 electron-builder buildResources：NSIS 卸载脚本必须入库
+# （图标 .ico/.png 同理需入库——见 251f96c）；其余构建产物照旧忽略
+!desktop/build/
+desktop/build/*
+!desktop/build/installer.nsh
 
 # ── 本地调试产物（永不入库）──
 scratch/

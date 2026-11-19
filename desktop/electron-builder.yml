@@ -44,6 +44,9 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+  # 卸载「删除模型与运行环境」选项：customUnInstall 宏（build/installer.nsh），
+  # 数据目录定位靠应用启动时写注册表 DataDir——见 main/index.ts
+  include: build/installer.nsh
   createDesktopShortcut: always
   shortcutName: DramaClip
   artifactName: ${productName}-${version}-${arch}-setup.${ext}

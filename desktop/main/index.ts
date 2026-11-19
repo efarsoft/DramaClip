@@ -1,9 +1,11 @@
 /** Electron 主进程入口（docs/desktop/00 §2 启动时序）。 */
 import { app, BrowserWindow, nativeTheme, protocol, screen, shell } from 'electron';
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { registerIpc, broadcastEvent, resolveDataPaths, type IpcContext } from './ipc';
 import { loadAppConfig, resolveDataDir } from './services/storage';
+import { registerDataDirForUninstaller } from './uninstaller-reg';
 import { createPreviewHandler, createPreviewRoots } from './services/preview-protocol';
 import { ServiceManager, type ServiceManagerOptions } from './services/service-manager';
 
@@ -113,6 +115,7 @@ function buildIpcContext(managerInstance: ServiceManager): IpcContext {
 
 async function bootstrap(): Promise<void> {
   nativeTheme.themeSource = 'dark';
+  registerDataDirForUninstaller(effectiveDataDir(), app.isPackaged, process.platform, spawn);
   // 打包模式：extraResources 落在 process.resourcesPath/app-resources；
   // 开发模式：仓库根 resources/
   const resourcesDir = app.isPackaged
