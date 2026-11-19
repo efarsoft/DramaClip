@@ -63,8 +63,22 @@ def _local(context: AppContext, models_dir: Path, model_id: str) -> dict[str, An
         return _asr(context, models_dir, spec)
     if spec.kind == "tts":
         return _tts(context, models_dir, spec)
+    if spec.kind == "vision":
+        return _vision(context, models_dir, spec)
     raise RpcDomainError(
-        _ERR_SELFTEST_PARAM, f"{spec.name} 没有能力层自检（只有 ASR/TTS 有真推理可跑）"
+        _ERR_SELFTEST_PARAM, f"{spec.name} 没有能力层自检（只有 ASR/TTS/VL 有真推理可跑）"
+    )
+
+
+def _vision(context: AppContext, models_dir: Path, spec: registry.ModelSpec) -> dict[str, Any]:
+    if registry.find(spec, models_dir) is None:
+        raise RpcDomainError(
+            _ERR_SELFTEST_STATE, f"{spec.name} 未安装——自检需要真实权重，请先下载或导入"
+        )
+    device = str(context.settings.get("vision.device") or "auto")
+    return selftest_mod.run_vision(
+        models_dir, spec, device=device,
+        data_dir=context.data_dir, work_dir=context.work_dir,
     )
 
 

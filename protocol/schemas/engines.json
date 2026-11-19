@@ -32,6 +32,10 @@
           "type": "number",
           "description": "TTS：合成音频的实测时长（秒）"
         },
+        "frames": {
+          "type": "integer",
+          "description": "VL：真描述的帧数（单帧测试卡自检恒为 1，非空描述才算过）"
+        },
         "latency_s": {
           "type": [
             "number",

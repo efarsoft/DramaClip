@@ -145,6 +145,56 @@ def test_asr_selftest_refuses_when_model_missing(
         engines_api.run(context, {"model_id": "faster-whisper-small"})
 
 
+# ---------------------------------------------------------------- VL
+
+
+def test_vision_selftest_launches_session_and_records(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """VL 自检：open_session → 真合成测试卡 → 单帧描述 → 落账。
+
+    2026-11-19 业主实锤「文案让点自检、资产行却没有按钮」——后端也没这条
+    vision 分派，本用例钉住整条链。"""
+    model_dir = tmp_path / "models" / "vl" / "qwen3-vl-4b"
+    model_dir.mkdir(parents=True)
+    (model_dir / "Qwen3VL-4B-Instruct-Q4_K_M.gguf").write_bytes(b"x")
+    (model_dir / "mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf").write_bytes(b"x")
+
+    class _FakeSession:
+        def describe_episode(self, video, episode_s, work_dir, *, count=1, on_progress=None):  # noqa: ANN001, ARG002
+            assert Path(video).is_file(), "自检必须真合成测试卡视频"
+            return [{"shot": "彩条", "scene": "测试卡", "action": "滚动", "watch_score": 5}]
+
+        def close(self) -> None:
+            pass
+
+    import dramaclip.infra.ffmpeg.runner as ffmpeg_runner
+    from dramaclip.engines.vision import runtime as vision_runtime
+
+    monkeypatch.setattr(vision_runtime, "open_session", lambda *a, **k: _FakeSession())
+
+    def fake_run(args, **_kwargs):  # noqa: ANN001, ANN003
+        Path(args[-1]).write_bytes(b"mp4")
+
+    monkeypatch.setattr(ffmpeg_runner, "run", fake_run)
+    context = _context(memory_db, tmp_path)
+
+    result = engines_api.run(context, {"model_id": "qwen3-vl-4b"})
+
+    assert result["ok"] is True
+    assert result["frames"] == 1
+    saved = selftest_mod.load_results(context.data_dir / "models")
+    assert saved["qwen3-vl-4b"]["ok"] is True
+
+
+def test_vision_selftest_refuses_when_model_missing(
+    memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    context = _context(memory_db, tmp_path)
+    with pytest.raises(RpcDomainError, match="未安装"):
+        engines_api.run(context, {"model_id": "qwen3-vl-8b"})
+
+
 def test_reserve_asset_cannot_selftest(
     memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

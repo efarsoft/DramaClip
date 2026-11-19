@@ -133,6 +133,62 @@ def run_tts(
     }
 
 
+def run_vision(
+    models_dir: Path,
+    spec: ModelSpec,
+    *,
+    device: str,
+    data_dir: Path,
+    work_dir: Path,
+) -> dict[str, Any]:
+    """VL 自检：真拉起 llama-server + 单帧真描述（CPU 加载 2.75GB 权重几十秒起）。
+
+    测试素材是 ffmpeg 内置 testsrc 合成的 1 秒测试卡——采样/编码/请求/解析全链
+    真跑；描述非空即过（彩条测试卡也能出画面描述，验的是「能不能推」不是
+    「描述得好不好」）。会话用完即关，不留 llama-server 驻留。"""
+    from dramaclip.engines.vision import runtime as vision_runtime
+    from dramaclip.infra.ffmpeg import runner as ffmpeg_runner
+
+    settings = {"vision.model": spec.model_id, "vision.device": device}
+    session = vision_runtime.open_session(data_dir, models_dir, settings)
+    if session is None:
+        return _fail(
+            "本地视觉运行时未就绪（缺 llama-server.exe 或主模型/mmproj 双文件不全）"
+            "——先装视觉运行时或重下模型"
+        )
+    work_dir = Path(work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    video = work_dir / "selftest-vl.mp4"
+    try:
+        ffmpeg_runner.run(
+            [
+                "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=15",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-y", str(video),
+            ],
+            timeout_s=60,
+        )
+        started = time.monotonic()
+        frames = session.describe_episode(video, 1.0, work_dir, count=1)
+        elapsed = round(time.monotonic() - started, 2)
+        text = "".join(
+            f"{frame.get('shot') or ''}{frame.get('scene') or ''}{frame.get('action') or ''}"
+            for frame in frames
+        ).strip()
+        if not text:
+            return _fail("视觉描述为空——llama-server 没有真跑通（详见 backend.log）")
+        return {
+            "ok": True,
+            "engine": spec.engine,
+            "frames": len(frames),
+            "elapsed_s": elapsed,
+            "text": text[:60],
+        }
+    except Exception as exc:  # noqa: BLE001 - 自检要的就是真异常原文，不包装不吞
+        return _fail(f"加载/推理失败：{type(exc).__name__}: {exc}")
+    finally:
+        session.close()
+
+
 def _build_asr(
     models_dir: Path,
     spec: ModelSpec,

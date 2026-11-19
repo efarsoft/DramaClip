@@ -34,7 +34,10 @@ export function RepairActions({
   const needs = repairNeeds(report);
   const broken = report !== undefined && !report.ok;
   const selftestFailed = selftest !== undefined && !selftest.ok;
-  const localInference = model.engine_ready && (model.kind === 'asr' || model.kind === 'tts');
+  // VL 也是本地真推理（llama-server 真拉起 + 单帧描述）：2026-11-19 业主实锤
+  // 「文案让点自检、资产行却没有按钮」——三域一视。
+  const localInference =
+    model.engine_ready && (model.kind === 'asr' || model.kind === 'tts' || model.kind === 'vision');
   return (
     <>
       {needs.residue && <ResidueButton model={model} onChanged={onChanged} onVerify={onVerify} />}
@@ -231,11 +234,14 @@ function selftestSummary(result: SelftestResult): string {
   if (result.duration_s !== undefined) {
     return `自检通过：合成 ${result.duration_s.toFixed(1)}s 音频${elapsed}`;
   }
+  if (result.frames !== undefined) {
+    return `自检通过：真描述 ${String(result.frames)} 帧${elapsed}`;
+  }
   return `自检通过${elapsed}`;
 }
 
 function selftestTitle(selftest: SelftestResult | undefined): string {
-  const intro = '用随包样例真跑一段：ASR 真转写 / TTS 真合成（CPU 上约十几秒）';
+  const intro = '用随包样例真跑一段：ASR 真转写 / TTS 真合成 / VL 真拉起 llama-server 描述测试卡（CPU 上十几秒到几十秒）';
   if (selftest === undefined) return intro;
   const when = selftest.at !== undefined ? new Date(selftest.at).toLocaleString() : '时间未知';
   if (!selftest.ok) return `上次自检（${when}）未通过：${selftest.error ?? ''}`;

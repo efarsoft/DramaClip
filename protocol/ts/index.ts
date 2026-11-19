@@ -730,6 +730,8 @@ export interface SelftestResult {
   readonly elapsed_s?: number;
   /** TTS：合成音频实测时长（秒）。 */
   readonly duration_s?: number;
+  /** VL：真描述的帧数（单帧测试卡自检恒为 1，非空描述才算过）。 */
+  readonly frames?: number;
   /** 云端域：连通延迟（engine_configs.test 透传）。 */
   readonly latency_s?: number | null;
   /** ASR：识别文本前 60 字。 */
