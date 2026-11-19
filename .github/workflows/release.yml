@@ -37,6 +37,10 @@ jobs:
             exit 1
           fi
 
+      # 行帽棘轮（W13）：函数 120/文件 800 只降不升——发版前最后防线（CI 侧已有同款）
+      - name: 行帽棘轮校验
+        run: uv --directory service run pytest tests/infra/test_line_budget.py -q
+
       # dist:service 硬编码 .venv\Scripts\python.exe，此处先建同名 venv；
       # PyInstaller 与本机开发环境钉同版（6.22.2）——PYZ 断言方法论绑它的归档形状
       - name: 建 Python venv 并安装 ML 依赖
