@@ -233,12 +233,24 @@ class IndexTts2Engine:
         hello = _HELLO.get(proc) if proc is not None else None
         if hello is None:
             return None
-        actual = "cuda" if str(hello.get("device") or "").startswith("cuda") else "cpu"
+        device_str = str(hello.get("device") or "")
+        # xpu 落点此前被换算成 cpu——「请求 xpu 实际 cpu：无原因」的谎就是它撒的
+        # （worker 明明在 xpu 上真算成功，2026-11-19 Arc 130T 自检实锤）
+        actual = (
+            "cuda" if device_str.startswith("cuda")
+            else "xpu" if device_str.startswith("xpu")
+            else "cpu"
+        )
         fallback = bool(hello.get("fallback"))
+        resolved = (
+            "cuda" if fallback or actual == "cuda"
+            else "xpu" if actual == "xpu"
+            else "cpu"
+        )
         return compute.ComputeReport(
             component="tts.indextts2",
             requested=str(hello.get("requested") or self._device),
-            resolved="cuda" if fallback or actual == "cuda" else "cpu",
+            resolved=resolved,
             actual=actual,
             fallback=fallback,
             reason=str(hello.get("reason") or ""),
