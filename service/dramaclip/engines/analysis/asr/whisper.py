@@ -104,21 +104,26 @@ class FasterWhisperEngine:
             result.append(AsrSegment(start=seg.start, end=seg.end, text=text, words=words))
         return result
 
-    def _require_local_model(self) -> None:
+    def _require_local_model(self) -> Path | None:
         """本地模型预检：缺失给行动性引导，不在分析路径里静默联网下载。
 
         download_root 的 HF 缓存布局与 registry.detect_status 同一套
         （models--Systran--…/snapshots/<rev>/model.bin），引擎中心「下载」落的
         正是这一份。放行缺失的话，huggingface_hub 会自己去撞网络——国内网络
         下用户看到的是英文连接超时，那是「分析失败没细节」的又一种来源。
+
+        返回找到的快照目录：调用方把它作为 model_size_or_path 直传
+        faster-whisper——绕开 hub 的 refs/main 指针解析（手动/镜像落位的
+        布局没有指针文件，离线回退时 hub 会抛 LocalEntryNotFoundError，
+        装测实锤；直传目录让 hub 完全不介入）。
         """
         if self._models_dir is None:
-            return
+            return None
         short = self._model_size.removeprefix("faster-whisper-")
         for cache_dir in sorted(self._models_dir.glob(f"models--*faster-whisper-{short}")):
             for snapshot in sorted(cache_dir.glob("snapshots/*"), reverse=True):
                 if (snapshot / "model.bin").is_file():
-                    return
+                    return snapshot
         raise ValueError(
             f"未找到本地 Whisper 模型（{self._model_size}）："
             "请到「引擎中心 → 语音识别 ASR」下载模型资产后再分析"
@@ -126,20 +131,24 @@ class FasterWhisperEngine:
 
     def _ensure_model(self) -> WhisperModel:
         if self._model is None:
-            self._require_local_model()
+            snapshot = self._require_local_model()
             from faster_whisper import WhisperModel  # ml extras 懒加载
 
             if self._requested == "cpu":
                 target = "cpu"
             else:
                 target = "cuda" if self._requested == "cuda" or _ct2_cuda_available() else "cpu"
-            self._model = self._create(WhisperModel, target)
+            # 快照目录直传（原生支持本地路径）：hub 完全不介入，refs 指针缺失
+            # 的手动/镜像落位布局也能加载（装测 LocalEntryNotFoundError 实锤）
+            self._model = self._create(WhisperModel, target, local_dir=snapshot)
         return self._model
 
-    def _create(self, cls: type[WhisperModel], device: str) -> WhisperModel:
+    def _create(
+        self, cls: type[WhisperModel], device: str, local_dir: Path | None = None
+    ) -> WhisperModel:
         try:
             model = cls(
-                self._model_size,
+                str(local_dir) if local_dir is not None else self._model_size,
                 device=device,
                 compute_type=self._compute_for(device),
                 download_root=str(self._models_dir) if self._models_dir else None,
@@ -157,7 +166,7 @@ class FasterWhisperEngine:
             self._actual_device = "cpu"
             self._fallback_reason = f"{type(exc).__name__}: {exc}"
             model = cls(
-                self._model_size,
+                str(local_dir) if local_dir is not None else self._model_size,
                 device="cpu",
                 compute_type=self._compute_for("cpu"),
                 download_root=str(self._models_dir) if self._models_dir else None,
