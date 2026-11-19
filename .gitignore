@@ -57,3 +57,4 @@ scratch/
 
 # 会话工具状态（不入库）
 .workbuddy/
+../tmp-rel/
