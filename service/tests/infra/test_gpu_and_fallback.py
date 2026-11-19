@@ -279,11 +279,15 @@ def test_profile_separation_gpu_needs_ort_probe_marker() -> None:
     assert "CUDA 运行库" in cap_runtime["hint"]
 
 
-def test_profile_intel_xpu_separation_dml_lights_up() -> None:
+def test_profile_intel_xpu_separation_dml_lights_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Arc 形态：ORT DML 装好即点亮分离徽标——worker auto 实走 DML，徽标不再漏报。
 
     2026-11-19 Arc 130T 真机：ort_state={gpu, backend=dml}、separation_worker
-    --probe-dml 真算 PASS，但徽标仍写「仅支持 NVIDIA CUDA，当前走 CPU」。"""
+    --probe-dml 真算 PASS，但徽标仍写「仅支持 NVIDIA CUDA，当前走 CPU」。
+    桩掉主进程 torch 探针（打包态口径）：funasr 走 tts-venv 的 xpu 轮，双灯全亮。"""
+    monkeypatch.setattr(device_profile, "service_torch_present", lambda: False)
     snap = {
         "vendor": "intel",
         "name": "Intel(R) Arc(TM) 130T GPU (16GB)",
@@ -312,6 +316,36 @@ def test_profile_intel_xpu_separation_dml_lights_up() -> None:
     # 既有 XPU 点亮行为回归：torch 系两引擎不因分离改动受影响
     assert dml["caps"]["funasr_gpu"]["ready"] is True
     assert dml["caps"]["indextts2_gpu"]["ready"] is True
+
+
+def test_profile_intel_xpu_dev_inproc_without_xpu_dims_funasr_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """dev 实况门：主进程 torch 在场但无 XPU（PyPI 轮）——只熄 funasr 灯。
+
+    indextts2 恒走 tts-venv worker（xpu 轮）、torch_device、分离 DML 都不动。
+    2026-11-19 自检实锤：resolve 把 xpu 承诺发给进程内 funasr 必违约
+    （「Torch not compiled with XPU enabled」）。"""
+    monkeypatch.setattr(device_profile, "service_torch_present", lambda: True)
+    monkeypatch.setattr(device_profile, "service_torch_has_xpu", lambda: False)
+    snap = {
+        "vendor": "intel",
+        "name": "Intel(R) Arc(TM) 130T GPU (16GB)",
+        "memory_total_mb": 16384,
+        "adapters": [
+            {"vendor": "intel", "name": "Intel(R) Arc(TM) 130T GPU (16GB)"},
+        ],
+    }
+    prof = device_profile.profile(
+        snap, cuda_runtime_installed=False,
+        separation_ort={"variant": "gpu", "gpu": True, "backend": "dml"},
+        torch_variant="xpu",
+    )
+    fa = prof["caps"]["funasr_gpu"]
+    assert fa["ready"] is False and "主进程 torch 无 XPU" in fa["reason"]
+    assert prof["caps"]["indextts2_gpu"]["ready"] is True
+    assert prof["torch_device"] == "xpu"  # TTS 线照旧：worker 用的是 tts-venv 的 xpu 轮
+    assert prof["caps"]["vocal_separation_gpu"]["ready"] is True  # DML 与 torch 构建无关
 
 
 def test_profile_sm52_blocks_whisper_but_not_funasr(monkeypatch: pytest.MonkeyPatch) -> None:

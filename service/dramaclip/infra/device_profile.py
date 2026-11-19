@@ -149,6 +149,36 @@ def _service_torch_is_cuda() -> bool:
     return _service_torch_state()[0]
 
 
+_SERVICE_TORCH_XPU: bool | None = None
+
+
+def service_torch_has_xpu() -> bool:
+    """dev 态主进程 torch 是否带可真算的 XPU 后端（进程内缓存，与 cuda 探针同款）。
+
+    False 的两种来路要分开看：主进程有 torch 但构建无 XPU（dev 态 PyPI 轮）——
+    funasr 进程内路径的 xpu 线是死的；主进程零 torch（打包态）——False 只说明
+    探不了，判据回落 tts-venv 变体标记（``service_torch_present()`` 分辨来路）。
+    """
+    global _SERVICE_TORCH_XPU
+    if _SERVICE_TORCH_XPU is None:
+        try:
+            import torch
+
+            if not torch.xpu.is_available():
+                _SERVICE_TORCH_XPU = False
+            else:
+                x = torch.randn(8, 8, device="xpu")
+                _SERVICE_TORCH_XPU = bool((x @ x.T).sum())
+        except Exception:  # noqa: BLE001 - 零 torch/坏装都算探不了
+            _SERVICE_TORCH_XPU = False
+    return _SERVICE_TORCH_XPU
+
+
+def service_torch_present() -> bool:
+    """主进程 torch 在场（dev 态）——在场时 funasr 走进程内，缺席走 tts-venv worker。"""
+    return _service_torch_state()[1]
+
+
 # ctranslate2 的 GPU 内核下界：低于此算力（如 Maxwell sm_52）没有可执行 kernel，
 # whisper GPU 加速永久不可用——上游硬边界，与驱动/运行库无关（10 月中定论）。
 _CTRANSLATE2_MIN_CC = (6, 1)
@@ -445,12 +475,24 @@ def profile(
         # worker auto 本就按 CUDA>DML>CPU 选路（separation_worker._provider_plan），
         # ORT DML 装好即点亮——此前徽标漏报 DML 实况（2026-11-19 Arc 130T 实测
         # --probe-dml 真算 PASS，徽标却写「仅支持 NVIDIA CUDA」）。
-        caps["funasr_gpu"] = _cap(
-            True,
-            True,
-            "Intel XPU 后端可用（算子覆盖未经验证，首次真算以实况为准）",
-            "Intel XPU",
-        )
+        # 双实况门（2026-11-19 自检实锤）：funasr dev 态跑主进程 torch（PyPI 轮
+        # 无 XPU），indextts2/cosyvoice 恒走 tts-venv worker（xpu 轮）——主进程
+        # torch 在场且探不出 XPU 时只熄 funasr 灯，TTS 灯与 torch_device 不动。
+        funasr_xpu_dead = service_torch_present() and not service_torch_has_xpu()
+        if funasr_xpu_dead:
+            caps["funasr_gpu"] = _cap(
+                True,
+                False,
+                "dev 主进程 torch 无 XPU 后端，转写走 CPU（打包态运行环境的 xpu 轮不受影响）",
+                "主进程 torch 无 XPU",
+            )
+        else:
+            caps["funasr_gpu"] = _cap(
+                True,
+                True,
+                "Intel XPU 后端可用（算子覆盖未经验证，首次真算以实况为准）",
+                "Intel XPU",
+            )
         caps["indextts2_gpu"] = _cap(
             True, True, "Intel XPU 后端（算子覆盖未经验证）", "Intel XPU",
         )

@@ -113,6 +113,45 @@ def shutdown_worker() -> None:
         proc.terminate()
 
 
+_AUX_READY = False
+
+
+def _ensure_aux_models(models_dir: Path | None) -> None:
+    """worker 拉起前补齐上游辅助模型（bigvgan/w2v-bert/semantic_codec/campplus）。
+
+    上游 ensure_models_available 的重试门有缺口：只看 w2v 目录在不在，bigvgan
+    下载中断过一次（半截被清）就永远缺、加载必炸（2026-11-19 自检实锤
+    FileNotFoundError: bigvgan_generator.pt）。引擎层在 spawn 前显式补齐：
+    文件齐时是毫秒级空转，缺时走上游双源（modelscope/HF）真下载，失败原文抛。
+    """
+    global _AUX_READY
+    if _AUX_READY:
+        return
+    venv_py = _venv_python()
+    if not venv_py.is_file():
+        return  # 无运行环境：spawn 自会如实报错，预检不是这条错误链的负责段
+    model_dir = (
+        Path(models_dir) if models_dir is not None
+        else resolve_data_dir() / "models" / "tts" / "indextts2"
+    )
+    probe = (
+        f"import sys; sys.path.insert(0, r'{_src_dir()}'); "
+        f"from indextts.utils.model_download import ensure_models_available; "
+        f"ensure_models_available(r'{model_dir}')"
+    )
+    result = subprocess.run(  # noqa: S603 - 固定解释器受控参数
+        [str(_venv_python()), "-c", probe],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=3600, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if result.returncode != 0:
+        tail = (result.stderr or result.stdout or "").strip()[-300:]
+        raise RuntimeError(
+            f"IndexTTS 辅助模型补齐失败（bigvgan/w2v-bert 等，网络重试可解）：{tail or '未知原因'}"
+        )
+    _AUX_READY = True
+
+
 def _ensure_worker(models_dir: Path | None, device: str = "auto") -> subprocess.Popen[str]:
     global _PROC, _PROC_DEVICE
     with _LOCK:
@@ -125,6 +164,7 @@ def _ensure_worker(models_dir: Path | None, device: str = "auto") -> subprocess.
             if alive:
                 _PROC.terminate()
             _PROC = None
+        _ensure_aux_models(models_dir)
         # device 交给 worker 内 torch 自检：探测层不区分 CUDA 代际（M4000 cc5.2 这类
         # 「有 N 卡但新栈不支持」的机器，init 失败进程即退，错误经 stdout 空行带回）。
         # stderr 走继承：worker 的 CUDA 回退/加载诊断（">> CUDA 探针失败"）经服务
