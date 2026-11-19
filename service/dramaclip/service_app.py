@@ -51,6 +51,7 @@ EXPLICIT_LIGHT_QUERIES = frozenset(
         "export.ab_report",
         "export.get",
         "export.list",
+        "export.import_settlement_csv",
         "export.list_works",
         "export.publish_report",
         "log.append",
