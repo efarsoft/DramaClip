@@ -905,9 +905,13 @@ def _run_uv(uv: Path, venv: Path, *args: str) -> None:
     )
     if result.returncode != 0:
         # stderr 可能是 None（Windows 管道异常/进程被强杀场景，装测实锤
-        # 'NoneType' object is not subscriptable）——防御取空串，别让报错本身再炸
-        detail = (result.stderr or "")[-300:]
-        raise RuntimeError(f"uv {' '.join(args[:2])} 失败: {detail}")
+        # 'NoneType' object is not subscriptable）——防御取空串，别让报错本身再炸。
+        # stderr 空时回退 stdout 尾部（uv 部分失败细节写 stdout），两者皆空至少带
+        # 退出码——空报错没法修（Arc 机装测实锤：「uv pip install 失败: 」整句空白）。
+        detail = ((result.stderr or "").strip() or (result.stdout or "").strip())[-300:]
+        raise RuntimeError(
+            f"uv {' '.join(args[:2])} 失败（exit {result.returncode}）: {detail}"
+        )
 
 
 def _fetch_first(sources: list[str], target: Path, size: int, cancel: threading.Event) -> None:
