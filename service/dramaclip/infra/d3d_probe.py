@@ -17,7 +17,7 @@ import uuid
 _PCI_VENDOR_NAMES = {0x1002: "amd", 0x10DE: "nvidia", 0x8086: "intel"}
 _VIRTUAL_IDS = {0x15AD}  # VMware SVGA：CIM 名称过滤之外的第二个信号
 
-_IID_IDXGIFACTORY1 = "770aae78-f26f-4dba-a829-e2533473d5e5"
+_IID_IDXGIFACTORY1 = "770aae78-f26f-4dba-a829-e7c1c4e5e0b4"
 _VT_RELEASE = 2
 _VT_ENUM_ADAPTERS1 = 8  # IDXGIFactory1
 _VT_GETDESC1 = 10  # IDXGIAdapter1
