@@ -24,10 +24,13 @@ _VT_GETDESC1 = 10  # IDXGIAdapter1
 
 
 class _GUID(ctypes.Structure):
+    # 固定宽度类型（c_uint32/c_uint16）：Win32 GUID 布局恒 16 字节——c_ulong
+    # 平台相关（Win 4 / Linux 8 字节），Linux 下结构变 24 字节、from_buffer_copy
+    # 直接 ValueError（CI 实锤：测试首跑 Linux 即炸，此前测试从未真正调用过）。
     _fields_ = [
-        ("Data1", ctypes.c_ulong),
-        ("Data2", ctypes.c_ushort),
-        ("Data3", ctypes.c_ushort),
+        ("Data1", ctypes.c_uint32),
+        ("Data2", ctypes.c_uint16),
+        ("Data3", ctypes.c_uint16),
         ("Data4", ctypes.c_ubyte * 8),
     ]
 
