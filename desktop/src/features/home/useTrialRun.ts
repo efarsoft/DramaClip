@@ -6,10 +6,12 @@
  * 逐段轮询到终态），零后端改动。断点语义：重试从失败阶段重入，已完成的分析按
  * 集状态天然跳过；组件卸载即停（内存编排，服务端任务继续跑，重进按集状态续）。
  */
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { analysisApi, exportApi, jobsApi, narrationApi } from '../../services/client';
 
 const POLL_INTERVAL_MS = 2500;
+
+type TrialStage = 'analysis' | 'planning' | 'export';
 
 export type TrialPhase =
   | { readonly kind: 'idle' }
@@ -21,17 +23,11 @@ export type TrialPhase =
   | { readonly kind: 'done'; readonly exportId: string }
   | {
       readonly kind: 'failed';
-      readonly stage: 'analysis' | 'planning' | 'export';
+      readonly stage: TrialStage;
       readonly reason: string;
     };
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-
-interface EpisodeSummary {
-  readonly id: string;
-  readonly episode_number: number;
-  readonly status: string;
-}
 
 /** 通用轮询：status 取数 → 进度回写 → 终态裁决（completed 放行 / 其余按失败带原因）。 */
 async function pollUntilDone(
@@ -43,6 +39,8 @@ async function pollUntilDone(
   for (;;) {
     if (isStopped()) return;
     const job = await fetch();
+    // 取数在途时被叫停（卸载/收起）：这份应答是旧编排的，不许再回写界面
+    if (isStopped()) return;
     onTick(Math.round(job.progress), job.message ?? '');
     if (job.status === 'completed') return;
     if (job.status !== 'running' && job.status !== 'pending') {
@@ -60,45 +58,52 @@ export function useTrialRun(
   reset: () => void;
 } {
   const [phase, setPhase] = useState<TrialPhase>({ kind: 'idle' });
-  const stoppedRef = useRef(false);
-  // 经函数读取打断控制流窄化（直接读 ref.current 会被判「always falsy」）
-  const stopped = (): boolean => stoppedRef.current;
+  // 编排代号：start / 收起 / 卸载都让代号前进，旧编排里的异步步骤醒来一看代号不对
+  // 就退出。布尔开关不够——「收起」之后马上点「重试」会把旧编排重新放开，两套并存。
+  const runRef = useRef(0);
+  const invalidate = useCallback((): void => {
+    runRef.current += 1;
+  }, []);
+  useEffect(() => invalidate, [invalidate]); // 卸载：在跑的编排到此为止
 
   const reset = useCallback((): void => {
-    stoppedRef.current = true;
+    invalidate();
     setPhase({ kind: 'idle' });
-  }, []);
+  }, [invalidate]);
 
   const start = useCallback(async (): Promise<void> => {
-    stoppedRef.current = false;
+    runRef.current += 1;
+    const run = runRef.current;
+    const stopped = (): boolean => runRef.current !== run;
+    let stage: TrialStage = 'analysis';
     setPhase({ kind: 'checking' });
     try {
       const { episodes } = await analysisApi.episodes(projectId);
       if (stopped()) return;
-      const summaries = (episodes as unknown as EpisodeSummary[]).slice();
-      const sorted = summaries.slice().sort((a, b) => a.episode_number - b.episode_number);
-      const first = sorted[0];
+      const first = episodes.slice().sort((a, b) => a.episode_number - b.episode_number)[0];
       if (first === undefined) {
         setPhase({ kind: 'no-material' });
         return;
       }
 
-      // ① 分析：目标集未完成才提交（done 天然跳过——重试/重入免重跑）
+      // ① 分析：目标集未完成才提交（done 天然跳过——重试/重入免重跑）。
+      // 集的 ID 在 episode_id 上（协议 EpisodeAnalysisResult 没有 id 键）
       if (first.status !== 'done') {
         setPhase({ kind: 'analyzing', percent: 0, message: '准备分析' });
-        const { job_id } = await analysisApi.start(projectId, [first.id]);
+        const { job_id } = await analysisApi.start(projectId, [first.episode_id]);
         await pollUntilDone(
           () => analysisApi.status(job_id),
           (percent, message) => {
             setPhase({ kind: 'analyzing', percent, message });
           },
-          () => stopped(),
+          stopped,
           (job) => job.error ?? job.message ?? `分析任务${job.status}`,
         );
         if (stopped()) return;
       }
 
       // ② 规划：纯原片剪辑 ×1 条（零文案模式，全链不触 LLM）
+      stage = 'planning';
       setPhase({ kind: 'planning', percent: 0, message: '挑选高冲突片段' });
       const planned = await narrationApi.planVariants(projectId, ['raw_clip'], 1);
       await pollUntilDone(
@@ -106,25 +111,28 @@ export function useTrialRun(
         (percent, message) => {
           setPhase({ kind: 'planning', percent, message });
         },
-        () => stoppedRef.current,
+        stopped,
         (job) => job.error ?? job.message ?? `规划任务${job.status}`,
       );
       if (stopped()) return;
       const batchPlans = await narrationApi.listPlans(projectId, planned.batch_id);
+      if (stopped()) return;
       const planId = batchPlans[0]?.id;
       if (planId === undefined) {
-        setPhase({ kind: 'failed', stage: 'planning', reason: '规划完成但没有产出方案' });
+        setPhase({ kind: 'failed', stage, reason: '规划完成但没有产出方案' });
         return;
       }
 
       // ③ 导出：提交后按导出任务轮询到终态
+      stage = 'export';
       setPhase({ kind: 'exporting', percent: 0, message: '合成成片' });
       const submission = await exportApi.submit([planId]);
+      if (stopped()) return;
       const submitted = submission.exports[0];
       if (submitted === undefined) {
         setPhase({
           kind: 'failed',
-          stage: 'export',
+          stage,
           reason: submission.rejected[0]?.reason ?? '导出被拒',
         });
         return;
@@ -134,7 +142,7 @@ export function useTrialRun(
         (percent, message) => {
           setPhase({ kind: 'exporting', percent, message });
         },
-        () => stoppedRef.current,
+        stopped,
         (job) => job.error ?? `导出任务${job.status}`,
       );
       if (stopped()) return;
@@ -143,7 +151,7 @@ export function useTrialRun(
       if (stopped()) return;
       setPhase({
         kind: 'failed',
-        stage: 'analysis',
+        stage,
         reason: exc instanceof Error ? exc.message : String(exc),
       });
     }

@@ -6,7 +6,7 @@ import type { SelfCheck } from '@dramaclip/protocol';
 import { PageSection } from '../../components/layout/PageKit';
 import { tokens } from '../../styles/theme';
 import { SelfCheckChip } from './WorkCard';
-import { selfCheckBadges } from './worksView';
+import { selfCheckBadges, selfCheckReadings } from './worksView';
 
 export function SelfCheckSection({
   selfcheck,
@@ -18,6 +18,8 @@ export function SelfCheckSection({
   onReload: () => void;
 }): ReactElement {
   const badges = selfCheckBadges(selfcheck);
+  // 四项之外的读数（开场质检/收尾出点/音画同步/响度/画面落位/残字影子）：有数才出行
+  const readings = selfCheckReadings(selfcheck);
   return (
     <PageSection
       title="成片自检"
@@ -44,6 +46,20 @@ export function SelfCheckSection({
               }}
             >
               {badge.detail}
+            </span>
+          </div>
+        ))}
+        {readings.map((row) => (
+          <div key={row.key} style={{ display: 'flex', alignItems: 'center', gap: tokens.spaceMd }}>
+            <SelfCheckChip badge={row} />
+            <span
+              style={{
+                fontSize: tokens.text.meta.size,
+                lineHeight: tokens.text.meta.leading,
+                color: tokens.textTertiary,
+              }}
+            >
+              {row.detail}
             </span>
           </div>
         ))}

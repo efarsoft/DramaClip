@@ -111,7 +111,7 @@ export const WORKS_FILTERS: readonly { key: WorksFilterKey; label: string }[] = 
 
 /** 徽章三态（意见08）：✓ 实底绿 / ✕ 红带度量原文 / — 灰描边空心。「—」与绿勾是两种视觉。 */
 export interface SelfCheckBadge {
-  readonly key: 'duration' | 'narration' | 'silence' | 'freeze' | 'safe_zone';
+  readonly key: string;
   readonly tone: 'ok' | 'fail' | 'none';
   readonly text: string;
   /** 度量原文（tooltip 与详情页「看度量原文」）；未检时说明量不到的原因。 */
@@ -197,6 +197,116 @@ function freezeBadge(sc: SelfCheck): SelfCheckBadge {
     text: item.pass === true ? '✓ 无长冻结帧' : item.pass === false ? '✕ 有长冻结帧' : '— 冻结帧未检',
     detail,
   };
+}
+
+/** 四项徽章之外的读数行（成片详情）。这些项不进汇总态，**有数才出行**——早期成绩单
+ *  没有这些键就不编造行。它们早在服务端落库（开场质检 / 收尾出点 / 音画同步 /
+ *  响度读数 / 画面落位 / 残字影子），此前协议类型里没有、界面一行都没显示过
+ *  （2026-11-24 审查实锤）。 */
+export interface SelfCheckReading {
+  readonly key: 'opening' | 'ending' | 'avsync' | 'caption_placement' | 'loudness' | 'caption_residue';
+  readonly tone: SelfCheckBadge['tone'];
+  readonly text: string;
+  readonly detail: string;
+}
+
+export function selfCheckReadings(sc: SelfCheck | null | undefined): SelfCheckReading[] {
+  if (sc === null || sc === undefined) {
+    return [];
+  }
+  const rows: SelfCheckReading[] = [];
+  const opening = sc.opening;
+  if (opening !== undefined && opening !== null) {
+    rows.push({
+      key: 'opening',
+      tone: tone(opening.pass),
+      text: opening.pass === true ? '✓ 开场有可闻声' : opening.pass === false ? '✕ 开场静默' : '— 开场未检',
+      detail:
+        opening.reason ??
+        (opening.window_s !== undefined && opening.mean_volume_db !== undefined
+          ? `前 ${opening.window_s.toFixed(0)}s 均值 ${opening.mean_volume_db.toFixed(1)} dB`
+          : '量不到'),
+    });
+  }
+  const ending = sc.ending;
+  if (ending !== undefined) {
+    const cut = ending.end_s !== undefined ? `最后一刀在 ${ending.end_s.toFixed(1)}s` : '最后一刀';
+    rows.push({
+      key: 'ending',
+      tone: tone(ending.pass),
+      text: ending.pass === true ? '✓ 收尾切在句末' : ending.pass === false ? '✕ 收尾把话切断' : '— 收尾未检',
+      detail:
+        ending.reason === 'mid_line'
+          ? `${cut}，落在台词「${ending.line ?? ''}」中间——话被拦腰`
+          : ending.reason === 'mid_sentence'
+            ? `${cut}，上一句还不是句末、下一句紧接着就来——答案没录进来`
+            : ending.pass === true
+              ? '出点落在句末'
+              : '没有台词时间轴，量不到',
+    });
+  }
+  const avsync = sc.avsync;
+  if (avsync !== undefined) {
+    const measured = avsync.median_ms !== undefined && avsync.dispersion_ms !== undefined;
+    rows.push({
+      key: 'avsync',
+      tone: tone(avsync.pass),
+      text: avsync.pass === true ? '✓ 音画同步' : avsync.pass === false ? '✕ 音画偏移' : '— 音画同步未检',
+      detail: measured
+        ? `各采样点偏移中位 ${avsync.median_ms.toFixed(1)} ms · 离散 ${avsync.dispersion_ms.toFixed(
+            1,
+          )} ms · ${String(avsync.samples ?? '?')} 点 · 判据均 ≤ 40 ms`
+        : '有效采样点不足两点，量不到',
+    });
+  }
+  const placement = sc.caption_placement;
+  if (placement !== undefined) {
+    const measured =
+      placement.measured_top !== undefined &&
+      placement.measured_bottom !== undefined &&
+      placement.expected_top !== undefined &&
+      placement.expected_bottom !== undefined;
+    rows.push({
+      key: 'caption_placement',
+      tone: tone(placement.pass),
+      text:
+        placement.pass === true
+          ? '✓ 字幕盖住台词带'
+          : placement.pass === false
+            ? '✕ 字幕偏离台词带'
+            : '— 字幕落位未检',
+      detail: measured
+        ? `字幕实测 ${placement.measured_top.toFixed(2)}–${placement.measured_bottom.toFixed(2)} · 台词带 ${placement.expected_top.toFixed(2)}–${placement.expected_bottom.toFixed(2)}（画面高占比）· 中心偏 ${placement.center_offset?.toFixed(2) ?? '?'}`
+        : (placement.reason ?? '量不到'),
+    });
+  }
+  const loudness = sc.loudness;
+  if (loudness !== undefined && loudness !== null) {
+    // 读数不设徽章：导出链的复核门禁已经硬失败守门，这里只是归一后的复核实测（历史账）
+    rows.push({
+      key: 'loudness',
+      tone: 'none',
+      text: '响度读数',
+      detail: `综合响度 ${loudness.measured_i.toFixed(1)} LUFS（目标 ${loudness.target_i.toFixed(
+            1,
+          )}，偏 ${loudness.deviation_lu.toFixed(1)} LU）· 真峰值 ${loudness.measured_tp.toFixed(
+            1,
+          )} dBTP（上限 ${loudness.target_tp.toFixed(1)}）· 响度范围 ${loudness.lra.toFixed(1)} LU`,
+    });
+  }
+  const residue = sc.caption_residue;
+  if (residue !== undefined && (residue.band_frames ?? 0) > 0) {
+    // 影子项：只攒数据不改徽章
+    rows.push({
+      key: 'caption_residue',
+      tone: 'none',
+      text: '残字候选',
+      detail: `字幕带内多出一簇文字的帧 ${String(residue.residue_frames ?? 0)}/${String(
+            residue.band_frames ?? 0,
+          )}（攒数据用，不作判定）`,
+    });
+  }
+  return rows;
 }
 
 /** 已选成片的合计字节（量化确认的数据源）。 */

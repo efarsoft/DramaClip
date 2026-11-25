@@ -242,6 +242,34 @@ describe('自检分区', () => {
       expect(api.selfcheck).toHaveBeenCalledWith(['w1']);
     });
   });
+
+  it('四项之外的读数也上屏：响度读数、开场质检（服务端一直在写，此前界面一行都没有）', async () => {
+    api.get.mockResolvedValue({
+      ...JOB,
+      selfcheck_state: 'passed',
+      selfcheck: {
+        checked_at: 1758600000000,
+        duration: { pass: true, measured_s: 134, budget_s: 134, tolerance_s: 10.7 },
+        narration: { pass: true, has_audio: true, expected: 'many', planned_segments: 8 },
+        silence: { pass: true, mean_volume_db: -23.4 },
+        freeze: { pass: true, max_freeze_s: 0 },
+        opening: { pass: true, window_s: 3, mean_volume_db: -18.2, reason: '开场 3s 有可闻声（mean -18.2 dB）' },
+        loudness: {
+          status: 'measured',
+          measured_i: -14.6,
+          measured_tp: -1.2,
+          lra: 8.4,
+          target_i: -14,
+          target_tp: -1.5,
+          deviation_lu: 0.6,
+        },
+      },
+    });
+    page();
+    expect(await screen.findByText(/综合响度 -14\.6 LUFS（目标 -14\.0，偏 0\.6 LU）/)).toBeTruthy();
+    expect(screen.getByText('✓ 开场有可闻声')).toBeTruthy();
+    expect(screen.getByText('开场 3s 有可闻声（mean -18.2 dB）')).toBeTruthy();
+  });
 });
 
 describe('发布物料', () => {

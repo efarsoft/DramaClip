@@ -95,7 +95,7 @@ function droppedText(count: number | undefined): string {
   return `剧本丢弃 ${String(count)} 段`;
 }
 
-/** 每模式默认推荐：首个可出片方案（列表已按评分降序——有分即最高分）。
+/** 每模式默认推荐：前两个可出片方案（列表已按评分降序——有分即分数最高的两条）。
  *  同模式全不可出片则该模式不推荐，不硬点。 */
 export function recommendedIds(plans: NarrationPlan[]): string[] {
   const best = new Map<string, NarrationPlan[]>();
