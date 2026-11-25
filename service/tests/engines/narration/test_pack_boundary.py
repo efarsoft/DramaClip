@@ -48,3 +48,29 @@ def test_full_width_digits_are_normalized() -> None:
     hits = [f for f in report.findings if f.rule_id == "FUND_EPISODE_OUT_OF_PACK"]
     assert hits and hits[0].passed is False
     assert "第15集" in hits[0].message
+
+
+def test_chinese_numeral_references_are_recognized() -> None:
+    """成稿出口已把数字中文化：文案到审查手里是「第三十五集」，规则得认中文数字。
+
+    上面那条用例直接喂阿拉伯数字原文，绕过了中文化——那种形状在真实流水线里
+    不存在，所以规则此前「测试全绿、生产上恒为死规则」（只认阿拉伯数字的正则
+    一条都匹配不上）。同文件里元叙述规则早就为同一个坑修过一次。
+    """
+    pack = {number: 90.0 for number in range(1, 31)}
+    report = review_script(
+        _script(
+            [
+                _seg(1, "第三十五集里他才知道真相。"),
+                _seg(2, "第一百零二集才是结局。"),
+                _seg(3, "第十二集的伏笔、第三十集的反转都收在这里。"),
+            ]
+        ),
+        episode_durations=pack,
+    )
+    hits = [f for f in report.findings if f.rule_id == "FUND_EPISODE_OUT_OF_PACK"]
+    assert hits and hits[0].passed is False
+    assert "第35集（段 0）、第102集（段 1）" in hits[0].message
+    assert "第12集" not in hits[0].message and "第30集（段" not in hits[0].message, (
+        "集内引用（哪怕写成中文数字）不该判包外"
+    )

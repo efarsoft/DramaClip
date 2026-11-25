@@ -19,32 +19,26 @@ _DIGITS = "零一二三四五六七八九"
 
 
 def _thousands(num: int) -> str:
-    """0 ≤ num ≤ 9999 的段内读法（含段内零规则与「两千」惯例）。"""
+    """0 ≤ num ≤ 9999 的段内读法（含段内零规则与「两千」惯例）。
+
+    零的规则：高位读过之后，中间缺哪一位就补一个「零」，补过即复位——
+    ``一百零二``（「一百二」口语里是一百二十）、``两千零二十六``。连续缺位只补一个。
+    """
     parts: list[str] = []
     need_zero = False
-    for value, name in ((1000, "千"), (100, "百")):
+    for value, name in ((1000, "千"), (100, "百"), (10, "十"), (1, "")):
         q, num = divmod(num, value)
-        if q:
-            if need_zero:
-                parts.append("零")
-            # 「两百」与「两千」同一口语惯例（千位已有）；十位个位保持「二」
+        if q == 0:
+            need_zero = need_zero or bool(parts)  # 中间缺位（更高位已读过）
+            continue
+        if need_zero:
+            parts.append("零")
+            need_zero = False
+        if value == 10 and q == 1 and not parts:
+            parts.append("十")  # 10~19 口语作「十X」不作「一十X」（十八，不是一十八）
+        else:
             parts.append(("两" if q == 2 and value in (1000, 100) else _DIGITS[q]) + name)
-        elif parts and num > 0:
-            need_zero = True
-    q, num = divmod(num, 10)
-    if q:
-        if need_zero:
-            parts.append("零")
-        parts.append(_DIGITS[q] + "十")
-    if num or not parts:
-        if need_zero:
-            parts.append("零")
-        parts.append(_DIGITS[num])
-    text = "".join(parts)
-    # 10~19 口语作「十X」不作「一十X」（十八，不是一十八）
-    if text.startswith("一十"):
-        text = text[1:]
-    return text
+    return "".join(parts) or "零"
 
 
 def int_to_cn(num: int) -> str:
@@ -122,3 +116,34 @@ _TOKEN = re.compile(
 def to_chinese_numerals(text: str) -> str:
     """文案里的阿拉伯数字 → 中文读法；认不出的组合整串放过，绝不半截转换。"""
     return _TOKEN.sub(_sub, text)
+
+
+_CN_DIGITS = {char: value for value, char in enumerate(_DIGITS)} | {"〇": 0, "两": 2}
+_CN_UNITS = {"十": 10, "百": 100, "千": 1000}
+_CN_SECTIONS = {"万": 10_000, "亿": 100_000_000}
+
+
+def cn_to_int(text: str) -> int | None:
+    """中文数字 → 整数（``int_to_cn`` 的逆）；混进认不出的字符整串返回 None，不做半截解析。
+
+    也认阿拉伯数字（全角归一、可混写）与年份那种逐位读法（二零零三）：连续的
+    数字字符按位拼接，遇单位（十百千万亿）才结算——「一百零二」里的「零二」拼成 2，
+    占位与逐位两种读法于是给出同一个数。
+    """
+    if not text:
+        return None
+    total = section = number = 0
+    for char in text.translate(str.maketrans("０１２３４５６７８９", "0123456789")):
+        if char.isdigit():
+            number = number * 10 + int(char)
+        elif char in _CN_DIGITS:
+            number = number * 10 + _CN_DIGITS[char]
+        elif char in _CN_UNITS:
+            section += (number or 1) * _CN_UNITS[char]  # 「十五」「十万」：起头省了「一」
+            number = 0
+        elif char in _CN_SECTIONS:
+            total = (total + section + number) * _CN_SECTIONS[char]
+            section = number = 0
+        else:
+            return None
+    return total + section + number

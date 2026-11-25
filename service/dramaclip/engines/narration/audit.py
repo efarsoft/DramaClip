@@ -19,6 +19,7 @@ from dataclasses import asdict
 from typing import Any
 
 from dramaclip.engines.narration.findings import Finding, ReviewReport
+from dramaclip.engines.narration.numerals import cn_to_int
 from dramaclip.engines.narration.prompt_rules import RULE_TEXTS as _RULES
 
 # ---------------------------------------------------------------------------
@@ -330,18 +331,17 @@ def _script_time_findings(
 def _episode_pack_findings(
     segs: list[dict[str, Any]], ep_bounds: dict[int, float]
 ) -> list[Finding]:
-    """包外集号引用告警（soft+人审）：文案提到素材外的集号——业主裁决
-    「不生成包外剧情」的验证侧补强（生成侧 no_fabrication 已有强约束）。
-    ep_bounds 缺集号 = 素材没有这一集；文案讲了它就是包外剧情，哪怕画面
-    已被清洗丢弃，文案层面的讲述也该提示人审确认。"""
+    """包外集号引用告警（soft+人审）：业主裁决「不生成包外剧情」的验证侧补强（生成侧
+    no_fabrication 已有强约束）。ep_bounds 没有的集号=素材没有，文案讲了就是包外剧情，
+    哪怕画面已被清洗丢弃。集号按中文数字认——成稿已中文化，只认阿拉伯数字恒为死规则。"""
     if not ep_bounds:
         return []
     max_episode = max(ep_bounds)
     out_refs: dict[int, list[int]] = {}
     for i, seg in enumerate(segs):
-        for ref in re.findall(r"第([0-9０-９]+)[集话]", str(seg.get("text", ""))):
-            ref_n = int(ref.translate(str.maketrans("０１２３４５６７８９", "0123456789")))
-            if ref_n > max_episode:
+        text = str(seg.get("text", ""))
+        for ref in re.findall(r"第([零〇一二三四五六七八九十百千两\d]+)[集话]", text):
+            if (ref_n := cn_to_int(ref)) is not None and ref_n > max_episode:
                 out_refs.setdefault(ref_n, []).append(i)
     if not out_refs:
         return []
