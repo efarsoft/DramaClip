@@ -397,9 +397,9 @@ def cut_segment_args(
     挂着的旧行为窄，比逐行精确粗，取中间值是有意的（要逐行窗须先改生产者）。
     """
     out_w, out_h = out_size
-    # 微扰动默认关（export.dedup_jitter，2026-11-18 业主裁决）：关=恒等参数走原
-    # 滤镜链（eq 1.0/0.0、setpts=/1.0、scale=画布尺寸均零效果），同输入渲染确定；
-    # sig 签名本就不含扰动值（每次渲染要不同的量），开关切换后陈旧段照常重编。
+    # 微扰动默认关（export.dedup_jitter，2026-11-18 业主裁决）：关=恒等参数走原滤镜链
+    # （eq 1.0/0.0、setpts=/1.0、scale=画布尺寸均零效果），同输入渲染确定；开关状态进段签名
+    # （见 _export_plan_once），扰动抽样值不入——每次渲染本就不同，复用=接受上次抽样。
     dedup = (
         dedup_params.generate(rng) if jitter_enabled else dedup_params.neutral()
     )
@@ -906,9 +906,9 @@ def _export_plan_once(
             subtitle_source = "provider"
         else:
             subtitle_source = "none"
-        # 声明输入签名：任何影响产物字节的**可声明**输入都在里面；jitter 后的实际
-        # 切点与消重参数刻意不在（每次渲染本就不同，复用=接受上次抽样）。
+        # 声明输入签名：影响产物字节的**可声明**输入都在里面；扰动抽样值不入（复用=接受上次抽样）。
         inputs: dict[str, object] = {
+            "dedup_jitter": jitter_enabled,  # 开关入签名：旧签名无此键即失配，切换后必重编
             "source": _file_identity(source),
             "episode_id": segment.episode_id,
             "start": segment.start,
@@ -1205,10 +1205,10 @@ def _export_plan_once(
                     "BGM 床混音重试仍失败（%s）：本条成片不带 BGM 出片", str(exc2)[:200]
                 )
                 staged_bed = None
+        loudness.normalize_in_place(
+            staged_bed or out_path, target=loudness_target, work_dir=work_dir / "loudnorm"
+        )
         if staged_bed is not None:
-            loudness.normalize_in_place(
-                staged_bed, target=loudness_target, work_dir=work_dir / "loudnorm"
-            )
             staged_bed.replace(out_path)
     else:
         if bgm_track is not None:

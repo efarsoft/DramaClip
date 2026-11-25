@@ -1197,3 +1197,75 @@ def test_export_plan_skips_loudness_when_target_none(
         lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("归一不该被调用")),
     )
     encoder.export_plan(plan, {"ep1": source}, tmp_path / "final.mp4", tmp_path / "work")
+
+
+def _wire_single_segment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """假切割 + 假拼接：段与成片只落占位字节，Phase C 的调用对象靠参数辨认。"""
+    monkeypatch.setattr(
+        encoder, "_run_cut", lambda args, *_a, **_k: Path(args[-1]).write_bytes(b"seg")
+    )
+    monkeypatch.setattr(
+        encoder, "_concat", lambda _files, target: Path(target).write_bytes(b"film")
+    )
+
+
+_BED_TARGET = loudness.LoudnessTarget(integrated_lufs=-14.0, true_peak_dbtp=-1.5)
+
+
+def test_export_plan_normalizes_the_staged_bed_then_swaps_it_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """有 BGM 且要归一时走「无损中间件」同链：归一落在中间件上，再换入成片。"""
+    plan, source = _one_segment_plan(tmp_path)
+    _wire_single_segment(monkeypatch)
+    staged = tmp_path / "staged.wav"
+    staged.write_bytes(b"bed-mixed")
+    monkeypatch.setattr(encoder, "_mix_bgm_bed", lambda *_a, **_k: staged)
+    normalized: list[str] = []
+    monkeypatch.setattr(
+        encoder.loudness,
+        "normalize_in_place",
+        lambda path, **_kw: normalized.append(Path(path).name),
+    )
+    bed = tmp_path / "bed.mp3"
+    bed.write_bytes(b"x")
+
+    encoder.export_plan(
+        plan, {"ep1": source}, tmp_path / "final.mp4", tmp_path / "work",
+        bgm_track=bed, loudness_target=_BED_TARGET,
+    )
+
+    assert normalized == ["staged.wav"]
+    assert (tmp_path / "final.mp4").read_bytes() == b"bed-mixed"
+
+
+def test_export_plan_still_normalizes_when_bed_mix_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """混床失败只是「这条成片不带 BGM」，响度归一必须照跑。
+
+    成片注释里一直这么承诺，但中间件为空时整段归一被跳过（2026-11-24 审查
+    实锤）：成片既没有 BGM 也没有响度归一，且没有任何关于响度的提示。
+    """
+    plan, source = _one_segment_plan(tmp_path)
+    _wire_single_segment(monkeypatch)
+
+    def bed_down(*_args: object, **_kwargs: object) -> Path:
+        raise RuntimeError("床混音挂了")
+
+    monkeypatch.setattr(encoder, "_mix_bgm_bed", bed_down)
+    normalized: list[str] = []
+    monkeypatch.setattr(
+        encoder.loudness,
+        "normalize_in_place",
+        lambda path, **_kw: normalized.append(Path(path).name),
+    )
+    bed = tmp_path / "bed.mp3"
+    bed.write_bytes(b"x")
+
+    encoder.export_plan(
+        plan, {"ep1": source}, tmp_path / "final.mp4", tmp_path / "work",
+        bgm_track=bed, loudness_target=_BED_TARGET,
+    )
+
+    assert normalized == ["final.mp4"], "混床失败后响度归一被整段跳过"

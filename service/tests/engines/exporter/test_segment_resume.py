@@ -484,6 +484,55 @@ def test_stale_tail_segments_are_pruned(
     assert not (work / "seg_005.sig").exists()
 
 
+# ---- 7b. 微扰动开关是声明输入：切换后旧段必须重编 ----
+
+def test_jitter_switch_is_part_of_the_signature(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """成片做过没做过扰动，要与成绩单的「已施加/未施加」一致（2026-11-18 业主裁决）。
+
+    失败 → 切换开关 → 重试的路径上，段缓存是复用的；开关状态不进签名的话，
+    旧段原样顶上，成片与成绩单对不上。0.2.5 的段全是开着扰动编的、签名里没有
+    这个键——无键签名一律失配（2026-11-24 审查实锤）。
+    """
+    monkeypatch.setattr(encoder.jitter, "safe_times", lambda s, e, _z, **_k: (s, e))
+    monkeypatch.setattr(
+        encoder, "_concat", lambda _files, target: Path(target).write_bytes(b"film")
+    )
+    spy = _Spy()
+    monkeypatch.setattr(encoder, "_run_cut", spy)
+    plan, source, work = _plan(), str(_source(tmp_path)), tmp_path / "work"
+
+    def run(jitter_enabled: bool) -> None:
+        encoder.export_plan(
+            plan,
+            {"ep1": source},
+            tmp_path / "out.mp4",
+            work,
+            parallel=1,
+            jitter_enabled=jitter_enabled,
+        )
+
+    run(True)
+    assert len(spy.calls) == 2, "首次渲染两段全编"
+    assert _sig(work, 0)["inputs"]["dedup_jitter"] is True
+
+    run(True)
+    assert len(spy.calls) == 2, "开关状态没变：两段整段复用"
+
+    run(False)
+    assert len(spy.calls) == 4, "切换开关：两段都必须重编"
+    assert _sig(work, 0)["inputs"]["dedup_jitter"] is False
+
+    # 旧格式签名（没有这个键）即使状态相同也不许复用：无从知道它当初是开着还是关着编的
+    for index in range(2):
+        payload = _sig(work, index)
+        payload["inputs"].pop("dedup_jitter")
+        (work / f"seg_{index:03d}.sig").write_text(json.dumps(payload), encoding="utf-8")
+    run(False)
+    assert len(spy.calls) == 6, "无键的旧签名必须失配"
+
+
 # ---- 8. 真机验证：lavfi 源真跑两次，第二次全跳过且产物一致 ----
 
 def test_real_ffmpeg_second_run_skips_and_reuses_bytes(
