@@ -8,6 +8,8 @@ desktop/dist-electron/
 *.tsbuildinfo
 service/build/
 service/dist/
+# 本地打包重定向出的日志（仓库根）
+/build_*_log.txt
 
 # ── Python ──
 __pycache__/
@@ -50,16 +52,23 @@ resources/dramaclip-service/
 build/
 desktop/release/
 desktop/release2/
-# desktop/build 是 electron-builder buildResources：NSIS 卸载脚本必须入库
-# （图标 .ico/.png 同理需入库——见 251f96c）；其余构建产物照旧忽略
+# desktop/build 是 electron-builder buildResources：NSIS 卸载脚本与应用图标必须入库
+# （干净 checkout 缺 icon.ico 时打包回退默认 Electron 图标）；其余构建产物照旧忽略
 !desktop/build/
 desktop/build/*
 !desktop/build/installer.nsh
+!desktop/build/icon.ico
 
 # ── 本地调试产物（永不入库）──
 scratch/
 /*ANALYSIS.md
 
-# 会话工具状态（不入库）
+# 会话/代理工具的工作区与状态（不入库：会话转录、调研产物、计划文件）
+.agnes/
+.adnify/
+.claude/
+.cursor/
 .workbuddy/
-../tmp-rel/
+
+# 本地临时目录（曾误写成 ../tmp-rel/——那指向仓库外一级，永远匹配不到）
+tmp-rel/

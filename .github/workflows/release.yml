@@ -37,9 +37,19 @@ jobs:
             exit 1
           fi
 
-      # 行帽棘轮（W13）：函数 120/文件 800 只降不升——发版前最后防线（CI 侧已有同款）
+      # 行帽棘轮（W13）：函数 120/文件 800 只降不升——发版前最后防线（CI 侧已有同款）。
+      # 该测试只做 AST 扫描、零项目依赖，所以完全脱离项目环境跑：
+      # - uv 不在 runner 预装清单里，须先装；
+      # - --no-project 不去同步项目环境（pytest 声明在可选组 dev 里，默认同步里没有）；
+      # - --noconftest 跳过 tests/conftest.py（它一加载就要导入整套引擎）。
+      # 实测教训（2026-11-24）：原写法 `uv --directory service run pytest …` 即使装了 uv
+      # 也会死在 conftest 的 ModuleNotFoundError 上——这一步此前从未在真实发版里跑过。
+      - name: 安装 uv
+        run: python -m pip install uv
       - name: 行帽棘轮校验
-        run: uv --directory service run pytest tests/infra/test_line_budget.py -q
+        run: >-
+          uv run --no-project --with "pytest>=8" pytest --noconftest
+          service/tests/infra/test_line_budget.py
 
       # dist:service 硬编码 .venv\Scripts\python.exe，此处先建同名 venv；
       # PyInstaller 与本机开发环境钉同版（6.22.2）——PYZ 断言方法论绑它的归档形状

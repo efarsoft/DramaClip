@@ -1,0 +1,21 @@
+# 行尾统一在 git 层把关（两机并行后契约文件被整文件写成 CRLF 进索引——
+# diff 虚胖上千行、blame 整文件失效）。.editorconfig 只管编辑器新写的文件，
+# 管不住脚本写出的文件，也管不住各机不同的 core.autocrlf。
+* text=auto eol=lf
+
+# Windows 脚本例外：cmd 解释器对 LF 批处理有边界缺陷
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 二进制：禁用行尾转换与文本 diff
+*.exe binary
+*.dll binary
+*.ico binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.otf binary
+*.ttf binary
+*.woff2 binary
