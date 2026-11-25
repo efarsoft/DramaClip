@@ -77,7 +77,8 @@ def subprocess_run_ffmpeg(wav_path: Path, dest: Path) -> str:
             resolve_ffmpeg(), "-y", "-i", str(wav_path),
             "-c:a", "libvorbis", "-q:a", "6", str(dest),
         ],
-        capture_output=True, text=True, check=False,
+        # ffmpeg 写的是 UTF-8：显式解码，不跟着系统 locale（中文 Windows=GBK）走
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
     )
     return (result.stderr or "")[-300:] if result.returncode != 0 else ""
 

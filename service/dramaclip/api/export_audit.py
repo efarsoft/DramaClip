@@ -200,7 +200,10 @@ def _run_silencedetect(output_path: str) -> str:
         [str(resolve_ffmpeg()), "-i", output_path,
          "-af", f"silencedetect=noise={_SILENCE_THRESHOLD_DB:.0f}dB:d={_SILENCE_DETECT_MIN_S}",
          "-f", "null", null_dev],
-        capture_output=True, text=True, timeout=120, creationflags=flags, check=False,
+        # ffmpeg 写的是 UTF-8：显式解码，不跟着系统 locale（中文 Windows=GBK）走——
+        # 按 GBK 解到解不了的路径会读流炸掉、stderr 成 None，被外层吞成「体检静默不跑」
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=120, creationflags=flags, check=False,
     )
     return result.stderr
 
