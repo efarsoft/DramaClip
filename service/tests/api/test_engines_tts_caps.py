@@ -16,9 +16,9 @@ from typing import Any
 import pytest
 
 from dramaclip.api import engines as engines_api
+from dramaclip.engines import selftest as selftest_mod
 from dramaclip.engines.tts import factory
 from dramaclip.engines.tts.base import EngineCaps
-from dramaclip.infra.model_manager import selftest as selftest_mod
 from dramaclip.transport.notify import Notifier
 
 

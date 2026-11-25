@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext
+from dramaclip.engines import selftest as selftest_mod
 from dramaclip.infra.jobs import STATUS_RUNNING
 from dramaclip.infra.model_manager import downloader, importer, registry
-from dramaclip.infra.model_manager import selftest as selftest_mod
 from dramaclip.transport.rpc import Router, RpcDomainError
 
 _ERR_MODEL_NOT_FOUND = -32010

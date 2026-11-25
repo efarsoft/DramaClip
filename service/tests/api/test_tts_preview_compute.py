@@ -6,8 +6,8 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
+from dramaclip.engines import selftest
 from dramaclip.infra import compute
-from dramaclip.infra.model_manager import selftest
 
 
 class _Engine:

@@ -104,10 +104,11 @@ def _bed_loop_inputs(
     接长的链长 = N*track_dur − (N−1)*crossfade ≥ 成片长（N 多取一副本留
     余量）；amix duration=first 与 -t 再兜底裁齐。
     """
-    if duration <= track_dur:
+    if duration <= track_dur - start_offset:
+        # 从首拍起播，可播的只剩「曲长 − 偏移」：按它比片长，否则床在片尾提前静掉
         # -ss 在 -i 前=输入侧快跳（不解码曲头），起播落在实测首拍上
         lead = ["-ss", f"{start_offset:.3f}"] if start_offset > 0 else []
-        return [*lead, "-i", str(track)], "[1:a]anull[bedsrc];"  # 曲比片长：无需循环
+        return [*lead, "-i", str(track)], "[1:a]anull[bedsrc];"  # 够长：无需循环
     effective_dur = track_dur - start_offset
     need = math.ceil(duration / effective_dur) + 1
     can_crossfade = effective_dur > 2 * _BGM_LOOP_XFADE_S and need <= _BGM_LOOP_MAX_COPIES

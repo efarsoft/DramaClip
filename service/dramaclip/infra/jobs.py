@@ -26,6 +26,18 @@ _PROGRESS_WRITE_INTERVAL_S = 2.0
 STATUS_PENDING = "pending"
 STATUS_RUNNING = "running"
 
+#: 中断话术只对「做得到接着上次」的任务说，且按它们真实走的那条链分两类。
+#: 可续传下载：全程走 fetch.download_file，``.incomplete`` 半成品按目标路径确定性
+#: 命名、跨任务保留（模型下载 / cuda 运行时 / llama 运行时三个安装器同一条链）。
+_RESUMABLE_DOWNLOAD_TYPES = ("model_download", "cuda_runtime", "llama_runtime")
+#: uv 安装的运行环境（tts_runtime / music_runtime）：已装好的步骤与包都留在盘上和
+#: venv 里，重试接着装；但下到一半的包 uv 不续传——所以不许说「断点续传」。
+_RESUMABLE_INSTALL_TYPES = ("indextts_runtime", "music_runtime")
+_INTERRUPTION_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (_RESUMABLE_DOWNLOAD_TYPES, "服务中断（下载断点已保留，重试将从断点续传）"),
+    (_RESUMABLE_INSTALL_TYPES, "服务中断（运行环境没装完，已装好的部分保留，重试会接着装）"),
+)
+
 
 def is_terminal(status: str) -> bool:
     """是否终态：终态任务不可再迁移，也不可再取消。上层据此判断，勿各写字面量。"""
@@ -227,25 +239,26 @@ class JobStore:
     def sweep_interrupted(self) -> int:
         """启动清扫：上一会话遗留的 running / pending 任务标记失败（崩溃重入协议）。
 
-        下载类附断点提示：fetch 的 ``.incomplete`` 半成品按目标路径确定性命名、
-        跨任务保留——重试不是从头再来，话术要把这件事说给用户（装测实锤：
-        用户看到「服务中断」不敢点重试，以为又要白下几个 GB）。
+        话术按各类任务的重试语义说（见 ``_INTERRUPTION_HINTS``）：做得到「接着上次」
+        的明说——装测实锤：用户看到「服务中断」不敢点重试，以为又要白下几个 GB。
         """
         now = _now_ms()
-        cursor = self._conn.execute(
-            "UPDATE jobs SET status = 'failed',"
-            " error = '服务中断（下载断点已保留，重试将从断点续传）', updated_at = ?"
-            " WHERE type = 'model_download' AND status IN (?, ?)",
-            (now, STATUS_PENDING, STATUS_RUNNING),
-        )
-        download_count = cursor.rowcount or 0
+        swept = 0
+        for types, hint in _INTERRUPTION_HINTS:
+            cursor = self._conn.execute(
+                "UPDATE jobs SET status = 'failed', error = ?, updated_at = ?"
+                f" WHERE type IN ({','.join('?' * len(types))}) AND status IN (?, ?)",
+                (hint, now, *types, STATUS_PENDING, STATUS_RUNNING),
+            )
+            swept += cursor.rowcount or 0
+        hinted = _RESUMABLE_DOWNLOAD_TYPES + _RESUMABLE_INSTALL_TYPES
         cursor = self._conn.execute(
             "UPDATE jobs SET status = 'failed', error = '服务中断', updated_at = ?"
-            " WHERE type != 'model_download' AND status IN (?, ?)",
-            (now, STATUS_PENDING, STATUS_RUNNING),
+            f" WHERE type NOT IN ({','.join('?' * len(hinted))}) AND status IN (?, ?)",
+            (now, *hinted, STATUS_PENDING, STATUS_RUNNING),
         )
         self._conn.commit()
-        return download_count + (cursor.rowcount or 0)
+        return swept + (cursor.rowcount or 0)
 
     def _transition(
         self, job_id: str, status: str, error: str | None = None, progress: float | None = None

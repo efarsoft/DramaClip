@@ -12,9 +12,9 @@ from typing import Any
 
 from dramaclip.api import engine_configs
 from dramaclip.api.context import AppContext
+from dramaclip.engines import selftest as selftest_mod
 from dramaclip.engines.tts import factory
 from dramaclip.infra.model_manager import downloader, registry
-from dramaclip.infra.model_manager import selftest as selftest_mod
 from dramaclip.infra.storage.repos import engine_configs as configs_repo
 from dramaclip.transport.rpc import Router, RpcDomainError
 

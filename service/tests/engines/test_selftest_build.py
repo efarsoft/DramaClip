@@ -10,12 +10,13 @@ from pathlib import Path
 
 import pytest
 
+from dramaclip.engines import selftest
 from dramaclip.engines.analysis.transcriber import (
     FasterWhisperEngine,
     ParaformerEngine,
     SenseVoiceEngine,
 )
-from dramaclip.infra.model_manager import registry, selftest
+from dramaclip.infra.model_manager import registry
 from dramaclip.infra.model_manager.registry import ModelSpec
 
 

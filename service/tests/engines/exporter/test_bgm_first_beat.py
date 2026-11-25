@@ -24,6 +24,26 @@ def test_first_beat_offsets_input(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     assert "-i" in inputs and prefix == "[1:a]anull[bedsrc];"
 
 
+def test_single_copy_needs_the_track_to_outlast_the_film_from_the_offset(
+    tmp_path: Path,
+) -> None:
+    """「曲比片长：无需循环」的判断要扣掉起播偏移（2026-11-24 审查实锤）。
+
+    首拍 9.35s 起播后，90 秒的曲子只剩 80.65 秒可播。85 秒的成片若仍按「曲比片长」
+    走单副本，床在片尾会提前静掉 4.35 秒——偏移上限 20 秒，窗口内的成片都中招；
+    循环分支早就按「曲长 − 偏移」算，只有这一支漏扣。
+    """
+    track = tmp_path / "t.mp3"
+    inputs, prefix = bgm_bed._bed_loop_inputs(track, 80.65, 90.0, start_offset=9.35)
+    assert prefix == "[1:a]anull[bedsrc];", "偏移之后刚好够长：单副本"
+    assert inputs.count("-i") == 1
+
+    inputs, prefix = bgm_bed._bed_loop_inputs(track, 85.0, 90.0, start_offset=9.35)
+    assert prefix != "[1:a]anull[bedsrc];", "总长够但扣掉偏移不够：床会在片尾提前静掉"
+    assert inputs.count("-i") >= 2 and "acrossfade" in prefix
+    assert inputs[:2] == ["-ss", "9.350"], "接长的副本同样从首拍起播"
+
+
 def test_clean_head_starts_at_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """首拍 ≤0.2s（多数曲子 0.07s 实测）：0 起播，无 -ss 参数。"""
     monkeypatch.setattr(bgm_bed, "_bed_first_beat_s", lambda _t: 0.0)

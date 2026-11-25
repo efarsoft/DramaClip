@@ -15,8 +15,8 @@ from types import SimpleNamespace
 import pytest
 
 from dramaclip.api import engines as engines_api
+from dramaclip.engines import selftest as selftest_mod
 from dramaclip.engines.analysis.models import AsrSegment
-from dramaclip.infra.model_manager import selftest as selftest_mod
 from dramaclip.infra.storage.repos import engine_configs as configs_repo
 from dramaclip.transport.notify import Notifier
 from dramaclip.transport.rpc import RpcDomainError

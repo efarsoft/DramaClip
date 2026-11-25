@@ -50,7 +50,6 @@ SCRIPT_LLM_TIMEOUT_S = 600.0
 _MAX_ATTEMPTS = 3
 _RETRY_BACKOFF_S = (15.0, 30.0)
 _FUZZY_ANCHOR_RATIO = 0.55
-_PAUSE_BREATH_S = 0.30  # 与 models.PAUSE_BREATH_S 同源（呼吸扣减见 W2）
 _MIN_BODY_LINES = 4  # 正文句数下限（防退化，同剧本链段数下限纪律）
 _BUDGET_TOL_S = 0.5  # 锚窗预算判定容差：小超不退稿（渲染期收短兜底够用）
 _HOOK_MIN_CHARS = 6  # 首选钩子低于此字数视为无效，备选候选接管

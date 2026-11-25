@@ -223,7 +223,7 @@ def test_engine_pool_forwards_data_dir(
 def test_selftest_build_asr_resolves_before_construction(
     tmp_path: Path, resolver: _Recorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from dramaclip.infra.model_manager import selftest
+    from dramaclip.engines import selftest
 
     monkeypatch.setattr(asr_mod, "SenseVoiceEngine", _ExplodingEngine)
     resolver.blocked = {"sensevoice"}
@@ -236,7 +236,7 @@ def test_selftest_build_asr_resolves_before_construction(
 def test_selftest_build_asr_without_data_dir_passes_through(
     tmp_path: Path, resolver: _Recorder, asr_stubs: None
 ) -> None:
-    from dramaclip.infra.model_manager import selftest
+    from dramaclip.engines import selftest
 
     built = selftest._build_asr(tmp_path, _asr_spec("sensevoice"), "cuda", "auto")
     assert built.kwargs["device"] == "cuda"

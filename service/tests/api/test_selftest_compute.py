@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from dramaclip.engines import selftest
 from dramaclip.infra import compute
-from dramaclip.infra.model_manager import selftest
 
 
 class _Engine:

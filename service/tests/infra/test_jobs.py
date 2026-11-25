@@ -134,3 +134,30 @@ def test_sweep_download_jobs_carry_resume_hint(
     analysis = store.get(analysis_id)
     assert download is not None and "断点已保留" in (download["error"] or "")
     assert analysis is not None and analysis["error"] == "服务中断"
+
+
+def test_sweep_resume_hints_follow_each_kinds_real_retry_semantics(
+    memory_db: sqlite3.Connection,
+) -> None:
+    """话术按任务实际走的那条下载链说（2026-11-24 审查：提示只认 model_download 一种）。
+
+    - cuda / llama 运行时与模型下载走同一条可续传下载（fetch.download_file）：
+      「断点已保留」对它们同样是实话，此前却只给一句「服务中断」；
+    - uv 安装的运行环境（本地运行环境 / 配乐运行环境）：已装好的步骤与包都在，
+      但下到一半的包会重下——不许对它们说「断点续传」，那是假话。
+    """
+    store = JobStore(memory_db)
+    kinds = ("cuda_runtime", "llama_runtime", "indextts_runtime", "music_runtime", "analysis")
+    ids = {kind: store.create(kind) for kind in kinds}
+    for job_id in ids.values():
+        store.mark_running(job_id)
+
+    assert store.sweep_interrupted() == 5
+
+    errors = {kind: store.get(job_id)["error"] for kind, job_id in ids.items()}
+    for kind in ("cuda_runtime", "llama_runtime"):
+        assert "断点已保留" in errors[kind], f"{kind}: {errors[kind]}"
+    for kind in ("indextts_runtime", "music_runtime"):
+        assert "接着装" in errors[kind], f"{kind}: {errors[kind]}"
+        assert "断点" not in errors[kind], f"{kind} 走 uv 安装，半截的包并不续传"
+    assert errors["analysis"] == "服务中断"
