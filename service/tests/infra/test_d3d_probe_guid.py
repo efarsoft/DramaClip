@@ -3,8 +3,9 @@
 历史事故两连（2026-11-19/20）：初版尾段 e2533473d5e5 错；首修 e7c1c4e5e0b4
 仍是错值（凭记忆未核一手来源）——两版 CreateDXGIFactory1 都回 E_NOINTERFACE，
 探测自落地起从未产出过一行数据。终值以 Windows SDK 10.0.26100.0 dxgi.h:3119
-DEFINE_GUID 为准（253c83d1b387）。沙箱 DXGI 禁访=端到端不可验，字节级断言是
-唯一防线——本测试即为此设，改值必须同步改这里的官方样本。
+DEFINE_GUID 为准（253c83d1b387）。本测试钉的是常量本身；枚举的控制流
+（收尾信号、失败留痕）由 test_d3d_probe_enum.py 用假 COM 对象验——只有字节
+断言的那段时间，第三、四个缺陷（HRESULT restype 吞清单）就是从缝里漏过去的。
 """
 
 from __future__ import annotations

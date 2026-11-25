@@ -215,13 +215,35 @@ def _query_nvidia_smi() -> dict[str, object] | None:
     return None
 
 
+def _take_cim_adapter(
+    by_name: dict[str, dict[str, object]], dxgi_name: str
+) -> dict[str, object] | None:
+    """按名称认领一条 CIM 条目（认领即从池里移除，不会两条 DXGI 行抢同一条）。
+
+    精确相等优先；DXGI 名常带厂商前缀而 CIM 名不带（NVIDIA Quadro M4000 对
+    Quadro M4000），退一步按「一方是另一方的子串」认——不然同一块卡会以两个
+    名字各出现一行。名称太短（<8 字符）不做子串认定，免得误认。
+    """
+    lowered = dxgi_name.lower()
+    exact = by_name.pop(lowered, None)
+    if exact is not None:
+        return exact
+    for key, cim in by_name.items():
+        if len(key) >= 8 and (key in lowered or lowered in key):
+            del by_name[key]
+            return cim
+    return None
+
+
 def detect() -> dict[str, object]:
     """同步探测（阻塞，最长 ~20s）：DXGI PCI 身份 + CIM 驱动版本 + nvidia-smi CUDA 事实。
 
     仅由 prefetch 后台线程调用。合并规则：DXGI 可用时以它为主（厂商按 PCI ID
     精确判定 + 专用显存），CIM 按名称补驱动版本、独有适配器追加；DXGI 失败回退
     纯 CIM。虚拟设备在解析阶段剔除，smi 的 NVIDIA 条目覆盖同名项，CUDA 三项只在
-    确为 NVIDIA 且 smi 可读时填充。
+    确为 NVIDIA 且 smi 可读时填充。同一块物理卡（PCI 厂商 + 设备 ID 相同）只留
+    一条——远程桌面/投屏的虚拟显示器驱动会生成报着底层 GPU 身份的间接显示适配器，
+    条数随会话数变，不去重的话清单里同一块卡出现好几行。
     """
     adapters: list[dict[str, object]] = []
     if sys.platform == "win32":
@@ -242,6 +264,7 @@ def detect() -> dict[str, object]:
     if d3d:
         by_name = {str(a["name"]).lower(): a for a in adapters}
         merged: list[dict[str, object]] = []
+        seen_cards: set[tuple[str, str]] = set()
         for item in d3d:
             name = str(item["name"])
             if (
@@ -251,6 +274,11 @@ def detect() -> dict[str, object]:
                 or is_virtual_adapter(name)
             ):
                 continue
+            card = (str(item["vendor_id"]), str(item["device_id"]))
+            if card in seen_cards:
+                # 同一块物理卡的后续呈现实例：见 detect 文档串
+                continue
+            seen_cards.add(card)
             row: dict[str, object] = {
                 "name": name,
                 "vendor": classify_vendor(name, _to_int_maybe(item["vendor_id"])),
@@ -259,7 +287,7 @@ def detect() -> dict[str, object]:
                 "device_id": item["device_id"],
                 "dedicated_video_mb": item["dedicated_video_mb"],
             }
-            cim = by_name.pop(name.lower(), None)
+            cim = _take_cim_adapter(by_name, name)
             if cim is not None:
                 row["driver_version"] = cim["driver_version"]
             merged.append(row)

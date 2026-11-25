@@ -21,6 +21,8 @@ _IID_IDXGIFACTORY1 = "770aae78-f26f-4dba-a829-253c83d1b387"
 _VT_RELEASE = 2
 _VT_ENUM_ADAPTERS1 = 12  # IDXGIFactory1::EnumAdapters1
 _VT_GETDESC1 = 10  # IDXGIAdapter1
+#: 枚举收尾信号——EnumAdapters1 的序号越界时返回它，是正常结束而不是错误。
+_DXGI_ERROR_NOT_FOUND = 0x887A0002
 
 
 class _GUID(ctypes.Structure):
@@ -70,28 +72,47 @@ def _clean_name(raw: str) -> str:
 
 
 def _enum_win32() -> list[dict[str, object]]:
+    # HRESULT 一律用 c_long 收原始值，**不能**用 ctypes.HRESULT 当 restype：后者遇到
+    # 失败码会直接抛 OSError，调用方拿不到返回值。枚举循环靠 `!= 0` 收尾，而
+    # DXGI_ERROR_NOT_FOUND 正是「枚举完了」的正常收尾信号——被抛成异常后跳过
+    # return adapters，已收齐的清单整个丢弃、回退 CIM（真机实锤：M4000 机器枚举出
+    # 5 个适配器后返回空清单）。
     dxgi = ctypes.WinDLL("dxgi")
     create = dxgi.CreateDXGIFactory1
-    create.restype = ctypes.HRESULT
+    create.restype = ctypes.c_long
     create.argtypes = [ctypes.POINTER(_GUID), ctypes.POINTER(ctypes.c_void_p)]
     factory = ctypes.c_void_p()
-    if create(_refiid(_IID_IDXGIFACTORY1), ctypes.byref(factory)) != 0 or not factory:
+    created = create(_refiid(_IID_IDXGIFACTORY1), ctypes.byref(factory))
+    if created != 0 or not factory:
+        # 工厂创建失败留一行现场：IID 写错那次就是这里静默返回了空清单，无从排查。
+        print(
+            f"[d3d-probe] CreateDXGIFactory1 失败 hr=0x{created & 0xFFFFFFFF:08X}",
+            file=sys.stderr,
+        )
         return []
     try:
         enum_adapters = _vtbl_func(
-            factory, _VT_ENUM_ADAPTERS1, ctypes.HRESULT, ctypes.c_uint,
+            factory, _VT_ENUM_ADAPTERS1, ctypes.c_long, ctypes.c_uint,
             ctypes.POINTER(ctypes.c_void_p),
         )
         adapters: list[dict[str, object]] = []
         index = 0
         while True:
             adapter = ctypes.c_void_p()
-            if enum_adapters(factory, index, ctypes.byref(adapter)) != 0 or not adapter:
+            found = enum_adapters(factory, index, ctypes.byref(adapter))
+            if found != 0 or not adapter:
+                if found & 0xFFFFFFFF != _DXGI_ERROR_NOT_FOUND:
+                    # 正常收尾是 NOT_FOUND；别的失败码说明枚举中途出错，留痕
+                    print(
+                        f"[d3d-probe] EnumAdapters1({index}) 失败 "
+                        f"hr=0x{found & 0xFFFFFFFF:08X}，已枚举 {len(adapters)} 个",
+                        file=sys.stderr,
+                    )
                 break
             index += 1
             try:
                 get_desc = _vtbl_func(
-                    adapter, _VT_GETDESC1, ctypes.HRESULT, ctypes.POINTER(_AdapterDesc1),
+                    adapter, _VT_GETDESC1, ctypes.c_long, ctypes.POINTER(_AdapterDesc1),
                 )
                 desc = _AdapterDesc1()
                 if get_desc(adapter, ctypes.byref(desc)) != 0:
@@ -112,11 +133,11 @@ def _enum_win32() -> list[dict[str, object]]:
                     }
                 )
             finally:
-                release = _vtbl_func(adapter, _VT_RELEASE, ctypes.HRESULT)
+                release = _vtbl_func(adapter, _VT_RELEASE, ctypes.c_long)
                 release(adapter)
         return adapters
     finally:
-        release_factory = _vtbl_func(factory, _VT_RELEASE, ctypes.HRESULT)
+        release_factory = _vtbl_func(factory, _VT_RELEASE, ctypes.c_long)
         release_factory(factory)
 
 

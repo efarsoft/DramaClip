@@ -102,10 +102,29 @@ def _stub_queries(
     cim: Any,
     smi: Any,
     platform: str = "win32",
+    d3d: Any = None,
 ) -> None:
     monkeypatch.setattr(gpu.sys, "platform", platform, raising=False)
     monkeypatch.setattr(gpu, "_query_cim_adapters", cim)
     monkeypatch.setattr(gpu, "_query_nvidia_smi", smi)
+    # DXGI 枚举也必须打桩：它自 2026-11-24 修好后能真的枚举到本机显卡，不打桩的话
+    # 这些用例测的就是开发机而不是「设定的宿主」。
+    monkeypatch.setattr(gpu.d3d_probe, "enumerate_adapters", d3d or (lambda: []))
+
+
+def _dxgi(
+    name: str, vendor_id: int, device_id: int, video_mb: int, **flags: Any
+) -> dict[str, Any]:
+    """d3d_probe.enumerate_adapters 的一条产出（形状与真实枚举一致）。"""
+    return {
+        "name": name,
+        "vendor_id": f"0x{vendor_id:04x}",
+        "vendor": gpu.classify_vendor("", vendor_id),
+        "device_id": f"0x{device_id:04x}",
+        "dedicated_video_mb": video_mb,
+        "is_software": flags.get("is_software", False),
+        "is_virtual": flags.get("is_virtual", False),
+    }
 
 
 def test_detect_reports_amd_host_with_adapters_and_empty_cuda_fields(
@@ -214,6 +233,54 @@ def test_detect_non_windows_skips_cim(monkeypatch: pytest.MonkeyPatch) -> None:
     info = gpu.detect()
     assert calls == []
     assert info["vendor"] == "none"
+
+
+def test_detect_prefers_dxgi_identity_and_keeps_one_row_per_card(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DXGI 可用时以它为主：厂商按 PCI ID、显存来自 DXGI；同一块物理卡的多个呈现
+    实例只留一条（M4000 开发机实测：DXGI 把同一块 Radeon 报了 3~4 条）。"""
+    cim = [
+        {"name": "Radeon RX 5500 XT", "vendor": "amd", "driver_version": "27.20.21003"},
+        {"name": "Quadro M4000", "vendor": "nvidia", "driver_version": "552.22"},
+        {"name": "OrayIddDriver Device", "vendor": "other", "driver_version": "1.0.0.0"},
+    ]
+    radeon = _dxgi("Radeon RX 5500 XT", 0x1002, 0x7340, 8151)
+    d3d = [
+        dict(radeon),
+        _dxgi("NVIDIA Quadro M4000", 0x10DE, 0x13F1, 8132),
+        dict(radeon),
+        dict(radeon),
+        _dxgi("Microsoft Basic Render Driver", 0x1414, 0x008C, 0, is_software=True),
+    ]
+    _stub_queries(monkeypatch, lambda: cim, lambda: None, d3d=lambda: d3d)
+
+    info = gpu.detect()
+
+    assert [a["name"] for a in info["adapters"]] == [
+        "Radeon RX 5500 XT",
+        "NVIDIA Quadro M4000",
+        "OrayIddDriver Device",
+    ]
+    amd_row, nvidia_row, other_row = info["adapters"]
+    assert amd_row["driver_version"] == "27.20.21003"  # CIM 按名称补驱动版本
+    assert amd_row["vendor_id"] == "0x1002" and amd_row["dedicated_video_mb"] == 8151
+    # 名称差一个厂商前缀也认得出是同一块卡——否则它会以两个名字各出现一行
+    assert nvidia_row["driver_version"] == "552.22"
+    assert other_row["driver_version"] == "1.0.0.0"  # CIM 独有的适配器照常追加
+    assert info["vendor"] == "nvidia"
+    assert info["name"] == "NVIDIA Quadro M4000"
+
+
+def test_detect_dxgi_vendor_id_decides_vendor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """名称里一个厂商 token 都没有的卡，厂商以 PCI ID 为准，显存也来自 DXGI。"""
+    d3d = [_dxgi("Some 3D Controller", 0x8086, 0x5690, 4096)]
+    _stub_queries(monkeypatch, lambda: [], lambda: None, d3d=lambda: d3d)
+
+    info = gpu.detect()
+
+    assert info["vendor"] == "intel"
+    assert info["adapters"][0]["dedicated_video_mb"] == 4096
 
 
 @pytest.mark.skipif(
