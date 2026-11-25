@@ -153,11 +153,17 @@ class ServiceApp:
 
     def run(self) -> int:
         data_dir = paths.resolve_data_dir(self._data_dir_env)
-        try:
-            backup.backup_database(paths.db_path(data_dir))
-        except sqlite3.Error as exc:  # 备份失败不阻塞启动
-            print(f"[backup] 备份失败: {exc}")
+        log_file = logging_setup.setup_file_logging(data_dir / "logs")
+        if log_file is not None:
+            print(f"[logging] 服务日志: {log_file}")
+        # 日志先挂再动库；横幅进日志：只发 backend.log 也带得上环境与启动失败原因
+        logging.getLogger(__name__).info(
+            "服务启动 v%s | 数据目录 %s | 平台 %s", __version__, data_dir, sys.platform)
         conn = db.connect(paths.db_path(data_dir))
+        try:
+            backup.backup_database(paths.db_path(data_dir), pending=db.migrations_pending(conn))
+        except (OSError, sqlite3.Error) as exc:  # 备份失败不阻塞启动
+            logging.getLogger(__name__).warning("[backup] 备份失败: %s", exc)
         db.migrate(conn)
         cuda_runtime.inject_dll_dirs(data_dir)
         settings = config.load(conn)
@@ -204,12 +210,6 @@ class ServiceApp:
             daemon=True,
         ).start()
 
-        log_file = logging_setup.setup_file_logging(data_dir / "logs")
-        if log_file is not None:
-            print(f"[logging] 服务日志: {log_file}")
-        # 启动横幅进日志：用户只发 backend.log 也带得上环境（单文件真源）
-        logging.getLogger(__name__).info(
-            "服务启动 v%s | 数据目录 %s | 平台 %s", __version__, data_dir, sys.platform)
         notifier = Notifier(self._send)
         work_dir = data_dir / "cache" / "analysis"
         work_dir.mkdir(parents=True, exist_ok=True)

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import sys
 import threading
+import urllib.parse
 from pathlib import Path
 from typing import Any, Literal
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
+
+_logger = logging.getLogger(__name__)
 
 _WRITE_PREFIXES = ("insert", "update", "delete", "replace", "create", "drop", "alter")
 
@@ -176,22 +180,56 @@ def connect_readonly(db_file: Path) -> sqlite3.Connection:
     - URI 模式 readonly=True：驱动层保证不会意外写入
     - 不需要 busy_timeout：WAL 读不碰写锁
     """
-    uri = f"file:{db_file.as_posix()}?mode=ro"
+    # 路径必须转义后再进 URI：``#`` 起片段、``?`` 起查询、``%`` 起转义——裸拼的话
+    # 数据目录名里带一个 ``#`` 就打开另一个（新建的空）库，查询一律「没有这张表」。
+    uri = f"file:{urllib.parse.quote(db_file.as_posix(), safe='/:')}?mode=ro"
     conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
+def migrations_pending(conn: sqlite3.Connection) -> list[str]:
+    """尚未应用的迁移名（文件名序）。只报不建——启动时在留备份**之前**问，这时不能动库。"""
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+    ).fetchone()
+    applied: set[str] = set()
+    if exists is not None:
+        applied = {str(row[0]) for row in conn.execute("SELECT name FROM schema_migrations")}
+    return [path.name for path in sorted(MIGRATIONS_DIR.glob("*.sql")) if path.name not in applied]
+
+
 def migrate(conn: sqlite3.Connection) -> list[str]:
-    """按文件名序号执行增量迁移（幂等），返回本次应用的迁移名列表。"""
+    """按文件名序号执行增量迁移（幂等），返回本次应用的迁移名列表。
+
+    每份脚本连同「记名」是**一个事务**：中途失败整份回滚、名字不落，库停在
+    上一份迁移之后——下次启动从这份重来。此前脚本裸跑、记名另起事务，炸在
+    中间时前几句已经提交，重来就撞在第一句上（``duplicate column name``），
+    此后每次启动都死在同一步，库却停在谁也不认识的半截状态。
+    """
     conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY)")
     applied = {str(row[0]) for row in conn.execute("SELECT name FROM schema_migrations")}
     done: list[str] = []
     for sql_file in sorted(MIGRATIONS_DIR.glob("*.sql")):
         if sql_file.name in applied:
             continue
-        conn.executescript(sql_file.read_text(encoding="utf-8"))
-        conn.execute("INSERT INTO schema_migrations (name) VALUES (?)", (sql_file.name,))
-        conn.commit()
+        script = (
+            "BEGIN;\n"
+            f"{sql_file.read_text(encoding='utf-8')}\n"
+            f"INSERT INTO schema_migrations (name) VALUES ('{sql_file.name}');\n"
+            "COMMIT;"
+        )
+        try:
+            conn.executescript(script)
+        except sqlite3.Error as exc:
+            conn.rollback()
+            _logger.error(
+                "迁移 %s 执行失败，已整份回滚（库未改动，停在上一份迁移之后）: %s",
+                sql_file.name,
+                exc,
+            )
+            raise
         done.append(sql_file.name)
+    # 收尾释放建表语句占的写归属：不让启动线程在整个启动流程里攥着写锁
+    conn.commit()
     return done

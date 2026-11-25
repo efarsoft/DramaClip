@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 from pathlib import Path
@@ -105,6 +106,148 @@ def test_migration_028_drops_global_hotwords_row(memory_db: sqlite3.Connection) 
     memory_db.executescript(sql)
     left = {row[0] for row in memory_db.execute("SELECT key FROM settings")}
     assert left == {"asr.pause_split"}, "只删热词全局行，别的键一行不动"
+
+
+# ---- 迁移原子性：一份脚本一个事务 ----
+
+
+def _install_migration_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """两份迁移的临时目录：002 默认前两句能过、第三句必炸。"""
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "001_base.sql").write_text(
+        "CREATE TABLE t (id INTEGER PRIMARY KEY);\n", encoding="utf-8"
+    )
+    (migrations / "002_broken.sql").write_text(
+        "INSERT INTO t (id) VALUES (1);\n"
+        "ALTER TABLE t ADD COLUMN note TEXT;\n"
+        "INSERT INTO no_such_table (id) VALUES (1);\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(db, "MIGRATIONS_DIR", migrations)
+    return migrations
+
+
+def test_failed_migration_is_rolled_back_whole_and_retries_cleanly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """脚本中途失败：整份回滚（不是把前几句留在库里）、名字不落，修好后从这份重来。
+
+    此前每份脚本裸跑、记名另起一个事务：中途炸了前几句已经提交，下次启动
+    从头再跑就撞在第一句上（``duplicate column name``），服务每次启动都死在
+    同一步，库却已经停在谁也不认识的半截状态。
+    """
+    migrations = _install_migration_dir(tmp_path, monkeypatch)
+    conn = db.connect(tmp_path / "data.db")
+    conn._LEAK_TIMEOUT_S = 0.3
+    try:
+        with (
+            caplog.at_level(logging.ERROR, logger="dramaclip.infra.storage.db"),
+            pytest.raises(sqlite3.OperationalError, match="no_such_table"),
+        ):
+            db.migrate(conn)
+
+        columns = [str(row[1]) for row in conn.execute("PRAGMA table_info(t)")]
+        assert columns == ["id"], f"半截迁移留在了库里: {columns}"
+        assert conn.execute("SELECT * FROM t").fetchall() == []
+        applied = [str(row[0]) for row in conn.execute("SELECT name FROM schema_migrations")]
+        assert applied == ["001_base.sql"]
+        assert "002_broken.sql" in caplog.text and "回滚" in caplog.text
+
+        # 回滚后连接照常可用，写归属没留给启动线程：别的线程的写不必等超时自愈
+        errors: list[BaseException] = []
+
+        def _other_thread_writes() -> None:
+            try:
+                conn.execute("INSERT INTO t (id) VALUES (7)")
+                conn.commit()
+            except BaseException as exc:  # noqa: BLE001 - 诊断
+                errors.append(exc)
+
+        thread = threading.Thread(target=_other_thread_writes)
+        thread.start()
+        thread.join(timeout=10)
+        assert not thread.is_alive() and errors == [], f"写归属泄漏: {errors}"
+        assert "tx_lock" not in capsys.readouterr().err, "别的线程的写等到了超时自愈"
+
+        # 修好脚本后从 002 整份重来（列也在这一份里加回来）：001 不重跑，一次到位
+        (migrations / "002_broken.sql").write_text(
+            "ALTER TABLE t ADD COLUMN note TEXT;\n"
+            "INSERT INTO t (id, note) VALUES (1, 'ok');\n",
+            encoding="utf-8",
+        )
+        assert db.migrate(conn) == ["002_broken.sql"]
+        rows = conn.execute("SELECT id, note FROM t ORDER BY id").fetchall()
+        assert rows == [(1, "ok"), (7, None)]
+    finally:
+        conn.close()
+
+
+def test_migrations_pending_is_read_only_and_tracks_migrate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """待应用清单只报不建：它在备份之前问，这时不能动库。"""
+    migrations = _install_migration_dir(tmp_path, monkeypatch)
+    (migrations / "002_broken.sql").write_text(
+        "ALTER TABLE t ADD COLUMN note TEXT;\n", encoding="utf-8"
+    )
+    conn = db.connect(tmp_path / "data.db")
+    try:
+        assert db.migrations_pending(conn) == ["001_base.sql", "002_broken.sql"]
+        tables = [
+            str(row[0])
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        ]
+        assert tables == [], "问个清单把库改了"
+
+        assert db.migrate(conn) == ["001_base.sql", "002_broken.sql"]
+        assert db.migrations_pending(conn) == []
+    finally:
+        conn.close()
+
+
+def test_migrations_pending_matches_what_migrate_applies_on_the_real_dir() -> None:
+    """对着真实迁移目录：清单就是 migrate 实际会应用的那些（备份据此决定留哪类快照）。"""
+    conn = sqlite3.connect(":memory:", factory=db.SerializedConnection)
+    try:
+        pending = db.migrations_pending(conn)
+        assert pending and db.migrate(conn) == pending
+        assert db.migrations_pending(conn) == []
+    finally:
+        conn.close()
+
+
+# ---- 只读连接：URI 转义 ----
+
+
+def test_connect_readonly_opens_the_requested_file_when_the_path_has_uri_delimiters(
+    tmp_path: Path,
+) -> None:
+    """数据目录含 ``#`` / ``%`` 时也必须读到同一个库（2026-11-24 审查实锤）。
+
+    URI 里 ``#`` 起片段、``?`` 起查询：裸拼的路径在 ``#`` 处被截断，打开的是
+    另一个库——查询一律「没有这张表」，还在数据目录之外留下一个游离文件。
+    """
+    data_dir = tmp_path / "数据 #1 100%"
+    data_dir.mkdir()
+    db_file = data_dir / "data.db"
+    writer = db.connect(db_file)
+    writer.execute("CREATE TABLE t (v INTEGER)")
+    writer.execute("INSERT INTO t VALUES (42)")
+    writer.commit()
+    writer.close()
+
+    reader = db.connect_readonly(db_file)
+    try:
+        assert reader.execute("SELECT v FROM t").fetchone()[0] == 42
+        with pytest.raises(sqlite3.OperationalError):
+            reader.execute("INSERT INTO t VALUES (1)")  # 只读：驱动层拦写
+    finally:
+        reader.close()
+    assert list(tmp_path.iterdir()) == [data_dir], "在数据目录之外留下了游离文件"
 
 
 def test_settings_roundtrip(memory_db: sqlite3.Connection) -> None:
