@@ -468,17 +468,31 @@ export interface ExportSubmitResult {
 
 /** 自检单项（09-10 §4.5）：pass 三态——true 实测过线 / false 实测不过 / null 量不到。
  * 量不到的项徽章显示灰「—」，绝不发未验证绿勾（宁灰勿假绿）；其余字段是实测原文，
- * 供「看度量原文」展示，判据与 scripts/verify_modes.py 同源。 */
+ * 供「看度量原文」展示，判据与 scripts/verify_modes.py 同源。
+ *  度量键按检查项选用，各键归属见行内注释；与 protocol/schemas/export.json 的
+ *  x-models/SelfCheckItem 逐键对应（service/tests/transport/test_contract_sync.py 守着不漂）。 */
 export interface SelfCheckItem {
   readonly pass: boolean | null;
+  /** 时长（duration）。 */
   readonly measured_s?: number;
   readonly budget_s?: number;
   readonly tolerance_s?: number;
+  /** 解说（narration）。 */
   readonly has_audio?: boolean;
   readonly expected?: string;
   readonly planned_segments?: number;
+  /** 静音（silence）与开场（opening）。 */
   readonly mean_volume_db?: number;
+  /** 冻结帧（freeze）。 */
   readonly max_freeze_s?: number;
+  /** 开场（opening）专用：判定窗口长度（秒）。 */
+  readonly window_s?: number;
+  /** 音画同步（avsync）专用：各采样点偏移的中位数与离散度（毫秒）。 */
+  readonly median_ms?: number;
+  readonly dispersion_ms?: number;
+  /** 收尾（ending）专用：成片最后一刀的时间点（秒），与被拦腰那句台词的开头（≤20 字）。 */
+  readonly end_s?: number;
+  readonly line?: string;
   /** 画面侧落位（caption_placement）专用：四个边界与两个长度都是**画面高占比**，不是秒。 */
   readonly measured_top?: number;
   readonly measured_bottom?: number;
@@ -489,8 +503,52 @@ export interface SelfCheckItem {
   readonly reason?: string;
 }
 
+/** 音画同步项：通用检查项之外带采样统计；有效采样点不足两点时只有 pass=null（不猜）。 */
+export interface SelfCheckAvsync extends SelfCheckItem {
+  /** 参与统计的有效采样点数。 */
+  readonly samples?: number;
+}
+
+/** 残字影子项的候选帧样本。 */
+export interface SelfCheckCaptionResidueSample {
+  /** 候选帧在成片里的时间点（秒）。 */
+  readonly film_t: number;
+  /** 该帧带内各簇文字（各 ≤20 字）。 */
+  readonly rows: readonly string[];
+}
+
+/** 残字影子项：成片字幕带内出现「我们烧的字幕之外」的第二簇文字的候选帧统计。
+ *  pass 恒为 null——只攒数据不改徽章。这里的 samples 是数组，与音画同步项的同名计数
+ *  不是一个东西，所以两者各用自己的类型。 */
+export interface SelfCheckCaptionResidue extends SelfCheckItem {
+  /** 字幕带内有文字的探针帧数。 */
+  readonly band_frames?: number;
+  /** 其中带内文字簇数 ≥2（候选）的帧数。 */
+  readonly residue_frames?: number;
+  /** 候选帧样本（最多 5 条）。 */
+  readonly samples?: readonly SelfCheckCaptionResidueSample[];
+}
+
+/** 响度实测读数：导出链的复核门禁已经硬失败守门，这里不设徽章，只记归一后的复核实测做历史账。 */
+export interface SelfCheckLoudnessReading {
+  readonly status: 'measured';
+  /** 成片综合响度实测（LUFS）。 */
+  readonly measured_i: number;
+  /** 真峰值实测（dBTP）。 */
+  readonly measured_tp: number;
+  /** 响度范围（LU）。 */
+  readonly lra: number;
+  /** 目标综合响度（LUFS）。 */
+  readonly target_i: number;
+  /** 真峰值上限（dBTP）。 */
+  readonly target_tp: number;
+  /** 综合响度偏离目标的绝对值（LU）。 */
+  readonly deviation_lu: number;
+}
+
 /** 成片自检成绩单（export_jobs.selfcheck，导出期产出字段 = 接口改动点 #29）。
- *  四项是交付徽章口径；caption_placement 是画面侧实测，不进 overall_state 汇总。 */
+ *  四项是交付徽章口径；其余各项（画面侧落位、劝告、影子项、读数）都不进 overall_state 汇总，
+ *  也都是可选键——早期成绩单没有。 */
 export interface SelfCheck {
   readonly version?: number;
   readonly checked_at: number;
@@ -499,7 +557,16 @@ export interface SelfCheck {
   readonly silence: SelfCheckItem;
   readonly freeze: SelfCheckItem;
   readonly caption_placement?: SelfCheckItem;
+  /** 劝告项：字幕带底是否进入平台底部互动区。 */
   readonly safe_zone?: SelfCheckItem;
+  /** 收尾词级出点：最后一刀是否把原声对白拦腰切断。 */
+  readonly ending?: SelfCheckItem;
+  /** 开场 3 秒质检：解说模式前窗应有可闻声；原声模式或量不到为 null。 */
+  readonly opening?: SelfCheckItem | null;
+  readonly avsync?: SelfCheckAvsync;
+  readonly caption_residue?: SelfCheckCaptionResidue;
+  /** 响度实测读数：量不到或未配目标为 null。 */
+  readonly loudness?: SelfCheckLoudnessReading | null;
   /** v4：逐片段微扰动开关状态（export.dedup_jitter）——处理链如实记录，成片可自证。 */
   readonly dedup_jitter?: boolean;
 }

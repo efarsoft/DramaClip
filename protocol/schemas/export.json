@@ -67,12 +67,141 @@
         },
         "reason": {
           "type": "string"
+        },
+        "window_s": {
+          "type": "number",
+          "description": "开场（opening）专用：判定窗口长度（秒）"
+        },
+        "end_s": {
+          "type": "number",
+          "description": "收尾（ending）专用：成片最后一刀的时间点（秒）"
+        },
+        "line": {
+          "type": "string",
+          "description": "收尾（ending）专用：被拦腰那句台词的开头（≤20 字）"
+        },
+        "median_ms": {
+          "type": "number",
+          "description": "音画同步（avsync）专用：各采样点偏移的中位数（毫秒）"
+        },
+        "dispersion_ms": {
+          "type": "number",
+          "description": "音画同步（avsync）专用：偏移的离散度＝最大−最小（毫秒）"
+        }
+      }
+    },
+    "SelfCheckAvsync": {
+      "description": "音画同步项：通用检查项之外带采样统计。有效采样点不足两点时只有 pass=null——不猜",
+      "allOf": [
+        {
+          "$ref": "#/x-models/SelfCheckItem"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "samples": {
+              "type": "integer",
+              "minimum": 2,
+              "description": "参与统计的有效采样点数"
+            }
+          }
+        }
+      ]
+    },
+    "SelfCheckCaptionResidue": {
+      "description": "残字影子项（v2）：成片字幕带内出现「我们烧的字幕之外」的第二簇文字的候选帧统计。pass 恒为 null——只攒数据不改徽章，判红阈值等跨片数据到位再定",
+      "allOf": [
+        {
+          "$ref": "#/x-models/SelfCheckItem"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "band_frames": {
+              "type": "integer",
+              "description": "字幕带内有文字的探针帧数"
+            },
+            "residue_frames": {
+              "type": "integer",
+              "description": "其中带内文字簇数 ≥2（候选）的帧数"
+            },
+            "samples": {
+              "type": "array",
+              "maxItems": 5,
+              "description": "候选帧样本（最多 5 条）",
+              "items": {
+                "type": "object",
+                "required": [
+                  "film_t",
+                  "rows"
+                ],
+                "properties": {
+                  "film_t": {
+                    "type": "number",
+                    "description": "候选帧在成片里的时间点（秒）"
+                  },
+                  "rows": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "该帧带内各簇文字（各 ≤20 字）"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "SelfCheckLoudnessReading": {
+      "type": "object",
+      "description": "响度实测读数（v3）：导出链的复核门禁已经硬失败守门，这里不设徽章，只记归一后的复核实测做历史账。量不到或未配目标时成绩单上的 loudness 键为 null",
+      "required": [
+        "status",
+        "measured_i",
+        "measured_tp",
+        "lra",
+        "target_i",
+        "target_tp",
+        "deviation_lu"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "measured"
+          ]
+        },
+        "measured_i": {
+          "type": "number",
+          "description": "成片综合响度实测（LUFS）"
+        },
+        "measured_tp": {
+          "type": "number",
+          "description": "真峰值实测（dBTP）"
+        },
+        "lra": {
+          "type": "number",
+          "description": "响度范围（LU）"
+        },
+        "target_i": {
+          "type": "number",
+          "description": "目标综合响度（LUFS）"
+        },
+        "target_tp": {
+          "type": "number",
+          "description": "真峰值上限（dBTP）"
+        },
+        "deviation_lu": {
+          "type": "number",
+          "description": "综合响度偏离目标的绝对值（LU）"
         }
       }
     },
     "SelfCheck": {
       "type": "object",
-      "description": "成片自检成绩单（09-10 §4.5 四项 + 画面侧落位实测；engines/exporter/selfcheck.py 度量，音画判据与 scripts/verify_modes.py 同源）。caption_placement 刻意不在 required、也不进四项汇总态：四项徽章口径不变，它自己有呈现位",
+      "description": "成片自检成绩单（09-10 §4.5 四项 + 画面侧落位实测；engines/exporter/selfcheck.py 度量，音画判据与 scripts/verify_modes.py 同源）。caption_placement 刻意不在 required、也不进四项汇总态：四项徽章口径不变，它自己有呈现位。四项之外的后加项（safe_zone/ending/avsync/caption_residue/loudness/opening）同理：不进汇总态、不在 required（早期成绩单没有这些键）",
       "required": [
         "checked_at",
         "duration",
@@ -101,6 +230,48 @@
         },
         "caption_placement": {
           "$ref": "#/x-models/SelfCheckItem"
+        },
+        "safe_zone": {
+          "$ref": "#/x-models/SelfCheckItem",
+          "description": "劝告项：字幕带底是否进入平台底部互动区"
+        },
+        "ending": {
+          "$ref": "#/x-models/SelfCheckItem",
+          "description": "收尾词级出点：最后一刀是否把原声对白拦腰切断"
+        },
+        "opening": {
+          "anyOf": [
+            {
+              "$ref": "#/x-models/SelfCheckItem"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "开场 3 秒质检（解说模式前窗应有可闻声）；原声模式或量不到为 null"
+        },
+        "avsync": {
+          "$ref": "#/x-models/SelfCheckAvsync",
+          "description": "音画同步（影子项）：各采样点偏移的中位数与离散度"
+        },
+        "caption_residue": {
+          "$ref": "#/x-models/SelfCheckCaptionResidue",
+          "description": "残字影子项：带内第二簇文字的候选帧统计"
+        },
+        "loudness": {
+          "anyOf": [
+            {
+              "$ref": "#/x-models/SelfCheckLoudnessReading"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "响度实测读数（影子项）：不设徽章，量不到为 null"
+        },
+        "dedup_jitter": {
+          "type": "boolean",
+          "description": "v4：逐片段微扰动开关状态（export.dedup_jitter）——处理链如实记录，成片可自证"
         }
       }
     },

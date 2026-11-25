@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import shutil
 import threading
 import time
@@ -389,15 +390,15 @@ def set_publish_data(context: AppContext, params: dict[str, Any]) -> dict[str, A
             raise RpcDomainError(_ERR_PUBLISH_DATA, f"{key} 过长（≤{cap} 字符）")
         return value
 
-    settlement = raw.get("settlement_amount")
+    raw_amount = raw.get("settlement_amount")
     settlement_amount: float | None = None
-    if settlement not in (None, ""):
+    if raw_amount is not None and str(raw_amount).strip():  # 留空（含 null）= 没填
         try:
-            settlement_amount = round(float(str(settlement)), 2)
+            settlement_amount = round(float(str(raw_amount)), 2)
         except (TypeError, ValueError) as exc:
             raise RpcDomainError(_ERR_PUBLISH_DATA, f"settlement_amount 须为数字: {exc}") from exc
-        if settlement_amount < 0:
-            raise RpcDomainError(_ERR_PUBLISH_DATA, "settlement_amount ≥ 0")
+        if not math.isfinite(settlement_amount) or settlement_amount < 0:  # NaN/∞ 上不了线
+            raise RpcDomainError(_ERR_PUBLISH_DATA, "settlement_amount 须为不小于 0 的数字")
 
     data = {
         "platform": platform,
@@ -460,6 +461,9 @@ def import_settlement_csv(context: AppContext, params: dict[str, Any]) -> dict[s
                 amount = round(float(str(amount_raw).strip()), 2)
             except ValueError:
                 skipped.append({"reason": f"结算金额不是数字：{amount_raw}", "row": row})
+                continue
+            if not math.isfinite(amount) or amount < 0:  # 与手工录入同一口径
+                skipped.append({"reason": f"结算金额须为不小于 0 的数字：{amount_raw}", "row": row})
                 continue
         hits = exports_repo.list_by_video_id(context.conn, video_id)
         if not hits:

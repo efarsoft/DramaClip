@@ -160,6 +160,43 @@ def test_rejects_bad_extended_fields(memory_db: sqlite3.Connection, tmp_path: Pa
     assert row is not None and row["publish_data"] is None, "拒收的脏数据一个都不落库"
 
 
+# 结算金额的唯一口径：≥ 0 的有限数字。NaN/∞ 必须拒——存得进库（JSON 文本）却上不了线：
+# Python 的 json 会写出 NaN/Infinity 字面量，那不是合法 JSON，主进程一解析整条连接就断，
+# 此后每次列出这条成片都会把服务打挂（2026-11-24 审查实锤）。两个录入入口共用这份清单。
+_SETTLEMENT_BAD: list[Any] = [
+    "nan", "NaN", "inf", "-inf", "Infinity", "1e999", float("nan"), float("inf"),
+    "-5", -0.01,
+]
+
+
+@pytest.mark.parametrize("bad", _SETTLEMENT_BAD)
+def test_settlement_amount_rejects_non_finite_and_negative(
+    memory_db: sqlite3.Connection, tmp_path: Path, bad: Any
+) -> None:
+    export_id = _seed(memory_db, tmp_path)
+    with pytest.raises(RpcDomainError) as exc_info:
+        export_api.set_publish_data(
+            _context(memory_db),
+            {"export_id": export_id, "data": {**_valid_data(), "settlement_amount": bad}},
+        )
+    assert exc_info.value.code == -32410, bad
+    row = exports_repo.get(memory_db, export_id)
+    assert row is not None and row["publish_data"] is None, "拒收的金额一个都不落库"
+
+
+def test_settlement_amount_accepts_finite_non_negative_and_blank(
+    memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """别矫枉过正：正常的钱（含 0）照收并保留两位，留空就是没填。"""
+    export_id = _seed(memory_db, tmp_path)
+    for raw, expected in (("128.456", 128.46), (0, 0.0), ("", None), (None, None), ("  ", None)):
+        result = export_api.set_publish_data(
+            _context(memory_db),
+            {"export_id": export_id, "data": {**_valid_data(), "settlement_amount": raw}},
+        )
+        assert result["publish_data"]["settlement_amount"] == expected, repr(raw)
+
+
 def test_video_id_conflict_conservative(memory_db: sqlite3.Connection, tmp_path: Path) -> None:
     # projects.source_path 有 UNIQUE 约束：两条独立成片须用不同源目录
     (tmp_path / "a").mkdir()

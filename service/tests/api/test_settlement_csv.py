@@ -108,3 +108,23 @@ def test_csv_skips_non_numeric_amount(
     assert any("结算金额不是数字" in item["reason"] for item in result["skipped"])
 
 
+@pytest.mark.parametrize("bad", ["nan", "inf", "1e999", "-5", "-0.01"])
+def test_csv_skips_non_finite_and_negative_amount(
+    memory_db: sqlite3.Connection, tmp_path: Path, bad: str
+) -> None:
+    """结算金额须为 ≥ 0 的有限数字（与手工录入同一口径）。
+
+    NaN/∞ 上了线就是非法 JSON（主进程一解析就断连）；负数不是结算。金额非法
+    时整行宁拒录——不能只回填账号、把坏金额一起写进去。
+    """
+    export_id = _seed_with_plan(memory_db, tmp_path, "vid-1")
+    csv_text = f"作品ID,结算金额,发布账号\nvid-1,{bad},主号\n"
+    result = export_api.import_settlement_csv(
+        SimpleNamespace(conn=memory_db), {"csv_text": csv_text}
+    )
+    assert result["matched"] == 0
+    assert any("不小于 0" in item["reason"] for item in result["skipped"]), result["skipped"]
+    publish = exports_repo.get(memory_db, export_id)["publish_data"]
+    assert publish.get("settlement_amount") is None and publish.get("publish_account") is None
+
+
