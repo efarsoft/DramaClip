@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from dramaclip.api import narration_plans as narration_plans
 from dramaclip.engines.analysis.models import AudioFeatures
+from dramaclip.flows import narration as flows_narration
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
@@ -42,10 +42,10 @@ def _cast(conn: sqlite3.Connection, episode: dict[str, object]) -> object:
     from types import SimpleNamespace
 
     context = SimpleNamespace(conn=conn, notifier=SimpleNamespace(log=lambda *a: None))
-    variant = narration_plans._Variant(
+    variant = flows_narration._Variant(
         name="角度1", reason="理由", episode_numbers=[1], angle_block=""
     )
-    _scenes, _highlights, material = narration_plans._casting_for(
+    _scenes, _highlights, material = flows_narration._casting_for(
         context, [episode], variant  # type: ignore[arg-type]
     )
     return material[str(episode["id"])]

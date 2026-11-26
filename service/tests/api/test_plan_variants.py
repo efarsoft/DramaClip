@@ -35,6 +35,7 @@ from dramaclip.engines.narration.models import (
     PlanData,
     TimelineSegment,
 )
+from dramaclip.flows import narration as flows_narration
 from dramaclip.infra import jobs
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -251,7 +252,7 @@ def test_pinned_style_survives_a_project_without_transcripts(
 
     settings = dict(context.settings)
     episodes = _done_episodes(memory_db, project_id)
-    episode_inputs = narration_plans._inject_run_settings(
+    episode_inputs = flows_narration._inject_run_settings(
         context, settings, episodes, ["dialogue_narration"]
     )
     assert episode_inputs == [], "本用例要的就是没有转写，种子被改则什么都没验"

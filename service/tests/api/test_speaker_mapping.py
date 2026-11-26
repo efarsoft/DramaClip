@@ -10,8 +10,8 @@ from types import SimpleNamespace
 import pytest
 
 from dramaclip.api import analysis as analysis_api
-from dramaclip.api import narration_plans
 from dramaclip.engines.analysis.models import AsrSegment
+from dramaclip.flows import narration as flows_narration
 from dramaclip.infra import jobs as jobs_mod
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -99,19 +99,19 @@ def test_apply_speaker_mapping_maps_and_passes_through() -> None:
         AsrSegment(start=0.0, end=1.0, text="甲", speaker="角色A"),
         AsrSegment(start=1.0, end=2.0, text="乙"),
     ]
-    out = narration_plans._apply_speaker_mapping(segs, {"角色A": "汪言"})
+    out = flows_narration._apply_speaker_mapping(segs, {"角色A": "汪言"})
     assert out[0].speaker == "汪言"
     assert out[1].speaker is None
-    assert narration_plans._apply_speaker_mapping(segs, {}) is segs, "空映射直通原列表"
+    assert flows_narration._apply_speaker_mapping(segs, {}) is segs, "空映射直通原列表"
 
 
 def test_speaker_mapping_of_parses_settings_json() -> None:
-    assert narration_plans._speaker_mapping_of(
+    assert flows_narration._speaker_mapping_of(
         {"speaker.mapping": '{"角色A": "汪言"}'}
     ) == {"角色A": "汪言"}
-    assert narration_plans._speaker_mapping_of({}) == {}
-    assert narration_plans._speaker_mapping_of({"speaker.mapping": "not-json"}) == {}
-    assert narration_plans._speaker_mapping_of({"speaker.mapping": "42"}) == {}
+    assert flows_narration._speaker_mapping_of({}) == {}
+    assert flows_narration._speaker_mapping_of({"speaker.mapping": "not-json"}) == {}
+    assert flows_narration._speaker_mapping_of({"speaker.mapping": "42"}) == {}
 
 
 def test_collect_episode_inputs_applies_mapping(
@@ -131,9 +131,9 @@ def test_collect_episode_inputs_applies_mapping(
         audio_features=None,
     )
     episodes = episodes_repo.list_by_project(memory_db, project_id)
-    inputs = narration_plans._collect_episode_inputs(
+    inputs = flows_narration._collect_episode_inputs(
         context, episodes, {"角色A": "汪言"}
     )
     assert inputs[0]["segments"][0]["speaker"] == "汪言"
-    unmapped = narration_plans._collect_episode_inputs(context, episodes, None)
+    unmapped = flows_narration._collect_episode_inputs(context, episodes, None)
     assert unmapped[0]["segments"][0]["speaker"] == "角色A"

@@ -6,9 +6,9 @@ import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
-from dramaclip.api.narration_plans import _collect_prior_texts
 from dramaclip.engines.narration import script_driver
 from dramaclip.engines.narration.models import PlanData
+from dramaclip.flows.narration import _collect_prior_texts
 from dramaclip.infra.storage.repos import plans as plans_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
 

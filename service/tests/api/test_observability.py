@@ -20,11 +20,11 @@ from dramaclip.api import analysis as analysis_api
 from dramaclip.api import analysis_job as analysis_job
 from dramaclip.api import export as export_api
 from dramaclip.api import narration as narration_api
-from dramaclip.api import narration_plans as narration_plans
 from dramaclip.engines.analysis import pipeline
 from dramaclip.engines.analysis.models import EpisodeRawAnalysis
 from dramaclip.engines.narration import titles
 from dramaclip.engines.semantic.llm_client import LlmClient
+from dramaclip.flows import narration as flows_narration
 from dramaclip.infra import jobs as jobs_mod
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -295,7 +295,7 @@ def test_style_resolution_leaves_no_llm_trace(
     settings: dict[str, str] = dict(_LLM_SETTINGS)
     settings["narration.style_id"] = "auto"
 
-    narration_plans._inject_run_settings(harness.context, settings, episodes, ["full_narration"])
+    flows_narration._inject_run_settings(harness.context, settings, episodes, ["full_narration"])
     blobs = _traces(tmp_path)
     names = [name for name in blobs if name.startswith("llm_style_select_")]
     assert names == [], f"风格选题已退役却仍有留痕：{sorted(names)}"
