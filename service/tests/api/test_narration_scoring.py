@@ -256,8 +256,18 @@ def test_plan_variants_scores_the_batch_at_the_tail_of_the_job(
 
     _wait_until(lambda: len(scored_batches) == 1)
     assert len(scored_batches[0]) == 2, "整批只评一次"
+    # fake 跑过 ≠ 落库完成（评分在 job 终态后异步收尾）：等 DB 出分再读，
+    # 否则长跑尾段的调度间隙会让断言读到 NULL（2026-11-26 全量套件实锚一次）。
+    _wait_until(
+        lambda: all(
+            row["score_total"] is not None
+            for row in plans_repo.list_by_batch(memory_db, project_id, str(result["batch_id"]))
+        )
+    )
     plans = plans_repo.list_by_batch(memory_db, project_id, str(result["batch_id"]))
-    assert all(row["score_total"] == pytest.approx(7.0) for row in plans)
+    assert all(row["score_total"] == pytest.approx(7.0) for row in plans), (
+        f"score_total 未按 fake 落库: {[(r['id'], r['status'], r['score_total']) for r in plans]}"
+    )
     assert {row["suggestion"] for row in plans} == {"建议·角度1", "建议·角度2"}
     # 评分不得改变硬门禁：grade 仍由 defects 决定，与分数无关
     assert all(row["status"] == "ready" for row in plans)

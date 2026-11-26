@@ -1,4 +1,8 @@
-"""retell 驱动的文案重写循环：gate 报告择优 + 反馈注入（批 ① 下半）。"""
+"""retell 驱动的文案重写循环：gate 报告择优 + 反馈注入（批 ① 下半）。
+
+被测执行体已下沉 flows/narration.py（工程债 ② 首切）；打桩随读者迁移——
+gate/write_plan_copy 的 setattr 都打在 flows.narration 上（调用发生的模块）。
+"""
 
 from __future__ import annotations
 
@@ -40,8 +44,8 @@ def _plan(text: str) -> PlanData:
 def test_gate_returns_report_and_writes_trace(tmp_path, monkeypatch):
     """gate 返回报告本体（重写循环取卡点），trace 落盘。"""
     import dramaclip.engines.semantic.llm_client as llm_client_mod
-    from dramaclip.api import narration_plans
     from dramaclip.engines.narration import retell as retell_mod
+    from dramaclip.flows import narration as narration_plans
 
     def fake_retell(text, client):
         return RetellReport(retell="复述", confusions=[{"note": "没听懂"}], passed=False)
@@ -64,7 +68,7 @@ def test_gate_returns_report_and_writes_trace(tmp_path, monkeypatch):
 
 def test_rewrite_loop_adopts_passing_rewrite(tmp_path, monkeypatch):
     """重写循环：初稿不达标 → 带卡点重写一次 → 重写稿复述达标才换血。"""
-    from dramaclip.api import narration_plans
+    from dramaclip.flows import narration as narration_plans
 
     plan = _plan("初稿文本")
     reports = iter([_report(4), _report(1, passed=True)])
@@ -91,8 +95,8 @@ def test_rewrite_loop_adopts_passing_rewrite(tmp_path, monkeypatch):
 
 def test_rewrite_loop_injects_scoring_suggestion(tmp_path, monkeypatch):
     """①审计落地：重写反馈并流评分器六维诊断——复述抓听不懂，评分抓不吸引。"""
-    from dramaclip.api import narration_plans
     from dramaclip.engines.narration import variant_scoring as vs
+    from dramaclip.flows import narration as narration_plans
 
     plan = _plan("初稿文本")
     reports = iter([_report(4), _report(1, passed=True)])
@@ -125,8 +129,8 @@ def test_rewrite_loop_injects_scoring_suggestion(tmp_path, monkeypatch):
 
 def test_rewrite_loop_survives_scoring_failure(tmp_path, monkeypatch):
     """评分诊断是增益不是依赖：score_one 抛异常时只缺建议，重写照常进行。"""
-    from dramaclip.api import narration_plans
     from dramaclip.engines.narration import variant_scoring as vs
+    from dramaclip.flows import narration as narration_plans
 
     plan = _plan("初稿文本")
     reports = iter([_report(4), _report(1, passed=True)])
@@ -160,7 +164,7 @@ def test_rewrite_loop_survives_scoring_failure(tmp_path, monkeypatch):
 
 def test_rewrite_loop_keeps_original_when_rewrite_worse(tmp_path, monkeypatch):
     """重写稿复述仍未达标 → 择优保留原稿，不盲采。"""
-    from dramaclip.api import narration_plans
+    from dramaclip.flows import narration as narration_plans
 
     plan = _plan("初稿文本")
     reports = iter([_report(1), _report(6)])

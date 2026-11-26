@@ -22,7 +22,6 @@ PACKAGE = SERVICE / "dramaclip"
 # 并写明欠账理由——「先合再还」可以，「不记账」不行。
 _FILE_RATCHET: dict[str, int] = {
     "dramaclip/api/models.py": 848,  # +35：下载收尾自动自检钩子（2026-11-19 业主裁决）
-    "dramaclip/api/narration_plans.py": 1002,
     "dramaclip/engines/exporter/encoder.py": 1240,
     "dramaclip/engines/narration/audit.py": 841,  # +34：包外集号告警规则（W14-A）
     # +3：stderr None 防御（2026-11-18 装测实锤）；+4：xpu 轮镜像 fallback（008eecf）
