@@ -139,6 +139,39 @@ def _plain(value: Any) -> Any:
     return str(value)
 
 
+#: funasr 1.4.16 的聚类硬门槛（嵌入 <20 全判 0 号说话人、忽略指定人数）。本文件
+#: 是独立脚本（venv 里不 import dramaclip），与主进程 diarize 模块的
+#: install_small_sample_clustering 镜像同一套语义——改哪边都要同步另一边。
+_SMALL_SAMPLE_MIN_EMBEDDINGS = 20
+
+
+def _install_small_sample_clustering(model: Any) -> None:
+    """小样本聚类兜底（worker 镜像，语义见主进程 diarize 模块的同名实现）。"""
+    inner = getattr(model, "cb_model", None)
+    if not callable(inner) or not (
+        hasattr(inner, "spectral_cluster") and hasattr(inner, "kmeans_cluster")
+    ):
+        return
+
+    def _cluster(
+        X: Any, oracle_num: int | None = None, *, _backend: Any = inner
+    ) -> Any:
+        import numpy as np
+
+        n = int(X.shape[0])
+        if n >= _SMALL_SAMPLE_MIN_EMBEDDINGS or n < 2:
+            return _backend(X, oracle_num=oracle_num)
+        try:
+            if oracle_num is not None and oracle_num > 0:
+                return _backend.kmeans_cluster(X, min(int(oracle_num), n))
+            return _backend.spectral_cluster(X, None)
+        except Exception as exc:  # noqa: BLE001 - 聚类炸了不能拖死整段转写
+            logging.warning("小样本说话人聚类失败，回退单一说话人：%s", exc)
+            return np.zeros(n, dtype="int")
+
+    model.cb_model = _cluster
+
+
 def main() -> int:
     cfg = json.loads(sys.argv[1])
     real_stdout = os.dup(1)
@@ -176,6 +209,8 @@ def main() -> int:
         reason = f"{type(exc).__name__}: {exc}"
         kwargs["device"] = device
         model = AutoModel(**kwargs)
+
+    _install_small_sample_clustering(model)
 
     actual = _model_device(model)
     if actual is not None:

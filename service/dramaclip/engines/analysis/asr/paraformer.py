@@ -30,7 +30,11 @@ from dramaclip.engines.analysis.asr.funasr import (
     _inproc_funasr,
     _spawn_funasr_worker,
 )
-from dramaclip.engines.analysis.diarize import _assign_speakers, _spk_spans
+from dramaclip.engines.analysis.diarize import (
+    _assign_speakers,
+    _spk_spans,
+    install_small_sample_clustering,
+)
 from dramaclip.engines.analysis.models import AsrSegment, WordSpan
 from dramaclip.infra import compute
 
@@ -281,6 +285,9 @@ class ParaformerEngine:
                 )
                 if reason:
                     self._fallback_reason = reason
+        # 小样本聚类兜底（装不上=模型没有聚类后端，无影响）：funasr 的
+        # 「嵌入<20 全判一人」硬门槛在重 BGM 的短剧集上必踩，0.2.5 装测实锤
+        install_small_sample_clustering(self._model)
         return self._model
 
     def compute(self) -> compute.ComputeReport | None:

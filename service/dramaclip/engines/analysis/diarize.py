@@ -8,9 +8,62 @@ funasr 原始输出（sentence_info），输出是句级段的 speaker 标签（
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+import numpy as np
+
 from dramaclip.engines.analysis.models import AsrSegment
+
+_LOGGER = logging.getLogger(__name__)
+
+# funasr 1.4.16 的聚类后端有一条硬门槛：嵌入不足 20 条时全员判 0 号说话人，
+# 连 preset_spk_num 都被忽略（funasr/models/campplus/cluster_backend.py 的
+# `if X.shape[0] < 20: return np.zeros(...)`）。嵌入按 0.75s 步进提取——VAD
+# 检出的语音不足约 15 秒就触发：重 BGM 的微短剧集 VAD 检出语音骤减，正是
+# 这个形状（0.2.5 装测实锤「多人全识别为角色A、指定人数也无效」）。
+_FUNASR_MIN_EMBEDDINGS = 20
+
+
+class _SmallSampleClustering:
+    """cb_model 的小样本包装：嵌入够多走 funasr 原路径，少量自己聚。
+
+    指定人数（`asr.num_speakers`）时用 funasr 自带的 KMeans 直聚 k 簇——
+    数学上两条嵌入也能聚，门槛对它毫无必要；自动估人数时照走谱聚类
+    （小矩阵照样成立），但**不做** 0.78 余弦合并——BGM 把嵌入推得彼此相似
+    时，合并会把仅有的几簇抹成一个，正是要修的塌缩。两条兜底都失败时回
+    全零标签（与原行为一致：转写不受影响，只是没有分声）。
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def __call__(self, X: Any, oracle_num: int | None = None) -> Any:
+        n = int(X.shape[0])
+        if n >= _FUNASR_MIN_EMBEDDINGS or n < 2:
+            return self._inner(X, oracle_num=oracle_num)
+        try:
+            if oracle_num is not None and oracle_num > 0:
+                return self._inner.kmeans_cluster(X, min(int(oracle_num), n))
+            return self._inner.spectral_cluster(X, None)
+        except Exception as exc:  # noqa: BLE001 - 聚类炸了不能拖死整段转写
+            _LOGGER.warning("小样本说话人聚类失败，回退单一说话人：%s", exc)
+            return np.zeros(n, dtype="int")
+
+
+def install_small_sample_clustering(model: Any) -> bool:
+    """给 funasr AutoModel 换上小样本可用的聚类后端；返回是否装上。
+
+    模型没有聚类后端（未挂 spk）或形状不对时不装。funasr 内部只把 cb_model
+    当 callable 用（说话人聚类是唯一调用点），换包装安全；测试桩没有它也不受影响。
+    """
+    inner = getattr(model, "cb_model", None)
+    if not callable(inner) or not (
+        hasattr(inner, "spectral_cluster") and hasattr(inner, "kmeans_cluster")
+    ):
+        return False
+    model.cb_model = _SmallSampleClustering(inner)
+    return True
 
 
 def _spk_spans(raw: list[Any]) -> list[tuple[float, float, int]]:
