@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import logging
 import socket
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,27 @@ def _cloud_reachable() -> bool:
 def _cues_path(audio_path: Path) -> Path:
     """词界 cue sidecar 约定路径（与 synthesis._cues_sidecar 同一约定）。"""
     return audio_path.with_name(audio_path.stem + ".cues.json")
+
+
+def _write_cues(audio_path: Path, cues: list[dict[str, Any]]) -> None:
+    """词界边车落盘。它是增强产物：写失败不影响音频，只留一条调试日志。"""
+    try:
+        _cues_path(audio_path).write_text(
+            json.dumps(cues, ensure_ascii=False), encoding="utf-8"
+        )
+    except OSError as exc:
+        logging.getLogger(__name__).debug("词界边车写入失败（忽略）: %s", exc)
+
+
+def _communicate(text: str, voice: str) -> Any:
+    """合成请求：显式要词界事件。
+
+    库默认只给句边界，而解说字幕的真实词时取自 WordBoundary——不显式要，
+    `.cues.json` 永远不会落下，字幕一直是按字数比例估的。
+    """
+    import edge_tts  # 可选依赖懒加载
+
+    return edge_tts.Communicate(text, voice, boundary="WordBoundary")
 
 
 class EdgeTtsTimeout(TimeoutError):
@@ -109,10 +131,8 @@ class EdgeTtsEngine:
 
             await asyncio.wait_for(_consume(), timeout=SYNTH_TIMEOUT_S)
             path.write_bytes(bytes(audio))
-            if cues:
-                _cues_path(path).write_text(
-                    json.dumps(cues, ensure_ascii=False), encoding="utf-8"
-                )
+            # 没拿到词界也落一个空边车：「有没有边车」是旧配音要不要补词界的记号
+            _write_cues(path, cues)
 
         async def _run() -> None:
             # 非 Edge 音色名（如升级前全局键残留的 Kokoro 名）回退默认，避免云端报错
@@ -120,9 +140,7 @@ class EdgeTtsEngine:
             chunks, dropped = split_long_text(text)
             if len(chunks) <= 1:
                 # 单块（含 dropped=1 的全空白文本）：整段一次请求，走词界流路径
-                await _stream_with_cues(
-                    edge_tts.Communicate(text, safe_voice), out_path
-                )
+                await _stream_with_cues(_communicate(text, safe_voice), out_path)
                 return
             # 多块：逐块合成到临时目录，按序字节拼接——对调用方仍是单文件契约
             # （缓存 key 用切分前整段原文，见 base.TtsEngine.synthesize docstring）。
@@ -135,9 +153,7 @@ class EdgeTtsEngine:
                 block_offset = 0.0
                 for index, chunk in enumerate(chunks):
                     part = parts_dir / f"part-{index:04d}.mp3"
-                    await _stream_with_cues(
-                        edge_tts.Communicate(chunk, safe_voice), part
-                    )
+                    await _stream_with_cues(_communicate(chunk, safe_voice), part)
                     block_cues = _cues_path(part)
                     if block_cues.is_file():
                         for cue in json.loads(block_cues.read_text(encoding="utf-8")):
@@ -156,11 +172,7 @@ class EdgeTtsEngine:
                         block_offset += len(piece) / 6000.0
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 out_path.write_bytes(b"".join(pieces))
-                if merged_cues:
-                    _cues_path(out_path).write_text(
-                        json.dumps(merged_cues, ensure_ascii=False),
-                        encoding="utf-8",
-                    )
+                _write_cues(out_path, merged_cues)
             finally:
                 for part in parts_dir.glob("*"):
                     part.unlink(missing_ok=True)

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -571,36 +572,154 @@ _TRAILING_MARKS = "，。、；：…——,.;:"
 # 对 export 侧公开：原声台词按词组拼行时沿用同一套「行尾不留句读」的规矩
 TRAILING_MARKS = _TRAILING_MARKS
 
+# 避头尾：这行以开引号/开括号收尾、下一行以闭引号/闭括号或助词起头，都读不成句。
+_OPENERS = "“‘「『（(《【"
+_CLOSERS = "”’」』）)》】"
+# 助词跟着前面的词走；刀口落在助词之后、连词/介词/副词之前，读起来最顺。
+_PARTICLES = "的了着地得们过吗呢吧啊嘛呀"
+_LEADERS = "但而却就才也都还又便被把给对向从让使连是"
+# 一个顺口的刀口抵几个字的均匀：离均分位两三字以内，宁可要顺口的。
+_SMOOTH_BREAK_CHARS = 2.5
+
+
+def _word_boundaries(sentence: str) -> list[int]:
+    """句内各个词的结束位置（可下刀处）。分词库缺席时只剩句末一个。"""
+    try:
+        import jieba  # 可选依赖懒加载（与热词挖掘同一份）
+    except ImportError:
+        return [len(sentence)]
+    jieba.setLogLevel(logging.WARNING)
+    ends: list[int] = []
+    pos = 0
+    for token in jieba.cut(sentence):
+        pos += len(token)
+        ends.append(pos)
+    return ends
+
+
+def _cut_points(text: str, start: int, stop: int, max_len: int) -> list[int]:
+    """一句超过行帽时在句内下刀：按块数均分，刀口落到最顺口的词边界。
+
+    只有句内已经没有可断标点时才走到这里——整句一口气超过行帽，只能从词缝里切。
+    顶格切会留残段（实测：十七字的句子切成十六字加一个「？」，问号被甩到下一行开头；
+    「连繁衍后代都是污染基因」切成「…都是污染」加「基因」）。每一刀两侧都不少于半份：
+    残段和秃头都不许有，「顺口」只能在匀称的刀口里挑。
+    """
+    ends = [start + end for end in _word_boundaries(text[start:stop])]
+    points: list[int] = []
+    while stop - start > max_len:
+        remain = stop - start
+        # 拆成 ceil(remain / max_len) 份，每份 ceil(remain / 份数)
+        share = -(-remain // -(-remain // max_len))
+        target = start + share
+        cuts = [end for end in ends if start < end <= start + max_len]
+        even = [
+            end
+            for end in cuts
+            if start + share // 2 <= end and stop - end >= -(-share // 2)
+        ]
+        clean = [
+            end
+            for end in even or cuts
+            if text[end - 1] not in _OPENERS
+            and text[end] not in _CLOSERS
+            and text[end] not in _PARTICLES
+        ]
+        smooth = [
+            end for end in clean if text[end - 1] in _PARTICLES or text[end] in _LEADERS
+        ]
+        # 比行帽还长的词（长数字、英文）没有缝：只能硬切，也按份均分
+        points.append(
+            min(
+                clean or even or cuts or [start + share],
+                key=lambda end: (
+                    abs(end - target) - (_SMOOTH_BREAK_CHARS if end in smooth else 0.0),
+                    end,
+                ),
+            )
+        )
+        start = points[-1]
+    return points
+
+
+def _sentences(stripped: str) -> list[tuple[int, int]]:
+    """按标点断成一句句，返回每句的 [起, 止)。
+
+    断在标点之后，所以紧跟着的闭引号/闭括号（「…糊弄我？」司仪…）、只剩句读的碎片
+    （「…了」。里的「。」）会落到下一句的开头——它们跟着前一句走，否则会被回并成
+    下一行的行首。
+    """
+    spans: list[tuple[int, int]] = []
+    pos = 0
+    for raw in _PUNCT_SPLIT.split(stripped):
+        start = pos + (len(raw) - len(raw.lstrip()))
+        pos += len(raw)
+        stop = start + len(raw.strip())
+        core = start
+        while core < stop and stripped[core] in _CLOSERS:
+            core += 1
+        marks_only = all(ch in _TRAILING_MARKS for ch in stripped[core:stop])
+        if spans and marks_only:
+            spans[-1] = (spans[-1][0], stop)
+            continue
+        if spans and core > start:
+            spans[-1] = (spans[-1][0], core)
+        if core < stop:
+            spans.append((core, stop))
+    return spans
+
+
+def split_subtitle_spans(text: str, max_len: int) -> list[tuple[int, int]]:
+    """长解说文案拆成字幕级短句，返回每行在原文里的 [起, 止) 字符区间。
+
+    行文规矩（业主立案②）：标点优先断句；整句超长时顺词缝均分；短段回并；行尾不留
+    句读；不留纯标点行。`split_subtitle_text` 就是这里切出来的字符串——按原文位置
+    返回，是为了让词界 cue 知道每一行从哪个字开始、到哪个字结束。
+    """
+    stripped = text.strip()
+    pieces: list[tuple[int, int]] = []
+    for start, stop in _sentences(stripped):
+        # 只有句尾句读把这一句顶过行帽的不算超长：那几个记号本来就要扫掉
+        body = stop
+        while body > start and stripped[body - 1] in _TRAILING_MARKS:
+            body -= 1
+        if body - start <= max_len:
+            pieces.append((start, stop))
+        else:
+            cuts = [start, *_cut_points(stripped, start, stop, max_len), stop]
+            pieces.extend(zip(cuts, cuts[1:], strict=False))
+    merged: list[tuple[int, int]] = []
+    for start, stop in pieces:
+        # 相邻两片之间至多隔着空白，按首尾跨度计长度：行里带着空白也不会超帽
+        if merged and stop - merged[-1][0] <= max_len:
+            merged[-1] = (merged[-1][0], stop)
+        else:
+            merged.append((start, stop))
+    lead = len(text) - len(text.lstrip())
+    lines: list[tuple[int, int]] = []
+    for start, stop in merged:
+        # 清理必须在**回并之后**：回并把 "好，" + "真的" 拼成一行时，那个逗号从行尾
+        # 挪到了行中，是句子的一部分。挪到回并之前清，就把该留的标点一起删了
+        # （`test_remerged_commas_survive_the_cleanup`）。
+        while stop > start and (
+            stripped[stop - 1].isspace() or stripped[stop - 1] in _TRAILING_MARKS
+        ):
+            stop -= 1
+        while start < stop and stripped[start].isspace():
+            start += 1
+        # 整行只剩标点/空白的留不得：调用方按字数比例分时长，0 字行是除零的来源
+        if start < stop:
+            lines.append((start + lead, stop + lead))
+    return lines or [(lead, lead)]
+
 
 def split_subtitle_text(text: str, max_len: int) -> list[str]:
-    """长解说文案拆成字幕级短句：标点优先断句，超长句硬切，短段回并，行尾句读清理。
+    """长解说文案拆成字幕级短句：标点优先断句，超长句顺词缝均分，短段回并，行尾句读清理。
 
     `max_len` 没有默认值：能放几个字只取决于用哪套预设烧（`line_char_cap`），写死一个
     数就是业主立案②的形状——「拆了，但每条照样放不下」。
     """
-    pieces: list[str] = []
-    for sentence in _PUNCT_SPLIT.split(text.strip()):
-        sentence = sentence.strip()
-        if not sentence:
-            continue
-        while len(sentence) > max_len:
-            pieces.append(sentence[:max_len])
-            sentence = sentence[max_len:]
-        if sentence:
-            pieces.append(sentence)
-    merged: list[str] = []
-    for piece in pieces:
-        if merged and len(merged[-1]) + len(piece) <= max_len:
-            merged[-1] += piece
-        else:
-            merged.append(piece)
-    # 清理必须在**回并之后**：回并把 "好，" + "真的" 拼成一行时，那个逗号从行尾挪到了
-    # 行中，是句子的一部分。挪到回并之前清，就把该留的标点一起删了（变异实测会红
-    # `test_remerged_commas_survive_the_cleanup`）。
-    cleaned = [piece.rstrip(_TRAILING_MARKS) for piece in merged]
-    # 整行只剩标点的（文案以「……」收尾就会产出这种行）留不得：0 字行在调用方按字数
-    # 比例分时长时是除零的来源，也不能替自己占一格时间轴。
-    return [piece for piece in cleaned if piece] or [""]
+    return [text[start:stop] for start, stop in split_subtitle_spans(text, max_len)]
 
 
 def build_ass(

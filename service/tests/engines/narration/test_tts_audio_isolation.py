@@ -24,6 +24,7 @@ from dramaclip.engines.narration.models import (
     PlanData,
     TimelineSegment,
 )
+from tests.tts_stub import write_audio
 
 _TTS_DURATION_S = 1.25
 _SETTINGS = {"tts.engine": "edge"}
@@ -41,8 +42,9 @@ class _TextWritingTts:
             raise RuntimeError("TTS 空文案：槽位未被语言层填充")
         with self._lock:
             self.calls.append((text, voice))
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(text.encode("utf-8"))
+        # 与真引擎同契约：连词界边车一起落——缺边车的配音会被当成旧产物去补词界，
+        # 这里量的「同文案不二次付费」才成立
+        write_audio(out_path, text.encode("utf-8"))
         return out_path
 
 

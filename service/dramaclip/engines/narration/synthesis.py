@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import shutil
+import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -89,11 +90,102 @@ def _cache_entry_for(
     try:
         key = _cache_key(text, engine_name, voice, speed)
         for candidate in cache_dir.glob(f"{key}.*"):
+            # <key>.cues.json 也落在这个通配里：它是词界边车不是音频，命中它会把
+            # JSON 当配音拷走（Windows 目录按字母序，.cues.json 还排在 .mp3 前面）
+            if candidate.name.endswith(".cues.json"):
+                continue
             if _usable(candidate):
                 return candidate
     except OSError:
         pass
     return None
+
+
+# ---- 旧配音补词界 ----------------------------------------------------------
+#: 会落下词界 cue 的引擎。它们在此之前的缓存/落位没有 .cues.json（那时合成还没
+#: 要词界），命中后补一次，解说字幕的真实词时才有得用。
+_CUE_ENGINES = frozenset({"edge"})
+#: 补词界时新旧音频时长差超过这个数就不认新词时：服务换过发声，词时对不上旧音频。
+_CUE_REFRESH_TOL_S = 0.05
+#: 补词界失败后的冷静期。没网的机器上引擎要把重试跑完（十几秒）才肯回退，一份
+#: 方案几十段就是十几分钟——失败一次先歇一会儿，期间照旧用旧音频。
+_CUE_REFRESH_COOLDOWN_S = 600.0
+_cue_refresh_after = 0.0
+
+
+def _needs_cues(engine_name: str, audio_path: Path) -> bool:
+    """这笔已有的配音要不要补词界：会落词界的引擎、没有边车、不在冷静期。"""
+    return (
+        engine_name in _CUE_ENGINES
+        and not _cues_sidecar(audio_path).is_file()
+        and time.monotonic() >= _cue_refresh_after
+    )
+
+
+def _same_audio_length(first: Path, second: Path) -> bool:
+    try:
+        return abs(tts_base.audio_duration_s(first) - tts_base.audio_duration_s(second)) <= (
+            _CUE_REFRESH_TOL_S
+        )
+    except Exception:  # noqa: BLE001 - 量不出时长就不认新词时
+        return False
+
+
+def _adopt_cues(cues: Path, fresh: Path, final_path: Path) -> None:
+    """把新合成给出的词界记到旧音频名下。
+
+    新旧时长对不上就不认（服务换过发声，词时对不上旧音频）；引擎没给词界也如实
+    留个空边车。两种情况都留边车——它同时是「补过了」的记号，缺边车的旧配音才会
+    触发补词界，不留就会每次建方案都重合成一遍。
+    """
+    if cues.is_file() and _same_audio_length(fresh, final_path):
+        os.replace(cues, _cues_sidecar(final_path))
+    else:
+        _cues_sidecar(final_path).write_text("[]", encoding="utf-8")
+
+
+def _refresh_cues(
+    engine: tts_base.TtsEngine,
+    engine_name: str,
+    text: str,
+    voice: str,
+    speed: str,
+    final_path: Path,
+    cache_dir: Path,
+) -> bool:
+    """旧配音补词界：同文同音色重合成一次，只取它的 .cues.json，音频原件不动。
+
+    实测同一段文字两次合成词时逐词相同，补来的词时配得上旧音频；音频不换，是因为
+    既有方案的时间轴是按它量的。新旧时长对不上就不认。合成失败（没网、服务不可达）
+    留着旧音频照常往下走——字幕回退按字数比例，不挡出片。
+
+    返回这次有没有真合成：补词界是真的调了引擎，算力回执要如实记。
+    """
+    global _cue_refresh_after
+    staging = final_path.with_name(f"{final_path.stem}.{uuid.uuid4().hex}{final_path.suffix}")
+    try:
+        produced = engine.synthesize(text, voice, staging)
+    except Exception as exc:  # noqa: BLE001 - 补词界是增益，失败不挡出片
+        _cue_refresh_after = time.monotonic() + _CUE_REFRESH_COOLDOWN_S
+        logger.warning("旧配音补词界失败，保留原音频（字幕按字数比例计时）: %s", exc)
+        return False
+    cues = _cues_sidecar(produced)
+    try:
+        try:
+            _adopt_cues(cues, produced, final_path)
+            key = _cache_key(text, engine_name, voice, speed)
+            if _usable(cache_dir / f"{key}{final_path.suffix}"):
+                shutil.copyfile(_cues_sidecar(final_path), cache_dir / f"{key}.cues.json")
+        except OSError as exc:
+            logger.debug("补词界落盘失败（忽略）: %s", exc)
+    finally:
+        if produced != staging:
+            produced.unlink(missing_ok=True)
+        staging.unlink(missing_ok=True)
+        _cues_sidecar(staging).unlink(missing_ok=True)
+        if produced != staging:
+            _cues_sidecar(produced).unlink(missing_ok=True)
+    return True
 
 
 def _store_in_cache(
@@ -191,12 +283,17 @@ def _synthesize_into(
     2. 内容寻址缓存 `cache_dir/sha256(text|engine|voice|speed).<ext>` 命中 →
        copy 落位（改一句只重合成一段，未改的段落不二次付费）；
     3. 都未命中 → 真合成，成功后写入缓存再原子落位。
+    命中那两条若落位的配音缺词界边车（引擎会落词界而边车不在），补合成一次只取
+    `.cues.json`，音频不动（见 `_refresh_cues`）。
 
     返回值只回答一件事：这次有没有真推理。算力回执只能来自真推理——
     缓存命中时设备根本没碰过，替它编一份就是假账。
     """
     if _usable(final_path):
-        return False
+        # 已有的配音缺词界（那之前合成还没要词界）：补一次，音频原件不动
+        return _needs_cues(engine_name, final_path) and _refresh_cues(
+            engine, engine_name, text, voice, speed, final_path, cache_dir
+        )
     cache_entry = _cache_entry_for(cache_dir, text, engine_name, voice, speed)
     if cache_entry is not None:
         tmp = final_path.with_name(f"{final_path.stem}.{uuid.uuid4().hex}{final_path.suffix}")
@@ -206,9 +303,11 @@ def _synthesize_into(
             cache_cues = cache_dir / f"{_cache_key(text, engine_name, voice, speed)}.cues.json"
             if cache_cues.is_file():
                 shutil.copyfile(cache_cues, _cues_sidecar(final_path))
-            return False
         finally:
             tmp.unlink(missing_ok=True)
+        return _needs_cues(engine_name, final_path) and _refresh_cues(
+            engine, engine_name, text, voice, speed, final_path, cache_dir
+        )
     # uuid 插进主干、保留最终扩展名：soundfile/edge 都靠扩展名推断音频格式，
     # 以 .part 结尾会让 sf.write 直接抛 TypeError。
     staging = final_path.with_name(f"{final_path.stem}.{uuid.uuid4().hex}{final_path.suffix}")

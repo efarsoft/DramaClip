@@ -64,12 +64,8 @@ from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.semantic import llm_budget
 from dramaclip.engines.subtitle import presets as subtitle_presets
-from dramaclip.engines.subtitle.ass_generator import (
-    Canvas,
-    build_ass,
-    line_char_cap,
-    split_subtitle_text,
-)
+from dramaclip.engines.subtitle.ass_generator import Canvas, build_ass, line_char_cap
+from dramaclip.engines.subtitle.narration_lines import narration_lines
 from dramaclip.engines.subtitle.srt import SrtCue, format_srt
 from dramaclip.infra import compute, config
 from dramaclip.infra.ffmpeg import probe
@@ -156,22 +152,15 @@ def _episode_paths_of(
     return paths
 
 
-def _narration_lines_from_cues(
-    plan_data: PlanData, segment_index: int, cap: int
-) -> list[dict[str, Any]] | None:
-    """词界 cue → 解说字幕行（T1 字幕批）：真实词时替代字符比例分配。
+def _narration_cues(plan_data: PlanData, segment_index: int) -> list[Any] | None:
+    """这一段配音旁的词界 cue（.cues.json，edge stream 词界，与 synthesis 缓存同约定）。
 
-    段落配音旁有 .cues.json（edge stream 词界，与 synthesis 缓存同约定）时，
-    按词累计到行字数上限封行、行时间=首词起点→末词终点；无 cue/坏数据返回
-    None（回退字符比例分配，逐字节兼容旧行为）。
+    没有、读不出、形状不对都返回 None：调用方回退按字数比例分配。
     """
     if not (0 <= segment_index < len(plan_data.timeline)):
         return None
-    segment = plan_data.timeline[segment_index]
-    slot = segment.narration_id
-    if not slot:
-        return None
-    item = next((t for t in plan_data.narration_texts if t.id == slot), None)
+    slot = plan_data.timeline[segment_index].narration_id
+    item = next((t for t in plan_data.narration_texts if t.id == slot), None) if slot else None
     if item is None or not item.audio_path:
         return None
     audio = Path(str(item.audio_path))
@@ -182,50 +171,20 @@ def _narration_lines_from_cues(
         cues = json.loads(cue_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
-    if not isinstance(cues, list):
-        return None
-    lines: list[dict[str, Any]] = []
-    buf_text = ""
-    buf_start: float | None = None
-    buf_end: float | None = None
-    for cue in cues:
-        if not isinstance(cue, dict):
-            continue
-        word = str(cue.get("text") or "")
-        if not word:
-            continue
-        start = float(cue.get("start") or 0.0)
-        end = float(cue.get("end") or 0.0)
-        if (
-            buf_text
-            and buf_start is not None
-            and buf_end is not None
-            and len(buf_text) + len(word) > cap
-        ):
-            lines.append(
-                {
-                    "start": round(buf_start, 3),
-                    "end": round(buf_end, 3),
-                    "text": buf_text,
-                    "emotion_label": segment.emotion_label,
-                }
-            )
-            buf_text = ""
-        if not buf_text:
-            buf_text, buf_start = word, start
-        else:
-            buf_text += word
-        buf_end = end
-    if buf_text and buf_start is not None and buf_end is not None:
-        lines.append(
-            {
-                "start": round(buf_start, 3),
-                "end": round(buf_end, 3),
-                "text": buf_text,
-                "emotion_label": segment.emotion_label,
-            }
-        )
-    return lines or None
+    return cues if isinstance(cues, list) else None
+
+
+def _narration_lines(
+    plan_data: PlanData, segment_index: int, text: str, cap: int, duration_s: float
+) -> list[dict[str, Any]]:
+    """解说字幕行：有词界 cue 走真实词时，没有就按字数比例；切行与最短停留同口径。"""
+    in_range = 0 <= segment_index < len(plan_data.timeline)
+    emotion = plan_data.timeline[segment_index].emotion_label if in_range else None
+    cues = _narration_cues(plan_data, segment_index)
+    return [
+        {"start": line.start, "end": line.end, "text": line.text, "emotion_label": emotion}
+        for line in narration_lines(text, cues, cap, duration_s)
+    ]
 
 
 def _write_film_map(
@@ -477,7 +436,8 @@ def render_export(
     def burn_subtitle(segment_index: int, text: str, duration_s: float) -> str:
         """生成段级 ass 文件并返回路径（相对时间轴 0→duration）。
 
-        长文案按标点/字数拆成多行字幕，时长按字数比例分配——整段一行会溢出画面。
+        长文案拆成多行字幕——整段一行会溢出画面。行时间有词界 cue 就跟实际念出的
+        字走，没有就按字数比例分配；亮不够的行延到读得过来为止。
         每行几个字的上限问预设要（`line_char_cap`）：字号 64 与字号 96 能塞进同一幅
         1080 宽的画框的字数不是一回事，写死一个数的话大字号预设会「拆了，但每条照样放
         不下」，真机烧出来整行向两侧溢出、首尾被画框切掉（实测）。
@@ -487,29 +447,8 @@ def render_export(
         ass_path = ass_dir / f"seg_{segment_index:03d}.ass"
         cap = line_char_cap(preset, ass_canvas)
         # 词界 cue 优先（T1 字幕批）：段落配音旁有 .cues.json（edge stream 词界）
-        # 时按真实词时切行；无 cue（indextts2/kokoro 等引擎）回退标点断句+字符比例。
-        cue_lines = _narration_lines_from_cues(plan_data, segment_index, cap)
-        if cue_lines is not None:
-            lines = cue_lines
-        else:
-            chunks = split_subtitle_text(text, cap)
-            total_chars = sum(len(c) for c in chunks)
-            emotion = None
-            if 0 <= segment_index < len(plan_data.timeline):
-                emotion = plan_data.timeline[segment_index].emotion_label
-            lines = []
-            cursor = 0.0
-            for chunk in chunks:
-                span = duration_s * len(chunk) / total_chars
-                lines.append(
-                    {
-                        "start": cursor,
-                        "end": cursor + span,
-                        "text": chunk,
-                        "emotion_label": emotion,
-                    }
-                )
-                cursor += span
+        # 时按真实词时切行；无 cue（indextts2/kokoro 等引擎）回退按字数比例。
+        lines = _narration_lines(plan_data, segment_index, text, cap, duration_s)
 
         burned_lines[segment_index] = [
             (float(line["start"]), float(line["end"]), str(line["text"])) for line in lines

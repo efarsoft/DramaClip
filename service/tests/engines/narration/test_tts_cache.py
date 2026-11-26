@@ -20,6 +20,7 @@ from dramaclip.engines.narration.models import (
     PlanData,
     TimelineSegment,
 )
+from tests.tts_stub import CUES_SUFFIX, write_audio
 
 _DURATION_S = 1.25
 _SOURCE = {"ep1": 120.0}
@@ -32,8 +33,7 @@ class _CountingTts:
 
     def synthesize(self, text: str, voice: Any, out_path: Path) -> Path:
         self.calls.append((text, voice))
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(text.encode("utf-8"))
+        write_audio(out_path, text.encode("utf-8"))  # 与真引擎同契约：连词界边车一起落
         return out_path
 
 
@@ -75,6 +75,11 @@ def _cache_files(tts_dir: Path) -> list[Path]:
     return sorted(p for p in cache.rglob("*") if p.is_file()) if cache.exists() else []
 
 
+def _audio_entries(tts_dir: Path) -> list[Path]:
+    """缓存里的音频条目：词界边车跟着自己的音频进缓存，不算单独一条。"""
+    return [p for p in _cache_files(tts_dir) if not p.name.endswith(CUES_SUFFIX)]
+
+
 def test_cache_hit_restores_target_without_resynthesising(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -85,7 +90,8 @@ def test_cache_hit_restores_target_without_resynthesising(
 
     first = _run(_plan("同一句话"), tts_dir)
     assert len(engine.calls) == 1
-    assert len(_cache_files(tts_dir)) == 1, "合成成功后必须写缓存"
+    assert len(_audio_entries(tts_dir)) == 1, "合成成功后必须写缓存"
+    assert len(_cache_files(tts_dir)) == 2, "词界边车要跟着音频一起进缓存"
 
     # 模拟产物目录被清（缓存目录保留）
     for item in first.narration_texts:
@@ -96,7 +102,11 @@ def test_cache_hit_restores_target_without_resynthesising(
     assert len(engine.calls) == 1, "缓存命中不该再调引擎"
     audio = second.narration_texts[0]
     assert audio.audio_path is not None
-    assert Path(audio.audio_path).read_text(encoding="utf-8") == "同一句话"
+    landed = Path(str(audio.audio_path))
+    assert landed.read_text(encoding="utf-8") == "同一句话"
+    assert landed.with_name(f"{landed.stem}{CUES_SUFFIX}").is_file(), (
+        "缓存里的词界边车要一起落位：它决定解说字幕走不走真实词时"
+    )
 
 
 def test_cache_survives_across_work_dirs(
@@ -157,8 +167,10 @@ def test_cache_key_is_sha256_of_all_params(
         {"tts.engine": "edge", "tts.voice": "甲", "tts.speed": "1.1"},
     )
     expected = hashlib.sha256("文案|edge|甲|1.1".encode()).hexdigest()
-    names = [p.stem for p in _cache_files(tts_dir)]
-    assert names == [expected], f"缓存文件名必须是全参数 sha256，实得 {names}"
+    names = [p.name for p in _cache_files(tts_dir)]
+    assert names == [f"{expected}{CUES_SUFFIX}", f"{expected}.mp3"], (
+        f"缓存文件名必须是全参数 sha256（词界边车同名加后缀），实得 {names}"
+    )
 
 
 def test_failed_synthesis_writes_no_cache_entry(
@@ -184,7 +196,7 @@ def test_eviction_shrinks_cache_to_limit(
     engine = _CountingTts()
     _stub(monkeypatch, engine)
     tts_dir = tmp_path / "tts"
-    # 每条缓存 ~63B（UTF-8）；上限 150B → 只容得下最新 2 条
+    # 每条缓存 = 音频 ~63B（UTF-8）+ 词界边车 2B；上限 150B → 只容得下最新 2 条
     monkeypatch.setattr(pipeline, "_CACHE_MAX_BYTES", 150)
 
     texts = [f"第{i}段" + "垫" * 18 for i in range(4)]

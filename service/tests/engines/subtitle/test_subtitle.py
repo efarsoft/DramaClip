@@ -267,11 +267,82 @@ def test_a_line_of_punctuation_only_never_returns_empty(text: str) -> None:
     assert split_subtitle_text(text, 12) == [""]
 
 
-def test_split_hard_cuts_a_run_without_punctuation() -> None:
-    """整段无标点（长旁白常见）：只能按上限硬切，且切点均匀不残段。"""
-    chunks = split_subtitle_text(_NO_PUNCT_RUN, 10)
-    assert chunks == [_NO_PUNCT_RUN[i : i + 10] for i in range(0, len(_NO_PUNCT_RUN), 10)]
-    assert all(len(chunk) == 10 for chunk in chunks[:-1])
+def test_split_cuts_a_punctuation_less_run_evenly_on_word_edges() -> None:
+    """整段无标点（长旁白常见）：只能硬切，但刀口落词缝、两侧匀称、不留残段。
+
+    此前是顶格切：字数不巧就切出十六字加一个字的尾巴，还会把词切开。
+    """
+    run = _NO_PUNCT_RUN
+    for cap in (6, 10, 16):
+        chunks = split_subtitle_text(run, cap)
+        assert "".join(chunks) == run, f"硬切丢字：{chunks}"
+        assert all(len(chunk) <= cap for chunk in chunks), f"{cap} 被超过：{chunks}"
+        assert min(len(chunk) for chunk in chunks) >= cap // 2, f"留了残段：{chunks}"
+    # 刀口在词缝上（「温声细语的｜男人」），不是从前往后数够十六个字
+    assert split_subtitle_text(run, 16) == [
+        "她怎么也想不到那个温声细语的",
+        "男人会在新婚夜锁上房门转身就走",
+    ]
+    # 顶格切会留的那种尾巴：二十一个字切十加十加一
+    assert split_subtitle_text(run[:21], 10) == [
+        "她怎么也想不到",
+        "那个温声细语的",
+        "男人会在新婚夜",
+    ]
+
+
+def test_tone_marks_and_closers_stay_with_their_sentence() -> None:
+    """句尾的「？。：，」和闭引号跟着自己那句走，不许被甩到下一行的开头。
+
+    全库对账（51 段解说）实测的形状：顶格切把十六字的句子切剩一个「？」，它回并到
+    下一句上成了「？」司仪照着流程问；同样的还有「。而在这之前」「，他抬手就赶人」。
+    """
+    banned_first = "，。、；：？！”’」』）的了着地得们"
+    for text in (
+        "“随便拿个几万的破钻戒就想糊弄我？”司仪照着流程问：许娇娇小姐您愿意嫁给汪言先生吗",
+        "酒店和整场婚礼当场归了另一个女人。而在这之前，穿白婚纱",
+        "旧的冲上来喊「我才是汪言的新娘」，他抬手就赶人",
+        "带头的闺蜜一边给她上妆一边敲边鼓：婚礼花多少钱",
+        "“这车已经是我能给你的最好的了”。她说",
+        "“谁稀罕你这十块八块的？”新娘在旁边补刀",
+    ):
+        chunks = split_subtitle_text(text, 16)
+        assert all(len(chunk) <= 16 for chunk in chunks), f"超帽：{chunks}"
+        heads = [chunk for chunk in chunks if chunk[0] in banned_first]
+        tails = [chunk for chunk in chunks if chunk[-1] in "“‘「『（(《【"]
+        assert not heads, f"行首是句读/助词：{chunks}"
+        assert not tails, f"行尾是开引号：{chunks}"
+    # 只有句尾句读把句子顶过行帽的不算超长：扫掉那个记号就放得下，不必下刀
+    assert split_subtitle_text("酒店和整场婚礼当场归了另一个女人。而在这之前", 16) == [
+        "酒店和整场婚礼当场归了另一个女人",
+        "而在这之前",
+    ]
+    # 整句确实超长：顺词缝均分，问号连同闭引号留在自己那行的行尾
+    assert split_subtitle_text("“随便拿个几万的破钻戒就想糊弄我？”司仪照着流程问", 16) == [
+        "“随便拿个几万的",
+        "破钻戒就想糊弄我？”",
+        "司仪照着流程问",
+    ]
+
+
+def test_a_long_sentence_breaks_before_the_clause_word_not_mid_term() -> None:
+    """超长句的刀口躲开词中间与助词：「连繁衍｜后代」「…的｜几十万」都不出现。"""
+    assert split_subtitle_text("说新郎这种男人连繁衍后代都是污染基因。新郎站在台上", 16) == [
+        "说新郎这种男人连繁衍后代",
+        "都是污染基因。新郎站在台上",
+    ]
+    assert split_subtitle_text("“你手里不是还有你们公司的几十万项目款吗”。他反问", 16) == [
+        "“你手里不是还有你们",
+        "公司的几十万项目款吗”。他反问",
+    ]
+
+
+def test_split_spans_are_what_the_text_splitter_returns() -> None:
+    """按位置返回的那一份是正源：切片拼回去必须就是 `split_subtitle_text` 的结果。"""
+    text = _PUNCTUATED + "“随便拿个几万的破钻戒就想糊弄我？”" + _NO_PUNCT_RUN
+    for cap in (6, 10, 16):
+        spans = ass_generator.split_subtitle_spans(text, cap)
+        assert [text[start:stop] for start, stop in spans] == split_subtitle_text(text, cap)
 
 
 def test_split_remerges_short_pieces() -> None:

@@ -24,7 +24,7 @@ import pytest
 from PIL import Image
 
 from dramaclip.engines.subtitle import ass_generator, caption_font, presets
-from dramaclip.engines.subtitle.ass_generator import build_ass, line_char_cap, split_subtitle_text
+from dramaclip.engines.subtitle.ass_generator import build_ass, line_char_cap
 
 
 def _ffmpeg() -> str:
@@ -135,8 +135,9 @@ def test_a_line_at_the_cap_stays_inside_the_safe_area(tmp_path: Path, preset_id:
     """
     preset = presets.get_preset(preset_id)
     cap = line_char_cap(preset)
-    line = split_subtitle_text(_RUN, cap)[0]
-    assert len(line) == cap, "用例已失效：这段旁白不再触顶"
+    # 顶到上限的一行直接取：拆行器现在匀着切，首行未必触顶，它不是这条用例的对象
+    line = _RUN[:cap]
+    assert len(line) == cap, "用例已失效：这段旁白不够一行上限的长度"
     left, right, bands = _span(_ink(_burn(tmp_path, preset, line, "capped")))
     assert bands == 1, f"{preset_id}: 上限 {cap} 字被排成了 {bands} 行"
     assert left >= _SAFE_LEFT and right <= _SAFE_RIGHT, (

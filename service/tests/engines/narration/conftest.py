@@ -6,7 +6,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
+import pytest
+
+from dramaclip.engines.narration import synthesis
 from dramaclip.engines.narration.models import PlanData
+
+
+@pytest.fixture(autouse=True)
+def _cue_refresh_off_cooldown() -> Iterator[None]:
+    """补词界的冷静期是模块级状态：上一个用例把它触发后，后面的用例就不补了。逐例归零。"""
+    synthesis._cue_refresh_after = 0.0
+    yield
+    synthesis._cue_refresh_after = 0.0
 
 
 def assert_slots_paired(plan: PlanData, label: str) -> None:

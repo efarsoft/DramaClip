@@ -52,7 +52,6 @@ _FUNC_RATCHET: dict[str, int] = {
     "dramaclip/engines/narration/pipeline.py::build_from_script_episodes": 140,
     "dramaclip/engines/narration/pipeline.py::synthesize_narration_texts": 203,
     "dramaclip/engines/narration/scriptwriter.py::write_script_episodes": 142,
-    "dramaclip/engines/tts/engines/edge.py::synthesize": 130,
     # +9：分离 cap 点亮 DML 实况（intel_xpu 块——徽标漏报 DirectML，2026-11-19 Arc 实测批）
     # +12：funasr 双实况门（dev 主进程 torch 无 XPU 只熄自己的灯——自检实锤批）
     "dramaclip/infra/device_profile.py::profile": 285,

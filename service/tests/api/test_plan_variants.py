@@ -43,6 +43,7 @@ from dramaclip.transport.notify import Notifier
 from dramaclip.transport.rpc import Router, RpcRequest
 from tests.conftest import register_job_executor
 from tests.llm_stub import patch_client_for
+from tests.tts_stub import write_audio
 
 # 角度桩轮换的合法母题：sanitize 对每条角度都校验 arc，桩必须像真模型一样按卡选
 _ARC_IDS = story_arc.ids()
@@ -370,8 +371,7 @@ class _TextWritingTts:
     def synthesize(self, text: str, _voice: str | None, out_path: Path) -> Path:
         assert text.strip(), "语言层没填上文案"
         self.calls.append(text)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(text.encode("utf-8"))
+        write_audio(out_path, text.encode("utf-8"))  # 与真引擎同契约：连词界边车一起落
         return out_path
 
 
