@@ -16,6 +16,7 @@ from dramaclip.api.analysis_job import (
     _analyze_one,  # noqa: F401 - 测试经 analysis_api._analyze_one 直调，引用面保留
     _current_signature,
     _run_job,
+    _semantic_stale,
     _source_stale,
 )
 from dramaclip.api.context import AppContext, llm_trace_dir
@@ -217,12 +218,16 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     episode_ids = params.get("episode_ids")
     if episode_ids is None:
         # analyzing 一并纳入：能开新任务即说明无并发分析，该状态必为崩溃/中断残留
-        # done 但源签名失配（B8）：源被换过，旧 ASR/场景结果不可信，强制重分析
+        # done 但源签名失配（B8）：源被换过，旧 ASR/场景结果不可信，强制重分析；
+        # done 但语义 stamp 失配（换 LLM 模型/语义提示词）：第一层保留，只重跑语义层
         targets = [
             ep
             for ep in episodes_repo.list_by_project(context.conn, project_id)
             if ep["status"] in ("pending", "prescreened", "failed", "analyzing")
-            or (ep["status"] == "done" and _source_stale(context, ep))
+            or (
+                ep["status"] == "done"
+                and (_source_stale(context, ep) or _semantic_stale(context, ep))
+            )
         ]
     else:
         wanted = [str(item) for item in episode_ids]
@@ -711,4 +716,3 @@ def _audio_peak(record: dict[str, Any] | None) -> tuple[float | None, bool]:
     except (json.JSONDecodeError, ValueError):
         return None, False
     return audio.peak_dbfs, audio.clipping
-

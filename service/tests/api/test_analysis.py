@@ -795,3 +795,57 @@ def test_ocr_cache_invalidated_when_engine_generation_changes(
     third = harness.rpc("analysis.start", {"project_id": project_id, "episode_ids": [episode_id]})
     assert harness.wait_done(str(third["job_id"]))["status"] == "completed"
     assert len(calls) == 2, "同代际产物命中缓存，不重挖"
+
+
+def test_llm_model_change_keeps_raw_and_reruns_semantic(
+    harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    """换 LLM 模型（源不变）→ done 集只重跑语义层：转写/OCR/场景/拼图保留。
+
+    B8 签名拆分（2026-11-26）：语义 stamp 失配此前连坐第一层——换模型会把
+    ASR/OCR/场景/拼图/视觉全部陪跑一遍（注释承诺保留，代码没兑现）。
+    """
+    project_id = _make_project(harness, tmp_path, sample_video, copies=1)
+    first = harness.rpc("analysis.start", {"project_id": project_id})
+    assert harness.wait_done(str(first["job_id"]))["status"] == "completed"
+    episode = episodes_repo.list_by_project(memory_db, project_id)[0]
+    source = Path(str(episode["source_path"]))
+    stored = episode["source_signature"]
+    assert stored == _expected_signature(harness, source)
+    calls_before = harness.transcriber.calls
+
+    harness.context.settings["llm.model"] = "changed-model"
+    second = harness.rpc("analysis.start", {"project_id": project_id})
+    assert harness.wait_done(str(second["job_id"]))["status"] == "completed"
+
+    refreshed = episodes_repo.list_by_project(memory_db, project_id)[0]
+    assert refreshed["status"] == "done"
+    assert harness.transcriber.calls == calls_before, "换 LLM 不许重跑转写：贵步骤跟着源走"
+    assert refreshed["source_signature"] != stored, "语义 stamp 翻新落库"
+    assert refreshed["source_signature"] == _expected_signature(harness, source)
+    logs = [m["params"]["message"] for m in harness.sent if m["method"] == "log.append"]
+    assert any("语义配置已变更" in message for message in logs), "语义重跑必须知情留痕"
+    assert not any("源已变更" in message for message in logs), "源没变不得误报源变更"
+
+
+def test_signature_predicates_split_raw_and_semantic(
+    harness: Harness, tmp_path: Path, sample_video: Path
+) -> None:
+    """三判据分家：源段失配=源失效（重算第一层）；仅 stamp 失配=语义重跑。"""
+    episode = {"source_path": str(sample_video), "status": "done", "source_signature": None}
+    base = analysis_job._raw_signature(harness.context, episode)
+    assert base is not None, "sample_video 可读，源签名必须取得到"
+    stamp = analysis_job._llm_stamp(harness.context.settings)
+
+    episode["source_signature"] = None
+    assert analysis_job._source_stale(harness.context, episode), "旧库 NULL：源失效"
+    assert not analysis_job._semantic_stale(harness.context, episode)
+    episode["source_signature"] = "other-source|whatever"
+    assert analysis_job._source_stale(harness.context, episode), "源变了：失效"
+    assert not analysis_job._semantic_stale(harness.context, episode), "源都变了，语义跟新源重算"
+    episode["source_signature"] = f"{base}|otherstamp"
+    assert not analysis_job._source_stale(harness.context, episode), "源段相同：第一层保留"
+    assert analysis_job._semantic_stale(harness.context, episode), "仅 stamp 失配：语义重跑"
+    episode["source_signature"] = f"{base}|{stamp}"
+    assert not analysis_job._source_stale(harness.context, episode)
+    assert not analysis_job._semantic_stale(harness.context, episode)

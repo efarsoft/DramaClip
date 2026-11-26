@@ -171,3 +171,46 @@ def test_corrupt_first_layer_redoes_everything(
 
     assert ok is True
     assert calls["pipeline"] == 1, "第一层产物损坏按不可续走全量重算"
+
+
+def test_llm_stamp_change_resumes_first_layer(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """语义 stamp 失配（源段相同）→ 第一层照样复用，语义列有值也重跑覆盖。
+
+    此前 `_resumable_raw` 要求组合签名完全相等：上轮死在语义层之后又换了 LLM
+    配置，重入会整段全量重算——最贵的转写被最便宜的配置变更连坐。
+    """
+    context = _context(memory_db, tmp_path)
+    episode = _episode(memory_db, tmp_path)
+    # 每轮 _analyze_one 只取一次签名（_reentry_signature，全程复用同一值）。
+    stamps = iter(["src-1|stamp-a", "src-1|stamp-b"])
+
+    def _signature(_ctx: object, _ep: object) -> str:
+        return next(stamps)
+
+    calls = {"pipeline": 0, "enhance": 0}
+
+    def fake_pipeline(**_kwargs: object) -> EpisodeRawAnalysis:
+        calls["pipeline"] += 1
+        return _raw()
+
+    def fake_enhance(_raw: EpisodeRawAnalysis, _settings: object, **_kw: object) -> SemanticResult:
+        calls["enhance"] += 1
+        return SemanticResult()
+
+    monkeypatch.setattr(pipeline, "analyze_episode", fake_pipeline)
+    monkeypatch.setattr(analysis_api.semantic_pipeline, "enhance", fake_enhance)
+    monkeypatch.setattr(analysis_job, "_current_signature", _signature)
+
+    assert analysis_api._analyze_one(context, "job1", episode, 0, 1, "zh", threading.Event())
+    assert calls["pipeline"] == 1 and calls["enhance"] == 1
+
+    episode = episodes_repo.get(memory_db, str(episode["id"]))
+    assert analysis_api._analyze_one(context, "job1", episode, 0, 1, "zh", threading.Event())
+
+    assert calls["pipeline"] == 1, "源段相同：第一层保留（stamp 失配不再连坐）"
+    assert calls["enhance"] == 2, "语义层按新 stamp 重跑"
+    refreshed = episodes_repo.get(memory_db, str(episode["id"]))
+    assert refreshed["source_signature"] == "src-1|stamp-b", "新 stamp 落库"
+    assert refreshed["status"] == "done"

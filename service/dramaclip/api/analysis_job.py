@@ -103,10 +103,7 @@ def _llm_stamp(settings: dict[str, str]) -> str:
 
 
 def _current_signature(context: AppContext, episode: dict[str, Any]) -> str | None:
-    base = pipeline.source_signature(
-        Path(str(episode["source_path"])),
-        ocr_channel=_ocr_channel_available(context),
-    )
+    base = _raw_signature(context, episode)
     if base is None:
         return None
     # 语义 stamp 拼尾：源签名相同时 LLM 配置变化也会让签名失配——语义列
@@ -114,15 +111,46 @@ def _current_signature(context: AppContext, episode: dict[str, Any]) -> str | No
     return f"{base}|{_llm_stamp(context.settings)}"
 
 
-def _source_stale(context: AppContext, episode: dict[str, Any]) -> bool:
-    """库里签名 ≠ 当前源签名（含旧库 NULL 首次）→ 既有分析/预筛产物不可信，需重算。
+def _raw_signature(context: AppContext, episode: dict[str, Any]) -> str | None:
+    """源签名（不含语义 stamp）：转写/OCR/场景/音频属于源，不随语义配置变。"""
+    return pipeline.source_signature(
+        Path(str(episode["source_path"])),
+        ocr_channel=_ocr_channel_available(context),
+    )
 
+
+def _stored_raw_part(episode: dict[str, Any]) -> str:
+    """库内签名的源段（语义 stamp 上线前的旧库整串就是源段）。"""
+    return str(episode.get("source_signature") or "").split("|")[0]
+
+
+def _raw_matches(episode: dict[str, Any], raw_signature: str | None) -> bool:
+    """库内签名的源段 == 当前源签名（语义 stamp 不参与）。"""
+    return bool(raw_signature) and _stored_raw_part(episode) == raw_signature
+
+
+def _source_stale(context: AppContext, episode: dict[str, Any]) -> bool:
+    """源文件变了（或旧库 NULL 签名）→ 第一层产物不可信，需重算（B8）。
+
+    只看源段：语义 stamp 变化（换 LLM 模型/语义提示词）不算源失效——那是
+    `_semantic_stale`，重跑语义层即可，转写/OCR/场景不必陪跑。
     源文件不可读时返回 False：缺文件的失败交给分析引擎自己报错留痕，不做签名失效。
     """
-    current = _current_signature(context, episode)
-    if current is None:
+    base = _raw_signature(context, episode)
+    if base is None:
         return False
-    return episode.get("source_signature") != current
+    return _stored_raw_part(episode) != base
+
+
+def _semantic_stale(context: AppContext, episode: dict[str, Any]) -> bool:
+    """换 LLM 模型/语义提示词而源未变 → 语义列需按新配置重跑（第一层保留）。
+
+    旧库无 stamp 段（stamp 上线前的存量）也判 stale：语义层按当前配置补跑一次。
+    """
+    base = _raw_signature(context, episode)
+    if base is None or _stored_raw_part(episode) != base:
+        return False
+    return episode.get("source_signature") != _current_signature(context, episode)
 
 
 def _project_name_of(context: AppContext, episode: dict[str, Any]) -> str:
@@ -185,17 +213,19 @@ def _describe_frames(
 
 
 def _resumable_raw(
-    context: AppContext, episode: dict[str, Any], signature: str | None
+    context: AppContext, episode: dict[str, Any], raw_signature: str | None
 ) -> EpisodeRawAnalysis | None:
-    """上轮死在语义层的残留可续跑时，从库里重建第一层产物；不可续返回 None。
+    """上轮残留可续跑时，从库里重建第一层产物；不可续返回 None。
 
-    判据三条同时成立：源签名相同（转写产物属于这份源）、语义列为空（语义层没
-    完成）、第一层产物能完整解析（半截/损坏的记录按不可续走全量重算）。
+    判据两条同时成立：源签名（不含语义 stamp）相同——第一层产物属于源，不属于
+    语义配置，换 LLM 后照样可续；第一层产物能完整解析（半截/损坏按不可续走全量
+    重算）。语义列在此之后总会被重跑覆盖：空（上轮死在语义层）按当前配置补跑，
+    有值且 stamp 失配（换配置重析）按新配置覆盖。
     """
-    if signature is None or episode.get("source_signature") != signature:
+    if not _raw_matches(episode, raw_signature):
         return None
     record = analysis_repo.get(context.conn, str(episode["id"]))
-    if record is None or not record["asr_segments"] or record["conflict_scores"]:
+    if record is None or not record["asr_segments"]:
         return None
     try:
         return EpisodeRawAnalysis(
@@ -482,6 +512,42 @@ def _run_job(
             context.notifier.log("warn", f"分析完成，{failures}/{total} 集失败")
 
 
+def _reentry_signature(
+    context: AppContext, episode: dict[str, Any]
+) -> tuple[str | None, str | None, tuple[str, str] | None]:
+    """重入判据三件套：(组合签名=存储值, 其源段, 该集的重入留痕)。
+
+    签名在**分析开始前**取：产物对应的是这份源；分析中途源被换则存的仍是旧
+    签名，下轮判定必然失配重算——宁多算一轮，不把新签名盖在旧源产物上。
+    语义 stamp 只管语义列的失效（换模型/改语义提示词 → 语义按新配置重跑），
+    不参与源失效：转写/OCR/场景等贵步骤跟着源走，不跟语义配置陪跑。
+    """
+    signature = _current_signature(context, episode)
+    raw_part = signature.split("|", 1)[0] if signature else None
+    raw_matches = _raw_matches(episode, raw_part)
+    semantic_stale = raw_matches and episode.get("source_signature") != signature
+    notice = _stale_notice(episode, raw_matches, semantic_stale, signature=signature)
+    return signature, raw_part, notice
+
+
+def _stale_notice(
+    episode: dict[str, Any],
+    raw_matches: bool,
+    semantic_stale: bool,
+    *,
+    signature: str | None,
+) -> tuple[str, str] | None:
+    """重入留痕（仅 done 集且签名可取）：源变了是警告（全量重算），只换语义
+    配置是知情（第一层保留、语义按新配置重跑）。"""
+    if episode["status"] != "done" or signature is None:
+        return None
+    if not raw_matches:
+        return ("warn", "源已变更，重新分析")
+    if semantic_stale:
+        return ("info", "语义配置已变更：转写/OCR/场景保留，按新配置重跑语义层")
+    return None
+
+
 def _analyze_one(
     context: AppContext,
     job_id: str,
@@ -516,22 +582,15 @@ def _analyze_one(
         context.job_store.set_progress(job_id, round(overall, 1), f"{label} {message}")
         context.notifier.progress(job_id, round(overall, 1), f"{label} {message}")
 
-    # 分析开始前取签名：产物对应的是这份源；分析中途源被换则存的是旧签名，
+    # 分析开始前取签名（理由见 _reentry_signature）：中途源被换则存旧签名，
     # 下轮判定必然失配重算——宁多算一轮，不把新签名盖在旧源产物上。
-    # 语义层 stamp（第二梯队③）：签名末尾拼 LLM 模型+提示词覆盖摘要——
-    # 换模型或改提示词后语义产物（冲突分/高光/题材）自动失效重跑，
-    # 转写/OCR/场景等贵步骤保留（它们不依赖 LLM 配置）。
-    signature = _current_signature(context, episode)
-    if (
-        episode["status"] == "done"
-        and signature is not None
-        and episode.get("source_signature") != signature
-    ):
-        # B8 失效重算（源被换或旧库 NULL 签名）：留痕，防「源换了还静默用旧 ASR」
-        context.notifier.log("warn", f"{label} 源已变更，重新分析", job_id=job_id)
+    signature, raw_part, notice = _reentry_signature(context, episode)
+    if notice is not None:
+        level, message = notice
+        context.notifier.log(level, f"{label} {message}", job_id=job_id)
     episodes_repo.set_status(context.conn, episode_id, "analyzing")
     try:
-        stored = _resumable_raw(context, episode, signature)
+        stored = _resumable_raw(context, episode, raw_part)
         if stored is not None:
             context.notifier.log(
                 "info", f"{label} 上轮语义层未完成：沿用转写结果，直接补语义", job_id=job_id
@@ -670,6 +729,10 @@ def _analyze_one(
             highlights=_dumps([h.model_dump() for h in semantic_result.highlights]),
             genre=semantic_result.genre or None,
         )
+        if signature is not None:
+            # 语义按当前配置跑完，stamp 同步翻新：复用路径（换配置重析）不更新的话
+            # 下一轮永远判语义失配。与开头取的是同一个值——中途源被换仍存旧签名。
+            episodes_repo.set_source_signature(context.conn, episode_id, signature)
         episodes_repo.mark_done(context.conn, episode_id)
         return True
     except Exception as exc:
