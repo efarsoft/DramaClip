@@ -13,7 +13,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceProfile, HealthResult, ModelInfo } from '@dramaclip/protocol';
-import { localRuntimeApi, runtimeApi, systemApi } from '../../../services/client';
+import { jobsApi, localRuntimeApi, runtimeApi, systemApi } from '../../../services/client';
 import { MachinePanel } from '../MachinePanel';
 
 vi.mock('../../../services/client', () => ({
@@ -28,9 +28,14 @@ vi.mock('../../../services/client', () => ({
   },
 
   systemApi: { health: vi.fn(() => Promise.resolve({})) },
+  jobsApi: {
+    get: vi.fn(() =>
+      Promise.resolve({ job: { id: 'cuda-1', progress: 0, label: '', status: 'completed' } }),
+    ),
+  },
   runtimeApi: {
     status: vi.fn(() => Promise.resolve({ cublas: true, cudnn: true, installed: true })),
-    install: vi.fn(() => Promise.resolve({})),
+    install: vi.fn(() => Promise.resolve({ job_id: 'cuda-1' })),
   },
   localRuntimeApi: {
     status: vi.fn(() =>
@@ -190,6 +195,37 @@ describe('总览页 · 运行环境状态行', () => {
     renderPanel();
     fireEvent.click(await screen.findByRole('button', { name: /下载运行库/ }));
     expect(await screen.findByText(/CUDA 运行库：已安装/)).toBeTruthy();
+    // 转绿由安装作业收尾触发，不是定时重探碰巧撞上
+    expect(jobsApi.get).toHaveBeenCalledWith('cuda-1');
+  });
+
+  it('安装作业失败 → 原因常驻并给「重试」，这一行不再挂在安装中', async () => {
+    // 此前盯的是状态：装失败时永远到不了「已安装」，2 秒一次的重探永不停
+    vi.mocked(runtimeApi.status).mockResolvedValue({ cublas: false, cudnn: false, installed: false });
+    vi.mocked(jobsApi.get).mockResolvedValue({
+      job: {
+        id: 'cuda-1', type: 'cuda_runtime', ref_id: null, created_at: 0, updated_at: 0,
+        progress: 40, label: '下载中', status: 'failed', error: '镜像源全部超时',
+      },
+    });
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: /下载运行库/ }));
+    expect(await screen.findByText(/CUDA 运行库下载失败：镜像源全部超时/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /重试下载运行库/ })).toBeTruthy();
+  });
+
+  it('安装作业被取消 → 说「已取消」，不冒充失败', async () => {
+    vi.mocked(runtimeApi.status).mockResolvedValue({ cublas: false, cudnn: false, installed: false });
+    vi.mocked(jobsApi.get).mockResolvedValue({
+      job: {
+        id: 'cuda-1', type: 'cuda_runtime', ref_id: null, created_at: 0, updated_at: 0,
+        progress: 10, label: '', status: 'cancelled', error: null,
+      },
+    });
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: /下载运行库/ }));
+    expect(await screen.findByText(/CUDA 运行库安装已取消/)).toBeTruthy();
+    expect(screen.queryByText(/下载失败/)).toBeNull();
   });
 
   it('下载没启起来：原因常驻在这一行，不是一闪而过的 toast（规格 §0.1 配方 3）', async () => {

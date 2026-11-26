@@ -8,6 +8,7 @@ import { mixins } from '../../styles/mixins';
 import { tokens, layout } from '../../styles/theme';
 import { FIT_VERDICT_COLOR, FIT_VERDICT_LABEL, judgeMachine, parseSizeGb, specsFromHealth } from './machineFit';
 import { errorText } from './errorText';
+import { useCudaInstall } from './useCudaInstall';
 import { useEnvStatus, type EnvStatus } from './runtimeState';
 
 function SectionCard({ children }: { children: React.ReactNode }): ReactElement {
@@ -59,7 +60,7 @@ export function MachinePanel({ models }: { models: readonly ModelInfo[] }): Reac
   const probeLocal = useCallback(() => localRuntimeApi.status(), []);
   const { status: cuda, reload: reloadCuda } = useEnvStatus(probeCuda);
   const localRuntime = useEnvStatus(probeLocal).status;
-  const cudaInstall = useCudaInstall(cuda, reloadCuda);
+  const cudaInstall = useCudaInstall(reloadCuda);
   const gpu = health?.gpu_info;
   const specs = specsFromHealth(health);
   const maxSizeGb = maxLocalModelSizeGb(models);
@@ -120,44 +121,6 @@ export function MachinePanel({ models }: { models: readonly ModelInfo[] }): Reac
       </div>
     </SectionCard>
   );
-}
-
-/**
- * CUDA 运行库的下载动作就在「未安装」那句旁边（规格 §2.3：指路不指按钮）——原先这句让用户
- * 去兄弟栅格位的 GPU 卡点下载，而设备钉在 CPU 时那张卡连下载行都不渲染，指路于是指向一个
- * 不在场的按钮。装成后自己重探（不逼用户刷页面）；装不起来把原因常驻在这一行，
- * 不交给会自己消失的 toast。
- */
-function useCudaInstall(
-  status: EnvStatus,
-  reload: () => void,
-): { installing: boolean; problem: string; start: () => void } {
-  const [installing, setInstalling] = useState(false);
-  const [problem, setProblem] = useState('');
-  useEffect(() => {
-    if (!installing) return undefined;
-    if (status === 'installed') {
-      setInstalling(false);
-      return undefined;
-    }
-    const timer = setInterval(reload, 2000);
-    return () => {
-      clearInterval(timer);
-    };
-  }, [installing, status, reload]);
-  const start = useCallback((): void => {
-    setProblem('');
-    void runtimeApi
-      .install()
-      .then(() => {
-        setInstalling(true);
-        reload();
-      })
-      .catch((error: unknown) => {
-        setProblem(`CUDA 运行库下载失败：${errorText(error, '服务端未给出原因')}`);
-      });
-  }, [reload]);
-  return { installing, problem, start };
 }
 
 const ENV_DOT: Record<EnvStatus, string> = {

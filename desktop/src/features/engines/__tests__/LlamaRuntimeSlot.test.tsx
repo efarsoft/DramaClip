@@ -72,6 +72,17 @@ describe('LlamaRuntimeSlot', () => {
     expect(screen.getByRole('button', { name: /重试下载/ })).toBeTruthy();
   });
 
+  it('作业被取消 → 说「已取消」并给重试入口，不冒充失败', async () => {
+    vi.mocked(jobsApi.get).mockResolvedValue({ job: jobInfo({ status: 'cancelled' }) });
+    render(<Harness />);
+    fireEvent.click(await screen.findByRole('button', { name: /下载运行时/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/安装已取消/)).toBeTruthy();
+    });
+    expect(screen.queryByText(/安装失败/)).toBeNull();
+    expect(screen.getByRole('button', { name: /重试下载/ })).toBeTruthy();
+  });
+
   it('探测失败说状态未知，不冒充未安装', async () => {
     vi.mocked(llamaRuntimeApi.status).mockRejectedValue(new Error('服务掉线'));
     render(<Harness />);

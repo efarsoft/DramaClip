@@ -17,16 +17,22 @@ export function useGpuInfo(): GpuView {
   useEffect(() => {
     if (serviceState !== 'ready') return undefined;
     let alive = true;
+    // 「就绪即停」此前只写在文件头：探到了也照旧每 5 秒问一次 system.health
+    // （这条在慢的时候要七八秒），引擎页开着就一直在问。探到结果即停，重测走 refresh。
+    let timer = 0;
     const load = (): void => {
       void systemApi
         .health()
         .then((health) => {
-          if (alive) setInfo(health.gpu_info ?? null);
+          if (!alive) return;
+          const next = health.gpu_info ?? null;
+          setInfo(next);
+          if (next?.ready) window.clearInterval(timer);
         })
         .catch(() => undefined);
     };
     load();
-    const timer = window.setInterval(load, 5000);
+    timer = window.setInterval(load, 5000);
     return () => {
       alive = false;
       clearInterval(timer);

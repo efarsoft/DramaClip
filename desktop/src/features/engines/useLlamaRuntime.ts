@@ -47,8 +47,9 @@ export function useLlamaRuntime(): LlamaRuntimeState {
   }, [refresh, serviceState]);
 
   useEffect(() => {
-    if (jobId === '') return;
-    const timer = setInterval(() => {
+    if (jobId === '') return undefined;
+    // 先查一次再按间隔轮询：装完/失败/取消立等可取，不必干等一轮间隔。
+    const poll = (): void => {
       jobsApi
         .get(jobId)
         .then(({ job }) => {
@@ -61,10 +62,16 @@ export function useLlamaRuntime(): LlamaRuntimeState {
           } else if (job.status === 'failed') {
             setJobId('');
             setProblem(`安装失败：${job.error ?? '服务端未给出原因'}`);
+          } else if (job.status === 'cancelled') {
+            // 终态三选一：漏了这一支，任务在任务抽屉里被取消后这张表永远停不下来
+            setJobId('');
+            setProblem('安装已取消');
           }
         })
         .catch(() => undefined);
-    }, 3000);
+    };
+    poll();
+    const timer = setInterval(poll, 3000);
     return () => {
       clearInterval(timer);
     };

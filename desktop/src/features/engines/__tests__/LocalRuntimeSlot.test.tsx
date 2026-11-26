@@ -189,8 +189,19 @@ describe('本地智能运行环境安装槽 · 接线', () => {
     });
     renderTts('indextts2');
     fireEvent.click(await screen.findByRole('button', { name: /安装运行环境/ }));
-    // 3s 一轮的作业轮询：这一条花的是真时间，换假定时器会把 antd 的动效一起冻住
+    // 起作业后先查一次再按 3s 轮询：终态立等可取，这一条不必再花真时间等间隔
     expect(await screen.findByText(/安装失败：venv 创建失败：目录只读/, {}, { timeout: 8000 })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /重试安装/ })).toBeTruthy();
+  }, 12000);
+
+  it('安装作业被取消 → 槽位说「已取消」并给「重试安装」，不冒充失败', async () => {
+    vi.mocked(jobsApi.get).mockResolvedValueOnce({
+      job: jobInfo({ status: 'cancelled' }),
+    });
+    renderTts('indextts2');
+    fireEvent.click(await screen.findByRole('button', { name: /安装运行环境/ }));
+    expect(await screen.findByText(/安装已取消/, {}, { timeout: 8000 })).toBeTruthy();
+    expect(screen.queryByText(/安装失败/)).toBeNull();
     expect(screen.getByRole('button', { name: /重试安装/ })).toBeTruthy();
   }, 12000);
 });
