@@ -130,8 +130,12 @@ def client_for(
     *,
     min_timeout_s: float = _REQUEST_TIMEOUT_S,
     site: str | None = None,
+    retry: bool = True,
 ) -> LlmClient:
     """文本 LLM 客户端的唯一构造入口，未配置即抛 `LlmUnavailable`。
+
+    `retry=False`：失败当场抛，不退避重试。给「测试连接」这类交互式调用用——
+    用户在等这一下，退避 5+15 秒只是在拖（2026-11-26 实测连不上要 26 秒才报）。
 
     `site` 是这件产物的名字（如「取材角度」），报给用户时说明少了它什么产出不了；
     上游已用 `is_configured` 拦住的防御性调用可以不填。
@@ -152,7 +156,9 @@ def client_for(
     except ValueError:
         logger.warning("llm.timeout_s=%r 不是数字，按本点下限 %ss", raw, min_timeout_s)
         configured_timeout = min_timeout_s
-    return LlmClient(config, timeout_s=max(min_timeout_s, configured_timeout))
+    return LlmClient(
+        config, timeout_s=max(min_timeout_s, configured_timeout), retry=retry
+    )
 
 
 def client_or_none(
@@ -165,9 +171,14 @@ def client_or_none(
 
 
 class LlmClient:
-    def __init__(self, config: LlmConfig, timeout_s: float = _REQUEST_TIMEOUT_S) -> None:
+    def __init__(
+        self, config: LlmConfig, timeout_s: float = _REQUEST_TIMEOUT_S, *, retry: bool = True
+    ) -> None:
         self._config = config
         self._timeout_s = timeout_s
+        # 退避表按实例存：长任务照旧两三轮自愈，交互式调用当场认输。
+        self._net_backoff = _NET_RETRY_BACKOFF if retry else ()
+        self._rate_backoff = tuple(_429_BACKOFF) if retry else ()
 
     @property
     def model(self) -> str:
@@ -251,22 +262,24 @@ class LlmClient:
                         f"LLM 额度耗尽（充值后重跑）：{redact_secrets(body_429)}"
                     ) from exc
                 rate_failures += 1
-                if rate_failures >= len(_429_BACKOFF):
-                    raise LlmUnavailable("LLM 请求失败: 429 重试耗尽") from exc
-                wait = _429_BACKOFF[rate_failures - 1]
+                if rate_failures >= len(self._rate_backoff):
+                    # 不重试的客户端第一次 429 就到这：说「重试耗尽」是假话
+                    tail = "重试耗尽" if self._rate_backoff else "限流"
+                    raise LlmUnavailable(f"LLM 请求失败: 429 {tail}") from exc
+                wait = self._rate_backoff[rate_failures - 1]
                 logger.warning(
                     "LLM 429 限流，%ds 后重试 (%d/%d)",
-                    wait, rate_failures, len(_429_BACKOFF),
+                    wait, rate_failures, len(self._rate_backoff),
                 )
                 time.sleep(wait)
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 net_failures += 1
-                if net_failures > len(_NET_RETRY_BACKOFF):
+                if net_failures > len(self._net_backoff):
                     raise LlmUnavailable(redact_secrets(f"LLM 请求失败: {exc}")) from exc
-                wait = _NET_RETRY_BACKOFF[net_failures - 1]
+                wait = self._net_backoff[net_failures - 1]
                 logger.warning(
                     "LLM 网络类失败（%s），%.0fs 后重试 (%d/%d)",
-                    exc, wait, net_failures, len(_NET_RETRY_BACKOFF),
+                    exc, wait, net_failures, len(self._net_backoff),
                 )
                 time.sleep(wait)
             except _StreamUnavailable:
@@ -335,22 +348,24 @@ class LlmClient:
                 if exc.code != 429:
                     raise LlmUnavailable(f"LLM 请求失败: {exc}") from exc
                 rate_failures += 1
-                if rate_failures >= len(_429_BACKOFF):
-                    raise LlmUnavailable("LLM 请求失败: 429 重试耗尽") from exc
-                wait = _429_BACKOFF[rate_failures - 1]
+                if rate_failures >= len(self._rate_backoff):
+                    # 不重试的客户端第一次 429 就到这：说「重试耗尽」是假话
+                    tail = "重试耗尽" if self._rate_backoff else "限流"
+                    raise LlmUnavailable(f"LLM 请求失败: 429 {tail}") from exc
+                wait = self._rate_backoff[rate_failures - 1]
                 logger.warning(
                     "LLM 429 限流，%ds 后重试 (%d/%d)",
-                    wait, rate_failures, len(_429_BACKOFF),
+                    wait, rate_failures, len(self._rate_backoff),
                 )
                 time.sleep(wait)
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 net_failures += 1
-                if net_failures > len(_NET_RETRY_BACKOFF):
+                if net_failures > len(self._net_backoff):
                     raise LlmUnavailable(f"LLM 请求失败: {exc}") from exc
-                wait = _NET_RETRY_BACKOFF[net_failures - 1]
+                wait = self._net_backoff[net_failures - 1]
                 logger.warning(
                     "LLM 网络类失败（%s），%.0fs 后重试 (%d/%d)",
-                    exc, wait, net_failures, len(_NET_RETRY_BACKOFF),
+                    exc, wait, net_failures, len(self._net_backoff),
                 )
                 time.sleep(wait)
 

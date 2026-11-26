@@ -186,7 +186,8 @@ def test_asr_start_rejects_video_extensions(context: SimpleNamespace, tmp_path: 
 
 
 class _RewriteFakeLlm:
-    def __init__(self, config: Any, timeout_s: float = 60.0) -> None:
+    # **_kw：llm_client 新形参（retry 等）照单全收，替身不随构造签名漂移
+    def __init__(self, config: Any, timeout_s: float = 60.0, **_kw: Any) -> None:
         self.payload: dict[str, Any] = {"text": ""}
         self.user = ""
 

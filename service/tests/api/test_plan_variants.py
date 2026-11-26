@@ -1184,6 +1184,42 @@ def test_plan_variants_cancel_releases_the_event(
     assert status["status"] == "cancelled", status
     assert str(result["job_id"]) not in harness.context.cancel_events, "cancel_events 未释放"
 
+
+def test_cancel_during_variant_gap_ends_the_job_at_once(
+    memory_db: sqlite3.Connection,
+    tmp_path: Path,
+    sample_video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """取消落在变体间隔里：等待立刻醒，任务当场收尾，不等间隔走完。
+
+    间隔此前是 time.sleep——取消要等它睡完才生效；现在是 cancel_event.wait。
+    """
+    project_id = _seed_project_with_episodes(memory_db, tmp_path, sample_video, 6)
+    harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
+    harness.context.settings.update(_LLM_SETTINGS)
+    calls: list[tuple[str, str]] = []
+    _stub_language_and_tts(monkeypatch, calls)
+    # 测试默认把间隔归零（conftest）；这里调大，才测得出「取消能打断等待」
+    monkeypatch.setattr(narration_plans, "_VARIANT_GAP_S", 30.0)
+    real_plan = narration_plans._plan_one
+
+    def plan_then_cancel(*args: Any, **kwargs: Any) -> Any:
+        planned = real_plan(*args, **kwargs)
+        for event in harness.context.cancel_events.values():
+            event.set()
+        return planned
+
+    monkeypatch.setattr(narration_plans, "_plan_one", plan_then_cancel)
+    started = time.monotonic()
+    result = harness.rpc(
+        "narration.plan_variants",
+        {"project_id": project_id, "modes": ["full_narration"], "k": 3},
+    )
+    status = _wait_terminal(harness, str(result["job_id"]))
+    assert status["status"] == "cancelled", status
+    assert time.monotonic() - started < 8.0, "30 秒的间隔不该被走完"
+
 def test_get_plan_returns_row_and_cost(
     memory_db: sqlite3.Connection,
     tmp_path: Path,

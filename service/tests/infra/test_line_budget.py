@@ -33,7 +33,7 @@ _FILE_RATCHET: dict[str, int] = {
     # 线程炸死，「exit 1 双流全空」真凶（2026-11-19 A/B 实锤）
     # −25：PyWorld/WORLD 整链摘除（推理链不 import，源码构建须 MSVC 用户机没有，
     # 2026-11-19 worker --check 卸载自检绿实证）
-    "dramaclip/infra/model_manager/tts_runtime.py": 946,
+    "dramaclip/infra/model_manager/tts_runtime.py": 945,
 }
 
 _FUNC_RATCHET: dict[str, int] = {

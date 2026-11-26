@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from dramaclip.api import narration_plans
 from dramaclip.engines.narration import variant_scoring
 from dramaclip.engines.semantic import llm_quota
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
@@ -52,6 +53,16 @@ def _llm_side_channels_offline(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(variant_scoring, "client_for", _refuse_client)
     monkeypatch.setattr(llm_quota, "probe_quota", lambda _config: llm_quota.SKIPPED)
+
+
+@pytest.fixture(autouse=True)
+def _no_variant_gap_in_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """规划变体间隔在测试里归零（生产 3 秒一条，防连发选题触发 QPS 上限）。
+
+    2026-11-26 实测：25 个规划用例各睡几轮 3 秒，合计 150 秒，占全量套件近四成。
+    「取消能打断等待」由 test_plan_variants 的专测覆盖，那里自行把间隔调回去。
+    """
+    monkeypatch.setattr(narration_plans, "_VARIANT_GAP_S", 0.0)
 
 
 # 作业线程池登记表：泄漏的作业线程若活过测试，会在 monkeypatch 还原后撞共享模块

@@ -31,8 +31,9 @@ def patch_client_for(
         *,
         min_timeout_s: float = 60.0,
         site: str | None = None,
+        retry: bool = True,
     ) -> Any:
-        llm_client.client_for(settings, min_timeout_s=min_timeout_s, site=site)
+        llm_client.client_for(settings, min_timeout_s=min_timeout_s, site=site, retry=retry)
         return fake_client(settings, timeout_s=min_timeout_s)
 
     monkeypatch.setattr(module, "client_for", _factory)

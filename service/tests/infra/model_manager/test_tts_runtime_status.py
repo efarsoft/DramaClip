@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -200,3 +201,60 @@ def test_venv_imports_ok_requires_zero_exit(tmp_path: Path, monkeypatch: Any) ->
     assert tts_runtime._venv_imports_ok(py, ("kokoro",)) is True
     assert tts_runtime._venv_imports_ok(py, ("funasr",)) is False
     assert seen[0][-1] == "import kokoro", "探针按模块逐个 import"
+
+
+def test_status_expired_serves_stale_then_refreshes_in_background(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """过期先回旧值、后台单个线程刷新：RPC 不再同步等子进程探测。
+
+    子进程 import torch/funasr 冷启十几到四十秒（2026-11-26 本机实测），此前
+    TTL 一过下一个调用方就同步等满，而它跑在只有两个工人的查询池里。
+    """
+    _prime_venv(tmp_path)
+    calls: list[int] = []
+    second_started = threading.Event()
+    gate = threading.Event()
+
+    def fake_run(*_a: Any, **_k: Any) -> Any:
+        calls.append(1)
+        if len(calls) == 1:
+            return _FakeCompleted(0, json.dumps({"indextts": False, "torch": False}))
+        second_started.set()
+        gate.wait(5)
+        return _FakeCompleted(0, json.dumps({"indextts": True, "torch": True}))
+
+    monkeypatch.setattr(tts_runtime.subprocess, "run", fake_run)
+    clock = [1000.0]
+    monkeypatch.setattr(tts_runtime._status_cache, "_clock", lambda: clock[0])  # noqa: SLF001
+    assert tts_runtime.status(tmp_path)["installed"] is False
+    clock[0] += 61.0
+
+    assert tts_runtime.status(tmp_path)["installed"] is False, "过期先回旧值"
+    assert tts_runtime.status(tmp_path)["installed"] is False, "刷新在途不再派探测"
+    assert second_started.wait(5)
+    assert calls == [1, 1]
+    gate.set()
+    for thread in threading.enumerate():
+        if thread.name == "stale-refresh":
+            thread.join(timeout=5)
+    assert tts_runtime.status(tmp_path)["installed"] is True
+
+
+def test_invalidate_status_forces_a_fresh_probe(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """运行环境装完必须立刻反映：作废缓存后同步重探，不回装前的旧态。"""
+    _prime_venv(tmp_path)
+    answers = iter([{"indextts": False, "torch": False}, {"indextts": True, "torch": True}])
+    monkeypatch.setattr(
+        tts_runtime.subprocess,
+        "run",
+        lambda *_a, **_k: _FakeCompleted(0, json.dumps(next(answers))),
+    )
+    monkeypatch.setattr(tts_runtime._status_cache, "_clock", lambda: 1000.0)  # noqa: SLF001
+    assert tts_runtime.status(tmp_path)["installed"] is False
+
+    tts_runtime.invalidate_status(tmp_path)
+
+    assert tts_runtime.status(tmp_path)["installed"] is True

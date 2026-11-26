@@ -12,7 +12,6 @@ from __future__ import annotations
 import contextlib
 import json
 import threading
-import time
 from typing import Any
 
 from dramaclip.api.context import AppContext, llm_trace_dir
@@ -81,6 +80,12 @@ _ZERO_COPY_MODES = _NO_TTS_MODES
 # scriptwriter 两侧都只往解说槽位里塞风格指令）。派生自上面两个集合，绝不另立
 # 第四份手抄模式清单——纯剪辑作业连口味层的答案都无人可读，不该为它付选题往返。
 _NARRATION_MODES = frozenset(SUPPORTED_MODES) - _NO_TTS_MODES
+
+
+#: 每条方案之间的间隔（秒）。2026-09-15 与 429 退避同批引入，防「九模式连发选题」
+#: 触发 QPS 上限。单列成常量是为了测试能打桩——规划用例不必各睡几轮 3 秒
+#: （2026-11-26 实测占全量套件近四成）；等待可被取消打断。
+_VARIANT_GAP_S = 3.0
 
 
 def expected_copy_source(mode: str) -> str:
@@ -158,8 +163,7 @@ def _run_plan_variants(
                         )
                     except Exception as exc:  # noqa: BLE001 - 选线失败回落单集锚定
                         context.notifier.log(
-                            "warning",
-                            f"{label} 跨集选线失败，回落单集锚定：{str(exc)[:80]}",
+                            "warning", f"{label} 跨集选线失败，回落单集锚定：{str(exc)[:80]}"
                         )
                         variants = _deterministic_variants(
                             context, mode, label, episode_inputs, k, excluded_angles
@@ -250,16 +254,13 @@ def _run_plan_variants(
                     )
                     if _fatal:
                         context.notifier.log(
-                            "error",
-                            "不可恢复错误（鉴权/额度/磁盘），规划停批——"
-                            "修复配置后重新规划",
+                            "error", "不可恢复错误（鉴权/额度/磁盘），规划停批——修复配置后重新规划"
                         )
                         raise
                     if consecutive_failures >= 3:
                         context.notifier.log(
-                            "error",
-                            f"连续 {consecutive_failures} 条方案失败，规划停批"
-                            "——检查网络/模型配置后重新规划",
+                            "error", f"连续 {consecutive_failures} 条方案失败，规划停批——"
+                            "检查网络/模型配置后重新规划"
                         )
                         raise
                 else:
@@ -268,8 +269,9 @@ def _run_plan_variants(
                 context.job_store.set_progress(
                     job_id, round(done_count / total * 100, 1), tag
                 )
-                # 模式间间隔：九模式同时发选题会触发 QPS 上限
-                time.sleep(3)
+                if mode != modes[-1] or index < len(variants):
+                    # 变体间隔见 _VARIANT_GAP_S 注释：取消即醒；末条之后无下一条，不再等
+                    cancel_event.wait(_VARIANT_GAP_S)
 
         if cancel_event.is_set():
             context.job_store.mark_cancelled(job_id)

@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
+import io
 import re
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -132,3 +135,102 @@ def _scan(pattern: re.Pattern[str], allowed: set[str]) -> list[str]:
             if pattern.search(line):
                 hits.append(f"{relative}:{lineno} {line.strip()}")
     return hits
+
+
+# ── 退避表按实例：长任务自愈，交互式当场认输 ──────────────────────────────
+
+
+def _patch_transport(monkeypatch: pytest.MonkeyPatch, fail: Any) -> list[float]:
+    """把 urlopen 换成必定失败的桩、把 sleep 换成记账；返回 sleep 记下的秒数。"""
+    sleeps: list[float] = []
+    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    monkeypatch.setattr(llm_client.time, "sleep", sleeps.append)
+    return sleeps
+
+
+def _refused(attempts: list[int]) -> Any:
+    def fail(*_a: Any, **_k: Any) -> Any:
+        attempts.append(1)
+        raise urllib.error.URLError("[Errno 111] Connection refused")
+
+    return fail
+
+
+def _rate_limited(calls: list[int]) -> Any:
+    def fail(*_a: Any, **_k: Any) -> Any:
+        calls.append(1)
+        raise urllib.error.HTTPError(
+            "https://x/v1/chat/completions", 429, "Too Many Requests", {}, io.BytesIO(b"slow down")
+        )
+
+    return fail
+
+
+def test_default_client_backs_off_then_gives_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    """长任务的默认：网络类失败短退避两轮（5s、15s）后才认输——一次抖动不该炸整条任务。"""
+    attempts: list[int] = []
+    sleeps = _patch_transport(monkeypatch, _refused(attempts))
+    with pytest.raises(llm_client.LlmUnavailable, match="Connection refused"):
+        llm_client.client_for(_CONFIGURED).ping()
+    assert sleeps == [5.0, 15.0]
+    assert len(attempts) == 3
+
+
+def test_default_client_waits_out_rate_limit_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[int] = []
+    sleeps = _patch_transport(monkeypatch, _rate_limited(calls))
+    with pytest.raises(llm_client.LlmUnavailable, match="429 重试耗尽"):
+        llm_client.client_for(_CONFIGURED).ping()
+    assert sleeps == [30, 60]
+
+
+def test_no_retry_client_fails_on_first_network_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """交互式调用（retry=False）：连不上当场报。此前「测试连接」要白等 21~26 秒。"""
+    attempts: list[int] = []
+    sleeps = _patch_transport(monkeypatch, _refused(attempts))
+    with pytest.raises(llm_client.LlmUnavailable, match="Connection refused"):
+        llm_client.client_for(_CONFIGURED, retry=False).ping()
+    assert attempts == [1]
+    assert sleeps == []
+
+
+def test_no_retry_client_reports_rate_limit_without_waiting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[int] = []
+    sleeps = _patch_transport(monkeypatch, _rate_limited(calls))
+    with pytest.raises(llm_client.LlmUnavailable, match="429 限流"):
+        llm_client.client_for(_CONFIGURED, retry=False).ping()
+    assert calls == [1]
+    assert sleeps == [], "没重试却报「重试耗尽」是说谎：文案与行为必须一致"
+
+
+class _EmptyReply:
+    """网关不支持 SSE：一行 data: 都没有，客户端回退非流式路径。"""
+
+    def __enter__(self) -> _EmptyReply:
+        return self
+
+    def __exit__(self, *_exc: object) -> bool:
+        return False
+
+    def __iter__(self) -> Any:
+        return iter([b'{"choices": []}\n'])
+
+
+def test_no_retry_also_covers_the_non_stream_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[int] = []
+
+    def empty_then_refused(*_a: Any, **_k: Any) -> Any:
+        calls.append(1)
+        if len(calls) == 1:
+            return _EmptyReply()
+        raise urllib.error.URLError("Connection refused")
+
+    sleeps = _patch_transport(monkeypatch, empty_then_refused)
+    with pytest.raises(llm_client.LlmUnavailable, match="Connection refused"):
+        llm_client.client_for(_CONFIGURED, retry=False).ping()
+    assert len(calls) == 2
+    assert sleeps == []

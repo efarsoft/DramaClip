@@ -41,6 +41,7 @@ from typing import Any
 from dramaclip.infra import gpu
 from dramaclip.infra.model_manager import cuda_runtime
 from dramaclip.infra.model_manager.fetch import download_file
+from dramaclip.infra.stale_cache import StaleWhileRevalidate
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -507,15 +508,12 @@ def _install_ort(
     _write_ort_marker(data_dir, variant="cpu", reason=reason)
 
 
-_status_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _STATUS_TTL_S = 60.0
 
 
 def warm_status_cache(data_dir: Path) -> None:
     """启动预热（同 gpu.prefetch 模式）：子进程探测在冷盘上秒级，
     首开引擎中心时 UI 立刻查 status 会因排队超时——后台先跑一遍入缓存。"""
-    import contextlib
-
     with contextlib.suppress(Exception):
         status(data_dir)
 
@@ -527,18 +525,14 @@ def status(data_dir: Path) -> dict[str, Any]:
     逐个 __import__ 记成败）：indextts 需源码路径引入，funasr/kokoro 是纯 pip 组。
     installed 维持旧口径（双栈 TTS）——前端既有判据零改动，新消费者读 groups。
 
-    结果 60s 缓存：子进程探测秒级，UI 轮询不应反复 spawn。
+    探针冷启十几到四十秒，过期后同步等它会占住查询池的工人：缓存 60s，过期先
+    回旧值、由单个后台线程刷新；装完由 install 作废缓存，下一次查询同步重探。
     """
-    import time as _time
+    return _status_cache.get(str(data_dir))
 
-    cache_key = str(data_dir)
-    cached = _status_cache.get(cache_key)
-    if cached is not None and _time.monotonic() - cached[0] < _STATUS_TTL_S:
-        return cached[1]
 
-    result = _status_uncached(data_dir)
-    _status_cache[cache_key] = (_time.monotonic(), result)
-    return result
+def invalidate_status(data_dir: Path) -> None:
+    _status_cache.invalidate(str(data_dir))
 
 
 def _status_uncached(data_dir: Path) -> dict[str, Any]:
@@ -597,6 +591,11 @@ def _status_uncached(data_dir: Path) -> dict[str, Any]:
             "groups": {},
             "ort_gpu": ort_state(data_dir),
         }
+
+
+_status_cache: StaleWhileRevalidate[dict[str, Any]] = StaleWhileRevalidate(
+    lambda key: _status_uncached(Path(key)), ttl_s=_STATUS_TTL_S
+)
 
 
 def _venv_imports_ok(py: Path, modules: tuple[str, ...]) -> bool:
@@ -758,10 +757,10 @@ def install(
     )
     if cv_check.returncode != 0:
         raise RuntimeError("自检失败：cosyvoice 导入异常，可重试修复")
-    if not _venv_imports_ok(py, ("funasr",)):
-        raise RuntimeError("自检失败：funasr 导入异常（本地 ASR），可重试修复")
-    if not _venv_imports_ok(py, ("kokoro",)):
-        raise RuntimeError("自检失败：kokoro 导入异常（本地 TTS），可重试修复")
+    for module, label in (("funasr", "本地 ASR"), ("kokoro", "本地 TTS")):
+        if not _venv_imports_ok(py, (module,)):
+            raise RuntimeError(f"自检失败：{module} 导入异常（{label}），可重试修复")
+    invalidate_status(data_dir)  # 运行环境刚变：装前探到的旧态不许再回给界面
     _pct(100, "完成")
 
 

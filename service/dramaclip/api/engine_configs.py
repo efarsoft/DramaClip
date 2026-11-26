@@ -187,6 +187,8 @@ def _test_llm(base_url: str, api_key: str, model: str) -> dict[str, Any]:
         client = client_for(
             _MIRROR["llm"]({"base_url": base_url, "api_key": api_key, "model": model}),
             min_timeout_s=_SELFTEST_TIMEOUT_S,
+            # 用户在等这一下：连不上当场报，不走长任务的退避（那是 5+15 秒的白等）
+            retry=False,
         )
         latency = client.ping()
     except LlmUnavailable as exc:
