@@ -1,7 +1,7 @@
-"""方案产出的两块软质检编排：整批评分（B10 尾部）+ 复述驱动重写循环。
+"""方案产出的编排执行体：选题变体构建与重叠裁决 + 两块软质检。
 
-自 api/narration_plans.py 逐字下沉（2026-11-26 工程债 ② 首切，语义零变化）：
-两块都不碰 RPC/选线/落方案主流程，只消费已落库的方案行与素材。`_NO_TTS_MODES`
+自 api/narration_plans.py 逐字下沉（2026-11-26 工程债 ② 分批，语义零变化）：
+都不碰 RPC/落方案主流程。`_NO_TTS_MODES`
 仍是模式词汇表、留在 narration_plans（expected_copy_source 与渲染审计共用），
 这里惰性引入避循环。
 """
@@ -9,12 +9,21 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext, llm_trace_dir
-from dramaclip.engines.narration import copywriter, variant_scoring
+from dramaclip.engines.narration import (
+    angles,
+    copywriter,
+    overlap,
+    variant_scoring,
+)
 from dramaclip.engines.narration import pipeline as narration_pipeline
+from dramaclip.engines.narration import (
+    styles as styles_lib,
+)
 from dramaclip.engines.narration.casting import MaterialByEpisode
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.semantic.llm_client import is_configured
@@ -257,3 +266,168 @@ def _retell_gate(
         + (f"（首条卡点：{report.confusions[0]['note']}）" if report.confusions else ""),
     )
     return report
+
+# ---------------------------------------------------------------------------
+# 选题变体与重叠裁决（②-2 下沉）：api 主循环按它选题、判兄弟重叠。
+# ---------------------------------------------------------------------------
+
+# 剧本驱动的唯一模式。2026-09-12 裁决之后**九个模式都能在一条方案里跨集取画面**
+# （Task 3c 的 casting 层给六个规则编排器补上了集身份），所以这个集合不再表示
+# "只有它能跨集"——那是一句已经作废的话，留着它就是留下一句关于代码的假话。
+# 它现在只表示一件事：**这条方案的时间轴不是 (mode, 取材集) 的纯函数**，
+# 因为剧本由模型按角度现写（script_driver.script_dialogue_plan）。于是成稿**前**那道
+# 重叠闸门（_reject_same_episode_sibling）对它无效，只能靠成稿**后**的 _worst_overlap 兜。
+_SCRIPT_DRIVEN_MODES = frozenset({"dialogue_narration"})
+
+
+@dataclass(frozen=True)
+class _Variant:
+    """一条待产出的方案：取材意图（名字/理由/集号/母题）+ 成稿时注入的角度块。
+    """
+
+    name: str
+    reason: str
+    episode_numbers: list[int]
+    angle_block: str
+    arc: str = ""
+
+
+def _slot_label(variant: _Variant, index: int) -> str:
+    """点名用的人读标签：解说类是角度名，规则类没有角度名，退回「第 N 条」。"""
+    return variant.name or f"第{index}条"
+
+
+@dataclass(frozen=True)
+class _OverlapHit:
+    """与一条已接受兄弟方案的重叠：名字用来点名，比值用来判阈值与落库。"""
+
+    name: str
+    ratio: float
+
+
+def _worst_overlap(
+    plan: PlanData, accepted: list[tuple[_Variant, PlanData]]
+) -> _OverlapHit | None:
+    """与同模式已接受兄弟里最像的那条比；没有兄弟时回 None（不是 0.0）。
+    """
+    worst: _OverlapHit | None = None
+    for index, (variant, other) in enumerate(accepted, start=1):
+        ratio = overlap.overlap(plan, other)
+        if worst is None or ratio > worst.ratio:
+            worst = _OverlapHit(name=_slot_label(variant, index), ratio=ratio)
+    return worst
+
+
+def _reject_same_episode_sibling(
+    mode: str, variant: _Variant, accepted: list[tuple[_Variant, PlanData]]
+) -> None:
+    """成稿**之前**的重叠闸门（R7）：同模式、**同一组取材集**的两条角度，取材必然逐秒相同。
+    """
+    if mode in _SCRIPT_DRIVEN_MODES:
+        return
+    wanted = frozenset(variant.episode_numbers)
+    for index, (sibling, _plan) in enumerate(accepted, start=1):
+        if frozenset(sibling.episode_numbers) == wanted:
+            raise ValueError(
+                f"取材与「{_slot_label(sibling, index)}」重叠 100%，"
+                f"超过 {overlap.OVERLAP_LIMIT:.0%}"
+                "——同模式同取材集的两条角度逐秒相同，这条角度不出（规格 §4.3）"
+            )
+
+
+def _deterministic_variants(
+    context: AppContext,
+    mode: str,
+    label: str,
+    episode_inputs: list[dict[str, Any]],
+    k: int,
+    excluded_angles: list[str],
+) -> list[_Variant]:
+    """零文案模式的兜底取材：按集冲突峰锚定（跨集选线失败时回落，可用性优先）。
+
+    2026-10-20 曾作为主路线，业主否掉——吸引力在跨集因果链，单集锚定出不了。
+    现仅当选线 LLM 不可用/不合格时兜底：互异轴=锚定集，天然满足重叠闸门；
+    K 封顶于集数；无冲突数据的集排最后（按集号）。
+    """
+    ranked: list[tuple[int, int]] = []
+    for episode in episode_inputs:
+        peak = 0
+        record = analysis_repo.get(context.conn, str(episode["episode_id"]))
+        if record is not None and record.get("conflict_scores"):
+            try:
+                scores = json.loads(str(record["conflict_scores"]))
+                peak = max(
+                    (int(s.get("score") or 0) for s in scores if isinstance(s, dict)),
+                    default=0,
+                )
+            except (json.JSONDecodeError, TypeError):
+                peak = 0
+        ranked.append((peak, int(episode["number"])))
+    ranked.sort(key=lambda t: (-t[0], t[1]))
+    variants: list[_Variant] = []
+    for _peak, number in ranked:
+        if len(variants) >= max(1, k):
+            break
+        name = f"{label}·锚定第{number}集"
+        if name in excluded_angles:
+            continue
+        variants.append(
+            _Variant(
+                name=name,
+                reason=f"以第 {number} 集冲突峰为锚的确定性取材（零文案模式不跑选题模型）",
+                episode_numbers=[number],
+                angle_block="",
+                arc="",
+            )
+        )
+    return variants
+
+
+def _angle_variants(
+    context: AppContext,
+    mode: str,
+    label: str,
+    episode_inputs: list[dict[str, Any]],
+    settings: dict[str, str],
+    k: int,
+    excluded_angles: list[str],
+    zero_copy: bool = False,
+) -> list[_Variant]:
+    """解说类：一次选题调用 → K 条卖点互异的角度（《定案二》）。
+
+    ``zero_copy``：换零文案选线提示词（只挑跨集冲突链+命名），且不组装
+    angle_block——没有旁白槽位，结构卡无人可读。
+    """
+    briefs = angles.select_angles(
+        mode,
+        mode_label=label,
+        k=k,
+        episode_inputs=episode_inputs,
+        settings=settings,
+        excluded=excluded_angles,
+        trace_dir=llm_trace_dir(context),
+        zero_copy=zero_copy,
+    )
+    # 人工显式选了风格：情绪配方让位（两套节拍永不同场，styles.is_manual_style）
+    include_style = not styles_lib.is_manual_style(settings)
+    return [
+        _Variant(
+            name=brief.name,
+            reason=brief.reason,
+            episode_numbers=brief.episode_numbers,
+            angle_block=(
+                "" if zero_copy
+                else angles.prompt_block(brief, include_style=include_style, mode=mode)
+            ),
+            arc=brief.arc,
+        )
+        for brief in briefs
+    ]
+
+
+def _card_hint(cards: list[dict[str, str]], position: int) -> str:
+    """策略卡 → 注入文案链的一行提示；越界（变体数多于卡数）给空串。"""
+    if 0 <= position < len(cards):
+        card = cards[position]
+        return f"{card['name']}——{card['hint']}"
+    return ""
