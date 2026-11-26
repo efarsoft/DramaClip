@@ -127,8 +127,12 @@ def _logs(sent: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [item["params"] for item in sent if item["method"] == "log.append"]
 
 
-def _probe(context: Any, job_id: str, *rest: Any) -> None:
-    """任务体替身：只在作业作用域里说一句话，用来验归因。"""
+def _probe(context: Any, job_id: str, *rest: Any, **_kw: Any) -> None:
+    """任务体替身：只在作业作用域里说一句话，用来验归因。
+
+    关键字参数照单全收：被替身的 `_run_job` 带关键字形参（resume_strict），
+    桩的签名写死就会以 TypeError 的形态冒出来，看着像生产 bug。
+    """
     context.notifier.log("info", f"任务体执行于 {job_id}")
 
 

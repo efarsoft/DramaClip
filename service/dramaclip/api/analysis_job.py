@@ -213,7 +213,11 @@ def _describe_frames(
 
 
 def _resumable_raw(
-    context: AppContext, episode: dict[str, Any], raw_signature: str | None
+    context: AppContext,
+    episode: dict[str, Any],
+    raw_signature: str | None,
+    *,
+    strict: bool = False,
 ) -> EpisodeRawAnalysis | None:
     """上轮残留可续跑时，从库里重建第一层产物；不可续返回 None。
 
@@ -221,8 +225,14 @@ def _resumable_raw(
     语义配置，换 LLM 后照样可续；第一层产物能完整解析（半截/损坏按不可续走全量
     重算）。语义列在此之后总会被重跑覆盖：空（上轮死在语义层）按当前配置补跑，
     有值且 stamp 失配（换配置重析）按新配置覆盖。
+
+    ``strict``（显式选集=用户点名「重新分析本集」）：已 done 的集一律不可续。
+    改热词、换 ASR 模型都不进源签名，用户让新配置生效靠的就是这个入口——放宽
+    判据只服务隐式全量路径（源没变、只是换了语义配置），不许蔓延到点名重析。
     """
     if not _raw_matches(episode, raw_signature):
+        return None
+    if strict and episode.get("status") == "done":
         return None
     record = analysis_repo.get(context.conn, str(episode["id"]))
     if record is None or not record["asr_segments"]:
@@ -421,8 +431,13 @@ def _run_job(
     project_id: str,
     targets: list[dict[str, Any]],
     cancel_event: threading.Event,
+    *,
+    resume_strict: bool = False,
 ) -> None:
-    """执行池任务：全剧 OCR→热词→逐集分析，单集失败不中断其余。"""
+    """执行池任务：全剧 OCR→热词→逐集分析，单集失败不中断其余。
+
+    ``resume_strict``：用户点名选集的重析（已 done 的集不可续跑，必须重转写）。
+    """
     vision = None
     total = len(targets)
     failures = 0
@@ -484,6 +499,7 @@ def _run_job(
                 ocr_lines=lines_by_episode.get(episode_id),
                 ocr_band=bands_by_episode.get(episode_id),
                 hotwords=hotwords,
+                resume_strict=resume_strict,
             ):
                 failures += 1
         if failures == total:
@@ -563,12 +579,14 @@ def _analyze_one(
     ocr_band: tuple[float, float] | None = None,
     ocr_lines: list[tuple[float, float]] | None = None,
     hotwords: str = "",
+    resume_strict: bool = False,
 ) -> bool:
     """分析单集；返回是否成功（失败标记后继续其余集）。
 
     两段写入：第一层（转写/场景/音频/OCR）跑完立即落库、语义列显式清空，语义层
     完成**才**标 done——链路里最贵的是转写、最易挂的是 LLM，语义抖动不再连坐
-    转写白跑。重入判据：签名相同 + 语义列为空 = 上轮死在语义层，跳过转写直补。
+    转写白跑。重入判据见 `_resumable_raw`：隐式全量路径源没变就沿用第一层
+    （补语义/按新语义配置重跑）；点名重析（resume_strict）一律重转写。
     """
     episode_id = str(episode["id"])
     label = f"第{episode['episode_number']}集"
@@ -590,11 +608,12 @@ def _analyze_one(
         context.notifier.log(level, f"{label} {message}", job_id=job_id)
     episodes_repo.set_status(context.conn, episode_id, "analyzing")
     try:
-        stored = _resumable_raw(context, episode, raw_part)
+        stored = _resumable_raw(context, episode, raw_part, strict=resume_strict)
         if stored is not None:
-            context.notifier.log(
-                "info", f"{label} 上轮语义层未完成：沿用转写结果，直接补语义", job_id=job_id
-            )
+            if notice is None:  # 语义配置变更的重入在上面已留痕，这里只报「续跑」
+                context.notifier.log(
+                    "info", f"{label} 上轮语义层未完成：沿用转写结果，直接补语义", job_id=job_id
+                )
             raw = stored
         else:
             transcriber = context.analysis_runtime.transcriber()

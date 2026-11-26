@@ -262,6 +262,8 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
                 project_id,
                 targets,
                 cancel_event,
+                # 点名选集（「重新分析本集」）= 强制重转写：改热词/换 ASR 后靠它生效
+                episode_ids is not None,
             )
         )
     except BaseException:
@@ -286,8 +288,11 @@ def _run_analysis_gated(
     project_id: str,
     targets: list[dict[str, Any]],
     cancel_event: threading.Event,
+    resume_strict: bool = False,
 ) -> None:
     """semaphore 包装：分析完成后释放并发闸。
+
+    第 6 个位置参数由 `start` 按「是否点名选集」给出（`tracked` 只收 fn + *args）。
 
     直接作为 `notifier.tracked` 的任务体（而非返回一个待调用的闭包）：
     `tracked` 的契约是 `fn(*args)` 一步执行完，经它投递的任务必须自己跑完，
@@ -296,7 +301,7 @@ def _run_analysis_gated(
     一个 job_id 直接 TypeError，分析任务在启动瞬间就崩（40 条测试转红）。
     """
     try:
-        _run_job(context, job_id, project_id, targets, cancel_event)
+        _run_job(context, job_id, project_id, targets, cancel_event, resume_strict=resume_strict)
     finally:
         _analysis_semaphore.release()
 

@@ -849,3 +849,26 @@ def test_signature_predicates_split_raw_and_semantic(
     episode["source_signature"] = f"{base}|{stamp}"
     assert not analysis_job._source_stale(harness.context, episode)
     assert not analysis_job._semantic_stale(harness.context, episode)
+
+
+def test_explicit_reanalyze_reruns_transcription(
+    harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    """「重新分析本集（重转写）」= 显式选集：源没变也必须重转写。
+
+    改热词/换 ASR 模型都不进源签名，用户让新配置生效靠的就是这个入口——
+    隐式全量路径的「源段相同就沿用第一层」不许蔓延到点名重析。
+    """
+    project_id = _make_project(harness, tmp_path, sample_video, copies=1)
+    first = harness.rpc("analysis.start", {"project_id": project_id})
+    assert harness.wait_done(str(first["job_id"]))["status"] == "completed"
+    episode = episodes_repo.list_by_project(memory_db, project_id)[0]
+    calls_before = harness.transcriber.calls
+
+    second = harness.rpc(
+        "analysis.start", {"project_id": project_id, "episode_ids": [str(episode["id"])]}
+    )
+    assert harness.wait_done(str(second["job_id"]))["status"] == "completed"
+
+    assert harness.transcriber.calls == calls_before + 1, "点名重析必须重转写"
+    assert episodes_repo.list_by_project(memory_db, project_id)[0]["status"] == "done"

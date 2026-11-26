@@ -214,3 +214,41 @@ def test_llm_stamp_change_resumes_first_layer(
     refreshed = episodes_repo.get(memory_db, str(episode["id"]))
     assert refreshed["source_signature"] == "src-1|stamp-b", "新 stamp 落库"
     assert refreshed["status"] == "done"
+
+
+def test_strict_reanalyze_reruns_first_layer(
+    memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """点名重析（resume_strict）：源没变、上轮已 done，第一层照样重跑。
+
+    放宽判据只给隐式全量路径用——「重新分析本集（重转写）」必须名副其实。
+    """
+    context = _context(memory_db, tmp_path)
+    episode = _episode(memory_db, tmp_path)
+    calls = {"pipeline": 0, "enhance": 0}
+
+    def fake_pipeline(**_kwargs: object) -> EpisodeRawAnalysis:
+        calls["pipeline"] += 1
+        return _raw()
+
+    def fake_enhance(_raw: EpisodeRawAnalysis, _settings: object, **_kw: object) -> SemanticResult:
+        calls["enhance"] += 1
+        return SemanticResult()
+
+    monkeypatch.setattr(pipeline, "analyze_episode", fake_pipeline)
+    monkeypatch.setattr(analysis_api.semantic_pipeline, "enhance", fake_enhance)
+    monkeypatch.setattr(analysis_job, "_current_signature", lambda _ctx, _ep: "src-1|stamp-a")
+
+    assert analysis_api._analyze_one(context, "job1", episode, 0, 1, "zh", threading.Event())
+    done = episodes_repo.get(memory_db, str(episode["id"]))
+    assert done["status"] == "done"
+
+    assert analysis_api._analyze_one(context, "job1", done, 0, 1, "zh", threading.Event())
+    assert calls["pipeline"] == 1, "隐式路径：源没变沿用第一层"
+    assert calls["enhance"] == 2
+
+    assert analysis_api._analyze_one(
+        context, "job1", done, 0, 1, "zh", threading.Event(), resume_strict=True
+    )
+    assert calls["pipeline"] == 2, "点名重析：第一层必须重跑"
+    assert calls["enhance"] == 3
