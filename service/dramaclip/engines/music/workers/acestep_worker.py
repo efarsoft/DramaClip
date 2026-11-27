@@ -36,6 +36,8 @@ _INFERENCE_STEPS = 32
 
 
 def _probe_device(requested: str) -> tuple[str, str]:
+    """cuda 单线是有意：music-venv 钉 torch 2.7.1+cu128，无 xpu 轮（music_runtime
+    变体只有 cuda/cpu）——与 tts 侧 probe_torch 的全链探针语义不同，不并单源。"""
     if requested == "cpu":
         return "cpu", ""
     import torch  # noqa: PLC0415

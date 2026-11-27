@@ -72,7 +72,14 @@ def _bootstrap_sys_path() -> None:
 
 
 def _probe_device(requested: str) -> tuple[str, str]:
-    """真探针而非 is_available：老卡（Pascal cc5.2）会被认出但新 CUDA 栈无内核。"""
+    """真探针而非 is_available：老卡（Pascal cc5.2）会被认出但新 CUDA 栈无内核。
+
+    注意（2026-11-27 查证）：本探针在 auto/gpu 下只试 cuda 线，与 funasr/kokoro/
+    indextts 单源 probe_torch 的「全链 cuda → xpu」不同——tts-venv 是共用的且带
+    xpu 轮（tts_runtime._gpu_variant 有 Intel Arc 判据），三兄弟在 Arc 机器上
+    auto 能落 xpu，本探针会静默回 CPU。疑似 2026-11-19 gpu 词汇裁决漏对齐本份。
+    修它须先真机验证 CosyVoice 模型在 xpu 上可跑（否则从「静默慢」变「报错」），
+    见 probe_torch 模块文档。"""
     if requested == "cpu":
         return "cpu", ""
     import torch  # noqa: PLC0415
