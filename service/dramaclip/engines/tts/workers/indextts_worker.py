@@ -28,44 +28,25 @@ def _bootstrap_sys_path() -> None:
         sys.path.insert(0, src)
 
 
+try:
+    from dramaclip.engines.tts.workers.probe_torch import (
+        probe_device as _probe_pkg,
+    )
+
+    _probe_impl = _probe_pkg
+except ImportError:  # venv 按路径执行/冻结态：包源码不在盘上，走同目录兄弟模块
+    from probe_torch import probe_device as _probe_sibling
+
+    _probe_impl = _probe_sibling
+
+
 def _probe_device(requested: str) -> tuple[str, str]:
     """真探针而非 is_available：老卡（如 Pascal cc5.2）会被认出但新 CUDA 栈无内核，
-    载入大模型才崩——这里先跑一次最小运算，失败即转 CPU。
+    载入大模型才崩——先跑一次最小运算，失败即转 CPU。
 
-    gpu/auto 按厂商优先级试全链（cuda → xpu）；cpu 恒 CPU；单后端请求只试该线。"""
-    if requested == "cpu":
-        return "cpu", ""
-    import torch  # noqa: PLC0415
-
-    if requested.startswith("xpu"):
-        lines: tuple[str, ...] = ("xpu",)
-    elif requested in ("auto", "gpu"):
-        lines = ("cuda", "xpu")
-    else:
-        lines = ("cuda",)
-    reasons: list[str] = []
-    for line in lines:
-        if line == "cuda":
-            if not torch.cuda.is_available():
-                reasons.append("torch.cuda.is_available() = False")
-                continue
-            try:
-                (torch.ones(4, device="cuda") * 2).sum().item()
-                return "cuda", ""
-            except Exception as exc:  # noqa: BLE001 - 任何 CUDA 故障都按不可用处理，诚实回 CPU
-                torch.cuda.empty_cache()
-                print(">> CUDA 探针失败，回退 CPU", file=sys.stderr)
-                reasons.append(f"{type(exc).__name__}: {exc}")
-        else:
-            if not torch.xpu.is_available():
-                reasons.append("torch.xpu.is_available() = False")
-                continue
-            try:
-                (torch.ones(4, device="xpu") * 2).sum().item()
-                return "xpu", ""
-            except Exception as exc:  # noqa: BLE001 - XPU 算子/驱动缺口如实回退 CPU
-                reasons.append(f"{type(exc).__name__}: {exc}")
-    return "cpu", "；".join(reasons)
+    gpu/auto 按厂商优先级试全链（cuda → xpu）；cpu 恒 CPU；单后端请求只试该线。
+    实现单源在 probe_torch（见其模块文档）。"""
+    return _probe_impl(requested, stderr_note=True)
 
 
 def main() -> int:

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from dramaclip.engines.tts.engines import kokoro as kokoro_mod
+from dramaclip.engines.tts.workers import probe_torch as probe_torch_mod
 from dramaclip.infra import compute
 
 
@@ -48,7 +49,7 @@ def test_kokoro_explicit_cuda_probe_failure_raises(
     fake_model_mod = SimpleNamespace(KModel=_FakeModel)
     monkeypatch.setitem(sys.modules, "kokoro", fake_kokoro)
     monkeypatch.setitem(sys.modules, "kokoro.model", fake_model_mod)
-    monkeypatch.setattr(kokoro_mod, "_probe_torch_device", lambda _d: ("cpu", "cuda 不可用"))
+    monkeypatch.setattr(probe_torch_mod, "probe_device", lambda _d, **_kw: ("cpu", "cuda 不可用"))
     engine = kokoro_mod.KokoroEngine(tmp_path, device="cuda")
     with pytest.raises(compute.ComputeUnavailableError):
         engine._ensure_pipeline()
