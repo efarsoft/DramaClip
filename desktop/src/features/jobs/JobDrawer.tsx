@@ -4,7 +4,7 @@
  * 失败行 error 原文不截断且给「去处理」；取消被拒时把服务端 reason 原样说出来。
  * 行内三段与过滤工具条在 ./JobRow（300 行红线拆出）。
  */
-import { Fragment, useEffect, useState, type ReactElement } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { Alert, Drawer, Empty } from 'antd';
 import type { JobInfo } from '@dramaclip/protocol';
 import { analysisApi, jobsApi, modelsApi, projectApi } from '../../services/client';
@@ -55,12 +55,15 @@ function JobsBody(): ReactElement {
   const [filter, setFilter] = useState<Filter>('all');
   const [notes, cancel] = useCancelJob();
   const [retryNotes, setRetryNotes] = useState<Readonly<Record<string, string>>>({});
-  const retry = (job: JobInfo): void => {
+  // 回调走派发（只吃 jobId，任务参数从 store 现查）：引用跨渲染稳定，JobRow 的 memo 才有意义。
+  const retry = useCallback((jobId: string): void => {
     // 通用重试只有两类有单条 API：模型下载（重发下载）与分析（重跑整项目）；
     // export/narration 的重跑依赖页面上下文（方案参数/导出 id），保持「去处理」路由。
-    setRetryNotes((prev) => ({ ...prev, [job.id]: '已重新提交' }));
+    const job = useJobsStore.getState().jobs.find((item) => item.id === jobId);
+    if (job === undefined) return;
+    setRetryNotes((prev) => ({ ...prev, [jobId]: '已重新提交' }));
     const finish = (reason: string): void => {
-      setRetryNotes((prev) => ({ ...prev, [job.id]: reason }));
+      setRetryNotes((prev) => ({ ...prev, [jobId]: reason }));
     };
     const call = (() => {
       if (job.type === 'model_download' && job.ref_id !== null && job.ref_id !== '') {
@@ -74,7 +77,12 @@ function JobsBody(): ReactElement {
     call.catch((error: unknown) => {
       finish(error instanceof Error && error.message !== '' ? error.message : String(error));
     });
-  };
+  }, []);
+
+  // 派生值挂 useMemo：轮询快照/切过滤才重算，别在每次渲染重复排序过滤 200 行。
+  // hooks 纪律：必须挂在下方早退之前（取不到时的短路渲染不能跳 hook）。
+  const summary = useMemo(() => summarizeJobs(jobs), [jobs]);
+  const shown = useMemo(() => sortJobs(jobs).filter((job) => matches(job, filter)), [jobs, filter]);
 
   if (!available) {
     return (
@@ -86,8 +94,6 @@ function JobsBody(): ReactElement {
       />
     );
   }
-  const summary = summarizeJobs(jobs);
-  const shown = sortJobs(jobs).filter((job) => matches(job, filter));
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceMd }}>
       <JobsToolbar
@@ -102,28 +108,19 @@ function JobsBody(): ReactElement {
         const retryNote = retryNotes[job.id];
         return (
           <Fragment key={job.id}>
-        <JobRow
-          key={job.id}
-          job={job}
-          names={names}
-          serverTimeMs={serverTimeMs}
-          note={notes[job.id]}
-          onCancel={() => {
-            cancel(job.id);
-          }}
-          onRetry={
-            job.type === 'model_download' || job.type === 'analysis'
-              ? () => {
-                  retry(job);
-                }
-              : undefined
-          }
-        />
-        {retryNote !== undefined && (
-          <span style={{ fontSize: tokens.text.badge.size, color: tokens.textSecondary }}>
-            {job.label ?? ''}：{retryNote}
-          </span>
-        )}
+            <JobRow
+              job={job}
+              names={names}
+              serverTimeMs={serverTimeMs}
+              note={notes[job.id]}
+              onCancel={cancel}
+              onRetry={job.type === 'model_download' || job.type === 'analysis' ? retry : undefined}
+            />
+            {retryNote !== undefined && (
+              <span style={{ fontSize: tokens.text.badge.size, color: tokens.textSecondary }}>
+                {job.label ?? ''}：{retryNote}
+              </span>
+            )}
           </Fragment>
         );
       })}
@@ -159,7 +156,7 @@ export function useJobSubjects(open: boolean): JobSubjectNames {
 
 function useCancelJob(): [Readonly<Record<string, CancelNote>>, (jobId: string) => void] {
   const [notes, setNotes] = useState<Readonly<Record<string, CancelNote>>>({});
-  const cancel = (jobId: string): void => {
+  const cancel = useCallback((jobId: string): void => {
     setNotes((prev) => ({ ...prev, [jobId]: { kind: 'sending' } }));
     jobsApi
       .cancel(jobId)
@@ -175,7 +172,7 @@ function useCancelJob(): [Readonly<Record<string, CancelNote>>, (jobId: string) 
         const reason = error instanceof Error && error.message !== '' ? error.message : String(error);
         setNotes((prev) => ({ ...prev, [jobId]: { kind: 'rejected', reason } }));
       });
-  };
+  }, []);
   return [notes, cancel];
 }
 
@@ -197,9 +194,9 @@ export function SessionLogFeed(): React.ReactElement {
         本会话留痕（实时流，重启即失；事后账在任务与成片记录里）
       </span>
       <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: tokens.spaceXs }}>
-        {notifyLog.map((entry, index) => (
+        {notifyLog.map((entry) => (
           <span
-            key={`${String(entry.at)}-${String(index)}`}
+            key={entry.id}
             style={{
               fontSize: tokens.text.badge.size,
               lineHeight: tokens.text.badge.leading,

@@ -197,6 +197,42 @@ describe('JobDrawer', () => {
   });
 });
 
+describe('会话留痕（notifyLog）', () => {
+  it('每条入列即得自增 id；滑出窗口后留存条目的 id 保持原值（key 钉内容身份）', () => {
+    useJobsStore.setState({ notifyLog: [] });
+    const entry = { jobId: null, level: 'info', message: 'x', at: 1 };
+    useJobsStore.getState().appendNotifyLog(entry);
+    useJobsStore.getState().appendNotifyLog(entry);
+    const [firstId, secondId] = useJobsStore.getState().notifyLog.map((item) => item.id);
+    if (firstId === undefined || secondId === undefined) throw new Error('两条都该在窗内');
+    expect(secondId).toBe(firstId + 1);
+
+    // 塞爆窗口（上限 200）再追加 202 条：204 个序号里最后 200 个留窗——
+    // 留下的 id 是连续自增的原值，不随数组前移而漂
+    for (let i = 0; i < 202; i += 1) {
+      useJobsStore.getState().appendNotifyLog({ jobId: null, level: 'info', message: `m${String(i)}`, at: i });
+    }
+    const log = useJobsStore.getState().notifyLog;
+    expect(log).toHaveLength(200);
+    const oldest = log[0];
+    const newest = log[199];
+    if (oldest === undefined || newest === undefined) throw new Error('窗口该是满 200 条');
+    expect(oldest.id).toBe(secondId + 3);
+    expect(newest.id).toBe(secondId + 202);
+  });
+
+  it('留痕上屏：jobId 截前 6 位、warn 着色内容照登', async () => {
+    useJobsStore.setState({ jobs: [], available: true, serverTimeMs: SERVER_NOW, drawerOpen: true, notifyLog: [] });
+    useJobsStore.getState().appendNotifyLog({ jobId: 'jabc123456', level: 'info', message: '转写开始', at: 1 });
+    useJobsStore.getState().appendNotifyLog({ jobId: null, level: 'warn', message: 'OCR 缺一页', at: 2 });
+    drawer();
+
+    expect(await screen.findByText('[jabc12] 转写开始')).toBeTruthy();
+    expect(screen.getByText('OCR 缺一页')).toBeTruthy();
+    expect(screen.getByText(/本会话留痕/)).toBeTruthy();
+  });
+});
+
 describe('JobsFeed（门控轮询）', () => {
   function feed(): void {
     render(
@@ -233,6 +269,28 @@ describe('JobsFeed（门控轮询）', () => {
       expect(useJobsStore.getState().available).toBe(false);
     });
     expect(useJobsStore.getState().error).toBe('管道断开');
+  });
+
+  it('后台页不打扰：hidden 时 tick 空转不发包，回前台立即补一发', async () => {
+    useUiStore.setState({ serviceState: 'ready' });
+    api.listJobs.mockResolvedValue({ jobs: [], server_time_ms: SERVER_NOW });
+    const setHidden = (value: boolean): void => {
+      Object.defineProperty(document, 'hidden', { configurable: true, value });
+    };
+    setHidden(true);
+    feed();
+    // 初始 tick 与几拍定时器都过去了，仍然零请求
+    await new Promise((resolve) => {
+      setTimeout(resolve, 30);
+    });
+    expect(api.listJobs).not.toHaveBeenCalled();
+
+    setHidden(false);
+    fireEvent(document, new Event('visibilitychange'));
+    await waitFor(() => {
+      expect(api.listJobs).toHaveBeenCalledTimes(1);
+    });
+    setHidden(false); // 复位，别污染后续用例
   });
 });
 

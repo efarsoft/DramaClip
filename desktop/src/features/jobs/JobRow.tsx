@@ -3,7 +3,7 @@
  */
 import { Button, Popconfirm, Progress, Segmented } from 'antd';
 import { useNavigate } from 'react-router-dom';
-import type { CSSProperties, ReactElement } from 'react';
+import { memo, type CSSProperties, type ReactElement } from 'react';
 import type { JobInfo, JobStatus } from '@dramaclip/protocol';
 import { jobsApi } from '../../services/client';
 import { mixins } from '../../styles/mixins';
@@ -97,7 +97,10 @@ export function JobsToolbar({
   );
 }
 
-export function JobRow({
+/** memo 化的行组件：onCancel/onRetry 走派发（只吃 jobId，父级传稳定引用），
+ * 过滤切换/记笔记这类抽屉内重渲不把 200 行全拖下水。job/serverTimeMs 每次快照
+ * 都换——轮询节拍上的行刷新本来就是必须的（进度与已耗时要走），不在这里撒谎。 */
+export const JobRow = memo(function JobRow({
   job,
   names,
   serverTimeMs,
@@ -109,16 +112,23 @@ export function JobRow({
   names: JobSubjectNames;
   serverTimeMs: number | null;
   note: CancelNote | undefined;
-  onCancel: () => void;
-  /** 失败行的重试动作（规格 §3.5 队列页）：提供才显示——抽屉场景不传则维持原样。 */
-  onRetry?: () => void;
+  onCancel: (jobId: string) => void;
+  /** 失败行的重试动作（规格 §3.5 队列页）：提供才显示——按 jobId 派发，行内不自建闭包。 */
+  onRetry?: (jobId: string) => void;
 }): ReactElement {
   const elapsed = jobElapsedMs(job, serverTimeMs);
   return (
     <div style={ROW_STYLE}>
       <JobTitleLine job={job} names={names} />
       {job.status === 'running' && <Progress percent={Math.round(job.progress)} size="small" status="active" />}
-      <JobMetaLine job={job} elapsed={elapsed} note={note} onCancel={onCancel} />
+      <JobMetaLine
+        job={job}
+        elapsed={elapsed}
+        note={note}
+        onCancel={() => {
+          onCancel(job.id);
+        }}
+      />
       {job.status === 'failed' && job.error !== null && job.error !== undefined && job.error !== '' && (
         <span
           style={{
@@ -135,14 +145,19 @@ export function JobRow({
       )}
       {job.status === 'failed' && onRetry !== undefined && (
         <div>
-          <Button size="small" onClick={onRetry}>
+          <Button
+            size="small"
+            onClick={() => {
+              onRetry(job.id);
+            }}
+          >
             重试
           </Button>
         </div>
       )}
     </div>
   );
-}
+});
 
 function JobTitleLine({ job, names }: { job: JobInfo; names: JobSubjectNames }): ReactElement {
   const navigate = useNavigate();

@@ -1,4 +1,6 @@
-/** 任务喂数：全局唯一轮询点，快照写 stores/jobs；顺带挂载任务抽屉。 */
+/** 任务喂数：全局唯一轮询点，快照写 stores/jobs；顺带挂载任务抽屉。
+ *  页面隐藏（最小化/切走）时 tick 直接空转不发包，回前台 visibilitychange 立即补一发——
+ *  看不见的页面不该持续打扰服务；完成通知等回前台一并到，不丢账。 */
 import { useEffect, type ReactElement } from 'react';
 import { jobsApi } from '../../services/client';
 import { useJobsStore } from '../../stores/jobs';
@@ -21,6 +23,7 @@ export function JobsFeed(): ReactElement {
     if (serviceState !== 'ready') return;
     let stopped = false;
     const tick = (): void => {
+      if (document.hidden) return;
       jobsApi
         .list(LIST_LIMIT)
         .then((result) => {
@@ -34,9 +37,14 @@ export function JobsFeed(): ReactElement {
     };
     tick();
     const timer = setInterval(tick, drawerOpen || fast > 0 ? OPEN_INTERVAL_MS : CLOSED_INTERVAL_MS);
+    const onVisibility = (): void => {
+      if (!document.hidden) tick();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       stopped = true;
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [serviceState, drawerOpen, fast]);
 

@@ -41,6 +41,12 @@ export interface NotifyLogEntry {
   readonly at: number;
 }
 
+/** 入列后的形态：多一个单调自增 id。滚动窗口滑出旧条目时整列前移、index 全变，
+ * 渲染 key 必须钉在条目自己的身份上——否则每来一条新日志，199 行全量 remount。 */
+export interface StoredNotifyLogEntry extends NotifyLogEntry {
+  readonly id: number;
+}
+
 interface JobsState {
   jobs: readonly JobInfo[];
   /** jobs.list 最近一次是否取到。取不到 ≠ 空列表：未知时界面显示「—」，不假装 0。 */
@@ -52,7 +58,7 @@ interface JobsState {
   drawerOpen: boolean;
   /** 快消费档计数（分析在跑/规划在跑等）：>0 时轮询节距 2s，否则 10s。 */
   fast: number;
-  notifyLog: readonly NotifyLogEntry[];
+  notifyLog: readonly StoredNotifyLogEntry[];
   appendNotifyLog: (entry: NotifyLogEntry) => void;
   /** 登记 fast 消费；返回释放函数（useEffect 清理直接返回它）。 */
   enterFast: () => (() => void);
@@ -60,6 +66,9 @@ interface JobsState {
   setUnavailable: (error: string) => void;
   setDrawerOpen: (open: boolean) => void;
 }
+
+/** notifyLog 条目的单调序号：进程内自增即可（会话级数据，重启归零无妨）。 */
+let notifyLogSeq = 0;
 
 export const useJobsStore = create<JobsState>((set) => ({
   jobs: [],
@@ -70,7 +79,9 @@ export const useJobsStore = create<JobsState>((set) => ({
   fast: 0,
   notifyLog: [],
   appendNotifyLog: (entry) => {
-    set((state) => ({ notifyLog: [...state.notifyLog.slice(-199), entry] }));
+    set((state) => ({
+      notifyLog: [...state.notifyLog.slice(-199), { ...entry, id: (notifyLogSeq += 1) }],
+    }));
   },
   enterFast: () => {
     set((state) => ({ fast: state.fast + 1 }));
