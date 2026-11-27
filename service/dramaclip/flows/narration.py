@@ -1,9 +1,9 @@
 """方案产出的编排执行体：选题变体构建与重叠裁决 + 两块软质检。
 
 自 api/narration_plans.py 逐字下沉（2026-11-26 工程债 ② 分批，语义零变化）：
-都不碰 RPC/落方案主流程。`_NO_TTS_MODES`
-仍是模式词汇表、留在 narration_plans（expected_copy_source 与渲染审计共用），
-这里惰性引入避循环。
+都不碰 RPC/落方案主流程。模式词汇表的家在
+engines/narration/mode_vocab.py（flows 与 api 同向引入，不再有惰性避循环）；
+真名映射的存放键是强项目归属数据，随本模块（装配时消费）走。
 """
 
 from __future__ import annotations
@@ -27,6 +27,11 @@ from dramaclip.engines.narration import (
     styles as styles_lib,
 )
 from dramaclip.engines.narration.casting import EpisodeScene, MaterialByEpisode
+from dramaclip.engines.narration.mode_vocab import (
+    _NARRATION_MODES,
+    _NO_TTS_MODES,
+    _SCRIPT_DRIVEN_MODES,
+)
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.narration.plan_inputs import (
     audio_of,
@@ -44,6 +49,11 @@ from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
 
+# 真名映射（v0.2.5 2.2）：project.settings 单键（JSON 串，角色标签→真名）。
+# 存放裁决=强项目归属数据挂 projects.settings（migration 028 热词同款先例：
+# 全局表是跨剧泄漏源；随 project.duplicate 自动复制）。
+SPEAKER_MAPPING_SETTINGS_KEY = "speaker.mapping"
+
 
 def _score_batch(
     context: AppContext, job_id: str, project_id: str, settings: dict[str, str]
@@ -54,8 +64,6 @@ def _score_batch(
     绝不让规划 job 因它变红——job 的成败只由方案生成本身决定。
     grade/defects 在此零触碰：`set_scores` 只写 score_* 与 suggestion 三列。
     """
-    from dramaclip.api.narration_plans import _NO_TTS_MODES  # noqa: PLC0415 - 惰性避循环
-
     if not is_configured(settings):
         return  # 没配 LLM 的项目：静默跳过，不发请求不留错误
     rows = plans_repo.list_by_batch(context.conn, project_id, job_id)
@@ -285,15 +293,6 @@ def _retell_gate(
 # 选题变体与重叠裁决（②-2 下沉）：api 主循环按它选题、判兄弟重叠。
 # ---------------------------------------------------------------------------
 
-# 剧本驱动的唯一模式。2026-09-12 裁决之后**九个模式都能在一条方案里跨集取画面**
-# （Task 3c 的 casting 层给六个规则编排器补上了集身份），所以这个集合不再表示
-# "只有它能跨集"——那是一句已经作废的话，留着它就是留下一句关于代码的假话。
-# 它现在只表示一件事：**这条方案的时间轴不是 (mode, 取材集) 的纯函数**，
-# 因为剧本由模型按角度现写（script_driver.script_dialogue_plan）。于是成稿**前**那道
-# 重叠闸门（_reject_same_episode_sibling）对它无效，只能靠成稿**后**的 _worst_overlap 兜。
-_SCRIPT_DRIVEN_MODES = frozenset({"dialogue_narration"})
-
-
 @dataclass(frozen=True)
 class _Variant:
     """一条待产出的方案：取材意图（名字/理由/集号/母题）+ 成稿时注入的角度块。
@@ -507,8 +506,6 @@ def _inject_run_settings(
 ) -> list[dict[str, Any]]:
     """任务级一次性注入：项目名、题材、跨集转写、口味层风格。返回跨集输入。
     """
-    from dramaclip.api.narration_plans import _NARRATION_MODES  # noqa: PLC0415 - 惰性避循环
-
     project_id = str(episodes[0]["project_id"])
     project = projects_repo.get(context.conn, project_id)
     if project is None:
@@ -548,10 +545,6 @@ def _settle_failed(context: AppContext, job_id: str, error: str) -> None:
 def _speaker_mapping_of(settings: dict[str, str]) -> dict[str, str]:
     """settings 里的真名映射（JSON 串）；缺失/坏 JSON/形不对一律空表——映射是
     增强不是义务，不为它付「这条方案出不了片」的代价。"""
-    from dramaclip.api.narration_plans import (  # noqa: PLC0415 - 惰性避循环
-        SPEAKER_MAPPING_SETTINGS_KEY,
-    )
-
     raw = settings.get(SPEAKER_MAPPING_SETTINGS_KEY)
     if not raw:
         return {}

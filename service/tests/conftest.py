@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from dramaclip.api import narration_plans
 from dramaclip.engines.narration import variant_scoring
 from dramaclip.engines.semantic import llm_quota
+from dramaclip.flows import plan_runner
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 from dramaclip.infra.storage import db
 
@@ -62,7 +62,7 @@ def _no_variant_gap_in_tests(monkeypatch: pytest.MonkeyPatch) -> None:
     2026-11-26 实测：25 个规划用例各睡几轮 3 秒，合计 150 秒，占全量套件近四成。
     「取消能打断等待」由 test_plan_variants 的专测覆盖，那里自行把间隔调回去。
     """
-    monkeypatch.setattr(narration_plans, "_VARIANT_GAP_S", 0.0)
+    monkeypatch.setattr(plan_runner, "_VARIANT_GAP_S", 0.0)
 
 
 # 作业线程池登记表：泄漏的作业线程若活过测试，会在 monkeypatch 还原后撞共享模块

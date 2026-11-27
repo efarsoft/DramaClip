@@ -227,10 +227,9 @@ def _voice_issue_or_none(
     """
     if not plan_data.narration_texts:
         return None  # 纯原片不需要配音
-    from dramaclip.api import narration as narration_api
     from dramaclip.engines.tts import auto_voice
-
-    settings = narration_api._effective_settings(context, project_id)
+    from dramaclip.flows.plan_runner import _effective_settings
+    settings = _effective_settings(context, project_id)
     engine = str(settings.get("tts.engine") or "edge").strip()
     if engine not in _VOICE_NEEDED_ENGINES:
         return None  # edge/kokoro/auto 链首不需要参考音色

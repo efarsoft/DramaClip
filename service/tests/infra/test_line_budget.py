@@ -36,10 +36,11 @@ _FILE_RATCHET: dict[str, int] = {
 }
 
 _FUNC_RATCHET: dict[str, int] = {
+    # _run_plan_variants：2026-09 起的欠账（api 时代 200），下沉 flows 后实测 195。
+    "dramaclip/flows/plan_runner.py::_run_plan_variants": 195,
+    "dramaclip/flows/plan_runner.py::_plan_one": 136,
     "dramaclip/api/analysis_job.py::_analyze_one": 204,
     "dramaclip/api/export_render.py::render_export": 297,
-    "dramaclip/api/narration_plans.py::_run_plan_variants": 200,
-    "dramaclip/api/narration_plans.py::_plan_one": 136,
     "dramaclip/engines/exporter/encoder.py::cut_segment_args": 209,
     "dramaclip/engines/exporter/encoder.py::_export_plan_once": 426,
     "dramaclip/engines/narration/flow_writer.py::write_flow_script": 148,

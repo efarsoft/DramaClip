@@ -58,7 +58,8 @@ def _ensure_voiced(
         str(episode["id"]): float(episode["duration"] or 0.0)
         for episode in episodes_repo.list_by_project(context.conn, project_id)
     }
-    settings = narration_api._effective_settings(context, project_id)
+    from dramaclip.flows.plan_runner import _effective_settings
+    settings = _effective_settings(context, project_id)
     _ensure_clone_voice(
         context, plan_row, project_id, episodes_repo, settings, voice_reports
     )

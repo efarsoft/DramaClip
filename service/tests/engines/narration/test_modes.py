@@ -34,7 +34,7 @@ def test_supported_modes_equal_labels_and_retired_are_gone() -> None:
     支持」（2026-11-12 真机实锤）；当天业主裁决完全清除。此后下线即干净摘除，
     名单只留名字给推荐缓存净化用。
     """
-    from dramaclip.api.narration_plans import SUPPORTED_MODES
+    from dramaclip.engines.narration.mode_vocab import SUPPORTED_MODES
 
     assert not (set(pipeline.MODE_LABELS) & pipeline.RETIRED_MODES), (
         "下线名单上的名字不得残留在标签表里"

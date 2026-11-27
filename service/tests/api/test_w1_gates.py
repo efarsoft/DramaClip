@@ -56,14 +56,14 @@ def test_g2_judgement_table_is_single_source() -> None:
     """全仓不得出现第二处手抄的「模式 → 来源」字面量表（拦 EXPECT_PLANNER 复发）。"""
     verify_modes = (_REPO / "scripts" / "verify_modes.py").read_text(encoding="utf-8")
     assert "EXPECT_PLANNER" not in verify_modes, "手抄表复活即红"
-    plans = (_REPO / "service" / "dramaclip" / "api" / "narration_plans.py").read_text(
+    vocab = (_REPO / "service" / "dramaclip" / "engines" / "narration" / "mode_vocab.py").read_text(
         encoding="utf-8"
     )
-    assert "def expected_copy_source" in plans, "唯一判定接口失踪"
+    assert "def expected_copy_source" in vocab, "唯一判定接口失踪"
 
     # 「模式 → llm_script」的字典字面量只准出现在派生接口所在文件；写入点
     # （copywriter 的 model_copy(update={"planner": ...})）键不是模式名，不误伤
-    from dramaclip.api.narration_plans import SUPPORTED_MODES
+    from dramaclip.engines.narration.mode_vocab import SUPPORTED_MODES
 
     key_pattern = re.compile(
         "|".join(
@@ -77,7 +77,7 @@ def test_g2_judgement_table_is_single_source() -> None:
     )
     for root in scan_roots:
         for path in root.rglob("*.py"):
-            if path.name == "narration_plans.py":
+            if path.name == "mode_vocab.py":
                 continue
             if key_pattern.search(path.read_text(encoding="utf-8")):
                 offenders.append(path)
@@ -111,7 +111,7 @@ def test_g2_mode_gate_tables_derive_from_production_mode_list() -> None:
     变异锚点：把 `ALL_MODES` 改回手抄列表并漏掉一个模式名，本用例必红。
     """
     gate = _load_mode_gate()
-    from dramaclip.api.narration_plans import SUPPORTED_MODES
+    from dramaclip.engines.narration.mode_vocab import SUPPORTED_MODES
 
     assert list(gate.ALL_MODES) == list(SUPPORTED_MODES)
     assert set(gate.EXPECT_NARRATION) == set(SUPPORTED_MODES)

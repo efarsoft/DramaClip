@@ -11,7 +11,6 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from dramaclip.api import narration_plans
 from dramaclip.api.analysis_job import (
     _analyze_one,  # noqa: F401 - 测试经 analysis_api._analyze_one 直调，引用面保留
     _current_signature,
@@ -28,6 +27,7 @@ from dramaclip.engines.analysis.models import (
     SceneInfo,
 )
 from dramaclip.engines.semantic import pipeline as semantic_pipeline
+from dramaclip.flows.narration import SPEAKER_MAPPING_SETTINGS_KEY
 from dramaclip.infra import config
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -466,7 +466,7 @@ def speaker_mapping(context: AppContext, params: dict[str, Any]) -> dict[str, An
     mapping = params.get("mapping")
     if mapping is None:
         raw = projects_repo.get_settings(context.conn, project_id).get(
-            narration_plans.SPEAKER_MAPPING_SETTINGS_KEY
+            SPEAKER_MAPPING_SETTINGS_KEY
         )
         try:
             current = json.loads(str(raw)) if raw else {}
@@ -487,7 +487,7 @@ def speaker_mapping(context: AppContext, params: dict[str, Any]) -> dict[str, An
         context.conn,
         project_id,
         {
-            narration_plans.SPEAKER_MAPPING_SETTINGS_KEY: json.dumps(
+            SPEAKER_MAPPING_SETTINGS_KEY: json.dumps(
                 cleaned, ensure_ascii=False
             )
         },

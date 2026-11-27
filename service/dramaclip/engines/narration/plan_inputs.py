@@ -6,7 +6,7 @@ casting 原料（AudioFeatures / 静音区间 / 拍点 / 窗口表 / 切点表 /
 高光）。坏数据一律降级为空表、不 raise（编排层不为解析失败付「这条方案
 出不了片」的代价），与 narration_plans 的既有纪律一致。
 
-两个消费方：api/narration_plans._collect_episode_inputs / _casting_for，
+两个消费方：flows/narration._collect_episode_inputs / _casting_for，
 以及 api/narration（scene_cuts_of 单点）。
 """
 

@@ -1,10 +1,8 @@
-"""narration 方案产出执行族：角度选题 → 逐条成稿 → 重叠裁决 → 落库评分。
+"""规划执行体：逐模式取 K 条意图 → 逐条成稿落库 → 尾部评分。
 
-自 api/narration.py 拆出（拆分专项 B）：RPC 受理/查询/标题留在 narration.py，
-本模块承载 job 池里真正跑的规划执行体（评分与复述质检块已下沉 flows/narration.py，
-工程债 ② 首切）。模式集合常量随执行族走（选题与裁决
-都按它分流），narration.py 单向引回 SUPPORTED_MODES/_NO_TTS_MODES；
-_effective_settings 留守（RPC 层受理期也要读），执行体惰性导入。
+自 api/narration_plans.py 逐字下沉（2026-11-26 工程债 ② 收尾批，语义零变化）：
+job 池里真正跑的规划主流程。`_effective_settings`（全局默认 + 项目级覆盖）随
+执行体走——执行开始与 RPC 受理期读的是同一份装配，只有一个定义点。
 """
 
 from __future__ import annotations
@@ -26,6 +24,7 @@ from dramaclip.engines.narration import (
 from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration import styles as styles_lib
 from dramaclip.engines.narration.conversion import grade
+from dramaclip.engines.narration.mode_vocab import _ZERO_COPY_MODES
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.semantic.llm_client import LlmQuotaExceeded
 from dramaclip.flows.narration import (
@@ -46,41 +45,7 @@ from dramaclip.flows.narration import (
     _worst_overlap,
 )
 from dramaclip.infra.storage.repos import plans as plans_repo
-
-# 真名映射（v0.2.5 2.2）：project.settings 单键（JSON 串，角色标签→真名）。
-# 存放裁决=强项目归属数据挂 projects.settings（migration 028 热词同款先例：
-# 全局表是跨剧泄漏源；随 project.duplicate 自动复制）。
-SPEAKER_MAPPING_SETTINGS_KEY = "speaker.mapping"
-
-SUPPORTED_MODES = (
-    "raw_clip",
-    # 高光混剪（highlight_cut）2026-10-27 业主裁决并入纯原片剪辑（raw_clip 单入口，
-    # 5 秒均切取消），2026-11-12 完全清除：生成/渲染/消费分支全删，存量方案行由
-    # migrations/027 删除，历史推荐缓存由 mode_recommend 读时净化。
-
-    "intro_narration",
-    "cross_narration",
-    "ultra_short_hook",
-    "dialogue_narration",
-    "full_narration",
-    "subtitle_flow",
-    "dual_host_chat",
-    "inner_monologue",
-)
-
-# 与 TTS 合成并行的两组：剧情解说已由 LLM 剧本驱动，每段都要配音，不再属"无 TTS"。
-_NO_TTS_MODES = frozenset({"raw_clip", "subtitle_flow"})
-# 零文案模式（=_NO_TTS_MODES）：没有旁白槽位，母题/钩子/句式约束无处落地——
-# 选题换零文案专用提示词（只挑跨集冲突链并命名，_REEL_SYSTEM_PROMPT），失败回落
-# 单集锚定（_deterministic_variants）。2026-10-20 业主裁决：单集锚定当主路线不
-# 合适——吸引力在跨集因果链。
-_ZERO_COPY_MODES = _NO_TTS_MODES
-
-# 会产出旁白槽位、因而读 `settings["_style_directives"]` 的模式（copywriter /
-# scriptwriter 两侧都只往解说槽位里塞风格指令）。派生自上面两个集合，绝不另立
-# 第四份手抄模式清单——纯剪辑作业连口味层的答案都无人可读，不该为它付选题往返。
-_NARRATION_MODES = frozenset(SUPPORTED_MODES) - _NO_TTS_MODES
-
+from dramaclip.infra.storage.repos import projects as projects_repo
 
 #: 每条方案之间的间隔（秒）。2026-09-15 与 429 退避同批引入，防「九模式连发选题」
 #: 触发 QPS 上限。单列成常量是为了测试能打桩——规划用例不必各睡几轮 3 秒
@@ -88,14 +53,15 @@ _NARRATION_MODES = frozenset(SUPPORTED_MODES) - _NO_TTS_MODES
 _VARIANT_GAP_S = 3.0
 
 
-def expected_copy_source(mode: str) -> str:
-    """该模式的方案文案应当来自哪里：``llm_script``（LLM 成稿）或 ``rule``（规则预算）。
-
-    「模式 → 来源」的唯一判定接口：verify_modes 与方案卡徽章都从它取判据，不许
-    另立第二份手抄模式表（2026-10-16 规格 §1.1；手抄表漏条目的漂移实证——那次
-    漏的是高光混剪，该模式已于 2026-11-12 完全移除，教训照旧成立）。
+def _effective_settings(context: AppContext, project_id: str) -> dict[str, str]:
+    """全局默认 + 项目级覆盖（规格 §4.3 的「默认 + 覆盖」）。
     """
-    return "rule" if mode in _NO_TTS_MODES else "llm_script"
+    settings = dict(context.settings)
+    for key, value in projects_repo.get_settings(context.conn, project_id).items():
+        if value is not None:
+            settings[str(key)] = str(value)
+    return settings
+
 
 def _run_plan_variants(
     context: AppContext,
@@ -110,10 +76,8 @@ def _run_plan_variants(
 ) -> None:
     """逐模式取 K 条方案意图 → 逐条成稿落库（配音推迟到勾选出片）。"""
     try:
-        from dramaclip.api import narration as narration_api
-
         context.job_store.mark_running(job_id)
-        settings = narration_api._effective_settings(context, project_id)
+        settings = _effective_settings(context, project_id)
         speaker_mapping = _speaker_mapping_of(settings)
         try:
             settings["_prior_texts_json"] = json.dumps(

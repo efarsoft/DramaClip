@@ -17,7 +17,6 @@ import pytest
 from dramaclip.api import analysis as analysis_api
 from dramaclip.api import export as export_api
 from dramaclip.api import narration as narration_api
-from dramaclip.api import narration_plans as narration_plans
 from dramaclip.api import project as project_api
 from dramaclip.engines.analysis.models import AudioFeatures
 from dramaclip.engines.narration import (
@@ -36,6 +35,7 @@ from dramaclip.engines.narration.models import (
     TimelineSegment,
 )
 from dramaclip.flows import narration as flows_narration
+from dramaclip.flows import plan_runner
 from dramaclip.infra import jobs
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -282,7 +282,8 @@ def test_assembly_failure_lands_in_jobs_table(
     def boom(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
         raise ValueError("项目不存在: 装配期已被删除")
 
-    monkeypatch.setattr(narration_plans, "_inject_run_settings", boom)
+    # runner 已下沉 flows/plan_runner：按值绑定，桩打在读者身上
+    monkeypatch.setattr(plan_runner, "_inject_run_settings", boom)
     job_id = str(harness.rpc(
         "narration.plan_variants",
         {"project_id": project_id, "modes": ["raw_clip"], "k": 1},
@@ -314,7 +315,7 @@ def test_outer_handler_failure_also_lands_in_the_log_panel(
     project_id = _seed_project_with_analysis(memory_db, tmp_path, sample_video)
     harness = Harness(memory_db, tmp_path / "cache" / "analysis", data_dir=tmp_path)
 
-    real = narration_api._effective_settings
+    real = plan_runner._effective_settings
     calls = {"n": 0}
 
     def flaky(_ctx: Any, _pid: str) -> dict[str, str]:
@@ -323,6 +324,8 @@ def test_outer_handler_failure_also_lands_in_the_log_panel(
             return real(harness.context, _pid)  # type: ignore[arg-type]
         raise RuntimeError("项目配置读坏了")
 
+    # 受理期（narration.py 全局名）与运行期（plan_runner）各读一次，两处都要打中
+    monkeypatch.setattr(plan_runner, "_effective_settings", flaky)
     monkeypatch.setattr(narration_api, "_effective_settings", flaky)
     job_id = str(harness.rpc(
         "narration.plan_variants",
@@ -955,7 +958,7 @@ def test_post_copy_overlap_gate_still_guards_cross_episode_modes(
     # 模板，真跑会多付一次避重重写、成稿计数 2→3）——变异链自身由
     # test_diversity 与真机验收覆盖。
     monkeypatch.setattr(
-        narration_plans.diversity, "too_similar", lambda *_a, **_k: False
+        plan_runner.diversity, "too_similar", lambda *_a, **_k: False
     )
     monkeypatch.setattr(
         angles,
@@ -1166,7 +1169,7 @@ def test_plan_variants_cancel_releases_the_event(
     calls: list[tuple[str, str]] = []
     _stub_language_and_tts(monkeypatch, calls)
 
-    real_plan = narration_plans._plan_one
+    real_plan = plan_runner._plan_one
 
     def plan_then_cancel(*args: Any, **kwargs: Any) -> Any:
         """编完第一条就取消：规划阶段不再走配音。"""
@@ -1175,7 +1178,7 @@ def test_plan_variants_cancel_releases_the_event(
             event.set()
         return planned
 
-    monkeypatch.setattr(narration_plans, "_plan_one", plan_then_cancel)
+    monkeypatch.setattr(plan_runner, "_plan_one", plan_then_cancel)
     result = harness.rpc(
         "narration.plan_variants",
         {"project_id": project_id, "modes": ["full_narration"], "k": 3},
@@ -1201,8 +1204,8 @@ def test_cancel_during_variant_gap_ends_the_job_at_once(
     calls: list[tuple[str, str]] = []
     _stub_language_and_tts(monkeypatch, calls)
     # 测试默认把间隔归零（conftest）；这里调大，才测得出「取消能打断等待」
-    monkeypatch.setattr(narration_plans, "_VARIANT_GAP_S", 30.0)
-    real_plan = narration_plans._plan_one
+    monkeypatch.setattr(plan_runner, "_VARIANT_GAP_S", 30.0)
+    real_plan = plan_runner._plan_one
 
     def plan_then_cancel(*args: Any, **kwargs: Any) -> Any:
         planned = real_plan(*args, **kwargs)
@@ -1210,7 +1213,7 @@ def test_cancel_during_variant_gap_ends_the_job_at_once(
             event.set()
         return planned
 
-    monkeypatch.setattr(narration_plans, "_plan_one", plan_then_cancel)
+    monkeypatch.setattr(plan_runner, "_plan_one", plan_then_cancel)
     started = time.monotonic()
     result = harness.rpc(
         "narration.plan_variants",

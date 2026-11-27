@@ -10,19 +10,19 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext, llm_trace_dir
-from dramaclip.api.narration_plans import (  # noqa: F401 - _NO_TTS_MODES 供测试经 narration_api 直读
-    _NO_TTS_MODES,
-    SUPPORTED_MODES,
-    _run_plan_variants,
-    expected_copy_source,
-)
 from dramaclip.engines.narration import mode_recommend, variant_scoring
 from dramaclip.engines.narration import pipeline as narration_pipeline
 from dramaclip.engines.narration import styles as styles_lib
 from dramaclip.engines.narration.conversion import defects
+from dramaclip.engines.narration.mode_vocab import (  # noqa: F401 - _NO_TTS_MODES 供测试经 narration_api 直读
+    _NO_TTS_MODES,
+    SUPPORTED_MODES,
+    expected_copy_source,
+)
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.narration.plan_inputs import scene_cuts_of
 from dramaclip.engines.semantic.llm_client import LlmUnavailable, client_or_none
+from dramaclip.flows.plan_runner import _effective_settings, _run_plan_variants
 from dramaclip.infra import config
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
@@ -272,16 +272,6 @@ def plan_cost(row: dict[str, Any]) -> dict[str, int]:
 
 def list_styles(context: AppContext, _params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     return styles_lib.list_styles()
-
-
-def _effective_settings(context: AppContext, project_id: str) -> dict[str, str]:
-    """全局默认 + 项目级覆盖（规格 §4.3 的「默认 + 覆盖」）。
-    """
-    settings = dict(context.settings)
-    for key, value in projects_repo.get_settings(context.conn, project_id).items():
-        if value is not None:
-            settings[str(key)] = str(value)
-    return settings
 
 
 def plan_variants(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:

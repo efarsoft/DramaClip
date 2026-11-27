@@ -257,7 +257,7 @@ def _probe_silence_quality(
     与时长审计同纪律。零文案模式（raw_clip 等）原声本就是主体，静默可能是剧情本身，
     不检查。探测自身失败静默跳过——事后体检不许拖垮已成功的导出。
     """
-    from dramaclip.api.narration_plans import _NO_TTS_MODES  # noqa: PLC0415 - 延迟导入避免循环
+    from dramaclip.engines.narration.mode_vocab import _NO_TTS_MODES  # noqa: PLC0415 - 保持调用点形状
 
     if narration_mode in _NO_TTS_MODES:
         return
