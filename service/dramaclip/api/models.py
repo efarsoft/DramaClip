@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from dramaclip.api.context import AppContext
+from dramaclip.api.job_runner import first_active_job, launch_threaded_job
 from dramaclip.engines import selftest as selftest_mod
 from dramaclip.infra.jobs import STATUS_RUNNING
 from dramaclip.infra.model_manager import downloader, importer, registry
@@ -411,46 +412,31 @@ def llama_install(context: AppContext, _params: dict[str, Any]) -> dict[str, Any
 
     if llama_assets.installed(context.data_dir):
         raise RpcDomainError(_ERR_MODEL_STATE, "llama.cpp 运行时已就绪")
-    _active = [
-        j for j in context.job_store.list_recent(limit=50, active_only=True)
-        if j["type"] == "llama_runtime"
-    ]
-    if _active:
+    active = first_active_job(context, "llama_runtime")
+    if active is not None:
         raise RpcDomainError(_ERR_MODEL_STATE, "已有安装任务进行中，请等待完成或取消")
-    job_id = context.job_store.create("llama_runtime", ref_id="llama-runtime")
-    context.job_store.mark_running(job_id)
-    cancel_event = threading.Event()
-    context.cancel_events[job_id] = cancel_event
-    done_event = threading.Event()
 
-    def _run() -> None:
-        try:
-            result = llama_assets.install(
-                context.data_dir,
-                cancel=cancel_event,
-                on_progress=lambda percent, stage: context.job_store.set_progress(
-                    job_id, float(percent), stage
-                ),
-            )
-            context.notifier.log(
-                "info",
-                f"llama.cpp 视觉运行时安装完成（{result['variant']}，{result['tag']}）："
-                f"{result.get('variant_reason', '')}",
-            )
-        except Exception as exc:  # noqa: BLE001 - 作业失败原样落 error
-            context.job_store.mark_failed(job_id, _failure_with_origin(exc))
-        finally:
-            done_event.set()
+    def _install(job_id: str, cancel_event: threading.Event) -> str:
+        result = llama_assets.install(
+            context.data_dir,
+            cancel=cancel_event,
+            on_progress=lambda percent, stage: context.job_store.set_progress(
+                job_id, float(percent), stage
+            ),
+        )
+        return (
+            f"llama.cpp 视觉运行时安装完成（{result['variant']}，{result['tag']}）："
+            f"{result.get('variant_reason', '')}"
+        )
 
-    def _watch() -> None:
-        done_event.wait()
-        job = context.job_store.get(job_id)
-        if job is not None and job["status"] == "running":
-            context.job_store.mark_completed(job_id)
-        context.cancel_events.pop(job_id, None)
-
-    threading.Thread(target=_run, daemon=True, name="llama-runtime-install").start()
-    threading.Thread(target=_watch, daemon=True, name="llama-runtime-watch").start()
+    job_id = launch_threaded_job(
+        context,
+        job_type="llama_runtime",
+        ref_id="llama-runtime",
+        thread_prefix="llama-runtime",
+        work=_install,
+        failure_message=_failure_with_origin,
+    )
     return {"job_id": job_id}
 
 
@@ -460,42 +446,27 @@ def install_runtime(context: AppContext, params: dict[str, Any]) -> dict[str, An
 
     if cuda_runtime.status(context.data_dir)["installed"]:
         raise RpcDomainError(_ERR_MODEL_STATE, "CUDA 运行库已安装")
-    _active = [
-        j for j in context.job_store.list_recent(limit=50, active_only=True)
-        if j["type"] == "cuda_runtime"
-    ]
-    if _active:
+    active = first_active_job(context, "cuda_runtime")
+    if active is not None:
         raise RpcDomainError(_ERR_MODEL_STATE, "已有安装任务进行中，请等待完成或取消")
-    job_id = context.job_store.create("cuda_runtime", ref_id="cuda-runtime")
-    context.job_store.mark_running(job_id)
-    cancel_event = threading.Event()
-    context.cancel_events[job_id] = cancel_event
-    done_event = threading.Event()
 
-    def _run() -> None:
-        try:
-            cuda_runtime.install(
-                context.data_dir,
-                cancel=cancel_event,
-                on_progress=lambda percent: context.job_store.set_progress(
-                    job_id, float(percent), "下载 CUDA 运行库"
-                ),
-            )
-            context.notifier.log("info", "CUDA 运行库安装完成，重启服务后对已运行进程生效")
-        except Exception as exc:  # noqa: BLE001 - 作业失败原样落 error
-            context.job_store.mark_failed(job_id, str(exc))
-        finally:
-            done_event.set()
+    def _install(job_id: str, cancel_event: threading.Event) -> str:
+        cuda_runtime.install(
+            context.data_dir,
+            cancel=cancel_event,
+            on_progress=lambda percent: context.job_store.set_progress(
+                job_id, float(percent), "下载 CUDA 运行库"
+            ),
+        )
+        return "CUDA 运行库安装完成，重启服务后对已运行进程生效"
 
-    def _watch() -> None:
-        done_event.wait()
-        job = context.job_store.get(job_id)
-        if job is not None and job["status"] == "running":
-            context.job_store.mark_completed(job_id)
-        context.cancel_events.pop(job_id, None)
-
-    threading.Thread(target=_run, daemon=True, name="cuda-runtime-install").start()
-    threading.Thread(target=_watch, daemon=True, name="cuda-runtime-watch").start()
+    job_id = launch_threaded_job(
+        context,
+        job_type="cuda_runtime",
+        ref_id="cuda-runtime",
+        thread_prefix="cuda-runtime",
+        work=_install,
+    )
     return {"job_id": job_id}
 
 
@@ -576,10 +547,6 @@ def import_commit(context: AppContext, params: dict[str, Any]) -> dict[str, Any]
     """
     source = _source_param(params)
     models_dir = context.data_dir / "models"
-    job_id = context.job_store.create("model_import", ref_id=source.name)
-    # 必须置 running：看门狗只给 running 收尾，漏了这一句作业会永远停在 pending（同 download）
-    context.job_store.mark_running(job_id)
-    done_event = threading.Event()
 
     def _progress(done: int, total: int) -> None:
         percent = 100.0 if total <= 0 else round(done * 100.0 / total, 1)
@@ -587,37 +554,35 @@ def import_commit(context: AppContext, params: dict[str, Any]) -> dict[str, Any]
         context.job_store.set_progress(job_id, percent, message)
         context.notifier.progress(job_id, percent, message)
 
-    def _run() -> None:
-        try:
-            result = importer.commit(
-                models_dir,
-                source,
-                mode=str(params.get("mode") or ""),
-                on_conflict=str(params.get("on_conflict") or ""),
-                allow_incomplete=bool(params.get("allow_incomplete") or False),
-                external_kind=str(params.get("external_kind") or ""),
-                label=str(params.get("label") or ""),
-                on_progress=_progress,
-            )
-            context.notifier.log(
-                "info",
-                f"{result['mode']} 落位完成：{result['path']}"
-                + ("（体检不通过，已按不完整导入登记）" if result["incomplete"] else ""),
-            )
-        except Exception as exc:  # noqa: BLE001 - 拒绝话术要原样回给向导
-            context.job_store.mark_failed(job_id, str(exc))
-        finally:
-            done_event.set()
+    def _run(job_id: str, _cancel_event: threading.Event) -> str:
+        result = importer.commit(
+            models_dir,
+            source,
+            mode=str(params.get("mode") or ""),
+            on_conflict=str(params.get("on_conflict") or ""),
+            allow_incomplete=bool(params.get("allow_incomplete") or False),
+            external_kind=str(params.get("external_kind") or ""),
+            label=str(params.get("label") or ""),
+            on_progress=_progress,
+        )
+        return f"{result['mode']} 落位完成：{result['path']}" + (
+            "（体检不通过，已按不完整导入登记）" if result["incomplete"] else ""
+        )
 
-    def _watch() -> None:
-        done_event.wait()
-        job = context.job_store.get(job_id)
-        if job is not None and job["status"] == STATUS_RUNNING:
-            context.job_store.mark_completed(job_id)
-        registry.invalidate_model_caches(context.data_dir / "models")
+    def _invalidate() -> None:
+        registry.invalidate_model_caches(models_dir)
 
-    threading.Thread(target=_run, daemon=True, name=f"import-{source.name}").start()
-    threading.Thread(target=_watch, daemon=True, name=f"import-watch-{job_id[:8]}").start()
+    job_id = launch_threaded_job(
+        context,
+        job_type="model_import",
+        ref_id=source.name,
+        thread_prefix=f"import-{source.name}",
+        # 复制半途没有「撤销」可言：能停下一半只会留下一份比原状更糟的资产，
+        # 所以不注册 cancel_events，宁可让业主等，也不给一个骗人的取消按钮。
+        cancellable=False,
+        work=_run,
+        on_settled=_invalidate,
+    )
     return {"job_id": job_id}
 
 
@@ -744,42 +709,28 @@ def install_music_runtime(context: AppContext, _params: dict[str, Any]) -> dict[
 
     if music_runtime.installed(context.data_dir):
         raise RpcDomainError(_ERR_MODEL_STATE, "配乐运行环境已就绪")
-    _active = [
-        j for j in context.job_store.list_recent(limit=50, active_only=True)
-        if j["type"] == "music_runtime"
-    ]
-    if _active:
+    active = first_active_job(context, "music_runtime")
+    if active is not None:
         raise RpcDomainError(_ERR_MODEL_STATE, "已有安装任务进行中，请等待完成或取消")
-    job_id = context.job_store.create("music_runtime", ref_id="music-runtime")
-    context.job_store.mark_running(job_id)
-    cancel_event = threading.Event()
-    context.cancel_events[job_id] = cancel_event
-    done_event = threading.Event()
 
-    def _run() -> None:
-        try:
-            music_runtime.install(
-                context.data_dir,
-                cancel=cancel_event,
-                on_progress=lambda percent, stage: context.job_store.set_progress(
-                    job_id, float(percent), stage
-                ),
-            )
-            context.notifier.log("info", "配乐运行环境安装完成")
-        except Exception as exc:  # noqa: BLE001 - 作业失败原样落 error
-            context.job_store.mark_failed(job_id, _failure_with_origin(exc))
-        finally:
-            done_event.set()
+    def _install(job_id: str, cancel_event: threading.Event) -> str:
+        music_runtime.install(
+            context.data_dir,
+            cancel=cancel_event,
+            on_progress=lambda percent, stage: context.job_store.set_progress(
+                job_id, float(percent), stage
+            ),
+        )
+        return "配乐运行环境安装完成"
 
-    def _watch() -> None:
-        done_event.wait()
-        job = context.job_store.get(job_id)
-        if job is not None and job["status"] == "running":
-            context.job_store.mark_completed(job_id)
-        context.cancel_events.pop(job_id, None)
-
-    threading.Thread(target=_run, daemon=True, name="music-runtime-install").start()
-    threading.Thread(target=_watch, daemon=True, name="music-runtime-watch").start()
+    job_id = launch_threaded_job(
+        context,
+        job_type="music_runtime",
+        ref_id="music-runtime",
+        thread_prefix="music-runtime",
+        work=_install,
+        failure_message=_failure_with_origin,
+    )
     return {"job_id": job_id}
 
 
@@ -809,40 +760,26 @@ def _install_local_runtime(context: AppContext, *, ready_label: str) -> dict[str
     # 补装，不能被旧的「双栈即 installed」口径挡在门外。
     if state["installed"] and groups.get("funasr") and groups.get("kokoro"):
         raise RpcDomainError(_ERR_MODEL_STATE, ready_label)
-    _active = [
-        j for j in context.job_store.list_recent(limit=50, active_only=True)
-        if j["type"] == "indextts_runtime"
-    ]
-    if _active:
+    active = first_active_job(context, "indextts_runtime")
+    if active is not None:
         raise RpcDomainError(_ERR_MODEL_STATE, "已有安装任务进行中，请等待完成或取消")
-    job_id = context.job_store.create("indextts_runtime", ref_id="indextts-runtime")
-    context.job_store.mark_running(job_id)
-    cancel_event = threading.Event()
-    context.cancel_events[job_id] = cancel_event
-    done_event = threading.Event()
 
-    def _run() -> None:
-        try:
-            tts_runtime.install(
-                context.data_dir,
-                cancel=cancel_event,
-                on_progress=lambda percent, stage: context.job_store.set_progress(
-                    job_id, float(percent), stage
-                ),
-            )
-            context.notifier.log("info", "本地智能运行环境安装完成")
-        except Exception as exc:  # noqa: BLE001 - 作业失败原样落 error
-            context.job_store.mark_failed(job_id, _failure_with_origin(exc))
-        finally:
-            done_event.set()
+    def _install(job_id: str, cancel_event: threading.Event) -> str:
+        tts_runtime.install(
+            context.data_dir,
+            cancel=cancel_event,
+            on_progress=lambda percent, stage: context.job_store.set_progress(
+                job_id, float(percent), stage
+            ),
+        )
+        return "本地智能运行环境安装完成"
 
-    def _watch() -> None:
-        done_event.wait()
-        job = context.job_store.get(job_id)
-        if job is not None and job["status"] == "running":
-            context.job_store.mark_completed(job_id)
-        context.cancel_events.pop(job_id, None)
-
-    threading.Thread(target=_run, daemon=True, name="indextts-runtime-install").start()
-    threading.Thread(target=_watch, daemon=True, name="indextts-runtime-watch").start()
+    job_id = launch_threaded_job(
+        context,
+        job_type="indextts_runtime",
+        ref_id="indextts-runtime",
+        thread_prefix="indextts-runtime",
+        work=_install,
+        failure_message=_failure_with_origin,
+    )
     return {"job_id": job_id}
