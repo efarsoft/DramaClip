@@ -872,3 +872,17 @@ def test_explicit_reanalyze_reruns_transcription(
 
     assert harness.transcriber.calls == calls_before + 1, "点名重析必须重转写"
     assert episodes_repo.list_by_project(memory_db, project_id)[0]["status"] == "done"
+
+
+def test_stage_timings_reach_the_log_panel(
+    harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    """每集收尾出「阶段耗时」一行账：归因不到转写/OCR/视觉/语义的优化无从下手。"""
+    project_id = _make_project(harness, tmp_path, sample_video, copies=1)
+    result = harness.rpc("analysis.start", {"project_id": project_id})
+    assert harness.wait_done(str(result["job_id"]))["status"] == "completed"
+
+    logs = [str(m["params"]["message"]) for m in harness.sent if m["method"] == "log.append"]
+    timing = [line for line in logs if "阶段耗时" in line]
+    assert timing, f"日志面板没有阶段耗时行：{logs[-6:]}"
+    assert any("语义层" in line for line in timing), "六段里语义层必须在账"

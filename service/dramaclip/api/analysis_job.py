@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib
 import json
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,7 @@ from dramaclip.engines.analysis.models import (
 )
 from dramaclip.engines.semantic import pipeline as semantic_pipeline
 from dramaclip.engines.vision import runtime as vision_engine
+from dramaclip.infra.stage_clock import StageClock
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
@@ -474,8 +476,13 @@ def _run_job(
             context.job_store.set_progress(job_id, percent, message)
             context.notifier.progress(job_id, percent, message)
 
+        _mining_started = time.monotonic()
         bars_by_episode, bands_by_episode, lines_by_episode, hotwords = _mine_hotwords(
             context, targets, cancel_event, on_episode=mining_report, project_id=project_id
+        )
+        context.notifier.log(
+            "info", f"全剧挖掘（字幕OCR/热词）耗时 {time.monotonic() - _mining_started:.0f}s",
+            job_id=job_id,
         )
         # 精炼熔断计数（稳定收尾批）：连续 2 集调用失败后跳过 LLM 精炼
         refine_state = {"failures": 0, "tripped": False}
@@ -583,13 +590,13 @@ def _analyze_one(
 ) -> bool:
     """分析单集；返回是否成功（失败标记后继续其余集）。
 
-    两段写入：第一层（转写/场景/音频/OCR）跑完立即落库、语义列显式清空，语义层
-    完成**才**标 done——链路里最贵的是转写、最易挂的是 LLM，语义抖动不再连坐
-    转写白跑。重入判据见 `_resumable_raw`：隐式全量路径源没变就沿用第一层
-    （补语义/按新语义配置重跑）；点名重析（resume_strict）一律重转写。
+    两段写入：第一层（转写/场景/音频/OCR）跑完立即落库、语义列显式清空，语义层完成
+    **才**标 done——最贵的转写不被最易挂的 LLM 连坐。重入判据见 `_resumable_raw`：
+    隐式全量路径源没变就沿用第一层；点名重析（resume_strict）一律重转写。
     """
     episode_id = str(episode["id"])
     label = f"第{episode['episode_number']}集"
+    clock = StageClock()
 
     # 单调钳制：转写管线报完「分析完成 100%」后视觉轨还会续报——不钳会 100%→48% 回跳
     peak = [float("-inf")]
@@ -611,21 +618,21 @@ def _analyze_one(
         stored = _resumable_raw(context, episode, raw_part, strict=resume_strict)
         if stored is not None:
             if notice is None:  # 语义配置变更的重入在上面已留痕，这里只报「续跑」
-                context.notifier.log(
-                    "info", f"{label} 上轮语义层未完成：沿用转写结果，直接补语义", job_id=job_id
-                )
+                msg = f"{label} 上轮语义层未完成：沿用转写结果，直接补语义"
+                context.notifier.log("info", msg, job_id=job_id)
             raw = stored
         else:
             transcriber = context.analysis_runtime.transcriber()
-            raw = pipeline.analyze_episode(
-                video_path=Path(str(episode["source_path"])),
-                work_dir=context.work_dir / episode_id,
-                transcriber=transcriber,
-                language=language,
-                cancel=cancel_event,
-                report=report,
-                hotwords=hotwords,
-            )
+            with clock.stage("转写/场景/音频"):
+                raw = pipeline.analyze_episode(
+                    video_path=Path(str(episode["source_path"])),
+                    work_dir=context.work_dir / episode_id,
+                    transcriber=transcriber,
+                    language=language,
+                    cancel=cancel_event,
+                    report=report,
+                    hotwords=hotwords,
+                )
             # 算力账落任务行：通知流会滚走，任务详情才是可复核的真相源。
             compute_report = getattr(transcriber, "compute", lambda: None)()
             if compute_report is not None:
@@ -634,20 +641,20 @@ def _analyze_one(
             # 时间轴可换，能做的是把「这份转写不可信」告诉用户，建议切云端重析。
             for warning in raw.warnings:
                 context.notifier.log("warn", f"{label} {warning}", job_id=job_id)
-            asr_segments, ocr_segments, band, band_lines = _fuse_ocr(
-                context, episode, raw.asr_segments, ocr_bars, ocr_band, ocr_lines
-            )  # noqa: F841 - band_lines 落库见下方 subtitle_band
-            ocr_json = (
-                _dumps([o.model_dump() for o in ocr_segments]) if ocr_segments else None
-            )
-            sheet = _contact_sheet(context, episode)
-            frames = _describe_frames(context, vision, episode, episode_id, report)
+            with clock.stage("字幕OCR融合"):
+                asr_segments, ocr_segments, band, band_lines = _fuse_ocr(
+                    context, episode, raw.asr_segments, ocr_bars, ocr_band, ocr_lines
+                )  # noqa: F841 - band_lines 落库见下方 subtitle_band
+            ocr_json = _dumps([o.model_dump() for o in ocr_segments]) if ocr_segments else None
+            with clock.stage("拼图"):
+                sheet = _contact_sheet(context, episode)
+            with clock.stage("画面理解"):
+                frames = _describe_frames(context, vision, episode, episode_id, report)
             # 视觉轨回执并入算力账：会话拉起后才有证据，转写与画面理解各记一条
             vision_report = vision.compute() if vision is not None else None
             if vision_report is not None:
                 context.job_store.set_compute(
-                    job_id,
-                    [r.to_dict() for r in (compute_report, vision_report) if r is not None],
+                    job_id, [r.to_dict() for r in (compute_report, vision_report) if r is not None]
                 )
             track: dict[str, Any] = {}
             if sheet is not None:
@@ -688,17 +695,16 @@ def _analyze_one(
             if tripped:
                 refine_outcome = None
             else:
-                refine_outcome = llm_refine.refine_segments(
-                    asr_segments,
-                    ocr_segments=ocr_segments,
-                    project_name=_project_name_of(context, episode),
-                    hotwords=hotwords,
-                    settings=context.settings,
-                )
+                with clock.stage("转写精炼"):
+                    refine_outcome = llm_refine.refine_segments(
+                        asr_segments,
+                        ocr_segments=ocr_segments,
+                        project_name=_project_name_of(context, episode),
+                        hotwords=hotwords,
+                        settings=context.settings,
+                    )
             if refine_outcome is not None and refine_state is not None:
-                failed = (
-                    not refine_outcome.applied and "attempt" in refine_outcome.detail
-                )
+                failed = not refine_outcome.applied and "attempt" in refine_outcome.detail
                 refine_state["failures"] = (
                     int(refine_state.get("failures", 0)) + 1 if failed else 0
                 )
@@ -721,8 +727,7 @@ def _analyze_one(
                     _dumps([seg.model_dump() for seg in asr_segments]),
                 )
                 context.notifier.log(
-                    "info",
-                    f"{label} 转写精炼：{len(asr_segments)} 句（{refine_outcome.detail}）",
+                    "info", f"{label} 转写精炼：{len(asr_segments)} 句（{refine_outcome.detail}）",
                     job_id=job_id,
                 )
             elif refine_outcome is not None and refine_outcome.detail not in ("LLM 未配置",):
@@ -735,12 +740,13 @@ def _analyze_one(
             # `_resumable_raw` 从库里重建——两份并存时，同一集会因「上轮有没有死在
             # 语义层」跑出不同的高光/冲突打分。
             raw = raw.model_copy(update={"asr_segments": asr_segments})
-        semantic_result = semantic_pipeline.enhance(
-            raw,
-            context.settings,
-            trace_dir=llm_trace_dir(context),
-            trace_tag=episode_id,
-        )
+        with clock.stage("语义层"):
+            semantic_result = semantic_pipeline.enhance(
+                raw,
+                context.settings,
+                trace_dir=llm_trace_dir(context),
+                trace_tag=episode_id,
+            )
         analysis_repo.update_semantic(
             context.conn,
             episode_id,
@@ -749,9 +755,10 @@ def _analyze_one(
             genre=semantic_result.genre or None,
         )
         if signature is not None:
-            # 语义按当前配置跑完，stamp 同步翻新：复用路径（换配置重析）不更新的话
-            # 下一轮永远判语义失配。与开头取的是同一个值——中途源被换仍存旧签名。
+            # 语义跑完 stamp 同步翻新：不翻新则下一轮永远判语义失配。
             episodes_repo.set_source_signature(context.conn, episode_id, signature)
+        if clock.spans:
+            context.notifier.log("info", f"{label} 阶段耗时：{clock.summary()}", job_id=job_id)
         episodes_repo.mark_done(context.conn, episode_id)
         return True
     except Exception as exc:
