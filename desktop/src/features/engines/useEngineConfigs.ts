@@ -3,6 +3,7 @@ import { App as AntdApp } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import type { EngineConfig } from '@dramaclip/protocol';
 import { engineConfigsApi } from '../../services/client';
+import { errorText } from './errorText';
 import type { FormState } from './CloudConfigModal';
 
 type AppApi = ReturnType<typeof AntdApp.useApp>;
@@ -27,10 +28,6 @@ export interface EngineConfigActions {
   /** 清空本域全部云端配置启用（切回本地引擎；与设置键写入配合完成一次切换）。 */
   readonly enableLocal: () => Promise<void>;
   readonly remove: (config: EngineConfig) => void;
-}
-
-function errorText(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message !== '' ? error.message : fallback;
 }
 
 function trim(form: FormState): { name: string; base_url: string; api_key: string; model: string } {

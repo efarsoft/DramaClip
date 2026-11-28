@@ -8,8 +8,9 @@
 import { useCallback, useState } from 'react';
 import type { ImportInspection } from '@dramaclip/protocol';
 import { modelsApi, pickFolder } from '../../services/client';
+import { errorText } from './errorText';
 import { type ImportDraft, commitPayload, emptyDraft, gateBlock } from './importWizard';
-import { type ImportLanding, errorText, useImportLanding } from './useImportLanding';
+import { type ImportLanding, useImportLanding } from './useImportLanding';
 
 export interface ImportFlow extends ImportLanding {
   step: number;

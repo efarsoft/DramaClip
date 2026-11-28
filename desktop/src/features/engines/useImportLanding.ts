@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react';
 import type { ImportInspection, ImportRecord } from '@dramaclip/protocol';
 import { jobsApi, modelsApi } from '../../services/client';
+import { errorText } from './errorText';
 import { landedRecord } from './importWizard';
 
 const POLL_MS = 800;
@@ -85,9 +86,4 @@ export function useImportLanding(
 function landingState(jobId: string, settled: Settlement | null): LandingState {
   if (jobId === '') return 'idle';
   return settled?.outcome ?? 'running';
-}
-
-/** 后端的拒绝话术原样贴出，只在它没说话时补一句兜底。 */
-export function errorText(reason: unknown, fallback: string): string {
-  return reason instanceof Error && reason.message !== '' ? reason.message : fallback;
 }
