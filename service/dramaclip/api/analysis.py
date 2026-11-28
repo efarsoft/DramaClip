@@ -247,7 +247,8 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
             ]
             if not targets:
                 raise RpcDomainError(
-                    _ERR_NO_EPISODES, "选中集都已是最新分析，无需重跑（改了热词/ASR 配置请用「重转写选中」）"
+                    _ERR_NO_EPISODES,
+                    "选中集都已是最新分析，无需重跑（改了热词/ASR 配置请用「重转写选中」）",
                 )
     if not targets:
         raise RpcDomainError(_ERR_NO_EPISODES, "没有待分析的集")
