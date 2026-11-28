@@ -4,11 +4,9 @@
  * 免模型的云端引擎单独走「无需本地模型」说明，不冒充体检结果。
  */
 import { Button } from 'antd';
-import { useState } from 'react';
 import type { ReactElement } from 'react';
 import type { EngineConfig, ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
-import { PageSection } from '../../components/layout/PageKit';
 import type { DomainTabProps } from './EnginesPage';
 import type { AssetState, Reports } from './assetState';
 import { localDomainModels,
@@ -24,11 +22,10 @@ import { DownloadSourceButton } from './ModelDownloadPopover';
 import { type ActiveCardProps, ActiveEngineCard } from './ActiveEngineCard';
 import { AssetLibrary } from './AssetLibrary';
 import {
-  CloudConfigsPane,
-  CloudSegment,
   CloudTestButton,
+  DomainPaneSection,
   MixedEnginePicker,
-  activeCloudConfig,
+  useDomainTabState,
 } from './CloudDomainUI';
 import { LocalRuntimeSlot } from './LocalRuntimeSlot';
 import { deviceSelectProps } from './deviceOptions';
@@ -40,7 +37,6 @@ import { SettingSelect } from './SettingSelect';
 import { TtsPreviewButton } from './TtsPreviewButton';
 import { previewNotice } from './ttsPreview';
 import { useDownloadState } from './useDownloadProgress';
-import { useEngineConfigs } from './useEngineConfigs';
 import { CloudNudgeCard } from './CloudNudgeCard';
 import { cloudRecommendation } from './cloudRecommend';
 import { useLocalRuntime } from './useLocalRuntime';
@@ -80,9 +76,7 @@ export function TtsTab({
   onForget,
   onImport,
 }: DomainTabProps): ReactElement {
-  const cloud = useEngineConfigs('tts_cloud', onChanged);
-  const [pane, setPane] = useState<'local' | 'cloud'>('local');
-  const activeCloud = activeCloudConfig(cloud.configs);
+  const { cloud, pane, activeCloud, segment } = useDomainTabState('tts_cloud', onChanged);
   const recommendation = cloudRecommendation(
     machine.gpu,
     cloud.configs,
@@ -91,7 +85,6 @@ export function TtsTab({
   const engine = settings['tts.engine'] ?? '';
   const domainModels = localDomainModels(models, 'tts');
   const active = isModelFreeEngine(engine) ? undefined : activeAsset(models, 'tts', settings);
-  const segment = <CloudSegment value={pane} onChange={setPane} />;
   const pickCloud = (config: EngineConfig): void => {
     cloud.enable(config);
   };
@@ -138,33 +131,34 @@ export function TtsTab({
           2~6GB 的独立 Python + torch 不悄悄装——「选为生效」不代装，给显式一键引导，
           试听/自检/导出的失败文案指的就是这扇门（曾经只有文案没有门）。 */}
       <LocalRuntimeSlot scope="tts" />
-      {pane === 'local' ? (
-        <AssetLibrary
-          models={domainModels}
-          externals={externalAssets(imported, 'tts')}
-          importError={importError}
-          reports={reports}
-          selftests={selftests}
-          specs={machine}
-          activeModelId={active?.model_id}
-          onActivate={(model) => {
-            pickLocalEngine(activateSettings(model)['tts.engine'] ?? model.engine);
-          }}
-          onChanged={onChanged}
-          onVerify={onVerify}
-          onForget={onForget}
-          onImport={onImport}
-          renderPreview={previewRenderer(settings, reports)}
-          segment={segment}
-        />
-      ) : (
-        <PageSectionCloud
-          segment={segment}
-          actions={cloud}
-          onChanged={onChanged}
-          note="云端合成按「配置」接入：可添加多个服务商与模型，同一时刻启用一条，切换即改生效引擎。密钥只存本机数据库、界面脱敏显示；未测通的配置可以保存，但启用前建议先测连接。"
-        />
-      )}
+      <DomainPaneSection
+        pane={pane}
+        segment={segment}
+        configsDomain="tts_cloud"
+        actions={cloud}
+        onChanged={onChanged}
+        note="云端合成按「配置」接入：可添加多个服务商与模型，同一时刻启用一条，切换即改生效引擎。密钥只存本机数据库、界面脱敏显示；未测通的配置可以保存，但启用前建议先测连接。"
+        library={
+          <AssetLibrary
+            models={domainModels}
+            externals={externalAssets(imported, 'tts')}
+            importError={importError}
+            reports={reports}
+            selftests={selftests}
+            specs={machine}
+            activeModelId={active?.model_id}
+            onActivate={(model) => {
+              pickLocalEngine(activateSettings(model)['tts.engine'] ?? model.engine);
+            }}
+            onChanged={onChanged}
+            onVerify={onVerify}
+            onForget={onForget}
+            onImport={onImport}
+            renderPreview={previewRenderer(settings, reports)}
+            segment={segment}
+          />
+        }
+      />
     </div>
   );
 }
@@ -218,25 +212,6 @@ function CloudActiveCard({
     footnote: `${VOICE_HINT[engine] ?? ''} · 切回本地模型用上方下拉选「本地模型」分组`,
   };
   return <ActiveEngineCard {...card} />;
-}
-
-/** 云端配置段的卡片外壳（与资产库同一张卡型，分段控件常驻卡头）。 */
-function PageSectionCloud({
-  segment,
-  actions,
-  onChanged,
-  note,
-}: {
-  segment: ReactElement;
-  actions: ReturnType<typeof useEngineConfigs>;
-  onChanged: () => void;
-  note: string;
-}): ReactElement {
-  return (
-    <PageSection title="云端配置" extra={segment}>
-      <CloudConfigsPane domain="tts_cloud" actions={actions} onChanged={onChanged} note={note} />
-    </PageSection>
-  );
 }
 
 /** 行内试听节点：音色取该引擎自己的设置值，放行判断只挡「必然听不到」的确定情况。 */

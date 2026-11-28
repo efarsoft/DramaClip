@@ -8,10 +8,11 @@ import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { useState, type ReactElement } from 'react';
 import type { EngineConfig } from '@dramaclip/protocol';
 import { engineConfigsApi } from '../../services/client';
+import { PageSection } from '../../components/layout/PageKit';
 import { tokens } from '../../styles/theme';
 import { ConfigModal, type CloudPreset, type FormState } from './CloudConfigModal';
 import { usesSdkEndpoint } from './cloudDomains';
-import type { EngineConfigActions } from './useEngineConfigs';
+import { useEngineConfigs, type EngineConfigActions } from './useEngineConfigs';
 
 /** 按域的服务商预设：选中即填默认模型（消费端点的域还填地址）；自定义=手填。
  * asr/tts 两域不带地址：转写与配音由服务商 SDK 固定端点发起，地址没有生效路径。 */
@@ -319,5 +320,52 @@ function ConfigRow({
         }}
       />
     </div>
+  );
+}
+
+
+/** 三域 tab 的头部状态三件套：useEngineConfigs + 分段状态 + 云端生效判定 + 分段钮元素。
+ *  三份手抄（Asr/Tts/Vision）各 5 行同形——收一处，新域 tab 直接解构用。 */
+export function useDomainTabState(
+  configsDomain: string,
+  configsDomainOnChanged: () => void,
+): {
+  cloud: EngineConfigActions;
+  pane: 'local' | 'cloud';
+  setPane: (pane: 'local' | 'cloud') => void;
+  activeCloud: EngineConfig | undefined;
+  segment: ReactElement;
+} {
+  const cloud = useEngineConfigs(configsDomain, configsDomainOnChanged);
+  const [pane, setPane] = useState<'local' | 'cloud'>('local');
+  const activeCloud = activeCloudConfig(cloud.configs);
+  const segment = <CloudSegment value={pane} onChange={setPane} />;
+  return { cloud, pane, setPane, activeCloud, segment };
+}
+
+/** 三域 tab 的尾部同构段：本地资产库（各域自建传入）或云端配置页（domain 决定清单）。
+ *  本地段的差异（模型过滤/激活动作）在 library 元素里，不进参数汤。 */
+export function DomainPaneSection({
+  pane,
+  segment,
+  configsDomain,
+  actions,
+  onChanged,
+  note,
+  library,
+}: {
+  pane: 'local' | 'cloud';
+  segment: ReactElement;
+  configsDomain: string;
+  actions: EngineConfigActions;
+  onChanged: () => void;
+  note: string;
+  library: ReactElement;
+}): ReactElement {
+  if (pane === 'local') return library;
+  return (
+    <PageSection title="云端配置" extra={segment}>
+      <CloudConfigsPane domain={configsDomain} actions={actions} onChanged={onChanged} note={note} />
+    </PageSection>
   );
 }

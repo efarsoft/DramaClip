@@ -5,11 +5,9 @@
  * llama-server 缺失或模型未装时分析按分档跳过视觉轨（warn 留痕，不挡出片）。
  */
 import { Button } from 'antd';
-import { useState } from 'react';
 import type { ReactElement } from 'react';
 import type { EngineConfig, ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
-import { PageSection } from '../../components/layout/PageKit';
 import type { DomainTabProps } from './EnginesPage';
 import type { Reports } from './assetState';
 import {
@@ -23,17 +21,15 @@ import {
 import { type ActiveCardProps, ActiveEngineCard } from './ActiveEngineCard';
 import { AssetLibrary } from './AssetLibrary';
 import {
-  CloudConfigsPane,
-  CloudSegment,
   CloudTestButton,
+  DomainPaneSection,
   MixedEnginePicker,
-  activeCloudConfig,
+  useDomainTabState,
 } from './CloudDomainUI';
 import { deviceSelectProps, visualCapKey } from './deviceOptions';
 import { LlamaRuntimeSlot } from './LlamaRuntimeSlot';
 import { SettingSelect } from './SettingSelect';
 import { useDownloadState } from './useDownloadProgress';
-import { useEngineConfigs } from './useEngineConfigs';
 
 export function VisionTab({
   models,
@@ -49,12 +45,9 @@ export function VisionTab({
   onForget,
   onImport,
 }: DomainTabProps): ReactElement {
-  const cloud = useEngineConfigs('image', onChanged);
-  const [pane, setPane] = useState<'local' | 'cloud'>('local');
-  const activeCloud = activeCloudConfig(cloud.configs);
+  const { cloud, pane, activeCloud, segment } = useDomainTabState('image', onChanged);
   const domainModels = models.filter((model) => model.kind === 'vision');
   const active = domainModels.find((model) => model.model_id === settings['vision.model']);
-  const segment = <CloudSegment value={pane} onChange={setPane} />;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spaceLg }}>
       {activeCloud !== undefined ? (
@@ -120,34 +113,33 @@ export function VisionTab({
         />
       )}
       {pane === 'local' && <LlamaRuntimeSlot />}
-      {pane === 'local' ? (
-        <AssetLibrary
-          models={domainModels}
-          externals={externalAssets(imported, 'vision')}
-          importError={importError}
-          reports={reports}
-          selftests={selftests}
-          specs={machine}
-          activeModelId={active?.model_id}
-          onActivate={(model) => {
-            onSave({ 'vision.model': model.model_id });
-          }}
-          onChanged={onChanged}
-          onVerify={onVerify}
-          onForget={onForget}
-          onImport={onImport}
-          segment={segment}
-        />
-      ) : (
-        <PageSection title="云端配置" extra={segment}>
-          <CloudConfigsPane
-            domain="image"
-            actions={cloud}
+      <DomainPaneSection
+        pane={pane}
+        segment={segment}
+        configsDomain="image"
+        actions={cloud}
+        onChanged={onChanged}
+        note="云端视觉按「配置」接入：可添加多个服务商与模型，同一时刻启用一条，切换即改生效引擎。密钥只存本机数据库、界面脱敏显示；未测通的配置可以保存，但启用前建议先测连接。"
+        library={
+          <AssetLibrary
+            models={domainModels}
+            externals={externalAssets(imported, 'vision')}
+            importError={importError}
+            reports={reports}
+            selftests={selftests}
+            specs={machine}
+            activeModelId={active?.model_id}
+            onActivate={(model) => {
+              onSave({ 'vision.model': model.model_id });
+            }}
             onChanged={onChanged}
-            note="云端视觉按「配置」接入：可添加多个服务商与模型，同一时刻启用一条，切换即改生效引擎。密钥只存本机数据库、界面脱敏显示；未测通的配置可以保存，但启用前建议先测连接。"
+            onVerify={onVerify}
+            onForget={onForget}
+            onImport={onImport}
+            segment={segment}
           />
-        </PageSection>
-      )}
+        }
+      />
     </div>
   );
 }

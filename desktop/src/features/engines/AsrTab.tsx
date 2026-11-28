@@ -3,12 +3,10 @@
  * 云端生效时参数换形（计费 / 上次连通替换运行设备 / 磁盘实占），判据永远是设置与配置表，前端不写死。
  */
 import { Button } from 'antd';
-import { useState } from 'react';
 import type { DefaultOptionType } from 'antd/es/select';
 import type { ReactElement } from 'react';
 import type { EngineConfig, ModelInfo } from '@dramaclip/protocol';
 import { tokens } from '../../styles/theme';
-import { PageSection } from '../../components/layout/PageKit';
 import type { DomainTabProps } from './EnginesPage';
 import type { Reports } from './assetState';
 import { localDomainModels } from './assetState';
@@ -28,17 +26,15 @@ import type { MachineSpecs } from './machineFit';
 import { LocalRuntimeSlot } from './LocalRuntimeSlot';
 import { AssetLibrary } from './AssetLibrary';
 import {
-  CloudConfigsPane,
-  CloudSegment,
   CloudTestButton,
+  DomainPaneSection,
   MixedEnginePicker,
-  activeCloudConfig,
+  useDomainTabState,
 } from './CloudDomainUI';
 import { SettingSelect } from './SettingSelect';
 import { CloudNudgeCard } from './CloudNudgeCard';
 import { cloudRecommendation } from './cloudRecommend';
 import { useDownloadState } from './useDownloadProgress';
-import { useEngineConfigs } from './useEngineConfigs';
 
 const PARAMS: readonly { key: string; label: string; options: DefaultOptionType[] }[] = [
   {
@@ -78,9 +74,7 @@ export function AsrTab({
   onForget,
   onImport,
 }: DomainTabProps): ReactElement {
-  const cloud = useEngineConfigs('asr_cloud', onChanged);
-  const [pane, setPane] = useState<'local' | 'cloud'>('local');
-  const activeCloud = activeCloudConfig(cloud.configs);
+  const { cloud, pane, activeCloud, segment } = useDomainTabState('asr_cloud', onChanged);
   const recommendation = cloudRecommendation(
     machine.gpu,
     cloud.configs,
@@ -88,7 +82,6 @@ export function AsrTab({
   );
   const domainModels = localDomainModels(models, 'asr');
   const active = activeAsset(models, 'asr', settings);
-  const segment = <CloudSegment value={pane} onChange={setPane} />;
   const pickCloud = (config: EngineConfig): void => {
     cloud.enable(config);
   };
@@ -152,27 +145,31 @@ export function AsrTab({
           onPickCloud={pickCloud}
         />
       )}
-      {pane === 'local' ? (
-        <AssetLibrary
-          models={domainModels}
-          externals={externalAssets(imported, 'asr')}
-          importError={importError}
-          reports={reports}
-          selftests={selftests}
-          specs={machine}
-          activeModelId={active?.model_id}
-          onActivate={pickLocal}
-          onChanged={onChanged}
-          onVerify={onVerify}
-          onForget={onForget}
-          onImport={onImport}
-          segment={segment}
-        />
-      ) : (
-        <PageSection title="云端配置" extra={segment}>
-          <CloudConfigsPane domain="asr_cloud" actions={cloud} onChanged={onChanged} note={CLOUD_NOTE} />
-        </PageSection>
-      )}
+      <DomainPaneSection
+        pane={pane}
+        segment={segment}
+        configsDomain="asr_cloud"
+        actions={cloud}
+        onChanged={onChanged}
+        note={CLOUD_NOTE}
+        library={
+          <AssetLibrary
+            models={domainModels}
+            externals={externalAssets(imported, 'asr')}
+            importError={importError}
+            reports={reports}
+            selftests={selftests}
+            specs={machine}
+            activeModelId={active?.model_id}
+            onActivate={pickLocal}
+            onChanged={onChanged}
+            onVerify={onVerify}
+            onForget={onForget}
+            onImport={onImport}
+            segment={segment}
+          />
+        }
+      />
     </div>
   );
 }
