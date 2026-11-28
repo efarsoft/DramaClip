@@ -23,6 +23,7 @@ from dramaclip.engines.narration.models import (
 )
 from dramaclip.engines.narration.modes_w8 import build_full
 from dramaclip.engines.semantic.models import ConflictScore
+from tests.tts_stub import BrokenTts, StubTts
 
 _TTS_DURATION_S = 1.25
 # 源时长必填（回填会改段尾，见 `pipeline._assert_within_source`）。这里给 120s：
@@ -32,22 +33,6 @@ _TTS_DURATION_S = 1.25
 _LONG_SOURCE = {"ep1": 120.0}
 
 
-class _StubTts:
-    """落一个空文件即返回路径；时长探测已被打桩，不碰网络也不碰真音频。"""
-
-    def synthesize(self, text: str, voice: str | None, out_path: Path) -> Path:
-        if text.strip() == "":  # 真引擎对空文案会失败（ffprobe check=True）：替身必须一样
-            raise RuntimeError("TTS 空文案：槽位未被语言层填充")
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(b"")
-        return out_path
-
-
-class _BrokenTts:
-    """云端不可达：每次合成都抛错，方案必须随之失败。"""
-
-    def synthesize(self, text: str, voice: str | None, out_path: Path) -> Path:
-        raise RuntimeError("云端不可达")
 
 
 def _plan(roles: list[str]) -> PlanData:
@@ -74,12 +59,12 @@ def _plan(roles: list[str]) -> PlanData:
 
 def _stub_tts(monkeypatch: pytest.MonkeyPatch, duration: float | None) -> None:
     """桩的两个落点以 pipeline 顶部 import 行为准：模块级 create_tts、tts_base 探测。"""
-    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: duration)
 
 
 def _broken_tts(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _BrokenTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: BrokenTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: None)
 
 

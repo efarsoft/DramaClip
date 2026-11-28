@@ -24,16 +24,12 @@ from dramaclip.engines.narration.models import (
     TimelineSegment,
 )
 from dramaclip.infra.ffmpeg.runner import FfmpegError, FfmpegResult
+from tests.tts_stub import StubTts
 
 _SLOT_S = modes._INTRO_MAX_S  # 30.0：与 intro_first 首段钳制同源
 _SOURCE = {"ep1": 3600.0}
 
 
-class _StubTts:
-    def synthesize(self, text: str, voice: str | None, out_path: Path) -> Path:
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(text.encode("utf-8"))
-        return out_path
 
 
 class _RunRecorder:
@@ -72,7 +68,7 @@ def _install(
         return measured_s
 
     recorder = _RunRecorder(fail=fail)
-    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: StubTts(content="text"))
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
     monkeypatch.setattr(synthesis.ffmpeg_runner, "run", recorder)
     # 桩 TTS 写的是文案字节、量不出电平，会在 warn 里多插一条，把「拒绝档恰好一条

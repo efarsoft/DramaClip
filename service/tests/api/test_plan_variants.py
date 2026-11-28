@@ -44,7 +44,7 @@ from dramaclip.transport.notify import Notifier
 from dramaclip.transport.rpc import Router, RpcRequest
 from tests.conftest import register_job_executor
 from tests.llm_stub import patch_client_for
-from tests.tts_stub import write_audio
+from tests.tts_stub import StubTts, write_audio
 
 # 角度桩轮换的合法母题：sanitize 对每条角度都校验 arc，桩必须像真模型一样按卡选
 _ARC_IDS = story_arc.ids()
@@ -190,14 +190,6 @@ class _FakeLlm:
         return {"lines": [{"id": slot, "text": f"{slot} 的解说"} for slot in slots]}
 
 
-class _StubTts:
-    """落成 0 字节 mp3 即返回；时长探测已打桩（真引擎对空文案会失败）。"""
-
-    def synthesize(self, text: str, _voice: str | None, out_path: Path) -> Path:
-        assert text.strip(), "语言层没填上文案，槽位还是空的"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(b"")
-        return out_path
 
 
 @pytest.mark.parametrize(
@@ -603,7 +595,7 @@ def _stub_language_and_tts(
     patch_client_for(monkeypatch, angles, _Llm)
     patch_client_for(monkeypatch, copywriter, _Llm)
     patch_client_for(monkeypatch, script_driver, _Llm)
-    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", lambda _p: 1.25)
 
 

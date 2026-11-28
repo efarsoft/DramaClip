@@ -20,13 +20,7 @@ from dramaclip.engines.narration.models import (
     SceneCandidate,
     TimelineSegment,
 )
-
-
-class _StubTts:
-    def synthesize(self, text: str, voice: str | None, out_path: Path) -> Path:
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(b"")
-        return out_path
+from tests.tts_stub import StubTts
 
 
 def _voice_slots(
@@ -42,7 +36,7 @@ def _voice_slots(
     def probe(path: Path) -> float:
         return durations[str(Path(path).stem.split("-")[0])]
 
-    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
     return pipeline.synthesize_narration_texts(
         plan,

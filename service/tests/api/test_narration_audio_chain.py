@@ -32,29 +32,12 @@ from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import exports as exports_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
+from tests.tts_stub import BrokenTts, StubTts
 
 _TTS_DURATION_S = 1.25
 
 
-class _StubTts:
-    """每段旁白落成各自的 mp3，文件内容即文案；时长探测已被打桩。
 
-    内容寻址后文件名不再恰为 `{id}.mp3`（见 pipeline._content_addressed_audio），
-    「哪段挂了谁的音」改由文件内容直接证明——比文件名更强：文件名对而内容错
-    （覆盖/串音）也能被抓住。
-    """
-
-    def synthesize(self, text: str, voice: str | None, out_path: Path) -> Path:
-        if text.strip() == "":  # 真引擎对空文案会失败（ffprobe check=True）：替身必须一样
-            raise RuntimeError("TTS 空文案：槽位未被语言层填充")
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(text.encode("utf-8"))
-        return out_path
-
-
-class _BrokenTts:
-    def synthesize(self, text: str, voice: str | None, out_path: Path) -> Path:
-        raise RuntimeError("云端不可达")
 
 
 def _scenes() -> list[ConflictScore]:
@@ -163,7 +146,7 @@ def test_full_narration_every_segment_mixes_its_own_narration(
     monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
 ) -> None:
     """核心可达性证明：全 ducked 的 full_narration，每段命令都要有混音分支和自己的旁白。"""
-    _stub_tts(monkeypatch, _StubTts())
+    _stub_tts(monkeypatch, StubTts(content="text"))
     plan_data, commands, _targets = _render(monkeypatch, memory_db, tmp_path, _full_plan)
 
     assert plan_data.mode == "full_narration"
@@ -199,7 +182,7 @@ def test_full_narration_map_covers_every_index(
     monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
 ) -> None:
     """映射层：ducked 时间轴的每个下标都要有条音，一个都不能漏。"""
-    _stub_tts(monkeypatch, _StubTts())
+    _stub_tts(monkeypatch, StubTts(content="text"))
     plan_data, _commands, _targets = _render(monkeypatch, memory_db, tmp_path, _full_plan)
 
     mapping = export_api.tts_audio_by_segment(plan_data)
@@ -216,7 +199,7 @@ def test_failed_tts_fails_the_plan(
     monkeypatch: pytest.MonkeyPatch, memory_db: sqlite3.Connection, tmp_path: Path
 ) -> None:
     """配音失败 = 方案失败：不再有"回退原声继续渲染"这条路。"""
-    _stub_tts(monkeypatch, _BrokenTts())
+    _stub_tts(monkeypatch, BrokenTts())
     with pytest.raises(RuntimeError, match="合成失败"):
         _render(monkeypatch, memory_db, tmp_path, _full_plan)
 
@@ -229,7 +212,7 @@ def test_render_export_feeds_settings_loudness_target_to_phase_c(
     漏传（loudness_target 默认 None）等于 Phase C 在生产路径上根本没跑，
     成片响度回到没人负责的状态——这条用例就是那个"没跑"的探测器。
     """
-    _stub_tts(monkeypatch, _StubTts())
+    _stub_tts(monkeypatch, StubTts(content="text"))
     _, _, targets = _render(
         monkeypatch,
         memory_db,

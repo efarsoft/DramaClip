@@ -17,6 +17,7 @@ from dramaclip.engines.narration.casting import stamp
 from dramaclip.engines.narration.models import PlanData, StrategySpec, TimelineSegment
 from dramaclip.engines.narration.modes_w8 import build_full
 from dramaclip.engines.semantic.models import ConflictScore
+from tests.tts_stub import StubTts
 
 _SCENES = [
     ConflictScore(scene_index=i, start=i * 12.0, end=i * 12.0 + 10.0, score=s)
@@ -28,18 +29,6 @@ _SCENES = [
 _LONG_SOURCE = {"ep1": 120.0}
 
 
-class _StubTts:
-    def __init__(self, fail_ids: tuple[str, ...] = ()) -> None:
-        self.fail_ids = fail_ids
-
-    def synthesize(self, text: str, voice: Any, out_path: Path) -> Path:
-        if text.strip() == "":  # 真引擎对空文案会失败（ffprobe check=True）：替身必须一样
-            raise RuntimeError("TTS 空文案：槽位未被语言层填充")
-        if any(bad in str(out_path) for bad in self.fail_ids):
-            raise RuntimeError("云端不可达")
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(b"mp3")
-        return out_path
 
 
 def _plan_with_copy() -> PlanData:
@@ -65,19 +54,19 @@ def _synth(monkeypatch, plan, engine, work_dir: Path, duration: float = 1.25) ->
 def test_empty_copy_raises_before_tts(monkeypatch, tmp_path: Path) -> None:
     plan = build_full(stamp([(1, "ep1", _SCENES)]), StrategySpec())
     with pytest.raises(RuntimeError, match="文案为空"):
-        _synth(monkeypatch, plan, _StubTts(), tmp_path)
+        _synth(monkeypatch, plan, StubTts(), tmp_path)
 
 
 def test_one_failed_segment_fails_whole_plan(monkeypatch, tmp_path: Path) -> None:
     plan = _plan_with_copy()
     with pytest.raises(RuntimeError, match="full-2"):
-        _synth(monkeypatch, plan, _StubTts(fail_ids=("full-2",)), tmp_path)
+        _synth(monkeypatch, plan, StubTts(fail_substrings=("full-2",)), tmp_path)
 
 
 def test_zero_duration_fails(monkeypatch, tmp_path: Path) -> None:
     plan = _plan_with_copy()
     with pytest.raises(RuntimeError, match="时长"):
-        _synth(monkeypatch, plan, _StubTts(), tmp_path, duration=0.0)
+        _synth(monkeypatch, plan, StubTts(), tmp_path, duration=0.0)
 
 
 def test_segment_without_narration_id_fails(monkeypatch, tmp_path: Path) -> None:
@@ -86,11 +75,11 @@ def test_segment_without_narration_id_fails(monkeypatch, tmp_path: Path) -> None
         "timeline": [s.model_copy(update={"narration_id": None}) for s in plan.timeline]
     })
     with pytest.raises(RuntimeError, match="narration_id"):
-        _synth(monkeypatch, broken, _StubTts(), tmp_path)
+        _synth(monkeypatch, broken, StubTts(), tmp_path)
 
 
 def test_backfill_writes_duration_subtitle_and_id(monkeypatch, tmp_path: Path) -> None:
-    plan = _synth(monkeypatch, _plan_with_copy(), _StubTts(), tmp_path)
+    plan = _synth(monkeypatch, _plan_with_copy(), StubTts(), tmp_path)
     assert all(s.narration_id for s in plan.timeline)
     assert all(s.subtitle_text for s in plan.timeline)
     assert all(abs((s.end - s.start) - 1.25) < 0.01 for s in plan.timeline)
@@ -107,7 +96,7 @@ def test_narration_segments_with_empty_text_table_fail(monkeypatch, tmp_path: Pa
     plan = _plan_with_copy().model_copy(update={"narration_texts": []})
     assert any(s.audio in ("narration", "ducked") for s in plan.timeline), "种子必须含旁白段"
     with pytest.raises(RuntimeError, match="编排自相矛盾"):
-        _synth(monkeypatch, plan, _StubTts(), tmp_path)
+        _synth(monkeypatch, plan, StubTts(), tmp_path)
 
 
 def test_plan_without_narration_segments_skips_tts(monkeypatch, tmp_path: Path) -> None:

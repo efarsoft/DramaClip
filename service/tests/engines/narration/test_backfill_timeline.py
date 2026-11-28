@@ -23,16 +23,7 @@ from dramaclip.engines.narration.models import (
     TimelineSegment,
 )
 from dramaclip.engines.narration.pipeline import build_from_script_episodes
-
-
-class _StubTts:
-    """只落一个空文件；实测时长由 audio_duration_s 的桩给出，不碰网络也不碰真音频。"""
-
-    def synthesize(self, text: str, voice: str | None, out_path: Path) -> Path:
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(b"")
-        return out_path
-
+from tests.tts_stub import StubTts
 
 _LONG_SOURCE_S = 3600.0
 
@@ -52,7 +43,7 @@ def _voice(
     def probe(path: Path) -> float:
         return durations[str(Path(path).stem.split("-")[0])]
 
-    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
     if source_durations is None:
         source_durations = {
@@ -277,7 +268,7 @@ def test_rewrite_round_shrinks_overlong_narration_into_its_gap(
             seen[stem] = 30.0 if not seen else 10.0
         return seen[stem]
 
-    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
 
     def rewrite(text: str, target_chars: int) -> str | None:
@@ -308,7 +299,7 @@ def test_unrewriteable_overflow_drops_after_first_round(
     def probe(path: Path) -> float:
         return 30.0
 
-    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
     calls: list[int] = []
 
@@ -339,7 +330,7 @@ def test_head_extension_start_snaps_to_nearest_scene_cut(
     def probe(path: Path) -> float:
         return 10.0
 
-    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
     result = pipeline.synthesize_narration_texts(
         plan,
@@ -367,7 +358,7 @@ def test_rewrite_output_passes_numerals_and_metanarrative_gates(
             seen[stem] = 30.0 if not seen else 10.0
         return seen[stem]
 
-    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
 
     def rewrite(text: str, target_chars: int) -> str | None:
@@ -411,7 +402,7 @@ def test_render_moved_start_snaps_back_to_sentence_bound(
     def probe(path: Path) -> float:
         return 10.0
 
-    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _StubTts())
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: StubTts())
     monkeypatch.setattr(pipeline.tts_base, "audio_duration_s", probe)
     result = pipeline.synthesize_narration_texts(
         plan,
