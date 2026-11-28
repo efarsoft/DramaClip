@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import sqlite3
-import time
 from typing import Any
 from uuid import uuid4
 
+from dramaclip.infra.clock import now_ms
+
 _COLUMNS = ("id", "domain", "name", "base_url", "api_key", "model", "enabled", "created_at")
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _mask(value: str) -> str:
@@ -67,7 +64,7 @@ def create(
         "INSERT INTO engine_configs"
         " (id, domain, name, base_url, api_key, model, enabled, created_at)"
         " VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
-        (config_id, domain, name, base_url, api_key, model, _now_ms()),
+        (config_id, domain, name, base_url, api_key, model, now_ms()),
     )
     conn.commit()
     config = get(conn, config_id)

@@ -9,6 +9,8 @@ import time
 from typing import Any
 from uuid import uuid4
 
+from dramaclip.infra.clock import now_ms
+
 _LOGGER = logging.getLogger(__name__)
 
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
@@ -44,10 +46,6 @@ def is_terminal(status: str) -> bool:
     return status in _TERMINAL_STATUSES
 
 
-def _now_ms() -> int:
-    return int(time.time() * 1000)
-
-
 def _parse_compute(raw: object) -> list[dict[str, Any]] | None:
     if raw is None or raw == "":
         return None
@@ -73,7 +71,7 @@ class JobStore:
 
     def create(self, job_type: str, ref_id: str | None = None) -> str:
         job_id = uuid4().hex
-        now = _now_ms()
+        now = now_ms()
         self._conn.execute(
             "INSERT INTO jobs (id, type, ref_id, status, progress, created_at, updated_at)"
             " VALUES (?, ?, ?, ?, 0, ?, ?)",
@@ -105,7 +103,7 @@ class JobStore:
         self._conn.execute(
             "UPDATE jobs SET error = CASE WHEN error IS NULL OR error = ''"
             " THEN ? ELSE error || '；' || ? END, updated_at = ? WHERE id = ?",
-            (line, line, _now_ms(), job_id),
+            (line, line, now_ms(), job_id),
         )
         self._conn.commit()
 
@@ -141,12 +139,12 @@ class JobStore:
         if label is None:
             self._conn.execute(
                 "UPDATE jobs SET progress = ?, updated_at = ? WHERE id = ?",
-                (percent, _now_ms(), job_id),
+                (percent, now_ms(), job_id),
             )
         else:
             self._conn.execute(
                 "UPDATE jobs SET progress = ?, label = ?, updated_at = ? WHERE id = ?",
-                (percent, label, _now_ms(), job_id),
+                (percent, label, now_ms(), job_id),
             )
         self._conn.commit()
 
@@ -165,7 +163,7 @@ class JobStore:
     def set_compute(self, job_id: str, reports: list[dict[str, Any]]) -> None:
         self._conn.execute(
             "UPDATE jobs SET compute = ?, updated_at = ? WHERE id = ?",
-            (json.dumps(reports, ensure_ascii=False), _now_ms(), job_id),
+            (json.dumps(reports, ensure_ascii=False), now_ms(), job_id),
         )
         self._conn.commit()
 
@@ -173,7 +171,7 @@ class JobStore:
         """补写 ref_id：产物路径要到洗完才知道（自动提取的音色文件名带时间戳）。"""
         self._conn.execute(
             "UPDATE jobs SET ref_id = ?, updated_at = ? WHERE id = ?",
-            (ref_id, _now_ms(), job_id),
+            (ref_id, now_ms(), job_id),
         )
         self._conn.commit()
 
@@ -242,7 +240,7 @@ class JobStore:
         话术按各类任务的重试语义说（见 ``_INTERRUPTION_HINTS``）：做得到「接着上次」
         的明说——装测实锤：用户看到「服务中断」不敢点重试，以为又要白下几个 GB。
         """
-        now = _now_ms()
+        now = now_ms()
         swept = 0
         for types, hint in _INTERRUPTION_HINTS:
             cursor = self._conn.execute(
@@ -274,11 +272,11 @@ class JobStore:
         if progress is None:
             self._conn.execute(
                 "UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE id = ?",
-                (status, error, _now_ms(), job_id),
+                (status, error, now_ms(), job_id),
             )
         else:
             self._conn.execute(
                 "UPDATE jobs SET status = ?, error = ?, progress = ?, updated_at = ? WHERE id = ?",
-                (status, error, progress, _now_ms(), job_id),
+                (status, error, progress, now_ms(), job_id),
             )
         self._conn.commit()

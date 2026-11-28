@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
-import time
 from typing import Any
 from uuid import uuid4
+
+from dramaclip.infra.clock import now_ms
 
 _COLUMNS = (
     "id",
@@ -22,17 +23,13 @@ _COLUMNS = (
 )
 
 
-def _now_ms() -> int:
-    return int(time.time() * 1000)
-
-
 def replace_all(
     conn: sqlite3.Connection,
     project_id: str,
     episodes: list[dict[str, Any]],
 ) -> int:
     """全量替换项目集列表（导入=重新扫描语义；id 重建，分析结果随旧 id 级联删除）。"""
-    now = _now_ms()
+    now = now_ms()
     conn.execute("DELETE FROM episodes WHERE project_id = ?", (project_id,))
     for episode in episodes:
         has_audio = episode.get("has_audio")
@@ -94,7 +91,7 @@ def mark_done(conn: sqlite3.Connection, episode_id: str) -> None:
     时间取服务毫秒，与方案行的 created_at 同量纲可直接比先后。"""
     conn.execute(
         "UPDATE episodes SET status = 'done', analyzed_at = ? WHERE id = ?",
-        (_now_ms(), episode_id),
+        (now_ms(), episode_id),
     )
     conn.commit()
 

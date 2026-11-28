@@ -10,9 +10,10 @@ added_at 首见时间；bpm 允许被新扫描覆盖——librosa 装上后重�
 from __future__ import annotations
 
 import sqlite3
-import time
 from typing import Any
 from uuid import uuid4
+
+from dramaclip.infra.clock import now_ms
 
 _COLUMNS = (
     "id",
@@ -25,10 +26,6 @@ _COLUMNS = (
     "source_url",
     "added_at",
 )
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _row_to_dict(row: tuple) -> dict[str, Any]:  # type: ignore[type-arg]
@@ -67,7 +64,7 @@ def upsert_track(
             license,
             attribution,
             source_url,
-            _now_ms(),
+            now_ms(),
         ),
     )
     conn.commit()

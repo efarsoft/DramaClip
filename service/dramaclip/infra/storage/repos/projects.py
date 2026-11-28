@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import time
 from typing import Any
 from uuid import uuid4
 
+from dramaclip.infra.clock import now_ms
+
 _COLUMNS = ("id", "name", "source_path", "status", "created_at", "updated_at", "cover_path",
             "settings")
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _parse_settings(raw: Any) -> dict[str, Any]:
@@ -51,7 +48,7 @@ def _row_to_dict(
 
 def create(conn: sqlite3.Connection, name: str, source_path: str) -> dict[str, Any]:
     project_id = uuid4().hex
-    now = _now_ms()
+    now = now_ms()
     conn.execute(
         "INSERT INTO projects (id, name, source_path, status, created_at, updated_at)"
         " VALUES (?, ?, ?, 'created', ?, ?)",
@@ -153,7 +150,7 @@ def update_settings(
             merged[str(key)] = value
     conn.execute(
         "UPDATE projects SET settings = ?, updated_at = ? WHERE id = ?",
-        (json.dumps(merged, ensure_ascii=False), _now_ms(), project_id),
+        (json.dumps(merged, ensure_ascii=False), now_ms(), project_id),
     )
     conn.commit()
     return merged
@@ -162,7 +159,7 @@ def update_settings(
 def set_status(conn: sqlite3.Connection, project_id: str, status: str) -> None:
     conn.execute(
         "UPDATE projects SET status = ?, updated_at = ? WHERE id = ?",
-        (status, _now_ms(), project_id),
+        (status, now_ms(), project_id),
     )
     conn.commit()
 
@@ -176,7 +173,7 @@ def reset_stale_analyzing(conn: sqlite3.Connection) -> int:
     """
     cursor = conn.execute(
         "UPDATE projects SET status = 'ready', updated_at = ? WHERE status = 'analyzing'",
-        (_now_ms(),),
+        (now_ms(),),
     )
     conn.commit()
     return cursor.rowcount
@@ -185,7 +182,7 @@ def reset_stale_analyzing(conn: sqlite3.Connection) -> int:
 def rename(conn: sqlite3.Connection, project_id: str, name: str) -> bool:
     cursor = conn.execute(
         "UPDATE projects SET name = ?, updated_at = ? WHERE id = ?",
-        (name, _now_ms(), project_id),
+        (name, now_ms(), project_id),
     )
     conn.commit()
     return cursor.rowcount > 0
@@ -197,7 +194,7 @@ def duplicate(conn: sqlite3.Connection, project_id: str, new_name: str) -> dict[
     source = get(conn, project_id)
     if source is None:
         return None
-    created = create(conn, new_name, f"{source['source_path']}#copy-{_now_ms()}")
+    created = create(conn, new_name, f"{source['source_path']}#copy-{now_ms()}")
     if source["settings"]:
         conn.execute(
             "UPDATE projects SET settings = ? WHERE id = ?",
@@ -208,7 +205,7 @@ def duplicate(conn: sqlite3.Connection, project_id: str, new_name: str) -> dict[
         " (id, project_id, episode_number, source_path, duration, status, created_at)"
         " SELECT hex(randomblob(16)), ?, episode_number, source_path, duration, 'pending', ?"
         " FROM episodes WHERE project_id = ?",
-        (created["id"], _now_ms(), project_id),
+        (created["id"], now_ms(), project_id),
     )
     conn.commit()
     return get(conn, str(created["id"]))

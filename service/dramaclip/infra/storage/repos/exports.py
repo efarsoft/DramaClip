@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import time
 from typing import Any
 from uuid import uuid4
+
+from dramaclip.infra.clock import now_ms
 
 _COLUMNS = (
     "id",
@@ -80,10 +81,6 @@ def set_publish_data(conn: sqlite3.Connection, export_id: str, data: dict[str, A
     conn.commit()
 
 
-def _now_ms() -> int:
-    return int(time.time() * 1000)
-
-
 # export_jobs 状态词表的唯一拼写源（docs/04 §5.2）。此前同一谓词分写两处：
 # api/export.py::retry 用 Python 比 status != "failed"，本模块 reset_for_retry 又用
 # SQL 的 WHERE status = 'failed' 做 CAS——两边不一致时并发保护形同虚设，两个重试会
@@ -105,7 +102,7 @@ def create(
     conn.execute(
         "INSERT INTO export_jobs (id, project_id, narration_plan_id, narration_mode, status,"
         " progress, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)",
-        (export_id, project_id, plan_id, narration_mode, STATUS_PENDING, _now_ms()),
+        (export_id, project_id, plan_id, narration_mode, STATUS_PENDING, now_ms()),
     )
     conn.commit()
     return export_id
@@ -120,7 +117,7 @@ def mark_completed(conn: sqlite3.Connection, export_id: str, output_path: str) -
     conn.execute(
         "UPDATE export_jobs SET status = ?, progress = 100, output_path = ?,"
         " completed_at = ? WHERE id = ?",
-        (STATUS_COMPLETED, output_path, _now_ms(), export_id),
+        (STATUS_COMPLETED, output_path, now_ms(), export_id),
     )
     conn.commit()
 
@@ -201,7 +198,7 @@ def append_degraded(conn: sqlite3.Connection, export_id: str, subject: str, outc
             parsed = None
         if isinstance(parsed, list):
             notes = [dict(item) for item in parsed]
-    notes.append({"subject": subject, "outcome": outcome, "at": _now_ms()})
+    notes.append({"subject": subject, "outcome": outcome, "at": now_ms()})
     conn.execute(
         "UPDATE export_jobs SET degraded_notes = ? WHERE id = ?",
         (json.dumps(notes, ensure_ascii=False), export_id),

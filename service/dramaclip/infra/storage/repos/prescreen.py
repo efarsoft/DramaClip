@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import sqlite3
-import time
 from typing import Any
 
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
+from dramaclip.infra.clock import now_ms
 
 
 def upsert(
@@ -43,7 +40,7 @@ def upsert(
             motion_intensity,
             prescreen_score,
             int(recommended),
-            _now_ms(),
+            now_ms(),
         ),
     )
     conn.commit()

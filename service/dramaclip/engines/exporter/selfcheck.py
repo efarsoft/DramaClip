@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import re
 import subprocess  # noqa: S404 - 参数为受控列表
-import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -25,6 +24,7 @@ from typing import Any
 from dramaclip.engines.analysis import subtitle_ocr
 from dramaclip.engines.exporter import film_assembly, loudness
 from dramaclip.engines.subtitle.safe_zone import check_safe_zone
+from dramaclip.infra.clock import now_ms
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
 
 # 与 verify_modes.py 同源的阈值初值（那边 L83-84）；时长容差不在此定义——
@@ -62,10 +62,6 @@ _NARRATION_FLOOR = {"one": 1, "many": 2}
 # 台词保护区外扩的逐段合法余量：safe_times 避字外移 + 尾垫，单段 ≤0.45s
 # （±0.3s 挪移 + 台词尾 +0.15s）。逐段累积对快切形态不可忽略。
 _SEGMENT_PROTECT_SLACK_S = 0.45
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def measure_audio_video(
@@ -703,7 +699,7 @@ def run(
     payload = {
         "version": 4,
         "dedup_jitter": bool(dedup_jitter),
-        "checked_at": _now_ms(),
+        "checked_at": now_ms(),
         "duration": check_duration(
             measured_s, budget_s, segment_count=segment_count
         ),

@@ -8,7 +8,6 @@ import json
 import math
 import shutil
 import threading
-import time
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -59,6 +58,7 @@ from dramaclip.engines.narration.conversion import defects
 from dramaclip.engines.narration.models import PlanData
 from dramaclip.engines.semantic import llm_budget
 from dramaclip.infra import config
+from dramaclip.infra.clock import now_ms
 from dramaclip.infra.ffmpeg import (
     cover as ffmpeg_cover,  # noqa: F401 - 测试经 export_api.ffmpeg_cover 取模块对象打桩，引用面保留
 )
@@ -80,11 +80,6 @@ _ERR_PUBLISH_DATA = -32410  # 发布数据录入不合法（W8）：宁拒收，
 _ERR_REPORT_PARAM = -32412  # 报告维度词表外（harness）
 
 _PUBLISH_PLATFORMS = ("抖音", "快手", "视频号", "小红书", "B站", "其他")
-
-
-def _now_ms() -> int:
-    """录入时刻（毫秒）：与 repo 层时间戳同源同单位。"""
-    return int(time.time() * 1000)
 
 
 def register(router: Router, context: AppContext) -> None:
@@ -415,7 +410,7 @@ def set_publish_data(context: AppContext, params: dict[str, Any]) -> dict[str, A
         "pack_version": _opt_text("pack_version", 100),
         "publish_account": _opt_text("publish_account", 100),
         "settlement_amount": settlement_amount,
-        "recorded_at": _now_ms(),
+        "recorded_at": now_ms(),
     }
     exports_repo.set_publish_data(context.conn, export_id, data)
     return {"ok": True, "publish_data": data}
@@ -520,7 +515,7 @@ def ab_report(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     project_id = str(params.get("project_id") or "").strip()
     if project_id:
         entries = [r for r in entries if r["project_id"] == project_id]
-    return export_report.ab_pairs(entries, now_ms=_now_ms())
+    return export_report.ab_pairs(entries, now_ms=now_ms())
 
 
 def _decode_json_columns(row: dict[str, Any], columns: tuple[str, ...]) -> dict[str, Any]:

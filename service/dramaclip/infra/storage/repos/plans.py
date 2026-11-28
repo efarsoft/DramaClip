@@ -4,19 +4,16 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import time
 from typing import Any
 from uuid import uuid4
+
+from dramaclip.infra.clock import now_ms
 
 _COLUMNS = (
     "id", "project_id", "narration_mode", "episode_ids", "plan_data", "status", "created_at",
     "angle", "angle_reason", "variant_index", "overlap_max", "batch_id", "titles",
     "score_total", "score_dims", "suggestion", "publish_meta",
 )
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _row_to_dict(row: tuple) -> dict[str, Any]:  # type: ignore[type-arg]
@@ -86,7 +83,7 @@ def create(
     """建一条方案行并原样返回（含五个角度字段）。
     """
     plan_id = uuid4().hex
-    created_at = _now_ms()
+    created_at = now_ms()
     conn.execute(
         "INSERT INTO narration_plans (id, project_id, narration_mode, episode_ids, plan_data,"
         " status, created_at, angle, angle_reason, variant_index, overlap_max, batch_id)"

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 from dramaclip.api.context import AppContext
+from dramaclip.infra.clock import now_ms
 from dramaclip.infra.jobs import is_terminal
 from dramaclip.transport.rpc import Router, RpcDomainError
 
@@ -33,7 +33,7 @@ def list_jobs(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
     active_only = bool(params.get("active_only", False))
     return {
         "jobs": context.job_store.list_recent(limit=limit, active_only=active_only),
-        "server_time_ms": _now_ms(),
+        "server_time_ms": now_ms(),
     }
 
 
@@ -68,7 +68,3 @@ def cancel(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
 def clear_finished(context: AppContext, _params: dict[str, Any]) -> dict[str, Any]:
     """清空全部已结束（完成/失败/取消）的任务记录；在跑与排队中的原样保留。"""
     return {"deleted": context.job_store.clear_finished()}
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
