@@ -1,5 +1,5 @@
 /** 工作台顶部：返回/项目信息/转写档位/批量操作/导出转写 + 横向步骤导航。 */
-import { Button, Tag } from 'antd';
+import { Button, Popconfirm, Tag } from 'antd';
 import { DownloadOutlined, LeftOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { Project } from '@dramaclip/protocol';
@@ -19,6 +19,8 @@ interface HeaderProps {
   tier: TranscribeTier;
   onTierChange: (next: TranscribeTier) => void;
   onBatchAnalyze: () => void;
+  /** B2：「重转写选中」——丢弃所选集现有转写强制重跑（改热词/ASR 配置用）。 */
+  onRetranscribe: () => void;
   onCancel: () => void;
   onExportTranscripts: () => void;
 }
@@ -34,6 +36,7 @@ export function WorkbenchHeader({
   tier,
   onTierChange,
   onBatchAnalyze,
+  onRetranscribe,
   onCancel,
   onExportTranscripts,
 }: HeaderProps): React.ReactElement {
@@ -69,8 +72,22 @@ export function WorkbenchHeader({
                 已选 <span style={NUM}>{String(selectedCount)}/{String(total)}</span> 集
               </span>
               <Button size="small" disabled={!canStart} onClick={onBatchAnalyze}>
-                {tier === 'recommended' ? '预筛后精转推荐集' : '批量分析所选'}
+                {tier === 'recommended' ? '预筛后精转推荐集' : '分析所选集'}
               </Button>
+              {tier !== 'recommended' && (
+                <Popconfirm
+                  title={`将丢弃所选 ${String(selectedCount)} 集的现有转写并全部重跑？`}
+                  description="改了热词/ASR 配置后才需要它；只是补分析新集请用「分析所选集」。"
+                  okText="重转写"
+                  cancelText="取消"
+                  disabled={!canStart}
+                  onConfirm={onRetranscribe}
+                >
+                  <Button size="small" disabled={!canStart}>
+                    重转写所选
+                  </Button>
+                </Popconfirm>
+              )}
             </>
           )}
         </span>

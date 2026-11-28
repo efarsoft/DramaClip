@@ -874,6 +874,36 @@ def test_explicit_reanalyze_reruns_transcription(
     assert episodes_repo.list_by_project(memory_db, project_id)[0]["status"] == "done"
 
 
+def test_explicit_select_skip_fresh_skips_done_episodes(
+    harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
+) -> None:
+    """「分析选中集」轻路径（force_retranscribe=False）：已 done 且源/语义都最新的集
+    直接剔除不重跑——项目补新集时不再连坐重算老集（survey 效率 7 的另一半）。
+
+    全部选中集都是最新 → -32210 拒绝并说清去路；混入选中时只跑 stale 的那部分。
+    """
+    project_id = _make_project(harness, tmp_path, sample_video, copies=1)
+    first = harness.rpc("analysis.start", {"project_id": project_id})
+    assert harness.wait_done(str(first["job_id"]))["status"] == "completed"
+    episode = episodes_repo.list_by_project(memory_db, project_id)[0]
+    assert episode["status"] == "done"
+    calls_before = harness.transcriber.calls
+
+    import pytest
+
+    with pytest.raises(AssertionError, match="最新") as exc_info:
+        harness.rpc(
+            "analysis.start",
+            {
+                "project_id": project_id,
+                "episode_ids": [str(episode["id"])],
+                "force_retranscribe": False,
+            },
+        )
+    assert "-32202" in str(exc_info.value), "拒绝码用 _ERR_NO_EPISODES 并指路「重转写选中」"
+    assert harness.transcriber.calls == calls_before, "拒绝路径零转写调用"
+
+
 def test_stage_timings_reach_the_log_panel(
     harness: Harness, memory_db: sqlite3.Connection, tmp_path: Path, sample_video: Path
 ) -> None:

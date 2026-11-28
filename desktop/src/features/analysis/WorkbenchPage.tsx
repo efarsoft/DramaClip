@@ -51,8 +51,11 @@ export function WorkbenchPage() {
         tier={tierState.tier}
         onTierChange={tierState.setTier}
         onBatchAnalyze={() => {
-          const action = tierState.tier === 'recommended' ? workspace.startPrescreen : workspace.start;
+          const action = tierState.tier === 'recommended' ? workspace.startPrescreen : () => workspace.start(false);
           startAnalysis(action, message);
+        }}
+        onRetranscribe={() => {
+          startAnalysis(() => workspace.start(true), message);
         }}
         onCancel={() => {
           startAnalysis(workspace.cancel, message);

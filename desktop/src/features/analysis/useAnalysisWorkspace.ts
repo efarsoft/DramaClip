@@ -110,11 +110,16 @@ function useStartActions(
   refreshJob: (jobId: string) => Promise<void>,
   selectedIds: readonly string[],
 ) {
-  const start = useCallback(async (): Promise<void> => {
-    if (selectedIds.length === 0) return;
-    const { job_id } = await analysisApi.start(projectId, selectedIds);
-    await refreshJob(job_id);
-  }, [projectId, refreshJob, selectedIds]);
+  /** B2 拆分：force=true「重转写选中」（改热词/ASR 配置后生效靠它）；
+   *  false「分析选中集」轻路径——已 done 且源/语义都最新的选中集跳过（补新集不连坐老集）。 */
+  const start = useCallback(
+    async (forceRetranscribe?: boolean): Promise<void> => {
+      if (selectedIds.length === 0) return;
+      const { job_id } = await analysisApi.start(projectId, selectedIds, { forceRetranscribe });
+      await refreshJob(job_id);
+    },
+    [projectId, refreshJob, selectedIds],
+  );
 
   /** 档位「仅推荐集精转」的执行体：预筛全项目待分析集，推荐集自动接精转。 */
   const startPrescreen = useCallback(async (): Promise<void> => {
@@ -277,7 +282,7 @@ export interface AnalysisWorkspace {
   setActiveEpisodeId: (id: string) => void;
   results: AnalysisResults | null;
   job: AnalysisJobStatus | null;
-  start: () => Promise<void>;
+  start: (forceRetranscribe?: boolean) => Promise<void>;
   startPrescreen: () => Promise<void>;
   cancel: () => Promise<void>;
   reload: () => Promise<void>;

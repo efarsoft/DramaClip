@@ -124,11 +124,18 @@ export const projectApi = {
 } as const;
 
 export const analysisApi = {
-  start: (projectId: string, episodeIds?: readonly string[]): Promise<{ job_id: string }> =>
-    rpc<{ job_id: string }>(
-      'analysis.start',
-      episodeIds ? { project_id: projectId, episode_ids: episodeIds } : { project_id: projectId },
-    ),
+  /** forceRetranscribe：显式选集时的转写语义——缺省沿用强制重转写（旧前端兼容）；
+   *  false=「分析选中集」轻路径，已 done 且源/语义都最新的选中集直接跳过。 */
+  start: (
+    projectId: string,
+    episodeIds?: readonly string[],
+    opts?: { forceRetranscribe?: boolean },
+  ): Promise<{ job_id: string }> => {
+    const params: Record<string, unknown> = { project_id: projectId };
+    if (episodeIds) params.episode_ids = [...episodeIds];
+    if (opts?.forceRetranscribe !== undefined) params.force_retranscribe = opts.forceRetranscribe;
+    return rpc<{ job_id: string }>('analysis.start', params);
+  },
   status: (jobId: string): Promise<AnalysisJobStatus> =>
     rpc<AnalysisJobStatus>('analysis.status', { job_id: jobId }),
   cancel: (jobId: string): Promise<{ ok: boolean }> =>

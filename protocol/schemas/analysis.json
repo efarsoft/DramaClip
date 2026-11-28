@@ -245,6 +245,10 @@
             "items": {
               "type": "string"
             }
+          },
+          "force_retranscribe": {
+            "type": "boolean",
+            "description": "显式选集时的转写语义：缺省=true 沿用强制重转写（改热词/ASR 配置后生效靠它）；false=轻路径，已 done 且源与语义都最新的选中集直接跳过。未点名 episode_ids 时忽略。"
           }
         }
       },

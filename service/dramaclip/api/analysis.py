@@ -234,6 +234,21 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
         targets = episodes_repo.list_by_ids(context.conn, wanted)
         if len(targets) != len(wanted):
             raise RpcDomainError(_ERR_JOB_NOT_FOUND, "episode_ids 含无效项")
+        # B2 显式选集拆分：force 缺省=真（旧前端/「重转写选中」沿用强制重转写语义，
+        # 热词/ASR 配置变更靠它生效）；force=False=轻路径「分析选中集」——已 done 且
+        # 源与语义都最新的集直接剔除（补新集场景不再连坐重算老集），剩 stale 的照常续跑。
+        force_retranscribe = params.get("force_retranscribe")
+        if force_retranscribe is False:
+            targets = [
+                ep
+                for ep in targets
+                if ep["status"] != "done"
+                or (_source_stale(context, ep) or _semantic_stale(context, ep))
+            ]
+            if not targets:
+                raise RpcDomainError(
+                    _ERR_NO_EPISODES, "选中集都已是最新分析，无需重跑（改了热词/ASR 配置请用「重转写选中」）"
+                )
     if not targets:
         raise RpcDomainError(_ERR_NO_EPISODES, "没有待分析的集")
 
@@ -262,8 +277,10 @@ def start(context: AppContext, params: dict[str, Any]) -> dict[str, Any]:
                 project_id,
                 targets,
                 cancel_event,
-                # 点名选集（「重新分析本集」）= 强制重转写：改热词/换 ASR 后靠它生效
-                episode_ids is not None,
+                # 点名选集缺省=强制重转写（改热词/换 ASR 后靠它生效）；
+                # 「分析选中集」轻路径（force_retranscribe=False）剩的是 stale 集，
+                # 第一层可续，照常走续跑判据
+                episode_ids is not None and force_retranscribe is not False,
             )
         )
     except BaseException:
