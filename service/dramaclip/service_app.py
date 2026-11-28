@@ -40,37 +40,51 @@ _STOP_POLL_SECONDS = 1.0
 
 
 
-_QUERY_PREFIXES = ("jobs.", "system.", "models.")
-
-# 纯读查询显式清单（DB/内存级耗时）：专用小池成员，新增 RPC 必须二选一归类——
-# tests/test_service_app_pool.py 用协议全覆盖钉死分类不缺号。
+# 纯读查询显式清单：决定请求走**只读连接**，错收一个写方法就是生产上的
+# `attempt to write a readonly database`。**禁止再按前缀/后缀兜底**——前缀不是
+# 副作用分类（2026-11-26 复核）：jobs.cancel / jobs.clear_finished / models.download /
+# export.import_settlement_csv 都曾被判成轻量查询。其中结算 CSV 走 context.conn 落库，
+# 匹配到作品即必失败；任务清理因 JobStore 自带写连接侥幸成功，但写操作跑在查询通道上，
+# 读写分离名存实亡。新增 RPC 默认走工作池（可写）；要进小池必须在下表显式登记，
+# tests/test_service_app_pool.py 以协议全覆盖钉死分类不缺号、且写方法不得入表。
 EXPLICIT_LIGHT_QUERIES = frozenset(
     {
         "analysis.results",
+        "analysis.status",
         "bgm.library",
         "bgm.runtime_status",
         "engine_configs.list",
         "export.ab_report",
         "export.get",
         "export.list",
-        "export.import_settlement_csv",
         "export.list_works",
         "export.publish_report",
-        "log.append",
+        "jobs.get",
+        "jobs.list",
+        "models.import_inspect",
+        "models.import_records",
+        "models.indextts_status",
+        "models.llama_status",
+        "models.list",
+        "models.local_runtime_status",
+        "models.orphan_list",
+        "models.runtime_status",
+        "models.verify",
         "narration.get_plan",
         "narration.list_plans",
         "narration.list_styles",
         "narration.llm_traces",
         "narration.plan_trace",
         "narration.publish_pack",
-        "subtitle.safe_zone",
-        "progress.update",
         "project.dashboard_summary",
         "project.get",
         "project.list",
         "prompts.list",
         "settings.get",
         "subtitle.list_presets",
+        "subtitle.safe_zone",
+        "system.health",
+        "system.ping",
     }
 )
 
@@ -96,16 +110,13 @@ def _purge_trash(trash_dir: Path, *, keep_days: int) -> None:
 
 
 def _is_light_query(method: str) -> bool:
-    """轻量查询走专用小池：列表/状态/get 类永不因长任务占满工作池而饿死。
+    """轻量查询走专用小池：只为「纯读且快」的方法保一条不被长任务饿死的通道。
 
-    两次实锤（jobs.list、models.list 被批量长任务饿到客户端超时）后改为
-    显式清单+模式兜底；新 RPC 未归类会被协议全覆盖测试拦下。
+    判据只有显式清单——2026-11-26 之前按 jobs./system./models. 前缀兜底，把写方法
+    送进只读连接（结算 CSV 导入必失败），也让写操作占了查询通道。宁可新方法先排队
+    在工作池（可写、安全），也不要凭命名猜副作用。
     """
-    return (
-        method in EXPLICIT_LIGHT_QUERIES
-        or method.startswith(_QUERY_PREFIXES)
-        or method.endswith(".status")
-    )
+    return method in EXPLICIT_LIGHT_QUERIES
 
 
 _WAL_CHECK_INTERVAL_S = 300  # 5 分钟查一次：无任务时 checkpoint，每日 ANALYZE
