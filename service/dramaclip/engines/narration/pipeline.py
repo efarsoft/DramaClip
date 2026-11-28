@@ -363,6 +363,70 @@ def _rewrite_and_resynth(
     return stats
 
 
+def presynthesize_plan_audio(
+    plan: PlanData,
+    settings: dict[str, str],
+    work_dir: Path,
+    models_dir: Path | None = None,
+    *,
+    data_dir: Path | None = None,
+    log: LogFn | None = None,
+    cancel: threading.Event | None = None,
+) -> tuple[int, int]:
+    """后台预热一条方案的配音缓存（C1 预合成）——返回 (已备段数, 总段数)。
+
+    合成参数与导出走完全同一路径：同一 `_EnginePool`、同一 `work_dir`（调用方传
+    `context.work_dir / "tts"`，与 `_voice()` 一致）、同一段 id/文本/音色/语速——
+    `synthesize_item` 的产物路径是内容寻址的，导出时要么直接命中产物文件，要么
+    命中 `tts/cache`，真引擎一次都不调。settings 必须与导出时同源（项目覆盖 +
+    全局默认）；中途改了 TTS 配置键会漂，漂了只是白预热不串味（键不含配置，只含
+    engine/voice/text/speed 本身）。
+
+    与 `synthesize_narration_texts` 的纪律差异：
+    - 失败**只记日志不抛**——预合成的定位是「抢跑可省的时间」，任何失败都不许
+      把一个成功的规划作业反咬成失败；导出时该段照常真合成并走原有的失败上报。
+    - 取消**静默返回**不抛——作业层按返回值落「部分完成」话术，不制造 cancelled
+      噪声；方案仍可正常出片。
+    - 不做时长回填与越界判定——那是导出语义（需要 source_durations），预热只
+      负责把音频备好。
+    """
+    if not plan.narration_texts:
+        return (0, 0)
+    pool = _EnginePool(
+        settings.get("tts.engine", ""),
+        models_dir,
+        log,
+        api_key=settings.get("tts.api_key", ""),
+        model=settings.get("tts.model", ""),
+        device=str(settings.get("tts.device") or "auto"),
+        data_dir=data_dir,
+    )
+    speed = str(settings.get("tts.speed", "") or "")
+    cache_dir = work_dir / "cache"
+    total = len(plan.narration_texts)
+    warmed = 0
+    for item in plan.narration_texts:
+        if cancel is not None and cancel.is_set():
+            break
+        voice = item.voice or pool.voice_for(settings)
+        if item.voice and not pool.accepts_voice(item.voice):
+            voice = pool.voice_for(settings)
+        try:
+            pool.synthesize_item(item.id, item.text, voice, speed, work_dir, cache_dir)
+        except Exception as exc:  # noqa: BLE001 - 预热失败只留痕：导出时会真合成并按原语义上报
+            _emit(
+                log,
+                f"预合成 {item.id} 失败（engine={pool.label}）: "
+                f"{type(exc).__name__}: {exc}——出片时将照常真合成",
+                "warn",
+            )
+            continue
+        warmed += 1
+        _emit(log, f"预合成 {item.id} 就绪 ({warmed}/{total})")
+    _evict_cache(cache_dir, _CACHE_MAX_BYTES)
+    return (warmed, total)
+
+
 def synthesize_narration_texts(
     plan: PlanData,
     settings: dict[str, str],

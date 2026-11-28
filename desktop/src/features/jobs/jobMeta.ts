@@ -12,6 +12,7 @@ export const JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   prescreen: '预筛',
   analysis: '分析',
   narration: '编剧',
+  narration_presynth: '预合成配音',
   export: '渲染',
   export_selfcheck: '成片自检',
   semantic: '语义重对齐',
@@ -31,6 +32,7 @@ const PROJECT_REF_ROUTES: Readonly<Record<string, string>> = {
   analysis: 'analysis',
   prescreen: 'analysis',
   narration: 'planning',
+  narration_presynth: 'planning',
 };
 
 /** 落点在引擎页的类型：ref 是固定串或产物路径，不含项目语境，因此只能聚合到 /engines。 */

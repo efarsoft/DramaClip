@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import subprocess  # noqa: S404 - 参数为受控列表
+import time
 import weakref
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -83,6 +84,21 @@ def drain_job_executors() -> None:
             executor.shutdown(wait=True)
 
 
+def _drain_presynth_threads(conn: sqlite3.Connection, timeout_s: float = 10.0) -> None:
+    """C1 预合成走 launch_threaded_job 的裸线程（不进 executor 池，上面的排空
+    够不着它）：close 前等它收官，否则线程拿已关连接写作业进度，
+    把 PytestUnhandledThreadExceptionWarning 洒进无关用例的输出。"""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        active = conn.execute(
+            "SELECT 1 FROM jobs WHERE type = 'narration_presynth'"
+            " AND status IN ('pending', 'running') LIMIT 1"
+        ).fetchone()
+        if active is None:
+            return
+        time.sleep(0.05)
+
+
 @pytest.fixture
 def memory_db() -> Iterator[sqlite3.Connection]:
     """已迁移的内存库（每个测试独立；与 db.connect 同一串行化形态，
@@ -96,6 +112,7 @@ def memory_db() -> Iterator[sqlite3.Connection]:
     # 先排空泄漏作业再关连接：保证它们不会在 close 之后继续持有旧连接，
     # 也不会把本测试的未竟写入带进下一个测试的窗口。
     drain_job_executors()
+    _drain_presynth_threads(conn)
     conn.close()
 
 

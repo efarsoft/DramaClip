@@ -13,6 +13,7 @@ import threading
 from typing import Any
 
 from dramaclip.api.context import AppContext, llm_trace_dir
+from dramaclip.api.job_runner import launch_threaded_job
 from dramaclip.engines.narration import (
     copywriter,
     diversity,
@@ -63,6 +64,95 @@ def _effective_settings(context: AppContext, project_id: str) -> dict[str, str]:
     return settings
 
 
+# 渲染类前台作业：预合成不与导出/成片自检抢 TTS worker、ffmpeg 与显存。
+_FRONT_BUSY_TYPES = frozenset({"export", "export_selfcheck"})
+
+
+def _presynth_eligible(context: AppContext) -> bool:
+    """预合成入队守卫：没有渲染类前台作业在跑、也没有同类预合成在跑。"""
+    types = {row.get("type") for row in context.job_store.list_recent(active_only=True)}
+    return not (types & _FRONT_BUSY_TYPES) and "narration_presynth" not in types
+
+
+def _presynth_work(
+    context: AppContext,
+    job_id: str,
+    plans: list[PlanData],
+    settings: dict[str, str],
+    cancel_event: threading.Event,
+) -> str | None:
+    """narration_presynth 作业体：逐方案预热配音缓存，进度上账面。
+
+    与导出同一路径、同一 work_dir（`context.work_dir / "tts"`），产物与缓存键
+    完全一致，出片阶段真引擎零调用。预热失败只在日志留痕不拦批（语义见
+    `presynthesize_plan_audio`）；取消在方案间生效，已备好的段保留。
+    """
+    slots = sum(len(plan.narration_texts) for plan in plans)
+    if slots == 0:
+        return None  # 纯台词剪辑批（无旁白）没有可预热的，静默收官
+    warmed = 0
+    for plan in plans:
+        got, _total = narration_pipeline.presynthesize_plan_audio(
+            plan,
+            settings,
+            context.work_dir / "tts",
+            context.data_dir / "models",
+            data_dir=context.data_dir,
+            log=context.notifier.log,
+            cancel=cancel_event,
+        )
+        warmed += got
+        context.job_store.set_progress(job_id, round(warmed / slots * 100, 1), "预合成配音")
+    if cancel_event.is_set():
+        context.job_store.mark_cancelled(job_id)
+        return None
+    if warmed < slots:
+        return f"后台预合成部分完成: {warmed}/{slots} 段就绪（失败段出片时照常真合成）"
+    return f"后台预合成完成: {warmed} 段配音已备好，出片直接用"
+
+
+def _settle_plan_batch(
+    context: AppContext,
+    job_id: str,
+    project_id: str,
+    settings: dict[str, str],
+    presynth_candidates: list[PlanData],
+    cancel_event: threading.Event,
+    failures: list[str],
+) -> None:
+    """批收尾三件事按既定次序：终态落账 → 尾部评分 → 预合成入队。
+
+    B10：评分在 job 落终态**之后**跑——job 的成败与时长只由方案生成决定，评分
+    慢/炸都不影响已定的终态（业主红线：评分失败不挡方案生成）；取消的作业不评分。
+    C1：规划干净收官（无失败、无取消）且批内有落库方案时，入队 narration_presynth
+    把配音缓存先热好——出片的 TTS 是耗时大头，规划→选稿→出片之间的人工间隔足以
+    备齐缓存，出片阶段直接命中。守卫：渲染类作业在跑不抢资源；已有预合成在跑不
+    重复入队；纯台词批（无旁白）进作业体后静默空转；预热失败不反咬规划。
+    """
+    if cancel_event.is_set():
+        context.job_store.mark_cancelled(job_id)
+    elif failures:
+        detail = "; ".join(failures)
+        context.job_store.mark_failed(job_id, detail)
+        context.notifier.log("error", f"部分方案失败: {detail}")
+    else:
+        context.job_store.set_progress(job_id, 100.0)
+        context.job_store.mark_completed(job_id)
+    if not cancel_event.is_set():
+        _score_batch(context, job_id, project_id, settings)
+        if not failures and presynth_candidates and _presynth_eligible(context):
+            launch_threaded_job(
+                context,
+                job_type="narration_presynth",
+                ref_id=project_id,
+                work=lambda _jid, _cancel: _presynth_work(
+                    context, _jid, presynth_candidates, settings, _cancel
+                ),
+                failure_message=lambda exc: f"后台预合成失败: {exc}",
+                thread_prefix="presynth",
+            )
+
+
 def _run_plan_variants(
     context: AppContext,
     job_id: str,
@@ -99,6 +189,8 @@ def _run_plan_variants(
         # 不再逐条烧完 K 条变体）；鉴权/额度耗尽/磁盘满类不可恢复 → 第一条
         # 失败就停（重试没有意义）。ASR/TTS 域外错误照旧逐条跳过。
         consecutive_failures = 0
+        # C1 预合成的候选：本批成功落库的方案（失败/超重叠的不预热）。
+        presynth_candidates: list[PlanData] = []
         for mode in modes:
             if cancel_event.is_set():
                 break
@@ -200,6 +292,7 @@ def _run_plan_variants(
                         batch_id=job_id,
                     )
                     accepted.append((variant, plan))
+                    presynth_candidates.append(plan)
                     past_copies.append(
                         "\n".join(item.text for item in plan.narration_texts)
                     )
@@ -237,20 +330,10 @@ def _run_plan_variants(
                     # 变体间隔见 _VARIANT_GAP_S 注释：取消即醒；末条之后无下一条，不再等
                     cancel_event.wait(_VARIANT_GAP_S)
 
-        if cancel_event.is_set():
-            context.job_store.mark_cancelled(job_id)
-        elif failures:
-            detail = "; ".join(failures)
-            context.job_store.mark_failed(job_id, detail)
-            context.notifier.log("error", f"部分方案失败: {detail}")
-        else:
-            context.job_store.set_progress(job_id, 100.0)
-            context.job_store.mark_completed(job_id)
-        # B10 尾部评分在 job 落终态**之后**跑：job 的成败与时长只由方案生成决定，
-        # 评分慢/炸都不影响已定的终态（业主红线：评分失败不挡方案生成）。
-        # 取消的作业不评分：用户已经不要这批的后续动作了。
-        if not cancel_event.is_set():
-            _score_batch(context, job_id, project_id, settings)
+        _settle_plan_batch(
+            context, job_id, project_id, settings,
+            presynth_candidates, cancel_event, failures,
+        )
     except Exception as exc:  # noqa: BLE001 - 逐变体守卫之外的抛出没人接就是一行永停 running
         reason = f"规划任务异常终止: {type(exc).__name__}: {exc}"
         # 落库之外必须上日志面板：只写 jobs 行的异常，用户在日志里翻不到痕迹
