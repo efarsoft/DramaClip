@@ -1,4 +1,5 @@
 /** 项目详情工作台：步骤导航 + 转写档位 + 左素材列表 + 右复合面板（分割线可拖拽）。 */
+import { useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Alert, App as AntdApp } from 'antd';
 import type { AnalysisResults, Project } from '@dramaclip/protocol';
@@ -166,6 +167,10 @@ interface TwoColumnsProps {
 function TwoColumns(props: TwoColumnsProps): React.ReactElement {
   const { pct, containerRef, onHandleDown } = useSplitDrag();
   const order = useEpisodeOrder(props.episodes, props.onReorder);
+  // 派生值挂 useMemo：分栏拖拽每个 mousemove 重渲染本组件，新对象引用会把
+  // 两个 memo 化 pane 的跳渲染击穿（宽度动画只该动 wrapper，不动集行与详情）。
+  const highlightCounts = useMemo(() => highlightCountsOf(props.results), [props.results]);
+  const errors = useMemo(() => analysisErrorsOf(props.results), [props.results]);
   return (
     <div
       ref={containerRef}
@@ -175,8 +180,8 @@ function TwoColumns(props: TwoColumnsProps): React.ReactElement {
         <EpisodeListPanel
           orderedIds={order.orderedIds}
           byId={order.byId}
-          highlightCounts={highlightCountsOf(props.results)}
-          errors={analysisErrorsOf(props.results)}
+          highlightCounts={highlightCounts}
+          errors={errors}
           activeEpisodeId={props.activeEpisodeId}
           selectedIds={props.selectedIds}
           running={props.running}

@@ -1,5 +1,5 @@
 /** 剧集顺序管理：本地拖拽/移动产生的临时顺序与落库回调。 */
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { Episode } from '@dramaclip/protocol';
 
 export function useEpisodeOrder(
@@ -19,8 +19,16 @@ export function useEpisodeOrder(
   const [overIndex, setOverIndex] = useState<number | null>(null);
   const [order, setOrder] = useState<string[] | null>(null);
 
-  const orderedIds = order ?? episodes.map((episode) => episode.id);
-  const byId = new Map(episodes.map((episode) => [episode.id, episode]));
+  // 引用稳定挂 useMemo：分栏拖拽的每次 mousemove 都会重渲染本 hook 的宿主，
+  // 新数组/新 Map 的引用会把下游 memo 击穿（集行连坐重渲染的来源之一）。
+  const orderedIds = useMemo(
+    () => order ?? episodes.map((episode) => episode.id),
+    [order, episodes],
+  );
+  const byId = useMemo(
+    () => new Map(episodes.map((episode) => [episode.id, episode])),
+    [episodes],
+  );
 
   const applyNext = useCallback(
     (next: string[]): void => {

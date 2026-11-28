@@ -1,7 +1,7 @@
 /** 右栏·复合面板：播放器(高光标记) → 高光列表 → 转写编辑 → 操作。 */
 import { tokens } from '../../styles/theme';
 import { App as AntdApp, Alert, Card, Empty } from 'antd';
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import type { AnalysisResults, AsrSegment, Episode, VisualFrame } from '@dramaclip/protocol';
 import { ActionsCard, PlayerHighlightsRow } from './DetailCards';
 import { reanalyzeEpisode } from './reanalyze';
@@ -20,8 +20,9 @@ interface DetailProps {
   onReload: () => void;
 }
 
-/** 选中剧集的详情面板。 */
-export function EpisodeDetail({
+/** 选中剧集的详情面板。memo 化：分栏拖拽的 mousemove 重渲染宿主时本面板
+ * props 引用全稳定（results/episodes 来自上层 state），整段跳过。 */
+export const EpisodeDetail = memo(function EpisodeDetail({
   projectId,
   episodes,
   activeEpisodeId,
@@ -103,7 +104,7 @@ export function EpisodeDetail({
       />
     </div>
   );
-}
+});
 
 interface BottomProps {
   transcript: readonly AsrSegment[];

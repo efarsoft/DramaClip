@@ -1,5 +1,5 @@
 /** 左栏·剧集素材列表：封面+文件名+状态，支持拖拽手动排序与多选批量；缺音轨告警行常驻（09-10 §2.3①）。 */
-import type { RefObject } from 'react';
+import { memo, type RefObject } from 'react';
 import { useState } from 'react';
 import { Button, Card, Checkbox } from 'antd';
 import type { Episode } from '@dramaclip/protocol';
@@ -27,8 +27,10 @@ interface ListProps {
   onMove: (index: number, direction: -1 | 1) => void;
 }
 
-/** 剧集素材列表（按手动/智能顺序渲染）。 */
-export function EpisodeListPanel(props: ListProps): React.ReactElement {
+/** 剧集素材列表（按手动/智能顺序渲染）。memo 化：分栏拖拽的 mousemove 重渲染
+ * 宿主时 props 引用全稳定（见 WorkbenchPage 派生值挂 memo），本面板整段跳过——
+ * 宽度动画只该动 wrapper，不该让几十个集行连坐。 */
+export const EpisodeListPanel = memo(function EpisodeListPanel(props: ListProps): React.ReactElement {
   const highlightCount = (id: string): number => props.highlightCounts[id] ?? 0;
   const missing = missingAudioEpisodes(orderedEpisodes(props.orderedIds, props.byId));
   return (
@@ -87,7 +89,7 @@ export function EpisodeListPanel(props: ListProps): React.ReactElement {
       )}
     </Card>
   );
-}
+});
 
 /** 按当前顺序取回集对象（缺 id 的槽位跳过——列表与数据短暂不同步时不炸）。 */
 function orderedEpisodes(orderedIds: readonly string[], byId: Map<string, Episode>): Episode[] {

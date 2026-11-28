@@ -19,6 +19,9 @@ export function useSplitDrag(initialPct: number = layout.split.initial): {
   });
   const containerRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
+  // 拖拽中的最新值进 ref 不进盘：localStorage 同步 IO 不该跟手——每个 mousemove
+  // 写一次盘是主线程抖动源，松手落一次账即可（§2：布局偏好落盘）。
+  const lastClampedRef = useRef<number>(pct);
 
   const onHandleDown = useCallback(() => {
     draggingRef.current = true;
@@ -30,15 +33,17 @@ export function useSplitDrag(initialPct: number = layout.split.initial): {
       const rect = containerRef.current.getBoundingClientRect();
       const next = ((event.clientX - rect.left) / rect.width) * 100;
       const clamped = Math.min(layout.split.max, Math.max(layout.split.min, next));
+      lastClampedRef.current = clamped;
       setPct(clamped);
-      try {
-        localStorage.setItem(STORAGE_KEY, String(clamped));
-      } catch {
-        // 隐私模式/配额满——不阻塞拖拽
-      }
     };
     const up = (): void => {
+      if (!draggingRef.current) return;
       draggingRef.current = false;
+      try {
+        localStorage.setItem(STORAGE_KEY, String(lastClampedRef.current));
+      } catch {
+        // 隐私模式/配额满——不阻塞松手
+      }
     };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
