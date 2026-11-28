@@ -9,7 +9,8 @@ export function isActiveJob(job: JobInfo): boolean {
   return ACTIVE_STATUSES.has(job.status);
 }
 
-export interface JobsSummary {
+/** summarizeJobs 的返回形状（文件内私有：状态栏与抽屉消费的是函数，不引类型）。 */
+interface JobsSummary {
   readonly active: number;
   readonly failed: number;
   /** 最新启动的在跑 job 的进度（状态栏「最高优先级」取 Newest-started 语义）；

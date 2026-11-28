@@ -5,7 +5,7 @@ import { dramaFocusPath } from '../../app/routes';
 
 // 在跑判定与汇总住在 stores/jobs（StatusBar 在 components 层，禁止反向依赖 features）；
 // 这里转出单一来源，features 侧调用方不必记两个地址。
-export { isActiveJob, summarizeJobs, type JobsSummary } from '../../stores/jobs';
+export { isActiveJob, summarizeJobs } from '../../stores/jobs';
 
 /** 线上实际会出现的全部类型（service 各 api create 调用的口径）；未知类型原样透出，不硬造中文。 */
 export const JOB_TYPE_LABELS: Readonly<Record<string, string>> = {

@@ -35,13 +35,6 @@ export const CLOUD_PRESETS: Record<string, readonly CloudPreset[]> = {
   ],
 };
 
-/** 域 tab → engine_configs 的 domain 名。 */
-export function cloudDomainOf(tab: 'asr' | 'tts' | 'vision'): string {
-  if (tab === 'asr') return 'asr_cloud';
-  if (tab === 'tts') return 'tts_cloud';
-  return 'image';
-}
-
 const EMPTY_FORM: FormState = { name: '', base_url: '', api_key: '', model: '' };
 
 interface TestState {
