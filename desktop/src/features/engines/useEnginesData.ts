@@ -34,6 +34,9 @@ export interface EnginesDataHub {
   readonly load: () => Promise<void>;
   readonly saveSettings: (values: SettingsMap) => Promise<void>;
   readonly verifyOne: (modelId: string) => Promise<void>;
+  /** 云端配置增删改/连接后的轻刷新：只重取 llm 启用态（1 RPC）。
+   *  配置动作不碰模型/体检/机器/导入账——全量 load 在这条路径上是大炮打蚊子。 */
+  readonly refreshLlmActive: () => Promise<void>;
 }
 
 export function useEnginesData(): EnginesDataHub {
@@ -98,5 +101,14 @@ export function useEnginesData(): EnginesDataHub {
     );
   }, []);
 
-  return { data, load, saveSettings, verifyOne };
+  const refreshLlmActive = useCallback(async (): Promise<void> => {
+    const llmConfigs = await engineConfigsApi.list('llm').catch(() => ({ configs: [] }));
+    setData((current) =>
+      current === null
+        ? current
+        : { ...current, llmConfigActive: llmConfigs.configs.some((c) => c.enabled > 0) },
+    );
+  }, []);
+
+  return { data, load, saveSettings, verifyOne, refreshLlmActive };
 }

@@ -48,7 +48,7 @@ export interface DomainTabProps {
 export function EnginesPage(): ReactElement {
   const navigate = useNavigate();
   const location = useLocation();
-  const { data, load, saveSettings, verifyOne } = useEnginesData();
+  const { data, load, saveSettings, verifyOne, refreshLlmActive } = useEnginesData();
   const tab = tabFromPath(location.pathname);
   const hub = useModelImport(data?.models ?? [], load, saveSettings);
   return (
@@ -75,7 +75,7 @@ export function EnginesPage(): ReactElement {
             tab={tab}
             data={data}
             onSave={saveSettings}
-            onLoaded={load}
+            onConfigChanged={refreshLlmActive}
             onVerify={verifyOne}
             onForget={hub.forget}
             onImport={hub.open}
@@ -98,7 +98,7 @@ function TabBody({
   tab,
   data,
   onSave,
-  onLoaded,
+  onConfigChanged,
   onVerify,
   onForget,
   onImport,
@@ -106,7 +106,8 @@ function TabBody({
   tab: EngineTabKey;
   data: EnginesData;
   onSave: (values: SettingsMap) => Promise<void>;
-  onLoaded: () => Promise<void>;
+  /** 云端配置动作后的轻刷新（只重取 llm 启用态）。 */
+  onConfigChanged: () => Promise<void>;
   onVerify: (modelId: string) => Promise<void>;
   onForget: (path: string) => void;
   onImport: () => void;
@@ -123,7 +124,7 @@ function TabBody({
       void onSave(values);
     },
     onChanged: () => {
-      void onLoaded();
+      void onConfigChanged();
     },
     onVerify: (modelId) => {
       void onVerify(modelId);
