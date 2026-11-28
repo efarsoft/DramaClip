@@ -461,7 +461,9 @@ def recommend_modes(context: AppContext, params: dict[str, Any]) -> dict[str, An
         cache_raw, episodes, analysis_by_id, context.settings, refresh=refresh
     )
     if cache_payload is not None:
-        projects_repo.update_settings(context.conn, project_id, {mode_recommend.CACHE_KEY: cache_payload})
+        projects_repo.update_settings(
+            context.conn, project_id, {mode_recommend.CACHE_KEY: cache_payload}
+        )
     return {"modes": result["modes"]}
 
 

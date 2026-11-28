@@ -56,14 +56,14 @@ def recommend(
     （推荐菜单曾按全量标签表生成）：读到就净化——剔除、按通用序补回三个、
     返回净化结果并要求写回（不写回等于每次读都当坏缓存处理）。
     """
-    if not refresh:
-        if isinstance(cache_raw, dict) and cache_raw.get("modes"):
-            raw_modes = cache_raw.get("modes")
-            kept = _drop_retired(raw_modes)
-            if len(kept) == len(raw_modes if isinstance(raw_modes, list) else []):
-                return cache_raw, None
-            purified = {**cache_raw, "modes": _fallback(kept, "已剔除退役模式")}
-            return purified, purified
+    cache_hit = not refresh and isinstance(cache_raw, dict) and cache_raw.get("modes")
+    if cache_hit:
+        raw_modes = cache_raw.get("modes")
+        kept = _drop_retired(raw_modes)
+        if len(kept) == len(raw_modes if isinstance(raw_modes, list) else []):
+            return cache_raw, None
+        purified = {**cache_raw, "modes": _fallback(kept, "已剔除退役模式")}
+        return purified, purified
     result = _compute(episodes, analysis_by_id, settings)
     return result, result
 
