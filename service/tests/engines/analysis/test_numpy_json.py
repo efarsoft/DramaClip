@@ -13,8 +13,8 @@ from typing import Any
 import numpy as np
 import pytest
 
-from dramaclip.api.analysis_job import _dumps
 from dramaclip.engines.analysis.subtitle_ocr import detect_band, extract_subtitles
+from dramaclip.flows.analysis_job import _dumps
 
 pytest.importorskip("rapidocr", reason="numpy 桩复刻 rapidocr 3.x 的 float32 坐标")
 

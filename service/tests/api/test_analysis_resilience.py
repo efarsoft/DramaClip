@@ -17,8 +17,9 @@ from typing import Any
 import pytest
 
 from dramaclip.api import analysis as analysis_api
-from dramaclip.api import analysis_job as analysis_job
 from dramaclip.engines.analysis import pipeline as analysis_pipeline
+from dramaclip.flows import analysis as flows_analysis
+from dramaclip.flows import analysis_job as analysis_job
 from dramaclip.infra import jobs as jobs_mod
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
@@ -257,7 +258,7 @@ def test_start_holds_capacity_slot_until_task_completes(
     """受理成功占一槽：第二笔 start 报 -32206（容量闸语义保持，未被预占重构稀释）。"""
     project_id, _episodes = _project_with_episodes(memory_db, tmp_path)
     context = _context(memory_db, tmp_path)
-    monkeypatch.setattr(analysis_api, "_run_job", lambda *a, **k: None)
+    monkeypatch.setattr(flows_analysis, "_run_job", lambda *a, **k: None)
 
     class _RecordingExecutor:
         def __init__(self) -> None:

@@ -16,11 +16,11 @@ from types import SimpleNamespace
 import pytest
 
 from dramaclip.api import analysis as analysis_api
-from dramaclip.api import analysis_job as analysis_job
 from dramaclip.engines.analysis import pipeline
 from dramaclip.engines.analysis.models import AsrSegment, AudioFeatures
 from dramaclip.engines.analysis.pipeline import EpisodeRawAnalysis
 from dramaclip.engines.semantic.models import SemanticResult
+from dramaclip.flows import analysis_job as analysis_job
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import projects as projects_repo

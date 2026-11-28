@@ -13,9 +13,9 @@ from typing import Any
 import pytest
 
 from dramaclip.api import analysis as analysis_api
-from dramaclip.api import analysis_job
 from dramaclip.engines.analysis import pipeline
 from dramaclip.engines.analysis.models import AsrSegment, AudioFeatures, EpisodeRawAnalysis
+from dramaclip.flows import analysis_job
 from dramaclip.infra import jobs
 from dramaclip.infra.compute import ComputeReport
 from dramaclip.infra.storage.repos import episodes as episodes_repo

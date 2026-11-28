@@ -17,13 +17,14 @@ from typing import Any
 import pytest
 
 from dramaclip.api import analysis as analysis_api
-from dramaclip.api import analysis_job as analysis_job
 from dramaclip.api import export as export_api
 from dramaclip.api import narration as narration_api
 from dramaclip.engines.analysis import pipeline
 from dramaclip.engines.analysis.models import EpisodeRawAnalysis
 from dramaclip.engines.narration import titles
 from dramaclip.engines.semantic.llm_client import LlmClient
+from dramaclip.flows import analysis as flows_analysis
+from dramaclip.flows import analysis_job as analysis_job
 from dramaclip.flows import narration as flows_narration
 from dramaclip.infra import jobs as jobs_mod
 from dramaclip.infra.storage.repos import analysis as analysis_repo
@@ -175,7 +176,9 @@ def test_start_logs_carry_the_job_id(
     memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     harness = _harness(memory_db, tmp_path, analysis_api)
-    monkeypatch.setattr(analysis_api, "_run_job", _probe)
+    # _run_job 由 flows.analysis 的 _run_analysis_gated 裸名调用——
+    # 打桩打定义侧模块全局（api 的同名 re-import 改不到它）
+    monkeypatch.setattr(flows_analysis, "_run_job", _probe)
     project_id, _episode_id = _seed(memory_db, tmp_path)
 
     job_id = str(_rpc(harness, "analysis.start", {"project_id": project_id})["job_id"])

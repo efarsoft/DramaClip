@@ -1,9 +1,9 @@
 """analysis 执行族：全剧任务体 + 单集分析 + OCR/热词挖掘 + B8 源签名判据。
 
-自 api/analysis.py 拆出（拆分专项 B）：RPC/队列/结果装配留在 analysis.py，本模块
-承载任务池里真正跑的部分——start() 建单后的一切。签名/失效判据（B8）随执行族走：
-两侧调用方（analysis 的 _run_prescreen 与本模块 _analyze_one）读同一份实现，
-测试打桩统一打 analysis_job 侧。
+自 api/analysis.py 拆出（拆分专项 B），runner 外溢第一刀整体下沉 flows（2026-11-28）：
+RPC/队列/结果装配留在 api/analysis.py，本模块承载任务池里真正跑的部分——start()
+建单后的一切。签名/失效判据（B8）随执行族走：两侧调用方（flows.analysis 的
+_run_prescreen 与本模块 _analyze_one）读同一份实现，测试打桩统一打本模块侧。
 """
 
 from __future__ import annotations

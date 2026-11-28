@@ -15,10 +15,10 @@ from typing import Any
 import pytest
 
 from dramaclip.api import analysis as analysis_api
-from dramaclip.api import analysis_job as analysis_job
 from dramaclip.api import project as project_api
 from dramaclip.engines.analysis import pipeline, subtitle_ocr
 from dramaclip.engines.analysis.models import AsrSegment, AudioFeatures, OcrSegment
+from dramaclip.flows import analysis_job as analysis_job
 from dramaclip.infra import jobs
 from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
