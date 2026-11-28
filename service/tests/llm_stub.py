@@ -37,3 +37,30 @@ def patch_client_for(
         return fake_client(settings, timeout_s=min_timeout_s)
 
     monkeypatch.setattr(module, "client_for", _factory)
+
+
+class FakeLlm:
+    """chat_json 网关替身基类：真引擎契约（签名同 LlmClient.chat_json，含
+    ``temperature: float | None``）+ 调用记账（calls）。
+
+    固定应答用 ``reply``；要抛错用 ``error``；场景差异（按 system 分层产出、
+    首轮失败重试等）子类覆写 ``produce``。
+    """
+
+    def __init__(
+        self, reply: Any = None, error: Exception | None = None
+    ) -> None:
+        self.reply = reply
+        self.error = error
+        self.calls: list[tuple[str, str]] = []
+
+    def chat_json(
+        self, system: str, user: str, temperature: float | None = None
+    ) -> Any:
+        self.calls.append((system, user))
+        if self.error is not None:
+            raise self.error
+        return self.produce(system, user)
+
+    def produce(self, system: str, user: str) -> Any:
+        return self.reply

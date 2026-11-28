@@ -1,17 +1,20 @@
 """零文案模式的标题/发布物料生成（发布套件补全）：raw_clip/金句流不再一票拒绝。"""
 
+from typing import Any
+
 import pytest
 
 from dramaclip.engines.narration import titles
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
+from tests.llm_stub import FakeLlm
 
 
-class _FakeLlm:
+class _FakeLlm(FakeLlm):
     def __init__(self, reply: dict) -> None:
-        self.reply = reply
+        super().__init__(reply=reply)
         self.user = ""
 
-    def chat_json(self, system: str, user: str, temperature: float | None = None) -> dict:
+    def produce(self, _system: str, user: str) -> Any:
         self.user = user
         return self.reply
 

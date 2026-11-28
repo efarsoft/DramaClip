@@ -15,6 +15,7 @@ import pytest
 
 from dramaclip.engines.narration import flow_writer
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
+from tests.llm_stub import FakeLlm
 
 
 def _episode_inputs() -> list[dict[str, Any]]:
@@ -56,14 +57,13 @@ def _flow_json() -> str:
     )
 
 
-class _FakeLlm:
+class _FakeLlm(FakeLlm):
     def __init__(self, payload: str) -> None:
+        super().__init__()
         self._payload = payload
-        self.calls = 0
 
-    def chat_json(self, _system: str, _user: str, temperature: float = 0.3) -> Any:
-        self.calls += 1
-        if self.calls == 1:
+    def produce(self, _system: str, _user: str) -> Any:
+        if len(self.calls) == 1:
             raise ValueError("mock: 第一轮硬审查不过")
         return json.loads(self._payload)
 
@@ -162,9 +162,11 @@ def test_llm_unavailable_backoff_then_raise(
     monkeypatch.setattr(flow_writer.time, "sleep", lambda _s: None)
     llm = _FakeLlm(_flow_json())
 
+    attempts = {"n": 0}
+
     def _fail_then_ok(_s: str, _u: str, **_k: object) -> Any:
-        llm.calls += 1
-        if llm.calls == 1:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
             raise LlmUnavailable("端点停顿")
         return json.loads(_flow_json())
 
@@ -177,7 +179,7 @@ def test_llm_unavailable_backoff_then_raise(
         angle_block="",
         trace_path=tmp_path / "trace.json",
     )
-    assert llm.calls == 2
+    assert attempts["n"] == 2, "第 1 轮失败 + 第 2 轮成功 = 恰好两次调用"
     assert script.segments
 
 

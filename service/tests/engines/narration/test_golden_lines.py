@@ -11,20 +11,8 @@ import pytest
 from dramaclip.engines.analysis.models import AsrSegment
 from dramaclip.engines.narration import golden_lines
 from dramaclip.engines.semantic.llm_client import LlmUnavailable
+from tests.llm_stub import FakeLlm as _FakeLlm
 from tests.llm_stub import patch_client_for
-
-
-class _FakeLlm:
-    def __init__(self, result=None, error: Exception | None = None):
-        self.result = result
-        self.error = error
-        self.calls: list[tuple[str, str]] = []
-
-    def chat_json(self, system: str, user: str, temperature: float = 0.3):
-        self.calls.append((system, user))
-        if self.error is not None:
-            raise self.error
-        return self.result
 
 
 def _asr() -> list[AsrSegment]:

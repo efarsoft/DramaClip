@@ -11,6 +11,7 @@ import json
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -21,22 +22,23 @@ from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import projects as projects_repo
 from dramaclip.transport.rpc import RpcDomainError
-from tests.llm_stub import patch_client_for
+from tests.llm_stub import FakeLlm, patch_client_for
 
 # 走 fake_llm 的用例都要过工厂的 configured 判定：给一条形似的端点配置，
 # 未配置那条用例单独留着 `{}`。
 _LLM_SETTINGS = {"llm.base_url": "http://llm.test/v1", "llm.model": "m"}
 
 
-class _FakeLlm:
+class _FakeLlm(FakeLlm):
     instances: list[_FakeLlm] = []
-    reply: dict = {}
+    reply: Any = {}
 
     def __init__(self, _config: object, timeout_s: float = 60.0) -> None:
+        super().__init__()
         self.timeout_s = timeout_s
         _FakeLlm.instances.append(self)
 
-    def chat_json(self, _system: str, user: str, temperature: float = 0.3) -> dict:
+    def produce(self, _system: str, user: str) -> Any:
         self.last_system = _system
         self.last_user = user
         if isinstance(_FakeLlm.reply, Exception):
