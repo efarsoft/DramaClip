@@ -46,8 +46,8 @@ def test_hello_device_is_kept_for_later_instances(
         {"id": "0", "ok": True},
         {"id": "0", "ok": True},
     ])
-    monkeypatch.setattr(indextts2, "_PROC", proc)
-    monkeypatch.setattr(indextts2, "_HELLO", {})
+    monkeypatch.setattr(indextts2._BRIDGE, "_proc", proc)
+    monkeypatch.setattr(indextts2._BRIDGE, "_hello", {})
     monkeypatch.setattr(indextts2, "_ensure_worker", lambda _d, _device="auto": proc)
     monkeypatch.setattr(indextts2, "runtime_ready", lambda: True)
 
@@ -59,7 +59,7 @@ def test_hello_device_is_kept_for_later_instances(
     report = other.compute()
     assert report is not None
     assert (report.resolved, report.actual) == ("cuda", "cuda")
-    assert indextts2._HELLO[proc]["device"] == "cuda", "第二个实例复用了同一进程的就绪行"
+    assert indextts2._BRIDGE._hello[proc]["device"] == "cuda", "第二个实例复用了同一进程的就绪行"
 
 
 def test_hello_failure_raises_with_worker_reason(
@@ -68,8 +68,8 @@ def test_hello_failure_raises_with_worker_reason(
     proc = _proc_with([
         {"ready": False, "error": "请求 CUDA 但探针失败：cuda 不可用"},
     ])
-    monkeypatch.setattr(indextts2, "_PROC", proc)
-    monkeypatch.setattr(indextts2, "_HELLO", {})
+    monkeypatch.setattr(indextts2._BRIDGE, "_proc", proc)
+    monkeypatch.setattr(indextts2._BRIDGE, "_hello", {})
     monkeypatch.setattr(indextts2, "_ensure_worker", lambda _d, _device="auto": proc)
 
     with pytest.raises(RuntimeError, match="请求 CUDA"):

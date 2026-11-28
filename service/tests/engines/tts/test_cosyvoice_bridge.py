@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from dramaclip.engines.tts import factory as tts_factory
+from dramaclip.engines.tts import local_bridge
 from dramaclip.engines.tts.engines import cosyvoice as mod
 from dramaclip.engines.tts.engines.cosyvoice import CosyVoiceEngine
 from dramaclip.infra.model_manager.registry import builtin_specs
@@ -128,12 +129,12 @@ def test_shutdown_worker_terminates_and_is_idempotent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     proc = _FakeProc()
-    monkeypatch.setattr(mod, "_PROC", proc)
+    monkeypatch.setattr(mod._BRIDGE, "_proc", proc)
 
     mod.shutdown_worker()
 
     assert proc.terminated
-    assert mod._PROC is None
+    assert mod._BRIDGE._proc is None
     mod.shutdown_worker()  # 再收一次：无进程在场也不炸
 
 
@@ -142,9 +143,9 @@ def test_worker_respawn_resets_hello_state(
 ) -> None:
     dead = _FakeProc()
     dead.terminated = True  # poll() -> 1：旧进程已死，强制走重拉分支
-    monkeypatch.setattr(mod, "_PROC", dead)
-    monkeypatch.setattr(mod, "_PROC_DEVICE", "auto")
-    monkeypatch.setattr(mod, "_HELLO", {dead: {"ready": True, "device": "cpu"}})
+    monkeypatch.setattr(mod._BRIDGE, "_proc", dead)
+    monkeypatch.setattr(mod._BRIDGE, "_proc_device", "auto")
+    monkeypatch.setattr(mod._BRIDGE, "_hello", {dead: {"ready": True, "device": "cpu"}})
     monkeypatch.setattr(mod, "runtime_ready", lambda: True)
     fresh = _FakeProc()
 
@@ -152,13 +153,14 @@ def test_worker_respawn_resets_hello_state(
         return fresh
 
     fake_subprocess = SimpleNamespace(Popen=fake_popen, PIPE=subprocess.PIPE, CREATE_NO_WINDOW=0)
-    monkeypatch.setattr(mod, "subprocess", fake_subprocess)
+    # Popen 在 local_bridge 单源里发起：桩打桥模块，不是引擎模块
+    monkeypatch.setattr(local_bridge, "subprocess", fake_subprocess)
 
     CosyVoiceEngine(tmp_path)._synth_one("x", "r.wav", tmp_path / "x.wav")
 
     assert fresh.replies == [], "新进程的就绪行被重新读过（不是沿用旧进程状态）"
     assert len(fresh.jobs) == 1
-    assert dead not in mod._HELLO, "旧进程的就绪行随进程一起作废"
+    assert dead not in mod._BRIDGE._hello, "旧进程的就绪行随进程一起作废"
 
 
 def test_long_text_is_split_into_clone_budget_and_concatenated(

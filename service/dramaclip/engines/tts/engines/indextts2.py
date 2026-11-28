@@ -8,17 +8,13 @@ worker 进程常驻（一次加载模型），按行 JSON 协议逐段合成；v
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import subprocess
-import threading
-import wave
 from pathlib import Path
-from typing import Any
 
 from dramaclip.engines.tts import reference_qc
 from dramaclip.engines.tts.base import EngineCaps
+from dramaclip.engines.tts.local_bridge import WorkerBridge, concat_wav
 from dramaclip.engines.tts.text_split import split_long_text
 from dramaclip.infra import compute
 from dramaclip.infra.paths import resolve_data_dir
@@ -39,16 +35,6 @@ _SAMPLE_RATE = 22050
 #: 模型加载判据文件（与 registry._REQUIREMENTS["indextts2"] 同口径的轻探测副本）。
 _REQUIRED_FILES = ("config.yaml", "gpt.pth", "s2mel.pth")
 
-_LOCK = threading.Lock()
-# 共享 worker 的 stdin/stdout 一问一答整段持锁：试听（RPC 执行池）与出片任务的
-# 合成并发打同一进程时，无锁的 write/readline 会应答错配拿到别人的音频。
-_IO_LOCK = threading.Lock()
-_PROC: subprocess.Popen[str] | None = None
-_PROC_DEVICE: str | None = None
-# 就绪行整个 worker 生命周期只发一次，内容记在进程身份上、不能记在引擎实例上——
-# factory 每次都可能 new 新实例，第二个实例再读就绪行会永远挂在 readline 上。
-# 按进程对象记账：respawn 出新对象天然重置，不依赖额外的复位分支。
-_HELLO: dict[subprocess.Popen[str], dict[str, Any]] = {}
 _RUNTIME_OK: bool | None = None
 
 
@@ -59,6 +45,25 @@ def _venv_python() -> Path:
 
 def _src_dir() -> Path:
     return resolve_data_dir() / "runtimes" / "indextts-src"
+
+
+def _worker_env() -> dict[str, str]:
+    return {
+        "DRAMACLIP_INDEXTTS_SRC": str(_src_dir()),
+        # 协议是 UTF-8；不指定时子进程按系统 ANSI 代码页解码中文。
+        "PYTHONIOENCODING": "utf-8",
+    }
+
+
+_BRIDGE = WorkerBridge(
+    label="IndexTTS",
+    worker_src=_WORKER_SRC,
+    venv_python=_venv_python,
+    env=_worker_env,
+    launch_timeout_s=_LAUNCH_TIMEOUT_S,
+    synth_timeout_s=_SYNTH_TIMEOUT_S,
+    pre_spawn=lambda models_dir: _ensure_aux_models(models_dir),
+)
 
 
 def runtime_ready() -> bool:
@@ -100,17 +105,14 @@ def shutdown_worker() -> None:
 
     一直占着数 GB 的模型内存/显存。挂在优雅退出路径（system.shutdown/SIGTERM
     → service_app.run 的 finally）上；Electron 强杀（TerminateProcess）到不了
-    这里，那类场景进程树随主进程终止，无法善后。
+    这里，那类场景进程树随主进程终止，无法善后。首次 spawn 时桥已向
+    worker_bridge 自登记，退出钩子会一并收割；本函数保留给显式关闭与测试打桩。
     """
-    global _PROC, _PROC_DEVICE
-    with _IO_LOCK:
-        proc = _PROC
-        _PROC = None
-        _PROC_DEVICE = None
-        if proc is not None:
-            _HELLO.pop(proc, None)
-    if proc is not None and proc.poll() is None:
-        proc.terminate()
+    _BRIDGE.shutdown()
+
+
+def _ensure_worker(models_dir: Path | None, device: str = "auto") -> subprocess.Popen[str]:
+    return _BRIDGE.ensure(models_dir, device)
 
 
 _AUX_READY = False
@@ -150,43 +152,6 @@ def _ensure_aux_models(models_dir: Path | None) -> None:
             f"IndexTTS 辅助模型补齐失败（bigvgan/w2v-bert 等，网络重试可解）：{tail or '未知原因'}"
         )
     _AUX_READY = True
-
-
-def _ensure_worker(models_dir: Path | None, device: str = "auto") -> subprocess.Popen[str]:
-    global _PROC, _PROC_DEVICE
-    with _LOCK:
-        if _PROC is not None:
-            alive = _PROC.poll() is None
-            if alive and device == _PROC_DEVICE:
-                return _PROC
-            # 死进程/设备承诺变了：旧进程的就绪行随进程一起作废
-            _HELLO.pop(_PROC, None)
-            if alive:
-                _PROC.terminate()
-            _PROC = None
-        _ensure_aux_models(models_dir)
-        # device 交给 worker 内 torch 自检：探测层不区分 CUDA 代际（M4000 cc5.2 这类
-        # 「有 N 卡但新栈不支持」的机器，init 失败进程即退，错误经 stdout 空行带回）。
-        # stderr 走继承：worker 的 CUDA 回退/加载诊断（">> CUDA 探针失败"）经服务
-        # stderr 落进 Electron 主进程日志——DEVNULL 吞掉等于盲飞。
-        _PROC = subprocess.Popen( # noqa: S603 - 固定脚本固定参数
-            [str(_venv_python()), str(_WORKER_SRC), str(models_dir), device],
-            env={
-                **os.environ,
-                "DRAMACLIP_INDEXTTS_SRC": str(_src_dir()),
-                # 协议是 UTF-8；不指定时子进程按系统 ANSI 代码页解码中文。
-                "PYTHONIOENCODING": "utf-8",
-            },
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=None,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        _PROC_DEVICE = device
-        return _PROC
 
 
 class IndexTts2Engine:
@@ -229,8 +194,8 @@ class IndexTts2Engine:
         return True, "运行环境与模型就绪"
 
     def compute(self) -> compute.ComputeReport | None:
-        proc = _PROC
-        hello = _HELLO.get(proc) if proc is not None else None
+        proc = _BRIDGE.current_proc()
+        hello = _BRIDGE.hello_of(proc) if proc is not None else None
         if hello is None:
             return None
         device_str = str(hello.get("device") or "")
@@ -299,7 +264,7 @@ class IndexTts2Engine:
                 part = parts_dir / f"part-{index:04d}.wav"
                 self._synth_one(chunk, ref, part)
                 parts.append(part)
-            _concat_wav(parts, out_path)
+            concat_wav(parts, out_path)
         finally:
             for part in parts_dir.glob("*"):
                 part.unlink(missing_ok=True)
@@ -313,75 +278,8 @@ class IndexTts2Engine:
     def _synth_one(self, text: str, ref: str, out_path: Path) -> None:
         """送一个 job 给 worker 并等应答（协议见文件头注释）。
 
-        整段持 _IO_LOCK：一问一答中间不许插队（并发场景见 _IO_LOCK 注释）。
+        IO 锁/看门狗/握手记账在 local_bridge 单源—— cosyvoice 同引，一次挂死
+        不再能把任一引擎的合成链锁死。
         """
-        with _IO_LOCK:
-            proc = _ensure_worker(self._model_dir, self._device)
-            if proc.stdin is None or proc.stdout is None:
-                raise RuntimeError("worker 进程管道不可用")
-            hello = _HELLO.get(proc)
-            if hello is None:
-                line = _readline_with_watchdog(proc, _LAUNCH_TIMEOUT_S, "就绪握手")
-                try:
-                    hello = json.loads(line)
-                except ValueError as exc:
-                    raise RuntimeError("worker 未返回可解析的就绪行") from exc
-                if not hello.get("ready"):
-                    raise RuntimeError(f"worker 启动失败：{hello.get('error', '未知原因')}")
-                _HELLO[proc] = hello
-            job = {"id": "0", "text": text, "voice": ref, "out": str(out_path)}
-            proc.stdin.write(json.dumps(job, ensure_ascii=False) + "\n")
-            proc.stdin.flush()
-            reply = json.loads(_readline_with_watchdog(proc, _SYNTH_TIMEOUT_S, "合成应答"))
-            if not reply.get("ok"):
-                raise RuntimeError(f"IndexTTS 合成失败：{reply.get('error', '未知错误')}")
-
-
-def _readline_with_watchdog(
-    proc: subprocess.Popen[str], timeout_s: float, what: str
-) -> str:
-    """带看门狗的应答读取：worker 卡死（GPU stall / OOM 挂起不退出）时，超时杀
-    进程让阻塞中的 readline 以 EOF 返回——_IO_LOCK 得以释放、下一位调用者经
-    _ensure_worker 自动重建。此前两处 readline 均无超时：一次挂死 = 合成/试听
-    全链在锁上永久排队，服务 ping 正常却不可用，只能重启进程。
-    """
-    timed_out = threading.Event()
-
-    def _kill() -> None:
-        timed_out.set()
-        proc.kill()
-
-    timer = threading.Timer(timeout_s, _kill)
-    timer.daemon = True
-    timer.start()
-    try:
-        stdout = proc.stdout
-        assert stdout is not None
-        line = stdout.readline()
-    finally:
-        timer.cancel()
-    if timed_out.is_set() or not line:
-        raise RuntimeError(
-            f"IndexTTS worker {what}超时/无应答"
-            f"（{timeout_s:.0f}s 看门狗已杀进程，下次合成自动重建）"
-        )
-    return line
-
-
-def _concat_wav(parts: list[Path], out_path: Path) -> None:
-    """同参 wav（worker 恒定 22050Hz/单声道/16bit）按帧拼接。
-
-    直接拼 PCM 帧不做 crossfade：块间 worker 自己会落 interval_silence=200ms
-    的静音间隔（infer 默认参数），再叠 50ms crossfade 反而会削掉句间停顿。
-    """
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with wave.open(str(out_path), "wb") as out_wav:
-        params_set = False
-        for part in parts:
-            with wave.open(str(part), "rb") as in_wav:
-                if not params_set:
-                    out_wav.setnchannels(in_wav.getnchannels())
-                    out_wav.setsampwidth(in_wav.getsampwidth())
-                    out_wav.setframerate(in_wav.getframerate())
-                    params_set = True
-                out_wav.writeframes(in_wav.readframes(in_wav.getnframes()))
+        proc = _ensure_worker(self._model_dir, self._device)
+        _BRIDGE.synth_one(proc, text, ref, out_path)

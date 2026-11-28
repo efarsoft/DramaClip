@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from dramaclip.engines.tts import local_bridge
 from dramaclip.engines.tts.engines import indextts2 as mod
 from dramaclip.engines.tts.engines.indextts2 import IndexTts2Engine
 
@@ -113,12 +114,12 @@ def test_shutdown_worker_terminates_and_is_idempotent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     proc = _FakeProc()
-    monkeypatch.setattr(mod, "_PROC", proc)
+    monkeypatch.setattr(mod._BRIDGE, "_proc", proc)
 
     mod.shutdown_worker()
 
     assert proc.terminated
-    assert mod._PROC is None
+    assert mod._BRIDGE._proc is None
     mod.shutdown_worker()  # 再收一次：无进程在场也不炸
 
 
@@ -127,9 +128,9 @@ def test_worker_respawn_resets_hello_state(
 ) -> None:
     dead = _FakeProc()
     dead.terminated = True  # poll() -> 1：旧进程已死，强制走重拉分支
-    monkeypatch.setattr(mod, "_PROC", dead)
-    monkeypatch.setattr(mod, "_PROC_DEVICE", "auto")
-    monkeypatch.setattr(mod, "_HELLO", {dead: {"ready": True, "device": "cpu"}})
+    monkeypatch.setattr(mod._BRIDGE, "_proc", dead)
+    monkeypatch.setattr(mod._BRIDGE, "_proc_device", "auto")
+    monkeypatch.setattr(mod._BRIDGE, "_hello", {dead: {"ready": True, "device": "cpu"}})
     monkeypatch.setattr(mod, "runtime_ready", lambda: True)
     fresh = _FakeProc()
 
@@ -141,10 +142,49 @@ def test_worker_respawn_resets_hello_state(
         PIPE=subprocess.PIPE,
         CREATE_NO_WINDOW=0,
     )
-    monkeypatch.setattr(mod, "subprocess", fake_subprocess)
+    # Popen 在 local_bridge 单源里发起：桩打桥模块，不是引擎模块
+    monkeypatch.setattr(local_bridge, "subprocess", fake_subprocess)
 
     IndexTts2Engine(tmp_path)._synth_one("x", "r.wav", tmp_path / "x.wav")
 
     assert fresh.replies == [], "新进程的就绪行被重新读过（不是沿用旧进程状态）"
     assert len(fresh.jobs) == 1
-    assert dead not in mod._HELLO, "旧进程的就绪行随进程一起作废"
+    assert dead not in mod._BRIDGE._hello, "旧进程的就绪行随进程一起作废"
+
+
+class _HungProc:
+    """readline 永远阻塞（worker 卡死形态），直到看门狗 kill 才返回 EOF。"""
+
+    def __init__(self) -> None:
+        self.killed = threading.Event()
+        self.stdin = io.StringIO()
+        self.stdout = self
+
+    def readline(self) -> str:
+        self.killed.wait(timeout=10)
+        return ""
+
+    def kill(self) -> None:
+        self.killed.set()
+
+    def poll(self) -> None:
+        return None
+
+    def terminate(self) -> None:
+        self.killed.set()
+
+
+def test_watchdog_kills_hung_worker_and_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """看门狗是两引擎共有的生死线：worker 挂死时超时杀进程、报错、IO 锁可释放。"""
+    proc = _HungProc()
+    monkeypatch.setattr(mod, "runtime_ready", lambda: True)
+    monkeypatch.setattr(mod, "_ensure_worker", lambda _d, _device="auto": proc)
+    monkeypatch.setattr(mod._BRIDGE, "_synth_timeout_s", 0.2)
+    # 就绪行已消费过：直接进入合成应答的阻塞 readline
+    monkeypatch.setattr(mod._BRIDGE, "_hello", {proc: {"ready": True, "device": "cpu"}})
+
+    with pytest.raises(RuntimeError, match="看门狗"):
+        IndexTts2Engine(tmp_path)._synth_one("x", "r.wav", tmp_path / "x.wav")
+    assert proc.killed.is_set(), "挂死的 worker 被看门狗杀掉，IO 锁才可能释放"

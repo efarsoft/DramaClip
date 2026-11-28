@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from dramaclip.engines.tts import local_bridge
 from dramaclip.engines.tts.engines import cosyvoice, indextts2
 from dramaclip.infra.model_manager import tts_runtime, worker_bridge
 
@@ -62,10 +63,11 @@ def test_cosyvoice_worker_is_launched_with_utf8_stdio(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(cosyvoice, "_PROC", None)
-    monkeypatch.setattr(cosyvoice, "_PROC_DEVICE", None)
-    monkeypatch.setattr(cosyvoice, "_HELLO", {})
-    monkeypatch.setattr(cosyvoice, "subprocess", _fake_subprocess(captured))
+    monkeypatch.setattr(cosyvoice._BRIDGE, "_proc", None)
+    monkeypatch.setattr(cosyvoice._BRIDGE, "_proc_device", None)
+    monkeypatch.setattr(cosyvoice._BRIDGE, "_hello", {})
+    # Popen 在 local_bridge 单源里发起：桩打桥模块的 subprocess，不是引擎模块
+    monkeypatch.setattr(local_bridge, "subprocess", _fake_subprocess(captured))
 
     assert cosyvoice._ensure_worker(tmp_path, "cpu") is not None
     assert captured["env"]["PYTHONIOENCODING"] == "utf-8"
@@ -75,12 +77,15 @@ def test_indextts_worker_is_launched_with_utf8_stdio(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(indextts2, "_PROC", None)
-    monkeypatch.setattr(indextts2, "_PROC_DEVICE", None)
-    monkeypatch.setattr(indextts2, "_HELLO", {})
+    monkeypatch.setattr(indextts2._BRIDGE, "_proc", None)
+    monkeypatch.setattr(indextts2._BRIDGE, "_proc_device", None)
+    monkeypatch.setattr(indextts2._BRIDGE, "_hello", {})
+    # 桥持有 venv_python 的构造期引用，pre_spawn（_ensure_aux_models）走引擎模块
+    # 的同名函数——两处都得钉，否则真装了 tts-venv 的机器会真跑辅助模型探针
+    monkeypatch.setattr(indextts2._BRIDGE, "_venv_python", lambda: tmp_path / "python.exe")
     monkeypatch.setattr(indextts2, "_venv_python", lambda: tmp_path / "python.exe")
     monkeypatch.setattr(indextts2, "_src_dir", lambda: tmp_path)
-    monkeypatch.setattr(indextts2, "subprocess", _fake_subprocess(captured))
+    monkeypatch.setattr(local_bridge, "subprocess", _fake_subprocess(captured))
 
     assert indextts2._ensure_worker(tmp_path, "cpu") is not None
     assert captured["env"]["PYTHONIOENCODING"] == "utf-8"

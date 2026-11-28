@@ -13,6 +13,7 @@ import os
 import subprocess
 import threading
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -166,3 +167,23 @@ def shutdown_venv_workers() -> None:
         _ACTIVE_WORKERS.clear()
     for worker in workers:
         worker.close()
+    with _REAPER_LOCK:
+        reapers = _PROCESS_REAPERS[:]
+    for reaper in reapers:
+        reaper()
+
+
+# 自管子进程的引擎桥（tts local_bridge 等，不经 VenvWorker 会话）在首次 spawn 时
+# 登记收尸回调——不登记的桥没人收，Windows 上优雅退出会留占着模型内存的孤儿进程
+#（cosyvoice 的收尸函数全仓无人调用的实锤，2026-11-28 桥单源批钉住）。
+_PROCESS_REAPERS: list[Callable[[], None]] = []
+_REAPER_LOCK = threading.Lock()
+
+
+def register_process_reaper(shutdown: Callable[[], None]) -> None:
+    """登记一个「收走自管子进程」的回调；shutdown_venv_workers 一并执行。
+
+    回调必须幂等（同一桥可能既被登记收割又被引擎模块显式关闭，重复收不炸）。"""
+    with _REAPER_LOCK:
+        if shutdown not in _PROCESS_REAPERS:
+            _PROCESS_REAPERS.append(shutdown)
