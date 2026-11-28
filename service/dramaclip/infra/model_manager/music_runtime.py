@@ -21,7 +21,9 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from dramaclip.infra.model_manager import tts_runtime
+from dramaclip.infra.model_manager import tts_runtime, uv_sources
+from dramaclip.infra.model_manager.uv_sources import _create_venv as _uv_create_venv
+from dramaclip.infra.model_manager.uv_sources import _run_uv as _uv_run
 
 # 与 tts_runtime 共用的常量抄本（它已贴近 800 行门禁不再扩；这边只取所需三件）
 _PYPI_MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
@@ -40,7 +42,7 @@ _ACESTEP_SOURCES = [
 # uv 引导器与 tts_runtime 同一份（runtimes/uv.exe 已在则复用；首装两路等价）。
 _UV_SOURCES = tts_runtime._UV_SOURCES
 _UV_ZIP_SIZE = tts_runtime._UV_ZIP_SIZE
-_UV_ENV = tts_runtime._UV_ENV
+_UV_ENV = uv_sources._UV_ENV
 
 
 def venv_dir(data_dir: Path) -> Path:
@@ -128,7 +130,7 @@ def install(
     py = venv / "Scripts" / "python.exe"
     if not py.is_file():
         _pct(8, "创建配乐运行环境（首次含解释器下载）")
-        tts_runtime._run_uv(uv, venv, "venv", str(venv), "--python", "3.11")
+        _uv_create_venv(uv, venv)
     _check_cancel()
 
     # ③ torch：变体判据与双栈同一份；xpu 主机（Intel Arc/Ultra）降装 CPU 轮——
@@ -157,7 +159,7 @@ def install(
     _check_cancel()
     if not installed(data_dir):
         _pct(58, "安装 acestep 及依赖（gradio/diffusers 等，约 1-2GB）")
-        tts_runtime._run_uv(
+        _uv_run(
             uv, venv, "pip", "install", str(src), "--index-url", _PYPI_MIRROR,
         )
     _check_cancel()
@@ -172,7 +174,7 @@ def install(
 def _install_torch(uv: Path, venv: Path, variant: str) -> None:
     """torch 按变体安装（与 tts_runtime._install_torch 同策略，pin 换成上游 2.7.1 系）。"""
     if variant == "cpu":
-        tts_runtime._run_uv(uv, venv, "pip", "install", *_MUSIC_TORCH, "--index-url", _PYPI_MIRROR)
+        _uv_run(uv, venv, "pip", "install", *_MUSIC_TORCH, "--index-url", _PYPI_MIRROR)
         return
     mirror_dir = "https://mirrors.aliyun.com/pytorch-wheels/cu128/"
     attempts: list[tuple[str, list[str]]] = [
@@ -188,7 +190,7 @@ def _install_torch(uv: Path, venv: Path, variant: str) -> None:
     last: Exception | None = None
     for label, args in attempts:
         try:
-            tts_runtime._run_uv(uv, venv, *args)
+            _uv_run(uv, venv, *args)
             return
         except RuntimeError as exc:
             last = exc

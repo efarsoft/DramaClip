@@ -41,6 +41,7 @@ from typing import Any
 from dramaclip.infra import gpu
 from dramaclip.infra.model_manager import cuda_runtime
 from dramaclip.infra.model_manager.fetch import download_file
+from dramaclip.infra.model_manager.uv_sources import _create_venv, _run_uv
 from dramaclip.infra.stale_cache import StaleWhileRevalidate
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,11 +52,6 @@ _UV_SOURCES = [
     f"https://gh-proxy.com/https://github.com/astral-sh/uv/releases/download/{_UV_VERSION}/uv-x86_64-pc-windows-msvc.zip",
     f"https://github.com/astral-sh/uv/releases/download/{_UV_VERSION}/uv-x86_64-pc-windows-msvc.zip",
 ]
-# 独立 CPython 与 PyPI 走国内镜像（uv 官方源国内不稳）
-_UV_ENV = {
-    "UV_PYTHON_INSTALL_MIRROR": "https://gh-proxy.com/https://github.com/astral-sh/python-build-standalone/releases/download",
-    "UV_HTTP_TIMEOUT": "120",
-}
 _PYPI_MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
 _GH_PROXY = "https://gh-proxy.com/https://github.com"
 _TORCH_XPU_INDEX = "https://download.pytorch.org/whl/xpu"
@@ -648,7 +644,7 @@ def install(
     py = venv / "Scripts" / "python.exe"
     if not py.is_file():
         _pct(8, "创建 Python 3.11 运行环境（首次含解释器下载）")
-        _run_uv(uv, venv, "venv", str(venv), "--python", "3.11")
+        _create_venv(uv, venv)
     _check_cancel()
 
     # ③ torch：N 卡且算力 ≥7.0 走 cu128（GPU 大版），否则 CPU 轮（省 4GB）。
@@ -870,52 +866,6 @@ def _install_torch(uv: Path, venv: Path, variant: str) -> None:
             last = exc
             _LOGGER.warning(f"[tts-runtime] torch {variant} 轮 {label} 失败，尝试下一来源")
     raise RuntimeError(f"torch {variant} 轮全部来源失败: {last}")
-
-
-def _run_uv(uv: Path, venv: Path, *args: str) -> None:
-    cmd = [str(uv), *args]
-    env = {**os.environ, **_UV_ENV}
-    if args and args[0] == "pip":
-        # --python 必须落在子命令之后：uv 0.8.4 的 `pip` 组不接受组级 --python
-        py = str(venv / "Scripts" / "python.exe")
-        cmd = [str(uv), "pip", *args[1:2], "--python", py, *args[2:]]
-    # 编码必须显式 UTF-8：uv 输出恒为 UTF-8（含 ├─▶ 等多字节制图符），而
-    # text=True 默认走系统 locale（中文 Windows = GBK）——读流线程解码即死、
-    # 缓冲区留空，「exit 1 双流全空」的真凶（2026-11-19 A/B 实锤）。
-    result = subprocess.run(  # noqa: S603 - 固定二进制受控参数
-        cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=3600,
-        creationflags=_NO_WINDOW, env=env, check=False,
-    )
-    if result.returncode != 0:
-        # stderr 可能是 None（Windows 管道异常/进程被强杀场景，装测实锤
-        # 'NoneType' object is not subscriptable）——防御取空串，别让报错本身再炸。
-        # stderr 空时回退 stdout 尾部；两者皆空至少带退出码并把完整输出落盘
-        # ——Arc 机装测二连实锤：exit 1 且双流全空（正常 uv 失败必写 stderr，
-        # 反常场景只有完整原始输出才能定位），尾部进报错+全量落盘双保险。
-        out = (result.stdout or "").strip()
-        err = (result.stderr or "").strip()
-        dump = venv.parent / "uv-last-error.log"
-        try:  # 落盘失败不遮蔽原错误（只读盘/杀软拦写都可能）——诊断材料尽力而为
-            dump.write_text(
-                f"cmd: {' '.join(cmd)}\nexit: {result.returncode}\n"
-                f"--- stdout ---\n{result.stdout or ''}\n"
-                f"--- stderr ---\n{result.stderr or ''}\n",
-                encoding="utf-8",
-            )
-            _LOGGER.info(f"[tts-runtime] uv 失败完整输出已落盘：{dump}")
-        except OSError as dump_exc:
-            _LOGGER.warning(f"[tts-runtime] uv 失败输出落盘失败（{dump_exc}）")
-        _LOGGER.info(f"[tts-runtime] uv stdout 尾部：{out[-200:]}")
-        _LOGGER.info(f"[tts-runtime] uv stderr 尾部：{err[-200:]}")
-        detail = (err or out)[-300:]
-        # 安装链有 torch/双栈 58 项/funasr/kokoro 四个批次同走本函数——报错必须
-        # 区分是哪一批（取第一个包名；flag 后面还有 --index-url 等不算目标）。
-        target = next((a for a in args[2:] if not a.startswith("-")), "")
-        label = f"{' '.join(args[:2])} {target}".strip()
-        raise RuntimeError(
-            f"uv {label} 失败（exit {result.returncode}）: {detail}"
-            f"（完整输出已存 {dump}）"
-        )
 
 
 def _fetch_first(sources: list[str], target: Path, size: int, cancel: threading.Event) -> None:
