@@ -1,9 +1,13 @@
 """AI 模式推荐（出片中心阶段①）：按题材与高光推 3 个模式，随项目缓存。
 
-推荐一次算好存进项目设置（`mode_recommendation` 键），进页面秒出；「重新推荐」
-显式刷新。LLM 未配置/失败/返回不合法时回退静态三件套——推荐纯按内容适配、
-不强制掺「无需文案」保底位（模型稳定性由用户选型保障，业主裁决 2026-09-29）。
-不足三个时按通用序补位并如实标注，保证预选框始终有三个可勾项。
+推荐一次算好存进项目设置（`CACHE_KEY` 键），进页面秒出；「重新推荐」显式刷新。
+LLM 未配置/失败/返回不合法时回退静态三件套——推荐纯按内容适配、不强制掺
+「无需文案」保底位（模型稳定性由用户选型保障，业主裁决 2026-09-29）。不足三个
+时按通用序补位并如实标注，保证预选框始终有三个可勾项。
+
+数据边界（2026-11-28 解耦）：本模块不再 import storage.repos——调用方（api 层）
+把剧集清单与分析记录读好递进来，这里只出纯逻辑与要写回的缓存载荷；DB 读写
+的活儿归 api/narration 的 RPC 处理器。
 """
 
 from __future__ import annotations
@@ -11,18 +15,16 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from dramaclip.engines.narration.pipeline import MODE_LABELS, RETIRED_MODES
 from dramaclip.engines.semantic.llm_client import LlmUnavailable, client_for, is_configured
-from dramaclip.infra.storage.repos import analysis as analysis_repo
-from dramaclip.infra.storage.repos import episodes as episodes_repo
-from dramaclip.infra.storage.repos import projects as projects_repo
 
 _LOGGER = logging.getLogger(__name__)
 
 _RECOMMEND_COUNT = 3
-_CACHE_KEY = "mode_recommendation"
+CACHE_KEY = "mode_recommendation"
 _RECOMMEND_TIMEOUT_S = 60.0
 #: LLM 缺位时的静态组合与补位顺序：叙事强 → 节奏快 → 门槛最低，通用可用的次序。
 _FALLBACK_ORDER = ["dialogue_narration", "cross_narration", "raw_clip"]
@@ -41,41 +43,50 @@ _SYSTEM = (
 
 
 def recommend(
-    conn: Any, project_id: str, settings: dict[str, str], *, refresh: bool
-) -> dict[str, Any]:
-    """取推荐：有缓存且未要求刷新直接回；否则现算并写回项目设置。
+    cache_raw: Any,
+    episodes: list[dict[str, Any]],
+    analysis_by_id: Mapping[str, dict[str, Any] | None],
+    settings: dict[str, str],
+    *,
+    refresh: bool,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """纯函数核心：返回 (给前端的结果, 要写回项目设置的缓存载荷；无变化为 None)。
 
-    老缓存可能带着退役模式（推荐菜单曾按全量标签表生成）：读到就净化——剔除、
-    按通用序补回三个、把净化结果写回缓存（不写回等于每次读都当坏缓存处理）。
+    有缓存且未要求刷新直接回（载荷 None = 不写）；老缓存可能带着退役模式
+    （推荐菜单曾按全量标签表生成）：读到就净化——剔除、按通用序补回三个、
+    返回净化结果并要求写回（不写回等于每次读都当坏缓存处理）。
     """
     if not refresh:
-        cached = projects_repo.get_settings(conn, project_id).get(_CACHE_KEY)
-        if isinstance(cached, dict) and cached.get("modes"):
-            raw_modes = cached.get("modes")
+        if isinstance(cache_raw, dict) and cache_raw.get("modes"):
+            raw_modes = cache_raw.get("modes")
             kept = _drop_retired(raw_modes)
             if len(kept) == len(raw_modes if isinstance(raw_modes, list) else []):
-                return cached
-            purified = {**cached, "modes": _fallback(kept, "已剔除退役模式")}
-            projects_repo.update_settings(conn, project_id, {_CACHE_KEY: purified})
-            return purified
-    result = _compute(conn, project_id, settings)
-    projects_repo.update_settings(conn, project_id, {_CACHE_KEY: result})
-    return result
+                return cache_raw, None
+            purified = {**cache_raw, "modes": _fallback(kept, "已剔除退役模式")}
+            return purified, purified
+    result = _compute(episodes, analysis_by_id, settings)
+    return result, result
 
 
-def _compute(conn: Any, project_id: str, settings: dict[str, str]) -> dict[str, Any]:
-    episodes = episodes_repo.list_by_project(conn, project_id)
-    genre, reasons = _content_facts(conn, [str(ep["id"]) for ep in episodes])
+def _compute(
+    episodes: list[dict[str, Any]],
+    analysis_by_id: Mapping[str, dict[str, Any] | None],
+    settings: dict[str, str],
+) -> dict[str, Any]:
+    genre, reasons = _content_facts([str(ep["id"]) for ep in episodes], analysis_by_id)
     modes = _ask_llm(settings, genre, reasons)
     return {"modes": modes, "genre": genre, "at": int(time.time() * 1000)}
 
 
-def _content_facts(conn: Any, episode_ids: list[str]) -> tuple[str, list[str]]:
+def _content_facts(
+    episode_ids: list[str],
+    analysis_by_id: Mapping[str, dict[str, Any] | None],
+) -> tuple[str, list[str]]:
     """从各集分析记录里取推荐依据：题材（首个非空）+ 高光理由（跨集聚合，最多 6 条）。"""
     genre = ""
     reasons: list[str] = []
     for episode_id in episode_ids:
-        record = analysis_repo.get(conn, episode_id)
+        record = analysis_by_id.get(episode_id)
         if record is None:
             continue
         if genre == "" and record["genre"]:

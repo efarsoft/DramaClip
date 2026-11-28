@@ -60,3 +60,21 @@ def test_infra_imports_engines_only_lazily_and_only_where_listed() -> None:
         offenders
     )
     assert found == _LAZY_DEBT, f"infra→engines 的反向引用变了：实测 {found}，台账 {_LAZY_DEBT}"
+
+
+def test_engines_never_touch_the_database_directly() -> None:
+    """engines 是纯逻辑层：DB 读写是 api/flows 的活（2026-11-28 解耦收官）。
+
+    mode_recommend/auto_voice 曾各自 import storage.repos 直连库——数据怎么来的
+    藏在引擎里，换数据源就得改引擎。现契约：调用方读好数据递进来，engines 里
+    不得出现 storage.repos / storage.db 的任何 import（含函数内延迟导入）。
+    """
+    offenders: list[str] = []
+    for path in sorted((PACKAGE / "engines").rglob("*.py")):
+        rel = path.relative_to(PACKAGE).as_posix()
+        text = path.read_text("utf-8")
+        if "dramaclip.infra.storage" in text:
+            offenders.append(rel)
+    assert not offenders, (
+        "engines 直连 storage（DB 归 api/flows，引擎收数据参数）：" + "; ".join(offenders)
+    )

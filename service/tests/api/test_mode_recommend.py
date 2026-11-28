@@ -84,6 +84,27 @@ def _project_with_analysis(memory_db: sqlite3.Connection, tmp_path: Path) -> str
     return project_id
 
 
+def _recommend(
+    memory_db: sqlite3.Connection,
+    project_id: str,
+    settings: dict[str, str],
+    *,
+    refresh: bool,
+) -> dict:
+    """api 层同款 IO 包装：读好数据递进纯函数核心，再把缓存载荷写回。"""
+    episodes = episodes_repo.list_by_project(memory_db, project_id)
+    analysis_by_id = {
+        str(ep["id"]): analysis_repo.get(memory_db, str(ep["id"])) for ep in episodes
+    }
+    cache_raw = projects_repo.get_settings(memory_db, project_id).get(mode_recommend.CACHE_KEY)
+    result, payload = mode_recommend.recommend(
+        cache_raw, episodes, analysis_by_id, settings, refresh=refresh
+    )
+    if payload is not None:
+        projects_repo.update_settings(memory_db, project_id, {mode_recommend.CACHE_KEY: payload})
+    return result
+
+
 def test_llm_recommendation_cached_until_refresh(
     memory_db: sqlite3.Connection, tmp_path: Path, fake_llm: type[_FakeLlm]
 ) -> None:
@@ -96,7 +117,7 @@ def test_llm_recommendation_cached_until_refresh(
         ]
     }
 
-    first = mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
+    first = _recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
     assert [m["mode"] for m in first["modes"]] == [
         "dialogue_narration",
         "cross_narration",
@@ -107,11 +128,11 @@ def test_llm_recommendation_cached_until_refresh(
     cached = projects_repo.get_settings(memory_db, project_id)["mode_recommendation"]
     assert cached == first, "推荐必须随项目落缓存"
 
-    second = mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
+    second = _recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
     assert second == first
     assert len(fake_llm.instances) == 1, "缓存命中不再调 LLM"
 
-    mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=True)
+    _recommend(memory_db, project_id, _LLM_SETTINGS, refresh=True)
     assert len(fake_llm.instances) == 2, "refresh 显式重算"
 
 
@@ -120,7 +141,7 @@ def test_prompt_carries_genre_and_highlight_reasons(
 ) -> None:
     project_id = _project_with_analysis(memory_db, tmp_path)
     fake_llm.reply = {"modes": []}
-    mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
+    _recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
     user = fake_llm.instances[0].last_user
     assert "逆袭" in user and "顶罪受辱" in user, "推荐依据必须真喂给 LLM"
 
@@ -137,7 +158,7 @@ def test_invalid_modes_filtered_and_padded(
         ]
     }
 
-    result = mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
+    result = _recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
 
     modes = [m["mode"] for m in result["modes"]]
     assert len(modes) == 3
@@ -151,7 +172,7 @@ def test_llm_unavailable_falls_back(
     project_id = _project_with_analysis(memory_db, tmp_path)
     fake_llm.reply = LlmUnavailable("读超时")
 
-    result = mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
+    result = _recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
 
     assert [m["mode"] for m in result["modes"]] == mode_recommend._FALLBACK_ORDER
     assert "LLM 不可用" in result["modes"][0]["reason"]
@@ -173,7 +194,7 @@ def test_invalid_llm_reply_falls_back_with_named_copy_and_trace(
     fake_llm.reply = ValueError("mode 必须是字符串")
 
     with caplog.at_level("WARNING", logger="dramaclip.engines.narration.mode_recommend"):
-        result = mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
+        result = _recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
 
     reasons = " ".join(str(m["reason"]) for m in result["modes"])
     assert "ValueError" not in reasons, f"异常类名漏进用户文案：{reasons}"
@@ -185,7 +206,7 @@ def test_unconfigured_llm_never_constructed(
     memory_db: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project_id = _project_with_analysis(memory_db, tmp_path)
-    result = mode_recommend.recommend(memory_db, project_id, {}, refresh=False)
+    result = _recommend(memory_db, project_id, {}, refresh=False)
     assert [m["mode"] for m in result["modes"]] == mode_recommend._FALLBACK_ORDER
 
 
@@ -205,7 +226,7 @@ def test_retired_mode_is_off_the_menu_and_never_recommended(
         ]
     }
 
-    result = mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
+    result = _recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
 
     system = fake_llm.instances[0].last_system
     assert "highlight_cut" not in system and "高光混剪" not in system, "菜单里不该有退役模式"
@@ -240,7 +261,7 @@ def test_cached_recommendation_with_retired_mode_is_purified_and_rewritten(
         },
     )
 
-    result = mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
+    result = _recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
 
     modes = [m["mode"] for m in result["modes"]]
     assert "highlight_cut" not in modes
@@ -250,7 +271,7 @@ def test_cached_recommendation_with_retired_mode_is_purified_and_rewritten(
     rewritten = projects_repo.get_settings(memory_db, project_id)["mode_recommendation"]
     assert "highlight_cut" not in [m["mode"] for m in rewritten["modes"]], "净化结果要落回缓存"
     assert len(fake_llm.instances) == 0, "读缓存净化不该惊动 LLM"
-    again = mode_recommend.recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
+    again = _recommend(memory_db, project_id, _LLM_SETTINGS, refresh=False)
     assert again == result, "净化后的缓存照常命中"
 
 

@@ -451,7 +451,17 @@ def recommend_modes(context: AppContext, params: dict[str, Any]) -> dict[str, An
     if projects_repo.get(context.conn, project_id) is None:
         raise RpcDomainError(_ERR_PROJECT_NOT_FOUND, f"项目不存在: {project_id}")
     refresh = bool(params.get("refresh"))
-    result = mode_recommend.recommend(context.conn, project_id, context.settings, refresh=refresh)
+    # DB 读写在 api 层：引擎侧只收数据（mode_recommend 不 import repos，2026-11-28 解耦）
+    episodes = episodes_repo.list_by_project(context.conn, project_id)
+    analysis_by_id = {
+        str(ep["id"]): analysis_repo.get(context.conn, str(ep["id"])) for ep in episodes
+    }
+    cache_raw = projects_repo.get_settings(context.conn, project_id).get(mode_recommend.CACHE_KEY)
+    result, cache_payload = mode_recommend.recommend(
+        cache_raw, episodes, analysis_by_id, context.settings, refresh=refresh
+    )
+    if cache_payload is not None:
+        projects_repo.update_settings(context.conn, project_id, {mode_recommend.CACHE_KEY: cache_payload})
     return {"modes": result["modes"]}
 
 

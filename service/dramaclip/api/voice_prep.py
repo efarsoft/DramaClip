@@ -16,6 +16,7 @@ from typing import Any
 from dramaclip.api.context import AppContext
 from dramaclip.api.export_audit import _note_degraded
 from dramaclip.engines.narration.models import PlanData
+from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
 
@@ -115,7 +116,10 @@ def _ensure_clone_voice(
             for row in episodes_repo.list_by_project(context.conn, project_id)
             if row["status"] == "done"
         ]
-        picked = auto_voice.pick_best_span(context.conn, episode_rows)
+        analysis_by_id = {
+            str(row["id"]): analysis_repo.get(context.conn, str(row["id"])) for row in episode_rows
+        }
+        picked = auto_voice.pick_best_span(analysis_by_id, episode_rows)
         if picked is None:
             raise ValueError(
                 "无法自动提取参考音色：本剧剧集分析里没有主角 4 秒以上的连续台词段。"
@@ -123,7 +127,7 @@ def _ensure_clone_voice(
             )
         row, start, end, speaker = picked
         result = auto_voice.extract_auto_voice(
-            context.conn,
+            {str(row["id"]): analysis_by_id.get(str(row["id"]))},
             context.data_dir,
             [{"id": row["id"], "source_path": row["source_path"]}],
         )

@@ -63,6 +63,7 @@ from dramaclip.infra.ffmpeg import (
     cover as ffmpeg_cover,  # noqa: F401 - 测试经 export_api.ffmpeg_cover 取模块对象打桩，引用面保留
 )
 from dramaclip.infra.ffmpeg import probe
+from dramaclip.infra.storage.repos import analysis as analysis_repo
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import exports as exports_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
@@ -208,7 +209,8 @@ def _auto_voice_available(conn: Any, episode_paths: dict[str, str]) -> bool:
     from dramaclip.engines.tts import auto_voice
 
     rows = [{"id": eid, "source_path": src} for eid, src in episode_paths.items()]
-    return auto_voice.pick_best_span(conn, rows) is not None
+    analysis_by_id = {str(row["id"]): analysis_repo.get(conn, str(row["id"])) for row in rows}
+    return auto_voice.pick_best_span(analysis_by_id, rows) is not None
 
 
 def _voice_issue_or_none(
@@ -234,7 +236,10 @@ def _voice_issue_or_none(
         {"id": row["id"], "source_path": row["source_path"]}
         for row in episodes_repo.list_by_project(context.conn, project_id)
     ]
-    if auto_voice.pick_best_span(context.conn, episode_rows) is not None:
+    analysis_by_id = {
+        str(row["id"]): analysis_repo.get(context.conn, str(row["id"])) for row in episode_rows
+    }
+    if auto_voice.pick_best_span(analysis_by_id, episode_rows) is not None:
         return None  # 可自动提取：渲染启动时补齐
     return (
         "无法自动提取参考音色：本剧已完成分析的剧集中没有主角 4 秒以上的连续台词段。"

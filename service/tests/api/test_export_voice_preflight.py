@@ -143,11 +143,11 @@ def test_ensure_clone_voice_reuses_sibling_result(
     calls: list[int] = []
 
     def fake_extract(
-        conn: Any, data_dir: Path, episodes: list[dict[str, Any]], **_kwargs: Any
+        _analysis_by_id: Any, data_dir: Path, episodes: list[dict[str, Any]], **_kwargs: Any
     ) -> dict[str, Any]:
         calls.append(1)
         voice_path = str(data_dir / "voices" / "ref.wav")
-        settings_repo.set_value(conn, "tts.voice.indextts2", voice_path)
+        settings_repo.set_value(memory_db, "tts.voice.indextts2", voice_path)
         return {"path": voice_path, "speaker": "角色A", "start": 0.0, "end": 8.0, "seconds": 8.0}
 
     monkeypatch.setattr(auto_voice, "extract_auto_voice", fake_extract)
@@ -177,7 +177,7 @@ def test_ensure_clone_voice_writes_engine_specific_key(
     _seed_done_analysis(memory_db, project_id)
 
     def fake_extract(
-        conn: Any, data_dir: Path, episodes: list[dict[str, Any]], **_kwargs: Any
+        _analysis_by_id: Any, data_dir: Path, episodes: list[dict[str, Any]], **_kwargs: Any
     ) -> dict[str, Any]:
         return {"path": str(data_dir / "ref.wav"), "speaker": "角色A", "seconds": 8.0}
 

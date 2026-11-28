@@ -18,13 +18,13 @@ import subprocess
 import threading
 import time
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from dramaclip.engines.tts import reference_clean, vocal_separation
 from dramaclip.infra.compute import ComputeReport
 from dramaclip.infra.ffmpeg.binaries import resolve_ffmpeg
-from dramaclip.infra.storage.repos import analysis as analysis_repo
 
 _MIN_S, _MAX_S, _TARGET_S = 4.0, 10.0, 8.0
 _EXTRACT_AR = 24000
@@ -83,13 +83,15 @@ def _pick_span(segments: list[dict[str, Any]], speaker: str) -> tuple[float, flo
 
 
 def pick_best_span(
-    conn: Any, episodes: list[dict[str, Any]]
+    analysis_by_id: Mapping[str, dict[str, Any] | None],
+    episodes: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], float, float, str] | None:
-    """在给定集行里选最优：(集行, start, end, 主角)。时长越接近 7s 越优。"""
-    rows = episodes
+    """在给定集行里选最优：(集行, start, end, 主角)。时长越接近 7s 越优。
+
+    分析记录由调用方按集 id 读好递进来（2026-11-28 解耦：引擎不 import repos）。"""
     best: tuple[float, dict[str, Any], float, float, str] | None = None
-    for row in rows:
-        record = analysis_repo.get(conn, str(row["id"]))
+    for row in episodes:
+        record = analysis_by_id.get(str(row["id"]))
         if record is None:
             continue
         segments = _segments_of(record)
@@ -109,21 +111,21 @@ def pick_best_span(
 
 
 def extract_auto_voice(
-    conn: Any,
+    analysis_by_id: Mapping[str, dict[str, Any] | None],
     data_dir: Path,
     episodes: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """主入口：选段 → ffmpeg 抽音频 → 人声分离 → 落盘。返回给前端展示/直接采用。"""
     with _EXTRACT_LOCK:
-        return _extract_locked(conn, data_dir, episodes)
+        return _extract_locked(analysis_by_id, data_dir, episodes)
 
 
 def _extract_locked(
-    conn: Any,
+    analysis_by_id: Mapping[str, dict[str, Any] | None],
     data_dir: Path,
     episodes: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    picked = pick_best_span(conn, episodes)
+    picked = pick_best_span(analysis_by_id, episodes)
     if picked is None:
         raise ValueError(
             "剧集中没有可用的参考段：需要先完成剧集分析（带说话人），"
