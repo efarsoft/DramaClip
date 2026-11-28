@@ -68,10 +68,16 @@ def _effective_settings(context: AppContext, project_id: str) -> dict[str, str]:
 _FRONT_BUSY_TYPES = frozenset({"export", "export_selfcheck"})
 
 
+def _front_busy(context: AppContext) -> bool:
+    """渲染类前台作业是否在跑（入队守卫与逐段让位共用同一判据）。"""
+    types = {row.get("type") for row in context.job_store.list_recent(active_only=True)}
+    return bool(types & _FRONT_BUSY_TYPES)
+
+
 def _presynth_eligible(context: AppContext) -> bool:
     """预合成入队守卫：没有渲染类前台作业在跑、也没有同类预合成在跑。"""
     types = {row.get("type") for row in context.job_store.list_recent(active_only=True)}
-    return not (types & _FRONT_BUSY_TYPES) and "narration_presynth" not in types
+    return not _front_busy(context) and "narration_presynth" not in types
 
 
 def _presynth_work(
@@ -86,6 +92,8 @@ def _presynth_work(
     与导出同一路径、同一 work_dir（`context.work_dir / "tts"`），产物与缓存键
     完全一致，出片阶段真引擎零调用。预热失败只在日志留痕不拦批（语义见
     `presynthesize_plan_audio`）；取消在方案间生效，已备好的段保留。
+    `pause_when` 逐段让位：入队守卫只挡得住入队瞬间，导出可能在预热中途发起
+    （本地克隆系单 worker 进程，不让位就把导出关键路径逐段往后顶）。
     """
     slots = sum(len(plan.narration_texts) for plan in plans)
     if slots == 0:
@@ -100,12 +108,18 @@ def _presynth_work(
             data_dir=context.data_dir,
             log=context.notifier.log,
             cancel=cancel_event,
+            pause_when=lambda: _front_busy(context),
         )
         warmed += got
         context.job_store.set_progress(job_id, round(warmed / slots * 100, 1), "预合成配音")
-    if cancel_event.is_set():
-        context.job_store.mark_cancelled(job_id)
-        return None
+        if cancel_event.is_set():
+            context.job_store.mark_cancelled(job_id)
+            return None
+        if _front_busy(context):
+            return (
+                f"后台预合成为导出让路: {warmed}/{slots} 段已备"
+                "（其余出片时照常真合成，导出完可重新规划再预热）"
+            )
     if warmed < slots:
         return f"后台预合成部分完成: {warmed}/{slots} 段就绪（失败段出片时照常真合成）"
     return f"后台预合成完成: {warmed} 段配音已备好，出片直接用"

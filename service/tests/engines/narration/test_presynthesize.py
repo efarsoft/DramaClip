@@ -101,6 +101,34 @@ def test_warmed_plan_exports_without_touching_the_engine(
         assert item.audio_path, "导出后 audio_path 必须落位"
 
 
+def test_pause_when_yields_between_segments(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """逐段让位（导出开跑即停）：首段备完即 break，返回值不区分停因。"""
+    engine = _CountingTts()
+    _stub(monkeypatch, engine)
+    tts_dir = tmp_path / "tts"
+    warmed_one = {"done": False}
+
+    def _pause_after_first() -> bool:
+        return warmed_one["done"]
+
+    class _FlaggingTts(_CountingTts):
+        def synthesize(self, text: str, voice: Any, out_path: Path) -> Path:
+            path = super().synthesize(text, voice, out_path)
+            warmed_one["done"] = True
+            return path
+
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: _FlaggingTts())
+    warmed, total = pipeline.presynthesize_plan_audio(
+        _plan("第一句", "第二句", "第三句"),
+        {"tts.engine": "edge"},
+        tts_dir,
+        pause_when=_pause_after_first,
+    )
+    assert (warmed, total) == (1, 3), "让位即停：已备段保留，剩余段出片时照常真合成"
+
+
 def test_presynth_failure_is_logged_not_raised(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

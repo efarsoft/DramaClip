@@ -7,16 +7,25 @@ plan_runner 的入队纪律（干净收官才入队、渲染类作业在跑不�
 
 from __future__ import annotations
 
+import threading
 import time
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from dramaclip.api import narration as narration_api
 from dramaclip.engines.narration import synthesis as synthesis
-from dramaclip.engines.narration.models import PlanData
+from dramaclip.engines.narration.models import (
+    NarrationText,
+    PlanData,
+    TimelineSegment,
+)
+from dramaclip.flows.plan_runner import _presynth_work
+from dramaclip.infra import jobs as jobs_mod
 from dramaclip.infra.storage.repos import episodes as episodes_repo
 from dramaclip.infra.storage.repos import plans as plans_repo
+from dramaclip.transport.notify import Notifier
 from tests.api.test_plan_variants import (
     _LLM_SETTINGS,
     Harness,
@@ -53,6 +62,18 @@ def _wait_presynth_settled(context: Any, timeout_s: float = 10.0) -> None:
             return
         time.sleep(0.05)
     raise AssertionError("预合成作业 10 秒未收官")
+
+
+def _single_plan() -> PlanData:
+    return PlanData(
+        mode="full_narration",
+        timeline=[
+            TimelineSegment(
+                episode_id="ep1", start=0.0, end=2.0, audio="ducked", narration_id="n0"
+            )
+        ],
+        narration_texts=[NarrationText(id="n0", text="一句话解说")],
+    )
 
 
 def _presynth_rows(context: Any) -> list[dict[str, Any]]:
@@ -131,3 +152,39 @@ def test_export_in_flight_suppresses_presynth(
     status = _wait_terminal(harness, str(result["job_id"]))
     assert status["status"] == "completed", status.get("error")
     assert _presynth_rows(harness.context) == [], "渲染在跑时不得入队预合成"
+
+
+def test_presynth_work_yields_when_export_is_front(
+    memory_db: Any, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """预热中途导出开跑：逐段让位即停，落「让路」话术收官（不是失败）。"""
+    engine = _CountingTextTts()
+    monkeypatch.setattr(synthesis, "create_tts", lambda *a, **k: engine)
+
+    store = jobs_mod.JobStore(memory_db)
+    context = SimpleNamespace(
+        conn=memory_db,
+        job_store=store,
+        notifier=Notifier(lambda _rec: None),
+        work_dir=tmp_path / "tts-root",
+        data_dir=tmp_path,
+        settings={},
+        cancel_events={},
+    )
+    busy = store.create("export", ref_id="p1")
+    store.mark_running(busy)
+    job_id = str(store.create("narration_presynth", ref_id="p1"))
+
+    plan = _single_plan()
+    message = _presynth_work(context, job_id, [plan], {"tts.engine": "edge"}, threading.Event())
+
+    assert message is not None and "让路" in message, message
+    assert "0/1" in message, "让位发生在首段之前，已备段数应为 0"
+    # 让位挡的是推理不是构造：池初始化对显式引擎急切构造（当场炸语义）是既有
+    # 行为，真正的资源点（worker 推理）在段循环头部让位判据之后
+    assert engine.calls == [], "让位即停：一段推理都不该发生"
+    row = store.get(job_id)
+    assert row is not None and row["status"] == "pending", (
+        "让位走返回话术收官，作业体不落终态（看门狗补 completed）"
+    )
+

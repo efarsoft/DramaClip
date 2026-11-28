@@ -372,6 +372,7 @@ def presynthesize_plan_audio(
     data_dir: Path | None = None,
     log: LogFn | None = None,
     cancel: threading.Event | None = None,
+    pause_when: Callable[[], bool] | None = None,
 ) -> tuple[int, int]:
     """后台预热一条方案的配音缓存（C1 预合成）——返回 (已备段数, 总段数)。
 
@@ -387,6 +388,10 @@ def presynthesize_plan_audio(
       把一个成功的规划作业反咬成失败；导出时该段照常真合成并走原有的失败上报。
     - 取消**静默返回**不抛——作业层按返回值落「部分完成」话术，不制造 cancelled
       噪声；方案仍可正常出片。
+    - `pause_when` 逐段让位检查（导出开跑即停）：入队时的「不与渲染抢资源」只
+      挡得住入队瞬间，导出可能在预热中途发起——本地克隆系引擎是单 worker 进程，
+      预热继续占着就会把导出关键路径逐段往后顶（CPU 档单段 2~3 分钟）。返回值
+      不区分停因，调用方按现场判「让位/取消/部分失败」。
     - 不做时长回填与越界判定——那是导出语义（需要 source_durations），预热只
       负责把音频备好。
     """
@@ -407,6 +412,8 @@ def presynthesize_plan_audio(
     warmed = 0
     for item in plan.narration_texts:
         if cancel is not None and cancel.is_set():
+            break
+        if pause_when is not None and pause_when():
             break
         voice = item.voice or pool.voice_for(settings)
         if item.voice and not pool.accepts_voice(item.voice):
