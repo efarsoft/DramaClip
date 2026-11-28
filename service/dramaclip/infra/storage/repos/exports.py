@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from dramaclip.infra.clock import now_ms
+from dramaclip.infra.jobs import parse_compute
 
 _COLUMNS = (
     "id",
@@ -31,16 +32,6 @@ _COLUMNS = (
 )
 
 
-def _parse_compute(raw: object) -> list[dict[str, Any]] | None:
-    if raw is None or raw == "":
-        return None
-    try:
-        value = json.loads(str(raw))
-    except ValueError:
-        return None  # 坏 JSON 按「没有回执」处理，不演成可用证据
-    return [dict(item) for item in value] if isinstance(value, list) else None
-
-
 def _parse_degraded(raw: object) -> list[dict[str, Any]] | None:
     if raw is None or raw == "":
         return None
@@ -53,7 +44,7 @@ def _parse_degraded(raw: object) -> list[dict[str, Any]] | None:
 
 def _row(row: tuple[Any, ...]) -> dict[str, Any]:
     record = dict(zip(_COLUMNS, row, strict=True))
-    record["compute"] = _parse_compute(record["compute"])
+    record["compute"] = parse_compute(record["compute"])
     record["degraded_notes"] = _parse_degraded(record["degraded_notes"])
     record["publish_data"] = _parse_publish(record["publish_data"])
     return record

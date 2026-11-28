@@ -46,7 +46,8 @@ def is_terminal(status: str) -> bool:
     return status in _TERMINAL_STATUSES
 
 
-def _parse_compute(raw: object) -> list[dict[str, Any]] | None:
+def parse_compute(raw: object) -> list[dict[str, Any]] | None:
+    """compute 回执列解析单源（作业台账与导出台账同形同语义，exports repo 同引）。"""
     if raw is None or raw == "":
         return None
     try:
@@ -188,7 +189,7 @@ class JobStore:
             "label", "error", "created_at", "updated_at", "compute",
         )
         record = dict(zip(keys, row, strict=True))
-        record["compute"] = _parse_compute(record["compute"])
+        record["compute"] = parse_compute(record["compute"])
         # 读己之写（读写分离批①）：节流窗口内的最新进度可能在缓存还没落盘
         # ——get() 先查缓存合并，保证调用方看到的是最新值而不是 2s 前的。
         cached = self._progress_cache.get(job_id)
@@ -222,7 +223,7 @@ class JobStore:
     @classmethod
     def _parse_row(cls, row: tuple[Any, ...]) -> dict[str, Any]:
         record = dict(zip(cls._LIST_COLUMNS, row, strict=True))
-        record["compute"] = _parse_compute(record["compute"])
+        record["compute"] = parse_compute(record["compute"])
         return record
 
     def clear_finished(self) -> int:
